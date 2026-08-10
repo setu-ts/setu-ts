@@ -22,6 +22,9 @@ developer owns.
   microservice template's discovery wiring pointing at it, and an e2e that scaffolds a workspace,
   adds two members, type-checks both, boots both, and has one call the other through the discovery
   capability.
+- **Folded in after the first review (§10):** a workspace-level `--transport` choice, and a
+  three-member e2e proving full-mesh discovery, cross-service communication on the chosen transport,
+  and that DI and decorators are reachable inside a member through the CLI alone.
 - **NOT this milestone:** Docker Compose / Kubernetes objects per member — **M39** owns the platform
   objects, this milestone owns the workspace and the app-side discovery map. Converting an existing
   single-service project into a workspace — unowned, its own design (§9). Shared library members
@@ -362,3 +365,89 @@ deno task release:verify 0.1.0-alpha.5
   covers the need, and the next `generate app` regenerates from it. Unowned.
 - **Interactive prompts for the member's template** — the CLI has no prompt surface anywhere and no
   stdin seam; adding one is its own milestone. Unowned.
+
+## 10. Folded-in scope — inter-service transport (added after the first code review)
+
+The first review shipped a workspace whose members talk over exactly one mechanism: HTTP, through
+the discovery map. Probed with two generated microservice members, one subscribing to
+`orders.created` and the other publishing to it, the publish reported success and **nothing
+crossed** — `MessagingPlugin()` defaults to the in-memory broker, which is process-local. N
+generated services each holding a private broker is a silent no-op between them, so the transport
+becomes a choice.
+
+### 10.1 Contracts verified from SOURCE
+
+| Reference                                    | Source (file:line)                                                 | Verified surface / fact                                                                                                                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MessagingPluginOptions`                     | `packages/messaging-plugin/src/interfaces/index.ts:293-303`        | Union discriminated on `broker`. Memory's discriminant is OPTIONAL, so `MessagingPlugin()` stays valid.                                                                                                       |
+| `RedisStreamsMessagingOptions`               | `…/interfaces/index.ts:127-135`                                    | `{ broker: 'redis-streams'; url?; client?; defaultQueue?; pollIntervalMs?; blockSizeMs? }` — a URL is the only thing a scaffold needs.                                                                        |
+| `RabbitMqMessagingOptions`                   | `…/interfaces/index.ts:142-148`                                    | `{ broker: 'rabbitmq'; url?; … }`.                                                                                                                                                                            |
+| `NatsMessagingOptions`                       | `…/interfaces/index.ts:155-161`                                    | `{ broker: 'nats'; url?; … }`.                                                                                                                                                                                |
+| `KafkaMessagingOptions`                      | `…/interfaces/index.ts:168-175`                                    | `{ broker: 'kafka'; brokers?: readonly string[]; … }` — a LIST, not a `url`.                                                                                                                                  |
+| Pub/Sub + Service Bus arms                   | `…/interfaces/index.ts:181-262`                                    | Both require a credential (`projectId` / `connectionString`) with no usable default — excluded from the flag (§10.2).                                                                                         |
+| Default broker                               | `packages/messaging-plugin/src/plugin/messaging-plugin.ts:116-117` | `brokerType === 'memory'` → `new InMemoryBroker(...)`, process-local.                                                                                                                                         |
+| `GrpcPluginOptions`                          | `packages/grpc-plugin/src/interfaces/index.ts:14-47`               | `{ basePath?; reflection?; health?; services?; connectModule? }` — every field optional, so `GrpcPlugin()` is a valid registration.                                                                           |
+| `GrpcServiceDefinition`                      | `packages/common/src/services/grpc.ts:43-58`                       | `{ typeName, method: Record<string, TMethod> }`. A real one comes from a revived `FileDescriptorSet` (`grpc-unary-e2e.test.ts:24-28`), NOT from a hand-written literal.                                       |
+| A bare `GrpcPlugin()` serves a callable RPC  | measured                                                           | `POST /grpc/grpc.health.v1.Health/Check` with `content-type: application/json` → `200 {"status":"SERVING"}`, with no descriptor generated and no proto toolchain. This is what makes a gRPC transport honest. |
+| Cross-process delivery on the default broker | measured                                                           | Two generated members, one `subscribe`, one `publish`: `ORDERS_PUBLISHED` / no `BILLING_RECEIVED`. The defect this scope closes.                                                                              |
+
+### 10.2 Design decisions
+
+#### 10.2.1 The transport is a WORKSPACE property, not a per-member one
+
+- **Decision:** `setu new <name> --workspace --transport <t>` records it in `setu.workspace.json`;
+  every member added later inherits it. `generate app` does NOT take `--transport` and refuses it,
+  naming the workspace flag — exactly as it refuses `--port`.
+- **Why:** members can only talk over a broker they SHARE. A per-member flag makes a workspace whose
+  members silently cannot reach each other trivially expressible, which is the failure this whole
+  milestone exists to remove. One workspace, one bus.
+- **Test home:** `test/unit/workspace/transport.test.ts`, `test/unit/app-command.test.ts`.
+
+#### 10.2.2 Which transports ship
+
+- **Decision:** `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`. `tcp` is
+  REFUSED with a message naming `http`. Pub/Sub and Service Bus are omitted.
+- **Why:** `http` is the existing discovery + `fetch` path and stays the default, so an upgrade
+  changes nothing. `grpc` registers `GrpcPlugin()`, which co-serves Connect RPC on the member's own
+  port and is callable immediately (measured above). The four brokers need only a URL (or a broker
+  list) and have a real local default. Pub/Sub and Service Bus need a credential no scaffold can
+  invent — a generated `projectId: ''` is a dead option. There is no raw-TCP transport in this
+  framework: HTTP over TCP is the honest reading of "TCP", so the refusal says so rather than
+  inventing one.
+- **Test home:** `test/unit/workspace/transport.test.ts`; the refusal in `new-command.test.ts`.
+
+#### 10.2.3 What a transport renders
+
+- **Decision:** one `TransportSpec` per transport (`plugins`, `defaultEndpoint`, `describe`), read
+  by the member overlay. `http` adds nothing; `grpc` adds `GrpcPlugin()`; a broker arm rewrites the
+  existing `MessagingPlugin` wiring's `args` to its discriminated-union literal.
+- **Why:** it is the `withPluginOptionSeams` technique the seams already use, so a template's own
+  wiring list stays the single source of what a member registers. Rewriting rather than appending
+  matters: the microservice template ALREADY registers `MessagingPlugin`, and appending a second one
+  would trip the kernel's duplicate-plugin-name check at `start()`.
+- **Test home:** `test/unit/workspace/member-host.test.ts`.
+
+#### 10.2.4 The endpoint a broker points at
+
+- **Decision:** a per-transport local default (`redis://127.0.0.1:6379`, `amqp://127.0.0.1:5672`,
+  `nats://127.0.0.1:4222`, `127.0.0.1:9092`), overridable with `--transport-url` at workspace
+  creation and recorded beside the transport in the manifest.
+- **Why:** the same reasoning as the `127.0.0.1` discovery map — the CLI knows only the local
+  development topology, and a broker on its standard local port is what `docker run redis` gives
+  you. The override exists because a shared dev broker is common and editing four generated configs
+  by hand is the churn this milestone removes.
+- **Test home:** `test/unit/workspace/transport.test.ts`.
+
+### 10.3 Verification bar for the folded-in scope
+
+Three members, not two — a two-member mesh cannot distinguish "every member learns every other" from
+"the pair happens to know each other":
+
+1. `setu new acme --workspace --transport <t>` then three `generate app` runs.
+2. Every member's map names the OTHER TWO and never itself (full mesh, 3×2 entries).
+3. All three type-check from the workspace root through the glob.
+4. All three boot, and one calls BOTH others on the chosen transport, asserting a response from
+   each.
+5. DI and decorators inside a member, via the CLI alone: `generate app x --di --template nest`, then
+   `setu generate module`/`service`/`controller` inside it, then `deno check`, then BOOT and drive
+   the decorated route.

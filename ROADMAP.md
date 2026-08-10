@@ -6407,6 +6407,15 @@ MEASUREMENT rather than by argument:
   resolve the other through the discovery capability** — the M58 functional bar. It goes one step
   further and CALLS the resolved URL, because that is the only thing that proves the generated map
   and the port each member binds are the same datum.
+- A workspace-level `--transport` (`http`, `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`),
+  recorded in `setu.workspace.json` and inherited by every member. Folded in after the first code
+  review, which found that two generated services publishing and subscribing on one topic exchanged
+  NOTHING while reporting success — the microservice template's `MessagingPlugin()` defaults to an
+  in-process broker, and a workspace makes that reachable in a way one service never did.
+- A THREE-member e2e, because a pair cannot distinguish "every member learns every other" from "the
+  pair happens to know each other": full-mesh maps, all three type-checked, one service calling both
+  peers over HTTP and over gRPC, a real Redis carrying a message between two services, and a
+  decorated `@Injectable` module generated with the CLI alone and driven to a `200`.
 - Docs: PUBLIC_API monorepo section; ARCHITECTURE note on the workspace shape; CHANGELOG.
 
 ### Out of scope
@@ -6426,6 +6435,12 @@ MEASUREMENT rather than by argument:
   covers the need, and the next `setu generate app` regenerates every module from it. Unowned.
 - **Interactive prompts** for a member's template. The CLI has no prompt surface anywhere and no
   stdin seam. Unowned.
+- **Generating gRPC service descriptors.** `--transport grpc` makes every member a Connect server —
+  the health service answers with no configuration at all — but serving your OWN protos needs a
+  Protobuf-ES descriptor from `buf`/`protoc` handed to `grpc.addService`. A proto toolchain in a
+  zero-dependency CLI is its own design. Unowned.
+- **Pub/Sub and Service Bus transports.** Both need a credential no scaffold can invent; a generated
+  empty `projectId` is a dead option. Unowned.
 
 ## Progress Tracking
 

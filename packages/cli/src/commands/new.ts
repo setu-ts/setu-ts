@@ -27,6 +27,14 @@ import { resolveTemplateChoice } from '../templates/choice.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost } from '../templates/project-files.ts';
 import { DEFAULT_BASE_PORT, isUsablePort, MAX_PORT, MIN_PORT } from '../workspace/manifest.ts';
+import {
+  DEFAULT_TRANSPORT,
+  getTransport,
+  listTransports,
+  TRANSPORT_ALIASES,
+  TRANSPORTS,
+  type TransportSpec,
+} from '../workspace/transport.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import { deriveNames } from '../utils/names.ts';
 import {
@@ -149,7 +157,81 @@ function planWorkspace(
   const basePort = readBasePort(args);
   if (!basePort.ok) return { ok: false, message: basePort.message };
 
-  return { ok: true, files: workspaceRootFiles(name, basePort.port ?? DEFAULT_BASE_PORT) };
+  const transport = readTransport(args);
+  if (!transport.ok) return { ok: false, message: transport.message };
+
+  return {
+    ok: true,
+    files: workspaceRootFiles(
+      name,
+      basePort.port ?? DEFAULT_BASE_PORT,
+      transport.spec,
+      transport.url,
+    ),
+  };
+}
+
+/**
+ * Reads and validates `--transport` and `--transport-url`.
+ *
+ * `tcp` is refused by name rather than accepted as a synonym for `http`: this
+ * framework has no raw-TCP transport, every inter-service path is HTTP over TCP
+ * or a broker client over TCP, and quietly handing back HTTP under another name
+ * would leave the user believing they chose something.
+ *
+ * @param args - The parsed arguments
+ * @returns The transport spec and endpoint, or the refusal to print
+ */
+function readTransport(
+  args: ParsedArgs,
+): { readonly ok: true; readonly spec: TransportSpec; readonly url?: string } | {
+  readonly ok: false;
+  readonly message: string;
+} {
+  const raw = args.flags['transport'];
+  const named = raw === undefined ? DEFAULT_TRANSPORT : raw;
+  if (typeof named !== 'string') {
+    return {
+      ok: false,
+      message: `--transport needs a value: ${TRANSPORTS.join(' | ')}.`,
+    };
+  }
+
+  const spec = getTransport(named);
+  if (spec === undefined) {
+    const alias = TRANSPORT_ALIASES[named];
+    return {
+      ok: false,
+      message: alias === undefined
+        ? `Unknown transport "${named}". Expected one of: ${TRANSPORTS.join(', ')}.`
+        : `There is no raw ${named} transport: every inter-service path here is HTTP over ` +
+          `${named} or a broker client over ${named}. Use --transport ${alias} for direct calls ` +
+          `through the discovery map, or a broker (${
+            TRANSPORTS.filter((t) => t !== 'http' && t !== 'grpc').join(', ')
+          }).`,
+    };
+  }
+
+  const rawUrl = args.flags['transport-url'];
+  if (rawUrl === undefined) return { ok: true, spec };
+  if (typeof rawUrl !== 'string') {
+    return { ok: false, message: `--transport-url needs a value.` };
+  }
+  // Refused rather than stored: a transport with no broker has nothing to point
+  // at, so recording the URL would put a value in the manifest that no
+  // generated config ever reads.
+  if (spec.defaultEndpoint === undefined) {
+    return {
+      ok: false,
+      message: `--transport ${spec.name} has no broker, so --transport-url has nothing to ` +
+        `address. It applies to ${
+          listTransports().filter((t) => t.defaultEndpoint !== undefined).map((t) => t.name).join(
+            ', ',
+          )
+        }.`,
+    };
+  }
+  return { ok: true, spec, url: rawUrl };
 }
 
 /**
@@ -177,6 +259,19 @@ function planProject(
       message: `--port applies to \`${PROGRAM_NAME} new <name> --workspace\`, which allocates ` +
         `member ports from it. A standalone project binds the port its \`main.ts\` names.`,
     };
+  }
+
+  // Same class: a transport describes how the members of a workspace reach each
+  // other, and a standalone project has no members. Accepting it would report
+  // success for a project that registers nothing of the kind.
+  for (const flag of ['transport', 'transport-url']) {
+    if (args.flags[flag] !== undefined) {
+      return {
+        ok: false,
+        message: `--${flag} applies to \`${PROGRAM_NAME} new <name> --workspace\`: it decides ` +
+          `how a workspace's services talk to each other, and a standalone project has none.`,
+      };
+    }
   }
 
   const choice = resolveTemplateChoice(args, runtime);
@@ -227,6 +322,11 @@ export async function runNewCommand(
     deps.log(
       `  --port <n>          Base port for workspace members (default ${DEFAULT_BASE_PORT})`,
     );
+    deps.log(
+      `  --transport <name>  How a workspace's services talk: ${TRANSPORTS.join(' | ')} ` +
+        `(default ${DEFAULT_TRANSPORT})`,
+    );
+    deps.log('  --transport-url <url>  Broker endpoint, for the broker transports');
     deps.log('  --dir <path>        Create the project under this directory');
     deps.log('  --dry-run           Print what would be created, write nothing');
     return EXIT_OK;

@@ -3,6 +3,10 @@ import { expect } from '@std/expect';
 import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
 import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
 import { WORKSPACE_MANIFEST, WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
+import { transportSpec } from '../../../src/workspace/transport.ts';
+
+/** The default transport every existing assertion was written against. */
+const HTTP = transportSpec('http');
 
 /**
  * Reads one emitted file's contents.
@@ -11,14 +15,14 @@ import { WORKSPACE_MANIFEST, WORKSPACE_VERSION } from '../../../src/workspace/ma
  * @returns Its contents
  */
 function contentsOf(path: string): string {
-  const file = workspaceRootFiles('acme', 3000).find((candidate) => candidate.path === path);
+  const file = workspaceRootFiles('acme', 3000, HTTP).find((candidate) => candidate.path === path);
   expect(file).toBeDefined();
   return file?.contents ?? '';
 }
 
 describe('workspaceRootFiles', () => {
   it('emits the four root files and nothing else', () => {
-    expect(workspaceRootFiles('acme', 3000).map((file) => file.path).sort()).toEqual([
+    expect(workspaceRootFiles('acme', 3000, HTTP).map((file) => file.path).sort()).toEqual([
       '.gitignore',
       'README.md',
       WORKSPACE_MANIFEST,
@@ -27,7 +31,7 @@ describe('workspaceRootFiles', () => {
   });
 
   it('plans no path twice', () => {
-    expect(firstDuplicatePath(workspaceRootFiles('acme', 3000))).toBeUndefined();
+    expect(firstDuplicatePath(workspaceRootFiles('acme', 3000, HTTP))).toBeUndefined();
   });
 
   // A GLOB, parsed rather than substring-matched: this is what makes adding a
@@ -55,11 +59,16 @@ describe('workspaceRootFiles', () => {
       basePort: number;
       members: unknown[];
     };
-    expect(manifest).toEqual({ version: WORKSPACE_VERSION, basePort: 3000, members: [] });
+    expect(manifest).toEqual({
+      version: WORKSPACE_VERSION,
+      basePort: 3000,
+      transport: 'http',
+      members: [],
+    });
   });
 
   it('records the base port it was given', () => {
-    const file = workspaceRootFiles('acme', 4100).find((f) => f.path === WORKSPACE_MANIFEST);
+    const file = workspaceRootFiles('acme', 4100, HTTP).find((f) => f.path === WORKSPACE_MANIFEST);
     expect(JSON.parse(file?.contents ?? '{}')).toMatchObject({ basePort: 4100 });
   });
 

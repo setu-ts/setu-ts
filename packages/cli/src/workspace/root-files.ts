@@ -16,6 +16,7 @@ import {
   WORKSPACE_MANIFEST,
   WORKSPACE_VERSION,
 } from './manifest.ts';
+import type { TransportSpec } from './transport.ts';
 
 /**
  * The member pattern the root `deno.json` declares.
@@ -46,6 +47,8 @@ const MEMBER_GLOB = `./${MEMBERS_DIR}/*`;
 export function workspaceRootFiles(
   name: string,
   basePort: number,
+  transport: TransportSpec,
+  transportUrl?: string,
 ): readonly GeneratedFile[] {
   const denoJson = {
     workspace: [MEMBER_GLOB],
@@ -83,6 +86,16 @@ deno task dev
 \`${WORKSPACE_MANIFEST}\` records the port each service binds. It is the source
 the generated \`src/discovery/services.ts\` modules are rendered from; change a
 port there and the next \`${PROGRAM_NAME} generate app\` rewrites them all.
+
+## Transport
+
+Services talk over **${transport.name}** — ${transport.description}.${
+    transportUrl === undefined ? '' : `\nBroker endpoint: \`${transportUrl}\`.`
+  }
+
+The transport is a property of the whole workspace, recorded in
+\`${WORKSPACE_MANIFEST}\`, because members can only meet on a bus they share.
+Every service added later inherits it.
 `;
 
   return [
@@ -92,6 +105,11 @@ port there and the next \`${PROGRAM_NAME} generate app\` rewrites them all.
       contents: renderWorkspaceManifest({
         version: WORKSPACE_VERSION,
         basePort,
+        transport: transport.name,
+        // Recorded only when it differs from the transport's own default, so
+        // the manifest states a choice rather than restating a constant that
+        // already lives in the CLI.
+        ...(transportUrl === undefined ? {} : { transportUrl }),
         members: [],
       }),
     },

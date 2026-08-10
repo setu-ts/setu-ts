@@ -4878,6 +4878,7 @@ setu new my-app --template rest --di           # add a DI container to any templ
 # Scaffold a monorepo (creates ./acme, no member yet)
 setu new acme --workspace
 setu new acme --workspace --port 4100          # base port for its members
+setu new acme --workspace --transport redis    # http | grpc | memory | redis | rabbitmq | nats | kafka
 setu generate app orders --template microservice
 setu generate app billing --template microservice
 
@@ -4917,16 +4918,18 @@ Any casing of the name produces identical output: `setu g controller user-profil
 
 ### Options
 
-| Option                                          | Commands          | Behavior                                                                                                                                                                                                                         |
-| ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.           |
-| `--di`                                          | `new`             | Registers `DiPlugin`, so every `@Injectable` is constructed through a container that honors its `scope`. Off by default; see "Decorators and DI are optional" below. A no-op on `--template nest`, which already registers it.   |
-| `--workspace`                                   | `new`             | Creates a monorepo root instead of a project: a `deno.json` declaring `"workspace": ["./apps/*"]` and a `setu.workspace.json`, with no member. Refuses `--template` and a non-Deno `--runtime` rather than ignoring them.        |
-| `--port <n>`                                    | `new --workspace` | Base port for the workspace's members; the first binds it and each later one takes the next free number above the highest in use. Defaults to `3000`. A usage error outside `--workspace`, or when it is not an integer 1–65535. |
-| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                           |
-| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                     |
-| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                     |
-| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                        |
+| Option                                          | Commands          | Behavior                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.                                                                 |
+| `--di`                                          | `new`             | Registers `DiPlugin`, so every `@Injectable` is constructed through a container that honors its `scope`. Off by default; see "Decorators and DI are optional" below. A no-op on `--template nest`, which already registers it.                                                         |
+| `--workspace`                                   | `new`             | Creates a monorepo root instead of a project: a `deno.json` declaring `"workspace": ["./apps/*"]` and a `setu.workspace.json`, with no member. Refuses `--template` and a non-Deno `--runtime` rather than ignoring them.                                                              |
+| `--port <n>`                                    | `new --workspace` | Base port for the workspace's members; the first binds it and each later one takes the next free number above the highest in use. Defaults to `3000`. A usage error outside `--workspace`, or when it is not an integer 1–65535.                                                       |
+| `--transport <name>`                            | `new --workspace` | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value. |
+| `--transport-url <url>`                         | `new --workspace` | Broker endpoint for the broker transports, replacing the local default. A usage error for `http`, `grpc` and `memory`, which have no broker to address.                                                                                                                                |
+| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                                                                                 |
+| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                                                                           |
+| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                                                                           |
+| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                                                                              |
 
 ### Exit codes
 
@@ -5044,6 +5047,32 @@ and the next `setu generate app` rewrites every module from it.
 | `new --workspace --di`                              | A root registers no plugins, so a container has nothing to construct — as with `--template`. Exits `2` naming `generate app <name> --di`.                                                                                                                                                                                                                           |
 | A port in `setu.workspace.json` outside `1`–`65535` | Refused on read, naming the value and the field. Every port there is written into a member's entry point AND into every sibling's map, so one bad number breaks the workspace: `app.start()` throws `Invalid port (out of range)`, and `0` is worse still — it binds an arbitrary free port, so the member looks healthy while every sibling is refused. Exits `1`. |
 | A workspace with no port left                       | `basePort` and its members reach `65535`. Exits `1` rather than allocating `65536`.                                                                                                                                                                                                                                                                                 |
+
+#### Inter-service transport
+
+The workspace decides how its services reach each other, because members can only meet on a bus they
+share — a per-member choice would make a workspace whose services silently cannot talk expressible
+in one flag. `generate app` therefore refuses `--transport` and names the workspace flag.
+
+| `--transport`                 | What every member gets                                                                                          | Proven by                                                                                                                  |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `http` (default)              | Nothing extra. Members call each other at `discovery.resolveUrl(name)`.                                         | Three members, one calling both peers, asserting `200` and the body.                                                       |
+| `grpc`                        | `GrpcPlugin()`, co-serving Connect/gRPC on the member's own port alongside HTTP.                                | Three members, one calling both peers at `/grpc/grpc.health.v1.Health/Check`, asserting the decoded `SERVING`.             |
+| `memory`                      | The messaging plugin's own in-process default, named rather than implied. **Messages never leave the process.** | —                                                                                                                          |
+| `redis`                       | `MessagingPlugin({ broker: 'redis-streams', url })`                                                             | A real Redis: one service publishes, another receives the payload. Swapping to `memory` makes that test fail.              |
+| `rabbitmq` / `nats` / `kafka` | The matching `MessagingPlugin` arm.                                                                             | Type-checked in the generated project against the plugin's discriminated union; not run in CI, which holds no such broker. |
+
+> **There is no raw-TCP transport, and `--transport tcp` says so** rather than quietly handing back
+> HTTP under another name. Every inter-service path here is HTTP over TCP or a broker client over
+> TCP. Google Pub/Sub and Azure Service Bus are omitted for a different reason: each needs a
+> credential no scaffold can invent, and a generated empty `projectId` is a dead option that fails
+> at the first call instead of at scaffold time.
+
+**Serving your own gRPC services still needs descriptors.** `--transport grpc` makes every member a
+Connect server immediately, which is why the health service answers with no configuration — but a
+service of your own needs a Protobuf-ES descriptor from `buf`/`protoc`, handed to
+`grpc.addService(definition, implementation)`. The CLI has no proto compiler and does not pretend
+to.
 
 ### Plugin gating
 

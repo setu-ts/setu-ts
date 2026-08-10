@@ -14,6 +14,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { joinPath } from '../utils/file-writer.ts';
+import { DEFAULT_TRANSPORT, getTransport, type TransportName } from './transport.ts';
 
 /** The workspace manifest's filename, at the workspace root. */
 export const WORKSPACE_MANIFEST = 'setu.workspace.json';
@@ -74,6 +75,21 @@ export interface WorkspaceManifest {
   readonly version: number;
   /** Floor for port allocation. */
   readonly basePort: number;
+  /**
+   * How members talk to each other.
+   *
+   * Recorded at the WORKSPACE level, and read by every `generate app` after it,
+   * because members can only meet on a bus they share — a per-member transport
+   * would make a workspace whose services silently cannot reach each other
+   * trivially expressible.
+   */
+  readonly transport: TransportName;
+  /**
+   * Where the transport's broker listens, when it has one.
+   *
+   * Omitted for `http`, `grpc` and `memory`, which have no endpoint to name.
+   */
+  readonly transportUrl?: string;
   /** Every member, in creation order. */
   readonly members: readonly WorkspaceMember[];
 }
@@ -100,7 +116,15 @@ export type WorkspaceManifestProblem =
     readonly port: number;
     /** `basePort`, or the member whose port it is. */
     readonly field: string;
-  };
+  }
+  /**
+   * Well-formed, but naming a transport this CLI does not know.
+   *
+   * Refused rather than defaulted to `http`: quietly moving every member off
+   * the bus the manifest asked for would leave services that cannot reach each
+   * other and no diagnostic saying why.
+   */
+  | { readonly kind: 'unknown-transport'; readonly transport: string };
 
 /** The result of reading a workspace manifest. */
 export type WorkspaceManifestResult =
@@ -174,6 +198,22 @@ export async function readWorkspaceManifest(
     return { ok: false, problem: { kind: 'invalid-port', port: basePort, field: 'basePort' } };
   }
 
+  // Absent → `http`, so a workspace created before the transport choice existed
+  // keeps working and keeps its behaviour. An unrecognised value is refused
+  // rather than defaulted: silently downgrading a member to HTTP because the
+  // manifest names a broker this CLI does not know is the "flag vanished" class
+  // one level up.
+  const rawTransport = record['transport'];
+  const transport = rawTransport === undefined ? DEFAULT_TRANSPORT : rawTransport;
+  if (typeof transport !== 'string' || getTransport(transport) === undefined) {
+    return { ok: false, problem: { kind: 'unknown-transport', transport: String(transport) } };
+  }
+
+  const rawUrl = record['transportUrl'];
+  if (rawUrl !== undefined && typeof rawUrl !== 'string') {
+    return { ok: false, problem: { kind: 'malformed' } };
+  }
+
   const rawMembers = record['members'];
   if (!Array.isArray(rawMembers)) return { ok: false, problem: { kind: 'malformed' } };
 
@@ -198,7 +238,16 @@ export async function readWorkspaceManifest(
     members.push(member);
   }
 
-  return { ok: true, manifest: { version, basePort, members } };
+  return {
+    ok: true,
+    manifest: {
+      version,
+      basePort,
+      transport: transport as TransportName,
+      ...(rawUrl === undefined ? {} : { transportUrl: rawUrl }),
+      members,
+    },
+  };
 }
 
 /**
