@@ -7861,24 +7861,28 @@ other runtime — and injection is what the platform docs recommend for testabil
 
 ### Options
 
-| Option                    | Type                  | Default      | Consumer / behavior                                                                                              |
-| ------------------------- | --------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `env`                     | `CloudflareWorkerEnv` | required     | `BindingRegistry` — the record every accessor reads                                                              |
-| `waitUntil`               | `WaitUntilHost`       | —            | `resolveWaitUntil` — delegated to; omit off Workers                                                              |
-| `requireBindings`         | `readonly string[]`   | `[]`         | `register()` — throws naming every absent entry                                                                  |
-| `cache.binding`           | `string`              | —            | `KvCacheStore` — the KV namespace serving `CAPABILITIES.CACHE`                                                   |
-| `cache.name`              | `string`              | `'default'`  | Plugin factory — derives `cache.<name>` when not `'default'`                                                     |
-| `cache.prefix`            | `string`              | —            | `KvCacheStore` — key prefix; **required to call `clear()`**                                                      |
-| `cache.defaultTtlSeconds` | `number`              | —            | `KvCacheStore.set` — applied when `ttlSeconds` is omitted                                                        |
-| `storage.binding`         | `string`              | —            | `R2Storage` — the R2 bucket serving `CAPABILITIES.STORAGE`                                                       |
-| `storage.name`            | `string`              | `'default'`  | Plugin factory — derives `storage.<name>` when not `'default'`                                                   |
-| `storage.prefix`          | `string`              | —            | `R2Storage` — object-key prefix                                                                                  |
-| `queue.binding`           | `string`              | —            | `WorkersQueue` — the producer binding serving `CAPABILITIES.QUEUE`                                               |
-| `queue.name`              | `string`              | `'default'`  | Plugin factory — derives `queue.<name>` when not `'default'`                                                     |
-| `queue.maxDelaySeconds`   | `number`              | `86400`      | `WorkersQueue.add` — a larger `delayMs` throws rather than being truncated                                       |
-| `durableObject.binding`   | `string`              | —            | `DurableObjectBackplane` — the namespace serving `CAPABILITIES.REALTIME_BACKPLANE`; validated at `register()`    |
-| `durableObject.name`      | `string`              | `'default'`  | Plugin factory — derives `realtime-backplane.<name>` when not `'default'`                                        |
-| `durableObject.topic`     | `string`              | `'realtime'` | `DurableObjectBackplane` — the `idFromName` value every replica shares; two apps sharing a namespace must differ |
+| Option                           | Type                  | Default      | Consumer / behavior                                                                                              |
+| -------------------------------- | --------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `env`                            | `CloudflareWorkerEnv` | required     | `BindingRegistry` — the record every accessor reads                                                              |
+| `waitUntil`                      | `WaitUntilHost`       | —            | `resolveWaitUntil` — delegated to; omit off Workers                                                              |
+| `requireBindings`                | `readonly string[]`   | `[]`         | `register()` — throws naming every absent entry                                                                  |
+| `cache.binding`                  | `string`              | —            | `KvCacheStore` — the KV namespace serving `CAPABILITIES.CACHE`                                                   |
+| `cache.name`                     | `string`              | `'default'`  | Plugin factory — derives `cache.<name>` when not `'default'`                                                     |
+| `cache.prefix`                   | `string`              | —            | `KvCacheStore` — key prefix; **required to call `clear()`**                                                      |
+| `cache.defaultTtlSeconds`        | `number`              | —            | `KvCacheStore.set` — applied when `ttlSeconds` is omitted                                                        |
+| `storage.binding`                | `string`              | —            | `R2Storage` — the R2 bucket serving `CAPABILITIES.STORAGE`                                                       |
+| `storage.name`                   | `string`              | `'default'`  | Plugin factory — derives `storage.<name>` when not `'default'`                                                   |
+| `storage.prefix`                 | `string`              | —            | `R2Storage` — object-key prefix                                                                                  |
+| `queue.binding`                  | `string`              | —            | `WorkersQueue` — the producer binding serving `CAPABILITIES.QUEUE`                                               |
+| `queue.name`                     | `string`              | `'default'`  | Plugin factory — derives `queue.<name>` when not `'default'`                                                     |
+| `queue.maxDelaySeconds`          | `number`              | `86400`      | `WorkersQueue.add` — a larger `delayMs` throws rather than being truncated                                       |
+| `messaging.binding`              | `string`              | —            | `WorkersBroker` — the producer binding serving `CAPABILITIES.MESSAGING`; validated at `register()`               |
+| `messaging.name`                 | `string`              | `'default'`  | Plugin factory — derives `messaging.<name>` when not `'default'`                                                 |
+| `messaging.rpc.binding`          | `string`              | —            | `WorkersBroker` — the Durable Object namespace serving reply inboxes; absent, `request`/`respond` throw          |
+| `messaging.rpc.defaultTimeoutMs` | `number`              | `5000`       | `RequestCorrelation` — reply budget when `RequestOptions.timeoutMs` is omitted                                   |
+| `durableObject.binding`          | `string`              | —            | `DurableObjectBackplane` — the namespace serving `CAPABILITIES.REALTIME_BACKPLANE`; validated at `register()`    |
+| `durableObject.name`             | `string`              | `'default'`  | Plugin factory — derives `realtime-backplane.<name>` when not `'default'`                                        |
+| `durableObject.topic`            | `string`              | `'realtime'` | `DurableObjectBackplane` — the `idFromName` value every replica shares; two apps sharing a namespace must differ |
 
 ### Exports
 
@@ -7886,7 +7890,7 @@ other runtime — and injection is what the platform docs recommend for testabil
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | `CloudflarePlugin`                                                                                                                                                                                                                                                                                                                      | factory       |
 | `ICloudflareBindings`                                                                                                                                                                                                                                                                                                                   | interface     |
-| `CloudflarePluginOptions`, `KvCacheOptions`, `R2StorageArm`, `WorkersQueueArm`, `DurableObjectArm`                                                                                                                                                                                                                                      | types         |
+| `CloudflarePluginOptions`, `KvCacheOptions`, `R2StorageArm`, `WorkersQueueArm`, `WorkersMessagingArm`, `WorkersMessagingRpcArm`, `DurableObjectArm`                                                                                                                                                                                     | types         |
 | `KvCacheStore`, `KvCacheStoreOptions`, `CacheClock`                                                                                                                                                                                                                                                                                     | class + types |
 | `KvSessionStore`, `KvSessionStoreOptions`                                                                                                                                                                                                                                                                                               | class + types |
 | `R2Storage`, `R2StorageOptions`                                                                                                                                                                                                                                                                                                         | class + types |
@@ -7894,6 +7898,9 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `WaitUntilHost`, `LoggerSource`                                                                                                                                                                                                                                                                                                         | types         |
 | `WorkersQueue`, `WorkersQueueOptions`, `JobIdSource`                                                                                                                                                                                                                                                                                    | class + types |
 | `createQueueHandler`, `QueueHandler`, `QueueHandlerOptions`                                                                                                                                                                                                                                                                             | fn + types    |
+| `WorkersBroker`, `WorkersBrokerOptions`, `ReplyInboxBinding`, `BrokerRuntime`                                                                                                                                                                                                                                                           | class + types |
+| `createMessagingHandler`, `MessagingHandler`, `MessagingHandlerOptions`                                                                                                                                                                                                                                                                 | fn + types    |
+| `ReplyInboxObjectCore`, `ReplyInboxObjectCoreOptions`                                                                                                                                                                                                                                                                                   | class + type  |
 | `WorkersCron`, `WorkersCronOptions`, `CronHandler`                                                                                                                                                                                                                                                                                      | class + types |
 | `createScheduledHandler`, `ScheduledHandler`                                                                                                                                                                                                                                                                                            | fn + type     |
 | `cacheApiMiddleware`, `CacheApiMiddlewareOptions`, `ICacheApi`                                                                                                                                                                                                                                                                          | fn + types    |
@@ -7906,8 +7913,8 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `createDefaultDurableObjectWebSocketHost`, `DurableObjectWebSocketHost`, `DurableObjectWebSocketPair`                                                                                                                                                                                                                                   | fn + types    |
 | `IDurableObjectState`, `IDurableObjectStorage`, `IDurableObjectWebSocket`, `IDurableObjectClientSocket`, `DurableObjectMessageEvent`                                                                                                                                                                                                    | types         |
 | `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IQueueMessage`, `IQueueMessageBatch`, `IScheduledController`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
-| `isKvNamespace`, `isR2Bucket`, `isD1Database`, `isDurableObjectNamespace`                                                                                                                                                                                                                                                               | guards        |
-| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`                                                                                                                                                                                                                                          | errors        |
+| `isKvNamespace`, `isR2Bucket`, `isD1Database`, `isQueueProducer`, `isDurableObjectNamespace`                                                                                                                                                                                                                                            | guards        |
+| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`, `CloudflareRequestTimeoutError`, `CloudflareRemoteHandlerError`                                                                                                                                                                         | errors        |
 
 ### `D1Adapter` — D1 as a first-class database
 
@@ -8117,6 +8124,40 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   prevent. A processor that throws is likewise retried, leaving the queue's own `max_retries` and
   dead-letter configuration to decide what happens next. `AddJobOptions.maxAttempts` is enforced at
   dispatch, because Cloudflare's `max_retries` is queue-wide configuration rather than per message.
+- **`publish` reaches one consumer Worker, not every subscriber in the cluster.** Cloudflare allows
+  **exactly one active consumer per queue**, so two Workers cannot both receive one published
+  message; fan-out happens across the handlers registered inside that consumer. A topology needing
+  cross-service fan-out binds one queue per consuming service. This is a platform property, not a
+  limitation of the adapter, and it is the one place `WorkersBroker` cannot match a socket broker.
+- **`subscribe` registers; it does not start receiving.** A Cloudflare queue consumer is a
+  module-level export, so delivery happens only once the application exports
+  `createMessagingHandler(app)` as `queue` AND declares the queue under `[[queues.consumers]]` — the
+  same split `WorkersQueue` has between `process` and `dispatch`. Within one delivery the selection
+  matches `InMemoryBroker`: every subscriber that named no `queue` is called, plus exactly one
+  member of each named group, round-robin.
+- **A publish nobody subscribed to is ACKED, not retried** — the one place this deliberately departs
+  from `WorkersQueue`. A job name with no processor is a mistake, but publishing to a topic nobody
+  listens on is ordinary pub/sub, and retrying would burn the queue's 100-retry budget and
+  dead-letter every fire-and-forget message. A body that is not a readable envelope is still
+  retried, and a subscriber that throws is retried.
+- **`request`/`respond` need the `messaging.rpc` arm, and throw `CloudflareUnsupportedError` without
+  it.** A queue reaches its one consumer Worker and never the caller waiting for a reply, so RPC
+  needs a second addressable path: the caller holds a WebSocket to a Durable Object named after its
+  own inbox, and the responder `POST`s the reply there. That costs a namespace binding and a DO
+  class the application exports (delegating to `ReplyInboxObjectCore`), which is why it is opt-in
+  rather than always on. A request whose topic has no responder is **answered with a failure**
+  rather than left to time out, and a responder that throws is relayed to the caller and acked —
+  never retried, since the caller has already been told and a redelivery would re-run side effects.
+- **A queue carrying RPC MUST set `max_batch_timeout = 0`.** The platform default is 5 seconds and
+  `RequestOptions.timeoutMs` defaults to 5000, so on a default queue essentially every `request()`
+  times out. `setu new --template microservice --runtime cloudflare-workers` emits the correct
+  stanza.
+- **The RPC errors are this package's own classes.** `CloudflareRequestTimeoutError` and
+  `CloudflareRemoteHandlerError` mirror `messaging-plugin`'s `RequestTimeoutError` and
+  `RemoteHandlerError` but are distinct identities, because AI_GUIDELINES §2.2 forbids a plugin
+  importing another plugin and `common` carries no error class to promote them into. Which one an
+  application catches is never ambiguous: both providers claim `CAPABILITIES.MESSAGING`, so the
+  kernel's duplicate-provider check guarantees exactly one is registered.
 - **Cron Triggers do NOT register `CAPABILITIES.SCHEDULER`, deliberately.** Of `IScheduler`'s eight
   methods only `cron` is expressible on Workers: `every` and `delay` arm a timer and the isolate is
   evicted between invocations (the same reason `scheduler-plugin` cannot run on Workers);

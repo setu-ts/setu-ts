@@ -6501,7 +6501,7 @@ MEASUREMENT rather than by argument:
 | 39        | ⬜     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
 | 58        | ✅     | cli (domain module scaffolding)       |
-| 59        | ⬜     | cloudflare-plugin (workers messaging) |
+| 59        | ✅     | cloudflare-plugin (workers messaging) |
 | 60        | ✅     | cli (wire generated artifacts)        |
 | 61        | ✅     | cli (decorator/DI opt-in)             |
 | 62        | ✅     | cli (monorepo support)                |
