@@ -1859,17 +1859,79 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   detect their own drift because they matched a bare substring rather than a link. Also: the
   `PUBLIC_API.md` section anchors now name their package, which is a **breaking change for external
   deep links** (`#storage` → `#storage-setu-tsstorage-plugin`) — complete (PR #143)
+- **Milestone 62** (`packages/cli` — monorepo support: more than one deployable service in a
+  repository. The CLI had no workspace concept at all, so a second service meant
+  `setu new other --dir .` — a fully independent project with its own manifest, its own lockfile,
+  and no knowledge of its sibling. The sharp edge was discovery: M50b wires
+  `ServiceDiscoveryPlugin({ provider: 'static', services: {} })` into the microservice template with
+  a deliberately EMPTY map, because a sample entry would have named a dead port, so every caller's
+  map was hand-edited in every service and nothing propagated a new name.
+  **`setu new <name> --workspace` creates the root and `setu generate app <name>` adds a member.**
+
+  **Two of the ROADMAP's three open questions were settled by MEASUREMENT, and the first removed a
+  trade-off the section had assumed.** A Deno workspace root accepts a **GLOB** —
+  `"workspace": ["./apps/*"]` resolves members for `deno task --recursive`, and a root whose glob
+  matches nothing still runs and type-checks — so the member list is never maintained and adding a
+  service rewrites NO manifest. The ROADMAP framed "one lockfile and one `deno task test`" against
+  "simpler, with neither"; the glob gives the first at the cost of neither. Also measured: a
+  member's `imports` MERGE with the root's rather than replacing them, a member's `compilerOptions`
+  are honored (so a decorated class in a member compiles), a member needs no `name`/`version`, and
+  `nodeModulesDir` is **refused** in a member
+  (`"nodeModulesDir" field can only be specified in the
+  workspace root deno.json file`) — which is
+  why `--template full-stack` is refused as a member with a reason rather than out of caution.
+  Framework pins live in each MEMBER's `deno.json` and NOT at the root, because `detectPlugins`
+  reads one directory's manifest and never walks up: root-only pins would make every gated schematic
+  refuse inside a member, and the e2e runs a real `g controller` inside one to prove it.
+
+  The verb is `app`, not `service` — `setu generate service` already emits a class, and one word
+  cannot mean two things in the same command. It is dispatched before the schematic registry exactly
+  as `custom` is, and is deliberately NOT a registry entry: `Schematic` is a pure
+  `(names, options) => GeneratedFile[]` performing no I/O, while this reads the workspace manifest,
+  allocates a port and regenerates every sibling's module — hoisting that into `SchematicOptions`
+  would put workspace state on a published interface no other schematic reads.
+
+  **Discovery is the M58 mechanism applied to a CROSS-FILE write.** Every member carries a CLI-owned
+  `src/discovery/services.ts`, `managed` and regenerated for ALL members on each `generate app`,
+  exporting `SERVICE_PORT` (its own) and `SERVICE_ENDPOINTS` (every sibling, self EXCLUDED). The
+  member's `main.ts` binds the former and its `setu.config.ts` hands the latter to the plugin, so
+  the port a member binds and the port its siblings dial are ONE datum — the drift the design exists
+  to remove. The overlay is applied only when the member installs `service-discovery-plugin`, since
+  being reachable and consuming the map are separate properties. Ports come from
+  `setu.workspace.json` and are allocated as `max(basePort - 1, ...existing) + 1`, from the MAXIMUM
+  rather than the member count, so adding a name that sorts earlier cannot move a running service's
+  port.
+
+  The e2e goes past the ROADMAP's bar: it scaffolds a workspace on a **free** base port (a constant
+  would collide on a machine binding real sockets), adds two members, type-checks both **from the
+  workspace root with no `--config`** — which can only resolve if Deno discovered the glob — boots
+  `billing` through its own generated entry, and has `orders` resolve it through
+  `CAPABILITIES.SERVICE_DISCOVERY` and **fetch the resolved URL**. That last step is the only thing
+  that proves map and binding agree: reverting `main.ts` to a literal port leaves everything
+  type-checking and scaffolding cleanly while the request never arrives (verified — the probe burns
+  its full 10 s retry loop and the assertion fails). Four negative controls were each observed
+  failing and reverted: dropping `managed` (the second `generate app` refuses to overwrite),
+  emitting the new member's module from its host as well (the duplicate-path guard fires), the
+  literal port above, and removing the discovery gate (a plugin-less member's host stops being
+  unchanged).
+
+  Refactors this forced, both because two commands now need one implementation: the ~700-line
+  project renderer moved out of `commands/new.ts` into `templates/project-files.ts` (a member IS a
+  scaffolded project), and `firstDuplicatePath` moved to `utils/file-writer.ts`.
+  `resolveTemplateChoice` is one template selector for both verbs, which let `isTemplateName` go —
+  the registry `Map` lookup IS the unknown-name test, and keeping both left a permanently
+  unreachable branch. No barrel change, so no public export moved. All new `src` files at **100%**
+  branch/function/line) — complete (PR #144)
 - **Next milestone** — **M39** (docker/kubernetes), then M40. Queued behind those: **M59**
-  (`cloudflare-plugin` — Workers-native messaging) and **M62** (`cli` — monorepo support). Both are
-  ROADMAP sections only, with no plan and no code yet. M61 closed the optional-decorators/DI half of
-  the CLI parity work, so M62 (monorepos) is the remaining piece. M59 came from an external DX
-  review; note what that review got wrong, since the section says so and a reader should not
-  re-raise it: it claimed the framework has no decorators (M9/M36b ship them) and that Workers
-  queues are still blocked (M52b shipped them). M60–M62 came from a measured audit after M58: a
-  project with all fourteen schematics generated type-checked clean while its entry points imported
-  exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable — that,
-  not breadth, was the distance from NestJS. **M60 has now closed eleven of the thirteen**, so M61
-  and M62 are the remaining CLI parity work: the optional-decorators/DI promise, and monorepos.
+  (`cloudflare-plugin` — Workers-native messaging), a ROADMAP section only, with no plan and no code
+  yet. M59 came from an external DX review; note what that review got wrong, since the section says
+  so and a reader should not re-raise it: it claimed the framework has no decorators (M9/M36b ship
+  them) and that Workers queues are still blocked (M52b shipped them). M60–M62 came from a measured
+  audit after M58: a project with all fourteen schematics generated type-checked clean while its
+  entry points imported exactly ONE generated path, so thirteen of fourteen generated artifacts were
+  unreachable — that, not breadth, was the distance from NestJS. **All three are now closed**: M60
+  wired eleven of the thirteen, M61 made decorators and DI independent choices, and M62 added
+  monorepos, so the CLI parity work is done.
 
 ## Verification (run before declaring any work done)
 
@@ -2106,7 +2168,9 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   section is a lie about the branch's contents (M37c was opened this way, PR #124). A doc edit that
   belongs to a milestone still ships on that milestone's own `feat/…` branch — the status flip, the
   PUBLIC_API correction, and the plan archival are part of the milestone, not separate work.
-  Commits: conventional format (`feat(scope): subject`); no direct commits to `main`.
+  Commits: conventional format (`feat(scope): subject`); **no commit message may exceed 100 words**
+  in total (AI_GUIDELINES §15.1) — the plan, the PR body, and the code comments are where the long
+  reasoning goes; no direct commits to `main`.
 - **Pushing and opening the PR are yours to do — but only when asked.** Remote credentials ARE
   available (`gh auth status` reports a logged-in account; SSH for git operations), so `git push`
   and `gh pr create` work. This bullet previously said the opposite — that no credentials existed
