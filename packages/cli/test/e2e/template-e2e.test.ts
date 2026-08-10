@@ -27,6 +27,7 @@ import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
+import { collectSources, denoCheck, useWorkspacePackages } from '../fixtures/generated-project.ts';
 
 const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -94,124 +95,6 @@ const NON_COLLIDING_GROUPS: Readonly<Record<string, readonly string[]>> = {
  * controllers, services, routes, middleware, plugins, health and metrics.
  */
 const SCAFFOLDED_BARRELS = 8;
-
-/**
- * Collects every `.ts` source under a directory, recursively.
- *
- * Recursive because `src/modules/` holds the aggregate barrel BESIDE the module
- * directories, so a fixed two-level walk would try to read a file as a directory.
- *
- * Every `.ts` file is collected, test files included — a generated test whose own
- * imports do not resolve is a defect in what the CLI emitted, so the gate has to
- * see it.
- *
- * @param dir - Directory to walk
- * @returns Absolute paths of the `.ts` files found
- */
-async function collectSources(dir: string): Promise<string[]> {
-  const found: string[] = [];
-  for await (const entry of Deno.readDir(dir)) {
-    const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
-      found.push(...(await collectSources(path)));
-    } else if (entry.name.endsWith('.ts')) {
-      found.push(path);
-    }
-  }
-  return found;
-}
-
-/** This repository's root, four levels up from `packages/cli/test/e2e/`. */
-const REPO_ROOT = new URL('../../../../', import.meta.url).pathname.replace(/\/$/, '');
-
-/**
- * Repoints a scaffolded project's `@setu-ts/*` imports at this
- * workspace, so the check measures drift against HEAD rather than against a
- * published snapshot.
- *
- * @param root - The project directory
- */
-async function useWorkspacePackages(root: string): Promise<void> {
-  const manifestPath = `${root}/deno.json`;
-  const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as {
-    imports?: Record<string, string>;
-    compilerOptions?: Record<string, unknown>;
-  };
-  const imports: Record<string, string> = {};
-  for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
-    // Only framework specifiers are repointed. A template may also declare a
-    // project-local alias (`~/` → `./app/`), and rewriting that to a package
-    // path would break every module that imports through it.
-    if (!specifier.startsWith('@setu-ts/')) {
-      imports[specifier] = target;
-      continue;
-    }
-    imports[specifier] = workspaceEntrypoint(specifier.slice('@setu-ts/'.length));
-  }
-  manifest.imports = imports;
-  manifest.compilerOptions = { ...manifest.compilerOptions, ...WORKSPACE_COMPILER_OPTIONS };
-  await Deno.writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
-}
-
-/** Starter packages live one directory deeper than every other package. */
-const STARTER_PACKAGES: ReadonlySet<string> = new Set([
-  'rest-starter',
-  'microservice-starter',
-  'full-stack-starter',
-]);
-
-/**
- * Maps a bare package name to its entrypoint in this workspace.
- *
- * @param pkg - The package name without the scope
- * @returns The absolute path to its `src/index.ts`
- */
-function workspaceEntrypoint(pkg: string): string {
-  const dir = STARTER_PACKAGES.has(pkg) ? `packages/starters/${pkg}` : `packages/${pkg}`;
-  return `${REPO_ROOT}/${dir}/src/index.ts`;
-}
-
-/**
- * Runs `deno check` over a scaffolded project.
- *
- * @param root - The project directory
- * @param files - Files to check
- * @returns The process result
- */
-async function denoCheck(root: string, files: readonly string[]) {
-  const command = new Deno.Command(Deno.execPath(), {
-    // `--node-modules-dir=none` because a template that also emits a
-    // package.json (a frontend build) would otherwise switch Deno into
-    // node_modules resolution, and the gate must not run an npm install to
-    // type-check generated TypeScript.
-    args: ['check', '--node-modules-dir=none', '--config', `${root}/deno.json`, ...files],
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const { code, stderr } = await command.output();
-  return { code, stderr: new TextDecoder().decode(stderr) };
-}
-
-/**
- * The workspace's own compiler options, applied to a scaffolded project before
- * it is checked.
- *
- * Repointing at workspace SOURCE means the framework is type-checked too, and
- * it only compiles under the settings it was written against —
- * `exactOptionalPropertyTypes` above all. Without this, checking a project
- * whose import graph reaches far enough into the workspace fails inside
- * framework source rather than in anything the template emitted.
- */
-const WORKSPACE_COMPILER_OPTIONS: Readonly<Record<string, boolean>> = {
-  strict: true,
-  noUnusedLocals: true,
-  noUnusedParameters: true,
-  noImplicitReturns: true,
-  noFallthroughCasesInSwitch: true,
-  noImplicitOverride: true,
-  exactOptionalPropertyTypes: true,
-  useUnknownInCatchVariables: true,
-};
 
 describe('template scaffolding — end to end', () => {
   let root: string;

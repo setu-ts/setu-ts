@@ -102,6 +102,27 @@ export function dirName(path: string): string {
 }
 
 /**
+ * Returns the first path planned more than once, if any.
+ *
+ * The overwrite check probes the filesystem, so it cannot see two entries with
+ * the same path inside a single plan; those would both be written, the last
+ * silently winning. A template emitting `deno.json` would overwrite the
+ * framework's, and a workspace member's discovery module emitted by both its
+ * host and the regeneration pass would overwrite itself.
+ *
+ * @param files - The planned files, in write order
+ * @returns The duplicated path, or undefined when every path is distinct
+ */
+export function firstDuplicatePath(files: readonly GeneratedFile[]): string | undefined {
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file.path)) return file.path;
+    seen.add(file.path);
+  }
+  return undefined;
+}
+
+/**
  * Returns the paths in `files` that already exist on `fs` and would be
  * overwritten.
  *

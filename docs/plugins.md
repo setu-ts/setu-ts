@@ -1109,7 +1109,9 @@ emitDecoratorMetadata).
 **Commands:**
 
 - `setu new <name>` - Create new project
+- `setu new <name> --workspace` - Create a monorepo root
 - `setu generate <type> <name>` - Generate code
+- `setu generate app <name>` - Add a service to a workspace
 - `setu commands` - List available commands
 
 **Installation:**
