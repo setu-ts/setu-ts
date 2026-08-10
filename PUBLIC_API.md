@@ -4875,6 +4875,12 @@ setu new my-app --template rest                # rest | microservice | nest | fu
 setu new my-app --template microservice --runtime bun
 setu new my-app --template rest --di           # add a DI container to any template
 
+# Scaffold a monorepo (creates ./acme, no member yet)
+setu new acme --workspace
+setu new acme --workspace --port 4100          # base port for its members
+setu generate app orders --template microservice
+setu generate app billing --template microservice
+
 # Commands this application's plugins provide
 setu commands
 setu db:migrate up 3                           # runs a plugin-registered command
@@ -4911,14 +4917,16 @@ Any casing of the name produces identical output: `setu g controller user-profil
 
 ### Options
 
-| Option                                          | Commands          | Behavior                                                                                                                                                                                                                       |
-| ----------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.         |
-| `--di`                                          | `new`             | Registers `DiPlugin`, so every `@Injectable` is constructed through a container that honors its `scope`. Off by default; see "Decorators and DI are optional" below. A no-op on `--template nest`, which already registers it. |
-| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                         |
-| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                   |
-| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                   |
-| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                      |
+| Option                                          | Commands          | Behavior                                                                                                                                                                                                                         |
+| ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.           |
+| `--di`                                          | `new`             | Registers `DiPlugin`, so every `@Injectable` is constructed through a container that honors its `scope`. Off by default; see "Decorators and DI are optional" below. A no-op on `--template nest`, which already registers it.   |
+| `--workspace`                                   | `new`             | Creates a monorepo root instead of a project: a `deno.json` declaring `"workspace": ["./apps/*"]` and a `setu.workspace.json`, with no member. Refuses `--template` and a non-Deno `--runtime` rather than ignoring them.        |
+| `--port <n>`                                    | `new --workspace` | Base port for the workspace's members; the first binds it and each later one takes the next free number above the highest in use. Defaults to `3000`. A usage error outside `--workspace`, or when it is not an integer 1–65535. |
+| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                           |
+| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                     |
+| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                     |
+| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                        |
 
 ### Exit codes
 
@@ -4976,6 +4984,62 @@ The "controller" schematic requires @setu-ts/decorator-plugin, which is not inst
 Install it, then run this command again.
 Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
 ```
+
+### Monorepo workspaces
+
+A Setu workspace is a **Deno workspace**: one repository holding several deployable services, each
+its own scaffolded project under `apps/`.
+
+```bash
+setu new acme --workspace                                  # the root: deno.json + setu.workspace.json
+cd acme
+setu generate app orders --template microservice           # apps/orders, port 3000
+setu generate app billing --template microservice          # apps/billing, port 3001
+deno task dev                                              # runs every member's start task
+```
+
+The root's `deno.json` declares members by **glob** — `"workspace": ["./apps/*"]` — so adding one
+creates a directory and rewrites nothing. Framework packages are pinned in each MEMBER's
+`deno.json`, never at the root: `setu generate` detects installed plugins by reading one directory's
+manifest and never walks up, so root-only pins would make every gated schematic refuse inside a
+member. Members' import maps merge with the root's, so two members may install different plugin
+sets.
+
+**Adding a service registers it with its callers.** Every member carries a CLI-owned
+`src/discovery/services.ts` that is regenerated for all members on each `setu generate app`:
+
+```typescript
+/** The port this workspace member binds. */
+export const SERVICE_PORT = 3000;
+
+/** Every OTHER member of this workspace, by service name. */
+export const SERVICE_ENDPOINTS = {
+  'billing': [{ host: '127.0.0.1', port: 3001 }],
+};
+```
+
+The member's `main.ts` binds `SERVICE_PORT` and — when its template installs
+`@setu-ts/service-discovery-plugin` — its `setu.config.ts` passes `SERVICE_ENDPOINTS` to
+`ServiceDiscoveryPlugin({ provider: 'static', services: SERVICE_ENDPOINTS })`. So the port a member
+binds and the port its siblings dial are the same datum, and `discovery.resolveUrl('billing')` works
+from any sibling with no configuration. A member without that plugin is still listed in every other
+member's map; being reachable and consuming the map are separate properties.
+
+That module is `managed`: the CLI rewrites it and a hand edit is lost. The data it is rendered from
+is `setu.workspace.json` at the root, which records each member's name and port — edit a port there
+and the next `setu generate app` rewrites every module from it.
+
+> **The generated map is the LOCAL development topology**, the addresses your members bind on one
+> machine. A deployed topology comes from a real discovery backend (`provider: 'consul'`,
+> `'kubernetes'`, `'dns'`), not from this file. Compose and Kubernetes objects per member are M39's
+> subject, not the CLI's.
+
+| Refusal                            | Why                                                                                                                                                                                      |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `generate app` outside a workspace | No `setu.workspace.json` in the target directory. Exits `1` naming `setu new <name> --workspace`.                                                                                        |
+| A member name already in use       | Exits `1` naming the directory it already has. The `managed` exemption covers regenerated modules only, never a member's own source.                                                     |
+| `--runtime` other than `deno`      | A Setu workspace is a Deno workspace. Exits `2` naming `setu new <name> --runtime <target>` for a standalone project.                                                                    |
+| `--template full-stack`            | That template's Vite build needs `nodeModulesDir`, which Deno accepts only in the workspace root deno.json — the member would scaffold cleanly and fail to resolve its own dependencies. |
 
 ### Plugin gating
 

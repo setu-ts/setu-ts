@@ -445,3 +445,53 @@ describe('runGenerateCommand', () => {
     expect(h.fs.writes).toEqual(['/app/src/migrations/20260728123045-add-orders.ts']);
   });
 });
+
+// `app` is dispatched before the schematic registry, exactly as `custom` is,
+// because adding a workspace member reads the workspace and a schematic is a
+// pure function that performs no I/O.
+describe('the app verb', () => {
+  it('reaches the workspace command rather than the schematic registry', async () => {
+    const h = harness();
+    // No workspace here, so the refusal that comes back is the app command's —
+    // "Unknown schematic" would mean the dispatch never happened.
+    expect(await h.run(['app', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('setu.workspace.json');
+    expect(h.err.text()).not.toContain('Unknown schematic');
+  });
+
+  it('adds a member to a real workspace', async () => {
+    const h = harness({
+      '/app/setu.workspace.json': JSON.stringify({
+        version: 1,
+        basePort: 3000,
+        members: [],
+      }),
+    });
+    expect(await h.run(['app', 'orders'])).toBe(0);
+    expect(h.fs.has('/app/apps/orders/main.ts')).toBe(true);
+  });
+
+  it('honours --dir like every other generate', async () => {
+    const h = harness({
+      '/elsewhere/setu.workspace.json': JSON.stringify({
+        version: 1,
+        basePort: 3000,
+        members: [],
+      }),
+    });
+    expect(await h.run(['app', 'orders', '--dir', '/elsewhere'])).toBe(0);
+    expect(h.fs.has('/elsewhere/apps/orders/main.ts')).toBe(true);
+  });
+
+  it('prints its own usage under --help, not the schematic list', async () => {
+    const h = harness();
+    expect(await h.run(['app', '--help'])).toBe(0);
+    expect(h.out.text()).toContain('Adds a service to a Setu workspace');
+  });
+
+  it('is listed in the generate help', async () => {
+    const h = harness();
+    await h.run(['--help']);
+    expect(h.out.text()).toContain('app <name>');
+  });
+});

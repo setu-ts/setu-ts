@@ -21,103 +21,10 @@ import { expect } from '@std/expect';
 import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
+import { bootAndProbe, useWorkspacePackages } from '../fixtures/generated-project.ts';
 
 const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
-
-/** This repository's root, four levels up from `packages/cli/test/e2e/`. */
-const REPO_ROOT = new URL('../../../../', import.meta.url).pathname.replace(/\/$/, '');
-
-/** Starter packages live one directory deeper than every other package. */
-const STARTER_PACKAGES: ReadonlySet<string> = new Set([
-  'rest-starter',
-  'microservice-starter',
-  'full-stack-starter',
-]);
-
-/**
- * The workspace's own compiler options, applied before a scaffolded project is booted.
- *
- * Repointing at workspace SOURCE means the framework is compiled too, and it only
- * compiles under the settings it was written against — `exactOptionalPropertyTypes`
- * above all.
- */
-const WORKSPACE_COMPILER_OPTIONS: Readonly<Record<string, boolean>> = {
-  strict: true,
-  noUnusedLocals: true,
-  noUnusedParameters: true,
-  noImplicitReturns: true,
-  noFallthroughCasesInSwitch: true,
-  noImplicitOverride: true,
-  exactOptionalPropertyTypes: true,
-  useUnknownInCatchVariables: true,
-};
-
-/**
- * Repoints a scaffolded project's `@setu-ts/*` imports at this workspace.
- *
- * @param root - The project directory
- */
-async function useWorkspacePackages(root: string): Promise<void> {
-  const manifestPath = `${root}/deno.json`;
-  const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as {
-    imports?: Record<string, string>;
-    compilerOptions?: Record<string, unknown>;
-  };
-  const imports: Record<string, string> = {};
-  for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
-    if (!specifier.startsWith('@setu-ts/')) {
-      imports[specifier] = target;
-      continue;
-    }
-    const pkg = specifier.slice('@setu-ts/'.length);
-    const dir = STARTER_PACKAGES.has(pkg) ? `packages/starters/${pkg}` : `packages/${pkg}`;
-    imports[specifier] = `${REPO_ROOT}/${dir}/src/index.ts`;
-  }
-  manifest.imports = imports;
-  manifest.compilerOptions = { ...manifest.compilerOptions, ...WORKSPACE_COMPILER_OPTIONS };
-  await Deno.writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
-}
-
-/** Prefix the probe puts its one-line JSON result behind. */
-const PROBE_MARKER = '__PROBE_RESULT__';
-
-/**
- * Boots a scaffolded project in a subprocess and returns the probe's JSON.
- *
- * A subprocess rather than an in-process import: the project resolves `@setu-ts/*`
- * through its own manifest, and running it here would load a second copy of the
- * framework into this test process.
- *
- * @param project - The project directory, already repointed at the workspace
- * @param probe - The probe module source, written into the project
- * @returns The parsed JSON the probe printed
- */
-async function bootAndProbe(project: string, probe: string): Promise<Record<string, unknown>> {
-  await Deno.writeTextFile(`${project}/run-probe.ts`, probe);
-  const command = new Deno.Command(Deno.execPath(), {
-    args: [
-      'run',
-      '-A',
-      '--node-modules-dir=none',
-      '--config',
-      `${project}/deno.json`,
-      `${project}/run-probe.ts`,
-    ],
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const { code, stdout, stderr } = await command.output();
-  const out = new TextDecoder().decode(stdout);
-  if (code !== 0) {
-    throw new Error(`probe exited ${code}\n${new TextDecoder().decode(stderr)}`);
-  }
-  // The booted app logs its own JSON lines to stdout, so the result is carried on ONE
-  // line behind a marker rather than located by shape.
-  const line = out.split('\n').find((l) => l.startsWith(PROBE_MARKER));
-  if (line === undefined) throw new Error(`probe printed no result:\n${out}`);
-  return JSON.parse(line.slice(PROBE_MARKER.length)) as Record<string, unknown>;
-}
 
 /**
  * Artifacts generated into every host, with DISTINCT names inside each collision group.

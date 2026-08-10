@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
-import { firstDuplicatePath, resolveHost, runNewCommand } from '../../src/commands/new.ts';
+import { runNewCommand } from '../../src/commands/new.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 
 interface Harness {
@@ -25,37 +25,9 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
   };
 }
 
-describe('firstDuplicatePath', () => {
-  // The overwrite check probes the filesystem, so it cannot see a path planned
-  // twice within one project — both would be written and the last would win.
-  it('finds a path planned twice', () => {
-    expect(firstDuplicatePath([
-      { path: 'deno.json', contents: '{}' },
-      { path: 'main.ts', contents: '' },
-      { path: 'deno.json', contents: 'overwrites the framework manifest' },
-    ])).toBe('deno.json');
-  });
-
-  it('returns the FIRST duplicate when there are several', () => {
-    expect(firstDuplicatePath([
-      { path: 'a', contents: '' },
-      { path: 'b', contents: '' },
-      { path: 'a', contents: '' },
-      { path: 'b', contents: '' },
-    ])).toBe('a');
-  });
-
-  it('returns undefined for a distinct plan', () => {
-    expect(firstDuplicatePath([
-      { path: 'deno.json', contents: '' },
-      { path: 'main.ts', contents: '' },
-    ])).toBeUndefined();
-  });
-
-  it('returns undefined for an empty plan', () => {
-    expect(firstDuplicatePath([])).toBeUndefined();
-  });
-
+// The guard itself is unit-tested in `file-writer.test.ts`, where it lives.
+// This is the invariant it protects, driven through the real command.
+describe('the duplicate-path guard', () => {
   it('reports no duplicate for any built-in template on any runtime', async () => {
     // The invariant the guard protects: a template's own files must never
     // collide with the fixed project files, for any target.
@@ -219,46 +191,6 @@ describe('the Node target can run decorated source', () => {
       unknown
     >;
     expect(Object.keys(other)).toContain('devDependencies');
-  });
-});
-
-describe('resolveHost', () => {
-  // Every host in the registry declares `localImports` and `files`, so these
-  // fallbacks are unreachable through `runNewCommand`. They are not dead —
-  // `TemplateHost` declares both optional — so they are driven here directly
-  // rather than left as an untested path behind a template that happens not to
-  // exercise them.
-  it('fills in every optional member of a bare host', () => {
-    const resolved = resolveHost(
-      { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
-      { di: false },
-    );
-    expect(resolved.localImports).toEqual([]);
-    expect(resolved.packageImports).toEqual([]);
-    expect(resolved.files).toEqual([]);
-    expect(resolved.pluginSpreads).toEqual([]);
-    expect(resolved.setupCalls).toEqual([]);
-    expect(resolved.appFactory).toBeUndefined();
-    expect(resolved.manifest).toBeUndefined();
-  });
-
-  it('applies --di to a plugin-list host', () => {
-    const resolved = resolveHost(
-      { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
-      { di: true },
-    );
-    expect(resolved.plugins.map((w) => w.pkg)).toEqual(['runtime', 'di-plugin']);
-  });
-
-  // A starter factory owns the whole plugin set, so a wiring appended here
-  // would be silently dropped by the renderer's factory branch. The flag
-  // reaches that template through the factory's own options instead.
-  it('leaves a factory host plugin list alone under --di', () => {
-    const resolved = resolveHost(
-      { plugins: [], middleware: [], appFactory: { pkg: 'full-stack-starter', symbol: 'x' } },
-      { di: true },
-    );
-    expect(resolved.plugins).toEqual([]);
   });
 });
 
@@ -1027,4 +959,94 @@ describe('runNewCommand', () => {
       expect(h.out.text()).toContain(expected);
     });
   }
+});
+
+describe('--workspace', () => {
+  it('creates a monorepo root rather than a project', async () => {
+    const h = harness();
+    expect(await h.run(['acme', '--workspace'])).toBe(0);
+    for (const file of ['deno.json', 'setu.workspace.json', 'README.md', '.gitignore']) {
+      expect(h.fs.has(`/work/acme/${file}`)).toBe(true);
+    }
+    // A root registers no plugins and starts no server.
+    expect(h.fs.has('/work/acme/setu.config.ts')).toBe(false);
+    expect(h.fs.has('/work/acme/main.ts')).toBe(false);
+  });
+
+  it('declares members by glob, so adding one rewrites nothing', async () => {
+    const h = harness();
+    await h.run(['acme', '--workspace']);
+    const manifest = JSON.parse(h.fs.read('/work/acme/deno.json')) as { workspace?: string[] };
+    expect(manifest.workspace).toEqual(['./apps/*']);
+  });
+
+  it('records the default base port', async () => {
+    const h = harness();
+    await h.run(['acme', '--workspace']);
+    expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({
+      basePort: 3000,
+      members: [],
+    });
+  });
+
+  it('records an explicit --port as the base port', async () => {
+    const h = harness();
+    expect(await h.run(['acme', '--workspace', '--port', '4100'])).toBe(0);
+    expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({
+      basePort: 4100,
+    });
+  });
+
+  it('points at the add-a-service command as the next step', async () => {
+    const h = harness();
+    await h.run(['acme', '--workspace']);
+    expect(h.out.text()).toContain('Created workspace acme');
+    expect(h.out.text()).toContain('generate app orders');
+  });
+
+  it('writes nothing under --dry-run', async () => {
+    const h = harness();
+    expect(await h.run(['acme', '--workspace', '--dry-run'])).toBe(0);
+    expect(h.fs.writes).toEqual([]);
+    expect(h.out.text()).toContain('/work/acme/setu.workspace.json');
+  });
+
+  describe('refusals', () => {
+    // A root has nothing to configure, so a template applied to it would be
+    // silently dropped — the defect class `generate` once shipped with
+    // `--runtime`.
+    it('refuses --template, naming where the template belongs', async () => {
+      const h = harness();
+      expect(await h.run(['acme', '--workspace', '--template', 'rest'])).toBe(2);
+      expect(h.err.text()).toContain('generate app <name> --template rest');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses a non-Deno runtime, naming the standalone alternative', async () => {
+      const h = harness();
+      expect(await h.run(['acme', '--workspace', '--runtime', 'node'])).toBe(2);
+      expect(h.err.text()).toContain('Deno workspace');
+      expect(h.err.text()).toContain('setu new acme --runtime node');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    for (const value of ['abc', '0', '70000', '30.5']) {
+      it(`refuses --port ${value}`, async () => {
+        const h = harness();
+        expect(await h.run(['acme', '--workspace', '--port', value])).toBe(2);
+        expect(h.err.text()).toContain('Invalid --port');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    // `--port` allocates MEMBER ports; a standalone project's entry binds the
+    // port its own `main.ts` names, so accepting it would report success for a
+    // project that ignores the number.
+    it('refuses --port on a standalone project', async () => {
+      const h = harness();
+      expect(await h.run(['acme', '--port', '4100'])).toBe(2);
+      expect(h.err.text()).toContain('--workspace');
+      expect(h.fs.writes).toEqual([]);
+    });
+  });
 });

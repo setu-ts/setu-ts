@@ -1,0 +1,320 @@
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
+import { parseArgs } from '../../src/args.ts';
+import { runAppCommand } from '../../src/commands/app.ts';
+import {
+  renderWorkspaceManifest,
+  WORKSPACE_MANIFEST,
+  WORKSPACE_VERSION,
+  type WorkspaceMember,
+} from '../../src/workspace/manifest.ts';
+import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
+
+interface Harness {
+  readonly fs: FakeFs;
+  readonly out: ReturnType<typeof createRecorder>;
+  readonly err: ReturnType<typeof createRecorder>;
+  run(argv: readonly string[]): Promise<number>;
+}
+
+/**
+ * Builds a harness over a workspace holding the given members.
+ *
+ * The argv it takes starts at the `app` verb, exactly as `generate` hands it
+ * over, so `positionals[1]` is the member name.
+ *
+ * @param members - Members already in the workspace, or `undefined` for no
+ * workspace at all
+ * @param basePort - The workspace's base port
+ * @returns The harness
+ */
+function harness(members?: readonly WorkspaceMember[], basePort = 3000): Harness {
+  const seed: Record<string, string> = {};
+  if (members !== undefined) {
+    seed[`/ws/${WORKSPACE_MANIFEST}`] = renderWorkspaceManifest({
+      version: WORKSPACE_VERSION,
+      basePort,
+      members,
+    });
+  }
+  const fs = createFakeFs(seed);
+  const out = createRecorder();
+  const err = createRecorder();
+  return {
+    fs,
+    out,
+    err,
+    run: (argv) =>
+      runAppCommand(parseArgs(argv), { fs, dir: '/ws', log: out.sink, error: err.sink }),
+  };
+}
+
+describe('runAppCommand', () => {
+  describe('usage', () => {
+    it('prints its own usage under --help and exits 0', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', '--help'])).toBe(0);
+      expect(h.out.text()).toContain('generate app <name>');
+      expect(h.out.text()).toContain('--template');
+    });
+
+    it('refuses a missing name with a usage error', async () => {
+      const h = harness([]);
+      expect(await h.run(['app'])).toBe(2);
+      expect(h.err.text()).toContain('generate app <name>');
+    });
+
+    it('refuses a name that cannot form an identifier', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', '2fa'])).toBe(2);
+      expect(h.err.text()).toContain('must not start with a digit');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    // Refused rather than ignored: a member is a Deno project by construction,
+    // and swallowing the flag would hand back something it says it is not.
+    it('refuses a non-Deno runtime, naming the standalone alternative', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--runtime', 'node'])).toBe(2);
+      expect(h.err.text()).toContain('Deno workspace');
+      expect(h.err.text()).toContain('setu new <name> --runtime node');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('accepts an explicit --runtime deno', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--runtime', 'deno'])).toBe(0);
+    });
+
+    // Measured: a member may not declare `nodeModulesDir`, which that
+    // template's Vite build needs, so it would scaffold and then fail to
+    // resolve its own dependencies.
+    it('refuses the full-stack template, naming nodeModulesDir', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(2);
+      expect(h.err.text()).toContain('nodeModulesDir');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses an unknown template through the shared selector', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--template', 'nope'])).toBe(2);
+      expect(h.err.text()).toContain('Unknown template "nope"');
+    });
+  });
+
+  describe('the workspace gate', () => {
+    it('refuses outside a workspace, naming how to make one', async () => {
+      const h = harness(undefined);
+      expect(await h.run(['app', 'orders'])).toBe(1);
+      expect(h.err.text()).toContain(WORKSPACE_MANIFEST);
+      expect(h.err.text()).toContain('--workspace');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses a malformed manifest distinctly from an absent one', async () => {
+      const fs = createFakeFs({ [`/ws/${WORKSPACE_MANIFEST}`]: '{ not json' });
+      const err = createRecorder();
+      const code = await runAppCommand(parseArgs(['app', 'orders']), {
+        fs,
+        dir: '/ws',
+        log: createRecorder().sink,
+        error: err.sink,
+      });
+      expect(code).toBe(1);
+      expect(err.text()).toContain('not a readable workspace manifest');
+    });
+
+    it('refuses a manifest version it does not understand', async () => {
+      const fs = createFakeFs({
+        [`/ws/${WORKSPACE_MANIFEST}`]: '{"version":99,"basePort":3000,"members":[]}',
+      });
+      const err = createRecorder();
+      const code = await runAppCommand(parseArgs(['app', 'orders']), {
+        fs,
+        dir: '/ws',
+        log: createRecorder().sink,
+        error: err.sink,
+      });
+      expect(code).toBe(1);
+      expect(err.text()).toContain('declares version 99');
+    });
+
+    it('refuses a duplicate member, naming the directory it already has', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'orders'])).toBe(1);
+      expect(h.err.text()).toContain('apps/orders');
+      expect(h.fs.writes).toEqual([]);
+    });
+  });
+
+  describe('the first member', () => {
+    it('creates the member project under apps/', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders'])).toBe(0);
+      for (const file of ['deno.json', 'main.ts', 'setu.config.ts', 'README.md']) {
+        expect(h.fs.has(`/ws/apps/orders/${file}`)).toBe(true);
+      }
+    });
+
+    it('binds the allocated port through the generated module, not a literal', async () => {
+      const h = harness([]);
+      await h.run(['app', 'orders']);
+      const main = h.fs.read('/ws/apps/orders/main.ts');
+      expect(main).toContain(`import { SERVICE_PORT } from './${DISCOVERY_MODULE}';`);
+      expect(main).toContain('await app.start({ port: SERVICE_PORT });');
+      expect(h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`)).toContain(
+        'export const SERVICE_PORT = 3000;',
+      );
+    });
+
+    it('records the member and its port in the workspace manifest', async () => {
+      const h = harness([]);
+      await h.run(['app', 'orders']);
+      expect(JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`))).toEqual({
+        version: WORKSPACE_VERSION,
+        basePort: 3000,
+        members: [{ name: 'orders', port: 3000 }],
+      });
+    });
+
+    it('allocates from the workspace base port', async () => {
+      const h = harness([], 4100);
+      await h.run(['app', 'orders']);
+      expect(h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`)).toContain(
+        'export const SERVICE_PORT = 4100;',
+      );
+    });
+
+    it('reports the allocated port and how to run the member', async () => {
+      const h = harness([]);
+      await h.run(['app', 'orders']);
+      expect(h.out.text()).toContain('Added orders on port 3000');
+      expect(h.out.text()).toContain('cd apps/orders && deno task start');
+    });
+
+    it('normalizes the member name', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'OrderItem'])).toBe(0);
+      expect(h.fs.has('/ws/apps/order-item/main.ts')).toBe(true);
+    });
+  });
+
+  describe('a member with the discovery plugin', () => {
+    it('wires the config at the generated map', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
+      const config = h.fs.read('/ws/apps/orders/setu.config.ts');
+      expect(config).toContain(
+        `import { SERVICE_ENDPOINTS } from './${DISCOVERY_MODULE}';`,
+      );
+      expect(config).toContain(
+        `ServiceDiscoveryPlugin({ provider: 'static', services: SERVICE_ENDPOINTS })`,
+      );
+      expect(config).not.toContain('services: {}');
+    });
+
+    it('leaves a member without that plugin unwired to the map', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'web', '--template', 'rest'])).toBe(0);
+      expect(h.fs.read('/ws/apps/web/setu.config.ts')).not.toContain('SERVICE_ENDPOINTS');
+      // It still carries the module, because `main.ts` reads the port from it.
+      expect(h.fs.has(`/ws/apps/web/${DISCOVERY_MODULE}`)).toBe(true);
+    });
+
+    it('passes --di through to the member', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--di'])).toBe(0);
+      expect(h.fs.read('/ws/apps/orders/setu.config.ts')).toContain('DiPlugin()');
+    });
+  });
+
+  describe('a second member', () => {
+    /**
+     * Adds `billing` to a workspace that already holds `orders`.
+     *
+     * @returns The harness, after the second member is added
+     */
+    async function twoMembers(): Promise<Harness> {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
+      expect(await h.run(['app', 'billing', '--template', 'microservice'])).toBe(0);
+      return h;
+    }
+
+    it('allocates the next port', async () => {
+      const h = await twoMembers();
+      expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
+        'export const SERVICE_PORT = 3001;',
+      );
+    });
+
+    // The whole point: adding a service registers it with its CALLERS. A
+    // sibling that never learns the new name resolves it to `[]`.
+    it('rewrites the first member map to name it', async () => {
+      const h = await twoMembers();
+      const orders = h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`);
+      expect(orders).toContain(`'billing': [{ host: '127.0.0.1', port: 3001 }]`);
+      expect(orders).not.toContain(`'orders':`);
+    });
+
+    it('gives the new member the first one address', async () => {
+      const h = await twoMembers();
+      const billing = h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`);
+      expect(billing).toContain(`'orders': [{ host: '127.0.0.1', port: 3000 }]`);
+    });
+
+    // The regenerated modules are `managed`, so rewriting them is not an
+    // overwrite; without that flag the second member would be refused outright.
+    it('rewrites an existing member module without refusing', async () => {
+      const h = await twoMembers();
+      expect(h.err.text()).not.toContain('Refusing to overwrite');
+      expect(h.fs.writes).toContain(`/ws/apps/orders/${DISCOVERY_MODULE}`);
+    });
+
+    it('records both members in the manifest', async () => {
+      const h = await twoMembers();
+      expect(JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`))).toMatchObject({
+        members: [{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }],
+      });
+    });
+  });
+
+  describe('safety', () => {
+    it('writes nothing under --dry-run but prints the whole plan', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'billing', '--dry-run'])).toBe(0);
+      expect(h.fs.writes).toEqual([]);
+      const plan = h.out.text();
+      expect(plan).toContain('/ws/apps/billing/main.ts');
+      expect(plan).toContain(`/ws/apps/orders/${DISCOVERY_MODULE}`);
+      expect(plan).toContain(`/ws/${WORKSPACE_MANIFEST}`);
+    });
+
+    it('refuses when a member source file already exists', async () => {
+      const h = harness([]);
+      await h.fs.writeFile('/ws/apps/orders/main.ts', new TextEncoder().encode('mine'));
+      expect(await h.run(['app', 'orders'])).toBe(1);
+      expect(h.err.text()).toContain('Refusing to overwrite existing files');
+      expect(h.fs.read('/ws/apps/orders/main.ts')).toBe('mine');
+    });
+
+    it('reports a write failure rather than throwing', async () => {
+      const h = harness([]);
+      const failing = {
+        ...h.fs,
+        writeFile: () => Promise.reject(new Error('disk full')),
+      };
+      const err = createRecorder();
+      const code = await runAppCommand(parseArgs(['app', 'orders']), {
+        fs: failing,
+        dir: '/ws',
+        log: createRecorder().sink,
+        error: err.sink,
+      });
+      expect(code).toBe(1);
+      expect(err.text()).toContain('disk full');
+    });
+  });
+});

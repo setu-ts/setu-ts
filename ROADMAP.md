@@ -6371,28 +6371,42 @@ and no knowledge of its sibling. The sharp edge is discovery — M50b wires
 **deliberately empty** map, because a sample entry would resolve to a dead port. So every caller's
 map is hand-edited, in every service, and nothing propagates a new name.
 
-Three questions must be settled in the plan before any code:
+Three questions were settled in the plan before any code, and the first two were settled by
+MEASUREMENT rather than by argument:
 
-- **What a Setu monorepo IS.** A Deno workspace (`deno.json` `workspace: []`, which is what this
-  repository itself uses, so there is an in-house precedent) or sibling directories with independent
-  manifests. The first gives one lockfile and one `deno task test`; the second is simpler and gives
-  neither.
-- **Who owns the discovery map.** Adding a service should register it with its callers, which is a
-  cross-FILE write — the mutation problem M58 solved for one file with a CLI-owned barrel. The same
-  technique probably applies (a generated `services.ts` the config imports), and the M58 rule holds:
-  never edit a file the developer owns.
+- **What a Setu monorepo IS.** A **Deno workspace** whose root `deno.json` declares
+  `"workspace": ["./apps/*"]` — a GLOB. Measured against Deno 2.9: a glob resolves members for
+  `deno task --recursive`, and a root whose glob matches nothing still runs and type-checks, so a
+  memberless root scaffolded before its first member is valid. That removes the trade-off this
+  section originally framed: the member list is never maintained, so adding a service rewrites no
+  manifest at all. The verb is `app`, not `service` — `setu generate service` is already a schematic
+  that emits a class, and one word cannot mean two things in the same command.
+- **Who owns the discovery map.** A CLI-owned `src/discovery/services.ts` per member, marked
+  `managed` and regenerated for EVERY member on each `setu generate app`, exactly as M58's aggregate
+  barrel is. It exports `SERVICE_PORT` (the member's own) and `SERVICE_ENDPOINTS` (every sibling),
+  and the member's `main.ts` binds the former while its `setu.config.ts` passes the latter to
+  `ServiceDiscoveryPlugin`. The authoritative data is `setu.workspace.json` at the workspace root;
+  the modules are derived from it. **No file the developer owns is ever edited.**
 - **The boundary against M39.** M39 owns Docker Compose and Kubernetes manifests. A monorepo command
   that emits a compose service per member would cross into it, so the split must be explicit — M62
-  owns the workspace and the app-side discovery map, M39 owns the platform objects.
+  owns the workspace and the app-side discovery map, M39 owns the platform objects. The generated
+  map says so in its own header: it is the LOCAL development topology, and a deployed one comes from
+  a real provider arm (`consul`, `kubernetes`, `dns`).
 
 ### Deliverables
 
-- `setu g app <name>` (name to be settled — `app` matches Nest, `service` matches the domain) adding
-  a member to the workspace, with the member's own `setu.config.ts` and entry.
+- `setu new <name> --workspace [--port <n>]` creating a workspace root: the member glob, the CLI's
+  `setu.workspace.json`, and no member. `--template` and a non-Deno `--runtime` are refused rather
+  than ignored — a root registers no plugins and starts no server.
+- `setu generate app <name> [--template <t>] [--di]` adding a member under `apps/<name>`, with the
+  member's own `setu.config.ts`, entry, and manifest, and a port allocated one above the highest in
+  use.
 - Registration of the new member in its siblings' static discovery map through a CLI-owned generated
   module, never by editing `setu.config.ts`.
 - An e2e that scaffolds a workspace, adds two members, type-checks both, and **boots one and has it
-  resolve the other through the discovery capability** — the M58 functional bar.
+  resolve the other through the discovery capability** — the M58 functional bar. It goes one step
+  further and CALLS the resolved URL, because that is the only thing that proves the generated map
+  and the port each member binds are the same datum.
 - Docs: PUBLIC_API monorepo section; ARCHITECTURE note on the workspace shape; CHANGELOG.
 
 ### Out of scope
@@ -6401,6 +6415,17 @@ Three questions must be settled in the plan before any code:
 - **Converting an existing single-service project into a workspace.** A migration command is its own
   design; the first version creates a workspace or adds to one that already exists. Unowned.
 - **Shared library members** (`nest g library`). Deferred until the application case is proven.
+- **`full-stack` members.** Refused for a measured reason: that template emits a `package.json` for
+  its Vite build, which switches Deno to node_modules resolution, and M37c established that such a
+  project needs `nodeModulesDir` in its own manifest — which Deno accepts only in the workspace root
+  (`"nodeModulesDir" field can only be specified in the workspace root deno.json file`). A
+  workspace-root `nodeModulesDir` design is what would unblock it. Unowned.
+- **Non-Deno workspaces** (npm workspaces, for `node` or `bun` members). A different mechanism with
+  its own manifest shape. Unowned.
+- **A per-member `--port` override.** The base port plus a hand-editable `setu.workspace.json`
+  covers the need, and the next `setu generate app` regenerates every module from it. Unowned.
+- **Interactive prompts** for a member's template. The CLI has no prompt surface anywhere and no
+  stdin seam. Unowned.
 
 ## Progress Tracking
 
@@ -6464,7 +6489,7 @@ Three questions must be settled in the plan before any code:
 | 59        | ⬜     | cloudflare-plugin (workers messaging) |
 | 60        | ✅     | cli (wire generated artifacts)        |
 | 61        | ✅     | cli (decorator/DI opt-in)             |
-| 62        | ⬜     | cli (monorepo support)                |
+| 62        | ✅     | cli (monorepo support)                |
 | 41        | ✅     | http-adapters                         |
 | 42        | ✅     | streaming-response                    |
 | 43        | ✅     | sse-plugin                            |
