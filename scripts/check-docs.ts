@@ -372,6 +372,112 @@ const REQUIRED_GUIDES = [
   'docs/runtime-deployment.md',
 ];
 
+/** The canonical absolute URL of the committed public-API ledger. */
+const PUBLIC_API_URL = 'https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md';
+
+/**
+ * Checks how a package README points a reader at `PUBLIC_API.md`.
+ *
+ * Three failures this catches, all of which shipped:
+ *
+ * 1. **A relative link.** JSR resolves a README's relative links against
+ *    `jsr.io/@setu-ts/`, so `../../PUBLIC_API.md` returns a 400 on the package
+ *    page — the link is not merely imprecise, it is broken for the audience the
+ *    README exists to serve. (`sdk` and `static-plugin` both carried these.)
+ * 2. **A bare link.** 31 of 36 READMEs linked to the top of an 8,000-line
+ *    document, leaving the reader to guess which of ~58 sections was theirs.
+ * 3. **A dangling anchor.** Renaming a section silently breaks every README
+ *    pointing at the old fragment, and nothing else in the toolchain looks:
+ *    these are absolute `https://` URLs, which the local-link checker skips as
+ *    external.
+ *
+ * @param readmePath - Repository-relative README path
+ * @param readme - The README contents
+ * @param publicApiAnchors - Every anchor `PUBLIC_API.md` actually defines
+ * @returns Findings for missing, relative, bare, or dangling links
+ */
+export function checkReadmeApiLink(
+  readmePath: string,
+  readme: string,
+  publicApiAnchors: ReadonlySet<string>,
+): readonly Finding[] {
+  const findings: Finding[] = [];
+  const lines = readme.split('\n');
+
+  for (const [index, line] of lines.entries()) {
+    for (const match of line.matchAll(/\]\((\.\.[^)\s]*\.md[^)\s]*)\)/g)) {
+      findings.push({
+        file: readmePath,
+        line: index + 1,
+        message: `Relative link "${match[1]}" to a repository document. JSR resolves a README's ` +
+          `relative links against jsr.io/@setu-ts/, so this returns a 400 on the package page. ` +
+          `Use the absolute https://github.com/setu-ts/setu-ts/blob/main/... form.`,
+      });
+    }
+  }
+
+  if (!readme.includes('PUBLIC_API.md')) {
+    findings.push({
+      file: readmePath,
+      line: 1,
+      message:
+        'No link to PUBLIC_API.md. Every package README points at its own section so a reader ' +
+        'on jsr.io can reach the full surface.',
+    });
+    return findings;
+  }
+
+  for (const [index, line] of lines.entries()) {
+    for (
+      const match of line.matchAll(/\]\((https:\/\/github\.com\/[^)\s]*PUBLIC_API\.md[^)\s]*)\)/g)
+    ) {
+      const url = match[1] as string;
+      const hash = url.indexOf('#');
+      if (hash === -1) {
+        findings.push({
+          file: readmePath,
+          line: index + 1,
+          message:
+            'Link to PUBLIC_API.md carries no anchor, so it lands at the top of an 8,000-line ' +
+            "document. Point it at this package's own section.",
+        });
+        continue;
+      }
+      const anchor = url.slice(hash + 1);
+      if (!publicApiAnchors.has(anchor)) {
+        findings.push({
+          file: readmePath,
+          line: index + 1,
+          message: `Link to PUBLIC_API.md#${anchor} matches no heading in PUBLIC_API.md.`,
+        });
+      }
+      if (!url.startsWith(PUBLIC_API_URL)) {
+        findings.push({
+          file: readmePath,
+          line: index + 1,
+          message: `Link to PUBLIC_API.md does not use the canonical ${PUBLIC_API_URL} base.`,
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * Collects every anchor `PUBLIC_API.md` defines, at any heading depth.
+ *
+ * @param publicApiSource - The contents of PUBLIC_API.md
+ * @returns The set of anchors, without leading `#`
+ */
+export function publicApiAnchors(publicApiSource: string): Set<string> {
+  const lines = publicApiSource.split('\n');
+  const { fenced } = scanFences(lines);
+  const anchors = new Set<string>();
+  for (const heading of collectHeadings(lines, fenced)) anchors.add(heading.anchor);
+  return anchors;
+}
+
 /**
  * Checks that all required guides exist.
  *
@@ -1476,6 +1582,49 @@ if (import.meta.main) {
           PACKAGE_METADATA,
         ),
       );
+    }
+
+    // Package README navigation: every README reaches its own PUBLIC_API
+    // section, by an absolute URL, through an anchor that exists.
+    const publicApiSource = fileContents.get('PUBLIC_API.md');
+    if (publicApiSource !== undefined) {
+      const { PUBLISHED_PACKAGES } = await import('./release-packages.ts');
+      const anchors = publicApiAnchors(publicApiSource);
+      for (const pkgPath of PUBLISHED_PACKAGES) {
+        const readmePath = `${pkgPath}/README.md`;
+        const readme = fileContents.get(readmePath);
+        if (readme === undefined) continue;
+        findings.push(...checkReadmeApiLink(readmePath, readme, anchors));
+      }
+    }
+
+    // Package README `## Exports` tables must match the real barrels.
+    {
+      const { PUBLISHED_PACKAGES } = await import('./release-packages.ts');
+      const { collectPackageExports, diffExportsTable } = await import(
+        './package-export-collection.ts'
+      );
+      try {
+        const exportsByPackage = await collectPackageExports(PUBLISHED_PACKAGES);
+        for (const pkgPath of PUBLISHED_PACKAGES) {
+          const readme = fileContents.get(`${pkgPath}/README.md`);
+          const groups = exportsByPackage.get(pkgPath);
+          if (readme === undefined || groups === undefined) continue;
+          for (const message of diffExportsTable(readme, groups)) {
+            findings.push({
+              file: `${pkgPath}/README.md`,
+              line: 1,
+              message: `Exports table drift — ${message}. Run \`deno task docs:exports\`.`,
+            });
+          }
+        }
+      } catch (error) {
+        findings.push({
+          file: 'scripts/package-export-collection.ts',
+          line: 1,
+          message: `Could not resolve package exports: ${(error as Error).message}`,
+        });
+      }
     }
   }
 

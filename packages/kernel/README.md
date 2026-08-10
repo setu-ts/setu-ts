@@ -66,7 +66,21 @@ console.log(res.statusCode, res.json());
 - A runtime provider is mandatory — `start()` fails fast if no plugin provides
   `CAPABILITIES.RUNTIME`.
 
-See the repository's [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+See the repository's
+[`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#createapplication-setu-tskernel)
 for the full API contract and
 [`ARCHITECTURE.md`](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) for how this
 package fits the plugin architecture.
+
+## Exports
+
+| Export               | Kind      |
+| -------------------- | --------- |
+| `createApplication`  | function  |
+| `ApplicationOptions` | interface |
+| `IKernelApplication` | interface |
+| `InjectRequest`      | interface |
+| `InjectResponse`     | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

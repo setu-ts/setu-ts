@@ -68,7 +68,39 @@ The multipart parser is implemented in this package — no dependency.
 The optional `getStream?` reads an object as a `ReadableStream<Uint8Array>`, wired through
 `IResponse.stream()` for zero-copy downloads.
 
+## Exports
+
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `canSign`                     | function  |
+| `createUploadMiddleware`      | function  |
+| `getUploadedFile`             | function  |
+| `StoragePlugin`               | function  |
+| `AzureBlobProvider`           | class     |
+| `GcsProvider`                 | class     |
+| `LocalStorageProvider`        | class     |
+| `MemoryProvider`              | class     |
+| `S3Provider`                  | class     |
+| `StorageService`              | class     |
+| `AzureBlobProviderOptions`    | interface |
+| `GcsProviderOptions`          | interface |
+| `IAwsS3Client`                | interface |
+| `IAzureBlobClient`            | interface |
+| `IGcsClient`                  | interface |
+| `IStorage`                    | interface |
+| `LocalStorageProviderOptions` | interface |
+| `S3ProviderOptions`           | interface |
+| `SignedUrlOptions`            | interface |
+| `StoragePluginOptions`        | interface |
+| `UploadedFile`                | interface |
+| `UploadMiddlewareOptions`     | interface |
+| `StorageProviderOptions`      | type      |
+| `StorageProviderType`         | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#storage-setu-tsstorage-plugin).

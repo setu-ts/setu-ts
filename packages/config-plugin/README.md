@@ -154,3 +154,20 @@ When `validationSchema` is not provided, all values remain as strings from the e
 
 - `@setu-ts/common` (workspace)
 - Consumer-supplied structural schema such as Zod (optional; not a package dependency)
+
+## Exports
+
+| Export                | Kind      |
+| --------------------- | --------- |
+| `ConfigPlugin`        | function  |
+| `loadConfig`          | function  |
+| `ConfigPluginOptions` | interface |
+| `StructuralSchema`    | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#configplugin-setu-tsconfig-plugin).

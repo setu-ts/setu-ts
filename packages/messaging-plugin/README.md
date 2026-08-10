@@ -88,7 +88,69 @@ the broker:
 app.register(EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'] }));
 ```
 
+## Exports
+
+| Export                         | Kind      |
+| ------------------------------ | --------- |
+| `adaptPubSubModule`            | function  |
+| `adaptServiceBusModule`        | function  |
+| `EventsMessagingBridge`        | function  |
+| `loadPubSubModule`             | function  |
+| `loadServiceBusModule`         | function  |
+| `MessagingPlugin`              | function  |
+| `CloudBrokerUnavailableError`  | class     |
+| `GcpPubSubBroker`              | class     |
+| `InMemoryBroker`               | class     |
+| `JsonSerializer`               | class     |
+| `KafkaBroker`                  | class     |
+| `MessagingNotSupportedError`   | class     |
+| `NatsBroker`                   | class     |
+| `RabbitMqBroker`               | class     |
+| `RedisStreamsBroker`           | class     |
+| `RemoteHandlerError`           | class     |
+| `ReplyInboxUnavailableError`   | class     |
+| `RequestTimeoutError`          | class     |
+| `ServiceBusBroker`             | class     |
+| `CustomMessagingOptions`       | interface |
+| `EventsMessagingBridgeOptions` | interface |
+| `IMessageBroker`               | interface |
+| `IPubSubSubscription`          | interface |
+| `IPubSubTransport`             | interface |
+| `ISerializer`                  | interface |
+| `IServiceBusProcessErrorArgs`  | interface |
+| `IServiceBusReceiver`          | interface |
+| `IServiceBusSubscribeOptions`  | interface |
+| `IServiceBusSubscription`      | interface |
+| `IServiceBusTransport`         | interface |
+| `ISubscription`                | interface |
+| `KafkaMessagingOptions`        | interface |
+| `KafkaOptions`                 | interface |
+| `MemoryMessagingOptions`       | interface |
+| `MessageMetadata`              | interface |
+| `MessagingCommonOptions`       | interface |
+| `NatsMessagingOptions`         | interface |
+| `NatsOptions`                  | interface |
+| `PubSubOptions`                | interface |
+| `PubSubSdkModule`              | interface |
+| `RabbitMqMessagingOptions`     | interface |
+| `RabbitMqOptions`              | interface |
+| `RedisStreamsMessagingOptions` | interface |
+| `RedisStreamsOptions`          | interface |
+| `RequestOptions`               | interface |
+| `ServiceBusOptions`            | interface |
+| `ServiceBusSdkModule`          | interface |
+| `SubscribeOptions`             | interface |
+| `MessageHandler`               | type      |
+| `MessagingBrokerType`          | type      |
+| `MessagingPluginOptions`       | type      |
+| `PubSubMessagingOptions`       | type      |
+| `RequestHandler`               | type      |
+| `ServiceBusMessagingOptions`   | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#messaging-setu-tsmessaging-plugin).

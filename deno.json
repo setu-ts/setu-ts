@@ -69,7 +69,8 @@
     "release:set-metadata": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE --allow-net=api.jsr.io scripts/set-jsr-metadata.ts",
     "lint": "deno lint",
     "fmt": "deno fmt",
-    "fmt:check": "deno fmt --check"
+    "fmt:check": "deno fmt --check",
+    "docs:exports": "deno run --allow-read --allow-write --allow-run=deno scripts/generate-package-exports.ts"
   },
   "compilerOptions": {
     "strict": true,

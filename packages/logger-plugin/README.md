@@ -40,7 +40,27 @@ a console-logging application never pulls it in. You may also inject a pre-built
 `createRequestLoggerMiddleware(options)` logs each request and its outcome. Durations are computed
 from the monotonic clock (`runtime.hrtime()`), never from a wall-clock epoch.
 
+## Exports
+
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `createRequestLoggerMiddleware` | function  |
+| `LoggerPlugin`                  | function  |
+| `ConsoleLogger`                 | class     |
+| `NoopLogger`                    | class     |
+| `PinoLogger`                    | class     |
+| `ConsoleLoggerOptions`          | interface |
+| `LoggerPluginOptions`           | interface |
+| `NoopLoggerOptions`             | interface |
+| `PinoLoggerOptions`             | interface |
+| `RequestLoggerOptions`          | interface |
+| `LoggerTransport`               | type      |
+| `PinoFactory`                   | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#loggerplugin-setu-tslogger-plugin).
