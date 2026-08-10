@@ -1921,7 +1921,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `resolveTemplateChoice` is one template selector for both verbs, which let `isTemplateName` go —
   the registry `Map` lookup IS the unknown-name test, and keeping both left a permanently
   unreachable branch. No barrel change, so no public export moved. All new `src` files at **100%**
-  branch/function/line) — complete (PR pending)
+  branch/function/line) — complete (PR #144)
 - **Next milestone** — **M39** (docker/kubernetes), then M40. Queued behind those: **M59**
   (`cloudflare-plugin` — Workers-native messaging), a ROADMAP section only, with no plan and no code
   yet. M59 came from an external DX review; note what that review got wrong, since the section says
