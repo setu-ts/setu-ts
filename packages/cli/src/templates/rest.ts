@@ -114,5 +114,4 @@ export const REST_TEMPLATE: TemplateDefinition = {
   manifest: MODULE_SEAM_MANIFEST,
   pluginSpreads: seamPluginSpreads(REST_SEAMS),
   setupCalls: seamSetupCalls(REST_SEAMS),
-  unsupported: {},
 };

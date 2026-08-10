@@ -331,6 +331,71 @@ describe('template scaffolding — end to end', () => {
     expect(code).toBe(0);
   });
 
+  // The microservice template was refused outright on Workers until its runtime
+  // swap existed, so NOTHING here had ever been scaffolded, let alone checked.
+  // Everything the swap contributes is a rendered string as far as the CLI's own
+  // `deno check` is concerned — the `workersArgs` option object, the DO class
+  // module, the `queue` export's signature — so this is the only place a wrong
+  // field name or a bad import is a compile error (the M50b trap).
+  it('type-checks the scaffolded microservice project on Cloudflare Workers', async () => {
+    expect(
+      await run(['new', 'edge', '--template', 'microservice', '--runtime', 'cloudflare-workers']),
+    ).toBe(0);
+    const project = `${root}/edge`;
+
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    // The swap happened: the two socket-bound plugins are gone and the platform
+    // plugin serves both capabilities in their place.
+    expect(config).not.toContain('MessagingPlugin');
+    expect(config).not.toContain('QueuePlugin');
+    expect(config).toContain("import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';");
+    expect(config).toContain("messaging: { binding: 'MESSAGES'");
+    expect(config).toContain("queue: { binding: 'JOBS' }");
+
+    // The consumer half is a module export, which no plugin option can declare.
+    const entry = await Deno.readTextFile(`${project}/src/index.ts`);
+    expect(entry).toContain('async queue(');
+    expect(entry).toContain('createMessagingHandler(app)(payload)');
+    expect(entry).toContain("export { ReplyInboxObject } from './reply-inbox-object.ts';");
+
+    // `max_batch_timeout = 0` is what makes request/reply usable at all; the
+    // platform default of 5s alone exhausts the default reply budget.
+    const wrangler = await Deno.readTextFile(`${project}/wrangler.toml`);
+    expect(wrangler).toContain('max_batch_timeout = 0');
+    expect(wrangler).toContain('[[queues.producers]]');
+    expect(wrangler).toContain('class_name = "ReplyInboxObject"');
+    expect(wrangler).toContain('new_classes = ["ReplyInboxObject"]');
+
+    // The DO class is checked too, which is only possible because it does NOT
+    // import `cloudflare:workers` — a specifier Deno cannot resolve.
+    const sources = [
+      `${project}/src/index.ts`,
+      `${project}/setu.config.ts`,
+      `${project}/src/reply-inbox-object.ts`,
+    ];
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, sources);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // Every other runtime keeps the socket-bound brokers, so the swap must be
+  // scoped to Workers rather than applied to the template.
+  it('leaves the microservice plugin set unchanged on the other runtimes', async () => {
+    expect(await run(['new', 'a', '--template', 'microservice', '--runtime', 'deno'])).toBe(0);
+    expect(await run(['new', 'b', '--template', 'microservice', '--runtime', 'node'])).toBe(0);
+
+    for (const name of ['a', 'b']) {
+      const config = await Deno.readTextFile(`${root}/${name}/setu.config.ts`);
+      expect(config).toContain('MessagingPlugin()');
+      expect(config).toContain('QueuePlugin()');
+      expect(config).not.toContain('CloudflarePlugin');
+    }
+
+    // And no Workers-only artifact leaks onto them.
+    await expect(Deno.stat(`${root}/a/src/reply-inbox-object.ts`)).rejects.toThrow();
+  });
+
   it('serves static assets everywhere but Cloudflare Workers', async () => {
     // The one runtime-dependent value in the template. On Workers a missing
     // filesystem would make the asset handler answer 404 for every asset, so
@@ -430,7 +495,7 @@ describe('template scaffolding — end to end', () => {
   });
 
   it('accepts the nest template on every runtime target', async () => {
-    // `unsupported` is empty — nothing in the template needs raw sockets.
+    // Nothing in the template needs raw sockets.
     for (const target of ['deno', 'node', 'bun', 'cloudflare-workers']) {
       out = [];
       err = [];
