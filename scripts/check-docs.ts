@@ -654,11 +654,21 @@ export async function checkLocalLinks(
       // Generated API links: validate against the manifest-derived page set
       // rather than unconditionally accepting. When the set is null/undefined
       // (output not yet generated), skip — the gate runs before `deno task docs:api`.
-      if (resolvedPath.startsWith('docs/api/')) {
+      //
+      // The bare site root (`./api/`) must be handled here too. Normalization
+      // above drops the trailing slash, so it arrives as `docs/api`, which a
+      // `startsWith('docs/api/')` test does NOT match — the link then fell
+      // through to ordinary directory resolution and failed on any tree where
+      // `docs/api/` had not been generated. That is every clean checkout,
+      // including CI, while every developer machine that had run
+      // `deno task docs:api` passed. `deno doc --html` emits the site index at
+      // `docs/api/index.html`, so the directory link resolves to it.
+      if (resolvedPath === 'docs/api' || resolvedPath.startsWith('docs/api/')) {
         if (generatedApiPages == null) {
           continue;
         }
-        if (!generatedApiPages.has(resolvedPath)) {
+        const generatedTarget = resolvedPath === 'docs/api' ? 'docs/api/index.html' : resolvedPath;
+        if (!generatedApiPages.has(generatedTarget)) {
           findings.push({
             file,
             line: index + 1,
