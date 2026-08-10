@@ -9,6 +9,7 @@
 import type {
   CapabilityToken,
   ICacheStore,
+  IMessageBroker,
   IPlugin,
   IPluginContext,
   IQueue,
@@ -19,6 +20,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@setu-ts/common';
 
 import { resolveWaitUntil } from '../background/wait-until.ts';
 import { instanceToken } from '../instance-token.ts';
+import { WorkersBroker } from '../messaging/workers-broker.ts';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
 import { BindingRegistry } from '../bindings/binding-registry.ts';
 import { CloudflareBindingMissingError } from '../errors.ts';
@@ -83,6 +85,10 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
   const queueArm = options.queue === undefined
     ? undefined
     : { options: options.queue, token: instanceToken(CAPABILITIES.QUEUE, options.queue.name) };
+  const messagingArm = options.messaging === undefined ? undefined : {
+    options: options.messaging,
+    token: instanceToken(CAPABILITIES.MESSAGING, options.messaging.name),
+  };
   const durableObjectArm = options.durableObject === undefined ? undefined : {
     options: options.durableObject,
     token: instanceToken(CAPABILITIES.REALTIME_BACKPLANE, options.durableObject.name),
@@ -94,6 +100,7 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
   if (cacheArm !== undefined) provides.push(cacheArm.token);
   if (storageArm !== undefined) provides.push(storageArm.token);
   if (queueArm !== undefined) provides.push(queueArm.token);
+  if (messagingArm !== undefined) provides.push(messagingArm.token);
   if (durableObjectArm !== undefined) provides.push(durableObjectArm.token);
 
   return {
@@ -164,6 +171,39 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
         ctx.services.register<IQueue>(queueArm.token, queue);
       }
 
+      if (messagingArm !== undefined) {
+        const rpc = messagingArm.options.rpc;
+        const broker = new WorkersBroker(
+          registry.queue(messagingArm.options.binding),
+          // `ctx.runtime` rather than `crypto.randomUUID()`/`setTimeout`:
+          // AI_GUIDELINES §4.2 routes every runtime capability through
+          // IRuntimeServices, which is why the broker is built here rather than
+          // by the application.
+          ctx.runtime,
+          {
+            // A thunk, matching the waitUntil and queue seams above.
+            logger: () => ctx.logger,
+            ...(rpc === undefined ? {} : {
+              replyInbox: {
+                namespace: registry.durableObject(rpc.binding),
+                binding: rpc.binding,
+                ...(rpc.defaultTimeoutMs === undefined
+                  ? {}
+                  : { defaultTimeoutMs: rpc.defaultTimeoutMs }),
+              },
+            }),
+          },
+        );
+        ctx.services.register<IMessageBroker>(messagingArm.token, broker);
+        // The reply-inbox socket is opened lazily on the first request, so
+        // there is nothing to connect here — but it must be closed, or a
+        // shutdown leaves a live WebSocket to the Durable Object and every
+        // in-flight caller waiting out its full budget.
+        ctx.lifecycle.onShutdown(async () => {
+          await broker.disconnect();
+        });
+      }
+
       if (durableObjectArm !== undefined) {
         const backplane = new DurableObjectBackplane(
           registry.durableObject(durableObjectArm.options.binding),
@@ -194,6 +234,8 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
           cache: cacheArm !== undefined,
           storage: storageArm !== undefined,
           queue: queueArm !== undefined,
+          messaging: messagingArm !== undefined,
+          rpc: messagingArm?.options.rpc !== undefined,
           durableObject: durableObjectArm !== undefined,
           waitUntil: options.waitUntil !== undefined,
           platform: ctx.runtime.platform(),

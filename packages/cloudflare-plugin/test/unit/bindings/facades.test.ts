@@ -9,7 +9,12 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import type { IKvNamespace, IR2Bucket } from '../../../src/index.ts';
-import { isDurableObjectNamespace, isKvNamespace, isR2Bucket } from '../../../src/index.ts';
+import {
+  isDurableObjectNamespace,
+  isKvNamespace,
+  isQueueProducer,
+  isR2Bucket,
+} from '../../../src/index.ts';
 import { FakeKv, FakeR2 } from '../../fakes.ts';
 
 describe('binding facades', () => {
@@ -62,6 +67,27 @@ describe('isR2Bucket', () => {
   it('rejects non-objects', () => {
     expect(isR2Bucket(null)).toBe(false);
     expect(isR2Bucket({ head: 'not a function' })).toBe(false);
+  });
+});
+
+describe('isQueueProducer', () => {
+  it('accepts a binding carrying both producer methods', () => {
+    expect(isQueueProducer({ send: () => {}, sendBatch: () => {} })).toBe(true);
+  });
+
+  it('rejects a KV namespace, the likeliest wrangler.toml mix-up', () => {
+    expect(isQueueProducer({ get: () => {}, put: () => {}, delete: () => {}, list: () => {} }))
+      .toBe(false);
+  });
+
+  it('rejects a partial producer, which would fail on the first sendBatch', () => {
+    expect(isQueueProducer({ send: () => {} })).toBe(false);
+  });
+
+  it('rejects null, undefined, and a non-object', () => {
+    expect(isQueueProducer(null)).toBe(false);
+    expect(isQueueProducer(undefined)).toBe(false);
+    expect(isQueueProducer('MESSAGES')).toBe(false);
   });
 });
 
