@@ -95,6 +95,22 @@ try {
     throw new Error('Scheduled handler did not write its KV confirmation.');
   }
 
+  // --- Runtime detection on the real platform ------------------------------
+  //
+  // workerd reports `navigator.userAgent === 'Cloudflare-Workers'`, and the
+  // detector compared it against a lowercase needle — so it answered 'node' on
+  // every Worker, and since that answer chooses the runtime adapter, a
+  // scaffolded Worker ran the NODE adapter on Cloudflare. Unit tests could not
+  // catch it: their fake sent a lowercase string the platform never sends.
+  const diag = await (await fetch(`${baseUrl}/diag/platform`)).json();
+  if (diag.detected !== 'cloudflare-workers') {
+    throw new Error(
+      `detectRuntime() answered '${String(diag.detected)}' on real workerd, expected ` +
+        'cloudflare-workers. That answer picks the runtime adapter, so a Worker would run the ' +
+        'Node one.',
+    );
+  }
+
   // --- Messaging over a real Cloudflare queue -----------------------------
   //
   // The publish happens in a `fetch` invocation and the delivery in a separate

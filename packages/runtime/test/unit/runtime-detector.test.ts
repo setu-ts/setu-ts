@@ -4,6 +4,17 @@ import { expect } from '@std/expect';
 import { detectRuntime } from '../../src/detector/runtime-detector.ts';
 import type { GlobalScope } from '../../src/detector/runtime-detector.ts';
 
+/**
+ * The user agent a REAL Worker reports, probed against workerd:
+ * `navigator.userAgent === 'Cloudflare-Workers'`.
+ *
+ * Load-bearing, not decorative. Every case below used to supply a lowercase
+ * string the platform never sends (`'cloudflare-workers/v1'`, `'cloudflare'`),
+ * so the suite passed while detection returned `'node'` on every real Worker.
+ * Asserting through this constant is what ties the tests to the platform.
+ */
+const REAL_WORKER_USER_AGENT = 'Cloudflare-Workers';
+
 describe('detectRuntime', () => {
   it('detects Deno when Deno global is present', () => {
     const globals: GlobalScope = { Deno: {} };
@@ -15,17 +26,37 @@ describe('detectRuntime', () => {
     expect(detectRuntime(globals)).toBe('bun');
   });
 
-  it('detects Cloudflare Workers when caches and navigator.userAgent match', () => {
+  it('detects Cloudflare Workers from the user agent a real Worker sends', () => {
     const globals: GlobalScope = {
       caches: {},
-      navigator: { userAgent: 'cloudflare-workers/v1' },
+      navigator: { userAgent: REAL_WORKER_USER_AGENT },
     };
+    expect(detectRuntime(globals)).toBe('cloudflare-workers');
+  });
+
+  it('matches the user agent case-insensitively', () => {
+    // The capital 'C' in the real string is exactly what the old lowercase
+    // `includes('cloudflare')` missed.
+    for (const userAgent of ['Cloudflare-Workers', 'cloudflare-workers/v1', 'CLOUDFLARE']) {
+      expect(detectRuntime({ caches: {}, navigator: { userAgent } })).toBe('cloudflare-workers');
+    }
+  });
+
+  it('detects a Worker even though nodejs_compat defines process', () => {
+    // Every Worker this CLI scaffolds sets `compatibility_flags =
+    // ["nodejs_compat"]`, which defines `process` — so a process-based check
+    // would report 'node' on the edge. Detection must not consult it.
+    const globals: GlobalScope = {
+      caches: {},
+      navigator: { userAgent: REAL_WORKER_USER_AGENT },
+    };
+    (globals as { process?: unknown }).process = { versions: { node: '22.0.0' } };
     expect(detectRuntime(globals)).toBe('cloudflare-workers');
   });
 
   it('does not detect Cloudflare when caches is missing', () => {
     const globals: GlobalScope = {
-      navigator: { userAgent: 'cloudflare' },
+      navigator: { userAgent: REAL_WORKER_USER_AGENT },
     };
     expect(detectRuntime(globals)).toBe('node');
   });
@@ -59,7 +90,7 @@ describe('detectRuntime', () => {
     const globals: GlobalScope = {
       Bun: {},
       caches: {},
-      navigator: { userAgent: 'cloudflare' },
+      navigator: { userAgent: REAL_WORKER_USER_AGENT },
     };
     expect(detectRuntime(globals)).toBe('bun');
   });

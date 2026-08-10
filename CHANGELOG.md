@@ -173,6 +173,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Every Cloudflare Worker misdetected its own runtime as `node`** (found while booting a
+  CLI-scaffolded Workers project in M59). `detectRuntime()` tested
+  `navigator.userAgent.includes('cloudflare')` — lowercase — and workerd reports
+  `'Cloudflare-Workers'`, so the check never matched and detection fell through to `'node'` on every
+  real deployment. That answer selects the runtime adapter, so a Worker built through
+  `RuntimePlugin()` ran the **Node** adapter on Cloudflare, and the `cloudflare` health indicator
+  reported `degraded` with a misleading detail. It also silently disabled every
+  `runtime.platform() === 'cloudflare-workers'` guard, including `messaging-plugin`'s cloud gate —
+  so Pub/Sub and Service Bus attempted their gRPC/AMQP SDK load instead of failing with the named
+  `CloudBrokerUnavailableError`.
+
+  The comparison is now case-insensitive. No test caught this because the unit fakes sent
+  `'cloudflare-workers/v1'` and `'cloudflare'`, strings the platform never sends — a test double
+  that violated the real contract, so the suite tested the double. The fakes now use the real
+  string, and `apps/cloudflare` asserts `detectRuntime()` against **real workerd** in its smoke,
+  which is the only place the platform sends its own user agent. Both were verified to fail without
+  the fix.
+
 - **A mistyped Queues binding now fails at `register()`, not at the first send** (M59).
   `BindingRegistry.queue()` cast its binding unvalidated, so a missing `[[queues.producers]]` stanza
   or a name typo let an application boot clean, report `up` from the `cloudflare` health indicator,
