@@ -184,3 +184,31 @@ This plugin is middleware-only — it registers no service and no capability tok
 added to the global pipeline via `ctx.middleware.add(...)` and is also available as a standalone
 factory for per-route use. This follows the same pattern as `rateLimitMiddleware` from the
 auth-plugin.
+
+## Exports
+
+| Export                           | Kind      |
+| -------------------------------- | --------- |
+| `corsMiddleware`                 | function  |
+| `csrfMiddleware`                 | function  |
+| `HttpSecurityPlugin`             | function  |
+| `ipSecurityMiddleware`           | function  |
+| `requestSizeMiddleware`          | function  |
+| `securityHeadersMiddleware`      | function  |
+| `ContentSecurityPolicyOptions`   | interface |
+| `CorsOptions`                    | interface |
+| `CsrfOptions`                    | interface |
+| `HttpSecurityPluginOptions`      | interface |
+| `IpSecurityOptions`              | interface |
+| `RequestSizeOptions`             | interface |
+| `SecurityHeadersOptions`         | interface |
+| `StrictTransportSecurityOptions` | interface |
+| `CorsOriginMatcher`              | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#httpsecurityplugin-setu-tshttp-security-plugin).

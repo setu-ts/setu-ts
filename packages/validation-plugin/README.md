@@ -56,7 +56,36 @@ problems. Both packages spell that URI `https://setu-ts.dev/errors/validation`.
 > bound to the **same formatter**, so the emitted body is byte-identical and migrating changes
 > nothing on the wire. Removal is scheduled for v1.0.0.
 
+## Exports
+
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `createSanitizer`            | function  |
+| `createValidationMiddleware` | function  |
+| `defaultFormatter`           | function  |
+| `nestjsFormatter`            | function  |
+| `resolveFormatter`           | function  |
+| `rfc9457Formatter`           | function  |
+| `sanitize`                   | function  |
+| `validateBody`               | function  |
+| `validateCookies`            | function  |
+| `validateHeaders`            | function  |
+| `validateParams`             | function  |
+| `validateQuery`              | function  |
+| `ValidationPlugin`           | function  |
+| `ValidationService`          | class     |
+| `rfc7807Formatter`           | const     |
+| `FormattedError`             | interface |
+| `FormatValidationErrors`     | interface |
+| `SanitizationRules`          | interface |
+| `ValidationPluginOptions`    | interface |
+| `ErrorFormat`                | type      |
+| `ValidationErrorFormatter`   | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#validationplugin-setu-tsvalidation-plugin).

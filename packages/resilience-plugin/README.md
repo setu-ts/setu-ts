@@ -54,7 +54,20 @@ mistake, not a silent no-op.
   supports cancellation.
 - The bulkhead is a bounded FIFO queue; overflow rejects with `BulkheadFullError`.
 
+## Exports
+
+| Export                    | Kind      |
+| ------------------------- | --------- |
+| `ResiliencePlugin`        | function  |
+| `BulkheadFullError`       | class     |
+| `CircuitOpenError`        | class     |
+| `TimeoutError`            | class     |
+| `ResiliencePluginOptions` | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#resilience-setu-tsresilience-plugin).

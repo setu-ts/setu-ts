@@ -52,7 +52,31 @@ all later behaviors do not run.
 `HandlerNotFoundError` is exported for `instanceof` handling; it is thrown when a request reaches a
 bus with no registered handler.
 
+## Exports
+
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `CqrsPlugin`                 | function  |
+| `CommandBus`                 | class     |
+| `HandlerNotFoundError`       | class     |
+| `QueryBus`                   | class     |
+| `CommandHandlerRegistration` | interface |
+| `CqrsCommand`                | interface |
+| `CqrsPluginOptions`          | interface |
+| `CqrsQuery`                  | interface |
+| `CqrsRequest`                | interface |
+| `ICommandBus`                | interface |
+| `ICommandHandler`            | interface |
+| `ICqrsFacade`                | interface |
+| `IPipelineBehavior`          | interface |
+| `IQueryBus`                  | interface |
+| `IQueryHandler`              | interface |
+| `QueryHandlerRegistration`   | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#cqrs-setu-tscqrs-plugin).

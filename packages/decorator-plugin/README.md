@@ -59,7 +59,69 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
 
 Discovery failures are logged as warnings and never crash the application.
 
+## Exports
+
+| Export                      | Kind      |
+| --------------------------- | --------- |
+| `ApiOperation`              | function  |
+| `ApiResponse`               | function  |
+| `ApiTags`                   | function  |
+| `Body`                      | function  |
+| `clearParameterResolvers`   | function  |
+| `Controller`                | function  |
+| `Cookie`                    | function  |
+| `createDecorator`           | function  |
+| `createParameterDecorator`  | function  |
+| `CurrentUser`               | function  |
+| `DecoratorPlugin`           | function  |
+| `discoverControllers`       | function  |
+| `getParameterResolver`      | function  |
+| `Header`                    | function  |
+| `Inject`                    | function  |
+| `Injectable`                | function  |
+| `Optional`                  | function  |
+| `Param`                     | function  |
+| `parseCookies`              | function  |
+| `Permissions`               | function  |
+| `Public`                    | function  |
+| `Query`                     | function  |
+| `registerParameterResolver` | function  |
+| `resolveParameter`          | function  |
+| `resolveParameters`         | function  |
+| `Roles`                     | function  |
+| `UseFilters`                | function  |
+| `UseGuards`                 | function  |
+| `UseInterceptors`           | function  |
+| `ValidateBody`              | function  |
+| `ValidateParams`            | function  |
+| `ValidateQuery`             | function  |
+| `Version`                   | function  |
+| `MetadataStore`             | class     |
+| `Delete`                    | const     |
+| `Get`                       | const     |
+| `Head`                      | const     |
+| `metadataStore`             | const     |
+| `Options`                   | const     |
+| `Patch`                     | const     |
+| `Post`                      | const     |
+| `Put`                       | const     |
+| `ApiOperationConfig`        | interface |
+| `ApiResponseConfig`         | interface |
+| `DecoratorPluginOptions`    | interface |
+| `DiscoveryOptions`          | interface |
+| `DiscoveryResult`           | interface |
+| `InjectableOptions`         | interface |
+| `ParameterMetadata`         | interface |
+| `CustomParameterResolver`   | type      |
+| `HttpMethodDecorator`       | type      |
+| `MiddlewareLike`            | type      |
+| `ModuleImporter`            | type      |
+| `ParameterType`             | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#api-reference-setu-tsdecorator-plugin).

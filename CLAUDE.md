@@ -1830,7 +1830,36 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   fail. Four other negative controls were each observed failing and reverted: removing the
   `withDiPlugin` dedupe, emptying the minimal host's seams, dropping the refusal's alternative line,
   and suppressing the full-stack `di` emission) — complete (PR #142)
-- **Next milestone** — **M38** (documentation), then M39–M40. Queued behind those: **M59**
+- **Milestone 38** (`docs/*` + `scripts/*` + `test/*` — documentation hub and tooling) — the
+  documentation milestone: nine curated guides under [`docs/`](docs/) (getting-started,
+  plugin-architecture, plugins, programmatic-api, decorators, custom-plugins, migration-nestjs,
+  migration-fastify, examples, runtime-deployment), a reproducible
+  [`deno doc`](https://docs.deno.com/runtime/reference/cli/doc/) HTML API generator
+  ([`scripts/generate-api-docs.ts`](scripts/generate-api-docs.ts)) over local manifest export
+  targets, a JSDoc-lint **ratchet** freezing the measured pre-existing diagnostics (776 when the
+  plan was written; **775** after merging `origin/main`, which the ratchet itself caught and named —
+  a below-baseline run is a failure that says "lower the constant", so debt paid down is locked in)
+  while keeping ten clean packages permanently clean, a Markdown documentation gate
+  ([`scripts/check-docs.ts`](scripts/check-docs.ts)) with structural package-catalog validation,
+  generated-API-link and cross-file-anchor validation, and a dedicated per-file script-coverage gate
+  ([`scripts/script-coverage.ts`](scripts/script-coverage.ts)) enforcing ≥90% branch/function/line
+  on both documentation scripts. The snippet gate mechanically type-checks committed fixtures
+  representing all nine guides plus the architecture registry example, with a negative control
+  proving the compiler rejects the banned `app.get()` family. Corrected ARCHITECTURE §6
+  service-registry examples (CAPABILITIES constants, no nonexistent `lazy` option,
+  `registerFactory()` for lazy construction) and §16 testing claim (Deno full suite; Node/Bun
+  published-artifact compat). No package source, manifest export, capability token, or plugin option
+  changed. Developed on a branch cut before M56–M61, so `origin/main` was merged in before the final
+  verification pass and the guides were re-checked against the merged tree — RFC 9457 (M56), derived
+  OpenAPI security (M57), and the `module` schematic plus the M60/M61 CLI wiring all postdate the
+  guides' first draft. Verification then found the guides still taught the DEPRECATED `'rfc7807'`
+  alias in three files while `PUBLIC_API.md` called it deprecated (every gate passed — the alias
+  still exists, so every fence compiled), a phantom `## HttpClient` section documenting a
+  `@setu-ts/http-client-plugin` that exists nowhere in source, and two drift gates that could not
+  detect their own drift because they matched a bare substring rather than a link. Also: the
+  `PUBLIC_API.md` section anchors now name their package, which is a **breaking change for external
+  deep links** (`#storage` → `#storage-setu-tsstorage-plugin`) — complete (PR #143)
+- **Next milestone** — **M39** (docker/kubernetes), then M40. Queued behind those: **M59**
   (`cloudflare-plugin` — Workers-native messaging) and **M62** (`cli` — monorepo support). Both are
   ROADMAP sections only, with no plan and no code yet. M61 closed the optional-decorators/DI half of
   the CLI parity work, so M62 (monorepos) is the remaining piece. M59 came from an external DX

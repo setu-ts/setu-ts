@@ -132,8 +132,29 @@ base64 -w0 < reflection.binpb  # 2332 chars
 
 ## See Also
 
-- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md) — the `grpc-plugin`
-  Options / Exports / Notes section
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#api-reference-setu-tsgrpc-plugin)
+  — the `grpc-plugin` Options / Exports / Notes section
 - [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) — §7 the
   `IHttpAdapter` seam, §18 why the plugin does not hang off the kernel
 - [ROADMAP.md](https://github.com/setu-ts/setu-ts/blob/main/ROADMAP.md) — Milestone 49
+
+## Exports
+
+| Export                  | Kind      |
+| ----------------------- | --------- |
+| `adaptConnectModule`    | function  |
+| `GrpcPlugin`            | function  |
+| `GrpcDescriptorError`   | class     |
+| `GrpcRuntimeLoadError`  | class     |
+| `GrpcService`           | class     |
+| `GrpcUnavailableError`  | class     |
+| `CAPABILITIES`          | const     |
+| `ConnectModuleLike`     | interface |
+| `GrpcPluginOptions`     | interface |
+| `GrpcServiceDefinition` | interface |
+| `IGrpcService`          | interface |
+| `GrpcServingStatus`     | type      |
+| `RpcFetchHandler`       | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

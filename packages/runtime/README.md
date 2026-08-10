@@ -73,7 +73,104 @@ unit-testable on Deno by passing a fake host — no real Node/Bun, no OS permiss
 M3 provides runtime services only. HTTP server adapters are deferred to a dedicated milestone — see
 ROADMAP.md.
 
-See the repository's [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+See the repository's
+[`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#runtimeplugin-setu-tsruntime)
 for the full API contract and
 [`ARCHITECTURE.md`](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) for how this
 package fits the plugin architecture.
+
+## Exports
+
+### `@setu-ts/runtime`
+
+| Export                                 | Kind      |
+| -------------------------------------- | --------- |
+| `adaptWsModule`                        | function  |
+| `asUpgradeEmitter`                     | function  |
+| `bindCloudflareSocketToSink`           | function  |
+| `bindDenoSocketToSink`                 | function  |
+| `bindWsSocketToSink`                   | function  |
+| `buildBunHost`                         | function  |
+| `buildNodeHost`                        | function  |
+| `createBunRuntimeServices`             | function  |
+| `createBunWebSocketHandlers`           | function  |
+| `createCloudflareRuntimeServices`      | function  |
+| `createDefaultCloudflareWebSocketHost` | function  |
+| `createDenoDnsResolver`                | function  |
+| `createDenoRuntimeServices`            | function  |
+| `createNodeDnsResolver`                | function  |
+| `createNodeRuntimeServices`            | function  |
+| `createNodeWorkerHost`                 | function  |
+| `createRuntimeServices`                | function  |
+| `createUpgradeRequest`                 | function  |
+| `createWebSocketTransport`             | function  |
+| `createWebWorkerHost`                  | function  |
+| `createWsTransport`                    | function  |
+| `detectRuntime`                        | function  |
+| `isWebSocketUpgradeRequest`            | function  |
+| `loadWsModule`                         | function  |
+| `normalizeFrame`                       | function  |
+| `rejectRawUpgrade`                     | function  |
+| `RuntimePlugin`                        | function  |
+| `toReadyState`                         | function  |
+| `toTransportError`                     | function  |
+| `toWsReadyState`                       | function  |
+| `BunHttpAdapter`                       | class     |
+| `CloudflareWorkersHttpAdapter`         | class     |
+| `DenoHttpAdapter`                      | class     |
+| `NodeHttpAdapter`                      | class     |
+| `NodeUpgradeCoordinator`               | class     |
+| `RpcInterceptorStore`                  | class     |
+| `BunFileInfo`                          | interface |
+| `BunHost`                              | interface |
+| `BunModules`                           | interface |
+| `BunServeHost`                         | interface |
+| `BunServer`                            | interface |
+| `BunServerWebSocket`                   | interface |
+| `BunSocketData`                        | interface |
+| `BunWebSocketHandlers`                 | interface |
+| `CloudflareEnv`                        | interface |
+| `CloudflareRuntimeOptions`             | interface |
+| `CloudflareServerSocket`               | interface |
+| `CloudflareWebSocketHost`              | interface |
+| `CloudflareWebSocketPair`              | interface |
+| `CreateRuntimeServicesOptions`         | interface |
+| `DenoDirEntry`                         | interface |
+| `DenoDnsHost`                          | interface |
+| `DenoFileInfo`                         | interface |
+| `DenoHost`                             | interface |
+| `DenoServeHost`                        | interface |
+| `DenoServer`                           | interface |
+| `DenoSrvRecord`                        | interface |
+| `DenoWebSocketLike`                    | interface |
+| `DenoWebSocketUpgrade`                 | interface |
+| `GlobalScope`                          | interface |
+| `HttpAdapterFactories`                 | interface |
+| `NodeDnsModule`                        | interface |
+| `NodeFsInfo`                           | interface |
+| `NodeHost`                             | interface |
+| `NodeIncomingMessage`                  | interface |
+| `NodeModules`                          | interface |
+| `NodeServeHost`                        | interface |
+| `NodeServer`                           | interface |
+| `NodeWorkerLike`                       | interface |
+| `NodeWorkerModules`                    | interface |
+| `RawUpgradeSocket`                     | interface |
+| `RuntimeAdapterFactories`              | interface |
+| `RuntimeOptions`                       | interface |
+| `UpgradeEmitter`                       | interface |
+| `WebSocketLike`                        | interface |
+| `WebWorkerGlobals`                     | interface |
+| `WebWorkerLike`                        | interface |
+| `WsModuleLike`                         | interface |
+| `WsServerLike`                         | interface |
+| `WsSocketLike`                         | interface |
+
+### `@setu-ts/runtime/worker`
+
+| Export             | Kind     |
+| ------------------ | -------- |
+| `defineWorkerTask` | function |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

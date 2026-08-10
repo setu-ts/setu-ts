@@ -75,7 +75,7 @@ Without becoming heavyweight. Without forcing opinions. Without locking you in.
 | **Optional decorators** | Decorators are a plugin, not a requirement. Every feature has a complete programmatic API.                           |
 | **Explicit APIs**       | No magic. No hidden globals. No reflection required. Everything is explicit and inspectable.                         |
 | **Type safety**         | Strict TypeScript throughout. No `any` in public APIs. Full type inference for services, config, and routes.         |
-| **Tree-shakeable**      | Every package uses ES modules, `sideEffects: false`, and subpath exports. You ship only what you use.                |
+| **Tree-shakeable**      | Every package uses ES modules and subpath exports. You ship only what you use.                                       |
 | **Production ready**    | Built for scale: graceful shutdown, distributed locking, circuit breakers, audit trails, and observability.          |
 | **Enterprise focused**  | Patterns that large organizations need: multi-tenancy, feature flags, secrets management, CQRS, event sourcing.      |
 
@@ -336,12 +336,11 @@ setu-ts/
 ├── docker/                # Docker and OpenTelemetry Collector configurations
 ├── kubernetes/            # Kubernetes manifests
 ├── plans/                 # One plan per milestone, archived on completion
-├── apps/                  # Example applications — empty, Milestone 37
-├── examples/              # Additional examples — empty, Milestone 37
+├── apps/                  # Example applications — 15 runnable apps (M37, M37b, M37c, M55)
 ├── ARCHITECTURE.md        # Technical architecture guide
 ├── PUBLIC_API.md          # Public API contract
 ├── AI_GUIDELINES.md       # Engineering guidelines
-├── ROADMAP.md             # Implementation roadmap, milestones 0–52
+├── ROADMAP.md             # Implementation roadmap, milestones 0–55
 ├── CHANGELOG.md           # Release notes
 └── README.md              # This file
 ```
@@ -356,6 +355,7 @@ be replaced without touching the others.
 
 | Document                                                                         | Audience                | Purpose                                                                  |
 | -------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------ |
+| [**docs/README.md**](docs/README.md)                                             | All users               | Documentation hub — navigation and guide index                           |
 | [**ARCHITECTURE.md**](ARCHITECTURE.md)                                           | Framework contributors  | How the framework works internally and why it was designed this way      |
 | [**PUBLIC_API.md**](PUBLIC_API.md)                                               | Application developers  | How to use the framework — complete examples for every plugin            |
 | [**AI_GUIDELINES.md**](AI_GUIDELINES.md)                                         | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
@@ -368,7 +368,8 @@ Each package also carries its own README with options, semantics, and a worked e
 
 **Start here:**
 
-- New to the framework? Read **PUBLIC_API.md** for usage examples.
+- New to the framework? Read the [Getting Started guide](docs/getting-started.md) or
+  **PUBLIC_API.md** for usage examples.
 - Want to contribute? Read **ARCHITECTURE.md** then **AI_GUIDELINES.md**.
 - Want to understand the plan? Read **ROADMAP.md**.
 
@@ -407,8 +408,7 @@ Detailed milestones, file structures, and interface definitions are documented i
 ## Contributing
 
 Contributions are welcome. The foundation is complete, so the most useful contributions right now
-are the remaining milestones (starters, examples), bug reports against the alpha, and plugins built
-on the capability model.
+are bug reports against the alpha, and plugins built on the capability model.
 
 ### Before You Write Code
 
@@ -476,7 +476,7 @@ production.
 
 <div align="center">
 
-**[Architecture](ARCHITECTURE.md)** · **[Public API](PUBLIC_API.md)** ·
-**[Guidelines](AI_GUIDELINES.md)** · **[Roadmap](ROADMAP.md)**
+**[Documentation Hub](docs/README.md)** · **[Architecture](ARCHITECTURE.md)** ·
+**[Public API](PUBLIC_API.md)** · **[Guidelines](AI_GUIDELINES.md)** · **[Roadmap](ROADMAP.md)**
 
 </div>

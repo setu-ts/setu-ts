@@ -240,6 +240,36 @@ A newer matching version was found, but it was not used because it was newer tha
 specified minimum dependency date ... pass the --minimum-dependency-age flag
 ```
 
+## API documentation
+
+M38 added a reproducible `deno doc` generator and a JSDoc lint ratchet. The generated HTML is
+ignored (not committed), but must be rebuilt before any release artifact is published so the release
+notes and changelog can reference the current API surface.
+
+```fish
+# Rebuild the static API site (ignored output)
+deno task docs:api
+
+# Run the JSDoc lint ratchet (must be green before release)
+deno task check:api-docs
+
+# Run both together (Markdown checks + API lint)
+deno task check:docs
+```
+
+The ratchet (`DOC_LINT_BASELINE = 776`) is frozen in `scripts/generate-api-docs.ts`. If the total
+diagnostic count drops below the baseline, the script prints a message instructing you to lower the
+constant in the same commit — do not ship a lower count without updating the constant, and do not
+raise the constant to accommodate new debt. The ten `CLEAN_PACKAGES` are permanently exempt: any
+finding in those packages fails the gate regardless of the baseline.
+
+Generated output lives under `docs/api/`, which is gitignored. Verify it is not tracked:
+
+```fish
+git status --short --ignored docs/api
+# Should show only ignored output, no tracked files
+```
+
 To smoke-test a release immediately, pass `--min-dep-age 0`. This resolves itself after a day, so it
 affects only the maintainer verifying the release, not ordinary users — but it will surprise you
 every time if it is not written down.

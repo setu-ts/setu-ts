@@ -162,3 +162,26 @@ in PUBLIC_API.md for the full option tables and notes.
   — Multi-mock fixture manager
 - [`collectStream`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#testing-package-setu-tstesting)
   — Streaming response reader
+
+## Exports
+
+| Export                | Kind      |
+| --------------------- | --------- |
+| `collectStream`       | function  |
+| `createMockPlugin`    | function  |
+| `createTestApp`       | function  |
+| `createTestContext`   | function  |
+| `inject`              | function  |
+| `FixtureManager`      | class     |
+| `MockResponse`        | class     |
+| `MockServiceRegistry` | class     |
+| `IKernelApplication`  | interface |
+| `InjectRequest`       | interface |
+| `InjectResponse`      | interface |
+| `MockPluginOptions`   | interface |
+| `StreamingBody`       | interface |
+| `TestAppOptions`      | interface |
+| `TestContextOptions`  | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

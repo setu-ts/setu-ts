@@ -239,4 +239,16 @@ accepts additional registrations.
 ## See Also
 
 - [JSR Registry](https://jsr.io/@setu-ts/rest-starter)
-- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#starter-exports-and-option-arms)
+
+## Exports
+
+| Export               | Kind      |
+| -------------------- | --------- |
+| `buildRestPlugins`   | function  |
+| `createRestApp`      | function  |
+| `RealtimeArm`        | interface |
+| `RestStarterOptions` | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

@@ -209,3 +209,57 @@ under another client's hash. Hashing uses `IRuntimeServices.subtle`, so `apq` re
 ## License
 
 MIT
+
+## Exports
+
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `adaptGraphqlModule`          | function  |
+| `createDepthLimitRule`        | function  |
+| `encodeSseComment`            | function  |
+| `encodeSseComplete`           | function  |
+| `encodeSseEvent`              | function  |
+| `extractPersistedQuery`       | function  |
+| `graphiqlHtml`                | function  |
+| `GraphqlPlugin`               | function  |
+| `loadGraphqlModule`           | function  |
+| `persistedQueryHash`          | function  |
+| `ApqResolver`                 | class     |
+| `GraphqlRuntimeLoadError`     | class     |
+| `GraphqlSchemaError`          | class     |
+| `GraphqlService`              | class     |
+| `GRAPHQL_TRANSPORT_WS`        | const     |
+| `DefaultGraphqlContext`       | interface |
+| `GraphqlApqOptions`           | interface |
+| `GraphqlCodeFirstOptions`     | interface |
+| `GraphqlConnectionInfo`       | interface |
+| `GraphqlContextInput`         | interface |
+| `GraphqlExecutionResult`      | interface |
+| `GraphqlFormattedError`       | interface |
+| `GraphqlModuleLike`           | interface |
+| `GraphqlOperationContext`     | interface |
+| `GraphqlRequestParams`        | interface |
+| `GraphqlScalarResolver`       | interface |
+| `GraphqlScalarTypeLike`       | interface |
+| `GraphqlSchemaFirstOptions`   | interface |
+| `GraphqlSchemaLike`           | interface |
+| `GraphqlSseTransportOptions`  | interface |
+| `GraphqlSubscriptionsOptions` | interface |
+| `GraphqlWsTransportOptions`   | interface |
+| `IApqResolver`                | interface |
+| `IGraphqlService`             | interface |
+| `SubscriptionResolver`        | interface |
+| `ApqResolveResult`            | type      |
+| `FieldResolver`               | type      |
+| `GraphqlPluginOptions`        | type      |
+| `GraphqlSubscriptionOutcome`  | type      |
+| `ResolverMap`                 | type      |
+| `TypeResolverMap`             | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#graphql-setu-tsgraphql-plugin).

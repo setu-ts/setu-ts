@@ -19,6 +19,9 @@ dependencies cannot enter a published package graph. Run its `smoke` task to ver
 | [`cloudflare`](./cloudflare)                 | Worker bindings wire KV and cron (requires Wrangler).                       |
 | [`realtime`](./realtime)                     | A publish on A reaches B's SSE client through Redis (requires Redis).       |
 | [`full-stack`](./full-stack)                 | An SSR React Router page renders rows read through the database capability. |
+| [`static-site`](./static-site)               | Static file serving with caching, ETags, and range requests.                |
+
+See the [examples guide](../docs/examples.md) for learning paths and more details.
 
 The root `deno task check:apps` gate type-checks every app and runs each smoke task. When a smoke
 task exits with code 77, the gate records it as a skip and prints a warning. In CI, the gate reads

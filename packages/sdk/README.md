@@ -359,5 +359,42 @@ covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, 
 
 ---
 
-[Architecture](../../ARCHITECTURE.md) · [Public API](../../PUBLIC_API.md) ·
-[Roadmap](../../ROADMAP.md)
+[Architecture](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) ·
+[Public API](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#sdk--client-sdk-setu-tssdk)
+· [Roadmap](https://github.com/setu-ts/setu-ts/blob/main/ROADMAP.md)
+
+## Exports
+
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `createApiKeyAuthInterceptor` | function  |
+| `createBearerAuthInterceptor` | function  |
+| `createClient`                | function  |
+| `createDefaultClientTiming`   | function  |
+| `generateOpenApiClient`       | function  |
+| `ClientCircuitOpenError`      | class     |
+| `HttpClientError`             | class     |
+| `OpenApiCodegenError`         | class     |
+| `CircuitBreakerPolicy`        | interface |
+| `ClientOptions`               | interface |
+| `ClientRateLimitPolicy`       | interface |
+| `ClientRequest`               | interface |
+| `ClientRequestContext`        | interface |
+| `ClientResponse`              | interface |
+| `IClientTiming`               | interface |
+| `IHttpClient`                 | interface |
+| `OpenApiCodegenOptions`       | interface |
+| `RetryPolicy`                 | interface |
+| `SdkOpenApiDocument`          | interface |
+| `SdkOpenApiOperation`         | interface |
+| `SdkOpenApiParameter`         | interface |
+| `SdkOpenApiPathItem`          | interface |
+| `SdkOpenApiRequestBody`       | interface |
+| `SdkOpenApiResponse`          | interface |
+| `SdkOpenApiSchema`            | interface |
+| `BackoffStrategy`             | type      |
+| `ClientRequestInterceptor`    | type      |
+| `ClientResponseInterceptor`   | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

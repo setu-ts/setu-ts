@@ -108,14 +108,23 @@ The plugin registers a health indicator named `static-files`:
 
 ## Exports
 
-| Export                | Type      | Description              |
-| --------------------- | --------- | ------------------------ |
-| `StaticPlugin`        | function  | Plugin factory           |
-| `StaticFilesService`  | class     | Service implementation   |
-| `createStaticHandler` | function  | Standalone route handler |
-| `IStaticFiles`        | interface | Service interface type   |
-| `StaticPluginOptions` | type      | Plugin options type      |
+| Export                | Kind      |
+| --------------------- | --------- |
+| `createStaticHandler` | function  |
+| `StaticPlugin`        | function  |
+| `StaticFilesService`  | class     |
+| `IStaticFiles`        | interface |
+| `StaticPluginOptions` | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Example Application
 
-See [`apps/static-site/`](../../apps/static-site/) for a complete example.
+See [`apps/static-site/`](https://github.com/setu-ts/setu-ts/tree/main/apps/static-site) for a
+complete example.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#static-files-plugin-setu-tsstatic-plugin).
