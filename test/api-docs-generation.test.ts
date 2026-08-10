@@ -1373,3 +1373,60 @@ error[private-type-ref]: public type references private type
     });
   });
 });
+
+describe('cold-cache resilience (the CI-only failure)', () => {
+  /**
+   * `deno doc` writes `Download https://registry.npmjs.org/...` to stderr once
+   * per npm specifier its graph reaches, but ONLY when the cache is cold. CI is
+   * always cold; a developer machine almost never is. The classifier treats
+   * unrecognized stderr as a fatal child error, so the ratchet reported
+   * "fatal child error" on CI while passing locally — with the diagnostic count
+   * at exactly the baseline in both places.
+   *
+   * Two independent guards, pinned here because dropping either silently
+   * restores a green local run and a red CI one.
+   */
+  it('passes --quiet so progress output never reaches the classifier', () => {
+    // Measured: 2 `Download` lines without this flag under a forced cold fetch
+    // (`--reload=npm:drizzle-orm`), 0 with it.
+    expect(buildDenoDocArgs(['a.ts'], 'check', 'docs/api')).toContain('--quiet');
+    expect(buildDenoDocArgs(['a.ts'], 'generate', 'docs/api')).toContain('--quiet');
+  });
+
+  it('classifies real cold-cache stderr as lint debt, not a fatal error', () => {
+    // The exact shape CI produced, reduced to one diagnostic.
+    const stderr = [
+      'Download https://registry.npmjs.org/drizzle-orm',
+      'Download https://registry.npmjs.org/@prisma%2fclient',
+      "error[private-type-ref]: public type 'MemoryAuditStorage' references private type 'IAuditStorage'",
+      '  --> /repo/packages/audit-plugin/src/storage/memory-audit.ts:14:1',
+      '   = hint: make the referenced type public or remove the reference',
+      'Found 1 documentation lint errors.',
+    ].join('\n');
+
+    expect(classifyChildResult(1, '', stderr).kind).toBe('lint-debt');
+  });
+
+  it('still reports a genuine failure as fatal, so the tolerance stayed narrow', () => {
+    const stderr = [
+      'Download https://registry.npmjs.org/drizzle-orm',
+      "error[private-type-ref]: public type 'X' references private type 'Y'",
+      '  --> /repo/a.ts:1:1',
+      'Found 1 documentation lint errors.',
+      'error: Module not found "./missing.ts".',
+    ].join('\n');
+
+    expect(classifyChildResult(1, '', stderr).kind).toBe('fatal');
+  });
+
+  it('does not treat an arbitrary unrecognized line as progress', () => {
+    const stderr = [
+      'Something unexpected happened',
+      "error[private-type-ref]: public type 'X' references private type 'Y'",
+      '  --> /repo/a.ts:1:1',
+      'Found 1 documentation lint errors.',
+    ].join('\n');
+
+    expect(classifyChildResult(1, '', stderr).kind).toBe('fatal');
+  });
+});
