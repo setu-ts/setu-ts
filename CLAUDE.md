@@ -1852,7 +1852,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   changed. Developed on a branch cut before M56–M61, so `origin/main` was merged in before the final
   verification pass and the guides were re-checked against the merged tree — RFC 9457 (M56), derived
   OpenAPI security (M57), and the `module` schematic plus the M60/M61 CLI wiring all postdate the
-  guides' first draft — complete (PR pending)
+  guides' first draft. Verification then found the guides still taught the DEPRECATED `'rfc7807'`
+  alias in three files while `PUBLIC_API.md` called it deprecated (every gate passed — the alias
+  still exists, so every fence compiled), a phantom `## HttpClient` section documenting a
+  `@setu-ts/http-client-plugin` that exists nowhere in source, and two drift gates that could not
+  detect their own drift because they matched a bare substring rather than a link. Also: the
+  `PUBLIC_API.md` section anchors now name their package, which is a **breaking change for external
+  deep links** (`#storage` → `#storage-setu-tsstorage-plugin`) — complete (PR #143)
 - **Next milestone** — **M39** (docker/kubernetes), then M40. Queued behind those: **M59**
   (`cloudflare-plugin` — Workers-native messaging) and **M62** (`cli` — monorepo support). Both are
   ROADMAP sections only, with no plan and no code yet. M61 closed the optional-decorators/DI half of
