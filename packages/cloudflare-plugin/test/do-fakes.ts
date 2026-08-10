@@ -32,6 +32,7 @@ import type {
 import type { DurableObjectWebSocketPair } from '../src/durable-objects/do-websocket-host.ts';
 import { DistributedLockObjectCore } from '../src/durable-objects/distributed-lock-object.ts';
 import { RealtimeBackplaneObjectCore } from '../src/durable-objects/realtime-backplane-object.ts';
+import { ReplyInboxObjectCore } from '../src/durable-objects/reply-inbox-object.ts';
 import type { IDurableObjectNamespace } from '../src/bindings/facades.ts';
 
 /** In-memory Durable Object storage. */
@@ -177,6 +178,7 @@ export function linkedPair(): { client: FakeClientSocket; server: FakeServerSock
 export class FakeDurableObjectNamespace implements IDurableObjectNamespace {
   readonly states = new Map<string, FakeDurableObjectState>();
   readonly cores = new Map<string, RealtimeBackplaneObjectCore>();
+  readonly inboxCores = new Map<string, ReplyInboxObjectCore>();
   readonly lockCores = new Map<string, DistributedLockObjectCore>();
   /** Names every `idFromName` call received, so key derivation is assertable. */
   readonly requestedNames: string[] = [];
@@ -187,11 +189,11 @@ export class FakeDurableObjectNamespace implements IDurableObjectNamespace {
   /** Set to answer every lock call with this status instead of handling it. */
   lockStatus: number | undefined;
   /** Which core kind this namespace serves. */
-  readonly kind: 'realtime' | 'lock';
+  readonly kind: 'realtime' | 'lock' | 'reply-inbox';
   /** Clock handed to every lock core, so expiry is drivable. */
   now: () => number = () => 0;
 
-  constructor(kind: 'realtime' | 'lock' = 'realtime') {
+  constructor(kind: 'realtime' | 'lock' | 'reply-inbox' = 'realtime') {
     this.kind = kind;
   }
 
@@ -254,6 +256,10 @@ export class FakeDurableObjectNamespace implements IDurableObjectNamespace {
       return await core.fetch(request);
     }
 
+    if (this.kind === 'reply-inbox') {
+      return await this.#handleReplyInbox(name, request);
+    }
+
     let pair: DurableObjectWebSocketPair | undefined;
     // A fresh core per upgrade over the SAME state. That is not a shortcut —
     // it is what the platform does when a hibernated object wakes: the
@@ -278,6 +284,39 @@ export class FakeDurableObjectNamespace implements IDurableObjectNamespace {
     // the fake answers the shape the platform actually produces. Reproducing
     // this is the whole point — a real `Response` here would make every happy
     // path throw in `asUpgradeResponse`.
+    return { status: 101, webSocket: pair.client } as unknown as Response;
+  }
+
+  /**
+   * Serves one reply-inbox object.
+   *
+   * A **fresh core per call over the same state**, for the same reason the
+   * realtime path builds one: a hibernated object re-runs its constructor, so
+   * any membership the core held in a field would be gone by the time a reply
+   * is posted. Delivery here therefore proves `getWebSockets()` is the only
+   * membership the core reads.
+   */
+  async #handleReplyInbox(name: string, request: Request): Promise<Response> {
+    let pair: DurableObjectWebSocketPair | undefined;
+    const core = new ReplyInboxObjectCore(this.state(name), {
+      createPair: {
+        createPair: (): DurableObjectWebSocketPair => {
+          const { client, server } = linkedPair();
+          this.clients.push(client);
+          client.onClose = (): void => {
+            this.states.get(name)?.drop(server);
+          };
+          pair = { client, server };
+          return pair;
+        },
+      },
+    });
+    this.inboxCores.set(name, core);
+
+    const response = await core.fetch(request);
+    if (response.status !== 101 || pair === undefined || this.omitSocket) {
+      return response;
+    }
     return { status: 101, webSocket: pair.client } as unknown as Response;
   }
 
