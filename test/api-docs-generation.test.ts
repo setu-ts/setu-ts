@@ -348,12 +348,13 @@ error[private-type-ref]: public type references private type
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the frozen baseline of 775', () => {
+    it('is the frozen baseline of 774', () => {
       // 776 when the plan was written against a pre-M56 tree; merging
       // origin/main brought M56-M61's JSDoc and the real count fell to 775.
-      // The ratchet refused the stale constant and named the new number, which
-      // is exactly the behaviour §3.10 specifies for a below-baseline run.
-      expect(DOC_LINT_BASELINE).toBe(775);
+      // M59 then added four diagnostics and removed five, so it fell to 774.
+      // The ratchet refused the stale constant in BOTH directions and named
+      // the new number, which is exactly the behaviour §3.10 specifies.
+      expect(DOC_LINT_BASELINE).toBe(774);
     });
   });
 
