@@ -65,9 +65,43 @@ problem type identified by `https://setu-ts.dev/errors/validation` — the same 
 > (`https://setu-ts.dev/errors/404`) they always did — a deprecated symbol must not silently change
 > behavior — so upgrading is a deliberate one-word edit. Removal is scheduled for v1.0.0.
 
+## Exports
+
+| Export                  | Kind      |
+| ----------------------- | --------- |
+| `badRequest`            | function  |
+| `conflict`              | function  |
+| `defaultFormatter`      | function  |
+| `errorHandler`          | function  |
+| `forbidden`             | function  |
+| `internalServerError`   | function  |
+| `notFound`              | function  |
+| `notImplemented`        | function  |
+| `rfc7807Formatter`      | function  |
+| `rfc9457Formatter`      | function  |
+| `selectFormatter`       | function  |
+| `serviceUnavailable`    | function  |
+| `statusTitle`           | function  |
+| `tooManyRequests`       | function  |
+| `unauthorized`          | function  |
+| `validationError`       | function  |
+| `HttpError`             | class     |
+| `ERROR_TYPE_BASE`       | const     |
+| `STATUS_TITLES`         | const     |
+| `DefaultErrorBody`      | interface |
+| `ErrorHandlerOptions`   | interface |
+| `HttpErrorInit`         | interface |
+| `ProblemDetails`        | interface |
+| `ValidationError`       | interface |
+| `ErrorFormat`           | type      |
+| `ErrorHandlerFormatter` | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export, its signature, and the exact response shapes are documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#api-reference-setu-tsexceptions).
 
 [rfc9457]: https://www.rfc-editor.org/rfc/rfc9457.html

@@ -49,7 +49,28 @@ can coexist in one application.
 `ReadableStream` cannot be replayed from a cache, so those requests are marked `X-Cache: MISS` and
 pass straight through.
 
+## Exports
+
+| Export                   | Kind      |
+| ------------------------ | --------- |
+| `cacheMiddleware`        | function  |
+| `CachePlugin`            | function  |
+| `CacheService`           | class     |
+| `MemoryStore`            | class     |
+| `NoopStore`              | class     |
+| `RedisStore`             | class     |
+| `CachedResponsePayload`  | interface |
+| `CacheMiddlewareOptions` | interface |
+| `CachePluginOptions`     | interface |
+| `CacheStoreOptions`      | interface |
+| `ICacheStore`            | interface |
+| `IRedisClient`           | interface |
+| `CacheStoreType`         | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#cacheplugin-setu-tscache-plugin).

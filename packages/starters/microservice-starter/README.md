@@ -192,5 +192,17 @@ Three consequences, each a startup throw rather than a silent misinjection:
 ## See Also
 
 - [JSR Registry](https://jsr.io/@setu-ts/microservice-starter)
-- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#starter-exports-and-option-arms)
 - [rest-starter](https://github.com/setu-ts/setu-ts/blob/main/packages/starters/rest-starter/README.md)
+
+## Exports
+
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `buildMicroservicePlugins`   | function  |
+| `createMicroserviceApp`      | function  |
+| `MicroserviceStarterOptions` | interface |
+| `RealtimeArm`                | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

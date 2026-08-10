@@ -57,7 +57,51 @@ The template engine renders named `{{ variable }}` placeholders. The `html` body
 **HTML-escaped**; a missing variable or an unknown template **throws** rather than rendering an
 empty string.
 
+## Exports
+
+| Export                    | Kind      |
+| ------------------------- | --------- |
+| `adaptNodemailerModule`   | function  |
+| `adaptSesModule`          | function  |
+| `createProvider`          | function  |
+| `escapeHtml`              | function  |
+| `loadNodemailerModule`    | function  |
+| `loadSesModule`           | function  |
+| `MailPlugin`              | function  |
+| `toNodemailerMessage`     | function  |
+| `toSendGridBody`          | function  |
+| `toSesInput`              | function  |
+| `validateSesClient`       | function  |
+| `validateSmtpTransport`   | function  |
+| `LogProvider`             | class     |
+| `MailService`             | class     |
+| `SendGridProvider`        | class     |
+| `SesProvider`             | class     |
+| `SmtpProvider`            | class     |
+| `TemplateEngine`          | class     |
+| `IMailer`                 | interface |
+| `ISesClient`              | interface |
+| `ISmtpTransport`          | interface |
+| `LogProviderOptions`      | interface |
+| `MailMessage`             | interface |
+| `MailPluginOptions`       | interface |
+| `MailProviderOptions`     | interface |
+| `MailServiceOptions`      | interface |
+| `MailTemplate`            | interface |
+| `NodemailerModule`        | interface |
+| `RenderedTemplate`        | interface |
+| `SendGridProviderOptions` | interface |
+| `SesProviderOptions`      | interface |
+| `SesSdkModule`            | interface |
+| `SmtpProviderOptions`     | interface |
+| `IMailHttp`               | type      |
+| `MailProviderType`        | type      |
+| `OutgoingMail`            | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#mailplugin-setu-tsmail-plugin).

@@ -243,18 +243,36 @@ arriving while every session reads as absent.
 
 ## Exports
 
-`SessionPlugin`, `SessionService`, `getSession`, `sessionMiddleware`, `csrfFormMiddleware`,
-`getCsrfToken`, `verifyCsrfToken`, `CSRF_SESSION_KEY`, `MemorySessionStore`, `CacheSessionStore`,
-`SessionSecretMissingError`, `SessionMiddlewareMissingError`, `CsrfTokenMismatchError`,
-`SessionTooLargeError`, and the option types.
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `csrfFormMiddleware`            | function  |
+| `getCsrfToken`                  | function  |
+| `getSession`                    | function  |
+| `sessionMiddleware`             | function  |
+| `SessionPlugin`                 | function  |
+| `verifyCsrfToken`               | function  |
+| `CacheSessionStore`             | class     |
+| `CsrfTokenMismatchError`        | class     |
+| `MemorySessionStore`            | class     |
+| `SessionMiddlewareMissingError` | class     |
+| `SessionSecretMissingError`     | class     |
+| `SessionService`                | class     |
+| `SessionTooLargeError`          | class     |
+| `CSRF_SESSION_KEY`              | const     |
+| `CacheSessionStoreOptions`      | interface |
+| `CsrfFormOptions`               | interface |
+| `MemorySessionStoreDeps`        | interface |
+| `SessionCookieOptions`          | interface |
+| `SessionPluginOptions`          | interface |
+| `SessionServiceDeps`            | interface |
+| `SessionMode`                   | type      |
 
-The `ISession` / `ISessionService` / `ISessionStore` contracts and the `parseCookie` /
-`serializeCookie` codec live in
-[`@setu-ts/common`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Documentation
 
-- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#sessionplugin-setu-tssession-plugin)
 - [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md)
 
 ## License

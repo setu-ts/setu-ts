@@ -10,62 +10,61 @@
 1. [Installation](#installation)
 2. [Full Stack Application](#full-stack-application)
 3. [Minimal Application](#minimal-application)
-4. [createApplication()](#createapplication)
-5. [RuntimePlugin()](#runtimeplugin)
-6. [LoggerPlugin()](#loggerplugin)
-7. [ConfigPlugin()](#configplugin)
-8. [ValidationPlugin()](#validationplugin)
-9. [DatabasePlugin()](#databaseplugin)
-10. [AuthPlugin()](#authplugin)
-11. [HttpSecurityPlugin()](#httpsecurityplugin)
-12. [CachePlugin()](#cacheplugin)
-13. [EventsPlugin()](#eventsplugin)
-14. [SsePlugin()](#sseplugin)
-15. [WebSocketPlugin()](#websocketplugin)
-16. [RealtimeBackplanePlugin()](#realtimebackplaneplugin)
-17. [SessionPlugin()](#sessionplugin)
-18. [ReactRouterPlugin()](#reactrouterplugin)
-19. [WorkerPoolPlugin()](#workerpoolplugin)
-20. [SecretsPlugin()](#secretsplugin)
-21. [AuditPlugin()](#auditplugin)
-22. [CQRS](#cqrs)
-23. [Messaging](#messaging)
-24. [Queue](#queue)
-25. [Scheduler](#scheduler)
-26. [Resilience](#resilience)
-27. [HttpClient](#httpclient)
-28. [Storage](#storage)
-29. [MailPlugin()](#mailplugin)
-30. [Notifications](#notifications)
-31. [Feature Flags](#feature-flags)
-32. [Multi-Tenancy Plugin](#multi-tenancy-plugin)
-33. [Health](#health)
-34. [Metrics](#metrics)
-35. [Telemetry](#telemetry)
-36. [OpenAPI](#openapi)
-37. [CLI](#cli)
-38. [REST API Application](#rest-api-application)
-39. [Microservice Application](#microservice-application)
-40. [CQRS Application](#cqrs-application)
-41. [Plugin Creation](#plugin-creation)
-42. [Custom Middleware](#custom-middleware)
-43. [Custom Decorators](#custom-decorators)
-44. [Service Discovery](#service-discovery)
-45. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
-46. [Developer Ergonomics](#developer-ergonomics)
-47. [API Reference: @setu-ts/common](#api-reference-setu-tscommon)
-48. [API Reference: @setu-ts/kernel](#api-reference-setu-tskernel)
-49. [API Reference: @setu-ts/runtime](#api-reference-setu-tsruntime)
-50. [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions)
-51. [API Reference: @setu-ts/di-plugin](#api-reference-setu-tsdi-plugin)
-52. [API Reference: @setu-ts/decorator-plugin](#api-reference-setu-tsdecorator-plugin)
-53. [Testing Package (@setu-ts/testing)](#testing-package-setu-tstesting)
-54. [SDK — Client SDK (@setu-ts/sdk)](#sdk--client-sdk-setu-tssdk)
-55. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
-56. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
-57. [GraphQL](#graphql)
-58. [Static Files Plugin](#static-files-plugin)
-59. [Summary](#summary)
+4. [createApplication() (`@setu-ts/kernel`)](#createapplication-setu-tskernel)
+5. [RuntimePlugin() (`@setu-ts/runtime`)](#runtimeplugin-setu-tsruntime)
+6. [LoggerPlugin() (`@setu-ts/logger-plugin`)](#loggerplugin-setu-tslogger-plugin)
+7. [ConfigPlugin() (`@setu-ts/config-plugin`)](#configplugin-setu-tsconfig-plugin)
+8. [ValidationPlugin() (`@setu-ts/validation-plugin`)](#validationplugin-setu-tsvalidation-plugin)
+9. [DatabasePlugin() (`@setu-ts/database-plugin`)](#databaseplugin-setu-tsdatabase-plugin)
+10. [AuthPlugin() (`@setu-ts/auth-plugin`)](#authplugin-setu-tsauth-plugin)
+11. [HttpSecurityPlugin() (`@setu-ts/http-security-plugin`)](#httpsecurityplugin-setu-tshttp-security-plugin)
+12. [CachePlugin() (`@setu-ts/cache-plugin`)](#cacheplugin-setu-tscache-plugin)
+13. [EventsPlugin() (`@setu-ts/events-plugin`)](#eventsplugin-setu-tsevents-plugin)
+14. [SsePlugin() (`@setu-ts/sse-plugin`)](#sseplugin-setu-tssse-plugin)
+15. [WebSocketPlugin() (`@setu-ts/websocket-plugin`)](#websocketplugin-setu-tswebsocket-plugin)
+16. [RealtimeBackplanePlugin() (`@setu-ts/realtime-backplane-plugin`)](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin)
+17. [SessionPlugin() (`@setu-ts/session-plugin`)](#sessionplugin-setu-tssession-plugin)
+18. [ReactRouterPlugin() (`@setu-ts/react-router-plugin`)](#reactrouterplugin-setu-tsreact-router-plugin)
+19. [WorkerPoolPlugin() (`@setu-ts/worker-pool-plugin`)](#workerpoolplugin-setu-tsworker-pool-plugin)
+20. [SecretsPlugin() (`@setu-ts/secrets-plugin`)](#secretsplugin-setu-tssecrets-plugin)
+21. [AuditPlugin() (`@setu-ts/audit-plugin`)](#auditplugin-setu-tsaudit-plugin)
+22. [CQRS (`@setu-ts/cqrs-plugin`)](#cqrs-setu-tscqrs-plugin)
+23. [Messaging (`@setu-ts/messaging-plugin`)](#messaging-setu-tsmessaging-plugin)
+24. [Queue (`@setu-ts/queue-plugin`)](#queue-setu-tsqueue-plugin)
+25. [Scheduler (`@setu-ts/scheduler-plugin`)](#scheduler-setu-tsscheduler-plugin)
+26. [Resilience (`@setu-ts/resilience-plugin`)](#resilience-setu-tsresilience-plugin)
+27. [Storage (`@setu-ts/storage-plugin`)](#storage-setu-tsstorage-plugin)
+28. [MailPlugin() (`@setu-ts/mail-plugin`)](#mailplugin-setu-tsmail-plugin)
+29. [Notifications (`@setu-ts/notification-plugin`)](#notifications-setu-tsnotification-plugin)
+30. [Feature Flags (`@setu-ts/feature-flags-plugin`)](#feature-flags-setu-tsfeature-flags-plugin)
+31. [Multi-Tenancy Plugin (`@setu-ts/multi-tenancy-plugin`)](#multi-tenancy-plugin-setu-tsmulti-tenancy-plugin)
+32. [Health (`@setu-ts/health-plugin`)](#health-setu-tshealth-plugin)
+33. [Metrics (`@setu-ts/metrics-plugin`)](#metrics-setu-tsmetrics-plugin)
+34. [Telemetry (`@setu-ts/telemetry-plugin`)](#telemetry-setu-tstelemetry-plugin)
+35. [OpenAPI (`@setu-ts/openapi-plugin`)](#openapi-setu-tsopenapi-plugin)
+36. [CLI (`@setu-ts/cli`)](#cli-setu-tscli)
+37. [REST API Application](#rest-api-application)
+38. [Microservice Application](#microservice-application)
+39. [CQRS Application](#cqrs-application)
+40. [Plugin Creation](#plugin-creation)
+41. [Custom Middleware](#custom-middleware)
+42. [Custom Decorators](#custom-decorators)
+43. [Service Discovery (`@setu-ts/service-discovery-plugin`)](#service-discovery-setu-tsservice-discovery-plugin)
+44. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
+45. [Developer Ergonomics](#developer-ergonomics)
+46. [API Reference: @setu-ts/common](#api-reference-setu-tscommon)
+47. [API Reference: @setu-ts/kernel](#api-reference-setu-tskernel)
+48. [API Reference: @setu-ts/runtime](#api-reference-setu-tsruntime)
+49. [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions)
+50. [API Reference: @setu-ts/di-plugin](#api-reference-setu-tsdi-plugin)
+51. [API Reference: @setu-ts/decorator-plugin](#api-reference-setu-tsdecorator-plugin)
+52. [Testing Package (`@setu-ts/testing`)](#testing-package-setu-tstesting)
+53. [SDK — Client SDK (`@setu-ts/sdk`)](#sdk--client-sdk-setu-tssdk)
+54. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
+55. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
+56. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
+57. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
+58. [Summary](#summary)
 
 ---
 
@@ -148,7 +147,7 @@ No decorators. No DI. No reflection. Just a router and a runtime.
 
 ---
 
-## createApplication()
+## createApplication() (`@setu-ts/kernel`)
 
 The entry point to the framework.
 
@@ -223,7 +222,7 @@ so you can call `inject()` or `fetch()` directly. See
 
 ---
 
-## RuntimePlugin()
+## RuntimePlugin() (`@setu-ts/runtime`)
 
 Provides runtime-agnostic services (UUID, timers, crypto, env, HTTP server).
 
@@ -346,7 +345,7 @@ whose sole export is `defineWorkerTask` (see the WorkerPoolPlugin section).
 
 ---
 
-## LoggerPlugin()
+## LoggerPlugin() (`@setu-ts/logger-plugin`)
 
 Provides structured logging via a capability token. The plugin depends on `RuntimePlugin` and
 registers its `ILogger` under `CAPABILITIES.LOGGER` at `PLUGIN_PRIORITY.HIGH` (100) so logging is
@@ -461,7 +460,7 @@ The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child l
 
 ---
 
-## ConfigPlugin()
+## ConfigPlugin() (`@setu-ts/config-plugin`)
 
 Provides strongly-typed configuration with environment validation and `.env` file loading.
 Configuration is an immutable application-startup snapshot — values are loaded once at startup and
@@ -608,7 +607,7 @@ so throws a clear startup error.
 
 ---
 
-## ValidationPlugin()
+## ValidationPlugin() (`@setu-ts/validation-plugin`)
 
 Provides schema-based request validation with standardized error responses. Schemas are duck-typed
 via a structural `safeParse()` interface — no hard Zod dependency in the plugin itself.
@@ -822,7 +821,7 @@ app.register(ValidationPlugin({
 
 ---
 
-## DatabasePlugin()
+## DatabasePlugin() (`@setu-ts/database-plugin`)
 
 Provides database access with repository pattern and unit of work.
 
@@ -1034,7 +1033,7 @@ app.router.get('/analytics', async (ctx) => {
 
 ---
 
-## AuthPlugin()
+## AuthPlugin() (`@setu-ts/auth-plugin`)
 
 Provides JWT and API-key authentication, local credential verification, RBAC authorization with role
 hierarchy, and short-circuiting route guards. All cryptography (HS256/RS256 JWT, PBKDF2-SHA256
@@ -1325,7 +1324,7 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 
 ---
 
-## HttpSecurityPlugin()
+## HttpSecurityPlugin() (`@setu-ts/http-security-plugin`)
 
 Provides HTTP transport security as a middleware-only plugin: CORS, security response headers, CSRF
 (stateless Origin/Referer validation), request-size limiting, and IP resolution. Registers **no
@@ -1429,7 +1428,7 @@ present. The fallback is retained for a custom `IHttpAdapter` that does set it.
 
 ---
 
-## CachePlugin()
+## CachePlugin() (`@setu-ts/cache-plugin`)
 
 Provides caching with multiple stores (Memory, Redis, Noop) and a transparent response-caching
 middleware.
@@ -1534,7 +1533,7 @@ interface ICacheStore {
 
 ---
 
-## EventsPlugin()
+## EventsPlugin() (`@setu-ts/events-plugin`)
 
 Provides in-memory event bus for domain events.
 
@@ -1655,7 +1654,7 @@ interface IEventBus {
 
 ---
 
-## SsePlugin()
+## SsePlugin() (`@setu-ts/sse-plugin`)
 
 Provides Server-Sent Events (SSE) for real-time, one-way server-to-client messaging over
 `text/event-stream`. Built on the Milestone 42 `IResponse.stream()` primitive and
@@ -1735,10 +1734,11 @@ Omitting an option disables that behaviour (no timer created).
 
 - Built entirely on web-standard `ReadableStream`; no platform-specific server socket APIs.
 - **Channels are in-process until a backplane is registered.** Register
-  [`RealtimeBackplanePlugin`](#realtimebackplaneplugin) and every `publish` also reaches members on
-  other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE` provider the behavior is unchanged.
-  `SseChannel.size` keeps reporting **local** membership either way. `SseChannelImpl.publishLocal`
-  is the local-only delivery path the backplane subscriber uses; applications call `publish`.
+  [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
+  `publish` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
+  provider the behavior is unchanged. `SseChannel.size` keeps reporting **local** membership either
+  way. `SseChannelImpl.publishLocal` is the local-only delivery path the backplane subscriber uses;
+  applications call `publish`.
 - Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
 - The `inject()` method cannot read a streaming body and throws when it meets one; SSE integration
@@ -1746,7 +1746,7 @@ Omitting an option disables that behaviour (no timer created).
 
 ---
 
-## WebSocketPlugin()
+## WebSocketPlugin() (`@setu-ts/websocket-plugin`)
 
 Provides full-duplex, bidirectional real-time messaging, completing the real-time story that
 `SsePlugin` covers one-way. Registers an `IWebSocketService` under `CAPABILITIES.WEBSOCKET`. Added
@@ -1857,13 +1857,13 @@ ws.route('/ws/chat', {
 - **A custom adapter without `setUpgradeRouter` degrades gracefully**: the service still registers,
   the health indicator reports `available: false`, and `route()` throws `WebSocketUnavailableError`.
 - **Rooms are in-process until a backplane is registered.** Register
-  [`RealtimeBackplanePlugin`](#realtimebackplaneplugin) and every `broadcast` also reaches members
-  on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE` provider the behavior is unchanged.
-  `RoomBroadcastOptions.except` is honored on **every** replica: connection IDs come from
-  `runtime.uuid()` and are globally unique, so the frame carries the excluded ID. `Room.size` keeps
-  reporting **local** membership either way. `Room.broadcastLocal` is the local-only delivery path
-  the backplane subscriber uses (its `LocalBroadcastOptions` adds `exceptId`); applications call
-  `broadcast`.
+  [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
+  `broadcast` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
+  provider the behavior is unchanged. `RoomBroadcastOptions.except` is honored on **every** replica:
+  connection IDs come from `runtime.uuid()` and are globally unique, so the frame carries the
+  excluded ID. `Room.size` keeps reporting **local** membership either way. `Room.broadcastLocal` is
+  the local-only delivery path the backplane subscriber uses (its `LocalBroadcastOptions` adds
+  `exceptId`); applications call `broadcast`.
 - A `RoomRegistry` keeps a reverse `connection → rooms` index, so evicting a disconnecting peer
   costs only the rooms that peer had actually joined rather than a scan of every live room. The
   index is maintained through the `RoomMembershipListener` the registry gives each `Room` it
@@ -1879,7 +1879,7 @@ ws.route('/ws/chat', {
 
 ---
 
-## RealtimeBackplanePlugin()
+## RealtimeBackplanePlugin() (`@setu-ts/realtime-backplane-plugin`)
 
 Provides cross-replica fan-out for WebSocket rooms and SSE channels. Registers an
 `IRealtimeBackplane` under `CAPABILITIES.REALTIME_BACKPLANE` (`'realtime-backplane'`). Added in
@@ -1988,7 +1988,7 @@ Discriminated on `transport`.
 
 ---
 
-## SessionPlugin()
+## SessionPlugin() (`@setu-ts/session-plugin`)
 
 Cookie-backed sessions and session-backed form CSRF. Registers a `SessionService`
 (`ISessionService`) under `CAPABILITIES.SESSION` (`'session'`). Added in Milestone 48.
@@ -2122,7 +2122,7 @@ app.router.post('/login', (ctx) => {
 
 ---
 
-## ReactRouterPlugin()
+## ReactRouterPlugin() (`@setu-ts/react-router-plugin`)
 
 Embeds **React Router v7 framework mode** as a first-party plugin so a Setu-TS application can serve
 a React frontend with Server-Side Rendering (SSR) and file-based routing. React Router's
@@ -2333,7 +2333,7 @@ client bundle has to inline what it imports and cannot resolve a JSR specifier.
 
 ---
 
-## WorkerPoolPlugin()
+## WorkerPoolPlugin() (`@setu-ts/worker-pool-plugin`)
 
 Runs CPU-bound work (image processing, report generation, large data transforms) on **real worker
 threads**, off the event loop, behind the capability model. Registers an `IWorkerPool` under
@@ -2435,7 +2435,7 @@ app.router.post('/thumbnail', async (ctx) => {
 
 ---
 
-## SecretsPlugin()
+## SecretsPlugin() (`@setu-ts/secrets-plugin`)
 
 Provides secret management: registers an `ISecretManager` under `CAPABILITIES.SECRETS`, backed by a
 pluggable provider with a monotonic-clock read-through cache. The default provider is `'env'`
@@ -2514,7 +2514,7 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 
 ---
 
-## AuditPlugin()
+## AuditPlugin() (`@setu-ts/audit-plugin`)
 
 Provides an immutable audit trail: registers an `IAuditLogger` under `CAPABILITIES.AUDIT`, backed by
 a pluggable storage backend. `log()` stamps each entry with an internally assigned `id`
@@ -2606,7 +2606,7 @@ not part of the public capability this milestone.
 
 ---
 
-## CQRS
+## CQRS (`@setu-ts/cqrs-plugin`)
 
 Provides command/query separation with buses.
 
@@ -2743,7 +2743,7 @@ app.router.get('/users/:id', async (ctx) => {
 
 ---
 
-## Messaging
+## Messaging (`@setu-ts/messaging-plugin`)
 
 Provides message broker abstraction for cross-service integration events.
 
@@ -3196,7 +3196,7 @@ export type {
 
 ---
 
-## Queue
+## Queue (`@setu-ts/queue-plugin`)
 
 Provides background job queue with Memory and Redis adapters.
 
@@ -3426,7 +3426,7 @@ interface IQueue {
 
 ---
 
-## Scheduler
+## Scheduler (`@setu-ts/scheduler-plugin`)
 
 Provides cron jobs, fixed-interval recurring jobs, and one-shot delayed jobs, with retry and
 distributed locking.
@@ -3435,7 +3435,7 @@ Registers `IScheduler` under `CAPABILITIES.SCHEDULER` (`'scheduler'`).
 
 Execution is in-process and time-driven — jobs are **not** durably persisted, so a restart drops the
 schedule until the registering plugin re-creates it. For durable background work, use
-[Queue](#queue) instead.
+[Queue](#queue-setu-tsqueue-plugin) instead.
 
 ### Exports
 
@@ -3604,7 +3604,7 @@ timers and disconnects the Redis lock on shutdown.
 
 ---
 
-## Resilience
+## Resilience (`@setu-ts/resilience-plugin`)
 
 Composes four pure, in-process resilience patterns — circuit breaker, retry with backoff, timeout,
 and bulkhead — around an arbitrary `() => Promise<T>`. Zero external dependencies.
@@ -3723,56 +3723,7 @@ Breaker/bulkhead state is per-process and per-`wrap`; there is no shared state a
 
 ---
 
-## HttpClient
-
-Provides an HTTP client for external API calls.
-
-### Registration
-
-```typescript
-import { HttpClientPlugin } from '@setu-ts/http-client-plugin';
-
-app.register(HttpClientPlugin({
-  baseURL: 'https://api.external.com',
-  timeout: 5000,
-  retries: 3,
-  retryDelay: 1000,
-  headers: {
-    'User-Agent': 'my-app/1.0',
-  },
-}));
-```
-
-### Usage
-
-```typescript
-app.router.get('/weather', async (ctx) => {
-  const http = ctx.services.get<IHttpClient>('http-client');
-
-  const response = await http.get('/weather', {
-    params: { city: 'London' },
-    headers: { 'X-API-Key': config.get('WEATHER_API_KEY') },
-  });
-
-  return ctx.response.json(response.data);
-});
-
-// POST
-const result = await http.post('/webhook', {
-  event: 'order.created',
-  data: { orderId: '123' },
-});
-
-// With retry and circuit breaker
-const data = await http.get('/unstable-api', {
-  retry: { limit: 3, backoff: 'exponential' },
-  circuitBreaker: { threshold: 5, timeout: 30000 },
-});
-```
-
----
-
-## Storage
+## Storage (`@setu-ts/storage-plugin`)
 
 Provides file storage abstraction.
 
@@ -3884,7 +3835,7 @@ All cloud providers support an injectable `client` option (`IAwsS3Client` / `IGc
 
 ---
 
-## MailPlugin()
+## MailPlugin() (`@setu-ts/mail-plugin`)
 
 Provides email sending: registers an `IMailer` under `CAPABILITIES.MAIL`, backed by a pluggable
 provider. The default provider is `'log'` (zero-dependency, every runtime — records/logs each
@@ -3994,7 +3945,7 @@ app.router.post('/users', async (ctx) => {
 
 ---
 
-## Notifications
+## Notifications (`@setu-ts/notification-plugin`)
 
 Provides multi-channel notifications.
 
@@ -4121,7 +4072,7 @@ through `CAPABILITIES.MAIL`.
 
 ---
 
-## Feature Flags
+## Feature Flags (`@setu-ts/feature-flags-plugin`)
 
 Provides feature flag capability.
 
@@ -4241,7 +4192,7 @@ app.router.get('/beta', {
 
 ---
 
-## Multi-Tenancy Plugin
+## Multi-Tenancy Plugin (`@setu-ts/multi-tenancy-plugin`)
 
 Provides multi-tenancy support: tenant resolution, tenant context, tenant-scoped repositories,
 cache-key isolation, and pluggable database-isolation strategies.
@@ -4353,7 +4304,7 @@ app.router.get('/users', async (ctx) => {
 - **Auto-added at priority 40.** Runs after observability (metrics 20 / telemetry 30), before auth
   (300). Exported for manual re-ordering.
 
-## Health
+## Health (`@setu-ts/health-plugin`)
 
 Provides health check endpoints with pluggable indicators.
 
@@ -4461,7 +4412,7 @@ GET /health
 
 ---
 
-## Metrics
+## Metrics (`@setu-ts/metrics-plugin`)
 
 Provides Prometheus metrics.
 
@@ -4582,7 +4533,7 @@ http_request_duration_seconds_bucket{le="0.5"} 150
 
 ---
 
-## Telemetry
+## Telemetry (`@setu-ts/telemetry-plugin`)
 
 Provides OpenTelemetry distributed tracing. The `TelemetryPlugin` registers an `ITelemetryService`
 under `CAPABILITIES.TELEMETRY` (`'telemetry'`), exposing manual span creation via `withSpan` plus a
@@ -4725,7 +4676,7 @@ its implementation seam.
 
 ---
 
-## OpenAPI
+## OpenAPI (`@setu-ts/openapi-plugin`)
 
 Provides automatic OpenAPI documentation.
 
@@ -4904,7 +4855,7 @@ const spec = openapi.getSpec();
 
 ---
 
-## CLI
+## CLI (`@setu-ts/cli`)
 
 `@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation.
 Install it with an explicit binary name, because Deno's default inference would name it after the
@@ -6082,7 +6033,7 @@ app.router.post('/users', {
 
 ---
 
-## Service Discovery
+## Service Discovery (`@setu-ts/service-discovery-plugin`)
 
 Turns a logical service name into a reachable address, balances across the instances behind it, and
 takes them out of rotation when callers report failures. Registers an `IServiceDiscovery` under
@@ -6425,12 +6376,10 @@ See [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions) for w
 
 ### Hot Reload
 
-```bash
-# Development with hot reload
-setu-ts dev
+Setu-TS does not include a built-in dev server. Use `deno run --watch` directly:
 
-# Or with file watching
-deno task dev  # runs `deno run --watch` under the hood
+```bash
+deno run --watch main.ts
 ```
 
 ### Debugging
@@ -8122,7 +8071,7 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
 
 ---
 
-## GraphQL
+## GraphQL (`@setu-ts/graphql-plugin`)
 
 Schema-first and code-first GraphQL support over the kernel router.
 
@@ -8354,7 +8303,7 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 ---
 
-## Static Files Plugin
+## Static Files Plugin (`@setu-ts/static-plugin`)
 
 **Package:** `@setu-ts/static-plugin`
 

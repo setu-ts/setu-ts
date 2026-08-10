@@ -110,3 +110,24 @@ All four are exported for `instanceof` handling: `WorkerPoolUnavailableError`, `
 
 Registers a `worker-pool` health indicator reporting `{ available, pools }`, where `pools` is one
 `{ taskModule, workers, busy, queued, completed, failed }` snapshot per pool.
+
+## Exports
+
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `WorkerPoolPlugin`           | function  |
+| `WorkerPoolService`          | class     |
+| `WorkerPoolUnavailableError` | class     |
+| `WorkerQueueFullError`       | class     |
+| `WorkerTaskError`            | class     |
+| `WorkerTaskTimeoutError`     | class     |
+| `TaskPoolOptions`            | interface |
+| `WorkerPoolPluginOptions`    | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#workerpoolplugin-setu-tsworker-pool-plugin).

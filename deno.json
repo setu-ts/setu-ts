@@ -51,10 +51,14 @@
   "tasks": {
     "check": "deno check packages",
     "check:apps": "deno run --allow-read --allow-run --allow-env=ALLOW_SKIP scripts/check-apps.ts",
-    "check:docs": "deno run --allow-read scripts/check-docs.ts",
+    "check:docs": "deno run --allow-read --allow-run scripts/check-docs.ts && deno run --allow-read --allow-run --allow-env scripts/generate-api-docs.ts --check",
+    "check:api-docs": "deno run --allow-read --allow-run --allow-env scripts/generate-api-docs.ts --check",
+    "check:script-coverage": "deno run --allow-run=deno scripts/script-coverage.ts coverage",
+    "docs:api": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",
+    "release:docs": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",
     "check:plan": "deno run --allow-read scripts/plan-lint.ts",
-    "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease packages test",
-    "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease packages test --coverage=coverage --coverage-raw-data-only && deno run --allow-run=deno scripts/coverage.ts",
+    "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git --allow-write packages test",
+    "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git --allow-write packages test --coverage=coverage --coverage-raw-data-only && deno run --allow-run=deno scripts/coverage.ts && deno run --allow-run=deno scripts/script-coverage.ts coverage",
     "audit": "deno audit --level=high",
     "publish:check": "deno publish --dry-run",
     "release:verify": "deno run --allow-read scripts/verify-release.ts",
@@ -65,7 +69,8 @@
     "release:set-metadata": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE --allow-net=api.jsr.io scripts/set-jsr-metadata.ts",
     "lint": "deno lint",
     "fmt": "deno fmt",
-    "fmt:check": "deno fmt --check"
+    "fmt:check": "deno fmt --check",
+    "docs:exports": "deno run --allow-read --allow-write --allow-run=deno scripts/generate-package-exports.ts"
   },
   "compilerOptions": {
     "strict": true,

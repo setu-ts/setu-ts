@@ -117,3 +117,36 @@ SecretsPlugin({
 
 `EnvProvider` is read-only: `rotate()` (and provider `set`) throws, because environment variables
 cannot be mutated at runtime.
+
+## Exports
+
+| Export                            | Kind      |
+| --------------------------------- | --------- |
+| `SecretsPlugin`                   | function  |
+| `AwsKmsProvider`                  | class     |
+| `AzureKeyVaultProvider`           | class     |
+| `EnvProvider`                     | class     |
+| `GcpSecretManagerProvider`        | class     |
+| `HashiCorpVaultProvider`          | class     |
+| `SecretsService`                  | class     |
+| `AwsKmsProviderOptions`           | interface |
+| `AzureKeyVaultProviderOptions`    | interface |
+| `GcpSecretManagerProviderOptions` | interface |
+| `HashiCorpVaultProviderOptions`   | interface |
+| `IAwsSecretsClient`               | interface |
+| `IAzureSecretsClient`             | interface |
+| `IGcpSecretsClient`               | interface |
+| `ISecretManager`                  | interface |
+| `SecretsPluginOptions`            | interface |
+| `SecretsProviderOptions`          | interface |
+| `SecretsServiceOptions`           | interface |
+| `IVaultHttp`                      | type      |
+| `SecretsProviderType`             | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#secretsplugin-setu-tssecrets-plugin).

@@ -55,7 +55,26 @@ Without `distributedLock`, a process-local `MemoryLock` is used — fine for a s
 **every replica will run every job**. Set `{ enabled: true, storage: 'redis' }` to use `RedisLock`
 (over `npm:ioredis`, lazily imported or injected) so only one replica executes each firing.
 
+## Exports
+
+| Export                   | Kind      |
+| ------------------------ | --------- |
+| `SchedulerPlugin`        | function  |
+| `DistributedLockOptions` | interface |
+| `IDistributedLock`       | interface |
+| `IRedisLockClient`       | interface |
+| `IScheduler`             | interface |
+| `RetryOptions`           | interface |
+| `ScheduledJob`           | interface |
+| `ScheduleOptions`        | interface |
+| `SchedulerPluginOptions` | interface |
+| `SchedulerBackoff`       | type      |
+| `SchedulerJobHandler`    | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#scheduler-setu-tsscheduler-plugin).

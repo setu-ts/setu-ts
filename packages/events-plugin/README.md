@@ -53,7 +53,28 @@ await bus.publishBatch([new UserCreated({ userId: '124' }), new UserCreated({ us
 `errorHandler` defaults to logging through the optional `logger` capability when one is registered,
 otherwise a no-op. **A failing handler never makes `publish` reject** in either dispatch mode.
 
+## Exports
+
+| Export                     | Kind      |
+| -------------------------- | --------- |
+| `defineDomainEvent`        | function  |
+| `EventsPlugin`             | function  |
+| `subscribeHandler`         | function  |
+| `DomainEvent`              | class     |
+| `InMemoryEventBus`         | class     |
+| `IntegrationEvent`         | class     |
+| `EventHandlerRegistration` | interface |
+| `EventsPluginOptions`      | interface |
+| `IDomainEvent`             | interface |
+| `IEventBus`                | interface |
+| `IEventHandler`            | interface |
+| `EventHandler`             | type      |
+| `Unsubscribe`              | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#eventsplugin-setu-tsevents-plugin).

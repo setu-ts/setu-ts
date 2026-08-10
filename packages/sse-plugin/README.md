@@ -105,7 +105,25 @@ That suppresses the message only. Channel delivery is identical either way.
 A reconnecting browser sends `Last-Event-ID`. Set `id` on the messages you send so a client can
 resume from where it dropped.
 
+## Exports
+
+| Export             | Kind      |
+| ------------------ | --------- |
+| `SsePlugin`        | function  |
+| `SseConnection`    | class     |
+| `SseService`       | class     |
+| `CAPABILITIES`     | const     |
+| `ISseConnection`   | interface |
+| `ISseService`      | interface |
+| `SseChannel`       | interface |
+| `SseMessage`       | interface |
+| `SsePluginOptions` | interface |
+| `ChannelPublisher` | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#sseplugin-setu-tssse-plugin).

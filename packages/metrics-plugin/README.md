@@ -50,7 +50,31 @@ The metrics middleware runs at **priority 20 — outermost**, so it observes all
 response status. The record path is wrapped in `try/finally`, so a request that throws still
 decrements the active-requests gauge rather than leaking it.
 
+## Exports
+
+| Export                 | Kind      |
+| ---------------------- | --------- |
+| `MetricsPlugin`        | function  |
+| `Counter`              | class     |
+| `Gauge`                | class     |
+| `Histogram`            | class     |
+| `MetricsService`       | class     |
+| `Summary`              | class     |
+| `ICounter`             | interface |
+| `IGauge`               | interface |
+| `IHistogram`           | interface |
+| `IMetric`              | interface |
+| `IMetricsService`      | interface |
+| `ISummary`             | interface |
+| `MetricConfig`         | interface |
+| `MetricOptions`        | interface |
+| `MetricsPluginOptions` | interface |
+| `NamedMetricConfig`    | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#metrics-setu-tsmetrics-plugin).
