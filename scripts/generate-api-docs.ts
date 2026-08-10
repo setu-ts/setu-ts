@@ -378,7 +378,14 @@ export function buildDenoDocArgs(
   mode: 'generate' | 'check',
   outputDir: string,
 ): string[] {
-  const args: string[] = ['doc'];
+  // `--quiet` suppresses Deno's own progress output. It is load-bearing, not
+  // tidiness: on a COLD npm cache `deno doc` writes `Download https://...` to
+  // stderr for every npm specifier the graph reaches (drizzle-orm, @prisma/
+  // client, …). The classifier treats unrecognized stderr as a fatal child
+  // error, so the gate failed on CI — which always has a cold cache — while
+  // passing on every developer machine, which does not. Measured: 2 Download
+  // lines without the flag under `--reload=npm:drizzle-orm`, 0 with it.
+  const args: string[] = ['doc', '--quiet'];
 
   if (mode === 'generate') {
     args.push('--html', '--output=' + outputDir, '--name=Setu-TS');
@@ -546,6 +553,23 @@ const LINT_CODE_CONTEXT_PATTERN = /^\s*(\d+\s+)?\|\s/;
 const LINT_HINT_PATTERN = /^\s*=\s*hint:/;
 
 /**
+ * Deno's own progress/informational lines, which are not lint output and not
+ * errors.
+ *
+ * `deno doc` writes `Download https://registry.npmjs.org/...` to stderr once
+ * per npm specifier whenever the cache is cold. CI is always cold and a
+ * developer machine rarely is, so treating these as fatal residual made the
+ * gate pass locally and fail on every clean runner. `--quiet` now suppresses
+ * them at the source (see {@linkcode buildDenoDocArgs}); this pattern is the
+ * second line of defence, so a future Deno that prints progress despite
+ * `--quiet` degrades to a correct result rather than a false fatal. It is
+ * deliberately anchored and limited to Deno's known prefixes — a blanket
+ * "ignore unrecognized output" rule would hide the real failures this
+ * classifier exists to catch.
+ */
+const DENO_PROGRESS_PATTERN = /^(?:Download|Warning|Check|Initialize|Blocking)\s/;
+
+/**
  * Info lines from `deno doc --lint` (e.g. `info: to ensure documentation...`).
  */
 const LINT_INFO_PATTERN = /^\s*info:/;
@@ -646,6 +670,8 @@ export function classifyChildResult(
         continue;
       }
       if (line.trim().length === 0) continue;
+      // Deno's own progress output is neither a diagnostic nor an error.
+      if (DENO_PROGRESS_PATTERN.test(line)) continue;
       if (inDiagnostic && !diagnosticHasLocation) {
         residual.push('malformed diagnostic');
       }
