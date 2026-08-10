@@ -2168,7 +2168,9 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   section is a lie about the branch's contents (M37c was opened this way, PR #124). A doc edit that
   belongs to a milestone still ships on that milestone's own `feat/…` branch — the status flip, the
   PUBLIC_API correction, and the plan archival are part of the milestone, not separate work.
-  Commits: conventional format (`feat(scope): subject`); no direct commits to `main`.
+  Commits: conventional format (`feat(scope): subject`); **no commit message may exceed 100 words**
+  in total (AI_GUIDELINES §15.1) — the plan, the PR body, and the code comments are where the long
+  reasoning goes; no direct commits to `main`.
 - **Pushing and opening the PR are yours to do — but only when asked.** Remote credentials ARE
   available (`gh auth status` reports a logged-in account; SSH for git operations), so `git push`
   and `gh pr create` work. This bullet previously said the opposite — that no credentials existed

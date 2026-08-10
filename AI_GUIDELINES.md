@@ -831,6 +831,12 @@ A public API is any export from a package's `src/index.ts` file.
 
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `build`, `ci`
 
+**A commit message must not exceed 100 words in total** (subject, body, and footer combined). The
+message records WHAT changed and WHY, at the altitude of the commit — not the reasoning that
+produced it. Detail that exceeds the limit belongs in the milestone plan, the PR description, or the
+code's own comments, all of which have room for it and none of which a `git log` reader has to
+scroll past.
+
 Example:
 
 ```
