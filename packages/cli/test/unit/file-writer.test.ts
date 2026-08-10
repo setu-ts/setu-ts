@@ -4,10 +4,43 @@ import { createFakeFs } from '../fixtures/fake-fs.ts';
 import {
   dirName,
   findExisting,
+  firstDuplicatePath,
   joinPath,
   resolveDir,
   writeFiles,
 } from '../../src/utils/file-writer.ts';
+
+describe('firstDuplicatePath', () => {
+  // The overwrite check probes the filesystem, so it cannot see a path planned
+  // twice within one plan — both would be written and the last would win.
+  it('finds a path planned twice', () => {
+    expect(firstDuplicatePath([
+      { path: 'deno.json', contents: '{}' },
+      { path: 'main.ts', contents: '' },
+      { path: 'deno.json', contents: 'overwrites the framework manifest' },
+    ])).toBe('deno.json');
+  });
+
+  it('returns the FIRST duplicate when there are several', () => {
+    expect(firstDuplicatePath([
+      { path: 'a', contents: '' },
+      { path: 'b', contents: '' },
+      { path: 'a', contents: '' },
+      { path: 'b', contents: '' },
+    ])).toBe('a');
+  });
+
+  it('returns undefined for a distinct plan', () => {
+    expect(firstDuplicatePath([
+      { path: 'deno.json', contents: '' },
+      { path: 'main.ts', contents: '' },
+    ])).toBeUndefined();
+  });
+
+  it('returns undefined for an empty plan', () => {
+    expect(firstDuplicatePath([])).toBeUndefined();
+  });
+});
 
 describe('joinPath', () => {
   it('joins relative segments', () => {

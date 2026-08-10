@@ -7,6 +7,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 import { parseArgs } from './args.ts';
 import {
+  APP_VERB,
   CONFIG_MODULE,
   EXIT_OK,
   EXIT_USAGE,
@@ -68,7 +69,9 @@ function printHelp(log: (message: string) => void): void {
   log('');
   log('Commands:');
   log(`  new, n <project-name>          Scaffold a new project`);
+  log(`  new, n <name> --workspace      Scaffold a monorepo root`);
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
+  log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
   log(`  commands                       List commands this app's plugins provide`);
   log('');
   log('Options:');

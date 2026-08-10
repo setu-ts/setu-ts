@@ -68,7 +68,21 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'runtime',
   'template',
   'config',
+  'port',
 ]);
+
+/**
+ * The `setu generate` verb that adds a member to a workspace.
+ *
+ * Not a schematic name: it is dispatched before the schematic registry, exactly
+ * as {@linkcode CUSTOM_SCHEMATIC} is, because adding a member reads the
+ * workspace and a schematic is a pure function that performs no I/O.
+ *
+ * Spelled `app` rather than `service` because `service` is already a schematic
+ * (`setu generate service` emits a class), and one word cannot mean two things
+ * in the same command.
+ */
+export const APP_VERB = 'app';
 
 /**
  * Narrows an arbitrary string to a {@linkcode TargetRuntime}.
@@ -78,16 +92,6 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
  */
 export function isTargetRuntime(value: string): value is TargetRuntime {
   return (TARGET_RUNTIMES as readonly string[]).includes(value);
-}
-
-/**
- * Narrows an arbitrary string to a {@linkcode TemplateName}.
- *
- * @param value - The raw `--template` flag value
- * @returns True when the value names a supported template
- */
-export function isTemplateName(value: string): value is TemplateName {
-  return (TEMPLATES as readonly string[]).includes(value);
 }
 
 /**

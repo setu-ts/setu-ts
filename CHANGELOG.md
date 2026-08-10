@@ -8,6 +8,42 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Monorepos: one repository, many deployable services** (M62). The CLI had no workspace concept at
+  all, so a second service meant `setu new other --dir .` — a fully independent project with its own
+  manifest, its own lockfile, and no knowledge of its sibling. The sharp edge was discovery: the
+  microservice template wires `ServiceDiscoveryPlugin({ provider: 'static', services: {} })` with a
+  deliberately EMPTY map, because a sample entry would have named a dead port, so every caller's map
+  was hand-edited in every service and nothing propagated a new name.
+
+  ```bash
+  setu new acme --workspace                          # the root, no member yet
+  cd acme
+  setu generate app orders --template microservice   # apps/orders, port 3000
+  setu generate app billing --template microservice  # apps/billing, port 3001
+  deno task dev                                      # runs every member
+  ```
+
+  A workspace is a **Deno workspace** whose root declares members by GLOB
+  (`"workspace":
+  ["./apps/*"]`), so adding a service creates a directory and rewrites no manifest
+  — no file you own is ever edited. Each member is an ordinary scaffolded project with its own
+  framework pins, because plugin detection reads one directory's manifest and never walks up; two
+  members may install different plugin sets.
+
+  **Adding a service registers it with its callers.** Every member carries a CLI-owned
+  `src/discovery/services.ts`, regenerated for all members on each `setu generate app`, exporting
+  `SERVICE_PORT` (its own) and `SERVICE_ENDPOINTS` (every sibling). The member's `main.ts` binds the
+  former and its `setu.config.ts` hands the latter to `ServiceDiscoveryPlugin`, so the port a member
+  binds and the port its siblings dial are one datum and `discovery.resolveUrl('billing')` works
+  from any sibling with no configuration. The map is the LOCAL development topology; a deployed one
+  comes from a real backend (`consul`, `kubernetes`, `dns`).
+
+  Refusals rather than silent surprises: `generate app` outside a workspace names
+  `setu new <name> --workspace`; a duplicate member names the directory it already has; a non-Deno
+  `--runtime` names the standalone alternative; `--template full-stack` is refused because its Vite
+  build needs `nodeModulesDir`, which Deno accepts only in a workspace ROOT; and `new --workspace`
+  refuses `--template` because a root registers no plugins.
+
 - **Decorators and DI are independently selectable in the generator** (M61). AI_GUIDELINES states
   that decorators are optional, DI is optional, and that no feature requires either — but the CLI
   offered one coarse control. No template gave you neither and refused `g controller`/`g module`;
