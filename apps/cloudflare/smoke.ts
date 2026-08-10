@@ -10,7 +10,9 @@ function unusedPort(): number {
 async function waitForReady(baseUrl: string): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      const response = await fetch(`${baseUrl}/value/ready`, { signal: AbortSignal.timeout(250) });
+      const response = await fetch(`${baseUrl}/value/ready`, {
+        signal: AbortSignal.timeout(250),
+      });
       if (response.status === 404) return;
     } catch {
       // Wrangler has not started listening yet.
@@ -42,7 +44,9 @@ const bundle = await new Deno.Command('deno', {
   stdout: 'null',
   stderr: 'inherit',
 }).output();
-if (!bundle.success) throw new Error('Deno could not bundle the Cloudflare Worker.');
+if (!bundle.success) {
+  throw new Error('Deno could not bundle the Cloudflare Worker.');
+}
 const worker = new Deno.Command('wrangler', {
   args: [
     'dev',
@@ -89,6 +93,61 @@ try {
   const runs = await (await fetch(`${baseUrl}/value/scheduled-runs`)).json();
   if (runs.value !== '1') {
     throw new Error('Scheduled handler did not write its KV confirmation.');
+  }
+
+  // --- Messaging over a real Cloudflare queue -----------------------------
+  //
+  // The publish happens in a `fetch` invocation and the delivery in a separate
+  // `queue` invocation, so a fake cannot stand in for either half. The
+  // subscriber writes to KV, which is how a delivery that happened in another
+  // invocation becomes observable from here.
+  // Unique per run, and load-bearing. `wrangler dev --persist-to` keeps its KV
+  // store between runs, so a fixed value would be satisfied by whatever an
+  // EARLIER green run wrote — the check then passes even when nothing is
+  // delivered at all. Caught by breaking the subscriber's topic and watching
+  // this check stay green.
+  const note = `audited-${crypto.randomUUID()}`;
+  const published = await fetch(`${baseUrl}/publish/${note}`, {
+    method: 'POST',
+  });
+  if (published.status !== 202) {
+    throw new Error(`Publish returned ${published.status}.`);
+  }
+
+  let delivered: string | undefined;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await fetch(`${baseUrl}/value/last-audit`);
+    if (response.ok) {
+      const seen = (await response.json()).value;
+      // A stale value from an earlier run is not a delivery: keep waiting for
+      // THIS run's note rather than accepting whatever the store holds.
+      if (seen === note) {
+        delivered = seen;
+        break;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  if (delivered !== note) {
+    throw new Error(
+      `Subscriber did not receive the published message (last-audit=${String(delivered)}).`,
+    );
+  }
+
+  // --- Brokered request/reply through a real Durable Object ---------------
+  //
+  // The request rides the queue to the consumer invocation; the reply travels
+  // back through a Durable Object the caller is holding a WebSocket to. Nothing
+  // short of real workerd exercises that crossing.
+  const rpc = await fetch(`${baseUrl}/double/21`);
+  if (!rpc.ok) {
+    throw new Error(
+      `Request/reply returned ${rpc.status}: ${await rpc.text()}`,
+    );
+  }
+  const { answer } = await rpc.json();
+  if (answer !== 42) {
+    throw new Error(`Responder answered ${String(answer)}, expected 42.`);
   }
 } finally {
   worker.kill('SIGTERM');
