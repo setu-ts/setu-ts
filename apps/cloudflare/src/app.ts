@@ -1,10 +1,11 @@
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMessageBroker, IPlugin, IPluginContext } from '@setu-ts/common';
+import type { IMessageBroker, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 import type { ICloudflareBindings, IKvNamespace } from '@setu-ts/cloudflare-plugin';
 import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
 import type { CloudflareWorkerEnv } from '@setu-ts/cloudflare-plugin';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
+import { detectRuntime } from '@setu-ts/runtime';
 import { CloudflareRuntimePlugin } from './cloudflare-runtime-plugin.ts';
 
 /**
@@ -62,6 +63,24 @@ export function createCloudflareApp(
   });
 
   const broker = (): IMessageBroker => app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+
+  // `detectRuntime()` run on the REAL platform, which is the only place it can
+  // be tested honestly: workerd reports
+  // `navigator.userAgent === 'Cloudflare-Workers'` and the detector compared it
+  // against a lowercase needle, so it answered `'node'` on every Worker — and
+  // since that answer chooses the runtime adapter, a scaffolded Worker ran the
+  // NODE adapter on Cloudflare.
+  //
+  // `detectRuntime()` rather than `runtime.platform()`: this example registers
+  // the Cloudflare factory explicitly and that factory hardcodes the platform,
+  // so asserting on it would pass whether detection worked or not. It did pass,
+  // on the first attempt at this gate.
+  app.router.get('/diag/platform', (ctx) => {
+    return ctx.response.json({
+      detected: detectRuntime(),
+      registered: ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME).platform(),
+    });
+  });
 
   app.router.post('/publish/:note', async (ctx) => {
     await broker().publish('audit.logged', { note: ctx.params.note });

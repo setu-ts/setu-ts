@@ -14,8 +14,14 @@ export function CloudflareRuntimePlugin(env: CloudflareWorkerEnv): IPlugin {
     provides: [CAPABILITIES.RUNTIME, CAPABILITIES.HTTP_ADAPTER],
     priority: PLUGIN_PRIORITY.HIGHEST,
     register(ctx: IPluginContext): void {
-      ctx.services.register(CAPABILITIES.RUNTIME, createCloudflareRuntimeServices({ env }));
-      ctx.services.register(CAPABILITIES.HTTP_ADAPTER, new CloudflareWorkersHttpAdapter());
+      ctx.services.register(
+        CAPABILITIES.RUNTIME,
+        createCloudflareRuntimeServices({ env }),
+      );
+      ctx.services.register(
+        CAPABILITIES.HTTP_ADAPTER,
+        new CloudflareWorkersHttpAdapter(),
+      );
     },
   };
 }

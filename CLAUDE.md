@@ -1972,8 +1972,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   store between runs, so the fixed assertion value was satisfied by what an EARLIER green run had
   written and the check passed with nothing delivered at all; the note is now a fresh UUID per run,
   and both checks were then observed failing when their topic is broken. All `src` files at 100%
-  branch/function/line except `workers-broker.ts` (96.2/100/99.3). **Not verified against a deployed
-  Worker** — CI holds no Cloudflare account) — complete (PR pending)
+  branch/function/line except `workers-broker.ts` (96.2/100/99.3). **Booting a CLI-scaffolded
+  Workers project then found a defect that had nothing to do with messaging and everything to do
+  with actually deploying**: `detectRuntime()` compared `navigator.userAgent` against a LOWERCASE
+  `'cloudflare'` while workerd reports `'Cloudflare-Workers'`, so it answered `'node'` on every real
+  Worker — and since that answer picks the runtime adapter, a scaffolded Worker ran the **Node**
+  adapter on Cloudflare, the `cloudflare` indicator reported `degraded`, and every
+  `platform() === 'cloudflare-workers'` guard was silently disabled (including `messaging-plugin`'s
+  cloud gate, so Pub/Sub attempted its gRPC load instead of the named
+  `CloudBrokerUnavailableError`). Fixed here rather than on a `fix/…` branch **at the maintainer's
+  direction**, a deliberate deviation from §15.2. The unit fakes sent `'cloudflare-workers/v1'` and
+  `'cloudflare'` — strings the platform never sends — so the suite tested the double, the recurring
+  root cause; they now use the real string, and `apps/cloudflare` asserts `detectRuntime()` on
+  **real workerd**, since only the real platform sends its own user agent. The first attempt at that
+  gate was itself vacuous: it asserted `runtime.platform()`, which this example gets from the
+  explicitly-registered Cloudflare factory where it is hardcoded, so it passed with the bug in
+  place. **Not verified against a deployed Worker** — CI holds no Cloudflare account) — complete (PR
+  pending)
 - **Next milestone** — **M39** (docker/kubernetes), then M40. M60–M62 came from a measured audit
   after M58: a project with all fourteen schematics generated type-checked clean while its entry
   points imported exactly ONE generated path, so thirteen of fourteen generated artifacts were
