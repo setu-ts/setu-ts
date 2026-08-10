@@ -105,3 +105,28 @@ mutated after it is written, and records reconstructed on read (database/file) a
 ## License
 
 MIT
+
+## Exports
+
+| Export                 | Kind      |
+| ---------------------- | --------- |
+| `AuditPlugin`          | function  |
+| `AuditService`         | class     |
+| `DatabaseAuditStorage` | class     |
+| `FileAuditStorage`     | class     |
+| `LogAuditStorage`      | class     |
+| `MemoryAuditStorage`   | class     |
+| `AuditEntry`           | interface |
+| `AuditPluginOptions`   | interface |
+| `AuditStorageOptions`  | interface |
+| `IAuditDbClient`       | interface |
+| `IAuditLogger`         | interface |
+| `AuditStorageType`     | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#auditplugin-setu-tsaudit-plugin).

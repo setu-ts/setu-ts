@@ -47,6 +47,11 @@ const THRESHOLD = 90;
 export const SCRIPT_TARGETS: readonly string[] = [
   'scripts/check-docs.ts',
   'scripts/generate-api-docs.ts',
+  // The pure half of the package-exports tooling. Its subprocess wrapper
+  // (`package-export-collection.ts`) is deliberately absent: it is the thin
+  // external-I/O seam the decidable logic was extracted OUT of, which is the
+  // technique CLAUDE.md prescribes rather than an exemption from the bar.
+  'scripts/package-exports.ts',
 ];
 
 interface FileCoverage {

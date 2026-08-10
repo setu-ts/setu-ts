@@ -71,7 +71,44 @@ per request.
 middleware publishes the active prefix under `TENANT_CACHE_PREFIX_STATE_KEY`, readable with
 `getTenantCachePrefix(ctx)`.
 
+## Exports
+
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `getTenantCachePrefix`          | function  |
+| `MultiTenancyPlugin`            | function  |
+| `tenantMiddleware`              | function  |
+| `ColumnPerTenant`               | class     |
+| `DatabasePerTenant`             | class     |
+| `HeaderResolver`                | class     |
+| `JwtResolver`                   | class     |
+| `MemoryTenantDataStore`         | class     |
+| `PathResolver`                  | class     |
+| `SchemaPerTenant`               | class     |
+| `SubdomainResolver`             | class     |
+| `TenantNotResolvedError`        | class     |
+| `CAPABILITIES`                  | const     |
+| `TENANT_CACHE_PREFIX_STATE_KEY` | const     |
+| `HeaderResolverOptions`         | interface |
+| `IMultiTenancyService`          | interface |
+| `ITenant`                       | interface |
+| `ITenantDataStore`              | interface |
+| `ITenantRepository`             | interface |
+| `ITenantResolver`               | interface |
+| `JwtResolverOptions`            | interface |
+| `MemoryTenantDataStoreOptions`  | interface |
+| `MultiTenancyPluginOptions`     | interface |
+| `PathResolverOptions`           | interface |
+| `SubdomainResolverOptions`      | interface |
+| `TenantCacheOptions`            | interface |
+| `DatabaseStrategyKind`          | type      |
+| `ITenantIsolationStrategy`      | type      |
+| `ResolverConfig`                | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#multi-tenancy-plugin-setu-tsmulti-tenancy-plugin).

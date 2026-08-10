@@ -71,7 +71,34 @@ it at an OpenTelemetry Collector — see
 and the reference config in
 [docker/otel-collector/](https://github.com/setu-ts/setu-ts/tree/main/docker/otel-collector).
 
+## Exports
+
+| Export                   | Kind      |
+| ------------------------ | --------- |
+| `telemetryMiddleware`    | function  |
+| `TelemetryPlugin`        | function  |
+| `NoopTelemetryService`   | class     |
+| `TELEMETRY_SPAN_KEY`     | const     |
+| `InstrumentationConfig`  | interface |
+| `InstrumentationsConfig` | interface |
+| `ISpan`                  | interface |
+| `ITelemetryService`      | interface |
+| `SamplingConfig`         | interface |
+| `SpanOptions`            | interface |
+| `TelemetryContext`       | interface |
+| `TelemetryPluginOptions` | interface |
+| `TracerHost`             | interface |
+| `InstrumentationKind`    | type      |
+| `SpanAttributeValue`     | type      |
+| `SpanExporterKind`       | type      |
+| `SpanKind`               | type      |
+| `SpanProcessorKind`      | type      |
+| `SpanStatus`             | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#telemetry-setu-tstelemetry-plugin).

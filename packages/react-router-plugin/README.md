@@ -72,7 +72,34 @@ lexical `..` checking.
 Registers a `react-router` health indicator. There is no `onClose` — the request handler is
 stateless.
 
+## Exports
+
+| Export                     | Kind      |
+| -------------------------- | --------- |
+| `assembleHandler`          | function  |
+| `assertSsrRuntime`         | function  |
+| `bridgeRequestToRR`        | function  |
+| `contextKeyFor`            | function  |
+| `createLoadContextFactory` | function  |
+| `createStaticAssetHandler` | function  |
+| `loadRequestHandler`       | function  |
+| `ReactRouterPlugin`        | function  |
+| `SsrService`               | class     |
+| `CAPABILITIES`             | const     |
+| `servicesContext`          | const     |
+| `userContext`              | const     |
+| `ISsrService`              | interface |
+| `ReactRouterPluginOptions` | interface |
+| `RouterContextKey`         | interface |
+| `RouterLoadContext`        | interface |
+| `SsrRuntime`               | interface |
+| `PopulateLoadContext`      | type      |
+| `SsrRequestHandler`        | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#reactrouterplugin-setu-tsreact-router-plugin).

@@ -220,9 +220,44 @@ refresh failed and a stale snapshot is being served.
 
 ## Related documentation
 
-- [Public API reference](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [Public API reference](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#service-discovery-setu-tsservice-discovery-plugin)
 - [Architecture](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md)
 
 ## License
 
 MIT
+
+## Exports
+
+| Export                              | Kind      |
+| ----------------------------------- | --------- |
+| `createDefaultDiscoveryHttp`        | function  |
+| `ServiceDiscoveryPlugin`            | function  |
+| `ConsulProvider`                    | class     |
+| `DiscoveryUnavailableError`         | class     |
+| `DnsProvider`                       | class     |
+| `KubernetesProvider`                | class     |
+| `SelfRegistrationNotSupportedError` | class     |
+| `StaticProvider`                    | class     |
+| `ADnsDiscoveryOptions`              | interface |
+| `ConsulDiscoveryOptions`            | interface |
+| `ConsulProviderOptions`             | interface |
+| `CustomDiscoveryOptions`            | interface |
+| `DiscoveryHttpResponse`             | interface |
+| `DiscoveryHttpStream`               | interface |
+| `DiscoveryProvider`                 | interface |
+| `EjectionOptions`                   | interface |
+| `IDiscoveryHttp`                    | interface |
+| `KubernetesDiscoveryOptions`        | interface |
+| `KubernetesProviderOptions`         | interface |
+| `SelfRegistration`                  | interface |
+| `SelfRegistrationCheck`             | interface |
+| `SrvDnsDiscoveryOptions`            | interface |
+| `StaticDiscoveryOptions`            | interface |
+| `StaticServiceDefinition`           | interface |
+| `DnsDiscoveryOptions`               | type      |
+| `DnsProviderOptions`                | type      |
+| `ServiceDiscoveryPluginOptions`     | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

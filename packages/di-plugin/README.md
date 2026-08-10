@@ -44,7 +44,26 @@ const users = container.resolve(UserService);
 With `autoRegister`, the first successful fallback is cached as a singleton. Explicit container
 registrations always take precedence.
 
+## Exports
+
+| Export             | Kind      |
+| ------------------ | --------- |
+| `createContainer`  | function  |
+| `DiPlugin`         | function  |
+| `CircularDetector` | class     |
+| `ContainerBuilder` | class     |
+| `DiContainer`      | class     |
+| `ProviderRegistry` | class     |
+| `ScopeManager`     | class     |
+| `ContainerConfig`  | interface |
+| `DiPluginOptions`  | interface |
+| `ExternalResolver` | interface |
+| `ProviderEntry`    | interface |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#api-reference-setu-tsdi-plugin).

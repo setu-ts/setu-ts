@@ -22,12 +22,22 @@ import {
   checkExamplesCoverage,
   checkLocalLinks,
   checkPackageCatalog,
+  checkReadmeApiLink,
   checkRequiredGuides,
   findSwallowedHeadings,
+  publicApiAnchors,
   scanFences,
 } from '../scripts/check-docs.ts';
 import { collectApiEntrypoints } from '../scripts/generate-api-docs.ts';
 import { PUBLISHED_PACKAGES } from '../scripts/release-packages.ts';
+import {
+  buildKindIndex,
+  diffExportsTable,
+  kindLabel,
+  parseExportsTable,
+  renderExportsTable,
+  symbolsForFile,
+} from '../scripts/package-exports.ts';
 import { PACKAGE_METADATA } from '../scripts/jsr-metadata.ts';
 
 describe('documentation gate — fence scanning', () => {
@@ -854,5 +864,249 @@ describe('documentation gate — script subprocess integration', () => {
     } finally {
       await Deno.remove(tmpPath);
     }
+  });
+});
+
+describe('documentation gate — package README navigation', () => {
+  const anchors = new Set(['storage-setu-tsstorage-plugin', 'api-reference-setu-tscommon']);
+  const BASE = 'https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md';
+
+  it('accepts an absolute link carrying an anchor that exists', () => {
+    const readme = `# x\n\nSee [PUBLIC_API.md](${BASE}#storage-setu-tsstorage-plugin).\n`;
+
+    expect(checkReadmeApiLink('packages/storage-plugin/README.md', readme, anchors)).toEqual([]);
+  });
+
+  it('rejects a bare link, which lands at the top of an 8,000-line document', () => {
+    const readme = `# x\n\nSee [PUBLIC_API.md](${BASE}).\n`;
+
+    const findings = checkReadmeApiLink('packages/storage-plugin/README.md', readme, anchors);
+
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.message).toContain('carries no anchor');
+  });
+
+  it('rejects an anchor that matches no heading', () => {
+    const readme = `# x\n\nSee [PUBLIC_API.md](${BASE}#storage-renamed).\n`;
+
+    const findings = checkReadmeApiLink('packages/storage-plugin/README.md', readme, anchors);
+
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.message).toContain('matches no heading');
+  });
+
+  /**
+   * JSR resolves a README's relative links against `jsr.io/@setu-ts/`, so this
+   * form returns a 400 on the package page. `sdk` and `static-plugin` both
+   * shipped it, and the local-link checker cannot see the class at all because
+   * these links are absolute `https://` URLs it skips as external.
+   */
+  it('rejects a relative link to a repository document', () => {
+    const readme = '# x\n\nSee [Public API](../../PUBLIC_API.md#storage-setu-tsstorage-plugin).\n';
+
+    const findings = checkReadmeApiLink('packages/sdk/README.md', readme, anchors);
+
+    expect(findings.some((f) => f.message.includes('400 on the package page'))).toBe(true);
+  });
+
+  it('rejects a README with no link at all', () => {
+    const findings = checkReadmeApiLink('packages/x/README.md', '# x\n\nNothing.\n', anchors);
+
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.message).toContain('No link to PUBLIC_API.md');
+  });
+
+  it('collects anchors at every heading depth, ignoring fenced text', () => {
+    const source = [
+      '## Storage (`@setu-ts/storage-plugin`)',
+      '',
+      '### Starter exports and option arms',
+      '',
+      '```markdown',
+      '## Not A Real Heading',
+      '```',
+    ].join('\n');
+
+    const found = publicApiAnchors(source);
+
+    expect(found.has('storage-setu-tsstorage-plugin')).toBe(true);
+    expect(found.has('starter-exports-and-option-arms')).toBe(true);
+    expect(found.has('not-a-real-heading')).toBe(false);
+  });
+});
+
+describe('package exports table', () => {
+  const payload = {
+    nodes: {
+      'file:///repo/packages/cache-plugin/src/index.ts': {
+        symbols: [
+          {
+            name: 'CachePlugin',
+            declarations: [{ kind: 'function', declarationKind: 'export' }],
+          },
+          // Re-exported from common: `deno doc` reports `reference` here.
+          {
+            name: 'ICacheStore',
+            declarations: [{ kind: 'reference', declarationKind: 'export' }],
+          },
+          // Private declarations must not reach the table.
+          {
+            name: 'internalHelper',
+            declarations: [{ kind: 'function', declarationKind: 'private' }],
+          },
+        ],
+      },
+      'file:///repo/packages/common/src/index.ts': {
+        symbols: [
+          {
+            name: 'ICacheStore',
+            declarations: [{ kind: 'interface', declarationKind: 'export' }],
+          },
+        ],
+      },
+    },
+  };
+
+  it('maps deno doc kinds to the words the table uses', () => {
+    expect(kindLabel('typeAlias')).toBe('type');
+    expect(kindLabel('variable')).toBe('const');
+    // An unknown kind passes through rather than being silently dropped.
+    expect(kindLabel('somethingNew')).toBe('somethingNew');
+  });
+
+  /**
+   * `deno doc` reports a re-export as `reference` even when the declaring file
+   * is in the same batch, which put "`ICacheStore` | reference" — a word from
+   * the tool's internals — into 132 README rows.
+   */
+  it('resolves a re-exported symbol to its declaring kind, never `reference`', () => {
+    const index = buildKindIndex(payload);
+    const symbols = symbolsForFile(
+      payload,
+      'file:///repo/packages/cache-plugin/src/index.ts',
+      index,
+    );
+
+    expect(index.get('ICacheStore')).toBe('interface');
+    expect(symbols.find((s) => s.name === 'ICacheStore')?.kind).toBe('interface');
+    expect(symbols.some((s) => s.kind === 'reference')).toBe(false);
+  });
+
+  it('without the index the unresolved kind survives, so the index is load-bearing', () => {
+    const symbols = symbolsForFile(payload, 'file:///repo/packages/cache-plugin/src/index.ts');
+
+    expect(symbols.find((s) => s.name === 'ICacheStore')?.kind).toBe('reference');
+  });
+
+  it('omits non-exported declarations and unknown files', () => {
+    const symbols = symbolsForFile(payload, 'file:///repo/packages/cache-plugin/src/index.ts');
+
+    expect(symbols.some((s) => s.name === 'internalHelper')).toBe(false);
+    expect(symbolsForFile(payload, 'file:///repo/nope.ts')).toEqual([]);
+  });
+
+  it('renders one table per entrypoint, heading each only when there are several', () => {
+    const single = renderExportsTable([
+      { specifier: '@setu-ts/kernel', symbols: [{ name: 'createApplication', kind: 'function' }] },
+    ]);
+    expect(single).toContain('| `createApplication` | function |');
+    expect(single).not.toContain('### `@setu-ts/kernel`');
+
+    const multi = renderExportsTable([
+      { specifier: '@setu-ts/runtime', symbols: [{ name: 'RuntimePlugin', kind: 'function' }] },
+      {
+        specifier: '@setu-ts/runtime/worker',
+        symbols: [{ name: 'defineWorkerTask', kind: 'function' }],
+      },
+    ]);
+    expect(multi).toContain('### `@setu-ts/runtime/worker`');
+  });
+
+  it('round-trips: a rendered table parses back to what it claimed', () => {
+    const groups = [
+      {
+        specifier: '@setu-ts/cache-plugin',
+        symbols: [
+          { name: 'CachePlugin', kind: 'function' },
+          { name: 'ICacheStore', kind: 'interface' },
+        ],
+      },
+    ];
+    const readme = `# x\n\n${renderExportsTable(groups)}\n\n## Full API\n\nlink\n`;
+
+    expect(parseExportsTable(readme)).toEqual(
+      new Set(['CachePlugin function', 'ICacheStore interface']),
+    );
+    expect(diffExportsTable(readme, groups)).toEqual([]);
+  });
+
+  it('reports an omitted export, a fabricated one, and a missing section', () => {
+    const groups = [
+      { specifier: '@setu-ts/cache-plugin', symbols: [{ name: 'CachePlugin', kind: 'function' }] },
+    ];
+
+    const omitted = '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n\n## Full API\n';
+    expect(diffExportsTable(omitted, groups)[0]).toContain('omits 1: CachePlugin (function)');
+
+    const fabricated = '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n' +
+      '| `CachePlugin` | function |\n| `Ghost` | class |\n\n## Full API\n';
+    expect(diffExportsTable(fabricated, groups)[0]).toContain('do not exist: Ghost (class)');
+
+    expect(diffExportsTable('# x\n\nNo table.\n', groups)).toEqual([
+      'has no `## Exports` section',
+    ]);
+  });
+});
+
+describe('package exports table — malformed payload branches', () => {
+  /**
+   * `deno doc --json` is an external contract, so the extractor must survive
+   * shapes it does not expect rather than throwing mid-gate. Each case here is
+   * a field the payload can legitimately omit.
+   */
+  it('skips a symbol with no name, no declarations, or an untyped declaration', () => {
+    const payload = {
+      nodes: {
+        'file:///repo/a.ts': {
+          symbols: [
+            { declarations: [{ kind: 'function', declarationKind: 'export' }] }, // no name
+            { name: 'NoDecls' }, // no declarations
+            { name: 'NoKind', declarations: [{ declarationKind: 'export' }] }, // no kind
+            { name: 'Real', declarations: [{ kind: 'function', declarationKind: 'export' }] },
+          ],
+        },
+      },
+    };
+
+    expect(symbolsForFile(payload, 'file:///repo/a.ts')).toEqual([
+      { name: 'Real', kind: 'function' },
+    ]);
+    expect([...buildKindIndex(payload).keys()]).toEqual(['Real']);
+  });
+
+  it('tolerates an empty payload and a node with no symbols', () => {
+    expect([...buildKindIndex({}).keys()]).toEqual([]);
+    expect([...buildKindIndex({ nodes: { 'file:///repo/a.ts': {} } }).keys()]).toEqual([]);
+  });
+
+  it('keeps the first resolved kind when a name appears in several files', () => {
+    const payload = {
+      nodes: {
+        'file:///repo/a.ts': {
+          symbols: [{ name: 'Dup', declarations: [{ kind: 'interface' }] }],
+        },
+        'file:///repo/b.ts': {
+          symbols: [{ name: 'Dup', declarations: [{ kind: 'class' }] }],
+        },
+      },
+    };
+
+    expect(buildKindIndex(payload).get('Dup')).toBe('interface');
+  });
+
+  it('parses a table that runs to end of file with no following heading', () => {
+    const readme = '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n| `A` | function |\n';
+
+    expect(parseExportsTable(readme)).toEqual(new Set(['A function']));
   });
 });

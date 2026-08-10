@@ -62,7 +62,43 @@ the **dot**, not a colon — `createCapabilityToken` rejects colons.
 `$transaction` with a default timeout, so the adapter bridges that model rather than offering
 imperative begin/commit.
 
+## Exports
+
+| Export                      | Kind      |
+| --------------------------- | --------- |
+| `createDrizzleDataSource`   | function  |
+| `createPrismaDataSource`    | function  |
+| `DatabasePlugin`            | function  |
+| `BaseRepository`            | class     |
+| `DatabaseService`           | class     |
+| `DrizzleAdapter`            | class     |
+| `DrizzleRepository`         | class     |
+| `MemoryAdapter`             | class     |
+| `PrismaAdapter`             | class     |
+| `PrismaRepository`          | class     |
+| `UnitOfWork`                | class     |
+| `BuiltInDatabaseOptions`    | interface |
+| `CountOptions`              | interface |
+| `CustomDatabaseOptions`     | interface |
+| `DatabaseAdapterOptions`    | interface |
+| `DatabaseConnectionOptions` | interface |
+| `FindOptions`               | interface |
+| `IAdapterTransaction`       | interface |
+| `IDatabaseAdapter`          | interface |
+| `IDatabaseService`          | interface |
+| `IDataSource`               | interface |
+| `IRepository`               | interface |
+| `IUnitOfWork`               | interface |
+| `NormalizedQuery`           | interface |
+| `DatabaseAdapterType`       | type      |
+| `DatabasePluginOptions`     | type      |
+| `DataSource`                | type      |
+| `OrderDirection`            | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#databaseplugin-setu-tsdatabase-plugin).

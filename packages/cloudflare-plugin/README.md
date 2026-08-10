@@ -380,9 +380,96 @@ job.
 
 ## Documentation
 
-- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#api-reference-setu-tscloudflare-plugin)
 - [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md)
 
 ## License
 
 MIT
+
+## Exports
+
+| Export                                    | Kind      |
+| ----------------------------------------- | --------- |
+| `assessCacheability`                      | function  |
+| `asUpgradeResponse`                       | function  |
+| `cacheApiMiddleware`                      | function  |
+| `CloudflarePlugin`                        | function  |
+| `createDefaultDurableObjectWebSocketHost` | function  |
+| `createQueueHandler`                      | function  |
+| `createScheduledHandler`                  | function  |
+| `isD1Database`                            | function  |
+| `isDurableObjectNamespace`                | function  |
+| `isKvNamespace`                           | function  |
+| `isR2Bucket`                              | function  |
+| `CloudflareBindingMissingError`           | class     |
+| `CloudflareObjectNotFoundError`           | class     |
+| `CloudflareUnsupportedError`              | class     |
+| `D1Adapter`                               | class     |
+| `DistributedLockObjectCore`               | class     |
+| `DurableObjectBackplane`                  | class     |
+| `DurableObjectLock`                       | class     |
+| `KvCacheStore`                            | class     |
+| `KvSessionStore`                          | class     |
+| `R2Storage`                               | class     |
+| `RealtimeBackplaneObjectCore`             | class     |
+| `WorkersCron`                             | class     |
+| `WorkersQueue`                            | class     |
+| `CacheabilityInput`                       | interface |
+| `CacheApiMiddlewareOptions`               | interface |
+| `CacheClock`                              | interface |
+| `CloudflarePluginOptions`                 | interface |
+| `D1AdapterOptions`                        | interface |
+| `D1EntityMapping`                         | interface |
+| `D1Result`                                | interface |
+| `DistributedLockObjectCoreOptions`        | interface |
+| `DurableObjectArm`                        | interface |
+| `DurableObjectBackplaneOptions`           | interface |
+| `DurableObjectLockOptions`                | interface |
+| `DurableObjectMessageEvent`               | interface |
+| `DurableObjectUpgradeResponse`            | interface |
+| `DurableObjectWebSocketHost`              | interface |
+| `DurableObjectWebSocketPair`              | interface |
+| `ICacheApi`                               | interface |
+| `ICloudflareBindings`                     | interface |
+| `ID1Database`                             | interface |
+| `ID1PreparedStatement`                    | interface |
+| `IDurableObjectClientSocket`              | interface |
+| `IDurableObjectNamespace`                 | interface |
+| `IDurableObjectState`                     | interface |
+| `IDurableObjectStorage`                   | interface |
+| `IDurableObjectWebSocket`                 | interface |
+| `IKvNamespace`                            | interface |
+| `IQueueMessage`                           | interface |
+| `IQueueMessageBatch`                      | interface |
+| `IQueueProducer`                          | interface |
+| `IR2Bucket`                               | interface |
+| `IR2Object`                               | interface |
+| `IR2ObjectBody`                           | interface |
+| `IScheduledController`                    | interface |
+| `IServiceBinding`                         | interface |
+| `JobIdSource`                             | interface |
+| `KvCacheOptions`                          | interface |
+| `KvCacheStoreOptions`                     | interface |
+| `KvListOptions`                           | interface |
+| `KvListResult`                            | interface |
+| `KvPutOptions`                            | interface |
+| `KvSessionStoreOptions`                   | interface |
+| `QueueHandlerOptions`                     | interface |
+| `QueueSendOptions`                        | interface |
+| `R2StorageArm`                            | interface |
+| `R2StorageOptions`                        | interface |
+| `RealtimeBackplaneObjectCoreOptions`      | interface |
+| `WorkersCronOptions`                      | interface |
+| `WorkersQueueArm`                         | interface |
+| `WorkersQueueOptions`                     | interface |
+| `CacheRefusal`                            | type      |
+| `CloudflareWorkerEnv`                     | type      |
+| `CronHandler`                             | type      |
+| `LoggerSource`                            | type      |
+| `QueueHandler`                            | type      |
+| `ScheduledHandler`                        | type      |
+| `WaitUntilHost`                           | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

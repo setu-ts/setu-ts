@@ -106,9 +106,43 @@ Redis or the broker misses frames sent during the partition. Frames are not pers
 
 ## Documentation
 
-- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)
+- [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin)
 - [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md)
 
 ## License
 
 MIT
+
+## Exports
+
+| Export                           | Kind      |
+| -------------------------------- | --------- |
+| `adaptRedisModule`               | function  |
+| `createBackplane`                | function  |
+| `decodeFrameData`                | function  |
+| `encodeFrameData`                | function  |
+| `isRealtimeFrame`                | function  |
+| `loadRedisModule`                | function  |
+| `RealtimeBackplanePlugin`        | function  |
+| `MemoryBackplane`                | class     |
+| `MessagingBackplane`             | class     |
+| `RedisBackplane`                 | class     |
+| `RedisModuleError`               | class     |
+| `CAPABILITIES`                   | const     |
+| `DEFAULT_TOPIC`                  | const     |
+| `BackplaneCommonOptions`         | interface |
+| `CustomBackplaneOptions`         | interface |
+| `EncodedPayload`                 | interface |
+| `IRealtimeBackplane`             | interface |
+| `IRedisBackplaneClient`          | interface |
+| `IRedisModule`                   | interface |
+| `MemoryBackplaneOptions`         | interface |
+| `MessagingBackplaneOptions`      | interface |
+| `RealtimeFrame`                  | interface |
+| `RedisBackplaneOptions`          | interface |
+| `RealtimeBackplanePluginOptions` | type      |
+| `RealtimeFrameHandler`           | type      |
+| `RealtimeFrameKind`              | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

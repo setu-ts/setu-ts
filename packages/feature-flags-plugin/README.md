@@ -71,7 +71,46 @@ Not supported. The LaunchDarkly Node server SDK's `variation`/`allFlagsState` ar
 no provider can reconcile with the synchronous committed `isEnabled` contract. Use the `'custom'`
 arm as a bridge.
 
+## Exports
+
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `adaptLaunchDarklyModule`     | function  |
+| `createFlagGuard`             | function  |
+| `createProvider`              | function  |
+| `FeatureFlagsPlugin`          | function  |
+| `loadLaunchDarklyModule`      | function  |
+| `toLaunchDarklyContext`       | function  |
+| `ConfigProvider`              | class     |
+| `DatabaseProvider`            | class     |
+| `FeatureFlagService`          | class     |
+| `LaunchDarklyModuleError`     | class     |
+| `LaunchDarklyProvider`        | class     |
+| `MemoryProvider`              | class     |
+| `ConfigProviderOptions`       | interface |
+| `CustomProviderOptions`       | interface |
+| `DatabaseProviderOptions`     | interface |
+| `FlagContext`                 | interface |
+| `FlagDefinition`              | interface |
+| `FlagGuardOptions`            | interface |
+| `FlagProvider`                | interface |
+| `FlagProviderStatus`          | interface |
+| `IFeatureFlags`               | interface |
+| `IFlagStore`                  | interface |
+| `ILaunchDarklyClient`         | interface |
+| `ILaunchDarklyFlagsState`     | interface |
+| `ILaunchDarklyModule`         | interface |
+| `LaunchDarklyContext`         | interface |
+| `LaunchDarklyProviderConfig`  | interface |
+| `LaunchDarklyProviderOptions` | interface |
+| `MemoryProviderOptions`       | interface |
+| `FeatureFlagsPluginOptions`   | type      |
+| `FlagProviderType`            | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#feature-flags-setu-tsfeature-flags-plugin).

@@ -86,7 +86,50 @@ To source tokens elsewhere — a GCP metadata server, or a broker that holds the
 application — supply a `tokenSource` implementing `FcmTokenSource`; the credential fields are then
 unused and the runtime requirement does not apply.
 
+## Exports
+
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `createChannel`                 | function  |
+| `createDefaultNotificationHttp` | function  |
+| `createProvider`                | function  |
+| `NotificationPlugin`            | function  |
+| `EmailChannel`                  | class     |
+| `FcmProvider`                   | class     |
+| `NotificationService`           | class     |
+| `PushChannel`                   | class     |
+| `SlackChannel`                  | class     |
+| `SlackProvider`                 | class     |
+| `SmsChannel`                    | class     |
+| `TwilioProvider`                | class     |
+| `FcmChannelConfig`              | interface |
+| `FcmProviderOptions`            | interface |
+| `FcmTokenSource`                | interface |
+| `INotificationHttp`             | interface |
+| `INotifier`                     | interface |
+| `MailChannelConfig`             | interface |
+| `NotificationHttpResponse`      | interface |
+| `NotificationMessage`           | interface |
+| `NotificationPluginOptions`     | interface |
+| `PushMessage`                   | interface |
+| `PushTransport`                 | interface |
+| `SlackChannelConfig`            | interface |
+| `SlackMessage`                  | interface |
+| `SlackProviderOptions`          | interface |
+| `SlackTransport`                | interface |
+| `SmsMessage`                    | interface |
+| `SmsTransport`                  | interface |
+| `TwilioChannelConfig`           | interface |
+| `TwilioProviderOptions`         | interface |
+| `ChannelConfig`                 | type      |
+| `ChannelsMap`                   | type      |
+| `NotificationTransport`         | type      |
+| `ProviderType`                  | type      |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
 ## Full API
 
 Every export and option is documented in
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md).
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#notifications-setu-tsnotification-plugin).

@@ -205,3 +205,35 @@ purpose: `src/main.ts` owns the process boundary, so every other path stays test
 ## License
 
 MIT
+
+## Exports
+
+### `@setu-ts/cli`
+
+| Export             | Kind      |
+| ------------------ | --------- |
+| `deriveNames`      | function  |
+| `detectPlugins`    | function  |
+| `runCli`           | function  |
+| `PROGRAM_NAME`     | const     |
+| `CliDependencies`  | interface |
+| `DerivedNames`     | interface |
+| `GeneratedFile`    | interface |
+| `SchematicOptions` | interface |
+| `AppLoader`        | type      |
+| `ModuleLoader`     | type      |
+| `Schematic`        | type      |
+| `TemplateName`     | type      |
+
+### `@setu-ts/cli/main`
+
+| Export | Kind |
+| ------ | ---- |
+
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
+
+## Full API
+
+Every export and option is documented in
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#cli-setu-tscli).
