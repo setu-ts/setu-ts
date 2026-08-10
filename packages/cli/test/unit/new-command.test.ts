@@ -1030,7 +1030,17 @@ describe('--workspace', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    for (const value of ['abc', '0', '70000', '30.5']) {
+    // Same class as --template: a root registers no plugins, so a container has
+    // nothing to construct and the flag would simply vanish.
+    it('refuses --di, naming where a container belongs', async () => {
+      const h = harness();
+      expect(await h.run(['acme', '--workspace', '--di'])).toBe(2);
+      expect(h.err.text()).toContain('no container to add');
+      expect(h.err.text()).toContain('generate app <name> --di');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    for (const value of ['abc', '0', '70000', '30.5', '65536']) {
       it(`refuses --port ${value}`, async () => {
         const h = harness();
         expect(await h.run(['acme', '--workspace', '--port', value])).toBe(2);
@@ -1038,6 +1048,31 @@ describe('--workspace', () => {
         expect(h.fs.writes).toEqual([]);
       });
     }
+
+    // `parseArgs` cannot consume a flag-shaped token as a value, so `--port -1`
+    // and a trailing `--port` both arrive as the boolean `true`. Testing for a
+    // string value would let the number the user typed vanish in silence — the
+    // exact class this milestone refuses everywhere else.
+    for (
+      const [label, argv] of [
+        ['a negative number', ['acme', '--workspace', '--port', '-1']],
+        ['no value at all', ['acme', '--workspace', '--port']],
+      ] as const
+    ) {
+      it(`refuses --port with ${label}`, async () => {
+        const h = harness();
+        expect(await h.run([...argv])).toBe(2);
+        expect(h.err.text()).toContain('--port needs a value');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    it('refuses --port with no value on a standalone project too', async () => {
+      const h = harness();
+      expect(await h.run(['acme', '--port'])).toBe(2);
+      expect(h.err.text()).toContain('--workspace');
+      expect(h.fs.writes).toEqual([]);
+    });
 
     // `--port` allocates MEMBER ports; a standalone project's entry binds the
     // port its own `main.ts` names, so accepting it would report success for a

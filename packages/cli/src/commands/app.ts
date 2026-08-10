@@ -37,7 +37,9 @@ import {
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import {
   allocatePort,
+  MAX_PORT,
   MEMBERS_DIR,
+  MIN_PORT,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
@@ -115,6 +117,17 @@ function reportNoWorkspace(
         `and this CLI understands version ${WORKSPACE_VERSION}.`,
     );
     error('Upgrade the CLI, or check the file into version control and roll it back.');
+    return EXIT_ERROR;
+  }
+  if (problem.kind === 'invalid-port') {
+    error(
+      `${joinPath(dir, WORKSPACE_MANIFEST)} gives ${problem.field} the port ${problem.port}, ` +
+        `which no service can bind: it must be an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+    );
+    error(
+      "Every port here is written into a member's own entry point and into every sibling's " +
+        'discovery map, so this would break the whole workspace.',
+    );
     return EXIT_ERROR;
   }
   error(`${joinPath(dir, WORKSPACE_MANIFEST)} is not a readable workspace manifest.`);
@@ -230,6 +243,23 @@ export async function runAppCommand(
     return EXIT_USAGE;
   }
 
+  // Refused rather than ignored, for the same reason `--runtime` is: a member's
+  // port is allocated from the workspace manifest, so a `--port` here would be
+  // parsed (it is a value flag) and then silently dropped, handing back a member
+  // on a port the user did not choose. `setu new --workspace --port` is where
+  // that number belongs.
+  if (args.flags['port'] !== undefined) {
+    deps.error(
+      `--port sets the BASE port of a whole workspace, not one member's: ` +
+        `\`${PROGRAM_NAME} new <name> --workspace --port <n>\`.`,
+    );
+    deps.error(
+      `A member's port is allocated from ${WORKSPACE_MANIFEST}; edit it there, then run ` +
+        `\`${PROGRAM_NAME} generate ${APP_VERB}\` to rewrite every member's map.`,
+    );
+    return EXIT_USAGE;
+  }
+
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
     deps.error(
@@ -251,6 +281,17 @@ export async function runAppCommand(
   }
 
   const port = allocatePort(read.manifest);
+  if (port === undefined) {
+    deps.error(
+      `This workspace has no port left to allocate: every number from its base up to ` +
+        `${MAX_PORT} is taken.`,
+    );
+    deps.error(
+      `Lower \`basePort\` in ${WORKSPACE_MANIFEST}, or free a port by removing a member.`,
+    );
+    return EXIT_ERROR;
+  }
+
   const next: WorkspaceManifest = {
     ...read.manifest,
     members: [...read.manifest.members, { name, port }],

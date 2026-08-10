@@ -102,6 +102,17 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'orders', '--template', 'nope'])).toBe(2);
       expect(h.err.text()).toContain('Unknown template "nope"');
     });
+
+    // `port` is a VALUE flag, so it parses cleanly and would otherwise be read
+    // by nothing — handing back a member on a port the user did not choose,
+    // with no diagnostic. The same class as `--runtime` above.
+    it('refuses --port, naming where a member port comes from', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--port', '4444'])).toBe(2);
+      expect(h.err.text()).toContain('--workspace --port');
+      expect(h.err.text()).toContain(WORKSPACE_MANIFEST);
+      expect(h.fs.writes).toEqual([]);
+    });
   });
 
   describe('the workspace gate', () => {
@@ -139,6 +150,35 @@ describe('runAppCommand', () => {
       });
       expect(code).toBe(1);
       expect(err.text()).toContain('declares version 99');
+    });
+
+    // The defect this closes: an out-of-range port was accepted and written
+    // into the member's own `main.ts` binding AND into every sibling's map, so
+    // `generate app` reported success while producing a workspace whose members
+    // throw `Invalid port (out of range)` on start.
+    it('refuses a member port no service can bind, naming the value', async () => {
+      const fs = createFakeFs({
+        [`/ws/${WORKSPACE_MANIFEST}`]:
+          '{"version":1,"basePort":3000,"members":[{"name":"orders","port":99999}]}',
+      });
+      const err = createRecorder();
+      const code = await runAppCommand(parseArgs(['app', 'billing']), {
+        fs,
+        dir: '/ws',
+        log: createRecorder().sink,
+        error: err.sink,
+      });
+      expect(code).toBe(1);
+      expect(err.text()).toContain('99999');
+      expect(err.text()).toContain('orders');
+      expect(fs.writes).toEqual([]);
+    });
+
+    it('refuses a workspace with no port left to allocate', async () => {
+      const h = harness([{ name: 'orders', port: 65535 }], 65535);
+      expect(await h.run(['app', 'billing'])).toBe(1);
+      expect(h.err.text()).toContain('no port left to allocate');
+      expect(h.fs.writes).toEqual([]);
     });
 
     it('refuses a duplicate member, naming the directory it already has', async () => {

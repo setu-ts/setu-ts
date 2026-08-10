@@ -62,13 +62,18 @@ export function renderDiscoveryModule(
   member: WorkspaceMember,
   all: readonly WorkspaceMember[],
 ): string {
+  // Plain `.sort()`, like every other determinism sort in this package
+  // (`seamNames`, `readArtifactNames`, `readModuleNames`). `localeCompare`
+  // would order by the collation of whatever locale the machine happens to run
+  // under, which is the opposite of the property this sort exists for.
   const siblings = all
     .filter((other) => other.name !== member.name)
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map((other) => other.name)
+    .sort();
 
+  const portOf = new Map(all.map((other) => [other.name, other.port]));
   const entries = siblings
-    .map((sibling) => `  '${sibling.name}': [{ host: '${LOCAL_HOST}', port: ${sibling.port} }],\n`)
+    .map((name) => `  '${name}': [{ host: '${LOCAL_HOST}', port: ${portOf.get(name)} }],\n`)
     .join('');
 
   const endpoints = entries === '' ? '{}' : `{\n${entries}}`;
