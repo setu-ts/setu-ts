@@ -1110,3 +1110,106 @@ describe('package exports table — malformed payload branches', () => {
     expect(parseExportsTable(readme)).toEqual(new Set(['A function']));
   });
 });
+
+describe('documentation gate — generated API tree links', () => {
+  /**
+   * `docs/api/` is generated and gitignored, so it is ABSENT on every clean
+   * checkout and present on any machine that has run `deno task docs:api`.
+   *
+   * The bare site-root link `[Generated API Documentation](./api/)` in
+   * `docs/README.md` normalises to `docs/api` — no trailing slash — which the
+   * generated-tree guard tested with `startsWith('docs/api/')` did not match.
+   * The link fell through to ordinary directory resolution and failed on any
+   * tree where the output had not been generated. Locally it always passed;
+   * CI failed on the first clean checkout. These cases pin both states.
+   */
+  const generatedPages = new Set([
+    'docs/api/index.html',
+    'docs/api/kernel/src/index.ts/index.html',
+  ]);
+
+  it('resolves the bare site root to the generated index, tree absent or not', async () => {
+    const source = '# Docs\n\n- [Generated API Documentation](./api/)\n';
+
+    // `allFiles` deliberately contains no docs/api entry: the CI condition.
+    const findings = await checkLocalLinks(
+      'docs/README.md',
+      source,
+      ['docs/README.md'],
+      generatedPages,
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  /**
+   * The discriminating case, and the only one that can be.
+   *
+   * `checkLocalLinks` falls back to a disk stat, and `docs/api/` exists on any
+   * machine that has run `deno task docs:api` — so a test asserting the bare
+   * root RESOLVES passes with or without the fix locally, for the wrong reason.
+   * That is the same warm-state trap the bug itself came from.
+   *
+   * Routing the bare root through the generated-page set inverts it: given a
+   * page set that does NOT contain the index, the fixed guard REJECTS the link,
+   * while the old `startsWith('docs/api/')` guard misses it, falls through to
+   * the disk, finds the real directory, and reports nothing. So this fails
+   * without the fix on a machine where the tree EXISTS — precisely where the
+   * original defect was invisible.
+   */
+  it('validates the bare site root against the page set, not the filesystem', async () => {
+    const source = '# Docs\n\n- [Generated API Documentation](./api/)\n';
+    const withoutIndex = new Set(['docs/api/kernel/src/index.ts/index.html']);
+
+    const findings = await checkLocalLinks(
+      'docs/README.md',
+      source,
+      ['docs/README.md'],
+      withoutIndex,
+    );
+
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.message).toContain('does not resolve to a known generated page');
+  });
+
+  it('accepts the site root written without a trailing slash', async () => {
+    const source = '# Docs\n\n- [API](./api)\n';
+
+    expect(await checkLocalLinks('docs/README.md', source, ['docs/README.md'], generatedPages))
+      .toEqual([]);
+  });
+
+  it('still rejects a generated page that the manifest cannot produce', async () => {
+    const source = '# Docs\n\n- [Ghost](./api/no-such-package/src/index.ts/index.html)\n';
+
+    const findings = await checkLocalLinks(
+      'docs/README.md',
+      source,
+      ['docs/README.md'],
+      generatedPages,
+    );
+
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.message).toContain('does not resolve to a known generated page');
+  });
+
+  it('does not extend the exemption to any other missing directory', async () => {
+    const source = '# Docs\n\n- [Nope](./nonexistent-dir/)\n';
+
+    const findings = await checkLocalLinks(
+      'docs/README.md',
+      source,
+      ['docs/README.md'],
+      generatedPages,
+    );
+
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.message).toContain('does not resolve to an existing file or directory');
+  });
+
+  it('skips generated links entirely when the page set is unavailable', async () => {
+    const source = '# Docs\n\n- [API](./api/)\n- [Ghost](./api/ghost/index.html)\n';
+
+    expect(await checkLocalLinks('docs/README.md', source, ['docs/README.md'], null)).toEqual([]);
+  });
+});
