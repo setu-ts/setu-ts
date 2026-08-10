@@ -1067,6 +1067,18 @@ describe('--workspace', () => {
       });
     }
 
+    // The transport describes how a workspace's members reach each other, and a
+    // standalone project has none — accepting it would report success for a
+    // project that registers nothing of the kind.
+    for (const flag of ['--transport', '--transport-url']) {
+      it(`refuses ${flag} on a standalone project`, async () => {
+        const h = harness();
+        expect(await h.run(['acme', flag, 'redis'])).toBe(2);
+        expect(h.err.text()).toContain('--workspace');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
     it('refuses --port with no value on a standalone project too', async () => {
       const h = harness();
       expect(await h.run(['acme', '--port'])).toBe(2);
@@ -1083,5 +1095,110 @@ describe('--workspace', () => {
       expect(h.err.text()).toContain('--workspace');
       expect(h.fs.writes).toEqual([]);
     });
+  });
+});
+
+describe('--workspace --transport', () => {
+  /**
+   * Reads the manifest of a workspace scaffolded with the given flags.
+   *
+   * @param argv - Arguments after the project name
+   * @returns The harness and the parsed manifest
+   */
+  async function workspaceWith(argv: readonly string[]) {
+    const h = harness();
+    const code = await h.run(['acme', '--workspace', ...argv]);
+    return { h, code };
+  }
+
+  it('records http when no transport is named, so the default is explicit', async () => {
+    const { h, code } = await workspaceWith([]);
+    expect(code).toBe(0);
+    expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({
+      transport: 'http',
+    });
+  });
+
+  for (const transport of ['grpc', 'memory', 'redis', 'rabbitmq', 'nats', 'kafka']) {
+    it(`records the ${transport} transport`, async () => {
+      const { h, code } = await workspaceWith(['--transport', transport]);
+      expect(code).toBe(0);
+      expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({ transport });
+    });
+  }
+
+  it('describes the chosen transport in the workspace README', async () => {
+    const { h } = await workspaceWith(['--transport', 'redis']);
+    expect(h.fs.read('/work/acme/README.md')).toContain('redis');
+    expect(h.fs.read('/work/acme/README.md')).toContain('Redis Streams');
+  });
+
+  it('records an endpoint override beside the transport', async () => {
+    const { h, code } = await workspaceWith([
+      '--transport',
+      'redis',
+      '--transport-url',
+      'redis://shared:6379',
+    ]);
+    expect(code).toBe(0);
+    expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json'))).toMatchObject({
+      transport: 'redis',
+      transportUrl: 'redis://shared:6379',
+    });
+  });
+
+  // The manifest states a CHOICE; restating a constant the CLI already holds
+  // would invite the two to drift.
+  it('omits the endpoint when it was not overridden', async () => {
+    const { h } = await workspaceWith(['--transport', 'redis']);
+    expect(JSON.parse(h.fs.read('/work/acme/setu.workspace.json')).transportUrl).toBeUndefined();
+  });
+
+  describe('refusals', () => {
+    it('refuses an unknown transport, naming every real one', async () => {
+      const { h, code } = await workspaceWith(['--transport', 'carrier-pigeon']);
+      expect(code).toBe(2);
+      expect(h.err.text()).toContain('Unknown transport "carrier-pigeon"');
+      expect(h.err.text()).toContain('rabbitmq');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    // There is no raw-TCP transport here. Accepting `tcp` as a synonym for HTTP
+    // would leave the user believing they chose something.
+    it('refuses tcp by explaining what it actually maps to', async () => {
+      const { h, code } = await workspaceWith(['--transport', 'tcp']);
+      expect(code).toBe(2);
+      expect(h.err.text()).toContain('no raw tcp transport');
+      expect(h.err.text()).toContain('--transport http');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses --transport with no value', async () => {
+      const { h, code } = await workspaceWith(['--transport']);
+      expect(code).toBe(2);
+      expect(h.err.text()).toContain('--transport needs a value');
+    });
+
+    it('refuses --transport-url with no value', async () => {
+      const { h, code } = await workspaceWith(['--transport', 'redis', '--transport-url']);
+      expect(code).toBe(2);
+      expect(h.err.text()).toContain('--transport-url needs a value');
+    });
+
+    // A transport with no broker has nothing to address, so storing the URL
+    // would put a value in the manifest no generated config ever reads.
+    for (const transport of ['http', 'grpc', 'memory']) {
+      it(`refuses --transport-url for ${transport}, which has no broker`, async () => {
+        const { h, code } = await workspaceWith([
+          '--transport',
+          transport,
+          '--transport-url',
+          'redis://x:1',
+        ]);
+        expect(code).toBe(2);
+        expect(h.err.text()).toContain('has no broker');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
   });
 });

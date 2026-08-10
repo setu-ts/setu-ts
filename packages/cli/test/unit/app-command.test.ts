@@ -10,6 +10,7 @@ import {
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
+import type { TransportName } from '../../src/workspace/transport.ts';
 
 interface Harness {
   readonly fs: FakeFs;
@@ -29,12 +30,17 @@ interface Harness {
  * @param basePort - The workspace's base port
  * @returns The harness
  */
-function harness(members?: readonly WorkspaceMember[], basePort = 3000): Harness {
+function harness(
+  members?: readonly WorkspaceMember[],
+  basePort = 3000,
+  transport: TransportName = 'http',
+): Harness {
   const seed: Record<string, string> = {};
   if (members !== undefined) {
     seed[`/ws/${WORKSPACE_MANIFEST}`] = renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
       basePort,
+      transport,
       members,
     });
   }
@@ -96,6 +102,19 @@ describe('runAppCommand', () => {
       expect(h.err.text()).toContain('nodeModulesDir');
       expect(h.fs.writes).toEqual([]);
     });
+
+    // The transport is a workspace-wide choice: members can only talk over a bus
+    // they share, so a per-member flag would make a workspace whose services
+    // cannot reach each other expressible in one flag.
+    for (const flag of ['--transport', '--transport-url']) {
+      it(`refuses ${flag}, naming the workspace-level flag`, async () => {
+        const h = harness([]);
+        expect(await h.run(['app', 'orders', flag, 'redis'])).toBe(2);
+        expect(h.err.text()).toContain('workspace-wide choice');
+        expect(h.err.text()).toContain('new <name> --workspace');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
 
     it('refuses an unknown template through the shared selector', async () => {
       const h = harness([]);
@@ -181,6 +200,41 @@ describe('runAppCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
+    it('refuses a manifest naming a transport it does not know', async () => {
+      const fs = createFakeFs({
+        [`/ws/${WORKSPACE_MANIFEST}`]:
+          '{"version":1,"basePort":3000,"transport":"carrier-pigeon","members":[]}',
+      });
+      const err = createRecorder();
+      const code = await runAppCommand(parseArgs(['app', 'orders']), {
+        fs,
+        dir: '/ws',
+        log: createRecorder().sink,
+        error: err.sink,
+      });
+      expect(code).toBe(1);
+      expect(err.text()).toContain('carrier-pigeon');
+      expect(fs.writes).toEqual([]);
+    });
+
+    it('inherits the workspace transport for every member it adds', async () => {
+      const h = harness([], 3000, 'redis');
+      expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
+      expect(h.fs.read('/ws/apps/orders/setu.config.ts')).toContain(
+        "MessagingPlugin({ broker: 'redis-streams', url: 'redis://127.0.0.1:6379' })",
+      );
+    });
+
+    it('registers the gRPC plugin in every member of a grpc workspace', async () => {
+      const h = harness([], 3000, 'grpc');
+      expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
+      const config = h.fs.read('/ws/apps/orders/setu.config.ts');
+      expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
+      expect(config).toContain('GrpcPlugin(),');
+      // …and declares it, or the member imports a package it does not have.
+      expect(h.fs.read('/ws/apps/orders/deno.json')).toContain('@setu-ts/grpc-plugin');
+    });
+
     it('refuses a duplicate member, naming the directory it already has', async () => {
       const h = harness([{ name: 'orders', port: 3000 }]);
       expect(await h.run(['app', 'orders'])).toBe(1);
@@ -215,6 +269,7 @@ describe('runAppCommand', () => {
       expect(JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`))).toEqual({
         version: WORKSPACE_VERSION,
         basePort: 3000,
+        transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
       });
     });

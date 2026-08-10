@@ -38,6 +38,17 @@ All notable changes to this project are documented here. The format follows
   from any sibling with no configuration. The map is the LOCAL development topology; a deployed one
   comes from a real backend (`consul`, `kubernetes`, `dns`).
 
+  **The workspace chooses how its services talk.**
+  `--transport http|grpc|memory|redis|rabbitmq|
+  nats|kafka` is recorded in `setu.workspace.json`
+  and inherited by every member, because services can only meet on a bus they share; `generate app`
+  refuses the flag and names the workspace-level one. `http` stays the default, so an upgrade
+  changes nothing. This closes a silent failure the workspace itself made reachable: the
+  microservice template registers `MessagingPlugin()`, whose default broker is in-process, so two
+  generated services publishing and subscribing on one topic exchanged nothing while both reported
+  success. `--transport tcp` is refused with an explanation rather than aliased to HTTP — there is
+  no raw-TCP transport here.
+
   Refusals rather than silent surprises: `generate app` outside a workspace names
   `setu new <name> --workspace`; a duplicate member names the directory it already has; a non-Deno
   `--runtime` names the standalone alternative; `--template full-stack` is refused because its Vite

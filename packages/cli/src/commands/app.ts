@@ -35,6 +35,7 @@ import {
   SERVICE_PORT_EXPORT,
 } from '../workspace/discovery-module.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
+import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
 import {
   allocatePort,
   MAX_PORT,
@@ -92,6 +93,9 @@ function printUsage(log: (message: string) => void): void {
   log('  --di                Register DiPlugin in this member');
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
+  log('');
+  log(`The transport is the workspace's, recorded in ${WORKSPACE_MANIFEST}, and every member`);
+  log('inherits it — services can only talk over a bus they share.');
 }
 
 /**
@@ -130,6 +134,17 @@ function reportNoWorkspace(
     );
     return EXIT_ERROR;
   }
+  if (problem.kind === 'unknown-transport') {
+    error(
+      `${joinPath(dir, WORKSPACE_MANIFEST)} names the transport "${problem.transport}", ` +
+        `which this CLI does not know. Expected one of: ${TRANSPORTS.join(', ')}.`,
+    );
+    error(
+      'Refused rather than defaulted: quietly moving every member off the bus this workspace ' +
+        'asked for would leave services that cannot reach each other and nothing saying why.',
+    );
+    return EXIT_ERROR;
+  }
   error(`${joinPath(dir, WORKSPACE_MANIFEST)} is not a readable workspace manifest.`);
   error(`It must be JSON carrying \`version\`, \`basePort\`, and a \`members\` array.`);
   return EXIT_ERROR;
@@ -153,6 +168,7 @@ function planMember(
   name: string,
   next: WorkspaceManifest,
   args: ParsedArgs,
+  transport: TransportSpec,
 ): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
   readonly ok: false;
   readonly message: string;
@@ -171,7 +187,11 @@ function planMember(
     };
   }
 
-  const host = withWorkspaceMember(resolveHost(choice.template ?? MINIMAL_HOST, choice.features));
+  const host = withWorkspaceMember(
+    resolveHost(choice.template ?? MINIMAL_HOST, choice.features),
+    transport,
+    next.transportUrl,
+  );
   const memberRoot = joinPath(MEMBERS_DIR, name);
 
   const files: GeneratedFile[] = projectFiles(name, 'deno', host, choice.features, {
@@ -260,6 +280,24 @@ export async function runAppCommand(
     return EXIT_USAGE;
   }
 
+  // The transport belongs to the WORKSPACE: members can only meet on a bus they
+  // share, so a per-member choice would make a workspace whose services cannot
+  // reach each other expressible in one flag.
+  for (const flag of ['transport', 'transport-url']) {
+    if (args.flags[flag] !== undefined) {
+      deps.error(
+        `--${flag} is a workspace-wide choice, not a per-member one: members can only talk ` +
+          `over a transport they share.`,
+      );
+      deps.error(
+        `Set it when you create the workspace: ` +
+          `\`${PROGRAM_NAME} new <name> --workspace --${flag} <value>\`. ` +
+          `This workspace already records its own in ${WORKSPACE_MANIFEST}.`,
+      );
+      return EXIT_USAGE;
+    }
+  }
+
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
     deps.error(
@@ -297,7 +335,9 @@ export async function runAppCommand(
     members: [...read.manifest.members, { name, port }],
   };
 
-  const plan = planMember(name, next, args);
+  // Total: the manifest reader refuses a transport it does not know, so this
+  // resolves without a "cannot happen" branch.
+  const plan = planMember(name, next, args, transportSpec(next.transport));
   if (!plan.ok) {
     deps.error(plan.message);
     return EXIT_USAGE;

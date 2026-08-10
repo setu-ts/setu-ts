@@ -29,6 +29,7 @@ describe('readWorkspaceManifest', () => {
       renderWorkspaceManifest({
         version: WORKSPACE_VERSION,
         basePort: 3000,
+        transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
       }),
     );
@@ -105,6 +106,62 @@ describe('readWorkspaceManifest', () => {
     if (result.ok) return;
     expect(result.problem.kind).toBe('invalid-port');
   });
+
+  it('reports a transportUrl that is not a string', async () => {
+    const result = await readWorkspaceManifest(
+      workspace(
+        `{"version":${WORKSPACE_VERSION},"basePort":3000,"transport":"redis",` +
+          `"transportUrl":42,"members":[]}`,
+      ),
+      '/ws',
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.problem.kind).toBe('malformed');
+  });
+
+  // Absent → http, so a workspace created before the transport choice existed
+  // keeps working and keeps its behaviour.
+  it('defaults an absent transport to http rather than refusing', async () => {
+    const result = await readWorkspaceManifest(
+      workspace(`{"version":${WORKSPACE_VERSION},"basePort":3000,"members":[]}`),
+      '/ws',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.transport).toBe('http');
+    expect(result.manifest.transportUrl).toBeUndefined();
+  });
+
+  it('reads a transport and its endpoint back', async () => {
+    const result = await readWorkspaceManifest(
+      workspace(
+        `{"version":${WORKSPACE_VERSION},"basePort":3000,"transport":"redis",` +
+          `"transportUrl":"redis://shared:6379","members":[]}`,
+      ),
+      '/ws',
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.transport).toBe('redis');
+    expect(result.manifest.transportUrl).toBe('redis://shared:6379');
+  });
+
+  // Refused rather than defaulted: quietly moving every member off the bus the
+  // manifest asked for would leave services that cannot reach each other.
+  for (const [label, value] of [['an unknown name', '"carrier-pigeon"'], ['a number', '42']]) {
+    it(`refuses ${label} as the transport`, async () => {
+      const result = await readWorkspaceManifest(
+        workspace(
+          `{"version":${WORKSPACE_VERSION},"basePort":3000,"transport":${value},"members":[]}`,
+        ),
+        '/ws',
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.problem.kind).toBe('unknown-transport');
+    });
+  }
 
   it('reports a missing basePort', async () => {
     const result = await readWorkspaceManifest(
@@ -226,6 +283,7 @@ describe('renderWorkspaceManifest', () => {
     const manifest: WorkspaceManifest = {
       version: WORKSPACE_VERSION,
       basePort: 4100,
+      transport: 'http',
       members: [{ name: 'orders', port: 4100 }, { name: 'billing', port: 4101 }],
     };
     const result = await readWorkspaceManifest(
@@ -241,6 +299,7 @@ describe('renderWorkspaceManifest', () => {
     const rendered = renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
       basePort: 3000,
+      transport: 'http',
       members: [],
     });
     expect(rendered.endsWith('\n')).toBe(true);
@@ -249,7 +308,9 @@ describe('renderWorkspaceManifest', () => {
 
 describe('allocatePort', () => {
   it('gives the first member the base port', () => {
-    expect(allocatePort({ version: WORKSPACE_VERSION, basePort: 3000, members: [] })).toBe(3000);
+    expect(
+      allocatePort({ version: WORKSPACE_VERSION, basePort: 3000, transport: 'http', members: [] }),
+    ).toBe(3000);
   });
 
   it('gives the next member one above the highest in use', () => {
@@ -257,6 +318,7 @@ describe('allocatePort', () => {
       allocatePort({
         version: WORKSPACE_VERSION,
         basePort: 3000,
+        transport: 'http',
         members: [{ name: 'a', port: 3000 }, { name: 'b', port: 3001 }],
       }),
     ).toBe(3002);
@@ -269,6 +331,7 @@ describe('allocatePort', () => {
       allocatePort({
         version: WORKSPACE_VERSION,
         basePort: 3000,
+        transport: 'http',
         members: [{ name: 'a', port: 4100 }, { name: 'b', port: 3001 }],
       }),
     ).toBe(4101);
@@ -277,10 +340,16 @@ describe('allocatePort', () => {
   // Member order comes from a file a human may reorder.
   it('does not depend on member order', () => {
     const ports = [{ name: 'a', port: 3005 }, { name: 'b', port: 3001 }];
-    const forwards = allocatePort({ version: WORKSPACE_VERSION, basePort: 3000, members: ports });
+    const forwards = allocatePort({
+      version: WORKSPACE_VERSION,
+      basePort: 3000,
+      transport: 'http',
+      members: ports,
+    });
     const backwards = allocatePort({
       version: WORKSPACE_VERSION,
       basePort: 3000,
+      transport: 'http',
       members: [...ports].reverse(),
     });
     expect(forwards).toBe(backwards);
@@ -294,6 +363,7 @@ describe('allocatePort', () => {
       allocatePort({
         version: WORKSPACE_VERSION,
         basePort: MAX_PORT,
+        transport: 'http',
         members: [{ name: 'a', port: MAX_PORT }],
       }),
     ).toBeUndefined();
@@ -304,6 +374,7 @@ describe('allocatePort', () => {
       allocatePort({
         version: WORKSPACE_VERSION,
         basePort: MAX_PORT - 1,
+        transport: 'http',
         members: [{ name: 'a', port: MAX_PORT - 1 }],
       }),
     ).toBe(MAX_PORT);
