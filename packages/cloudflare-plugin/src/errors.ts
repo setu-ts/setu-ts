@@ -98,6 +98,8 @@ export class CloudflareRequestTimeoutError extends Error {
   override readonly name = 'CloudflareRequestTimeoutError';
 
   /**
+   * Builds the error a caller receives when its reply budget elapses.
+   *
    * @param topic - The request topic that went unanswered
    * @param timeoutMs - The budget that elapsed
    */
@@ -124,6 +126,8 @@ export class CloudflareRemoteHandlerError extends Error {
   override readonly name = 'CloudflareRemoteHandlerError';
 
   /**
+   * Builds the error relaying a remote responder's failure to its caller.
+   *
    * @param message - The message the remote responder failed with
    */
   constructor(message: string) {
@@ -145,6 +149,8 @@ export class CloudflareObjectNotFoundError extends Error {
   override readonly name = 'CloudflareObjectNotFoundError';
 
   /**
+   * Builds the error a missing R2 object produces.
+   *
    * @param path - The object path that was requested
    */
   constructor(path: string) {

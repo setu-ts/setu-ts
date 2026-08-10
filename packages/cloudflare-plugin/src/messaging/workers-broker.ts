@@ -183,6 +183,8 @@ export class WorkersBroker implements IMessageBroker {
   #generation = 0;
 
   /**
+   * Builds a broker over one Queues producer binding.
+   *
    * @param producer - The Queues producer binding
    * @param runtime - Id, clock, and timer source; pass `IRuntimeServices`
    * @param options - Logger thunk and the optional reply-inbox binding

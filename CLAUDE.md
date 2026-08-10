@@ -1922,16 +1922,68 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the registry `Map` lookup IS the unknown-name test, and keeping both left a permanently
   unreachable branch. No barrel change, so no public export moved. All new `src` files at **100%**
   branch/function/line) — complete (PR #144)
-- **Next milestone** — **M39** (docker/kubernetes), then M40. Queued behind those: **M59**
-  (`cloudflare-plugin` — Workers-native messaging), a ROADMAP section only, with no plan and no code
-  yet. M59 came from an external DX review; note what that review got wrong, since the section says
-  so and a reader should not re-raise it: it claimed the framework has no decorators (M9/M36b ship
-  them) and that Workers queues are still blocked (M52b shipped them). M60–M62 came from a measured
-  audit after M58: a project with all fourteen schematics generated type-checked clean while its
-  entry points imported exactly ONE generated path, so thirteen of fourteen generated artifacts were
+- **Milestone 59** (`packages/cloudflare-plugin` + `packages/cli` — Workers-native messaging, the
+  last edge capability gap. `cloudflare-plugin` already served `QUEUE`, `CACHE`, `STORAGE`,
+  `DATABASE` and `REALTIME_BACKPLANE`; `CAPABILITIES.MESSAGING` was the one token it could not,
+  because all ten `messaging-plugin` brokers need a socket or a socket-bound SDK and `cloud-gate.ts`
+  hard-refuses Pub/Sub and Service Bus on Workers by name. `WorkersBroker` serves it from the
+  platform: `publish` is a Queues producer call, `subscribe` registers into a dispatch table the
+  application's `queue` module export drives (the M52b `process`/`dispatch` split), and
+  `request`/`respond` ride an opt-in `rpc` arm whose replies travel through a Durable Object the
+  caller holds a WebSocket to. **Two ROADMAP claims did not survive source-checking, and correcting
+  them was the milestone's substance.** It said the Workers inbox would be "a third implementation
+  of a seam that exists" via M14d's `openInbox` — but `OpenInbox`, `ReplyInbox` and
+  `RequestReplyCore` live in `packages/messaging-plugin/src/brokers/`, and §2.2 forbids a plugin
+  importing another plugin, so the seam is unreachable from here; `common` carries no error class
+  either, so promoting the two RPC errors was equally unavailable. The correlation manager is
+  therefore purpose-built (not the §11.1 duplication case — the shipped core carries its reply over
+  the broker's own `publish`, while here the request rides a queue and the reply is PUSHED over a
+  socket no publish produced), and `CloudflareRequestTimeoutError`/`CloudflareRemoteHandlerError`
+  are distinct classes, unambiguous per application because the kernel admits one provider of the
+  token. It also said the microservice template's refusal would be "replaced by a runtime-aware
+  arm"; no such mechanism existed — `TemplateHost.plugins` is a static array — so a declarative
+  `TemplateDefinition.runtimeSwaps` is a template-contract widening, chosen over a callback so
+  `--dry-run` stays exact and the swap is assertable without rendering a project. **Four platform
+  facts were verified against current Cloudflare docs and each shaped the design:** a queue has
+  **exactly one active consumer** (attaching a second is a publish-time error), so cross-service
+  fan-out is unreachable and is documented rather than faked; `max_batch_timeout` ranges **0–60s**
+  with a default of 5, which alone exhausts `RequestOptions`' default 5000 ms budget — so
+  `max_batch_timeout = 0` is a stated requirement and the CLI emits it, not a tuning note; Durable
+  Objects have **no wall-clock cap while the caller stays connected**, which is the only reason a DO
+  reply inbox is viable; and delivery is at-least-once, so a duplicate reply is dropped rather than
+  reported. The dispatch discipline mirrors `WorkersQueue` (exactly one disposition, `ack()` outside
+  the handler `try`) with **one deliberate departure**: a publish whose topic has no subscriber is
+  **acked**, because a job name with no processor is a mistake while publishing to a topic nobody
+  listens on is ordinary pub/sub, and retrying would burn the 100-retry budget and dead-letter every
+  fire-and-forget message. A request with no responder is **answered with a failure** rather than
+  left to time out. Writing the tests found `respond()` throwing **synchronously** despite its
+  `Promise` return type — the M52b `createQueueHandler` defect class, which a caller using
+  `.catch()` would miss. Also closed the last hole in the binding-guard family:
+  `BindingRegistry.queue()` cast unvalidated, so a mistyped binding booted clean, reported `up`, and
+  failed on the first send with a bare `TypeError` — the exact defect M52c found on D1 and M52d on
+  Durable Objects, and a contradiction of `facades.ts:402`'s own stated principle. **Removing the
+  template refusal made `TemplateDefinition.unsupported` and its branch in `resolveTemplateChoice`
+  unreachable by any input** (`microservice` held the last entry), dropping `choice.ts` to 80.8%
+  line — so both were deleted rather than left as an uncoverable branch, which cascaded into an
+  unused `runtime` parameter and two now-empty tests, all removed. Verified against **real workerd**
+  via `wrangler dev`: a publish observed arriving at a subscriber in a separate `queue` invocation,
+  and a full request/reply round trip through a real Durable Object. **The first negative control
+  passed, which was the milestone's most useful failure** — `wrangler dev --persist-to` keeps its KV
+  store between runs, so the fixed assertion value was satisfied by what an EARLIER green run had
+  written and the check passed with nothing delivered at all; the note is now a fresh UUID per run,
+  and both checks were then observed failing when their topic is broken. All `src` files at 100%
+  branch/function/line except `workers-broker.ts` (96.2/100/99.3). **Not verified against a deployed
+  Worker** — CI holds no Cloudflare account) — complete (PR pending)
+- **Next milestone** — **M39** (docker/kubernetes), then M40. M60–M62 came from a measured audit
+  after M58: a project with all fourteen schematics generated type-checked clean while its entry
+  points imported exactly ONE generated path, so thirteen of fourteen generated artifacts were
   unreachable — that, not breadth, was the distance from NestJS. **All three are now closed**: M60
   wired eleven of the thirteen, M61 made decorators and DI independent choices, and M62 added
-  monorepos, so the CLI parity work is done.
+  monorepos, so the CLI parity work is done. M59 came from an external DX review; note what that
+  review got wrong, since the ROADMAP section says so and a reader should not re-raise it: it
+  claimed the framework has no decorators (M9/M36b ship them) and that Workers queues are still
+  blocked (M52b shipped them). Its suggested HTTP-polling adapters were rejected with cause — a
+  Worker has no ambient loop to poll from.
 
 ## Verification (run before declaring any work done)
 

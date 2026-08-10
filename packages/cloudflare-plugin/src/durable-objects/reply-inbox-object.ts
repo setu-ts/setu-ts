@@ -74,6 +74,8 @@ export class ReplyInboxObjectCore {
   readonly #host: DurableObjectWebSocketHost;
 
   /**
+   * Builds the core the application's Durable Object class delegates to.
+   *
    * @param state - The Durable Object's `ctx`
    * @param options - Optional seams; the defaults are the deployment path
    */

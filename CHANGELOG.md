@@ -8,6 +8,47 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Workers-native messaging: the last edge capability gap** (M59). `cloudflare-plugin` already
+  served `QUEUE`, `CACHE`, `STORAGE`, `DATABASE` and `REALTIME_BACKPLANE` on Cloudflare Workers.
+  `CAPABILITIES.MESSAGING` was the one token it could not: all ten `messaging-plugin` brokers need a
+  socket or a socket-bound SDK. A new `messaging` arm serves it from the platform itself.
+
+  ```typescript
+  app.register(CloudflarePlugin({
+    env,
+    messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },
+  }));
+
+  // Consuming is a MODULE export — no plugin option can declare one.
+  export default { fetch: app.fetch, queue: createMessagingHandler(app) };
+  ```
+
+  `publish` is a Queues producer call; `subscribe` registers into a dispatch table the `queue`
+  export drives, matching `InMemoryBroker`'s fan-out and round-robin group semantics. Two limits are
+  documented rather than papered over: Cloudflare allows **exactly one active consumer per queue**,
+  so cross-service fan-out needs one queue per consumer, and a publish nobody subscribed to is
+  **acked** rather than retried — retrying ordinary pub/sub would dead-letter every fire-and-forget
+  message.
+
+  `request`/`respond` ship behind the opt-in `rpc` arm. A queue reaches its one consumer Worker and
+  never the caller, so the reply travels through a Durable Object the caller holds a WebSocket to
+  while its request is in flight (`ReplyInboxObjectCore`, which the application exports as its own
+  DO class). Without the arm both throw, naming the binding to add. A queue carrying RPC **must**
+  set `max_batch_timeout = 0`: the platform default of 5s alone exhausts the default reply budget.
+
+  `CloudflareRequestTimeoutError` and `CloudflareRemoteHandlerError` mirror `messaging-plugin`'s two
+  RPC errors as distinct classes, because §2.2 forbids a plugin importing another plugin. Exactly
+  one provider of `CAPABILITIES.MESSAGING` can be registered, so which to catch is never ambiguous.
+
+- **`setu new --template microservice --runtime cloudflare-workers`** (M59). The template refused
+  that target unconditionally. The refusal was right about `MessagingPlugin` and `QueuePlugin`
+  needing raw sockets and wrong about the capabilities, which the platform serves itself. A new
+  declarative `TemplateDefinition.runtimeSwaps` replaces those two with `CloudflarePlugin` on
+  Workers only, and contributes the `queue` module export, the Durable Object class, and the
+  wrangler stanzas — including `max_batch_timeout = 0`. The other three runtimes are byte-identical.
+  `TemplateDefinition.unsupported` and its refusal branch are **removed**: `microservice` held the
+  last entry, so both became unreachable. CLI-internal, never a published export.
+
 - **Monorepos: one repository, many deployable services** (M62). The CLI had no workspace concept at
   all, so a second service meant `setu new other --dir .` — a fully independent project with its own
   manifest, its own lockfile, and no knowledge of its sibling. The sharp edge was discovery: the
@@ -131,6 +172,14 @@ All notable changes to this project are documented here. The format follows
   and `g event-handler`, all three of which were gated on plugins no template installed.
 
 ### Fixed
+
+- **A mistyped Queues binding now fails at `register()`, not at the first send** (M59).
+  `BindingRegistry.queue()` cast its binding unvalidated, so a missing `[[queues.producers]]` stanza
+  or a name typo let an application boot clean, report `up` from the `cloudflare` health indicator,
+  and fail on the first `add()` with a bare `TypeError` pointing at nothing. A new `isQueueProducer`
+  guard closes the last hole in that family — the same defect M52c fixed on D1 and M52d on Durable
+  Objects. **Behaviour change** for anyone whose queue binding was already wrong: the failure now
+  arrives at startup, naming the binding.
 
 - **`setu new --runtime cloudflare-workers` produced a project that could not be built or
   deployed.** `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:`
