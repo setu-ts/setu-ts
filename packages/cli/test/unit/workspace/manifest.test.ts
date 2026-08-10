@@ -3,6 +3,9 @@ import { expect } from '@std/expect';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
   allocatePort,
+  isUsablePort,
+  MAX_PORT,
+  MIN_PORT,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
@@ -89,14 +92,18 @@ describe('readWorkspaceManifest', () => {
     expect(result.problem.version).toBe(99);
   });
 
-  it('reports a non-integer basePort', async () => {
+  // A fractional basePort is reported as the unusable PORT it is rather than as
+  // an unreadable manifest: "this is not a readable workspace manifest" would
+  // send a developer hunting for a syntax error in a file whose only problem is
+  // one number.
+  it('reports a non-integer basePort as an invalid port', async () => {
     const result = await readWorkspaceManifest(
       workspace(`{"version":${WORKSPACE_VERSION},"basePort":30.5,"members":[]}`),
       '/ws',
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.problem.kind).toBe('malformed');
+    expect(result.problem.kind).toBe('invalid-port');
   });
 
   it('reports a missing basePort', async () => {
@@ -129,7 +136,7 @@ describe('readWorkspaceManifest', () => {
       ['an entry with no name', '{"port":3000}'],
       ['an entry with an empty name', '{"name":"","port":3000}'],
       ['an entry with no port', '{"name":"orders"}'],
-      ['an entry with a fractional port', '{"name":"orders","port":30.5}'],
+      ['an entry whose port is not a number', '{"name":"orders","port":"3000"}'],
     ] as const
   ) {
     it(`reports ${label}`, async () => {
@@ -142,6 +149,76 @@ describe('readWorkspaceManifest', () => {
       expect(result.problem.kind).toBe('malformed');
     });
   }
+
+  // A port outside the bindable range is checked on the way IN, because every
+  // one of them is written into a member's own entry point AND into every
+  // sibling's discovery map. Verified against the real kernel: `app.start()`
+  // throws `Invalid port (out of range)` for 99999 and -1, while 0 BINDS on an
+  // arbitrary free port — so the member starts, looks healthy, and every sibling
+  // dialling 0 is refused. All three must be refused here, not propagated.
+  for (const port of [99999, 0, -1, 65536, 30.5]) {
+    it(`refuses a member port of ${port}, naming the value and the member`, async () => {
+      const result = await readWorkspaceManifest(
+        workspace(
+          `{"version":${WORKSPACE_VERSION},"basePort":3000,` +
+            `"members":[{"name":"orders","port":${port}}]}`,
+        ),
+        '/ws',
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.problem.kind).toBe('invalid-port');
+      if (result.problem.kind !== 'invalid-port') return;
+      expect(result.problem.port).toBe(port);
+      expect(result.problem.field).toContain('orders');
+    });
+  }
+
+  it('refuses an out-of-range basePort, naming the field', async () => {
+    const result = await readWorkspaceManifest(
+      workspace(`{"version":${WORKSPACE_VERSION},"basePort":99999,"members":[]}`),
+      '/ws',
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.problem.kind).toBe('invalid-port');
+    if (result.problem.kind !== 'invalid-port') return;
+    expect(result.problem.field).toBe('basePort');
+  });
+
+  it('reports a basePort that is not a number as malformed, not as a bad port', async () => {
+    const result = await readWorkspaceManifest(
+      workspace(`{"version":${WORKSPACE_VERSION},"basePort":"3000","members":[]}`),
+      '/ws',
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.problem.kind).toBe('malformed');
+  });
+
+  it('accepts the range boundaries', async () => {
+    const result = await readWorkspaceManifest(
+      workspace(
+        `{"version":${WORKSPACE_VERSION},"basePort":1,` +
+          `"members":[{"name":"a","port":1},{"name":"b","port":65535}]}`,
+      ),
+      '/ws',
+    );
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('isUsablePort', () => {
+  it('accepts the whole bindable range and nothing outside it', () => {
+    for (const usable of [MIN_PORT, 3000, MAX_PORT]) {
+      expect(isUsablePort(usable)).toBe(true);
+    }
+    // 0 binds an arbitrary free port rather than failing, which is why it is
+    // excluded here rather than left to `app.start()` to reject.
+    for (const unusable of [0, -1, MAX_PORT + 1, 30.5, Number.NaN, '3000', null, undefined]) {
+      expect(isUsablePort(unusable)).toBe(false);
+    }
+  });
 });
 
 describe('renderWorkspaceManifest', () => {
@@ -208,5 +285,27 @@ describe('allocatePort', () => {
     });
     expect(forwards).toBe(backwards);
     expect(forwards).toBe(3006);
+  });
+
+  // 65536 is not a port. Handing it out would write a `main.ts` that throws
+  // `Invalid port (out of range)` the first time it runs.
+  it('reports exhaustion rather than allocating past the range', () => {
+    expect(
+      allocatePort({
+        version: WORKSPACE_VERSION,
+        basePort: MAX_PORT,
+        members: [{ name: 'a', port: MAX_PORT }],
+      }),
+    ).toBeUndefined();
+  });
+
+  it('still allocates the last usable port', () => {
+    expect(
+      allocatePort({
+        version: WORKSPACE_VERSION,
+        basePort: MAX_PORT - 1,
+        members: [{ name: 'a', port: MAX_PORT - 1 }],
+      }),
+    ).toBe(MAX_PORT);
   });
 });

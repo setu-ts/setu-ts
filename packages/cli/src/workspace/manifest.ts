@@ -33,6 +33,33 @@ export const WORKSPACE_VERSION = 1;
 /** The port the first member of a workspace binds, unless `--port` says otherwise. */
 export const DEFAULT_BASE_PORT = 3000;
 
+/** The lowest port a member may bind. */
+export const MIN_PORT = 1;
+
+/** The highest port a member may bind. */
+export const MAX_PORT = 65535;
+
+/**
+ * Reports whether a value is a port a member can actually bind.
+ *
+ * Applied to every port the CLI reads or derives, not only to the `--port`
+ * flag. This manifest is documented as hand-editable, and `app.start()` rejects
+ * anything outside this range outright (`Invalid port (out of range): 99999`),
+ * so a number that reaches a generated module unchecked produces a workspace
+ * whose members cannot start — from a command that reported success.
+ *
+ * `0` is excluded for a subtler reason than the rest: it BINDS, on an arbitrary
+ * free port, so the member starts and looks healthy while every sibling
+ * dialling `0` is refused.
+ *
+ * @param value - The candidate port
+ * @returns True when a member could bind it
+ */
+export function isUsablePort(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) &&
+    value >= MIN_PORT && value <= MAX_PORT;
+}
+
 /** One member of a workspace. */
 export interface WorkspaceMember {
   /** The member's directory name under `apps/`, and its service name in every sibling's map. */
@@ -58,7 +85,22 @@ export type WorkspaceManifestProblem =
   /** Present but unreadable as a manifest: malformed JSON, or the wrong shape. */
   | { readonly kind: 'malformed' }
   /** Present and well-formed, but written by a CLI this one does not understand. */
-  | { readonly kind: 'unsupported-version'; readonly version: number };
+  | { readonly kind: 'unsupported-version'; readonly version: number }
+  /**
+   * Well-formed, but a port in it is one no member could bind.
+   *
+   * Reported separately from `malformed` so the refusal can NAME the number and
+   * the field it came from. "This is not a readable workspace manifest" would
+   * send a developer looking for a syntax error in a file whose only problem is
+   * a typo'd port.
+   */
+  | {
+    readonly kind: 'invalid-port';
+    /** The offending value, exactly as it appeared. */
+    readonly port: number;
+    /** `basePort`, or the member whose port it is. */
+    readonly field: string;
+  };
 
 /** The result of reading a workspace manifest. */
 export type WorkspaceManifestResult =
@@ -66,7 +108,11 @@ export type WorkspaceManifestResult =
   | { readonly ok: false; readonly problem: WorkspaceManifestProblem };
 
 /**
- * Narrows one parsed `members` entry.
+ * Narrows one parsed `members` entry to the right SHAPE.
+ *
+ * The port's RANGE is checked by the caller rather than here, so that a
+ * plausible-but-unusable port is reported as the invalid port it is instead of
+ * as an unreadable manifest.
  *
  * @param value - The parsed entry
  * @returns The member, or undefined when the entry is not one
@@ -77,7 +123,7 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const name = record['name'];
   const port = record['port'];
   if (typeof name !== 'string' || name === '') return undefined;
-  if (typeof port !== 'number' || !Number.isInteger(port)) return undefined;
+  if (typeof port !== 'number') return undefined;
   return { name, port };
 }
 
@@ -123,8 +169,9 @@ export async function readWorkspaceManifest(
   }
 
   const basePort = record['basePort'];
-  if (typeof basePort !== 'number' || !Number.isInteger(basePort)) {
-    return { ok: false, problem: { kind: 'malformed' } };
+  if (typeof basePort !== 'number') return { ok: false, problem: { kind: 'malformed' } };
+  if (!isUsablePort(basePort)) {
+    return { ok: false, problem: { kind: 'invalid-port', port: basePort, field: 'basePort' } };
   }
 
   const rawMembers = record['members'];
@@ -137,6 +184,17 @@ export async function readWorkspaceManifest(
     // silently omitted member is a member every sibling's map stops naming, and
     // the CLI would then reallocate its port to someone else.
     if (member === undefined) return { ok: false, problem: { kind: 'malformed' } };
+    // Checked on the way IN, so an unusable port can never reach a generated
+    // module. Every member's port is written into its own `main.ts` binding and
+    // into every sibling's discovery map, so one bad value breaks the whole
+    // workspace — and `generate app` would otherwise report success while doing
+    // it.
+    if (!isUsablePort(member.port)) {
+      return {
+        ok: false,
+        problem: { kind: 'invalid-port', port: member.port, field: `member "${member.name}"` },
+      };
+    }
     members.push(member);
   }
 
@@ -162,13 +220,19 @@ export function renderWorkspaceManifest(manifest: WorkspaceManifest): string {
  * every member sorting after a newly inserted name, silently moving a running
  * service.
  *
+ * Returns `undefined` rather than a number past {@linkcode MAX_PORT}: a
+ * workspace based at 65535 has exactly one member's worth of room, and handing
+ * out 65536 would write a `main.ts` that throws `Invalid port (out of range)`
+ * the first time it runs.
+ *
  * @param manifest - The workspace's current state
- * @returns The port for the next member
+ * @returns The port for the next member, or undefined when the range is spent
  */
-export function allocatePort(manifest: WorkspaceManifest): number {
+export function allocatePort(manifest: WorkspaceManifest): number | undefined {
   let highest = manifest.basePort - 1;
   for (const member of manifest.members) {
     if (member.port > highest) highest = member.port;
   }
-  return highest + 1;
+  const next = highest + 1;
+  return isUsablePort(next) ? next : undefined;
 }
