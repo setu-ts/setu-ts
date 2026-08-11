@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.6] — 2026-08-11
+
+**A generator release.** Eleven of the fourteen artifacts `setu generate` emits now reach a
+registration site with no edit to a file you own — the other three have a stated reason they have
+none. Decorators and dependency injection became independent choices, a repository can hold more
+than one deployable service, and Cloudflare Workers gained the last capability it was missing.
+Alongside that: a documentation hub with nine curated guides, RFC 9457 Problem Details, and an
+OpenAPI document derived from the guards that enforce authentication.
+
+All 47 packages move as one version, because the CLI stamps its own version as the dependency range
+for every project it scaffolds. Installs still need an explicit version
+(`jsr:@setu-ts/kernel@^0.1.0-alpha.6`) — JSR does not point `latest` at a prerelease — and Deno
+refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
+
+**One behavior change to already-generated code**: `setu generate controller` emitted a controller
+that answered `500` on every request, in every release since the CLI first shipped in
+`v0.1.0-alpha.2`. The fix changes the shape of what it emits — see _Changed_ below for the
+migration.
+
 ### Added
 
 - **Workers-native messaging: the last edge capability gap** (M59). `cloudflare-plugin` already
@@ -173,6 +192,21 @@ All notable changes to this project are documented here. The format follows
   credentials holds, and neither needs a socket so the Cloudflare Workers refusal is unchanged. They
   are also the only host a scaffolded project can have for `g command-handler`, `g query-handler`
   and `g event-handler`, all three of which were gated on plugins no template installed.
+
+- **A documentation hub, and gates that keep it true** (M38). Nine curated guides under
+  [`docs/`](docs/) — getting started, plugin architecture, the plugin catalog, the programmatic API,
+  decorators, writing custom plugins, migrating from NestJS and from Fastify, the examples index,
+  and runtime deployment — plus a reproducible `deno doc` API-site generator (`deno task docs:api`).
+  Every package README now links to its own `PUBLIC_API.md` section.
+
+  The guides are mechanically checked rather than trusted: committed fixtures representing all nine
+  are type-checked against the workspace, a Markdown gate validates the package catalog and every
+  cross-file anchor, and a JSDoc lint ratchet freezes the measured diagnostic count so documentation
+  debt can only be paid down, never added to. A below-baseline run fails and names the constant to
+  lower. No package source, manifest export, capability token, or plugin option changed.
+
+  `PUBLIC_API.md` section anchors now carry their package name, which **breaks external deep links**
+  (`#storage` is now `#storage-setu-tsstorage-plugin`).
 
 ### Fixed
 
@@ -1599,5 +1633,6 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.1.0-alpha.6]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.5
 [0.1.0-alpha.1]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.1
