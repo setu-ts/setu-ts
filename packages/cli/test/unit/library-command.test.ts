@@ -33,6 +33,7 @@ function harness(root?: string, workspace = true): Harness {
   if (workspace) {
     seed[`/acme/${WORKSPACE_MANIFEST}`] = renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
+      runtime: 'deno',
       basePort: 3000,
       transport: 'http',
       members: [],

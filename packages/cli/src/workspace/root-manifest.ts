@@ -140,6 +140,8 @@ export function planRootWorkspaceGlob(
   contents: string,
   glob: string,
   library: string,
+  manifestFile: string = ROOT_MANIFEST,
+  globKey: string = WORKSPACE_KEY,
 ): RootManifestPlan {
   let parsed: unknown;
   try {
@@ -148,8 +150,8 @@ export function planRootWorkspaceGlob(
     return {
       kind: 'refused',
       message:
-        `Cannot read the workspace ${ROOT_MANIFEST} as JSON, and the "${library}" library needs ` +
-        `"${glob}" in its \`${WORKSPACE_KEY}\` list — without it Deno does not treat the library ` +
+        `Cannot read the workspace ${manifestFile} as JSON, and the "${library}" library needs ` +
+        `"${glob}" in its \`${globKey}\` list — without it the workspace does not treat the library ` +
         `as a member and no sibling can import it. Add that entry by hand and run this again.`,
     };
   }
@@ -157,20 +159,20 @@ export function planRootWorkspaceGlob(
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return {
       kind: 'refused',
-      message: `The workspace ${ROOT_MANIFEST} is not a JSON object, so there is no ` +
-        `\`${WORKSPACE_KEY}\` list to add "${glob}" to for the "${library}" library.`,
+      message: `The workspace ${manifestFile} is not a JSON object, so there is no ` +
+        `\`${globKey}\` list to add "${glob}" to for the "${library}" library.`,
     };
   }
 
   const record = parsed as Record<string, unknown>;
-  const globs = record[WORKSPACE_KEY];
+  const globs = record[globKey];
 
   // A root whose `workspace` is not a list of strings is one this CLI did not
   // write, and rewriting it would discard whatever shape it has.
   if (!Array.isArray(globs) || globs.some((entry) => typeof entry !== 'string')) {
     return {
       kind: 'refused',
-      message: `The workspace ${ROOT_MANIFEST} does not declare \`${WORKSPACE_KEY}\` as a list ` +
+      message: `The workspace ${manifestFile} does not declare \`${globKey}\` as a list ` +
         `of globs, so "${glob}" cannot be added to it for the "${library}" library.`,
     };
   }
@@ -180,8 +182,8 @@ export function planRootWorkspaceGlob(
   return {
     kind: 'update',
     file: {
-      path: ROOT_MANIFEST,
-      contents: `${JSON.stringify({ ...record, [WORKSPACE_KEY]: [...globs, glob] }, null, 2)}\n`,
+      path: manifestFile,
+      contents: `${JSON.stringify({ ...record, [globKey]: [...globs, glob] }, null, 2)}\n`,
       managed: true,
     },
   };

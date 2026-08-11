@@ -43,6 +43,7 @@ import {
 } from '../workspace/discovery-module.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
+import { workspaceProfile, type WorkspaceRuntimeProfile } from '../workspace/runtime-profile.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
@@ -173,13 +174,12 @@ function planMember(
   next: WorkspaceManifest,
   args: ParsedArgs,
   transport: TransportSpec,
+  profile: WorkspaceRuntimeProfile,
   rootManifest: string,
 ): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
   readonly ok: false;
   readonly message: string;
 } {
-  // Members are Deno projects: a Setu workspace is a Deno workspace, and there
-  // is no npm-workspace design here to put a `node` member into.
   const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
 
@@ -212,19 +212,23 @@ function planMember(
     if (plan.kind === 'update') extra.push(plan.file);
   }
 
+  // The WORKSPACE's runtime, never a per-member flag: members share one root
+  // manifest and one lockfile, so a member built with a different toolchain than
+  // the root that installs it is not a member at all. A runtime swap can still
+  // apply — the template data decides that, per target, exactly as it does for a
+  // standalone project.
   const host = withWorkspaceMember(
-    // A workspace member is always a Deno project (`--runtime` is refused
-    // above), so no runtime swap can apply here.
-    resolveHost(choice.template ?? MINIMAL_HOST, choice.features, 'deno'),
+    resolveHost(choice.template ?? MINIMAL_HOST, choice.features, profile.runtime),
     transport,
     name,
+    profile,
     // Omitted rather than passed as `undefined`: `exactOptionalPropertyTypes` is
     // on, and the parameter is optional.
-    ...(next.transportUrl === undefined ? [] : [next.transportUrl]),
+    ...(next.transportUrl === undefined ? [] : [next.transportUrl]) as [string?],
   );
   const memberRoot = joinPath(MEMBERS_DIR, name);
 
-  const files: GeneratedFile[] = projectFiles(name, 'deno', host, choice.features, {
+  const files: GeneratedFile[] = projectFiles(name, profile.runtime, host, choice.features, {
     symbol: SERVICE_PORT_EXPORT,
     from: DISCOVERY_SPECIFIER,
   }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
@@ -235,7 +239,7 @@ function planMember(
   for (const member of next.members) {
     files.push({
       path: joinPath(MEMBERS_DIR, member.name, DISCOVERY_MODULE),
-      contents: renderDiscoveryModule(member, next.members),
+      contents: renderDiscoveryModule(member, next.members, profile),
       managed: true,
     });
   }
@@ -249,7 +253,7 @@ function planMember(
   // Regenerated for the whole workspace on every member, exactly as the discovery
   // modules are: a stack that names two of three members is worse than none, and
   // the ports it publishes come from the same manifest the maps do.
-  for (const file of workspaceContainerFiles(next, transport)) files.push(file);
+  for (const file of workspaceContainerFiles(next, transport, profile)) files.push(file);
   for (const file of workspaceK8sFiles(next, transport)) files.push(file);
 
   for (const file of extra) files.push(file);
@@ -282,22 +286,6 @@ export async function runAppCommand(
   const rawName = args.positionals[1];
   if (rawName === undefined) {
     printUsage(deps.error);
-    return EXIT_USAGE;
-  }
-
-  // Refused rather than ignored: a member is a Deno project by construction, and
-  // silently swallowing `--runtime node` would hand back something the flag says
-  // it is not. `new` rejects an unknown value the same way.
-  const runtimeFlag = stringFlag(args.flags, 'runtime');
-  if (runtimeFlag !== undefined && runtimeFlag !== 'deno') {
-    deps.error(
-      `A workspace member is always a Deno project, so --runtime ${runtimeFlag} cannot apply: ` +
-        `a Setu workspace is a Deno workspace.`,
-    );
-    deps.error(
-      `Scaffold a standalone project instead: ` +
-        `\`${PROGRAM_NAME} new <name> --runtime ${runtimeFlag}\`.`,
-    );
     return EXIT_USAGE;
   }
 
@@ -337,6 +325,24 @@ export async function runAppCommand(
 
   const read = await readWorkspaceManifest(deps.fs, deps.dir);
   if (!read.ok) return reportNoWorkspace(deps.dir, read.problem, deps.error);
+
+  // A member's runtime is the WORKSPACE's. The flag is accepted when it agrees
+  // and refused when it does not, rather than silently scaffolding a member the
+  // root's toolchain cannot install: members share one root manifest and one
+  // lockfile, so a Node member inside a Deno workspace is not a member at all.
+  const runtimeFlag = stringFlag(args.flags, 'runtime');
+  if (runtimeFlag !== undefined && runtimeFlag !== read.manifest.runtime) {
+    deps.error(
+      `This is a ${read.manifest.runtime} workspace, so --runtime ${runtimeFlag} cannot apply to ` +
+        `one of its members: they share a root manifest and a lockfile, and the root is what ` +
+        `installs them.`,
+    );
+    deps.error(
+      `Create a separate workspace for it: ` +
+        `\`${PROGRAM_NAME} new <name> --workspace --runtime ${runtimeFlag}\`.`,
+    );
+    return EXIT_USAGE;
+  }
 
   const name = names.kebab;
   if (read.manifest.members.some((member) => member.name === name)) {
@@ -397,7 +403,8 @@ export async function runAppCommand(
 
   // Total: the manifest reader refuses a transport it does not know, so this
   // resolves without a "cannot happen" branch.
-  const plan = planMember(name, next, args, transportSpec(next.transport), rootManifest);
+  const profile = workspaceProfile(next.runtime);
+  const plan = planMember(name, next, args, transportSpec(next.transport), profile, rootManifest);
   if (!plan.ok) {
     deps.error(plan.message);
     return EXIT_USAGE;
@@ -433,6 +440,11 @@ export async function runAppCommand(
   for (const file of files) deps.log(`created ${file.path}`);
   deps.log('');
   deps.log(`Added ${name} on port ${port}. Next:`);
-  deps.log(`  cd ${joinPath(MEMBERS_DIR, name)} && deno task start`);
+  // From the profile: a Node member has no `deno task`, and a next step that
+  // cannot be run is worse than none.
+  deps.log(
+    `  ${profile.install} && cd ${joinPath(MEMBERS_DIR, name)} && ` +
+      `${profile.manifestKind === 'deno' ? 'deno task start' : 'npm start'}`,
+  );
   return EXIT_OK;
 }

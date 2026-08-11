@@ -19,6 +19,7 @@
 
 import type { Wiring } from '../templates/registry.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import type { WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import {
   PROTO_IMPORTS,
   PROTO_TASK,
@@ -523,10 +524,10 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
  */
 export function renderConnection(
   connection: TransportConnection,
+  profile: WorkspaceRuntimeProfile,
   override?: string,
 ): string {
-  const fallback = override ?? connection.localDefault;
-  return `Deno.env.get('${connection.variable}') ??\n          '${fallback}'`;
+  return profile.envRead(connection.variable, override ?? connection.localDefault);
 }
 
 /**

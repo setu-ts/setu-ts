@@ -41,6 +41,7 @@ function harness(
   if (members !== undefined) {
     seed[`/ws/${WORKSPACE_MANIFEST}`] = renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
+      runtime: 'deno',
       basePort,
       transport,
       members,
@@ -91,13 +92,15 @@ describe('runAppCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    // Refused rather than ignored: a member is a Deno project by construction,
-    // and swallowing the flag would hand back something it says it is not.
-    it('refuses a non-Deno runtime, naming the standalone alternative', async () => {
+    // A member's runtime is the WORKSPACE's: they share one root manifest and one
+    // lockfile, so a Node member inside a Deno workspace is not a member at all.
+    // The flag is refused when it DISAGREES rather than whenever it is non-Deno,
+    // because a Node workspace's members are Node projects.
+    it('refuses a runtime the workspace does not use', async () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--runtime', 'node'])).toBe(2);
-      expect(h.err.text()).toContain('Deno workspace');
-      expect(h.err.text()).toContain('setu new <name> --runtime node');
+      expect(h.err.text()).toContain('This is a deno workspace');
+      expect(h.err.text()).toContain('--workspace --runtime node');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -430,6 +433,9 @@ describe('runAppCommand', () => {
       await h.run(['app', 'orders']);
       expect(JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`))).toEqual({
         version: WORKSPACE_VERSION,
+        // Carried through unchanged: the runtime is the workspace's, and adding a
+        // member must never rewrite it.
+        runtime: 'deno',
         basePort: 3000,
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }],

@@ -47,6 +47,12 @@ All notable changes to this project are documented here. The format follows
   the workspace root may enable, so the root gains `nodeModulesDir` when such a member arrives — and
   not before, because with it set an ordinary member's first `deno check` materialises every npm
   package the framework lazily imports.
+- **Node and Bun workspaces.** `setu new --workspace --runtime node|bun` builds a monorepo on npm
+  workspaces instead of a Deno one — the framework claims runtime independence, and only the
+  monorepo was Deno-only. The runtime is recorded in `setu.workspace.json` (absent means `deno`, so
+  nothing existing changes) and every later command reads it back: root manifest shape, environment
+  reads in generated source, library manifest and test runner, base image, and install and run
+  commands. Cloudflare Workers is refused, because each Worker is its own deploy unit.
 - **A proto toolchain for `--transport grpc` members.** An example proto, both `buf` manifests and a
   `proto:gen` task. Both the compiler and the codegen plugin run through Deno's npm compatibility,
   so nothing needs `buf` or `protoc` on a PATH.

@@ -21,9 +21,10 @@ import {
   joinPath,
   writeFiles,
 } from '../utils/file-writer.ts';
-import { libraryFiles, librarySpecifier, LIBS_DIR, LIBS_GLOB } from '../workspace/library.ts';
+import { libraryFiles, librarySpecifier, LIBS_DIR } from '../workspace/library.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
-import { planRootWorkspaceGlob, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
+import { planRootWorkspaceGlob } from '../workspace/root-manifest.ts';
+import { workspaceProfile } from '../workspace/runtime-profile.ts';
 
 /** Everything `runLibraryCommand` reaches the outside world through. */
 export interface LibraryDependencies {
@@ -125,19 +126,28 @@ export async function runLibraryCommand(
   }
   const scope = resolveScope(deps.dir, rawScope);
 
-  const files: GeneratedFile[] = [...libraryFiles(scope, names)];
+  // The workspace's own toolchain: a library carrying a deno.json inside an npm
+  // workspace is invisible to every member that would import it.
+  const profile = workspaceProfile(read.manifest.runtime);
+  const files: GeneratedFile[] = [...libraryFiles(scope, names, profile)];
 
   // Only ever an edit for a workspace created before libraries existed: a root
   // this CLI wrote already declares the glob, so this is `unchanged` there.
   let rootManifest = '';
   try {
     rootManifest = new TextDecoder().decode(
-      await deps.fs.readFile(joinPath(deps.dir, ROOT_MANIFEST)),
+      await deps.fs.readFile(joinPath(deps.dir, profile.rootManifestFile)),
     );
   } catch {
     // Left empty: the planner refuses an unreadable root, naming the library.
   }
-  const rootPlan = planRootWorkspaceGlob(rootManifest, LIBS_GLOB, names.kebab);
+  const rootPlan = planRootWorkspaceGlob(
+    rootManifest,
+    profile.memberGlob(LIBS_DIR),
+    names.kebab,
+    profile.rootManifestFile,
+    profile.globKey,
+  );
   if (rootPlan.kind === 'refused') {
     deps.error(rootPlan.message);
     return EXIT_ERROR;

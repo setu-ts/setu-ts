@@ -31,6 +31,7 @@
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { joinPath } from '../utils/file-writer.ts';
 import type { DerivedNames } from '../utils/names.ts';
+import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 
 /** Where libraries live, relative to the workspace root. */
 export const LIBS_DIR = 'libs';
@@ -67,36 +68,78 @@ export function librarySpecifier(scope: string, name: string): string {
 export function libraryFiles(
   scope: string,
   names: DerivedNames,
+  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
 ): readonly GeneratedFile[] {
   const specifier = librarySpecifier(scope, names.kebab);
   const root = joinPath(LIBS_DIR, names.kebab);
+  const onDeno = profile.manifestKind === 'deno';
 
-  const manifest = {
-    name: specifier,
-    version: '0.1.0',
-    // Both required for a sibling to import it: `name` is the specifier and
-    // `exports` is what that specifier resolves to. A member declaring `name`
-    // without `exports` warns and resolves nothing.
-    exports: { '.': './src/index.ts' },
-    tasks: { test: 'deno test' },
-    imports: {
-      '@std/testing': 'jsr:@std/testing@^1.0.0',
-      '@std/expect': 'jsr:@std/expect@^1.0.0',
-    },
-  };
+  // Two manifest shapes for one property. Both toolchains resolve a workspace
+  // member by its declared NAME — measured under each — but they declare it in
+  // different files, and a library carrying the wrong one is invisible to the
+  // workspace that holds it.
+  const manifest = onDeno
+    ? {
+      path: joinPath(root, 'deno.json'),
+      contents: `${
+        JSON.stringify(
+          {
+            name: specifier,
+            version: '0.1.0',
+            // Both required for a sibling to import it: `name` is the specifier
+            // and `exports` is what that specifier resolves to. A member
+            // declaring `name` without `exports` warns and resolves nothing.
+            exports: { '.': './src/index.ts' },
+            tasks: { test: 'deno test' },
+            imports: {
+              '@std/testing': 'jsr:@std/testing@^1.0.0',
+              '@std/expect': 'jsr:@std/expect@^1.0.0',
+            },
+          },
+          null,
+          2,
+        )
+      }\n`,
+    }
+    : {
+      path: joinPath(root, 'package.json'),
+      contents: `${
+        JSON.stringify(
+          {
+            name: specifier,
+            version: '0.1.0',
+            private: true,
+            type: 'module',
+            // `exports` for a modern resolver and `main` for anything older, both
+            // pointing at the TypeScript source: the sibling that imports this is
+            // itself run through a TypeScript runner, so there is no build step
+            // between them.
+            exports: { '.': './src/index.ts' },
+            main: './src/index.ts',
+            scripts: { test: profile.runtime === 'bun' ? 'bun test' : 'tsx --test test/*.ts' },
+            ...(profile.runtime === 'bun'
+              ? { devDependencies: { '@types/bun': '^1.2.0' } }
+              : { devDependencies: { '@types/node': '^24.0.0', tsx: '^4.20.0' } }),
+          },
+          null,
+          2,
+        )
+      }\n`,
+    };
 
   const barrel = `/**
  * ${specifier} — code shared by this workspace's services.
  *
- * Import it from any member by name; the workspace resolves it, so no member's
- * \`deno.json\` needs an entry for it:
+ * Import it from any member by name; the workspace resolves it, so no member
+ * needs an entry for it:
  *
  * \`\`\`ts
  * import { ${names.camel} } from '${specifier}';
  * \`\`\`
  *
- * To use a framework package here, add its pin to this library's own
- * \`deno.json\` — a member's import map does not extend to its dependencies.
+ * To use a framework package here, declare it in this library's own
+ * \`${onDeno ? 'deno.json' : 'package.json'}\` — a member's dependencies do not
+ * extend to the libraries it imports.
  *
  * @module
  */
@@ -112,13 +155,27 @@ export function ${names.camel}(value: string): string {
 }
 `;
 
-  const test = `import { describe, it } from '@std/testing/bdd';
+  // Each toolchain's own runner, because a library must be testable with what its
+  // workspace already installs: a `@std/testing` import in a Node library would
+  // need a JSR dependency nothing else there uses.
+  const test = onDeno
+    ? `import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { ${names.camel} } from '../src/index.ts';
 
 describe('${names.kebab}', () => {
   it('describes the value it is given', () => {
     expect(${names.camel}('x')).toBe('${names.kebab}: x');
+  });
+});
+`
+    : `import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { ${names.camel} } from '../src/index.ts';
+
+describe('${names.kebab}', () => {
+  it('describes the value it is given', () => {
+    assert.equal(${names.camel}('x'), '${names.kebab}: x');
   });
 });
 `;
@@ -131,17 +188,17 @@ Shared code for this workspace. Import it from any member:
 import { ${names.camel} } from '${specifier}';
 \`\`\`
 
-No wiring is needed: a Deno workspace resolves a member by its declared \`name\`.
+No wiring is needed: the workspace resolves a member by its declared \`name\`.
 
 ## Test
 
 \`\`\`bash
-deno task test
+${onDeno ? 'deno task test' : 'npm test'}
 \`\`\`
 `;
 
   return [
-    { path: joinPath(root, 'deno.json'), contents: `${JSON.stringify(manifest, null, 2)}\n` },
+    manifest,
     { path: joinPath(root, 'src/index.ts'), contents: barrel },
     { path: joinPath(root, `test/${names.kebab}.test.ts`), contents: test },
     { path: joinPath(root, 'README.md'), contents: readme },

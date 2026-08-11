@@ -9,6 +9,7 @@ import {
   TRANSPORTS,
   transportSpec,
 } from '../../../src/workspace/transport.ts';
+import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 
 describe('the transport registry', () => {
   it('lists every declared transport, in order', () => {
@@ -98,17 +99,19 @@ describe('the transport registry', () => {
     // unreachable from inside a container, where loopback is the container itself.
     it('reads its connection value from the environment, with the local fallback', () => {
       const redis = transportSpec('redis').connection;
-      expect(renderConnection(redis!)).toBe(
+      expect(renderConnection(redis!, workspaceProfile('deno'))).toBe(
         `Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'`,
       );
       // `--transport-url` replaces the FALLBACK, not the variable: an override
       // still has to lose to the environment inside a deployed stack.
-      expect(renderConnection(redis!, 'redis://elsewhere:6379')).toContain(
-        `Deno.env.get('REDIS_URL')`,
-      );
-      expect(renderConnection(redis!, 'redis://elsewhere:6379')).toContain(
-        'redis://elsewhere:6379',
-      );
+      expect(renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'))
+        .toContain(
+          `Deno.env.get('REDIS_URL')`,
+        );
+      expect(renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'))
+        .toContain(
+          'redis://elsewhere:6379',
+        );
     });
 
     // A GCP project id is a name and a Service Bus connection string carries a

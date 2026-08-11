@@ -48,6 +48,7 @@ import {
   WORKSPACE_VERSION,
 } from '../workspace/manifest.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
+import { detectProjectRuntime, workspaceProfile } from '../workspace/runtime-profile.ts';
 import { DEFAULT_TRANSPORT, transportSpec } from '../workspace/transport.ts';
 
 /** Everything `runAdoptCommand` reaches the outside world through. */
@@ -137,8 +138,14 @@ export async function runAdoptCommand(
     return EXIT_ERROR;
   }
 
+  // The toolchain the project already uses, not a choice: a project with a
+  // package.json is a Node or Bun one, and converting it into a Deno workspace
+  // would leave a root whose members its toolchain cannot install.
+  const profile = workspaceProfile(await detectProjectRuntime(deps.fs, project));
+
   const manifest = {
     version: WORKSPACE_VERSION,
+    runtime: profile.runtime,
     basePort,
     // The default, deliberately: a project being converted has whatever broker its
     // own config already names, and rewriting that here would change how a running
@@ -164,7 +171,7 @@ export async function runAdoptCommand(
     }
   }
 
-  const created: GeneratedFile[] = workspaceRootFiles(names.kebab, basePort, transport)
+  const created: GeneratedFile[] = workspaceRootFiles(names.kebab, basePort, transport, profile)
     .filter((file) => !present.has(file.path))
     .map((file) =>
       file.path === WORKSPACE_MANIFEST
@@ -174,9 +181,9 @@ export async function runAdoptCommand(
 
   created.push({
     path: joinPath(memberRoot, DISCOVERY_MODULE),
-    contents: renderDiscoveryModule(manifest.members[0]!, manifest.members),
+    contents: renderDiscoveryModule(manifest.members[0]!, manifest.members, profile),
   });
-  for (const file of workspaceContainerFiles(manifest, transport)) created.push(file);
+  for (const file of workspaceContainerFiles(manifest, transport, profile)) created.push(file);
   for (const file of workspaceK8sFiles(manifest, transport)) created.push(file);
 
   const planned = created.map((file) => ({ ...file, path: joinPath(project, file.path) }));

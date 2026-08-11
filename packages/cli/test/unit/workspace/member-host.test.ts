@@ -1,4 +1,5 @@
 import { describe, it } from '@std/testing/bdd';
+import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { expect } from '@std/expect';
 import { resolveHost } from '../../../src/templates/project-files.ts';
 import { getTemplate } from '../../../src/templates/registry.ts';
@@ -81,7 +82,13 @@ describe('withWorkspaceMember — the transport overlay', () => {
    * @returns The member's `MessagingPlugin` wiring
    */
   function messagingOf(name: Parameters<typeof transportSpec>[0], url?: string) {
-    const member = withWorkspaceMember(hostOf('microservice'), transportSpec(name), 'orders', url);
+    const member = withWorkspaceMember(
+      hostOf('microservice'),
+      transportSpec(name),
+      'orders',
+      workspaceProfile('deno'),
+      url,
+    );
     return member.plugins.find((p) => p.pkg === 'messaging-plugin');
   }
 
