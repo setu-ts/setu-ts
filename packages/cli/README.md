@@ -1,12 +1,12 @@
 # @setu-ts/cli
 
-The `setu` command-line tool: project scaffolding and plugin-aware code generation for the Hono
-Enterprise framework.
+The `setu` command-line tool: project scaffolding and plugin-aware code generation for the Setu-TS
+framework.
 
 ## Installation
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.5/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.6/main
 ```
 
 The `-n setu` is required, not decorative: Deno derives the binary name from the package, which for

@@ -27,10 +27,12 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **Container and Kubernetes artifacts for a generated workspace.** `setu generate app` emits
-  `docker/Dockerfile` (one parameterized image per member), `docker/compose.yaml` (every member plus
-  the transport's broker) and `k8s/members.yaml` (a Deployment and a Service per member), all
-  regenerated for the whole workspace whenever a member is added. M39 owns this repository's own
-  deployment objects; nothing produced any for a user's project.
+  `docker/Dockerfile` (one parameterized image per member), `.dockerignore` (at the workspace root,
+  where Docker reads it — without one the host's `node_modules` is copied over the one the image
+  installed), `docker/compose.yaml` (every member plus the transport's broker) and
+  `k8s/members.yaml` (a Deployment and a Service per member), all regenerated for the whole
+  workspace whenever a member is added. M39 owns this repository's own deployment objects; nothing
+  produced any for a user's project.
 - **`--transport pubsub` and `--transport service-bus`.** Both were previously refused because each
   needs a value no scaffold can invent. Every transport with a connection value now reads it from
   the environment with a local fallback, and for these two that fallback is the vendor's own

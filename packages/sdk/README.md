@@ -13,13 +13,13 @@ type-level from `@setu-ts/common`.
 
 ```bash
 # Deno
-deno add jsr:@setu-ts/sdk@^0.1.0-alpha.4
+deno add jsr:@setu-ts/sdk@^0.1.0-alpha.6
 
 # npm / pnpm / yarn
-npx jsr add @setu-ts/sdk@^0.1.0-alpha.4
+npx jsr add @setu-ts/sdk@^0.1.0-alpha.6
 
 # Bun
-bunx jsr add @setu-ts/sdk@^0.1.0-alpha.4
+bunx jsr add @setu-ts/sdk@^0.1.0-alpha.6
 ```
 
 ## Quick Start
