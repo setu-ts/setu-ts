@@ -2059,7 +2059,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `check-apps.ts` is not either, and the file is mostly `docker`/`kind` orchestration a test may not
   spawn; its decidable logic is exported and unit-tested instead. **Not verified against a managed
   cloud cluster** — CI holds no cloud credentials; the proof is a real local kind cluster) —
-  complete (PR pending)
+  complete (PR #149)
 - **Next milestone** — **M40** (final polish and release). M60–M62 came from a measured audit after
   M58: a project with all fourteen schematics generated type-checked clean while its entry points
   imported exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable
