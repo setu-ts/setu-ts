@@ -307,7 +307,7 @@ async function onPath(tool: string): Promise<boolean> {
 async function run(
   command: readonly string[],
   options: { readonly quiet?: boolean } = {},
-): Promise<{ success: boolean; stdout: string }> {
+): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const quiet = options.quiet === true;
   const output = await new Deno.Command(command[0], {
     args: [...command.slice(1)],
@@ -316,9 +316,12 @@ async function run(
   }).output();
   return {
     success: output.success,
-    // `output.stdout` throws when the stream was inherited rather than piped, so it is only
-    // read in the quiet case. Callers that need stdout always pass quiet.
+    // `output.stdout` throws when the stream was inherited rather than piped, so both are only
+    // read in the quiet case. Callers that need either always pass quiet.
     stdout: quiet ? new TextDecoder().decode(output.stdout) : '',
+    // Where kubectl puts the reason a wait timed out, which is the one thing worth printing when
+    // the probe pod never reaches a terminal phase.
+    stderr: quiet ? new TextDecoder().decode(output.stderr) : '',
   };
 }
 
@@ -551,15 +554,24 @@ async function checkCluster(): Promise<CheckOutcome> {
 
     // Serve a request THROUGH the Service, so a selector matching no pod fails here — the defect
     // schema validation cannot see.
+    //
+    // The status code is read from the probe pod's LOGS, not from `kubectl run -i`'s attached
+    // stream. That stream is a race: kubectl has to attach before a container whose whole job is one
+    // curl has already exited, and on a loaded runner it loses. When it does, the command still
+    // succeeds and still prints — just kubectl's own deletion notice and nothing from the pod — so
+    // the gate failed with `returned "pod "gate-probe" deleted from setu namespace", expected 200`
+    // on a branch that had touched neither the manifests nor the chart. Logs come from the API
+    // server after the fact and cannot be missed.
     console.log('  serving a request through the Service …');
-    const served = await run(
+    await run(kubectl('delete', 'pod', 'gate-probe', '-n', NAMESPACE, '--ignore-not-found'), {
+      quiet: true,
+    });
+    const started = await run(
       kubectl(
         'run',
         'gate-probe',
         '-n',
         NAMESPACE,
-        '--rm',
-        '-i',
         '--restart=Never',
         '--image=curlimages/curl:8.11.1',
         '--command',
@@ -574,9 +586,37 @@ async function checkCluster(): Promise<CheckOutcome> {
       ),
       { quiet: true },
     );
-    const status = served.stdout.trim();
-    if (!served.success || !status.startsWith('200')) {
+    if (!started.success) {
+      console.error(`  ✗ could not start the probe pod: ${started.stderr.trim()}`);
+      return 'failed';
+    }
+
+    // Either terminal phase ends the wait. Waiting only for `Succeeded` would spend the whole
+    // timeout on the failure this check exists to catch — a Service selector matching no pod, where
+    // curl exits non-zero and the pod goes `Failed`.
+    const settled = await run(
+      kubectl(
+        'wait',
+        // One argument: passing the value separately makes kubectl read it as a second resource.
+        '--for=jsonpath={.status.phase}=Succeeded',
+        'pod/gate-probe',
+        '-n',
+        NAMESPACE,
+        '--timeout=90s',
+      ),
+      { quiet: true },
+    );
+    const logs = await run(kubectl('logs', 'pod/gate-probe', '-n', NAMESPACE), { quiet: true });
+    const status = logs.stdout.trim();
+    await run(kubectl('delete', 'pod', 'gate-probe', '-n', NAMESPACE, '--ignore-not-found'), {
+      quiet: true,
+    });
+
+    if (!settled.success || status !== '200') {
       console.error(`  ✗ request through the Service returned "${status}", expected 200`);
+      if (!settled.success) {
+        console.error(`    probe pod never succeeded: ${settled.stderr.trim()}`);
+      }
       return 'failed';
     }
     console.log('  ✓ Service → pod → /live returned 200');
