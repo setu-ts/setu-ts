@@ -1618,7 +1618,7 @@ Behaviors are consumer-supplied and composable; no built-in behaviors ship in M1
 > Note: the ROADMAP file list included `src/handlers/command-handler.ts` and
 > `src/handlers/query-handler.ts`; these were intentionally omitted (the handler interfaces
 > `ICommandHandler`/`IQueryHandler` are contracts owned by `@setu-ts/common`, so plugin handler
-> files would be empty re-export shells). See `plans/archive/milestone-13-cqrs-plugin.md` §C4.
+> files would be empty re-export shells).
 
 ---
 
@@ -3785,8 +3785,7 @@ sensible defaults.
 > Secrets/Config, etc. KEEP B2BAdmin's layering but REWIRE those `lib/` modules to consume the
 > plugins through the M44 `loadContext` bridge (`context.services.get(CAPABILITIES.X)`) instead of
 > duplicating them; keep only app-specific glue in `app/lib`. A worthwhile validation is migrating
-> B2BAdmin itself off `@react-router/serve` onto the M44 plugin. See the M44 plan §9 (archived under
-> `plans/archive/milestone-44-react-router-plugin.md` once M44 merges).
+> B2BAdmin itself off `@react-router/serve` onto the M44 plugin.
 
 ### Deliverables
 
@@ -5475,8 +5474,6 @@ Durable-Object backplane is its own design — see M52c and M52d.
 
 **Package:** `packages/cloudflare-plugin` (extended). No `common` change, no new capability token.
 
-**Plan:** `plans/archive/milestone-52-b-cloudflare-handlers.md`
-
 ### Scope
 
 - **Queues.** `WorkersQueue` satisfying the committed `IQueue` over a producer binding, opt-in via a
@@ -5571,8 +5568,6 @@ application to export a **DO class** plus a `wrangler.toml` stanza — a contrac
 not have, and the reason this was not M52b.
 
 **Package:** `packages/cloudflare-plugin` (extended)
-
-**Plan:** `plans/archive/milestone-52-d-durable-objects.md`
 
 ### Scope
 

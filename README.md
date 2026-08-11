@@ -353,16 +353,15 @@ be replaced without touching the others.
 
 ## Documentation
 
-| Document                                                                         | Audience                | Purpose                                                                  |
-| -------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------ |
-| [**docs/README.md**](docs/README.md)                                             | All users               | Documentation hub — navigation and guide index                           |
-| [**ARCHITECTURE.md**](ARCHITECTURE.md)                                           | Framework contributors  | How the framework works internally and why it was designed this way      |
-| [**PUBLIC_API.md**](PUBLIC_API.md)                                               | Application developers  | How to use the framework — complete examples for every plugin            |
-| [**AI_GUIDELINES.md**](AI_GUIDELINES.md)                                         | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
-| [**ROADMAP.md**](ROADMAP.md)                                                     | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
-| [**CHANGELOG.md**](CHANGELOG.md)                                                 | Everyone                | What each release contains, and its known limitations                    |
-| [**docs/releasing.md**](docs/releasing.md)                                       | Maintainers             | JSR release runbook — setup, quotas, and the per-release sequence        |
-| [**plans/archive/architecture-review.md**](plans/archive/architecture-review.md) | Architects              | Critical analysis of the original design with recommendations (archived) |
+| Document                                   | Audience                | Purpose                                                                  |
+| ------------------------------------------ | ----------------------- | ------------------------------------------------------------------------ |
+| [**docs/README.md**](docs/README.md)       | All users               | Documentation hub — navigation and guide index                           |
+| [**ARCHITECTURE.md**](ARCHITECTURE.md)     | Framework contributors  | How the framework works internally and why it was designed this way      |
+| [**PUBLIC_API.md**](PUBLIC_API.md)         | Application developers  | How to use the framework — complete examples for every plugin            |
+| [**AI_GUIDELINES.md**](AI_GUIDELINES.md)   | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
+| [**ROADMAP.md**](ROADMAP.md)               | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
+| [**CHANGELOG.md**](CHANGELOG.md)           | Everyone                | What each release contains, and its known limitations                    |
+| [**docs/releasing.md**](docs/releasing.md) | Maintainers             | JSR release runbook — setup, quotas, and the per-release sequence        |
 
 Each package also carries its own README with options, semantics, and a worked example.
 
