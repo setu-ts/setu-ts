@@ -345,13 +345,9 @@ export interface TemplateHost {
 export interface WorkerExport {
   /** The module-export name, e.g. `queue`. */
   readonly name: string;
-  /** Bare `@setu-ts` package the factory comes from, e.g. `cloudflare-plugin`. */
-  readonly pkg: string;
-  /** The factory symbol, called with the booted application. */
-  readonly symbol: string;
   /**
-   * The type of the payload the platform passes, imported as a type from the
-   * same package — e.g. `IQueueMessageBatch`.
+   * The type of the payload the platform passes, imported as a type from
+   * {@linkcode WorkerExport.payloadPkg} — e.g. `IQueueMessageBatch`.
    *
    * Named rather than left as a placeholder: the export is part of the
    * project's public module surface, and a generated signature that does not
@@ -359,6 +355,42 @@ export interface WorkerExport {
    * (nothing in the project calls it).
    */
   readonly payloadType: string;
+  /** Bare `@setu-ts` package {@linkcode WorkerExport.payloadType} comes from. */
+  readonly payloadPkg: string;
+  /**
+   * Which factory handles which queue, keyed by the queue NAME from
+   * `wrangler.toml` — never the binding name.
+   *
+   * A list rather than one factory because **Cloudflare invokes a single
+   * `queue` export for every queue a Worker consumes**, distinguished only by
+   * `batch.queue`. A Worker consuming two queues that dispatches both into one
+   * handler feeds each the other's messages: the messaging broker cannot read a
+   * job envelope, so it retries that batch until the queue dead-letters it.
+   * Emitting the routing is what lets one Worker serve messaging AND queues.
+   *
+   * An unlisted queue name **throws** in the generated handler rather than
+   * falling through to whichever route happens to be first: a batch the project
+   * has no handler for is a configuration mistake, and answering it silently is
+   * how the work disappears.
+   */
+  readonly routes: readonly WorkerExportRoute[];
+}
+
+/**
+ * One queue a {@linkcode WorkerExport} dispatches, and the factory handling it.
+ *
+ * @since 0.2.0
+ */
+export interface WorkerExportRoute {
+  /**
+   * The queue NAME from `wrangler.toml` (`queue = "…"`), which is what
+   * `batch.queue` carries — never the binding name.
+   */
+  readonly queueName: string;
+  /** Bare `@setu-ts` package the factory comes from, e.g. `cloudflare-plugin`. */
+  readonly pkg: string;
+  /** The factory symbol, called with the booted application. */
+  readonly symbol: string;
 }
 
 /**

@@ -135,9 +135,16 @@ const WORKERS_SWAP = {
   workerExports: [
     {
       name: 'queue',
-      pkg: 'cloudflare-plugin',
-      symbol: 'createMessagingHandler',
       payloadType: 'IQueueMessageBatch',
+      payloadPkg: 'cloudflare-plugin',
+      // Both queues this project consumes, routed by NAME. One handler for both
+      // would hand the messaging broker its job batches — which it cannot read,
+      // so it would retry them until the queue dead-lettered them — and leaving
+      // the job queue unconsumed would discard every `queue.add()` silently.
+      routes: [
+        { queueName: 'messages', pkg: 'cloudflare-plugin', symbol: 'createMessagingHandler' },
+        { queueName: 'jobs', pkg: 'cloudflare-plugin', symbol: 'createQueueHandler' },
+      ],
     },
   ],
   files: [{ path: 'src/reply-inbox-object.ts', contents: REPLY_INBOX_MODULE }],
@@ -153,10 +160,18 @@ queue = "jobs"
 
 # \`max_batch_timeout = 0\` is REQUIRED for request/reply: the platform default of
 # 5s alone exhausts the default reply budget, so every request() would time out.
+# It applies to this queue only, so background jobs below keep the platform's
+# batching.
 [[queues.consumers]]
 queue = "messages"
 max_batch_size = 1
 max_batch_timeout = 0
+
+# Background jobs, consumed by the same \`queue\` export and told apart by this
+# name. Without this stanza nothing consumes the queue \`IQueue.add()\` writes to,
+# so every enqueued job is discarded once the platform's retention elapses.
+[[queues.consumers]]
+queue = "jobs"
 
 [[durable_objects.bindings]]
 name = "REPLY_INBOX"

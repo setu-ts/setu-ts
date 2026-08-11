@@ -85,6 +85,50 @@ describe('runtime swaps', () => {
     expect(wrangler).toContain('max_batch_timeout = 0');
   });
 
+  // Cloudflare invokes ONE `queue` export for every queue a Worker consumes, so
+  // a project serving messaging AND background jobs must tell them apart. One
+  // handler for both would feed the messaging broker its job batches — which it
+  // cannot read, so it retries them until the queue dead-letters them.
+  it('routes each consumed queue to its own handler', () => {
+    const entry = fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'src/index.ts') ?? '';
+
+    expect(entry).toContain('switch (payload.queue)');
+    expect(entry).toContain("case 'messages':");
+    expect(entry).toContain('createMessagingHandler(app)(payload)');
+    expect(entry).toContain("case 'jobs':");
+    expect(entry).toContain('createQueueHandler(app)(payload)');
+    // One import line for the package, not one per symbol — two would not compile.
+    expect(entry).toContain(
+      "import { createMessagingHandler, createQueueHandler } from '@setu-ts/cloudflare-plugin';",
+    );
+  });
+
+  it('throws for a queue it has no handler for, rather than guessing', () => {
+    const entry = fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'src/index.ts') ?? '';
+
+    // Falling through to the first route would hand one queue's batches to the
+    // other's handler; silently acking them would discard the work.
+    expect(entry).toContain('default:');
+    expect(entry).toContain('No handler is registered for queue');
+  });
+
+  it('consumes every queue it produces to', () => {
+    const wrangler = fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'wrangler.toml') ?? '';
+
+    // A producer with no consumer accepts `IQueue.add()` and discards the job
+    // once retention elapses — silently, which is the failure a queue exists to
+    // prevent.
+    const produced = [
+      ...wrangler.matchAll(/\[\[queues\.producers\]\]\nbinding = "[^"]+"\nqueue = "([^"]+)"/g),
+    ]
+      .map((match) => match[1]);
+    const consumed = [...wrangler.matchAll(/\[\[queues\.consumers\]\]\nqueue = "([^"]+)"/g)]
+      .map((match) => match[1]);
+
+    expect(produced.length).toBeGreaterThan(0);
+    expect([...produced].sort()).toEqual([...consumed].sort());
+  });
+
   it('declares the queue export in the Workers entry, and nowhere else', () => {
     const entry = fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'src/index.ts');
 

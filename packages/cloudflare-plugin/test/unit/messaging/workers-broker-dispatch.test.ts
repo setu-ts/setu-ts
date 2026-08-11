@@ -359,6 +359,36 @@ describe('WorkersBroker.dispatch — responders', () => {
     expect(seen).toEqual(['a', 'b']);
   });
 
+  it('runs ONE responder even when two are registered without a queue', async () => {
+    const { broker, namespace } = makeBroker(true);
+    const ran: string[] = [];
+    await broker.respond('sum', () => {
+      ran.push('first');
+      return 1;
+    });
+    await broker.respond('sum', () => {
+      ran.push('second');
+      return 2;
+    });
+
+    const inbox = namespace.get(namespace.idFromName('rr.inbox.abc'));
+    await inbox.fetch('https://reply-inbox.internal/connect', {
+      headers: { Upgrade: 'websocket' },
+    });
+
+    await dispatchOne(broker, encodeRequestEnvelope('sum', 'i1', 'corr-1', 'rr.inbox.abc', 1));
+
+    // Deliberate, and a departure from the socket brokers: there, two queue-less
+    // responders both run and the caller's correlation drops the second reply.
+    // A request has exactly one answer, so running the work twice buys nothing —
+    // and the caller sees the same single reply either way.
+    expect(ran).toEqual(['first']);
+    const server = namespace.states.get('rr.inbox.abc')?.accepted[0] as
+      | { readonly sent: string[] }
+      | undefined;
+    expect(server?.sent).toHaveLength(1);
+  });
+
   it('stays silent on every path when no logger is registered', async () => {
     const broker = new WorkersBroker(new FakeQueueProducer(), new FakeBrokerRuntime());
 
