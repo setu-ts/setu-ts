@@ -47,10 +47,10 @@ deno task smoke
 
 ### Platform-Specific
 
-| Example                                    | What It Proves                                        | Run                                   |
-| ------------------------------------------ | ----------------------------------------------------- | ------------------------------------- |
-| [cloudflare](../apps/cloudflare)           | Cloudflare Workers integration (KV, D1, Queues, Cron) | `deno task start` (requires Wrangler) |
-| [compiled-binary](../apps/compiled-binary) | Compiled binary using `deno compile`                  | Build with `deno task build`          |
+| Example                                    | What It Proves                                                              | Run                                   |
+| ------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------- |
+| [cloudflare](../apps/cloudflare)           | Cloudflare Workers integration (KV, D1, Queues, Cron, Messaging, Cache API) | `deno task start` (requires Wrangler) |
+| [compiled-binary](../apps/compiled-binary) | Compiled binary using `deno compile`                                        | Build with `deno task build`          |
 
 ### Full-Stack
 
@@ -364,6 +364,12 @@ Cloudflare Workers integration.
 - Queue production
 - Cron trigger handling
 - Cache API usage
+- Messaging: a `publish` in one `fetch` invocation observed arriving at a subscriber in a separate
+  `queue` invocation
+- `detectRuntime()` answering `'cloudflare-workers'` on the real platform, which only workerd can
+  prove — the platform sends its own user agent
+
+Its smoke check runs against **real workerd** through `wrangler dev`, not a fake.
 
 **Key code:**
 
