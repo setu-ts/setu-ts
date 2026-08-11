@@ -2,7 +2,7 @@
 
 Verifies that the published packages work on Node.js and Bun (AI_GUIDELINES §4.5, §6.4). CI runs it
 as the `Node compatibility` and `Bun compatibility` jobs; before that it was a pair of placeholder
-jobs blocked on the first JSR publish, which happened at `v0.1.0-alpha.1`.
+jobs blocked on the first JSR publish, which happened at `v0.1.0-alpha.1`. <!-- version:history -->
 
 ```bash
 cd compat
