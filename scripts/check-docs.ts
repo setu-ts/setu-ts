@@ -56,8 +56,14 @@ interface Finding {
 /** Directories whose markdown is not part of the maintained documentation. */
 const SKIP_DIRS = new Set(['node_modules', '.git', 'coverage', 'build', '.wrangler', 'dist']);
 
-/** Roots scanned when no explicit file list is given. */
-const SCAN_ROOTS: readonly string[] = ['.', 'docs', 'packages', 'apps'];
+/**
+ * Roots scanned when no explicit file list is given.
+ *
+ * The repository root is walked one level deep, so a subdirectory is checked
+ * only by being named here. `compat` was not, which left its README outside
+ * every check — including the version claims added below.
+ */
+const SCAN_ROOTS: readonly string[] = ['.', 'docs', 'packages', 'apps', 'compat'];
 
 /**
  * Fence info strings whose language does NOT treat `#` as a line comment, so a
@@ -1480,6 +1486,161 @@ export function checkInstallVersions(
   return findings;
 }
 
+/**
+ * The marker that exempts a block from {@link checkVersionClaims}.
+ *
+ * Spelled without comment syntax so one token works in every language the check
+ * reads: `<!-- version:history -->` in Markdown, `# version:history` in YAML,
+ * `// version:history` in a Dockerfile comment or TypeScript.
+ *
+ * It exempts the block it sits in, and — when it is the only thing in its block
+ * — the block after it as well. That second rule is what makes it usable in
+ * Markdown: `deno fmt` treats an HTML comment as a block-level element and
+ * forces blank lines around it, so a marker written inline at the head of a
+ * paragraph is reformatted into its own block, splitting the sentence it was
+ * attached to. Standing the marker above the paragraph is the shape that
+ * survives formatting.
+ */
+const HISTORY_MARKER = 'version:history';
+
+/**
+ * Non-Markdown files that state the shipping version as a fact about the
+ * CURRENT release, rather than using a version string as data.
+ *
+ * A list rather than a repository-wide sweep, and deliberately short. A sweep
+ * reports every test fixture and usage example that happens to name a version —
+ * measured at 34 references across 13 files — and a gate whose output is mostly
+ * noise gets a blanket exemption instead of a fix. These three are claims:
+ * a chart's `appVersion` names the release its manifests target, and each
+ * Dockerfile quotes the resolution error a reader would see today.
+ */
+const VERSIONED_ARTIFACTS: readonly string[] = [
+  'k8s/chart/Chart.yaml',
+  'docker/Dockerfile',
+  'docker/Dockerfile.compiled',
+];
+
+/**
+ * Splits a source into blocks for {@link checkVersionClaims}, with each block's
+ * first line number.
+ *
+ * A blank line separates blocks, and so does a line holding nothing but a
+ * blockquote marker — without that second rule, the whole `> [!IMPORTANT]`
+ * status block at the top of README.md is ONE block, so a history marker on its
+ * "alpha.5 renamed the project" paragraph would also exempt the status sentence
+ * two lines above it, which is the single reference that most needs checking.
+ *
+ * Blocks rather than lines because `deno fmt` reflows Markdown prose: a marker
+ * pinned to a line moves off the reference it exempts the first time a sentence
+ * above it grows. Reflow never crosses a blank line.
+ *
+ * @param source - File contents
+ * @returns One entry per block: its text and the 1-based line it starts on
+ */
+function splitBlocks(source: string): { text: string; firstLine: number }[] {
+  const blocks: { text: string; firstLine: number }[] = [];
+  let current: string[] = [];
+  let firstLine = 1;
+
+  const flush = (): void => {
+    if (current.length > 0) blocks.push({ text: current.join('\n'), firstLine });
+    current = [];
+  };
+
+  for (const [index, line] of source.split('\n').entries()) {
+    if (/^\s*>?\s*$/.test(line)) {
+      flush();
+      firstLine = index + 2;
+      continue;
+    }
+    current.push(line);
+  }
+  flush();
+  return blocks;
+}
+
+/**
+ * Whether a block holds the history marker and nothing else of substance.
+ *
+ * Comment syntax and blockquote markers are stripped, so `> <!-- version:history
+ * -->`, `# version:history` and `// version:history` all qualify. A block that
+ * also carries prose does not: it exempts itself, but nothing after it.
+ *
+ * @param text - The block's text
+ * @returns True when the block is only the marker
+ */
+function isMarkerOnly(text: string): boolean {
+  const stripped = text
+    .replaceAll('<!--', '')
+    .replaceAll('-->', '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*(>\s*)?(\/\/|#)?\s*/, '').trim())
+    .join(' ')
+    .trim();
+  return stripped === HISTORY_MARKER;
+}
+
+/**
+ * Reports version claims naming a release other than the one shipping.
+ *
+ * {@link checkInstallVersions} reads `@setu-ts/<pkg>@<version>` specifiers, which
+ * is the common form and not the only one. Cutting `0.1.0-alpha.7` found four
+ * stale references it could not see, because none carried a package name:
+ * README.md's "all 47 packages are published in `v0.1.0-alpha.6`" — the first
+ * line a reader reads — the same claim repeated below the install snippets, the
+ * sentence explaining that `@^0.1.0-alpha.6` is required, and the chart's
+ * `appVersion`.
+ *
+ * A bare version is ambiguous in a way a specifier is not: "`v0.1.0-alpha.5`
+ * renamed the project" is a true statement that must never be rewritten. So a
+ * block carrying {@link HISTORY_MARKER} is skipped, which makes the exemption
+ * explicit and greppable instead of guessed from phrasing.
+ *
+ * @param contents - Every checked file, by path
+ * @param current - The version this workspace ships
+ * @returns One finding per stale claim
+ */
+export function checkVersionClaims(
+  contents: ReadonlyMap<string, string>,
+  current: string,
+): Finding[] {
+  const findings: Finding[] = [];
+  const reference = /v?(0\.1\.0-alpha\.\d+)/g;
+
+  for (const [file, source] of contents) {
+    const relative = file.startsWith('./') ? file.slice(2) : file;
+    if (VERSION_HISTORY_DOCS.includes(relative) || relative.startsWith('plans/')) continue;
+
+    let carriedMarker = false;
+    for (const block of splitBlocks(source)) {
+      const marked = carriedMarker || block.text.includes(HISTORY_MARKER);
+      // A block whose only content is the marker exempts the next one too; see
+      // HISTORY_MARKER for why Markdown needs that.
+      carriedMarker = isMarkerOnly(block.text);
+      if (marked) continue;
+
+      for (const [offset, line] of block.text.split('\n').entries()) {
+        for (const match of line.matchAll(reference)) {
+          if (match[1] === current) continue;
+          // A specifier is checkInstallVersions' finding; reporting it twice
+          // would make one stale install line produce two entries.
+          const before = line.slice(0, match.index);
+          if (/@setu-ts\/[a-z0-9-]+@\^?$/.test(before)) continue;
+
+          findings.push({
+            file: relative,
+            line: block.firstLine + offset,
+            message: `Names version ${match[1]}, but this workspace ships ${current}. ` +
+              `If this is a statement about the current release, update it; if it is a ` +
+              `record of a past one, mark the block with \`${HISTORY_MARKER}\` in a comment.`,
+          });
+        }
+      }
+    }
+  }
+  return findings;
+}
+
 async function collectMarkdown(root: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
@@ -1590,6 +1751,27 @@ if (import.meta.main) {
     });
   } else {
     findings.push(...checkInstallVersions(fileContents, kernelManifest.version));
+
+    // Bare version claims, in the documents above plus the deployment artifacts
+    // that state a version outside Markdown. Only in default scan mode: an
+    // explicit file list is a targeted run, and pulling in files the caller did
+    // not name would report findings they cannot act on from that invocation.
+    if (args.length === 0) {
+      const claimSources = new Map(fileContents);
+      for (const artifact of VERSIONED_ARTIFACTS) {
+        try {
+          claimSources.set(artifact, await Deno.readTextFile(artifact));
+        } catch {
+          findings.push({
+            file: artifact,
+            line: 1,
+            message: 'Listed in VERSIONED_ARTIFACTS but cannot be read — remove it from the ' +
+              'list, or restore the file whose version claim it was checking.',
+          });
+        }
+      }
+      findings.push(...checkVersionClaims(claimSources, kernelManifest.version));
+    }
   }
 
   // Run local link checks (only in default scan mode, only on markdown files)

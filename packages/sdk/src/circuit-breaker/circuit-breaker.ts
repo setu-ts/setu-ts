@@ -27,7 +27,7 @@
  */
 
 import type { IClientTiming } from '../http/contracts.ts';
-import type { CircuitBreakerPolicy } from 'jsr:@setu-ts/common@^0.1.0-alpha.6';
+import type { CircuitBreakerPolicy } from 'jsr:@setu-ts/common@^0.1.0-alpha.7';
 import { ClientCircuitOpenError } from '../errors.ts';
 
 interface State {

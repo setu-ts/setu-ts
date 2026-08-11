@@ -6,7 +6,7 @@ framework.
 ## Installation
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.6/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.7/main
 ```
 
 The `-n setu` is required, not decorative: Deno derives the binary name from the package, which for

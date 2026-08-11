@@ -1126,7 +1126,7 @@ emitDecoratorMetadata).
 **Installation:**
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.6/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.7/main
 ```
 
 **Links:**
