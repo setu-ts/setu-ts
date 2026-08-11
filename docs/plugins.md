@@ -383,9 +383,12 @@ emitDecoratorMetadata).
 - GCP Pub/Sub (via npm:@google-cloud/pubsub)
 - Azure Service Bus (via npm:@azure/service-bus)
 
-> Workers is not supported: every broker except the in-memory default needs raw sockets or an npm
-> SDK that does not run on the edge. Use [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin)
-> for edge messaging primitives.
+> Workers is not supported by **this package**: every broker except the in-memory default needs raw
+> sockets or an npm SDK that does not run on the edge. The capability itself IS available there —
+> [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin) registers `CAPABILITIES.MESSAGING` from
+> the platform, serving publish/subscribe over Workers Queues and request/reply through a Durable
+> Object reply inbox. An application registers exactly one provider of the token, so the choice is
+> per deployment target, not per call site.
 
 **Features:**
 
@@ -849,6 +852,9 @@ emitDecoratorMetadata).
 - Durable Objects (backplane, locks)
 - Workers Queues
 - Cron Triggers
+- Messaging (`CAPABILITIES.MESSAGING`) — publish/subscribe over Workers Queues, and request/reply
+  through a Durable Object reply inbox
+- Cache API middleware
 
 **Links:**
 
@@ -1108,20 +1114,24 @@ emitDecoratorMetadata).
 
 **Commands:**
 
-- `setu new <name>` - Create new project
-- `setu new <name> --workspace` - Create a monorepo root
-- `setu generate <type> <name>` - Generate code
-- `setu generate app <name>` - Add a service to a workspace
-- `setu commands` - List available commands
+- `setu new <name>` - Create a new project (`--template rest|microservice|nest|full-stack`,
+  `--runtime deno|node|bun|cloudflare-workers`, `--di` for a DI container)
+- `setu new <name> --workspace` - Create a monorepo root (`--port`, `--transport`)
+- `setu generate <type> <name>` - Generate code; 14 schematics, 11 of them wired into a registration
+  site with no edit to a file you own
+- `setu generate app <name>` - Add a service to a workspace, allocating its port and registering it
+  in every sibling's discovery map
+- `setu commands` - List the commands this project's plugins provide
 
 **Installation:**
 
 ```bash
-deno install -A -f jsr:@setu-ts/cli@^0.1.0-alpha.5/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.5/main
 ```
 
 **Links:**
 
+- [CLI Guide](./cli.md)
 - [README](../packages/cli/README.md)
 - [API Reference](./api/cli/src/index.ts/index.html)
 

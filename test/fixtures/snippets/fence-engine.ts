@@ -44,11 +44,12 @@ import { scanFences } from '../../../scripts/check-docs.ts';
 /** Language aliases that map to TypeScript for compilation purposes. */
 export const TS_ALIASES = new Set(['typescript', 'ts', 'tsx']);
 
-/** The nine curated guides whose copyable fences must compile or be classified. */
+/** The ten curated guides whose copyable fences must compile or be classified. */
 export const GUIDES = [
   'docs/getting-started.md',
   'docs/programmatic-api.md',
   'docs/custom-plugins.md',
+  'docs/cli.md',
   'docs/plugin-architecture.md',
   'docs/examples.md',
   'docs/decorators.md',

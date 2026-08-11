@@ -180,6 +180,7 @@ describe('documentation gate — required guides', () => {
       'docs/getting-started.md',
       'docs/plugin-architecture.md',
       'docs/plugins.md',
+      'docs/cli.md',
       'docs/programmatic-api.md',
       'docs/decorators.md',
       'docs/custom-plugins.md',

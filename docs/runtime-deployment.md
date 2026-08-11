@@ -140,8 +140,11 @@ console.log('Server running on http://localhost:3000');
 {
   "type": "module",
   "scripts": {
-    "start": "node --loader ts-node/esm main.ts",
-    "dev": "node --watch --loader ts-node/esm main.ts"
+    "start": "tsx main.ts",
+    "dev": "tsx watch main.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
   },
   "imports": {
     "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.5",
@@ -150,6 +153,14 @@ console.log('Server running on http://localhost:3000');
   }
 }
 ```
+
+> **Node needs a transform, not just type stripping.** `--experimental-strip-types` erases types
+> without transforming code, so it cannot run a legacy decorator (a bare `SyntaxError`) or a
+> constructor parameter property (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`), and
+> `--experimental-transform-types` still rejects the decorator because it does not enable
+> `experimentalDecorators`. `tsx` reads the `experimentalDecorators` in your `tsconfig.json` and
+> runs all of it, which is why `setu new --runtime node` emits exactly this. Compiling ahead of time
+> with `tsc` and running the JavaScript works equally well.
 
 ### Deployment
 
@@ -164,7 +175,6 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
 
 EXPOSE 3000
 CMD ["npm", "start"]
@@ -174,7 +184,8 @@ CMD ["npm", "start"]
 
 ```bash
 npm install -g pm2
-pm2 start main.ts --name my-app --interpreter node
+# Run the `start` script, so PM2 launches the same tsx entry point npm does.
+pm2 start npm --name my-app -- start
 ```
 
 #### Serverless
@@ -495,18 +506,52 @@ wrangler open
 
 ### Limitations
 
-| Feature                 | Status | Notes                            |
-| ----------------------- | ------ | -------------------------------- |
-| TCP sockets             | ❌     | Use HTTP-based services          |
-| File system             | ❌     | Use R2 or KV for storage         |
-| Worker threads          | ❌     | Use worker-pool-plugin (limited) |
-| Raw sockets (WebSocket) | ✅     | Via WebSocket upgrade            |
-| Cron                    | ✅     | Via Wrangler triggers            |
-| Queues                  | ✅     | Via Workers Queues               |
-| KV                      | ✅     | Via KV bindings                  |
-| D1                      | ✅     | Via D1 bindings                  |
-| R2                      | ✅     | Via R2 bindings                  |
-| Durable Objects         | ✅     | Via DO bindings                  |
+| Feature                   | Status | Notes                            |
+| ------------------------- | ------ | -------------------------------- |
+| TCP sockets               | ❌     | Use HTTP-based services          |
+| File system               | ❌     | Use R2 or KV for storage         |
+| Worker threads            | ❌     | Use worker-pool-plugin (limited) |
+| Raw sockets (WebSocket)   | ✅     | Via WebSocket upgrade            |
+| Cron                      | ✅     | Via Wrangler triggers            |
+| Queues                    | ✅     | Via Workers Queues               |
+| Messaging (pub/sub)       | ✅     | Via Workers Queues               |
+| Messaging (request/reply) | ✅     | Via a Durable Object reply inbox |
+| KV                        | ✅     | Via KV bindings                  |
+| D1                        | ✅     | Via D1 bindings                  |
+| R2                        | ✅     | Via R2 bindings                  |
+| Durable Objects           | ✅     | Via DO bindings                  |
+
+### Messaging on Workers
+
+`@setu-ts/messaging-plugin` cannot run here — every broker but the in-memory default needs a raw
+socket. `CloudflarePlugin` registers `CAPABILITIES.MESSAGING` from the platform instead, so
+`publish`/`subscribe`/`request`/`respond` work at the edge with no code change at the call site.
+
+Two things about it are structural rather than incidental. First, delivery arrives through a
+**module-level `queue` export**, not through `fetch` — `subscribe()` registers a handler into a
+dispatch table, and the handler `createMessagingHandler(app)` builds is what routes a delivered
+batch into it:
+
+```typescript
+import type { IApplication } from '@setu-ts/common';
+import { createMessagingHandler } from '@setu-ts/cloudflare-plugin';
+
+// A Worker's src/index.ts exports both entry points from one application.
+export function workerEntry(application: IApplication) {
+  return {
+    fetch: (request: Request) => application.fetch(request),
+    queue: createMessagingHandler(application),
+  };
+}
+```
+
+Second, the consuming queue **must** set `max_batch_timeout = 0` in `wrangler.toml`. The platform
+default of 5s alone exhausts the default request/reply budget, so a nonzero value makes every RPC
+time out. A queue also has exactly one active consumer, so cross-service fan-out over one topic is
+not available.
+
+`setu new --template microservice --runtime cloudflare-workers` scaffolds this wiring, including the
+`wrangler.toml` stanzas — see the [CLI Guide](./cli.md#runtime-targets).
 
 ### Runtime Environment
 
