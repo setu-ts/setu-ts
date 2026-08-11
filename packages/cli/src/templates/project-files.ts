@@ -92,6 +92,19 @@ export interface ResolvedHost {
   readonly files: readonly GeneratedFile[];
   readonly pluginSpreads: readonly string[];
   readonly setupCalls: readonly string[];
+  /**
+   * Tasks merged into the generated `deno.json` beyond `start`.
+   *
+   * A workspace transport contributes these — the gRPC arm needs a `proto:gen`
+   * task, because the descriptors `grpc.addService` takes come from a compiler
+   * rather than from the CLI.
+   */
+  readonly extraTasks: Readonly<Record<string, string>>;
+  /**
+   * Import-map entries merged into the generated `deno.json` beyond the framework
+   * pins — what a transport-contributed file needs in order to compile.
+   */
+  readonly extraImports: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly manifest?: TemplateManifest | undefined;
 }
@@ -134,6 +147,8 @@ export function resolveHost(
     files: [...(host.files ?? []), ...(swap?.files ?? [])],
     pluginSpreads: host.pluginSpreads ?? [],
     setupCalls: host.setupCalls ?? [],
+    extraTasks: {},
+    extraImports: {},
     appFactory: host.appFactory,
     manifest: host.manifest,
   };
@@ -579,7 +594,7 @@ function jsrImports(host: ResolvedHost): Record<string, string> {
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.
-  return { ...imports, ...host.manifest?.denoImports };
+  return { ...imports, ...host.extraImports, ...host.manifest?.denoImports };
 }
 
 /**
@@ -855,7 +870,10 @@ ${PROGRAM_NAME} generate --help
       contents: `${
         JSON.stringify(
           {
-            tasks: { start: `deno run ${denoPermissions(manifest)} ${entry}` },
+            tasks: {
+              start: `deno run ${denoPermissions(manifest)} ${entry}`,
+              ...host.extraTasks,
+            },
             // The decorator and OpenAPI plugins ship legacy decorators, so a
             // generated @Controller class only type-checks with this enabled.
             compilerOptions: { experimentalDecorators: true },

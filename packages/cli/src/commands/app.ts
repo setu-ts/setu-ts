@@ -216,7 +216,10 @@ function planMember(
     // above), so no runtime swap can apply here.
     resolveHost(choice.template ?? MINIMAL_HOST, choice.features, 'deno'),
     transport,
-    next.transportUrl,
+    name,
+    // Omitted rather than passed as `undefined`: `exactOptionalPropertyTypes` is
+    // on, and the parameter is optional.
+    ...(next.transportUrl === undefined ? [] : [next.transportUrl]),
   );
   const memberRoot = joinPath(MEMBERS_DIR, name);
 
