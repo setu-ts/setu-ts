@@ -46,12 +46,15 @@ describe('the workspace runtime profiles', () => {
     expect(new Set(commands).size).toBe(WORKSPACE_RUNTIMES.length);
   });
 
-  // Measured: `bun install` populates the MEMBER's node_modules as well as the
-  // root, so an image copying only a hoisted root starts it with nothing.
-  it('records that Bun installs into each member', () => {
-    expect(workspaceProfile('bun').memberModules).toBe(true);
-    expect(workspaceProfile('node').memberModules).toBe(false);
-    expect(workspaceProfile('deno').memberModules).toBe(false);
+  // The reason `runScript` exists rather than a branch on `manifestKind`: Bun
+  // shares npm's manifest shape and none of its commands, so a next step derived
+  // from the shape told a Bun developer to run `npm start` immediately after
+  // telling them to run `bun install`.
+  it('runs a named script with its own toolchain, Bun included', () => {
+    expect(workspaceProfile('deno').runScript('start')).toBe('deno task start');
+    expect(workspaceProfile('node').runScript('start')).toBe('npm run start');
+    expect(workspaceProfile('bun').runScript('start')).toBe('bun run start');
+    expect(workspaceProfile('bun').runScript('dev')).not.toContain('npm');
   });
 
   // The one thing a generated module cannot express portably.
@@ -205,6 +208,11 @@ describe('what an npm workspace renders', () => {
     expect(dockerfile).toContain('COPY package.json');
     // Without the scope mapping the install resolves no framework package at all.
     expect(dockerfile).toContain('.npmrc');
+    // Shared libraries BEFORE the install, not after: a member that depends on one
+    // is linked by the install itself, so a library arriving later is a dependency
+    // the install could not resolve.
+    expect(dockerfile.indexOf('COPY lib[s]')).toBeGreaterThan(-1);
+    expect(dockerfile.indexOf('COPY lib[s]')).toBeLessThan(dockerfile.indexOf(NODE.install));
     // Numeric for the same reason every other image here is.
     expect(dockerfile).toMatch(/^USER \d+:\d+$/m);
   });
@@ -267,6 +275,7 @@ describe('what a Bun workspace renders differently', () => {
       const profile = workspaceProfile(runtime);
       expect(profile.memberGlob('apps')).toContain('apps/');
       expect(profile.envRead('X', 'd')).toContain('X');
+      expect(profile.runScript('start')).toContain('start');
       expect(profile.rootManifestFile.endsWith('.json')).toBe(true);
     }
   });

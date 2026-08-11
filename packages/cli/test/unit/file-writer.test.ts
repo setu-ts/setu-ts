@@ -83,8 +83,20 @@ describe('resolveDir', () => {
     expect(resolveDir('/work', 'proj')).toBe('/work/proj');
   });
 
-  it('anchors a dot-relative --dir to the cwd', () => {
-    expect(resolveDir('/work', './proj/nested')).toBe('/work/./proj/nested');
+  // The `/./` used to survive into the resolved path. Nothing failed loudly —
+  // every filesystem call honours it — but it reached every path the CLI PRINTS,
+  // and `setu adopt` derives its member name from the last segment, so `--dir .`
+  // produced a member literally called `.` and a conversion that died on `mkdir
+  // apps/.`.
+  it('anchors a dot-relative --dir to the cwd, resolving the dots', () => {
+    expect(resolveDir('/work', './proj/nested')).toBe('/work/proj/nested');
+    expect(resolveDir('/work/svc', '.')).toBe('/work/svc');
+    expect(resolveDir('/work/svc', '..')).toBe('/work');
+  });
+
+  // What every filesystem does with `/..`: a path cannot climb above the root.
+  it('cannot be walked above the filesystem root', () => {
+    expect(resolveDir('/work', '../../..')).toBe('/');
   });
 });
 

@@ -30,6 +30,26 @@ const PROJECT: Readonly<Record<string, string>> = {
   '/work/svc/.github/workflows/ci.yml': 'name: ci\n',
 };
 
+/**
+ * The same project on the npm toolchain.
+ *
+ * Its root manifest is `package.json` and it carries an `.npmrc` — both of which
+ * the workspace root ALSO emits, and both of which move into the member. A
+ * conversion that exempts only `deno.json` from the overwrite check therefore
+ * refuses every npm and Bun project, which is what shipped.
+ */
+const NODE_PROJECT: Readonly<Record<string, string>> = {
+  '/work/svc/package.json': '{ "scripts": { "start": "tsx main.ts" } }\n',
+  '/work/svc/.npmrc': '@jsr:registry=https://npm.jsr.io\n',
+  '/work/svc/tsconfig.json': '{}\n',
+  '/work/svc/setu.config.ts': 'export function createApp() {}\n',
+  '/work/svc/main.ts': `import { createApp } from './setu.config.ts';\n` +
+    `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`,
+  '/work/svc/README.md': '# svc\n',
+  '/work/svc/src/routes/index.ts': 'export const routes = [];\n',
+  '/work/svc/package-lock.json': '{}\n',
+};
+
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;
@@ -268,6 +288,36 @@ describe('runAdoptCommand', () => {
     await expect(h.fs.stat('/work/svc/src')).rejects.toThrow();
   });
 
+  // The whole npm path, which nothing exercised: `package.json` and `.npmrc` are
+  // both emitted by the root AND owned by the project, so the overwrite check has
+  // to run against the post-move state rather than against a list of one filename.
+  it('converts an npm project, whose manifest collides with the root it writes', async () => {
+    const h = harness(NODE_PROJECT);
+    expect(await h.run([])).toBe(0);
+    expect(h.err.text()).toBe('');
+
+    // The project's own manifest went into the member…
+    expect(h.fs.read('/work/svc/apps/svc/package.json')).toContain('tsx main.ts');
+    expect(h.fs.has('/work/svc/apps/svc/.npmrc')).toBe(true);
+    // …and the workspace root's took its place at the top.
+    const root = JSON.parse(h.fs.read('/work/svc/package.json')) as { workspaces?: string[] };
+    expect(root.workspaces).toEqual(['apps/*', 'libs/*']);
+    // Recorded as an npm workspace, so every later command reads the right one.
+    const manifest = JSON.parse(h.fs.read(`/work/svc/${WORKSPACE_MANIFEST}`)) as {
+      runtime?: string;
+    };
+    expect(manifest.runtime).toBe('node');
+  });
+
+  // A dry run that prints a clean plan for a conversion the real run refuses is
+  // worse than no dry run at all.
+  it('reports a collision under --dry-run instead of promising it would work', async () => {
+    const h = harness({ ...PROJECT, [`/work/svc/apps/svc/${DISCOVERY_MODULE}`]: 'left over\n' });
+    expect(await h.run(['--dry-run'])).toBe(1);
+    expect(h.out.text()).toContain('WOULD REFUSE');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   it('takes the member name from --name over the directory', async () => {
     const h = harness();
     expect(await h.run(['--name', 'orders'])).toBe(0);
@@ -279,6 +329,22 @@ describe('runAdoptCommand', () => {
     expect(await h.run(['--name', '2fa'])).toBe(2);
     expect(h.err.text()).toContain('--name');
     expect(h.fs.writes).toEqual([]);
+  });
+
+  // `--dir .` is the obvious way to name the current directory, and the member
+  // name is DERIVED from that path — so with the dot left unresolved the last
+  // segment was literally `.`, which produced `apps/.` and died part-way through
+  // the conversion on a bare `mkdir` errno. It now names the directory it means.
+  it('converts through --dir . exactly as it does with no --dir at all', async () => {
+    const dotted = harness();
+    expect(await dotted.run(['--dir', '.'])).toBe(0);
+    expect(dotted.fs.read('/work/svc/apps/svc/setu.config.ts')).toContain('createApp');
+    // No stray `/./` anywhere in what it reports, either.
+    expect(dotted.out.text()).not.toContain('/./');
+
+    const plain = harness();
+    expect(await plain.run([])).toBe(0);
+    expect([...plain.fs.writes].sort()).toEqual([...dotted.fs.writes].sort());
   });
 
   it('refuses a port no service can bind, through the shared reader', async () => {
@@ -354,6 +420,29 @@ describe('runAdoptCommand', () => {
     });
     expect(code).toBe(0);
     expect(out.text()).toContain('kept src/');
+  });
+
+  // The workspace root's own README documents the install command, the ports and
+  // the transport. The project's copy MOVES into the member, so suppressing the
+  // root's because "the project already has one" left the workspace with none.
+  it('leaves the root a README of its own, since the project takes its copy along', async () => {
+    const h = harness();
+    expect(await h.run([])).toBe(0);
+    expect(h.fs.read('/work/svc/apps/svc/README.md')).toBe('# svc\n');
+    const root = h.fs.read('/work/svc/README.md');
+    expect(root).not.toBe('# svc\n');
+    expect(root).toContain('workspace');
+  });
+
+  it('names the toolchain the converted project actually uses in its next step', async () => {
+    const deno = harness();
+    expect(await deno.run([])).toBe(0);
+    expect(deno.out.text()).toContain('deno task dev');
+
+    const node = harness(NODE_PROJECT);
+    expect(await node.run([])).toBe(0);
+    expect(node.out.text()).toContain('npm run dev');
+    expect(node.out.text()).not.toContain('deno task');
   });
 
   it('reports a write failure rather than throwing', async () => {

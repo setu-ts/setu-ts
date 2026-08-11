@@ -207,9 +207,17 @@ function planMember(
       };
     }
 
-    const plan = planRootNodeModulesDir(rootManifest, name);
-    if (plan.kind === 'refused') return { ok: false, message: plan.message };
-    if (plan.kind === 'update') extra.push(plan.file);
+    // Deno only. `nodeModulesDir` is a Deno setting that turns on the real
+    // `node_modules` directory npm and Bun have BY CONSTRUCTION — so on an npm
+    // workspace there is nothing to enable, and asking for the field would mean
+    // reading a `deno.json` that does not exist there. Left ungated, the absent
+    // file lands in the unparseable-root branch and the member is refused with
+    // advice that would change nothing if followed.
+    if (profile.manifestKind === 'deno') {
+      const plan = planRootNodeModulesDir(rootManifest, name);
+      if (plan.kind === 'refused') return { ok: false, message: plan.message };
+      if (plan.kind === 'update') extra.push(plan.file);
+    }
   }
 
   // The WORKSPACE's runtime, never a per-member flag: members share one root
@@ -440,11 +448,13 @@ export async function runAppCommand(
   for (const file of files) deps.log(`created ${file.path}`);
   deps.log('');
   deps.log(`Added ${name} on port ${port}. Next:`);
-  // From the profile: a Node member has no `deno task`, and a next step that
-  // cannot be run is worse than none.
+  // From the profile, and from `runScript` rather than `manifestKind`: a Node
+  // member has no `deno task`, and a Bun one — which shares npm's manifest shape
+  // and none of its commands — would otherwise be told to run `npm start` right
+  // after being told to run `bun install`.
   deps.log(
     `  ${profile.install} && cd ${joinPath(MEMBERS_DIR, name)} && ` +
-      `${profile.manifestKind === 'deno' ? 'deno task start' : 'npm start'}`,
+      `${profile.runScript('start')}`,
   );
   return EXIT_OK;
 }

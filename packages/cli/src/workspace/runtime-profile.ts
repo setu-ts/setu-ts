@@ -13,10 +13,11 @@
  *
  * - **Bun needs no root shape of its own.** `bun install` reads npm `workspaces`
  *   from `package.json`, so `deno` and `npm` are the only two manifest kinds. What
- *   Bun changes is the commands — and its INSTALL LAYOUT, which is why
- *   {@linkcode WorkspaceRuntimeProfile.memberModules} exists: Bun installs into the
- *   member's own `node_modules`, not only a hoisted root, so an image that copied
- *   the root alone would start a member with nothing to import.
+ *   Bun changes is the COMMANDS, which is why
+ *   {@linkcode WorkspaceRuntimeProfile.runScript} exists beside `manifestKind`: a
+ *   next step derived from the shape alone tells a Bun developer to run `npm
+ *   start`. It also installs into each member's own `node_modules` rather than
+ *   only a hoisted root, which both generated ignore files account for.
  * - **A workspace-root `.npmrc` maps the `@jsr` scope for members.** Verified by
  *   installing `@setu-ts/{kernel,common,runtime}` into a two-member npm workspace
  *   and serving a request from one of them.
@@ -85,16 +86,21 @@ export interface WorkspaceRuntimeProfile {
   readonly install: string;
   /** What runs every member's start script at once. */
   readonly runAll: string;
+  /**
+   * Renders the command that runs one named script in the current directory.
+   *
+   * Bun is why this exists rather than a branch on
+   * {@linkcode WorkspaceRuntimeProfile.manifestKind}: it shares npm's manifest
+   * shape and NOT its commands, so a next step derived from the shape tells a Bun
+   * developer to run `npm start` in a workspace whose install line says
+   * `bun install`.
+   *
+   * @param script - The script or task name, e.g. `start`
+   * @returns The command to run it
+   */
+  readonly runScript: (script: string) => string;
   /** The lockfile this toolchain writes, for `.gitignore` and image copies. */
   readonly lockfile: string;
-  /**
-   * Whether dependencies land in each member's own `node_modules`.
-   *
-   * True for Bun, measured: `bun install` populated `apps/orders/node_modules`
-   * rather than only the root. An image or a deploy that copies the hoisted root
-   * alone would leave a Bun member unable to resolve anything.
-   */
-  readonly memberModules: boolean;
 }
 
 /**
@@ -134,8 +140,8 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     envRead: denoEnvRead,
     install: 'deno install',
     runAll: 'deno task --recursive start',
+    runScript: (script) => `deno task ${script}`,
     lockfile: 'deno.lock',
-    memberModules: false,
   },
   ['node']: {
     runtime: 'node',
@@ -149,8 +155,8 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     // `--workspaces` rather than `--filter`: npm's own flag, and it runs the
     // script in every workspace that declares it.
     runAll: 'npm run --workspaces start',
+    runScript: (script) => `npm run ${script}`,
     lockfile: 'package-lock.json',
-    memberModules: false,
   },
   ['bun']: {
     runtime: 'bun',
@@ -162,10 +168,11 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     envRead: nodeEnvRead,
     install: 'bun install',
     runAll: "bun run --filter '*' start",
+    runScript: (script) => `bun run ${script}`,
+    // Measured: `bun install` populates each MEMBER's `node_modules` as well as
+    // the hoisted root — which is why the generated `.gitignore` and
+    // `.dockerignore` both name the member locations, not only the root one.
     lockfile: 'bun.lock',
-    // Measured: `bun install` populates the MEMBER's node_modules, not only a
-    // hoisted root.
-    memberModules: true,
   },
   // Present so the record is total over `TargetRuntime` and the lookup needs no
   // "cannot happen" branch. It is refused before it can be selected: each Worker
@@ -181,8 +188,8 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     envRead: nodeEnvRead,
     install: 'npm install',
     runAll: 'npm run --workspaces start',
+    runScript: (script) => `npm run ${script}`,
     lockfile: 'package-lock.json',
-    memberModules: false,
   },
 };
 

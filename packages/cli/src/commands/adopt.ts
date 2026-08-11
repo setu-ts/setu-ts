@@ -156,11 +156,16 @@ export async function runAdoptCommand(
   };
   const transport = transportSpec(DEFAULT_TRANSPORT);
 
-  // The root's own files, minus the two the project already owns at this level.
-  // `README.md` moves into the member with the rest of its source; `.gitignore`
-  // stays exactly where it is, because a repository's ignore rules belong at its
-  // root and the developer's copy may say more than ours would.
-  const keepExisting = new Set(['README.md', '.gitignore']);
+  // The root's own files, minus the one the project keeps at this level.
+  // `.gitignore` is NOT adopted, so a project that has one keeps it exactly where
+  // it is: a repository's ignore rules belong at its root, and the developer's
+  // copy may say more than ours would.
+  //
+  // `README.md` is deliberately absent from this set even though the project has
+  // one, because that copy MOVES into the member — suppressing the root's on the
+  // strength of a file that is about to leave is how the workspace ends up with
+  // no README at all.
+  const keepExisting = new Set(['.gitignore']);
   const present = new Set<string>();
   for (const path of keepExisting) {
     try {
@@ -188,21 +193,29 @@ export async function runAdoptCommand(
 
   const planned = created.map((file) => ({ ...file, path: joinPath(project, file.path) }));
 
+  // The check runs against the POST-MOVE state, because the moves happen first:
+  // anything this is about to relocate is no longer at the root by the time the
+  // root's own copy is written. Derived from the plan rather than named as a
+  // literal — an earlier version exempted `deno.json` alone, which is exactly the
+  // set for a Deno project and misses `package.json` and `.npmrc`, so converting
+  // any npm or Bun project refused every time.
+  const vacated = new Set(plan.files.map((file) => joinPath(project, file.from)));
+  const collisions = await findExisting(
+    deps.fs,
+    planned.filter((file) => !vacated.has(file.path)),
+  );
+
   if (args.flags['dry-run'] === true) {
     for (const file of plan.files) {
       deps.log(`would move ${file.from} -> ${file.to}`);
     }
     for (const file of planned) deps.log(`would create ${file.path}`);
-    return EXIT_OK;
+    // Reported here too: a dry run that prints a clean plan for a conversion the
+    // real run refuses is worse than no dry run.
+    for (const path of collisions) deps.log(`WOULD REFUSE: ${path} already exists`);
+    return collisions.length > 0 ? EXIT_ERROR : EXIT_OK;
   }
 
-  // The root manifest is the one collision that matters: the project has a
-  // `deno.json` of its own, and it MOVES into the member before the root's is
-  // written, so the check runs against the post-move state rather than this one.
-  const collisions = await findExisting(
-    deps.fs,
-    planned.filter((file) => !file.path.endsWith('/deno.json')),
-  );
   if (collisions.length > 0) {
     deps.error('Refusing to overwrite existing files:');
     for (const path of collisions) deps.error(`  ${path}`);
@@ -267,6 +280,8 @@ export async function runAdoptCommand(
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${PROGRAM_NAME} generate ${APP_VERB} <name>   # add a second service`);
-  deps.log(`  deno task dev                       # run every member`);
+  // From the profile, which is the project's own detected toolchain: a converted
+  // Node project has no `deno task`.
+  deps.log(`  ${profile.runScript('dev')}   # run every member`);
   return EXIT_OK;
 }

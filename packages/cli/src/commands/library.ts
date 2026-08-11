@@ -47,8 +47,9 @@ function printUsage(log: (message: string) => void): void {
   log(`Usage: ${PROGRAM_NAME} generate ${LIBRARY_VERB} <name> [--scope <scope>] [--dir <path>]`);
   log('');
   log(`Adds shared code to a Setu workspace: creates ${LIBS_DIR}/<name>/, which every`);
-  log(`member can import by name. No member's manifest changes — a Deno workspace`);
-  log(`resolves a member by its declared name.`);
+  log(`member can import by name. No member's manifest changes — a workspace resolves`);
+  log(`a member by its declared name, under every supported toolchain. On npm and Bun`);
+  log(`the link is made by the install, so re-run it before importing the library.`);
   log('');
   log('Options:');
   log('  --scope <scope>     Import scope, without the @ (default: the workspace directory)');
@@ -185,5 +186,15 @@ export async function runLibraryCommand(
   deps.log('');
   deps.log(`Added the ${librarySpecifier(scope, names.kebab)} library. Import it anywhere:`);
   deps.log(`  import { ${names.camel} } from '${librarySpecifier(scope, names.kebab)}';`);
+
+  // Not advice — a requirement, and measured: on npm and Bun a workspace package
+  // is reachable through a symlink the INSTALL creates in the root
+  // `node_modules`, so until that runs again the import above fails to resolve.
+  // Deno needs nothing: it resolves a member from the manifest glob directly.
+  if (profile.manifestKind === 'npm') {
+    deps.log('');
+    deps.log(`Run \`${profile.install}\` first — a workspace package is linked into node_modules`);
+    deps.log(`by the install, so the import above cannot resolve until it does.`);
+  }
   return EXIT_OK;
 }

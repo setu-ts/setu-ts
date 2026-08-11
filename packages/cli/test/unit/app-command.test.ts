@@ -11,13 +11,32 @@ import {
 } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 import { ROOT_MANIFEST } from '../../src/workspace/root-manifest.ts';
+import {
+  workspaceProfile,
+  type WorkspaceRuntimeProfile,
+} from '../../src/workspace/runtime-profile.ts';
 import type { TransportName } from '../../src/workspace/transport.ts';
+import type { TargetRuntime } from '../../src/constants.ts';
 
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;
   readonly err: ReturnType<typeof createRecorder>;
   run(argv: readonly string[]): Promise<number>;
+}
+
+/**
+ * The script block a root manifest of this shape declares.
+ *
+ * Deno spells it `tasks` and npm spells it `scripts`, and the existing tests
+ * assert the Deno one survives a one-key merge.
+ *
+ * @param profile - The workspace's runtime profile
+ * @returns The block to spread into the seeded root
+ */
+function tasksFor(profile: WorkspaceRuntimeProfile): Record<string, unknown> {
+  const dev = { dev: profile.runAll };
+  return profile.manifestKind === 'deno' ? { tasks: dev } : { scripts: dev, private: true };
 }
 
 /**
@@ -29,6 +48,9 @@ interface Harness {
  * @param members - Members already in the workspace, or `undefined` for no
  * workspace at all
  * @param basePort - The workspace's base port
+ * @param transport - The workspace's transport
+ * @param root - The root manifest contents, when the default will not do
+ * @param runtime - The workspace's runtime, which decides the root's filename
  * @returns The harness
  */
 function harness(
@@ -36,12 +58,13 @@ function harness(
   basePort = 3000,
   transport: TransportName = 'http',
   root?: string,
+  runtime: TargetRuntime = 'deno',
 ): Harness {
   const seed: Record<string, string> = {};
   if (members !== undefined) {
     seed[`/ws/${WORKSPACE_MANIFEST}`] = renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
-      runtime: 'deno',
+      runtime,
       basePort,
       transport,
       members,
@@ -50,9 +73,14 @@ function harness(
     // the wrong reason: the full-stack case was asserted to fail on
     // `nodeModulesDir`, and with no root manifest to read it failed because the
     // file was missing rather than because of anything the template needed.
-    seed[`/ws/${ROOT_MANIFEST}`] = root ?? `${
+    //
+    // Its FILENAME comes from the profile for the same reason: an npm workspace's
+    // root is `package.json`, and seeding a `deno.json` there would reproduce that
+    // same wrong-reason pass in the other direction.
+    const profile = workspaceProfile(runtime);
+    seed[`/ws/${profile.rootManifestFile}`] = root ?? `${
       JSON.stringify(
-        { workspace: ['./apps/*'], tasks: { dev: 'deno task --recursive start' } },
+        { [profile.globKey]: [profile.memberGlob('apps')], ...tasksFor(profile) },
         null,
         2,
       )
@@ -164,6 +192,24 @@ describe('runAppCommand', () => {
   // A frontend member is the one case that needs a field only the workspace ROOT
   // may declare, so it is also the one case where this command edits a file it
   // did not just create.
+  // Bun shares npm's manifest SHAPE and none of its commands, so a next step
+  // branching on the shape told a Bun developer to run `npm start` in the same
+  // breath as `bun install`. Asserted on the command this actually PRINTS —
+  // testing the profile's renderer alone leaves this line free to drift back.
+  it('names each toolchain own commands in the next step it prints', async () => {
+    const expected = {
+      deno: 'deno install && cd apps/orders && deno task start',
+      node: 'npm install && cd apps/orders && npm run start',
+      bun: 'bun install && cd apps/orders && bun run start',
+    } as const;
+
+    for (const [runtime, line] of Object.entries(expected)) {
+      const h = harness([], 3000, 'http', undefined, runtime as TargetRuntime);
+      expect(await h.run(['app', 'orders'])).toBe(0);
+      expect(h.out.text()).toContain(line);
+    }
+  });
+
   describe('a member with a frontend build', () => {
     /**
      * Reads a workspace root manifest out of the fake filesystem.
@@ -232,6 +278,23 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(2);
       expect(h.err.text()).toContain('Add that field by hand');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    // `nodeModulesDir` is a DENO setting that turns on the real node_modules
+    // directory npm and Bun have by construction, so an npm workspace has nothing
+    // to enable. Ungated, the absent deno.json landed in the unparseable-root
+    // branch and every full-stack member was refused with advice that would have
+    // changed nothing if followed.
+    it('needs no root edit on npm, where node_modules already exists', async () => {
+      for (const runtime of ['node', 'bun'] as const) {
+        const h = harness([], 3000, 'http', undefined, runtime);
+        expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+        expect(h.err.text()).toBe('');
+        expect(h.fs.has('/ws/apps/web/setu.config.ts')).toBe(true);
+        // …and the Deno-only field is not smuggled into the npm root either.
+        const root = JSON.parse(h.fs.read('/ws/package.json')) as Record<string, unknown>;
+        expect(root['nodeModulesDir']).toBeUndefined();
+      }
     });
   });
 
