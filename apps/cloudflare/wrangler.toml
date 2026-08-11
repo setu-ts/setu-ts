@@ -9,3 +9,22 @@ id = "00000000000000000000000000000000"
 
 [triggers]
 crons = ["*/5 * * * *"]
+
+[[queues.producers]]
+binding = "MESSAGES"
+queue = "example-messages"
+
+# `max_batch_timeout = 0` is what makes request/reply usable: the platform
+# default of 5s alone exhausts the default reply budget.
+[[queues.consumers]]
+queue = "example-messages"
+max_batch_size = 1
+max_batch_timeout = 0
+
+[[durable_objects.bindings]]
+name = "REPLY_INBOX"
+class_name = "ReplyInboxObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ReplyInboxObject"]

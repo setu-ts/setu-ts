@@ -4,9 +4,9 @@ Cloudflare Workers platform bindings for Setu-TS.
 
 The framework has served traffic on Workers since the Hono migration, but had no way to reach the
 platform's own primitives. This plugin publishes a Worker's bindings under `CAPABILITIES.CLOUDFLARE`
-and, optionally, serves the committed cache, storage, and queue capabilities from KV, R2, and
-Cloudflare Queues. It also ships the `queue` and `scheduled` handler exports a Worker needs, and a
-response cache over the platform's own edge cache.
+and, optionally, serves the committed cache, storage, queue, and messaging capabilities from KV, R2,
+and Cloudflare Queues. It also ships the `queue` and `scheduled` handler exports a Worker needs, and
+a response cache over the platform's own edge cache.
 
 **Zero npm dependencies.** Nothing in this package imports `cloudflare:workers` — the application
 passes `env` in, which keeps the package type-checkable on Deno, Node, and Bun, and trivially
@@ -69,24 +69,28 @@ longer; only `waitUntil` needs the newer date.
 
 ## Options
 
-| Option                    | Type                     | Default      | Description                                                       |
-| ------------------------- | ------------------------ | ------------ | ----------------------------------------------------------------- |
-| `env`                     | `Record<string,unknown>` | —            | Required. The Worker's `env`.                                     |
-| `waitUntil`               | `WaitUntilHost`          | —            | The platform sink. Omit off Workers.                              |
-| `requireBindings`         | `string[]`               | `[]`         | Bindings that must exist; `register()` throws naming absent ones. |
-| `cache.binding`           | `string`                 | —            | KV namespace serving `CAPABILITIES.CACHE`.                        |
-| `cache.name`              | `string`                 | `'default'`  | Derives `cache.<name>` when not `'default'`.                      |
-| `cache.prefix`            | `string`                 | —            | Key prefix. **Required to call `clear()`.**                       |
-| `cache.defaultTtlSeconds` | `number`                 | —            | TTL applied when `set` omits one.                                 |
-| `storage.binding`         | `string`                 | —            | R2 bucket serving `CAPABILITIES.STORAGE`.                         |
-| `storage.name`            | `string`                 | `'default'`  | Derives `storage.<name>` when not `'default'`.                    |
-| `storage.prefix`          | `string`                 | —            | Object-key prefix.                                                |
-| `queue.binding`           | `string`                 | —            | Queues producer binding serving `CAPABILITIES.QUEUE`.             |
-| `queue.name`              | `string`                 | `'default'`  | Derives `queue.<name>` when not `'default'`.                      |
-| `queue.maxDelaySeconds`   | `number`                 | `86400`      | A larger `delayMs` throws rather than being truncated.            |
-| `durableObject.binding`   | `string`                 | —            | DO namespace serving `CAPABILITIES.REALTIME_BACKPLANE`.           |
-| `durableObject.name`      | `string`                 | `'default'`  | Derives `realtime-backplane.<name>` when not `'default'`.         |
-| `durableObject.topic`     | `string`                 | `'realtime'` | The object every replica shares. Differ it per application.       |
+| Option                           | Type                     | Default      | Description                                                       |
+| -------------------------------- | ------------------------ | ------------ | ----------------------------------------------------------------- |
+| `env`                            | `Record<string,unknown>` | —            | Required. The Worker's `env`.                                     |
+| `waitUntil`                      | `WaitUntilHost`          | —            | The platform sink. Omit off Workers.                              |
+| `requireBindings`                | `string[]`               | `[]`         | Bindings that must exist; `register()` throws naming absent ones. |
+| `cache.binding`                  | `string`                 | —            | KV namespace serving `CAPABILITIES.CACHE`.                        |
+| `cache.name`                     | `string`                 | `'default'`  | Derives `cache.<name>` when not `'default'`.                      |
+| `cache.prefix`                   | `string`                 | —            | Key prefix. **Required to call `clear()`.**                       |
+| `cache.defaultTtlSeconds`        | `number`                 | —            | TTL applied when `set` omits one.                                 |
+| `storage.binding`                | `string`                 | —            | R2 bucket serving `CAPABILITIES.STORAGE`.                         |
+| `storage.name`                   | `string`                 | `'default'`  | Derives `storage.<name>` when not `'default'`.                    |
+| `storage.prefix`                 | `string`                 | —            | Object-key prefix.                                                |
+| `queue.binding`                  | `string`                 | —            | Queues producer binding serving `CAPABILITIES.QUEUE`.             |
+| `queue.name`                     | `string`                 | `'default'`  | Derives `queue.<name>` when not `'default'`.                      |
+| `queue.maxDelaySeconds`          | `number`                 | `86400`      | A larger `delayMs` throws rather than being truncated.            |
+| `messaging.binding`              | `string`                 | —            | Queues producer binding serving `CAPABILITIES.MESSAGING`.         |
+| `messaging.name`                 | `string`                 | `'default'`  | Derives `messaging.<name>` when not `'default'`.                  |
+| `messaging.rpc.binding`          | `string`                 | —            | DO namespace serving RPC reply inboxes. Absent, RPC throws.       |
+| `messaging.rpc.defaultTimeoutMs` | `number`                 | `5000`       | Reply budget when `RequestOptions.timeoutMs` is omitted.          |
+| `durableObject.binding`          | `string`                 | —            | DO namespace serving `CAPABILITIES.REALTIME_BACKPLANE`.           |
+| `durableObject.name`             | `string`                 | `'default'`  | Derives `realtime-backplane.<name>` when not `'default'`.         |
+| `durableObject.topic`            | `string`                 | `'realtime'` | The object every replica shares. Differ it per application.       |
 
 ## Queues, Cron Triggers, and the edge cache
 
@@ -147,6 +151,64 @@ queue = "jobs"
 [triggers]
 crons = ["0 3 * * *"]
 ```
+
+## Messaging
+
+`CAPABILITIES.MESSAGING` over Cloudflare Queues, with request/reply through a Durable Object.
+
+```typescript
+app.register(CloudflarePlugin({
+  env,
+  messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },
+}));
+
+const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+await broker.subscribe<{ id: string }>('user.created', async (user) => {/* … */});
+await broker.respond<number, number>('double', (n) => n * 2);
+
+// Consuming is a MODULE export. Combine with a job queue by routing on the
+// queue name, which your `wrangler.toml` owns and this package cannot see.
+export default { fetch: app.fetch, queue: createMessagingHandler(app) };
+```
+
+```toml
+[[queues.producers]]
+binding = "MESSAGES"
+queue = "messages"
+
+# REQUIRED for request/reply: the platform default of 5s alone exhausts the
+# default reply budget, so every request() would time out.
+[[queues.consumers]]
+queue = "messages"
+max_batch_size = 1
+max_batch_timeout = 0
+
+[[durable_objects.bindings]]
+name = "REPLY_INBOX"
+class_name = "ReplyInboxObject"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ReplyInboxObject"]
+```
+
+The `rpc` arm needs a Durable Object class your application exports, delegating to
+`ReplyInboxObjectCore` exactly as the realtime backplane's class does — see
+[the class you export](#the-class-you-export).
+
+Three things to know before you rely on it:
+
+- **`publish` reaches one consumer Worker, not every subscriber in the cluster.** Cloudflare allows
+  exactly one active consumer per queue. Fan-out happens across the handlers registered inside that
+  consumer; cross-service fan-out means one queue per consuming service.
+- **`subscribe` registers, it does not start receiving.** Delivery begins when the Worker exports
+  the handler above and the queue is declared under `[[queues.consumers]]`.
+- **A publish nobody subscribed to is acked, not retried.** Retrying ordinary pub/sub would burn the
+  queue's retry budget and dead-letter every fire-and-forget message. An unreadable body is still
+  retried, and a subscriber that throws is retried.
+
+Without the `rpc` arm, `request` and `respond` throw `CloudflareUnsupportedError` naming the binding
+to add — `publish` and `subscribe` are unaffected.
 
 ## Sessions
 
@@ -396,14 +458,18 @@ MIT
 | `cacheApiMiddleware`                      | function  |
 | `CloudflarePlugin`                        | function  |
 | `createDefaultDurableObjectWebSocketHost` | function  |
+| `createMessagingHandler`                  | function  |
 | `createQueueHandler`                      | function  |
 | `createScheduledHandler`                  | function  |
 | `isD1Database`                            | function  |
 | `isDurableObjectNamespace`                | function  |
 | `isKvNamespace`                           | function  |
+| `isQueueProducer`                         | function  |
 | `isR2Bucket`                              | function  |
 | `CloudflareBindingMissingError`           | class     |
 | `CloudflareObjectNotFoundError`           | class     |
+| `CloudflareRemoteHandlerError`            | class     |
+| `CloudflareRequestTimeoutError`           | class     |
 | `CloudflareUnsupportedError`              | class     |
 | `D1Adapter`                               | class     |
 | `DistributedLockObjectCore`               | class     |
@@ -413,8 +479,11 @@ MIT
 | `KvSessionStore`                          | class     |
 | `R2Storage`                               | class     |
 | `RealtimeBackplaneObjectCore`             | class     |
+| `ReplyInboxObjectCore`                    | class     |
+| `WorkersBroker`                           | class     |
 | `WorkersCron`                             | class     |
 | `WorkersQueue`                            | class     |
+| `BrokerRuntime`                           | interface |
 | `CacheabilityInput`                       | interface |
 | `CacheApiMiddlewareOptions`               | interface |
 | `CacheClock`                              | interface |
@@ -455,18 +524,25 @@ MIT
 | `KvListResult`                            | interface |
 | `KvPutOptions`                            | interface |
 | `KvSessionStoreOptions`                   | interface |
+| `MessagingHandlerOptions`                 | interface |
 | `QueueHandlerOptions`                     | interface |
 | `QueueSendOptions`                        | interface |
 | `R2StorageArm`                            | interface |
 | `R2StorageOptions`                        | interface |
 | `RealtimeBackplaneObjectCoreOptions`      | interface |
+| `ReplyInboxBinding`                       | interface |
+| `ReplyInboxObjectCoreOptions`             | interface |
+| `WorkersBrokerOptions`                    | interface |
 | `WorkersCronOptions`                      | interface |
+| `WorkersMessagingArm`                     | interface |
+| `WorkersMessagingRpcArm`                  | interface |
 | `WorkersQueueArm`                         | interface |
 | `WorkersQueueOptions`                     | interface |
 | `CacheRefusal`                            | type      |
 | `CloudflareWorkerEnv`                     | type      |
 | `CronHandler`                             | type      |
 | `LoggerSource`                            | type      |
+| `MessagingHandler`                        | type      |
 | `QueueHandler`                            | type      |
 | `ScheduledHandler`                        | type      |
 | `WaitUntilHost`                           | type      |

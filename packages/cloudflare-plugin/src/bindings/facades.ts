@@ -439,6 +439,24 @@ export function isD1Database(value: unknown): value is ID1Database {
 }
 
 /**
+ * Reports whether a binding is Queues-producer-shaped.
+ *
+ * Read by {@linkcode BindingRegistry.queue}, which cast its binding unvalidated
+ * until this existed — the same hole M52c closed on D1 and M52d on Durable
+ * Objects, and the last one left in this family. A missing `queues.producers`
+ * stanza or a name typo let the application boot clean, report `up` from the
+ * `cloudflare` health indicator, and fail on the first `add()` or `publish()`
+ * with a bare `TypeError` pointing at nothing.
+ *
+ * @param value - The binding to check
+ * @returns `true` when it carries the Queues producer methods
+ * @since 0.2.0
+ */
+export function isQueueProducer(value: unknown): value is IQueueProducer {
+  return hasMethods(value, ['send', 'sendBatch']);
+}
+
+/**
  * Reports whether a binding is Durable-Object-namespace-shaped.
  *
  * Read by {@linkcode BindingRegistry.durableObject}, closing the last hole in

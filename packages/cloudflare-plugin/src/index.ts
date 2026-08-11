@@ -40,6 +40,8 @@ export type {
   DurableObjectArm,
   KvCacheOptions,
   R2StorageArm,
+  WorkersMessagingArm,
+  WorkersMessagingRpcArm,
   WorkersQueueArm,
 } from './options.ts';
 
@@ -71,6 +73,7 @@ export {
   isD1Database,
   isDurableObjectNamespace,
   isKvNamespace,
+  isQueueProducer,
   isR2Bucket,
 } from './bindings/facades.ts';
 
@@ -114,6 +117,19 @@ export type { JobIdSource, WorkersQueueOptions } from './queues/workers-queue.ts
 export { createQueueHandler } from './queues/queue-handler.ts';
 export type { QueueHandler, QueueHandlerOptions } from './queues/queue-handler.ts';
 
+// Messaging — the committed IMessageBroker over Cloudflare Queues, its `queue`
+// export, and the Durable Object core serving RPC reply inboxes
+export { WorkersBroker } from './messaging/workers-broker.ts';
+export type {
+  BrokerRuntime,
+  ReplyInboxBinding,
+  WorkersBrokerOptions,
+} from './messaging/workers-broker.ts';
+export { createMessagingHandler } from './messaging/messaging-handler.ts';
+export type { MessagingHandler, MessagingHandlerOptions } from './messaging/messaging-handler.ts';
+export { ReplyInboxObjectCore } from './durable-objects/reply-inbox-object.ts';
+export type { ReplyInboxObjectCoreOptions } from './durable-objects/reply-inbox-object.ts';
+
 // Cron Triggers — the registry and the `scheduled` export
 export { WorkersCron } from './cron/workers-cron.ts';
 export type { CronHandler, WorkersCronOptions } from './cron/workers-cron.ts';
@@ -147,5 +163,7 @@ export type { R2StorageOptions } from './storage/r2-storage.ts';
 export {
   CloudflareBindingMissingError,
   CloudflareObjectNotFoundError,
+  CloudflareRemoteHandlerError,
+  CloudflareRequestTimeoutError,
   CloudflareUnsupportedError,
 } from './errors.ts';

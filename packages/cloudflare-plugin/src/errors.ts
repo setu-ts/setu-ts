@@ -80,6 +80,62 @@ export class CloudflareUnsupportedError extends Error {
 }
 
 /**
+ * A brokered request received no reply within its budget.
+ *
+ * The Cloudflare counterpart of `messaging-plugin`'s `RequestTimeoutError`.
+ * They are deliberately distinct classes rather than one shared identity:
+ * AI_GUIDELINES §2.2 forbids a plugin importing another plugin, and `common`
+ * carries no error class to promote one into (§2.1 limits it to types,
+ * interfaces, constants and pure utilities). Which class an application catches
+ * is never ambiguous — `MessagingPlugin` and this package's `messaging` arm
+ * both provide `CAPABILITIES.MESSAGING`, so the kernel's duplicate-provider
+ * check guarantees exactly one of them is registered.
+ *
+ * @since 0.2.0
+ */
+export class CloudflareRequestTimeoutError extends Error {
+  /** Discriminating name for `instanceof`-free checks. */
+  override readonly name = 'CloudflareRequestTimeoutError';
+
+  /**
+   * Builds the error a caller receives when its reply budget elapses.
+   *
+   * @param topic - The request topic that went unanswered
+   * @param timeoutMs - The budget that elapsed
+   */
+  constructor(topic: string, timeoutMs: number) {
+    super(
+      `No reply to a request on '${topic}' arrived within ${timeoutMs}ms. Check that a Worker ` +
+        "consumes this queue and calls respond() on the same topic, and that the queue's " +
+        'consumer sets `max_batch_timeout = 0` — the platform default of 5s alone exhausts ' +
+        'the default reply budget.',
+    );
+  }
+}
+
+/**
+ * A responder threw, and its failure was relayed to the caller.
+ *
+ * The Cloudflare counterpart of `messaging-plugin`'s `RemoteHandlerError`; see
+ * {@linkcode CloudflareRequestTimeoutError} for why the two are distinct.
+ *
+ * @since 0.2.0
+ */
+export class CloudflareRemoteHandlerError extends Error {
+  /** Discriminating name for `instanceof`-free checks. */
+  override readonly name = 'CloudflareRemoteHandlerError';
+
+  /**
+   * Builds the error relaying a remote responder's failure to its caller.
+   *
+   * @param message - The message the remote responder failed with
+   */
+  constructor(message: string) {
+    super(`The responder failed: ${message}`);
+  }
+}
+
+/**
  * An R2 object read found nothing.
  *
  * `IStorage.get` is contracted as `Promise<Uint8Array>` with no null arm, so an
@@ -93,6 +149,8 @@ export class CloudflareObjectNotFoundError extends Error {
   override readonly name = 'CloudflareObjectNotFoundError';
 
   /**
+   * Builds the error a missing R2 object produces.
+   *
    * @param path - The object path that was requested
    */
   constructor(path: string) {

@@ -138,8 +138,7 @@ export const NEST_PLUGINS: readonly Wiring[] = withPluginOptionSeams(
  * `nest` — the REST set plus a DI container, a decorated controller, and an
  * injected service.
  *
- * `unsupported` is empty: nothing here needs raw sockets, so all four runtime
- * targets work.
+ * Nothing here needs raw sockets, so all four runtime targets work.
  */
 export const NEST_TEMPLATE: TemplateDefinition = {
   name: 'nest',
@@ -151,5 +150,4 @@ export const NEST_TEMPLATE: TemplateDefinition = {
   manifest: MODULE_SEAM_MANIFEST,
   pluginSpreads: seamPluginSpreads(REST_SEAMS),
   setupCalls: seamSetupCalls(REST_SEAMS),
-  unsupported: {},
 };

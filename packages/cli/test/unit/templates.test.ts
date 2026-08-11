@@ -81,12 +81,6 @@ describe('rest template', () => {
     expect(packages).not.toContain('database-plugin');
     expect(packages).not.toContain('auth-plugin');
   });
-
-  it('supports every runtime target', () => {
-    for (const runtime of TARGET_RUNTIMES) {
-      expect(REST_TEMPLATE.unsupported[runtime]).toBeUndefined();
-    }
-  });
 });
 
 describe('microservice template', () => {
@@ -133,12 +127,15 @@ describe('microservice template', () => {
     expect(paths).toContain('src/events/index.ts');
   });
 
-  it('keeps neither plugin on the Workers refusal, since neither needs a socket', () => {
-    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).toContain(
-      'messaging and queue',
-    );
-    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).not.toContain('cqrs');
-    expect(MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers']).not.toContain('events');
+  it('keeps neither plugin in the Workers swap, since neither needs a socket', () => {
+    // The swap replaces only what the platform genuinely cannot serve. CQRS and
+    // events are in-memory, so swapping them out would remove a capability
+    // Workers supports perfectly well.
+    const removed = MICROSERVICE_TEMPLATE.runtimeSwaps?.['cloudflare-workers']?.removePackages ??
+      [];
+
+    expect(removed).not.toContain('cqrs-plugin');
+    expect(removed).not.toContain('events-plugin');
   });
 
   it('wires service discovery with the static arm, the only one needing no backend', () => {
@@ -165,31 +162,19 @@ describe('microservice template', () => {
     expect(MICROSERVICE_TEMPLATE.middleware).toEqual(REST_MIDDLEWARE);
   });
 
-  it('refuses Cloudflare Workers with a stated reason', () => {
-    const reason = MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers'];
-    expect(reason).toBeDefined();
-    expect(reason).toContain('sockets');
+  // The refusal this template used to carry was template-level and
+  // unconditional. It was right about the two plugins and wrong about the
+  // capabilities: Cloudflare serves both messaging and queues itself, so the
+  // tier keeps them from a different provider rather than losing the target.
+  it('no longer refuses Cloudflare Workers, and swaps instead', () => {
+    const swap = MICROSERVICE_TEMPLATE.runtimeSwaps?.['cloudflare-workers'];
+    expect(swap?.removePackages).toEqual(['messaging-plugin', 'queue-plugin']);
+    expect(swap?.addPlugins.map((wiring) => wiring.pkg)).toEqual(['cloudflare-plugin']);
   });
 
-  it('states only blockers that apply to the config it actually generates', () => {
-    // The reason is shown verbatim to a user whose scaffold was refused, so it
-    // must describe THIS template's wiring. Service discovery is wired with the
-    // `'static'` arm, which contacts no backend — only `DnsProvider` reads
-    // `IRuntimeServices.dns`, and nothing here selects it. Citing DNS-SRV would
-    // name a blocker the generated config never meets, and would imply the
-    // discovery plugin is unusable on Workers when its static, Consul and
-    // Kubernetes arms are plain HTTP.
-    const reason = MICROSERVICE_TEMPLATE.unsupported['cloudflare-workers'] ?? '';
-
-    expect(reason).toMatch(/messaging/i);
-    expect(reason).toMatch(/queue/i);
-    expect(reason).not.toMatch(/dns/i);
-    expect(reason).not.toMatch(/discovery/i);
-  });
-
-  it('supports the three socket-capable runtimes', () => {
+  it('swaps on Workers only, leaving the socket-capable runtimes alone', () => {
     for (const runtime of ['deno', 'node', 'bun'] as const) {
-      expect(MICROSERVICE_TEMPLATE.unsupported[runtime]).toBeUndefined();
+      expect(MICROSERVICE_TEMPLATE.runtimeSwaps?.[runtime]).toBeUndefined();
     }
   });
 });
@@ -239,7 +224,6 @@ describe('every template', () => {
       const args = template.appFactory?.args;
       if (args === undefined) continue;
       for (const runtime of TARGET_RUNTIMES) {
-        if (template.unsupported[runtime] !== undefined) continue;
         expect(args(runtime, { di: true })).not.toBe(args(runtime, { di: false }));
       }
     }
@@ -372,13 +356,6 @@ describe('nest template', () => {
     expect(seamPaths(NEST_TEMPLATE.files ?? [])).toEqual(seamPaths(REST_TEMPLATE.files ?? []));
     expect(seamPaths(NEST_TEMPLATE.files ?? [])).not.toContain('src/cqrs/index.ts');
     expect(seamPaths(REST_TEMPLATE.files ?? [])).not.toContain('src/events/index.ts');
-  });
-
-  it('refuses no runtime target', () => {
-    expect(NEST_TEMPLATE.unsupported).toEqual({});
-    for (const target of TARGET_RUNTIMES) {
-      expect(NEST_TEMPLATE.unsupported[target]).toBeUndefined();
-    }
   });
 
   it('declares di-plugin in the packages a manifest must pin', () => {

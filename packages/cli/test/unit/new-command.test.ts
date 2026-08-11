@@ -33,9 +33,6 @@ describe('the duplicate-path guard', () => {
     // collide with the fixed project files, for any target.
     for (const template of listTemplates()) {
       for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
-        // A pairing the template refuses never reaches the plan.
-        if (template.unsupported[runtime] !== undefined) continue;
-
         const h = harness();
         const code = await h.run(['app', '--template', template.name, '--runtime', runtime]);
         expect(code).toBe(0);
@@ -620,13 +617,17 @@ describe('runNewCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    it('refuses microservice on cloudflare-workers, naming the reason', async () => {
+    it('scaffolds microservice on cloudflare-workers, swapping in the platform plugin', async () => {
       const h = harness();
       expect(await h.run(['app', '--template', 'microservice', '--runtime', 'cloudflare-workers']))
-        .toBe(2);
-      expect(h.err.text()).toContain('does not support --runtime cloudflare-workers');
-      expect(h.err.text()).toContain('sockets');
-      expect(h.fs.writes).toEqual([]);
+        .toBe(0);
+
+      // The capabilities survive the swap; only their provider changes.
+      const config = h.fs.read('/work/app/setu.config.ts');
+      expect(config).toContain('CloudflarePlugin');
+      expect(config).not.toContain('MessagingPlugin');
+      // Consuming a queue is a module export, which no plugin option can be.
+      expect(h.fs.has('/work/app/src/reply-inbox-object.ts')).toBe(true);
     });
 
     it('allows rest on cloudflare-workers', async () => {
@@ -635,8 +636,8 @@ describe('runNewCommand', () => {
       expect(h.fs.has('/work/app/wrangler.toml')).toBe(true);
     });
 
-    it('allows microservice on every socket-capable runtime', async () => {
-      for (const runtime of ['deno', 'node', 'bun']) {
+    it('allows microservice on every runtime target', async () => {
+      for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers']) {
         const h = harness();
         expect(await h.run(['app', '--template', 'microservice', '--runtime', runtime])).toBe(0);
       }

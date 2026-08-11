@@ -175,7 +175,7 @@ function planMember(
 } {
   // Members are Deno projects: a Setu workspace is a Deno workspace, and there
   // is no npm-workspace design here to put a `node` member into.
-  const choice = resolveTemplateChoice(args, 'deno');
+  const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
   if (choice.template?.name === REFUSED_TEMPLATE) {
     return {
@@ -188,7 +188,9 @@ function planMember(
   }
 
   const host = withWorkspaceMember(
-    resolveHost(choice.template ?? MINIMAL_HOST, choice.features),
+    // A workspace member is always a Deno project (`--runtime` is refused
+    // above), so no runtime swap can apply here.
+    resolveHost(choice.template ?? MINIMAL_HOST, choice.features, 'deno'),
     transport,
     next.transportUrl,
   );

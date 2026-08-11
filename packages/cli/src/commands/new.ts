@@ -274,12 +274,12 @@ function planProject(
     }
   }
 
-  const choice = resolveTemplateChoice(args, runtime);
+  const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
 
   // The no-template path is a HOST like any other — that is what gives a bare
   // project the seams needing no plugin, so `setu generate route` lands wired.
-  const host = resolveHost(choice.template ?? MINIMAL_HOST, choice.features);
+  const host = resolveHost(choice.template ?? MINIMAL_HOST, choice.features, runtime);
   return { ok: true, files: projectFiles(name, runtime, host, choice.features) };
 }
 

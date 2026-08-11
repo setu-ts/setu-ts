@@ -3,17 +3,16 @@
  * `--template`.
  *
  * `setu new` and `setu generate app` both choose a template, refuse an unknown
- * name, refuse a template/runtime pairing the template declares unsupported,
- * and read `--di`. Duplicating that would duplicate three user-facing messages
- * as well as the logic (AI_GUIDELINES §11.1), and two copies of a refusal drift
- * the moment one of them is improved.
+ * name, and read `--di`. Duplicating that would duplicate the user-facing
+ * message as well as the logic (AI_GUIDELINES §11.1), and two copies of a
+ * refusal drift the moment one of them is improved.
  *
  * @module
  */
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { type TargetRuntime, TEMPLATES } from '../constants.ts';
+import { TEMPLATES } from '../constants.ts';
 import { getTemplate, type TemplateDefinition, type TemplateFeatures } from './registry.ts';
 
 /**
@@ -37,17 +36,19 @@ export type TemplateChoice =
   };
 
 /**
- * Reads `--template` and `--di`, refusing an unknown template and a pairing the
- * template declares unsupported.
+ * Reads `--template` and `--di`, refusing a template that does not exist.
+ *
+ * The runtime target is deliberately NOT a parameter. It used to be, to refuse
+ * a template/runtime pairing the template declared unsupported — but no
+ * template declares one any more (`microservice` was the last, and its Workers
+ * entry became a {@linkcode RuntimeSwap}), so the branch became unreachable.
+ * A per-runtime difference is now expressed by swapping what a template
+ * registers, in `resolveHost`, rather than by refusing the pairing here.
  *
  * @param args - The parsed arguments for the verb
- * @param runtime - The runtime target the project will use
  * @returns The chosen template and features, or the refusal to print
  */
-export function resolveTemplateChoice(
-  args: ParsedArgs,
-  runtime: TargetRuntime,
-): TemplateChoice {
+export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
   // Read once, here, so the flag cannot be honored by one renderer and ignored
   // by another. `--di` is boolean: it is absent from VALUE_FLAGS, so `parseArgs`
   // records it as `true` rather than consuming the next token.
@@ -65,16 +66,6 @@ export function resolveTemplateChoice(
     return {
       ok: false,
       message: `Unknown template "${templateFlag}". Expected one of: ${TEMPLATES.join(', ')}.`,
-    };
-  }
-
-  // Refuse a template/runtime pairing that would deploy and then fail at first
-  // use, naming the reason rather than scaffolding a broken project.
-  const blocked = template.unsupported[runtime];
-  if (blocked !== undefined) {
-    return {
-      ok: false,
-      message: `The "${template.name}" template does not support --runtime ${runtime}: ${blocked}.`,
     };
   }
 
