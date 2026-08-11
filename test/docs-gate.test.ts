@@ -1393,3 +1393,36 @@ describe('documentation gate — bare version claims', () => {
       .toEqual([]);
   });
 });
+
+describe('documentation gate — which runtimes host a workspace', () => {
+  // A workspace was Deno-only until Node and Bun arrived, and the docs did not
+  // all follow. `e1bb5cf` corrected ONE of them — its own message says it fixed
+  // "the --workspace flag row, which still claimed a non-Deno runtime was
+  // refused" — and left six: the PUBLIC_API refusals table (which then
+  // contradicted a `--runtime node` example 60 lines below it in the same
+  // document), that section's opening sentence, two paragraphs of Deno-only
+  // manifest detail, docs/cli.md twice, and the ARCHITECTURE Rules row.
+  //
+  // Nothing mechanical can read prose, so this does the one thing that IS
+  // decidable: it pins the source constant, and names the documents to re-read
+  // when it moves. A failure here is not a bug in the CLI — it means the set
+  // changed and the prose has to be checked by hand.
+  const DOCUMENTS_STATING_THE_SET: readonly string[] = [
+    'PUBLIC_API.md — "Monorepo workspaces" opener, the refusals table, "Node and Bun workspaces"',
+    'docs/cli.md — "Monorepos" opener and "Refusals"',
+    'ARCHITECTURE.md — the CLI "Rules" row',
+  ];
+
+  it('is exactly deno, node and bun — Workers is the only target refused', async () => {
+    const { WORKSPACE_RUNTIMES } = await import(
+      '../packages/cli/src/workspace/runtime-profile.ts'
+    );
+    const { TARGET_RUNTIMES } = await import('../packages/cli/src/constants.ts');
+
+    const refused = TARGET_RUNTIMES.filter((runtime) => !WORKSPACE_RUNTIMES.includes(runtime));
+
+    expect([...WORKSPACE_RUNTIMES], DOCUMENTS_STATING_THE_SET.join('; '))
+      .toEqual(['deno', 'node', 'bun']);
+    expect(refused, DOCUMENTS_STATING_THE_SET.join('; ')).toEqual(['cloudflare-workers']);
+  });
+});
