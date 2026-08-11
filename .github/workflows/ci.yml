@@ -45,7 +45,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: 2.9.5
 
       - name: Format check
         run: deno task fmt:check
@@ -90,14 +90,22 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: 2.9.5
 
       # Docker is preinstalled on ubuntu-latest; kind, kubectl and helm are not.
       - uses: helm/kind-action@v1
         with:
           cluster_name: setu-deploy-gate
-          # Must match the kubectl the runner ships, and the API versions the
-          # chart uses (autoscaling/v2, policy/v1, discovery.k8s.io/v1).
+          # Every version here is pinned, kubectl included. The action defaults
+          # kubectl to the newest release, which drifts on its own schedule: it
+          # reached v1.35.0 against this v1.31 server — four minors outside
+          # kubectl's supported +/-1 skew — and the job started failing on a
+          # branch that touched neither the manifests nor the chart. The chart's
+          # API versions (autoscaling/v2, policy/v1, discovery.k8s.io/v1) are
+          # what the node image has to satisfy; the client is pinned to match
+          # the server rather than the calendar.
+          version: v0.31.0
+          kubectl_version: v1.31.4
           node_image: kindest/node:v1.31.2
 
       - uses: azure/setup-helm@v4
@@ -127,7 +135,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: 2.9.5
 
       # Validates every workspace package against JSR's publish rules without
       # publishing: exports resolve, package metadata is complete, and the
@@ -163,7 +171,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24.18.0
 
       # No lockfile is committed (see .gitignore): resolving `latest` on every
       # run is the point.
@@ -184,7 +192,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install published packages
         run: bun install
@@ -200,7 +208,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: 2.9.5
 
       # Native dependency audit (JSR + npm deps in deno.lock).
       # OSV-Scanner is not used: it has no deno.lock support.
