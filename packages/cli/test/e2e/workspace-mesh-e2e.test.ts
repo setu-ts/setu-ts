@@ -235,7 +235,8 @@ describe('a three-service workspace — end to end', () => {
           expect(map).not.toContain(`'${peer}':`);
           continue;
         }
-        expect(map).toContain(`'${peer}': [{ host: '127.0.0.1', port: ${base + peerIndex} }]`);
+        expect(map).toContain(`'${peer}': [{`);
+        expect(map).toContain(`port: ${base + peerIndex},`);
       }
     }
   });

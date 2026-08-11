@@ -90,7 +90,25 @@ port there and the next \`${PROGRAM_NAME} generate app\` rewrites them all.
 ## Transport
 
 Services talk over **${transport.name}** — ${transport.description}.${
-    transportUrl === undefined ? '' : `\nBroker endpoint: \`${transportUrl}\`.`
+    transport.connection === undefined ? '' : `
+
+Every member reads its connection value from \`${transport.connection.variable}\`,
+falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that
+is unset. Both halves matter: \`deno task dev\` on this machine needs the local
+address, and the generated Compose stack overrides the variable with the broker's
+service name, because two containers do not share a loopback interface.${
+      transport.connection.note === undefined ? '' : `\n\n${transport.connection.note}`
+    }`
+  }${
+    transport.compose === undefined ? '' : `
+
+## Run the stack
+
+\`\`\`bash
+docker compose -f docker/compose.yaml up --build
+\`\`\`
+
+That builds every member and starts the ${transport.name} service they share.`
   }
 
 The transport is a property of the whole workspace, recorded in

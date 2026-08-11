@@ -4,6 +4,7 @@ import {
   DEFAULT_TRANSPORT,
   getTransport,
   listTransports,
+  renderConnection,
   TRANSPORT_ALIASES,
   TRANSPORTS,
   transportSpec,
@@ -42,30 +43,48 @@ describe('the transport registry', () => {
   describe('the broker arms', () => {
     const brokers = listTransports().filter((t) => t.messagingArgs !== undefined);
 
-    it('is exactly the set with an endpoint to address', () => {
-      expect(brokers.map((t) => t.name)).toEqual(['redis', 'rabbitmq', 'nats', 'kafka']);
+    it('is exactly the set with a connection value', () => {
+      expect(brokers.map((t) => t.name)).toEqual([
+        'redis',
+        'rabbitmq',
+        'nats',
+        'kafka',
+        'pubsub',
+        'service-bus',
+      ]);
+      // Both or neither. `member-host.ts` renders arguments only when the pair is
+      // present, so an arm declaring one without the other would silently leave
+      // its members on the in-process broker.
       for (const broker of brokers) {
-        expect(broker.defaultEndpoint).toBeDefined();
+        expect(broker.connection).toBeDefined();
       }
     });
 
     it('names the discriminant the messaging plugin expects', () => {
-      expect(transportSpec('redis').messagingArgs?.('redis://h:1')).toBe(
-        "{ broker: 'redis-streams', url: 'redis://h:1' }",
+      expect(transportSpec('redis').messagingArgs?.('CONN')).toBe(
+        "{ broker: 'redis-streams', url: CONN }",
       );
-      expect(transportSpec('rabbitmq').messagingArgs?.('amqp://h:1')).toBe(
-        "{ broker: 'rabbitmq', url: 'amqp://h:1' }",
+      expect(transportSpec('rabbitmq').messagingArgs?.('CONN')).toBe(
+        "{ broker: 'rabbitmq', url: CONN }",
       );
-      expect(transportSpec('nats').messagingArgs?.('nats://h:1')).toBe(
-        "{ broker: 'nats', url: 'nats://h:1' }",
+      expect(transportSpec('nats').messagingArgs?.('CONN')).toBe(
+        "{ broker: 'nats', url: CONN }",
+      );
+      expect(transportSpec('pubsub').messagingArgs?.('CONN')).toContain("broker: 'pubsub'");
+      expect(transportSpec('pubsub').messagingArgs?.('CONN')).toContain('projectId: CONN');
+      expect(transportSpec('service-bus').messagingArgs?.('CONN')).toContain(
+        "broker: 'service-bus'",
+      );
+      expect(transportSpec('service-bus').messagingArgs?.('CONN')).toContain(
+        'connectionString: CONN',
       );
     });
 
     // Kafka is the one arm whose option is a LIST, not a `url` — rendering it
     // like the others would produce a literal the union rejects.
     it('renders kafka as a broker list, not a url', () => {
-      expect(transportSpec('kafka').messagingArgs?.('h:9092')).toBe(
-        "{ broker: 'kafka', brokers: ['h:9092'] }",
+      expect(transportSpec('kafka').messagingArgs?.('CONN')).toBe(
+        "{ broker: 'kafka', brokers: [CONN] }",
       );
     });
 
@@ -73,6 +92,102 @@ describe('the transport registry', () => {
       for (const broker of brokers) {
         expect(broker.plugins).toEqual([]);
       }
+    });
+
+    // The whole point of the connection indirection: a literal endpoint is
+    // unreachable from inside a container, where loopback is the container itself.
+    it('reads its connection value from the environment, with the local fallback', () => {
+      const redis = transportSpec('redis').connection;
+      expect(renderConnection(redis!)).toBe(
+        `Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'`,
+      );
+      // `--transport-url` replaces the FALLBACK, not the variable: an override
+      // still has to lose to the environment inside a deployed stack.
+      expect(renderConnection(redis!, 'redis://elsewhere:6379')).toContain(
+        `Deno.env.get('REDIS_URL')`,
+      );
+      expect(renderConnection(redis!, 'redis://elsewhere:6379')).toContain(
+        'redis://elsewhere:6379',
+      );
+    });
+
+    // A GCP project id is a name and a Service Bus connection string carries a
+    // key; neither is a URL, so `--transport-url` is refused for both rather than
+    // stored as something no generated config addresses.
+    it('marks the two cloud arms as not URL-overridable', () => {
+      expect(transportSpec('pubsub').connection?.urlOverridable).toBe(false);
+      expect(transportSpec('service-bus').connection?.urlOverridable).toBe(false);
+      for (const name of ['redis', 'rabbitmq', 'nats', 'kafka'] as const) {
+        expect(transportSpec(name).connection?.urlOverridable).toBe(true);
+      }
+    });
+
+    // The emulator fallback is what makes a scaffolded workspace run with no
+    // configuration at all, so it must be the vendor's documented value.
+    it('falls back to the vendors local emulator settings', () => {
+      expect(transportSpec('pubsub').connection?.localDefault).toBe('setu-local');
+      expect(transportSpec('service-bus').connection?.localDefault).toContain(
+        'UseDevelopmentEmulator=true',
+      );
+      // Both carry an operational fact a developer cannot guess: Pub/Sub does not
+      // create topics, and the Service Bus emulator creates no entities at all.
+      expect(transportSpec('pubsub').connection?.note).toContain('Topics are NOT');
+      expect(transportSpec('service-bus').connection?.note).toContain('NO entities');
+    });
+  });
+
+  // A transport that rewrites a member's broker wiring but starts no broker is
+  // exactly the state every broker arm was in before this: a README naming an
+  // endpoint nothing served.
+  describe('the Compose backing', () => {
+    it('is declared by every transport with a connection', () => {
+      for (const transport of listTransports()) {
+        if (transport.connection === undefined) {
+          expect(transport.compose).toBeUndefined();
+          continue;
+        }
+        expect(transport.compose).toBeDefined();
+        expect(transport.compose?.services).toContain('image:');
+        expect(transport.compose?.dependsOn.length).toBeGreaterThan(0);
+      }
+    });
+
+    // Compose REFUSES to start a stack whose dependency is waited on with
+    // `service_healthy` and has no healthcheck, so the two must agree.
+    it('waits on service_healthy only where a healthcheck exists', () => {
+      for (const transport of listTransports()) {
+        const backing = transport.compose;
+        if (backing === undefined) continue;
+        if (backing.condition === 'service_healthy') {
+          expect(backing.services).toContain('healthcheck:');
+        }
+      }
+    });
+
+    // Inside the stack the broker is reachable by SERVICE NAME, never by the
+    // loopback address baked in for a developer running `deno task dev`.
+    it('overrides the connection variable with the service name', () => {
+      for (const transport of listTransports()) {
+        const backing = transport.compose;
+        if (backing === undefined) continue;
+        const values = Object.values(backing.memberEnv);
+        expect(values.length).toBeGreaterThan(0);
+        for (const value of values) expect(value).not.toContain('127.0.0.1');
+      }
+    });
+
+    // The emulator creates nothing at run time, so its entity list has to ship.
+    it('ships the Service Bus emulator entity config', () => {
+      const files = transportSpec('service-bus').compose?.files ?? [];
+      expect(files.map((f) => f.path)).toEqual(['docker/servicebus-config.json']);
+      const config = JSON.parse(files[0]?.contents ?? '{}') as {
+        UserConfig: { Namespaces: { Topics: { Subscriptions: { Name: string }[] }[] }[] };
+      };
+      // The subscription name must be the broker's own default, or `subscribe`
+      // asks the emulator for an entity that does not exist.
+      expect(config.UserConfig.Namespaces[0]?.Topics[0]?.Subscriptions[0]?.Name).toBe(
+        'messaging-consumers',
+      );
     });
   });
 
@@ -90,7 +205,7 @@ describe('the transport registry', () => {
   it('leaves memory as the plugin own default', () => {
     expect(transportSpec('memory').plugins).toEqual([]);
     expect(transportSpec('memory').messagingArgs).toBeUndefined();
-    expect(transportSpec('memory').defaultEndpoint).toBeUndefined();
+    expect(transportSpec('memory').connection).toBeUndefined();
   });
 
   it('maps tcp to http rather than inventing a transport', () => {

@@ -135,8 +135,10 @@ describe('workspace scaffolding — end to end', () => {
     const ws = await twoMembers();
     const orders = await Deno.readTextFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`);
     const billing = await Deno.readTextFile(`${ws}/apps/billing/${DISCOVERY_MODULE}`);
-    expect(orders).toContain(`'billing': [{ host: '127.0.0.1', port: ${base + 1} }]`);
-    expect(billing).toContain(`'orders': [{ host: '127.0.0.1', port: ${base} }]`);
+    expect(orders).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
+    expect(orders).toContain(`port: ${base + 1},`);
+    expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') ?? '127.0.0.1'");
+    expect(billing).toContain(`port: ${base},`);
   });
 
   it('gives every member the start task the root dev task runs', async () => {

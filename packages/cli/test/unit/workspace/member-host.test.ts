@@ -92,7 +92,12 @@ describe('withWorkspaceMember — the transport overlay', () => {
     const member = withWorkspaceMember(hostOf('microservice'), transportSpec('redis'));
     const messaging = member.plugins.filter((p) => p.pkg === 'messaging-plugin');
     expect(messaging).toHaveLength(1);
-    expect(messaging[0]?.args).toBe("{ broker: 'redis-streams', url: 'redis://127.0.0.1:6379' }");
+    // An environment read with the local address as its FALLBACK, not a literal:
+    // inside a container 127.0.0.1 is the container itself, so the Compose stack
+    // has to be able to override it.
+    expect(messaging[0]?.args).toBe(
+      "{ broker: 'redis-streams', url: Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379' }",
+    );
   });
 
   it('uses the transport default endpoint when the workspace names none', () => {
@@ -100,9 +105,12 @@ describe('withWorkspaceMember — the transport overlay', () => {
   });
 
   it('honors the workspace endpoint override', () => {
-    expect(messagingOf('redis', 'redis://shared:6379')?.args).toBe(
-      "{ broker: 'redis-streams', url: 'redis://shared:6379' }",
-    );
+    // The override replaces the FALLBACK, not the environment read: a deployed
+    // stack still has to be able to point a member elsewhere.
+    const args = messagingOf('redis', 'redis://shared:6379')?.args ?? '';
+    expect(args).toContain("Deno.env.get('REDIS_URL')");
+    expect(args).toContain('redis://shared:6379');
+    expect(args).not.toContain('127.0.0.1');
   });
 
   it('leaves the messaging wiring alone for http, grpc and memory', () => {

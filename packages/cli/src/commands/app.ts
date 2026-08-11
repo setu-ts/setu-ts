@@ -41,6 +41,7 @@ import {
   renderDiscoveryModule,
   SERVICE_PORT_EXPORT,
 } from '../workspace/discovery-module.ts';
+import { workspaceContainerFiles } from '../workspace/compose.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
@@ -240,6 +241,11 @@ function planMember(
     contents: renderWorkspaceManifest(next),
     managed: true,
   });
+
+  // Regenerated for the whole workspace on every member, exactly as the discovery
+  // modules are: a stack that names two of three members is worse than none, and
+  // the ports it publishes come from the same manifest the maps do.
+  for (const file of workspaceContainerFiles(next, transport)) files.push(file);
 
   for (const file of extra) files.push(file);
 

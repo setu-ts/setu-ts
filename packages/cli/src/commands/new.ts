@@ -176,18 +176,29 @@ function readTransport(
   if (typeof rawUrl !== 'string') {
     return { ok: false, message: `--transport-url needs a value.` };
   }
-  // Refused rather than stored: a transport with no broker has nothing to point
-  // at, so recording the URL would put a value in the manifest that no
-  // generated config ever reads.
-  if (spec.defaultEndpoint === undefined) {
+  // Refused rather than stored, for two different reasons — and they are told
+  // apart, because "this transport has no broker" is wrong advice for a cloud arm
+  // that plainly does.
+  if (spec.connection?.urlOverridable !== true) {
+    const applies = listTransports()
+      .filter((t) => t.connection?.urlOverridable === true)
+      .map((t) => t.name)
+      .join(', ');
+
+    if (spec.connection !== undefined) {
+      return {
+        ok: false,
+        message: `--transport ${spec.name} is not configured by URL: its connection value is ` +
+          `read from ${spec.connection.variable} at run time, because it is a project id or a ` +
+          `secret and a generated file is the wrong place for either. Leave it unset to use the ` +
+          `local emulator. --transport-url applies to ${applies}.`,
+      };
+    }
+
     return {
       ok: false,
       message: `--transport ${spec.name} has no broker, so --transport-url has nothing to ` +
-        `address. It applies to ${
-          listTransports().filter((t) => t.defaultEndpoint !== undefined).map((t) => t.name).join(
-            ', ',
-          )
-        }.`,
+        `address. It applies to ${applies}.`,
     };
   }
   return { ok: true, spec, url: rawUrl };

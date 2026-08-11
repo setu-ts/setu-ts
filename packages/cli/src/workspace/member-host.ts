@@ -14,7 +14,7 @@
 
 import type { ResolvedHost } from '../templates/project-files.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_ENDPOINTS_EXPORT } from './discovery-module.ts';
-import type { TransportSpec } from './transport.ts';
+import { renderConnection, type TransportSpec } from './transport.ts';
 
 /** The package whose wiring the discovery overlay rewrites. */
 const DISCOVERY_PACKAGE = 'service-discovery-plugin';
@@ -92,13 +92,19 @@ function withTransport(
   transport: TransportSpec,
   override?: string,
 ): ResolvedHost {
-  const endpoint = override ?? transport.defaultEndpoint;
   const args = transport.messagingArgs;
+  const connection = transport.connection;
 
-  const plugins = args === undefined || endpoint === undefined
+  // Both or neither: a transport declaring arguments always declares where its
+  // connection value comes from, which a unit test pins across the registry. The
+  // pair is checked rather than assumed so a future arm cannot render `url:
+  // undefined` into a member's config.
+  const plugins = args === undefined || connection === undefined
     ? host.plugins
     : host.plugins.map((wiring) =>
-      wiring.pkg === MESSAGING_PACKAGE ? { ...wiring, args: args(endpoint) } : wiring
+      wiring.pkg === MESSAGING_PACKAGE
+        ? { ...wiring, args: args(renderConnection(connection, override)) }
+        : wiring
     );
 
   return {
