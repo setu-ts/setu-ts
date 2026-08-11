@@ -18,6 +18,13 @@ export interface CloudflareHealthInput {
   readonly storage: boolean;
   /** Whether `CAPABILITIES.QUEUE` is served from a Queues producer binding. */
   readonly queue: boolean;
+  /** Whether `CAPABILITIES.MESSAGING` is served from a Queues producer binding. */
+  readonly messaging: boolean;
+  /**
+   * Whether the messaging arm's `rpc` sub-arm is configured, so `request` and
+   * `respond` work rather than throwing.
+   */
+  readonly rpc: boolean;
   /**
    * Whether `CAPABILITIES.REALTIME_BACKPLANE` is served from a Durable Object
    * namespace.
@@ -57,6 +64,8 @@ export function createCloudflareIndicator(input: CloudflareHealthInput): HealthI
       cache: input.cache,
       storage: input.storage,
       queue: input.queue,
+      messaging: input.messaging,
+      rpc: input.rpc,
       durableObject: input.durableObject,
       waitUntil: input.waitUntil ? 'injected' : 'absent',
       ...(offPlatform

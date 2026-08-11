@@ -77,6 +77,73 @@ export interface WorkersQueueArm {
 }
 
 /**
+ * Enables brokered request-reply on a {@linkcode WorkersMessagingArm}.
+ *
+ * A Cloudflare queue reaches exactly one consumer Worker and never the caller
+ * waiting for a reply, so RPC needs a second, addressable path: a Durable
+ * Object the caller holds a WebSocket to while its request is in flight. That
+ * costs a namespace binding and a DO class the application exports, which is
+ * why it is opt-in rather than always on — a project that only publishes and
+ * subscribes should not have to deploy one.
+ *
+ * The namespace's `class_name` must be a Durable Object class the application
+ * exports, delegating to {@linkcode ReplyInboxObjectCore}.
+ *
+ * The consuming queue **must** set `max_batch_timeout = 0` in `wrangler.toml`.
+ * The platform default is 5 seconds, which alone exhausts the default reply
+ * budget, so every `request()` would time out.
+ *
+ * @since 0.2.0
+ */
+export interface WorkersMessagingRpcArm {
+  /** The Durable Object namespace binding name from `wrangler.toml`. */
+  readonly binding: string;
+  /**
+   * Reply budget applied when `RequestOptions.timeoutMs` is omitted.
+   *
+   * @default 5000
+   */
+  readonly defaultTimeoutMs?: number;
+}
+
+/**
+ * Wires a Cloudflare Queues producer binding up as the application's
+ * {@linkcode IMessageBroker} under `CAPABILITIES.MESSAGING`.
+ *
+ * Producing is all this arm configures. Consuming needs the Worker module to
+ * export the handler `createMessagingHandler(app)` builds, and the queue to be
+ * declared as a consumer in `wrangler.toml` — neither of which a plugin option
+ * can do on the application's behalf.
+ *
+ * **`publish` reaches one consumer Worker, not every subscriber in the
+ * cluster.** A Cloudflare queue allows exactly one active consumer, so two
+ * Workers cannot both receive one published message; fan-out happens across the
+ * handlers registered inside that consumer. A topology needing cross-service
+ * fan-out binds one queue per consuming service.
+ *
+ * Registering this arm **and** `MessagingPlugin` in one application fails at
+ * startup: the kernel rejects two providers of one capability token. Register
+ * exactly one.
+ *
+ * @since 0.2.0
+ */
+export interface WorkersMessagingArm {
+  /** The Queues producer binding name from `wrangler.toml`. */
+  readonly binding: string;
+  /**
+   * Instance name. `'default'` (the default) claims the bare `messaging`
+   * token; anything else derives `messaging.<name>`, which
+   * {@linkcode MessagingHandlerOptions.name} must then match.
+   */
+  readonly name?: string;
+  /**
+   * Enable `request`/`respond`. Omitted, both throw
+   * {@linkcode CloudflareUnsupportedError} naming this arm.
+   */
+  readonly rpc?: WorkersMessagingRpcArm;
+}
+
+/**
  * Wires a Durable Object namespace up as the application's
  * {@linkcode IRealtimeBackplane} under `CAPABILITIES.REALTIME_BACKPLANE`, so
  * WebSocket rooms and SSE channels reach clients on other replicas.
@@ -167,6 +234,11 @@ export interface CloudflarePluginOptions {
    * registers nothing.
    */
   readonly queue?: WorkersQueueArm;
+  /**
+   * Serve `CAPABILITIES.MESSAGING` from a Queues producer binding. Omitted
+   * registers nothing.
+   */
+  readonly messaging?: WorkersMessagingArm;
   /**
    * Serve `CAPABILITIES.REALTIME_BACKPLANE` from a Durable Object namespace.
    * Omitted registers nothing.

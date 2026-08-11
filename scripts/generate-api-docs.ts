@@ -10,7 +10,7 @@
  * The ratchet policy (§3.10 of the M38 plan):
  * - Diagnostics are partitioned by owning package path
  * - Any diagnostic in a CLEAN_PACKAGE fails the gate
- * - The total diagnostic count must not exceed DOC_LINT_BASELINE (775)
+ * - The total diagnostic count must not exceed DOC_LINT_BASELINE (774)
  * - If the count is BELOW baseline, the script instructs to lower the constant
  *
  * Usage:
@@ -45,8 +45,13 @@ export const CLEAN_PACKAGES = new Set([
  * and the real count fell to 775, so the ratchet did its job: it refused the
  * stale constant and named the new number. Lowered here rather than widened,
  * which is the whole point of a ratchet — debt paid down is locked in.
+ *
+ * M59 added four `missing-jsdoc` diagnostics (constructors carrying `@param`
+ * tags but no description) and then removed five by writing the descriptions —
+ * one of them on a constructor that predates the milestone. The ratchet refused
+ * the run in BOTH directions, which is exactly its job.
  */
-export const DOC_LINT_BASELINE = 775;
+export const DOC_LINT_BASELINE = 774;
 
 /** One parsed `deno doc --lint` diagnostic. */
 export interface DocLintDiagnostic {

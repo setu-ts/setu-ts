@@ -15,7 +15,7 @@ import type {
   IR2Bucket,
   IServiceBinding,
 } from './facades.ts';
-import { isDurableObjectNamespace, isKvNamespace, isR2Bucket } from './facades.ts';
+import { isDurableObjectNamespace, isKvNamespace, isQueueProducer, isR2Bucket } from './facades.ts';
 
 /**
  * Typed access to a Cloudflare Worker's platform bindings.
@@ -206,7 +206,11 @@ export class BindingRegistry implements ICloudflareBindings {
   }
 
   queue(name: string): IQueueProducer {
-    return this.#require(name) as IQueueProducer;
+    const binding = this.#require(name);
+    if (!isQueueProducer(binding)) {
+      throw CloudflareBindingMissingError.wrongShape(name, 'a Queues producer');
+    }
+    return binding;
   }
 
   service(name: string): IServiceBinding {

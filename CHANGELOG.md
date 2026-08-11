@@ -8,6 +8,50 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Workers-native messaging: the last edge capability gap** (M59). `cloudflare-plugin` already
+  served `QUEUE`, `CACHE`, `STORAGE`, `DATABASE` and `REALTIME_BACKPLANE` on Cloudflare Workers.
+  `CAPABILITIES.MESSAGING` was the one token it could not: all ten `messaging-plugin` brokers need a
+  socket or a socket-bound SDK. A new `messaging` arm serves it from the platform itself.
+
+  ```typescript
+  app.register(CloudflarePlugin({
+    env,
+    messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },
+  }));
+
+  // Consuming is a MODULE export — no plugin option can declare one.
+  export default { fetch: app.fetch, queue: createMessagingHandler(app) };
+  ```
+
+  `publish` is a Queues producer call; `subscribe` registers into a dispatch table the `queue`
+  export drives, matching `InMemoryBroker`'s fan-out and round-robin group semantics. Two limits are
+  documented rather than papered over: Cloudflare allows **exactly one active consumer per queue**,
+  so cross-service fan-out needs one queue per consumer, and a publish nobody subscribed to is
+  **acked** rather than retried — retrying ordinary pub/sub would dead-letter every fire-and-forget
+  message.
+
+  `request`/`respond` ship behind the opt-in `rpc` arm. A queue reaches its one consumer Worker and
+  never the caller, so the reply travels through a Durable Object the caller holds a WebSocket to
+  while its request is in flight (`ReplyInboxObjectCore`, which the application exports as its own
+  DO class). Without the arm both throw, naming the binding to add. A queue carrying RPC **must**
+  set `max_batch_timeout = 0`: the platform default of 5s alone exhausts the default reply budget.
+
+  `CloudflareRequestTimeoutError` and `CloudflareRemoteHandlerError` mirror `messaging-plugin`'s two
+  RPC errors as distinct classes, because §2.2 forbids a plugin importing another plugin. Exactly
+  one provider of `CAPABILITIES.MESSAGING` can be registered, so which to catch is never ambiguous.
+
+- **`setu new --template microservice --runtime cloudflare-workers`** (M59). The template refused
+  that target unconditionally. The refusal was right about `MessagingPlugin` and `QueuePlugin`
+  needing raw sockets and wrong about the capabilities, which the platform serves itself. A new
+  declarative `TemplateDefinition.runtimeSwaps` replaces those two with `CloudflarePlugin` on
+  Workers only, and contributes the `queue` module export, the Durable Object class, and the
+  wrangler stanzas — including `max_batch_timeout = 0`. The other three runtimes are byte-identical.
+  Because Cloudflare invokes ONE `queue` export for every consumed queue, the emitted handler routes
+  on the queue name and both queues get a consumer: one handler for both would feed the messaging
+  broker its job batches, and an unconsumed producer discards every `IQueue.add()` silently.
+  `TemplateDefinition.unsupported` and its refusal branch are **removed**: `microservice` held the
+  last entry, so both became unreachable. CLI-internal, never a published export.
+
 - **Monorepos: one repository, many deployable services** (M62). The CLI had no workspace concept at
   all, so a second service meant `setu new other --dir .` — a fully independent project with its own
   manifest, its own lockfile, and no knowledge of its sibling. The sharp edge was discovery: the
@@ -131,6 +175,32 @@ All notable changes to this project are documented here. The format follows
   and `g event-handler`, all three of which were gated on plugins no template installed.
 
 ### Fixed
+
+- **Every Cloudflare Worker misdetected its own runtime as `node`** (found while booting a
+  CLI-scaffolded Workers project in M59). `detectRuntime()` tested
+  `navigator.userAgent.includes('cloudflare')` — lowercase — and workerd reports
+  `'Cloudflare-Workers'`, so the check never matched and detection fell through to `'node'` on every
+  real deployment. That answer selects the runtime adapter, so a Worker built through
+  `RuntimePlugin()` ran the **Node** adapter on Cloudflare, and the `cloudflare` health indicator
+  reported `degraded` with a misleading detail. It also silently disabled every
+  `runtime.platform() === 'cloudflare-workers'` guard, including `messaging-plugin`'s cloud gate —
+  so Pub/Sub and Service Bus attempted their gRPC/AMQP SDK load instead of failing with the named
+  `CloudBrokerUnavailableError`.
+
+  The comparison is now case-insensitive. No test caught this because the unit fakes sent
+  `'cloudflare-workers/v1'` and `'cloudflare'`, strings the platform never sends — a test double
+  that violated the real contract, so the suite tested the double. The fakes now use the real
+  string, and `apps/cloudflare` asserts `detectRuntime()` against **real workerd** in its smoke,
+  which is the only place the platform sends its own user agent. Both were verified to fail without
+  the fix.
+
+- **A mistyped Queues binding now fails at `register()`, not at the first send** (M59).
+  `BindingRegistry.queue()` cast its binding unvalidated, so a missing `[[queues.producers]]` stanza
+  or a name typo let an application boot clean, report `up` from the `cloudflare` health indicator,
+  and fail on the first `add()` with a bare `TypeError` pointing at nothing. A new `isQueueProducer`
+  guard closes the last hole in that family — the same defect M52c fixed on D1 and M52d on Durable
+  Objects. **Behaviour change** for anyone whose queue binding was already wrong: the failure now
+  arrives at startup, naming the binding.
 
 - **`setu new --runtime cloudflare-workers` produced a project that could not be built or
   deployed.** `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:`

@@ -15,6 +15,8 @@ const BASE = {
   cache: true,
   storage: true,
   queue: true,
+  messaging: true,
+  rpc: true,
   durableObject: true,
   waitUntil: true,
 } as const;
@@ -32,6 +34,8 @@ describe('createCloudflareIndicator', () => {
       cache: true,
       storage: true,
       queue: true,
+      messaging: true,
+      rpc: true,
       durableObject: true,
       waitUntil: 'injected',
     });
@@ -67,6 +71,8 @@ describe('createCloudflareIndicator', () => {
       cache: false,
       storage: false,
       queue: false,
+      messaging: false,
+      rpc: false,
       durableObject: false,
       waitUntil: false,
       platform: 'cloudflare-workers',
@@ -76,6 +82,8 @@ describe('createCloudflareIndicator', () => {
     expect(result.data?.cache).toBe(false);
     expect(result.data?.storage).toBe(false);
     expect(result.data?.queue).toBe(false);
+    expect(result.data?.messaging).toBe(false);
+    expect(result.data?.rpc).toBe(false);
     expect(result.data?.durableObject).toBe(false);
     expect(result.data?.bindings).toEqual([]);
   });

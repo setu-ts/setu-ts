@@ -134,12 +134,12 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Service-to-service
 
-| Feature           | Status | Package                    | Description                                                     |
-| ----------------- | ------ | -------------------------- | --------------------------------------------------------------- |
-| Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection |
-| gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on the same port           |
-| Cloudflare        | ✅     | `cloudflare-plugin`        | Worker bindings; KV cache, R2 storage, KV sessions, `waitUntil` |
-| Static files      | ✅     | `static-plugin`            | ETag, Range, precompressed sidecars, SPA fallback, streaming    |
+| Feature           | Status | Package                    | Description                                                               |
+| ----------------- | ------ | -------------------------- | ------------------------------------------------------------------------- |
+| Service discovery | ✅     | `service-discovery-plugin` | Static, Consul, Kubernetes, DNS-SRV; balancing, watch, ejection           |
+| gRPC              | ✅     | `grpc-plugin`              | Co-serve gRPC, Connect, and gRPC-Web on the same port                     |
+| Cloudflare        | ✅     | `cloudflare-plugin`        | Worker bindings; KV cache, R2 storage, D1, Queues, messaging, KV sessions |
+| Static files      | ✅     | `static-plugin`            | ETag, Range, precompressed sidecars, SPA fallback, streaming              |
 
 ### Real-time and rendering
 

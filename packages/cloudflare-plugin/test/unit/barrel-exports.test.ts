@@ -31,6 +31,10 @@ describe('cloudflare-plugin barrel', () => {
     expect(typeof barrel.DurableObjectLock).toBe('function');
     expect(typeof barrel.asUpgradeResponse).toBe('function');
     expect(typeof barrel.createDefaultDurableObjectWebSocketHost).toBe('function');
+    expect(typeof barrel.isQueueProducer).toBe('function');
+    expect(typeof barrel.WorkersBroker).toBe('function');
+    expect(typeof barrel.createMessagingHandler).toBe('function');
+    expect(typeof barrel.ReplyInboxObjectCore).toBe('function');
   });
 
   it('exports errors that are real Error subclasses with stable names', () => {
@@ -46,6 +50,19 @@ describe('cloudflare-plugin barrel', () => {
     expect(missing).toBeInstanceOf(Error);
     expect(missing.name).toBe('CloudflareObjectNotFoundError');
     expect(missing.message).toContain('a.bin');
+
+    // The Cloudflare counterparts of messaging-plugin's two RPC errors. They
+    // are distinct classes because §2.2 forbids importing that package, and an
+    // application catching one must be able to name it.
+    const timeout = new barrel.CloudflareRequestTimeoutError('sum', 5000);
+    expect(timeout).toBeInstanceOf(Error);
+    expect(timeout.name).toBe('CloudflareRequestTimeoutError');
+    expect(timeout.message).toContain("'sum'");
+
+    const remote = new barrel.CloudflareRemoteHandlerError('bad input');
+    expect(remote).toBeInstanceOf(Error);
+    expect(remote.name).toBe('CloudflareRemoteHandlerError');
+    expect(remote.message).toContain('bad input');
   });
 
   it('does not export the internal registry or the envelope codec', () => {
@@ -64,6 +81,16 @@ describe('cloudflare-plugin barrel', () => {
         // second public definition of them is not.
         'isRealtimeFrame',
         'dispatchFrame',
+        // The messaging wire shape and its routing internals: one in-package
+        // caller each, and no application ever names one.
+        'encodePublishEnvelope',
+        'encodeRequestEnvelope',
+        'encodeReplyEnvelope',
+        'isQueueEnvelope',
+        'SubscriptionTable',
+        'RequestCorrelation',
+        'openReplyInbox',
+        'deliverReply',
       ]
     ) {
       expect(names).not.toContain(internal);

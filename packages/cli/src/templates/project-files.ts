@@ -25,10 +25,13 @@ import type {
   LocalImport,
   MiddlewareWiring,
   PackageImport,
+  RuntimeSwap,
   TemplateFeatures,
   TemplateHost,
   TemplateManifest,
   Wiring,
+  WorkerExport,
+  WorkerExportRoute,
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
 
@@ -77,6 +80,12 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
  */
 export interface ResolvedHost {
   readonly plugins: readonly Wiring[];
+  /** Module exports the Workers entry declares beside `fetch`. */
+  readonly workerExports: readonly WorkerExport[];
+  /** Lines appended verbatim to the Workers entry, for a re-exported DO class. */
+  readonly entryReExports: readonly string[];
+  /** TOML appended to the generated `wrangler.toml`. */
+  readonly wranglerToml: string;
   readonly middleware: readonly MiddlewareWiring[];
   readonly localImports: readonly LocalImport[];
   readonly packageImports: readonly PackageImport[];
@@ -103,21 +112,58 @@ export interface ResolvedHost {
  * @param features - The per-project choices parsed from the flags
  * @returns The host with every member present
  */
-export function resolveHost(host: TemplateHost, features: TemplateFeatures): ResolvedHost {
+export function resolveHost(
+  host: TemplateHost,
+  features: TemplateFeatures,
+  runtime: TargetRuntime,
+): ResolvedHost {
+  const swap = host.runtimeSwaps?.[runtime];
+  const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
+
   return {
     // A starter-composed template owns its whole plugin set, so `--di` reaches
     // it through the factory's options instead (see `fullStackArgs`). Appending
     // here would be silently dropped by the renderer's factory branch.
-    plugins: host.appFactory === undefined ? withDiPlugin(host.plugins, features) : host.plugins,
+    plugins: host.appFactory === undefined ? withDiPlugin(swapped, features) : swapped,
+    workerExports: swap?.workerExports ?? [],
+    entryReExports: swap?.entryReExports ?? [],
+    wranglerToml: swap?.wranglerToml ?? '',
     middleware: host.middleware,
     localImports: host.localImports ?? [],
     packageImports: host.packageImports ?? [],
-    files: host.files ?? [],
+    files: [...(host.files ?? []), ...(swap?.files ?? [])],
     pluginSpreads: host.pluginSpreads ?? [],
     setupCalls: host.setupCalls ?? [],
     appFactory: host.appFactory,
     manifest: host.manifest,
   };
+}
+
+/**
+ * Replaces the packages a runtime cannot serve with the ones it can.
+ *
+ * @param plugins - The template's plugin list
+ * @param swap - What this runtime replaces
+ * @returns The plugin list for this runtime
+ * @throws {Error} When `removePackages` names a package the template does not
+ * register — a defect in this repository's own template data, not something a
+ * user can reach, and silently dropping it would leave a swap that no longer
+ * removes what its author believed it did
+ */
+function applyRuntimeSwap(
+  plugins: readonly Wiring[],
+  swap: RuntimeSwap,
+): readonly Wiring[] {
+  const present = new Set(plugins.map((wiring) => wiring.pkg));
+  const absent = swap.removePackages.filter((pkg) => !present.has(pkg));
+  if (absent.length > 0) {
+    throw new Error(
+      `Runtime swap removes ${absent.join(', ')}, which this template does not register.`,
+    );
+  }
+
+  const removed = new Set(swap.removePackages);
+  return [...plugins.filter((wiring) => !removed.has(wiring.pkg)), ...swap.addPlugins];
 }
 
 /**
@@ -288,7 +334,69 @@ await app.start({ port: ${portExpression} });
  *
  * @returns The `src/index.ts` contents
  */
-function workersEntry(): string {
+/**
+ * Renders the value imports one worker export's routes need.
+ *
+ * Grouped by package and deduplicated: two routes from one package must not emit
+ * the same import twice, which would not compile.
+ *
+ * @param routes - The export's routes
+ * @returns One import line per contributing package
+ */
+function renderRouteImports(routes: readonly WorkerExportRoute[]): string {
+  const byPackage = new Map<string, Set<string>>();
+  for (const route of routes) {
+    const symbols = byPackage.get(route.pkg) ?? new Set<string>();
+    symbols.add(route.symbol);
+    byPackage.set(route.pkg, symbols);
+  }
+  return [...byPackage]
+    .map(([pkg, symbols]) => `import { ${[...symbols].sort().join(', ')} } from '@setu-ts/${pkg}';`)
+    .join('\n');
+}
+
+/**
+ * Renders the body that dispatches one delivered payload to its handler.
+ *
+ * A single route needs no branch. Several need one on `payload.queue`, because
+ * Cloudflare invokes ONE `queue` export for every queue a Worker consumes: a
+ * Worker that fed both queues to one handler would hand the messaging broker
+ * its job batches, which it cannot read and therefore retries until the queue
+ * dead-letters them.
+ *
+ * An unlisted queue throws rather than falling through to the first route, so a
+ * queue added to `wrangler.toml` without a handler fails loudly instead of
+ * having its work quietly discarded.
+ *
+ * @param entry - The worker export to render
+ * @returns The indented statement block
+ */
+function renderRoutes(entry: WorkerExport): string {
+  const only = entry.routes[0];
+  if (entry.routes.length === 1 && only !== undefined) {
+    return `    await ${only.symbol}(app)(payload);`;
+  }
+
+  const cases = entry.routes
+    .map((route) =>
+      `      case '${route.queueName}':\n` +
+      `        return await ${route.symbol}(app)(payload);`
+    )
+    .join('\n');
+
+  return `    // Cloudflare invokes ONE '${entry.name}' export for every queue this Worker
+    // consumes, distinguished only by the queue NAME from wrangler.toml.
+    switch (payload.queue) {
+${cases}
+      default:
+        throw new Error(\`No handler is registered for queue '\${payload.queue}'.\`);
+    }`;
+}
+
+function workersEntry(
+  workerExports: readonly WorkerExport[],
+  entryReExports: readonly string[],
+): string {
   // `env` is threaded in on BOTH paths. On Workers the environment is not
   // process-wide — bindings and variables arrive as the `env` argument below —
   // so a factory-composed app would otherwise resolve its configuration from
@@ -302,9 +410,33 @@ function workersEntry(): string {
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
+  // One import line per contributing package, and one export per contribution.
+  // Each reuses `booted`, never a second `boot(env)`: two applications would
+  // mean two brokers with two dispatch tables, and a subscription registered on
+  // one would be invisible to the other.
+  const exportImports = workerExports
+    .map((entry) =>
+      `import type { ${entry.payloadType} } from '@setu-ts/${entry.payloadPkg}';\n` +
+      renderRouteImports(entry.routes)
+    )
+    .join('\n');
+  const exportBlock = workerExports
+    .map((entry) =>
+      `\n  async ${entry.name}(
+    payload: ${entry.payloadType},
+    env: Record<string, unknown>,
+  ): Promise<void> {
+    ${bootedInit}
+    const app = await booted;
+${renderRoutes(entry)}
+  },`
+    )
+    .join('');
+  const reExportBlock = entryReExports.length === 0 ? '' : `\n${entryReExports.join('\n')}\n`;
+
   return `import type { IApplication } from '@setu-ts/common';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
-
+${exportImports === '' ? '' : `${exportImports}\n`}
 let booted: Promise<IApplication> | undefined;
 
 /**
@@ -324,9 +456,9 @@ export default {
     ${bootedInit}
     const app = await booted;
     return await app.fetch(request);
-  },
+  },${exportBlock}
 };
-`;
+${reExportBlock}`;
 }
 
 /**
@@ -694,7 +826,10 @@ ${PROGRAM_NAME} generate --help
   });
 
   if (runtime === 'cloudflare-workers') {
-    files.push({ path: 'src/index.ts', contents: workersEntry() });
+    files.push({
+      path: 'src/index.ts',
+      contents: workersEntry(host.workerExports, host.entryReExports),
+    });
     files.push({
       path: 'wrangler.toml',
       // The compatibility date has to postdate 2025-08-08, when Cloudflare
@@ -718,7 +853,7 @@ compatibility_flags = ["nodejs_compat"]
 # [[r2_buckets]]
 # binding = "UPLOADS"
 # bucket_name = "<your-bucket-name>"
-`,
+${host.wranglerToml}`,
     });
   } else {
     files.push({ path: 'main.ts', contents: serveEntry(port) });
