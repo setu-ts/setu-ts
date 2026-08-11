@@ -61,6 +61,49 @@ export function isUsablePort(value: unknown): value is number {
     value >= MIN_PORT && value <= MAX_PORT;
 }
 
+/** What reading a `--port` flag produced. */
+export type PortFlagResult =
+  | { readonly ok: true; readonly port?: number }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * Reads and validates a `--port` flag.
+ *
+ * Shared by `setu new --workspace` (where it sets the base port) and
+ * `setu generate app` (where it sets one member's), so the two cannot disagree
+ * about what a bindable port is. They already could not disagree with the
+ * MANIFEST reader — the range comes from {@linkcode isUsablePort} — and this
+ * closes the same gap between the two flag sites.
+ *
+ * Presence is tested, not `stringFlag`: `parseArgs` records a valued flag as the
+ * boolean `true` when the next token is itself flag-shaped or absent, so
+ * `--port -1` and a trailing `--port` both read as "no value". Testing for a
+ * string instead would let the number the user typed vanish without a word.
+ *
+ * @param flags - The parsed flags
+ * @returns The port, `ok` with no port when the flag is absent, or the refusal
+ */
+export function readPortFlag(flags: Readonly<Record<string, string | boolean>>): PortFlagResult {
+  const raw = flags['port'];
+  if (raw === undefined) return { ok: true };
+  if (typeof raw !== 'string') {
+    return {
+      ok: false,
+      message: `--port needs a value: expected an integer between ${MIN_PORT} and ${MAX_PORT}. ` +
+        `A negative number is read as another flag, so there is no port below ${MIN_PORT}.`,
+    };
+  }
+
+  const port = Number(raw);
+  if (!isUsablePort(port)) {
+    return {
+      ok: false,
+      message: `Invalid --port "${raw}": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+    };
+  }
+  return { ok: true, port };
+}
+
 /** One member of a workspace. */
 export interface WorkspaceMember {
   /** The member's directory name under `apps/`, and its service name in every sibling's map. */

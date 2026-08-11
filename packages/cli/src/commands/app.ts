@@ -41,6 +41,7 @@ import {
   MAX_PORT,
   MEMBERS_DIR,
   MIN_PORT,
+  readPortFlag,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
@@ -82,7 +83,8 @@ const REFUSED_TEMPLATE = 'full-stack';
  */
 function printUsage(log: (message: string) => void): void {
   log(
-    `Usage: ${PROGRAM_NAME} generate ${APP_VERB} <name> [--template <name>] [--di] [--dir <path>]`,
+    `Usage: ${PROGRAM_NAME} generate ${APP_VERB} <name> [--template <name>] [--di] ` +
+      `[--port <n>] [--dir <path>]`,
   );
   log('');
   log(`Adds a service to a Setu workspace: creates ${MEMBERS_DIR}/<name>/, allocates it a`);
@@ -91,6 +93,7 @@ function printUsage(log: (message: string) => void): void {
   log('Options:');
   log('  --template <name>   rest | microservice | nest');
   log('  --di                Register DiPlugin in this member');
+  log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
   log('');
@@ -265,20 +268,11 @@ export async function runAppCommand(
     return EXIT_USAGE;
   }
 
-  // Refused rather than ignored, for the same reason `--runtime` is: a member's
-  // port is allocated from the workspace manifest, so a `--port` here would be
-  // parsed (it is a value flag) and then silently dropped, handing back a member
-  // on a port the user did not choose. `setu new --workspace --port` is where
-  // that number belongs.
-  if (args.flags['port'] !== undefined) {
-    deps.error(
-      `--port sets the BASE port of a whole workspace, not one member's: ` +
-        `\`${PROGRAM_NAME} new <name> --workspace --port <n>\`.`,
-    );
-    deps.error(
-      `A member's port is allocated from ${WORKSPACE_MANIFEST}; edit it there, then run ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB}\` to rewrite every member's map.`,
-    );
+  // Read through the same helper `setu new --workspace --port` uses, so the two
+  // flag sites cannot disagree about what a bindable port is.
+  const requested = readPortFlag(args.flags);
+  if (!requested.ok) {
+    deps.error(requested.message);
     return EXIT_USAGE;
   }
 
@@ -320,14 +314,32 @@ export async function runAppCommand(
     return EXIT_ERROR;
   }
 
-  const port = allocatePort(read.manifest);
+  // An explicit `--port` wins over allocation, but never over another member: two
+  // services on one port means the second fails to bind, while every sibling's
+  // map still names both — so one name silently resolves to the OTHER service.
+  // Refusing here is the only place that can see it, since the collision is
+  // between a flag and a file.
+  const taken = read.manifest.members.find((member) => member.port === requested.port);
+  if (taken !== undefined) {
+    deps.error(
+      `Port ${requested.port} is already bound by the member "${taken.name}" in this workspace.`,
+    );
+    deps.error(
+      `Two members on one port cannot both start, and every sibling's map would name both — ` +
+        `so requests for one would reach the other. Choose another port, or omit --port and ` +
+        `let the CLI allocate one.`,
+    );
+    return EXIT_ERROR;
+  }
+
+  const port = requested.port ?? allocatePort(read.manifest);
   if (port === undefined) {
     deps.error(
       `This workspace has no port left to allocate: every number from its base up to ` +
         `${MAX_PORT} is taken.`,
     );
     deps.error(
-      `Lower \`basePort\` in ${WORKSPACE_MANIFEST}, or free a port by removing a member.`,
+      `Lower \`basePort\` in ${WORKSPACE_MANIFEST}, or pass --port to choose one directly.`,
     );
     return EXIT_ERROR;
   }
