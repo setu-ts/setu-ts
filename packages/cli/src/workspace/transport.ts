@@ -19,6 +19,12 @@
 
 import type { Wiring } from '../templates/registry.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import {
+  PROTO_IMPORTS,
+  PROTO_TASK,
+  PROTO_TASK_COMMAND,
+  protoToolchainFiles,
+} from './proto-toolchain.ts';
 
 /**
  * The inter-service transports `setu new --workspace --transport` accepts.
@@ -167,6 +173,30 @@ export interface TransportSpec {
    * Omitted → the transport needs no backing service.
    */
   readonly compose?: ComposeBacking;
+  /**
+   * Extra source files every member of this workspace gets.
+   *
+   * A function of the member's name, because the files it produces are named
+   * after the service: a proto package is `<member>.v1`, and a fixed one would
+   * put two members' messages in the same namespace.
+   *
+   * @param member - The member's kebab-case name
+   * @returns Files relative to the member root
+   */
+  readonly memberFiles?: (member: string) => readonly GeneratedFile[];
+  /** Tasks merged into every member's `deno.json`, for what those files need. */
+  readonly memberTasks?: Readonly<Record<string, string>>;
+  /**
+   * Import-map entries merged into every member's `deno.json`.
+   *
+   * Needed because {@linkcode TransportSpec.memberFiles} can produce source that
+   * imports something the framework does not: the Protobuf-ES descriptors the gRPC
+   * toolchain generates import `@bufbuild/protobuf/codegenv2`, and without the
+   * mapping the member cannot compile the file its own task just wrote — measured,
+   * as `Import "@bufbuild/protobuf/codegenv2" not a dependency and not in import
+   * map`.
+   */
+  readonly memberImports?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -211,6 +241,12 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     // emits a toolchain for rather than generating itself.
     description: 'Members co-serve Connect/gRPC on their own port, alongside HTTP',
     plugins: [{ pkg: 'grpc-plugin', symbol: 'GrpcPlugin' }],
+    // The health service needs none of this — the plugin carries that descriptor
+    // itself. Serving the member's OWN protos needs a compiler, so the toolchain
+    // ships instead of the descriptors.
+    memberFiles: (member) => protoToolchainFiles(`${member.replaceAll('-', '_')}.v1`),
+    memberTasks: { [PROTO_TASK]: PROTO_TASK_COMMAND },
+    memberImports: PROTO_IMPORTS,
   },
   ['memory']: {
     name: 'memory',

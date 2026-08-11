@@ -40,9 +40,10 @@ const MESSAGING_PACKAGE = 'messaging-plugin';
 export function withWorkspaceMember(
   host: ResolvedHost,
   transport: TransportSpec,
+  member: string,
   endpoint?: string,
 ): ResolvedHost {
-  return withTransport(withDiscoveryMap(host), transport, endpoint);
+  return withTransport(withDiscoveryMap(host), transport, member, endpoint);
 }
 
 /**
@@ -90,6 +91,7 @@ function withDiscoveryMap(host: ResolvedHost): ResolvedHost {
 function withTransport(
   host: ResolvedHost,
   transport: TransportSpec,
+  member: string,
   override?: string,
 ): ResolvedHost {
   const args = transport.messagingArgs;
@@ -113,5 +115,8 @@ function withTransport(
     // registers one of them would collide — none does, and a unit test pins
     // that across the registry.
     plugins: [...plugins, ...transport.plugins],
+    files: [...host.files, ...(transport.memberFiles?.(member) ?? [])],
+    extraTasks: { ...host.extraTasks, ...transport.memberTasks },
+    extraImports: { ...host.extraImports, ...transport.memberImports },
   };
 }
