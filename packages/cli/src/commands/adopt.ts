@@ -31,6 +31,7 @@ import {
   rewriteEntryPort,
 } from '../workspace/adopt.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
+import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import {
   DISCOVERY_MODULE,
   DISCOVERY_SPECIFIER,
@@ -176,6 +177,7 @@ export async function runAdoptCommand(
     contents: renderDiscoveryModule(manifest.members[0]!, manifest.members),
   });
   for (const file of workspaceContainerFiles(manifest, transport)) created.push(file);
+  for (const file of workspaceK8sFiles(manifest, transport)) created.push(file);
 
   const planned = created.map((file) => ({ ...file, path: joinPath(project, file.path) }));
 

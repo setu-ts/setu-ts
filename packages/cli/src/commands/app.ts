@@ -42,6 +42,7 @@ import {
   SERVICE_PORT_EXPORT,
 } from '../workspace/discovery-module.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
+import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
@@ -249,6 +250,7 @@ function planMember(
   // modules are: a stack that names two of three members is worse than none, and
   // the ports it publishes come from the same manifest the maps do.
   for (const file of workspaceContainerFiles(next, transport)) files.push(file);
+  for (const file of workspaceK8sFiles(next, transport)) files.push(file);
 
   for (const file of extra) files.push(file);
 
