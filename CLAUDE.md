@@ -1988,7 +1988,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   gate was itself vacuous: it asserted `runtime.platform()`, which this example gets from the
   explicitly-registered Cloudflare factory where it is hardcoded, so it passed with the bug in
   place. **Not verified against a deployed Worker** — CI holds no Cloudflare account) — complete (PR
-  pending)
+  #145)
 - **Next milestone** — **M39** (docker/kubernetes), then M40. M60–M62 came from a measured audit
   after M58: a project with all fourteen schematics generated type-checked clean while its entry
   points imported exactly ONE generated path, so thirteen of fourteen generated artifacts were
