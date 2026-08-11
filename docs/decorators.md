@@ -52,9 +52,17 @@ import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
 const app = createApplication();
 
 app.register(RuntimePlugin());
-app.register(DiPlugin()); // Required for dependency injection
+app.register(DiPlugin()); // Optional: adds a container, so `scope` is honored
 app.register(DecoratorPlugin()); // Required for decorator processing
 ```
+
+`DecoratorPlugin` is required — decorators are inert without it. **`DiPlugin` is not.**
+`DecoratorPlugin` branches on the container's presence: with `DiPlugin` registered, an `@Injectable`
+class is constructed through the container and its `scope` is honored; without it, the class is
+constructed once and registered in the kernel's `ServiceRegistry`. The decorated source is identical
+either way — what changes is the lifecycle. Scaffolding the two combinations is
+`setu new app --template rest` and `setu new app --template rest --di` (see the
+[CLI Guide](./cli.md#decorators-and-di-are-independent-choices)).
 
 ## Controllers
 
@@ -225,6 +233,12 @@ export class UserService {
   }
 }
 ```
+
+**Where the instance lives depends on whether a container is present.** `DecoratorPlugin` registers
+a provider on the container when `DiPlugin` is registered, and it never touches the kernel registry
+in that case — so `ctx.services.get('user-service')` resolves an `@Injectable` class **only in a
+project without `DiPlugin`**. With a container, reach it by injecting it
+(`@Inject('user-service')`), which is the path that works under both compositions.
 
 ### Parameter-Level Injection
 
@@ -715,9 +729,11 @@ class UserRepositoryOk {
 
 Decorators only add metadata. You must:
 
-1. Register `DecoratorPlugin`
-2. Register `DiPlugin` (for injection)
-3. Register controllers manually or use `autoDiscover: true`
+1. Register `DecoratorPlugin` — required; nothing reads the metadata without it
+2. Register controllers and services with the plugin, or use `autoDiscover: true`
+
+`DiPlugin` is **not** on that list: injection works without a container, which resolves from the
+kernel's `ServiceRegistry` instead. Register it when you want a scoped or transient lifecycle.
 
 ### No Method Overloading
 

@@ -30,6 +30,14 @@ building production-ready applications with our plugin-first, runtime-independen
   - Dependency injection
   - Custom decorators
 
+## Tooling
+
+- [CLI Guide](./cli.md)
+  - Scaffolding projects: templates, runtimes, `--di`
+  - Generating code: the schematics and where each one is wired
+  - Domain modules
+  - Monorepo workspaces and service discovery
+
 ## Plugin Reference
 
 - [Plugin Catalog](./plugins.md)
