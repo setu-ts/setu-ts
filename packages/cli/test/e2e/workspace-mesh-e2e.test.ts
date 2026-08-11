@@ -16,7 +16,7 @@ import { expect } from '@std/expect';
 import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
-import { bootAndProbe, useWorkspacePackages } from '../fixtures/generated-project.ts';
+import { bootAndProbe, unusedPort, useWorkspacePackages } from '../fixtures/generated-project.ts';
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 
@@ -25,18 +25,6 @@ const fs: IFileSystem = runtime.fs!;
 
 /** The three services every case in this file scaffolds. */
 const MEMBERS = ['orders', 'billing', 'shipping'] as const;
-
-/**
- * Finds a port nothing is listening on.
- *
- * @returns A free TCP port on loopback
- */
-function freePort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
-}
 
 /**
  * The probe `orders` runs: reach BOTH siblings, not just one.
@@ -190,7 +178,7 @@ describe('a three-service workspace — end to end', () => {
 
   beforeEach(async () => {
     root = await Deno.makeTempDir({ prefix: 'setu-mesh-' });
-    base = freePort();
+    base = unusedPort();
     log.length = 0;
   });
 
@@ -247,7 +235,8 @@ describe('a three-service workspace — end to end', () => {
           expect(map).not.toContain(`'${peer}':`);
           continue;
         }
-        expect(map).toContain(`'${peer}': [{ host: '127.0.0.1', port: ${base + peerIndex} }]`);
+        expect(map).toContain(`'${peer}': [{`);
+        expect(map).toContain(`port: ${base + peerIndex},`);
       }
     }
   });

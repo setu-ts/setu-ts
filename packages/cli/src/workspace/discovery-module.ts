@@ -19,6 +19,7 @@
 
 import { CONFIG_MODULE } from '../constants.ts';
 import type { WorkspaceMember } from './manifest.ts';
+import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 
 /** The module's path, relative to a member's own root. */
 export const DISCOVERY_MODULE = 'src/discovery/services.ts';
@@ -33,13 +34,46 @@ export const SERVICE_PORT_EXPORT = 'SERVICE_PORT';
 export const SERVICE_ENDPOINTS_EXPORT = 'SERVICE_ENDPOINTS';
 
 /**
- * The host every generated endpoint names.
+ * The host a generated endpoint falls back to.
  *
  * The members run on one machine during development, and that is the only
  * topology the CLI can know. A deployed topology comes from a real provider arm
  * (`consul`, `kubernetes`, `dns`), not from this file.
  */
 const LOCAL_HOST = '127.0.0.1';
+
+/**
+ * Builds the environment variable that overrides one sibling's host.
+ *
+ * Needed because `127.0.0.1` is the wrong answer the moment members stop sharing
+ * a machine — and the generated Compose stack is exactly that case. Each member
+ * runs in its own container, where loopback is the container itself, so a map
+ * naming `127.0.0.1` would have every service dial ITSELF on its sibling's port
+ * and time out. The stack sets these variables to the siblings' service names.
+ *
+ * Same shape as a transport's connection value: an environment read with the
+ * local address as its fallback, so `deno task dev` on one machine is unchanged.
+ *
+ * @param name - The sibling's member name
+ * @returns The variable name
+ */
+export function hostVariable(name: string): string {
+  return `${name.replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}_HOST`;
+}
+
+/**
+ * Folds an environment read onto one line.
+ *
+ * The profile renders it wrapped for the deep indentation of a plugin argument in
+ * `setu.config.ts`; here it sits inside a short object literal, where the wrap
+ * would read as a stray blank column.
+ *
+ * @param expression - The rendered read
+ * @returns The same expression on one line
+ */
+function collapse(expression: string): string {
+  return expression.replace(/\s*\n\s*/g, ' ');
+}
 
 /**
  * Renders one member's discovery module.
@@ -61,6 +95,7 @@ const LOCAL_HOST = '127.0.0.1';
 export function renderDiscoveryModule(
   member: WorkspaceMember,
   all: readonly WorkspaceMember[],
+  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
 ): string {
   // Plain `.sort()`, like every other determinism sort in this package
   // (`seamNames`, `readArtifactNames`, `readModuleNames`). `localeCompare`
@@ -73,7 +108,16 @@ export function renderDiscoveryModule(
 
   const portOf = new Map(all.map((other) => [other.name, other.port]));
   const entries = siblings
-    .map((name) => `  '${name}': [{ host: '${LOCAL_HOST}', port: ${portOf.get(name)} }],\n`)
+    .map((name) =>
+      `  '${name}': [{\n` +
+      // The profile's reader, not a literal `Deno.env.get`: this module is emitted
+      // into Node and Bun members too, where that name does not exist. Its own
+      // line breaks are for the deeper indentation of a plugin argument, so they
+      // collapse here.
+      `    host: ${collapse(profile.envRead(hostVariable(name), LOCAL_HOST))},\n` +
+      `    port: ${portOf.get(name)},\n` +
+      `  }],\n`
+    )
     .join('');
 
   const endpoints = entries === '' ? '{}' : `{\n${entries}}`;
@@ -92,9 +136,15 @@ export function renderDiscoveryModule(
 //   import { ${SERVICE_PORT_EXPORT} } from '${DISCOVERY_SPECIFIER}';
 //   await app.start({ port: ${SERVICE_PORT_EXPORT} });
 //
-// This is the LOCAL development topology — the addresses your workspace members
-// bind on this machine. A deployed topology comes from a real discovery backend
-// (\`provider: 'consul'\`, \`'kubernetes'\`, \`'dns'\`), not from this file.
+// Each sibling's host falls back to ${LOCAL_HOST} — right when every member runs
+// on this machine, wrong the moment they do not, so it is overridable per service
+// (\`<MEMBER>_HOST\`). The generated Compose stack sets those variables to the
+// siblings' service names, because inside a container loopback is the container
+// itself: a fixed ${LOCAL_HOST} would have every service dial ITSELF on its
+// sibling's port.
+//
+// This is still only a LOCAL topology. A deployed one comes from a real discovery
+// backend (\`provider: 'consul'\`, \`'kubernetes'\`, \`'dns'\`), not from this file.
 
 /** The port this workspace member binds. */
 export const ${SERVICE_PORT_EXPORT} = ${member.port};

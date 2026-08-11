@@ -92,6 +92,19 @@ export interface ResolvedHost {
   readonly files: readonly GeneratedFile[];
   readonly pluginSpreads: readonly string[];
   readonly setupCalls: readonly string[];
+  /**
+   * Tasks merged into the generated `deno.json` beyond `start`.
+   *
+   * A workspace transport contributes these — the gRPC arm needs a `proto:gen`
+   * task, because the descriptors `grpc.addService` takes come from a compiler
+   * rather than from the CLI.
+   */
+  readonly extraTasks: Readonly<Record<string, string>>;
+  /**
+   * Import-map entries merged into the generated `deno.json` beyond the framework
+   * pins — what a transport-contributed file needs in order to compile.
+   */
+  readonly extraImports: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
   readonly manifest?: TemplateManifest | undefined;
 }
@@ -134,6 +147,8 @@ export function resolveHost(
     files: [...(host.files ?? []), ...(swap?.files ?? [])],
     pluginSpreads: host.pluginSpreads ?? [],
     setupCalls: host.setupCalls ?? [],
+    extraTasks: {},
+    extraImports: {},
     appFactory: host.appFactory,
     manifest: host.manifest,
   };
@@ -308,12 +323,14 @@ ${middlewareLines}${setupLines}
  * runtime's Hono serve adapter (M23). The plugin list lives in
  * {@linkcode configModule}, not here.
  *
+ * @param runtime - The selected runtime target, which decides how the shutdown
+ * signal is caught
  * @param port - Where the bound port comes from, when it is not the literal
  * default. A workspace member imports it, so the port it binds and the port its
  * siblings dial are one datum rather than two that can drift.
  * @returns The `main.ts` contents
  */
-function serveEntry(port?: EntryPort): string {
+function serveEntry(runtime: TargetRuntime, port?: EntryPort): string {
   const portImport = port === undefined ? '' : `import { ${port.symbol} } from '${port.from}';\n`;
   const portExpression = port === undefined ? '3000' : port.symbol;
 
@@ -322,6 +339,81 @@ ${portImport}
 const app = await ${CONFIG_EXPORT}();
 
 await app.start({ port: ${portExpression} });
+${shutdownBlock(runtime)}`;
+}
+
+/**
+ * The graceful-shutdown listener the generated entry installs.
+ *
+ * **Measured, not precautionary.** A scaffolded project without this dies from
+ * the signal itself: `docker stop` (and every Kubernetes pod eviction) sends
+ * `SIGTERM`, and the default action for it terminates the process immediately —
+ * a project generated before this exited with **code 143 after 1 ms**, so
+ * `app.stop()` never ran. Everything that makes a rolling deploy safe is in that
+ * call: the in-flight drain, `onStopping` (where a service deregisters from
+ * discovery — M50), and `onShutdown` (where a database and a broker
+ * disconnect). `terminationGracePeriodSeconds` and `stop_grace_period` are
+ * decorative without it.
+ *
+ * The framework deliberately does not install this itself: a signal handler
+ * needs a runtime API, so a framework-level seam would be an `IRuntimeServices`
+ * widening (recorded as out of scope in M39, which found the same defect in this
+ * repository's own examples and fixed it the same way). Emitting it here is what
+ * makes the documented pattern the default rather than something a reader has to
+ * find in a deployment guide.
+ *
+ * `SIGINT` is caught beside `SIGTERM` so a local `Ctrl+C` exercises the exact
+ * path the container runtime will take.
+ *
+ * @param runtime - The selected runtime target
+ * @returns The block appended to the entry, empty on Cloudflare Workers
+ */
+function shutdownBlock(runtime: TargetRuntime): string {
+  // Workers never reaches here (it renders a `fetch` export, not a socket
+  // entry), and has no process to signal: an isolate is evicted, not stopped.
+  if (runtime === 'cloudflare-workers') return '';
+
+  const preamble = `
+// Graceful shutdown. Without this the process dies from the signal itself and
+// \`app.stop()\` never runs, so in-flight requests are cut, the service never
+// deregisters from discovery, and no database or broker disconnects.
+`;
+
+  if (runtime === 'deno') {
+    // Guarded: \`Deno.addSignalListener('SIGTERM')\` THROWS on Windows, which
+    // would turn a portability detail into a crash at startup.
+    return `${preamble}if (Deno.build.os !== 'windows') {
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    Deno.addSignalListener(signal, () => {
+      // The .catch is not optional: a rejecting onShutdown hook makes stop()
+      // reject, and an unhandled rejection replaces the reason with a trace.
+      void app.stop()
+        .then(() => Deno.exit(0))
+        .catch((error: unknown) => {
+          console.error('Graceful shutdown failed:', error);
+          Deno.exit(1);
+        });
+    });
+  }
+}
+`;
+  }
+
+  // Node and Bun share one block: Bun implements the Node `process` API, and
+  // registering a listener is a no-op on a platform that never raises the
+  // signal rather than a throw — so this needs no OS guard.
+  return `${preamble}for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    // The .catch is not optional: a rejecting onShutdown hook makes stop()
+    // reject, and an unhandled rejection replaces the reason with a trace.
+    void app.stop()
+      .then(() => process.exit(0))
+      .catch((error: unknown) => {
+        console.error('Graceful shutdown failed:', error);
+        process.exit(1);
+      });
+  });
+}
 `;
 }
 
@@ -502,7 +594,7 @@ function jsrImports(host: ResolvedHost): Record<string, string> {
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.
-  return { ...imports, ...host.manifest?.denoImports };
+  return { ...imports, ...host.extraImports, ...host.manifest?.denoImports };
 }
 
 /**
@@ -613,9 +705,16 @@ const NODE_RUNNER = 'tsx';
  */
 function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string, string>> {
   // Node: see NODE_RUNNER — the start script invokes it, so it must be
-  // installed. Workers: `wrangler` is pinned rather than left to `npx`, which
-  // would otherwise fetch whatever is latest at that moment.
-  if (runtime === 'node') return { tsx: '^4.20.0' };
+  // installed. `@types/node` is what declares the `process` the entry's shutdown
+  // listener registers on; without it a generated project's own `tsc` reports an
+  // undeclared name while `tsx` runs the file regardless, so nothing but this
+  // would catch it.
+  if (runtime === 'node') return { '@types/node': '^24.0.0', tsx: '^4.20.0' };
+  // Bun gets `@types/bun` rather than `@types/node`: it is the package Bun's own
+  // documentation prescribes, and it supplies the `process` declarations by
+  // depending on `@types/node` — so the entry's listener type-checks without the
+  // project claiming to be a Node one.
+  if (runtime === 'bun') return { '@types/bun': '^1.2.0' };
   if (runtime === 'cloudflare-workers') return { wrangler: '^4.0.0' };
   return {};
 }
@@ -771,7 +870,10 @@ ${PROGRAM_NAME} generate --help
       contents: `${
         JSON.stringify(
           {
-            tasks: { start: `deno run ${denoPermissions(manifest)} ${entry}` },
+            tasks: {
+              start: `deno run ${denoPermissions(manifest)} ${entry}`,
+              ...host.extraTasks,
+            },
             // The decorator and OpenAPI plugins ship legacy decorators, so a
             // generated @Controller class only type-checks with this enabled.
             compilerOptions: { experimentalDecorators: true },
@@ -802,10 +904,17 @@ ${PROGRAM_NAME} generate --help
             dependencies: npmDependencies(host),
             // Runtime-level first, so a template that pins its own copy of the
             // same package wins — the template knows what its build needs.
-            ...(() => {
-              const dev = { ...runtimeDevDependencies(runtime), ...manifest?.npmDevDependencies };
-              return Object.keys(dev).length === 0 ? {} : { devDependencies: dev };
-            })(),
+            //
+            // Emitted unconditionally: this branch serves Node and Bun, and both
+            // now contribute a runtime devDependency of their own (the TypeScript
+            // runner and the `process` declarations the entry's shutdown listener
+            // needs). The empty-object guard that used to sit here covered the
+            // Bun-with-no-template case and became unreachable, so it is gone
+            // rather than left as a branch no input can take.
+            devDependencies: {
+              ...runtimeDevDependencies(runtime),
+              ...manifest?.npmDevDependencies,
+            },
           },
           null,
           2,
@@ -856,7 +965,7 @@ compatibility_flags = ["nodejs_compat"]
 ${host.wranglerToml}`,
     });
   } else {
-    files.push({ path: 'main.ts', contents: serveEntry(port) });
+    files.push({ path: 'main.ts', contents: serveEntry(runtime, port) });
   }
 
   // Template source files last. Any path colliding with the fixed set above is

@@ -186,7 +186,7 @@ rules:
 
 `watch` is required as well as `list` — the provider re-LISTs on every watch event. The framework's
 Helm chart renders this Role and its RoleBinding when `serviceDiscovery.enabled=true`; see the
-[deployment guide](https://github.com/setu-ts/hono-enterprise/blob/main/docs/deployment.md).
+[deployment guide](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md).
 
 ## Kubernetes in-cluster TLS
 

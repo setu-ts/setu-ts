@@ -10,13 +10,33 @@ import {
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
+import { ROOT_MANIFEST } from '../../src/workspace/root-manifest.ts';
+import {
+  workspaceProfile,
+  type WorkspaceRuntimeProfile,
+} from '../../src/workspace/runtime-profile.ts';
 import type { TransportName } from '../../src/workspace/transport.ts';
+import type { TargetRuntime } from '../../src/constants.ts';
 
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;
   readonly err: ReturnType<typeof createRecorder>;
   run(argv: readonly string[]): Promise<number>;
+}
+
+/**
+ * The script block a root manifest of this shape declares.
+ *
+ * Deno spells it `tasks` and npm spells it `scripts`, and the existing tests
+ * assert the Deno one survives a one-key merge.
+ *
+ * @param profile - The workspace's runtime profile
+ * @returns The block to spread into the seeded root
+ */
+function tasksFor(profile: WorkspaceRuntimeProfile): Record<string, unknown> {
+  const dev = { dev: profile.runAll };
+  return profile.manifestKind === 'deno' ? { tasks: dev } : { scripts: dev, private: true };
 }
 
 /**
@@ -28,21 +48,43 @@ interface Harness {
  * @param members - Members already in the workspace, or `undefined` for no
  * workspace at all
  * @param basePort - The workspace's base port
+ * @param transport - The workspace's transport
+ * @param root - The root manifest contents, when the default will not do
+ * @param runtime - The workspace's runtime, which decides the root's filename
  * @returns The harness
  */
 function harness(
   members?: readonly WorkspaceMember[],
   basePort = 3000,
   transport: TransportName = 'http',
+  root?: string,
+  runtime: TargetRuntime = 'deno',
 ): Harness {
   const seed: Record<string, string> = {};
   if (members !== undefined) {
     seed[`/ws/${WORKSPACE_MANIFEST}`] = renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
+      runtime,
       basePort,
       transport,
       members,
     });
+    // A real workspace root has this, and leaving it out made a refusal pass for
+    // the wrong reason: the full-stack case was asserted to fail on
+    // `nodeModulesDir`, and with no root manifest to read it failed because the
+    // file was missing rather than because of anything the template needed.
+    //
+    // Its FILENAME comes from the profile for the same reason: an npm workspace's
+    // root is `package.json`, and seeding a `deno.json` there would reproduce that
+    // same wrong-reason pass in the other direction.
+    const profile = workspaceProfile(runtime);
+    seed[`/ws/${profile.rootManifestFile}`] = root ?? `${
+      JSON.stringify(
+        { [profile.globKey]: [profile.memberGlob('apps')], ...tasksFor(profile) },
+        null,
+        2,
+      )
+    }\n`;
   }
   const fs = createFakeFs(seed);
   const out = createRecorder();
@@ -78,13 +120,15 @@ describe('runAppCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    // Refused rather than ignored: a member is a Deno project by construction,
-    // and swallowing the flag would hand back something it says it is not.
-    it('refuses a non-Deno runtime, naming the standalone alternative', async () => {
+    // A member's runtime is the WORKSPACE's: they share one root manifest and one
+    // lockfile, so a Node member inside a Deno workspace is not a member at all.
+    // The flag is refused when it DISAGREES rather than whenever it is non-Deno,
+    // because a Node workspace's members are Node projects.
+    it('refuses a runtime the workspace does not use', async () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--runtime', 'node'])).toBe(2);
-      expect(h.err.text()).toContain('Deno workspace');
-      expect(h.err.text()).toContain('setu new <name> --runtime node');
+      expect(h.err.text()).toContain('This is a deno workspace');
+      expect(h.err.text()).toContain('--workspace --runtime node');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -93,13 +137,16 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'orders', '--runtime', 'deno'])).toBe(0);
     });
 
-    // Measured: a member may not declare `nodeModulesDir`, which that
-    // template's Vite build needs, so it would scaffold and then fail to
-    // resolve its own dependencies.
-    it('refuses the full-stack template, naming nodeModulesDir', async () => {
-      const h = harness([]);
+    // The template itself is now allowed as a member — what is refused is the
+    // pairing. It composes through a starter factory, so `TemplateHost.plugins`
+    // must stay empty, and a broker transport's contribution would be dropped by
+    // the renderer's factory branch: the member would look connected to the bus
+    // and reach nobody.
+    it('refuses a starter-composed template on a transport that adds a plugin', async () => {
+      const h = harness([], 3000, 'redis');
       expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(2);
-      expect(h.err.text()).toContain('nodeModulesDir');
+      expect(h.err.text()).toContain('createFullStackAppFromConfig');
+      expect(h.err.text()).toContain('talking to nobody');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -122,15 +169,193 @@ describe('runAppCommand', () => {
       expect(h.err.text()).toContain('Unknown template "nope"');
     });
 
-    // `port` is a VALUE flag, so it parses cleanly and would otherwise be read
-    // by nothing — handing back a member on a port the user did not choose,
-    // with no diagnostic. The same class as `--runtime` above.
-    it('refuses --port, naming where a member port comes from', async () => {
+    // Through the same reader `setu new --workspace --port` uses, so a value the
+    // one flag site rejects can never be accepted by the other.
+    it('refuses a member port no service can bind', async () => {
       const h = harness([]);
-      expect(await h.run(['app', 'orders', '--port', '4444'])).toBe(2);
-      expect(h.err.text()).toContain('--workspace --port');
-      expect(h.err.text()).toContain(WORKSPACE_MANIFEST);
+      expect(await h.run(['app', 'orders', '--port', '99999'])).toBe(2);
+      expect(h.err.text()).toContain('Invalid --port "99999"');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    // `parseArgs` records a valued flag as boolean `true` when the next token is
+    // flag-shaped or absent, so a negative number reads as "no value" rather
+    // than as the number the user typed.
+    it('refuses --port with no value', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--port'])).toBe(2);
+      expect(h.err.text()).toContain('--port needs a value');
+      expect(h.fs.writes).toEqual([]);
+    });
+  });
+
+  // A frontend member is the one case that needs a field only the workspace ROOT
+  // may declare, so it is also the one case where this command edits a file it
+  // did not just create.
+  // Bun shares npm's manifest SHAPE and none of its commands, so a next step
+  // branching on the shape told a Bun developer to run `npm start` in the same
+  // breath as `bun install`. Asserted on the command this actually PRINTS —
+  // testing the profile's renderer alone leaves this line free to drift back.
+  it('names each toolchain own commands in the next step it prints', async () => {
+    const expected = {
+      deno: 'deno install && cd apps/orders && deno task start',
+      node: 'npm install && cd apps/orders && npm run start',
+      bun: 'bun install && cd apps/orders && bun run start',
+    } as const;
+
+    for (const [runtime, line] of Object.entries(expected)) {
+      const h = harness([], 3000, 'http', undefined, runtime as TargetRuntime);
+      expect(await h.run(['app', 'orders'])).toBe(0);
+      expect(h.out.text()).toContain(line);
+    }
+  });
+
+  describe('a member with a frontend build', () => {
+    /**
+     * Reads a workspace root manifest out of the fake filesystem.
+     *
+     * @param h - The harness
+     * @returns The parsed root manifest
+     */
+    function rootOf(h: Harness): Record<string, unknown> {
+      return JSON.parse(h.fs.read(`/ws/${ROOT_MANIFEST}`)) as Record<string, unknown>;
+    }
+
+    it('adds nodeModulesDir to the workspace root', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+      const root = rootOf(h);
+      expect(root['nodeModulesDir']).toBe('auto');
+      // Everything else the root held survives: this is a one-key merge, not a
+      // regeneration, so a task the developer added is not discarded.
+      expect(root['workspace']).toEqual(['./apps/*']);
+      expect(root['tasks']).toEqual({ dev: 'deno task --recursive start' });
+    });
+
+    // Every OTHER member must leave the root alone. Declaring it up front would
+    // make an ordinary member's first `deno check` materialise every npm package
+    // the framework lazily imports — the AWS SDK, the Kafka and Redis clients —
+    // into node_modules, none of which it uses.
+    it('leaves the root untouched for a member with no frontend build', async () => {
+      const h = harness([]);
+      const before = h.fs.read(`/ws/${ROOT_MANIFEST}`);
+      expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
+      expect(h.fs.read(`/ws/${ROOT_MANIFEST}`)).toBe(before);
+      expect(rootOf(h)['nodeModulesDir']).toBeUndefined();
+    });
+
+    it('writes the root once, not again on a second frontend member', async () => {
+      const first = harness([]);
+      expect(await first.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+      const updated = first.fs.read(`/ws/${ROOT_MANIFEST}`);
+
+      const second = harness(
+        JSON.parse(first.fs.read(`/ws/${WORKSPACE_MANIFEST}`)).members as WorkspaceMember[],
+        3000,
+        'http',
+        updated,
+      );
+      expect(await second.run(['app', 'admin', '--template', 'full-stack'])).toBe(0);
+      expect(second.fs.writes).not.toContain(`/ws/${ROOT_MANIFEST}`);
+    });
+
+    // `none` is a deliberate choice to keep every dependency in Deno's global
+    // cache. Overwriting it would reverse a decision without saying so.
+    it('refuses a root that answers nodeModulesDir differently', async () => {
+      const h = harness(
+        [],
+        3000,
+        'http',
+        `${JSON.stringify({ workspace: ['./apps/*'], nodeModulesDir: 'none' })}\n`,
+      );
+      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(2);
+      expect(h.err.text()).toContain('"none"');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses a root it cannot parse rather than rewriting it', async () => {
+      const h = harness([], 3000, 'http', '{ "workspace": ["./apps/*"], // a comment\n}');
+      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(2);
+      expect(h.err.text()).toContain('Add that field by hand');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    // `nodeModulesDir` is a DENO setting that turns on the real node_modules
+    // directory npm and Bun have by construction, so an npm workspace has nothing
+    // to enable. Ungated, the absent deno.json landed in the unparseable-root
+    // branch and every full-stack member was refused with advice that would have
+    // changed nothing if followed.
+    it('needs no root edit on npm, where node_modules already exists', async () => {
+      for (const runtime of ['node', 'bun'] as const) {
+        const h = harness([], 3000, 'http', undefined, runtime);
+        expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+        expect(h.err.text()).toBe('');
+        expect(h.fs.has('/ws/apps/web/setu.config.ts')).toBe(true);
+        // …and the Deno-only field is not smuggled into the npm root either.
+        const root = JSON.parse(h.fs.read('/ws/package.json')) as Record<string, unknown>;
+        expect(root['nodeModulesDir']).toBeUndefined();
+      }
+    });
+  });
+
+  describe('--port', () => {
+    it('binds the requested port instead of the allocated one', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'billing', '--port', '4444'])).toBe(0);
+
+      const manifest = JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
+        members: { name: string; port: number }[];
+      };
+      expect(manifest.members).toEqual([
+        { name: 'orders', port: 3000 },
+        { name: 'billing', port: 4444 },
+      ]);
+      // The chosen port has to reach BOTH sides of the one datum: what this
+      // member binds, and what its sibling dials.
+      expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
+        'export const SERVICE_PORT = 4444;',
+      );
+      expect(h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`)).toContain(
+        'port: 4444,',
+      );
+    });
+
+    // Two members on one port cannot both start, and every sibling's map names
+    // both — so one name resolves to the other service. The collision is between
+    // a flag and a file, so this command is the only place that can see it.
+    it('refuses a port another member already binds, naming that member', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'billing', '--port', '3000'])).toBe(1);
+      expect(h.err.text()).toContain('already bound by the member "orders"');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    // Allocation is derived from the HIGHEST port in use, so a hand-picked port
+    // above the base moves the ceiling rather than being skipped over — the next
+    // member cannot land on it.
+    it('allocates above a hand-picked port for the next member', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'billing', '--port', '4444'])).toBe(0);
+
+      const next = harness(
+        JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`)).members as WorkspaceMember[],
+      );
+      expect(await next.run(['app', 'shipping'])).toBe(0);
+      const manifest = JSON.parse(next.fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
+        members: { name: string; port: number }[];
+      };
+      expect(manifest.members.at(-1)).toEqual({ name: 'shipping', port: 4445 });
+    });
+
+    // The escape hatch from the exhausted-range refusal the workspace gate
+    // covers: an explicit port is never allocated, so a workspace based at the
+    // top of the range can still take a member.
+    it('takes a member even when allocation has no port left', async () => {
+      const h = harness([{ name: 'orders', port: 65535 }], 65535);
+      expect(await h.run(['app', 'billing', '--port', '3000'])).toBe(0);
+      expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
+        'export const SERVICE_PORT = 3000;',
+      );
     });
   });
 
@@ -220,9 +445,12 @@ describe('runAppCommand', () => {
     it('inherits the workspace transport for every member it adds', async () => {
       const h = harness([], 3000, 'redis');
       expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
-      expect(h.fs.read('/ws/apps/orders/setu.config.ts')).toContain(
-        "MessagingPlugin({ broker: 'redis-streams', url: 'redis://127.0.0.1:6379' })",
-      );
+      const config = h.fs.read('/ws/apps/orders/setu.config.ts');
+      expect(config).toContain("broker: 'redis-streams'");
+      // Read from the environment with the local address as the fallback, so the
+      // same generated config works on the host and inside the Compose stack.
+      expect(config).toContain(`Deno.env.get('REDIS_URL')`);
+      expect(config).toContain('redis://127.0.0.1:6379');
     });
 
     it('registers the gRPC plugin in every member of a grpc workspace', async () => {
@@ -268,6 +496,9 @@ describe('runAppCommand', () => {
       await h.run(['app', 'orders']);
       expect(JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`))).toEqual({
         version: WORKSPACE_VERSION,
+        // Carried through unchanged: the runtime is the workspace's, and adding a
+        // member must never rewrite it.
+        runtime: 'deno',
         basePort: 3000,
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
@@ -350,14 +581,16 @@ describe('runAppCommand', () => {
     it('rewrites the first member map to name it', async () => {
       const h = await twoMembers();
       const orders = h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`);
-      expect(orders).toContain(`'billing': [{ host: '127.0.0.1', port: 3001 }]`);
+      expect(orders).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
+      expect(orders).toContain('port: 3001,');
       expect(orders).not.toContain(`'orders':`);
     });
 
     it('gives the new member the first one address', async () => {
       const h = await twoMembers();
       const billing = h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`);
-      expect(billing).toContain(`'orders': [{ host: '127.0.0.1', port: 3000 }]`);
+      expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') ?? '127.0.0.1'");
+      expect(billing).toContain('port: 3000,');
     });
 
     // The regenerated modules are `managed`, so rewriting them is not an

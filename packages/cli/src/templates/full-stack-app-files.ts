@@ -452,6 +452,68 @@ export default function LoginLayout() {
 }
 `;
 
+/**
+ * The landing page — the route whose ABSENCE made every scaffolded full-stack
+ * project serve a blank home page.
+ *
+ * `app/routes.ts` wraps two `flatRoutes` groups in `layout()` calls, and neither
+ * group had an `_index` file. So `/` matched a layout with no child, `<Outlet />`
+ * rendered nothing, and the server answered **200 with an empty `<body>`** — not
+ * a 404, not an error, a blank document. Measured on a scaffolded project:
+ * `/products` and `/login` rendered while `/` returned 2761 bytes of shell and no
+ * visible text. M37c found and fixed exactly this in `apps/full-stack`; the
+ * generator kept emitting it, because both that example's smoke check and its
+ * browser run requested `/products` and `/login` explicitly and nothing ever
+ * requested `/`.
+ *
+ * It reads the session rather than being decoration, so the first page a reader
+ * opens demonstrates a capability: sign in on `/login` and the greeting changes,
+ * because the cookie survives the redirect.
+ */
+const indexRoute = `import { Link, useLoaderData } from 'react-router';
+
+import type { AppLoadContext } from '~/lib/load-context.ts';
+import { getSession } from '~/config/services.server.ts';
+
+/** Reads the session on the server, so the greeting reflects the cookie. */
+export function loader({ context }: { context: AppLoadContext }) {
+  const session = getSession(context);
+  return { signedInAs: session.get<string>('userEmail') ?? null };
+}
+
+export default function IndexRoute() {
+  const { signedInAs } = useLoaderData<typeof loader>();
+
+  return (
+    <section>
+      <h1>Welcome</h1>
+      <p>
+        A React Router application server-rendered by the kernel through{' '}
+        <code>react-router-plugin</code>.
+      </p>
+      <p>
+        {signedInAs === null ? <>You are not signed in.</> : (
+          <>
+            Signed in as <strong>{signedInAs}</strong> — the session is server-authoritative and
+            the cookie is HttpOnly.
+          </>
+        )}
+      </p>
+      <ul>
+        <li>
+          <Link to='/products'>Products</Link> — rows read through the database capability by a
+          loader.
+        </li>
+        <li>
+          <Link to='/login'>Sign in</Link> — a form guarded by the session's synchronizer CSRF
+          token.
+        </li>
+      </ul>
+    </section>
+  );
+}
+`;
+
 const productsRoute = `import { useLoaderData } from 'react-router';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';
@@ -578,6 +640,7 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
   { path: 'app/features/products/products.server.ts', contents: productsFeature },
   { path: 'app/components/layouts/AppLayout.tsx', contents: appLayout },
   { path: 'app/components/layouts/LoginLayout.tsx', contents: loginLayout },
+  { path: 'app/routes/_app/_index.tsx', contents: indexRoute },
   { path: 'app/routes/_app/products._index.tsx', contents: productsRoute },
   { path: 'app/routes/_auth/login.tsx', contents: loginRoute },
 ];

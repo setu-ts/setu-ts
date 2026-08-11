@@ -169,25 +169,23 @@ describe('the Node target can run decorated source', () => {
     expect(manifest.devDependencies?.['vite']).toBeDefined();
   });
 
-  it('emits no devDependencies block when there is nothing to declare', async () => {
-    // The Bun + no-template path is the one combination that contributes
-    // neither a runtime devDependency nor a template one, so it is the only
-    // case that exercises the empty-object guard. Asserting the key is ABSENT
-    // is the whole test: an earlier version checked that `dependencies` was
-    // present instead, which passed with the guard deleted.
+  // This used to assert the OPPOSITE — that the Bun + no-template combination
+  // emitted no `devDependencies` at all, because it was the one path
+  // contributing neither a runtime nor a template entry. It no longer exists:
+  // the entry's shutdown listener registers on `process`, whose declarations a
+  // Bun project has to declare, so every project on this branch now carries the
+  // block and the empty-object guard it was testing is gone.
+  it('declares the Bun type declarations even with no template', async () => {
     const h = harness();
     expect(await h.run(['app', '--runtime', 'bun'])).toBe(0);
-    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as Record<string, unknown>;
-    expect(Object.keys(manifest)).not.toContain('devDependencies');
-    // …and the same path with a template that declares them still emits it, so
-    // the guard cannot be satisfied by dropping the key unconditionally.
-    const withTemplate = harness();
-    expect(await withTemplate.run(['app', '--runtime', 'bun', '--template', 'rest'])).toBe(0);
-    const other = JSON.parse(withTemplate.fs.read('/work/app/package.json')) as Record<
-      string,
-      unknown
-    >;
-    expect(Object.keys(other)).toContain('devDependencies');
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      devDependencies?: Record<string, string>;
+    };
+    expect(manifest.devDependencies?.['@types/bun']).toBeDefined();
+    // Not `@types/node`: a Bun project declares the package Bun's own docs
+    // prescribe, which supplies the same `process` declarations transitively.
+    expect(manifest.devDependencies?.['@types/node']).toBeUndefined();
+    expect(manifest.devDependencies?.['tsx']).toBeUndefined();
   });
 });
 
@@ -978,7 +976,9 @@ describe('--workspace', () => {
     const h = harness();
     await h.run(['acme', '--workspace']);
     const manifest = JSON.parse(h.fs.read('/work/acme/deno.json')) as { workspace?: string[] };
-    expect(manifest.workspace).toEqual(['./apps/*']);
+    // Services under apps/, libraries under libs/ — both declared at creation, so
+    // neither kind of addition rewrites this file.
+    expect(manifest.workspace).toEqual(['./apps/*', './libs/*']);
   });
 
   it('records the default base port', async () => {
@@ -1023,11 +1023,25 @@ describe('--workspace', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    it('refuses a non-Deno runtime, naming the standalone alternative', async () => {
+    // Node and Bun host a workspace; Cloudflare Workers does not, and that is a
+    // topology difference rather than a missing profile — each Worker is its own
+    // deploy unit with its own wrangler.toml.
+    it('accepts every runtime that can host a workspace', async () => {
+      for (const runtime of ['deno', 'node', 'bun']) {
+        const h = harness();
+        expect(await h.run(['acme', '--workspace', '--runtime', runtime])).toBe(0);
+        const manifest = JSON.parse(h.fs.read('/work/acme/setu.workspace.json')) as {
+          runtime?: string;
+        };
+        expect(manifest.runtime).toBe(runtime);
+      }
+    });
+
+    it('refuses Cloudflare Workers, naming why it is not a workspace target', async () => {
       const h = harness();
-      expect(await h.run(['acme', '--workspace', '--runtime', 'node'])).toBe(2);
-      expect(h.err.text()).toContain('Deno workspace');
-      expect(h.err.text()).toContain('setu new acme --runtime node');
+      expect(await h.run(['acme', '--workspace', '--runtime', 'cloudflare-workers'])).toBe(2);
+      expect(h.err.text()).toContain('own deploy unit');
+      expect(h.err.text()).toContain('setu new acme --runtime cloudflare-workers');
       expect(h.fs.writes).toEqual([]);
     });
 

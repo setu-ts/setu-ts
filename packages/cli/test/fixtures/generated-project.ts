@@ -149,6 +149,97 @@ export async function collectSources(dir: string): Promise<string[]> {
   return found;
 }
 
+/**
+ * A port nothing on this machine is listening on.
+ *
+ * Never a fixed number: a scaffolded project binds `3000`, and so does anything
+ * else a developer happens to be running, so a literal makes the gate report on
+ * whichever process won the race. Binding port `0` and closing immediately is the
+ * same technique `apps/*` smoke checks use.
+ *
+ * @returns A free TCP port
+ */
+export function unusedPort(): number {
+  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
+  const address = listener.addr;
+  listener.close();
+  if (!('port' in address)) throw new Error('Expected a TCP listener.');
+  return address.port;
+}
+
+/** How a booted project ended after it was signalled. */
+export interface SignalOutcome {
+  /** The process exit code. `0` means it shut itself down. */
+  readonly code: number;
+  /**
+   * The signal that killed it, or `null` when it exited under its own control.
+   *
+   * This is the field that distinguishes a graceful stop from death by signal:
+   * a process with no handler for `SIGTERM` is terminated by the kernel and
+   * reports `143` here, having run none of its shutdown path.
+   */
+  readonly killedBySignal: string | null;
+  /** Everything it wrote to stdout and stderr, concatenated. */
+  readonly output: string;
+}
+
+/**
+ * Boots a scaffolded project, waits for it to serve, signals it, and reports how
+ * it ended.
+ *
+ * The readiness fetch is not politeness: signalling before the socket is bound
+ * measures startup rather than shutdown, and would pass whether or not a handler
+ * is installed.
+ *
+ * @param project - The project directory, already repointed at the workspace
+ * @param signal - The signal to send once it is serving
+ * @returns How the process ended
+ * @throws {Error} If the entry has no literal port to rebind, or never serves
+ */
+export async function bootAndSignal(
+  project: string,
+  signal: Deno.Signal,
+): Promise<SignalOutcome> {
+  const port = unusedPort();
+  const entry = `${project}/main.ts`;
+  const source = await Deno.readTextFile(entry);
+  const patched = source.replace(/port: \d+/, `port: ${port}`);
+  if (patched === source) throw new Error(`No literal port to rebind in ${entry}.`);
+  await Deno.writeTextFile(entry, patched);
+
+  const child = new Deno.Command(Deno.execPath(), {
+    args: ['run', '-A', '--node-modules-dir=none', '--config', `${project}/deno.json`, entry],
+    stdout: 'piped',
+    stderr: 'piped',
+  }).spawn();
+
+  let served = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/`);
+      await response.body?.cancel();
+      served = true;
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  const stdout = new Response(child.stdout);
+  const stderr = new Response(child.stderr);
+  if (!served) {
+    child.kill('SIGKILL');
+    await child.status;
+    throw new Error(`The project never served a request:\n${await stderr.text()}`);
+  }
+
+  child.kill(signal);
+  const status = await child.status;
+  const output = `${await stdout.text()}${await stderr.text()}`;
+
+  return { code: status.code, killedBySignal: status.signal ?? null, output };
+}
+
 /** Prefix a probe puts its one-line JSON result behind. */
 export const PROBE_MARKER = '__PROBE_RESULT__';
 

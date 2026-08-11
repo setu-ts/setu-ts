@@ -85,6 +85,15 @@ describe('isIdentifierSafe', () => {
     expect(isIdentifierSafe(deriveNames('oauth2-client'))).toBe(true);
   });
 
+  // These survive normalisation intact — `deriveNames('.')` returns `.` for every
+  // form — so the empty check passes them straight through. `setu adopt` derives
+  // its member name from a directory, which made `--dir .` produce `apps/.`.
+  it('rejects a path segment carrying no letter at all', () => {
+    for (const input of ['.', '..', './']) {
+      expect(isIdentifierSafe(deriveNames(input))).toBe(false);
+    }
+  });
+
   it('rejects a name that normalises to nothing', () => {
     // Would emit `class Service` at the hidden path src/services/.service.ts.
     for (const raw of ['', '___', '---', '   ']) {

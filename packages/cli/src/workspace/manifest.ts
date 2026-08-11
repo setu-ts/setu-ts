@@ -13,7 +13,10 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 
+import { isTargetRuntime, type TargetRuntime } from '../constants.ts';
+
 import { joinPath } from '../utils/file-writer.ts';
+import { isWorkspaceRuntime } from './runtime-profile.ts';
 import { DEFAULT_TRANSPORT, getTransport, type TransportName } from './transport.ts';
 
 /** The workspace manifest's filename, at the workspace root. */
@@ -61,6 +64,49 @@ export function isUsablePort(value: unknown): value is number {
     value >= MIN_PORT && value <= MAX_PORT;
 }
 
+/** What reading a `--port` flag produced. */
+export type PortFlagResult =
+  | { readonly ok: true; readonly port?: number }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * Reads and validates a `--port` flag.
+ *
+ * Shared by `setu new --workspace` (where it sets the base port) and
+ * `setu generate app` (where it sets one member's), so the two cannot disagree
+ * about what a bindable port is. They already could not disagree with the
+ * MANIFEST reader — the range comes from {@linkcode isUsablePort} — and this
+ * closes the same gap between the two flag sites.
+ *
+ * Presence is tested, not `stringFlag`: `parseArgs` records a valued flag as the
+ * boolean `true` when the next token is itself flag-shaped or absent, so
+ * `--port -1` and a trailing `--port` both read as "no value". Testing for a
+ * string instead would let the number the user typed vanish without a word.
+ *
+ * @param flags - The parsed flags
+ * @returns The port, `ok` with no port when the flag is absent, or the refusal
+ */
+export function readPortFlag(flags: Readonly<Record<string, string | boolean>>): PortFlagResult {
+  const raw = flags['port'];
+  if (raw === undefined) return { ok: true };
+  if (typeof raw !== 'string') {
+    return {
+      ok: false,
+      message: `--port needs a value: expected an integer between ${MIN_PORT} and ${MAX_PORT}. ` +
+        `A negative number is read as another flag, so there is no port below ${MIN_PORT}.`,
+    };
+  }
+
+  const port = Number(raw);
+  if (!isUsablePort(port)) {
+    return {
+      ok: false,
+      message: `Invalid --port "${raw}": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+    };
+  }
+  return { ok: true, port };
+}
+
 /** One member of a workspace. */
 export interface WorkspaceMember {
   /** The member's directory name under `apps/`, and its service name in every sibling's map. */
@@ -90,6 +136,18 @@ export interface WorkspaceManifest {
    * Omitted for `http`, `grpc` and `memory`, which have no endpoint to name.
    */
   readonly transportUrl?: string;
+  /**
+   * Which toolchain the workspace is built and run with.
+   *
+   * Recorded at the WORKSPACE level for the same reason the transport is, and
+   * with more force: members share one root manifest and one lockfile, so a
+   * per-member runtime would make an unbuildable workspace expressible in a flag.
+   *
+   * **Absent means `deno`**, so every workspace created before this field existed
+   * keeps its shape and its behaviour — the same compatibility trick `transport`
+   * uses.
+   */
+  readonly runtime: TargetRuntime;
   /** Every member, in creation order. */
   readonly members: readonly WorkspaceMember[];
 }
@@ -124,7 +182,15 @@ export type WorkspaceManifestProblem =
    * the bus the manifest asked for would leave services that cannot reach each
    * other and no diagnostic saying why.
    */
-  | { readonly kind: 'unknown-transport'; readonly transport: string };
+  | { readonly kind: 'unknown-transport'; readonly transport: string }
+  /**
+   * Well-formed, but naming a runtime no workspace can be built with.
+   *
+   * Refused rather than defaulted for the same reason an unknown transport is:
+   * quietly rebuilding a workspace with a different toolchain would rewrite every
+   * member's manifest and its image.
+   */
+  | { readonly kind: 'unknown-runtime'; readonly runtime: string };
 
 /** The result of reading a workspace manifest. */
 export type WorkspaceManifestResult =
@@ -214,6 +280,19 @@ export async function readWorkspaceManifest(
     return { ok: false, problem: { kind: 'malformed' } };
   }
 
+  // Absent → `deno`, so a workspace created before this field existed keeps its
+  // shape. An unrecognised value is refused rather than defaulted, exactly as an
+  // unknown transport is: silently rebuilding a workspace with the wrong
+  // toolchain would rewrite every member's manifest and its Dockerfile.
+  const rawRuntime = record['runtime'];
+  const runtime = rawRuntime === undefined ? 'deno' : rawRuntime;
+  if (
+    typeof runtime !== 'string' || !isTargetRuntime(runtime) ||
+    !isWorkspaceRuntime(runtime)
+  ) {
+    return { ok: false, problem: { kind: 'unknown-runtime', runtime: String(runtime) } };
+  }
+
   const rawMembers = record['members'];
   if (!Array.isArray(rawMembers)) return { ok: false, problem: { kind: 'malformed' } };
 
@@ -244,6 +323,7 @@ export async function readWorkspaceManifest(
       version,
       basePort,
       transport: transport as TransportName,
+      runtime,
       ...(rawUrl === undefined ? {} : { transportUrl: rawUrl }),
       members,
     },

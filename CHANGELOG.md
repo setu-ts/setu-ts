@@ -6,6 +6,73 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A scaffolded project now survives `SIGTERM`.** A generated `main.ts` installed no signal
+  handler, so `docker stop` and every pod eviction killed it: measured at **exit 143 after 1 ms**,
+  with `app.stop()` never run — no drain, no service-discovery deregistration, no database or broker
+  disconnect. M39 found and fixed this in this repository's own examples and documented the pattern
+  as recommended; the generator kept emitting the defect. `main.ts` now catches `SIGTERM` and
+  `SIGINT` — `Deno.addSignalListener` (Windows-guarded, where it throws) or `process.on` for Node
+  and Bun, nothing on Cloudflare Workers, which has no process. Both npm targets declare the type
+  package their `process` reference needs.
+- **`setu new --template full-stack` served a blank home page.** `app/routes.ts` wraps two
+  `flatRoutes` groups in `layout()` calls and neither had an `_index`, so `/` matched a layout with
+  no child: `<Outlet />` rendered nothing and the server answered **200 with an empty `<body>`** —
+  not a 404, not an error. Measured on a scaffolded project: `/products` and `/login` rendered while
+  `/` returned 2761 bytes of shell and no visible text. M37c found and fixed exactly this in
+  `apps/full-stack`; the template kept emitting it, because every check requested `/products` and
+  `/login` explicitly and nothing ever requested `/`.
+
+### Added
+
+- **Container and Kubernetes artifacts for a generated workspace.** `setu generate app` emits
+  `docker/Dockerfile` (one parameterized image per member), `.dockerignore` (at the workspace root,
+  where Docker reads it — without one the host's `node_modules` is copied over the one the image
+  installed), `docker/compose.yaml` (every member plus the transport's broker) and
+  `k8s/members.yaml` (a Deployment and a Service per member), all regenerated for the whole
+  workspace whenever a member is added. M39 owns this repository's own deployment objects; nothing
+  produced any for a user's project.
+- **`--transport pubsub` and `--transport service-bus`.** Both were previously refused because each
+  needs a value no scaffold can invent. Every transport with a connection value now reads it from
+  the environment with a local fallback, and for these two that fallback is the vendor's own
+  local-emulator setting — so a scaffolded workspace runs against an emulator unconfigured and
+  against the real service with one variable set.
+- **`setu generate library <name>`.** Shared code as a workspace member under `libs/`, importable by
+  every sibling as `@<scope>/<name>` with no import-map entry anywhere.
+- **`setu adopt`.** Converts an existing single-service project into a workspace holding it as the
+  first member. It moves only the files the CLI emits, so `.git`, CI configuration and `deno.lock`
+  stay at the repository root.
+- **`setu generate app --port <n>`.** A member can be given a specific port; one another member
+  already binds is refused.
+- **`--template full-stack` as a workspace member.** Its Vite build needs `node_modules`, which only
+  the workspace root may enable, so the root gains `nodeModulesDir` when such a member arrives — and
+  not before, because with it set an ordinary member's first `deno check` materialises every npm
+  package the framework lazily imports.
+- **Node and Bun workspaces.** `setu new --workspace --runtime node|bun` builds a monorepo on npm
+  workspaces instead of a Deno one — the framework claims runtime independence, and only the
+  monorepo was Deno-only. The runtime is recorded in `setu.workspace.json` (absent means `deno`, so
+  nothing existing changes) and every later command reads it back: root manifest shape, environment
+  reads in generated source, library manifest and test runner, base image, and install and run
+  commands. Cloudflare Workers is refused, because each Worker is its own deploy unit.
+- **A proto toolchain for `--transport grpc` members.** An example proto, both `buf` manifests and a
+  `proto:gen` task. Both the compiler and the codegen plugin run through Deno's npm compatibility,
+  so nothing needs `buf` or `protoc` on a PATH.
+
+### Changed
+
+- **A workspace transport's connection value is an environment read, not a literal.** A generated
+  member's `MessagingPlugin` wiring was `url: 'redis://127.0.0.1:6379'`, which is unreachable from
+  inside a container — two Compose services do not share a loopback interface, so the member dialled
+  its own container. It is now `Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379'`.
+- **The generated discovery map reads each sibling's host from `<MEMBER>_HOST`**, falling back to
+  `127.0.0.1`, for the same reason: inside a container loopback is the container itself, so a fixed
+  address had every member dial ITSELF on its sibling's port. The generated Compose stack and
+  Kubernetes objects set those variables to the service names.
+- **A new workspace's root declares both member globs** (`./apps/*` and `./libs/*`) at creation, so
+  neither a service nor a library ever rewrites it. A workspace created earlier gets the second glob
+  added when its first library arrives.
+
 ## [0.1.0-alpha.6] — 2026-08-11
 
 **A generator release.** Eleven of the fourteen artifacts `setu generate` emits now reach a

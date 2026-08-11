@@ -1420,6 +1420,66 @@ export function checkPackageCatalog(
  * @param root - Directory to walk
  * @returns Markdown file paths, sorted
  */
+/**
+ * Documents whose stale version references are a RECORD rather than a defect.
+ *
+ * A changelog states what a past release did, and a release runbook walks through
+ * one as a worked example; rewriting either to the current version would falsify
+ * it. Everything else — a package README's install line, a guide's snippet — tells
+ * a reader what to run TODAY, and a version there that JSR no longer serves as the
+ * newest is simply wrong.
+ */
+const VERSION_HISTORY_DOCS: readonly string[] = [
+  'CHANGELOG.md',
+  'ROADMAP.md',
+  'CLAUDE.md',
+  'docs/releasing.md',
+];
+
+/**
+ * Reports install snippets pinning a version older than the one being shipped.
+ *
+ * These drift silently and in the worst possible place: a package README's
+ * install line is the first thing a new user runs, and `packages/sdk/README.md`
+ * sat two releases behind while every gate stayed green. Nothing else can see it
+ * — `release:verify` checks manifests and cross-package specifiers, not prose, and
+ * a stale-but-real version still resolves on JSR, so the command in the README
+ * WORKS while installing something two releases old.
+ *
+ * Only `@setu-ts/…` specifiers are read, and only ones naming this project's own
+ * `0.1.0-alpha.N` line, so a third-party pin in a guide is left alone.
+ *
+ * @param contents - Every checked document, by path
+ * @param current - The version this workspace ships
+ * @returns One finding per stale reference
+ */
+export function checkInstallVersions(
+  contents: ReadonlyMap<string, string>,
+  current: string,
+): Finding[] {
+  const findings: Finding[] = [];
+  const reference = /@setu-ts\/[a-z0-9-]+@\^?(0\.1\.0-alpha\.\d+)/g;
+
+  for (const [file, source] of contents) {
+    const relative = file.startsWith('./') ? file.slice(2) : file;
+    if (VERSION_HISTORY_DOCS.includes(relative) || relative.startsWith('plans/')) continue;
+
+    for (const [index, line] of source.split('\n').entries()) {
+      for (const match of line.matchAll(reference)) {
+        if (match[1] === current) continue;
+        findings.push({
+          file: relative,
+          line: index + 1,
+          message: `Names @setu-ts version ${match[1]}, but this workspace ships ${current}. ` +
+            `An install snippet has to name the version being shipped — a stale one still ` +
+            `resolves on JSR, so the command works and installs something old.`,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 async function collectMarkdown(root: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
@@ -1480,7 +1540,7 @@ if (import.meta.main) {
       }
     }
     // Also include markdown files from docs/ subdirectories
-    const docsRoots = ['docs', 'plans/archive'];
+    const docsRoots = ['docs'];
     for (const root of docsRoots) {
       try {
         for await (const entry of Deno.readDir(root)) {
@@ -1516,6 +1576,22 @@ if (import.meta.main) {
     findings.push(...checkDocument(file, source));
   }
 
+  // Install snippets that name a version other than the one shipping. The
+  // workspace version is read from one manifest rather than passed in, because
+  // `release:verify` already proves all 47 agree.
+  const kernelManifest = JSON.parse(
+    await Deno.readTextFile('packages/kernel/deno.json'),
+  ) as { version?: string };
+  if (kernelManifest.version === undefined) {
+    findings.push({
+      file: 'packages/kernel/deno.json',
+      line: 1,
+      message: 'No version field, so no document version can be checked against it.',
+    });
+  } else {
+    findings.push(...checkInstallVersions(fileContents, kernelManifest.version));
+  }
+
   // Run local link checks (only in default scan mode, only on markdown files)
   // Skip archived plan files as they may reference historical paths.
   // Collect the deterministic manifest-derived generated API page set so
@@ -1537,7 +1613,7 @@ if (import.meta.main) {
     }
 
     for (const file of files) {
-      if (!file.endsWith('.md') || file.startsWith('plans/archive/')) continue;
+      if (!file.endsWith('.md')) continue;
       const source = fileContents.get(file)!;
       const linkFindings = await checkLocalLinks(file, source, linkTargets, generatedApiPages);
       findings.push(...linkFindings);

@@ -26,7 +26,7 @@ import { listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost } from '../templates/project-files.ts';
-import { DEFAULT_BASE_PORT, isUsablePort, MAX_PORT, MIN_PORT } from '../workspace/manifest.ts';
+import { DEFAULT_BASE_PORT, readPortFlag } from '../workspace/manifest.ts';
 import {
   DEFAULT_TRANSPORT,
   getTransport,
@@ -35,6 +35,11 @@ import {
   TRANSPORTS,
   type TransportSpec,
 } from '../workspace/transport.ts';
+import {
+  isWorkspaceRuntime,
+  WORKSPACE_RUNTIMES,
+  workspaceProfile,
+} from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import { deriveNames } from '../utils/names.ts';
 import {
@@ -61,47 +66,6 @@ export interface NewDependencies {
 }
 
 /**
- * Reads and validates `--port`.
- *
- * The range comes from `workspace/manifest.ts` rather than a local constant, so
- * the flag and the manifest reader cannot disagree about what a bindable port
- * is — they did, and an out-of-range port hand-edited into the manifest reached
- * every generated module unchecked.
- *
- * @param args - The parsed arguments
- * @returns The base port, `undefined` when the flag is absent, or the refusal
- */
-function readBasePort(
-  args: ParsedArgs,
-): { readonly ok: true; readonly port?: number } | {
-  readonly ok: false;
-  readonly message: string;
-} {
-  // Presence, not `stringFlag`. `parseArgs` records a valued flag as the boolean
-  // `true` when the next token is itself flag-shaped or absent, so
-  // `--port -1` and a trailing `--port` both read as "no value" — and testing
-  // for a string would let the number the user typed vanish without a word.
-  const raw = args.flags['port'];
-  if (raw === undefined) return { ok: true };
-  if (typeof raw !== 'string') {
-    return {
-      ok: false,
-      message: `--port needs a value: expected an integer between ${MIN_PORT} and ${MAX_PORT}. ` +
-        `A negative number is read as another flag, so there is no port below ${MIN_PORT}.`,
-    };
-  }
-
-  const port = Number(raw);
-  if (!isUsablePort(port)) {
-    return {
-      ok: false,
-      message: `Invalid --port "${raw}": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
-    };
-  }
-  return { ok: true, port };
-}
-
-/**
  * Plans a workspace root, refusing the flags a root cannot honor.
  *
  * `--template` and a non-Deno `--runtime` are refused rather than ignored: a
@@ -123,12 +87,17 @@ function planWorkspace(
   readonly ok: false;
   readonly message: string;
 } {
-  if (runtime !== 'deno') {
+  // Deno, Node and Bun all host a workspace; Cloudflare Workers does not, and
+  // that is a topology difference rather than a missing profile — each Worker is
+  // its own deploy unit with its own `wrangler.toml`, so several in one repository
+  // are several deployments, not members sharing a root manifest and a lockfile.
+  if (!isWorkspaceRuntime(runtime)) {
     return {
       ok: false,
-      message: `A Setu workspace is a Deno workspace, so --runtime ${runtime} cannot apply. ` +
-        `Scaffold a standalone project instead: ` +
-        `\`${PROGRAM_NAME} new ${name} --runtime ${runtime}\`.`,
+      message: `--runtime ${runtime} cannot host a workspace: each Worker is its own deploy ` +
+        `unit with its own wrangler.toml, so several of them are several deployments rather ` +
+        `than members of one. Workspaces target ${WORKSPACE_RUNTIMES.join(', ')}; scaffold a ` +
+        `standalone project instead with \`${PROGRAM_NAME} new ${name} --runtime ${runtime}\`.`,
     };
   }
 
@@ -154,7 +123,7 @@ function planWorkspace(
     };
   }
 
-  const basePort = readBasePort(args);
+  const basePort = readPortFlag(args.flags);
   if (!basePort.ok) return { ok: false, message: basePort.message };
 
   const transport = readTransport(args);
@@ -166,7 +135,9 @@ function planWorkspace(
       name,
       basePort.port ?? DEFAULT_BASE_PORT,
       transport.spec,
-      transport.url,
+      workspaceProfile(runtime),
+      // Omitted rather than passed as `undefined`: exactOptionalPropertyTypes.
+      ...(transport.url === undefined ? [] : [transport.url]),
     ),
   };
 }
@@ -217,18 +188,29 @@ function readTransport(
   if (typeof rawUrl !== 'string') {
     return { ok: false, message: `--transport-url needs a value.` };
   }
-  // Refused rather than stored: a transport with no broker has nothing to point
-  // at, so recording the URL would put a value in the manifest that no
-  // generated config ever reads.
-  if (spec.defaultEndpoint === undefined) {
+  // Refused rather than stored, for two different reasons — and they are told
+  // apart, because "this transport has no broker" is wrong advice for a cloud arm
+  // that plainly does.
+  if (spec.connection?.urlOverridable !== true) {
+    const applies = listTransports()
+      .filter((t) => t.connection?.urlOverridable === true)
+      .map((t) => t.name)
+      .join(', ');
+
+    if (spec.connection !== undefined) {
+      return {
+        ok: false,
+        message: `--transport ${spec.name} is not configured by URL: its connection value is ` +
+          `read from ${spec.connection.variable} at run time, because it is a project id or a ` +
+          `secret and a generated file is the wrong place for either. Leave it unset to use the ` +
+          `local emulator. --transport-url applies to ${applies}.`,
+      };
+    }
+
     return {
       ok: false,
       message: `--transport ${spec.name} has no broker, so --transport-url has nothing to ` +
-        `address. It applies to ${
-          listTransports().filter((t) => t.defaultEndpoint !== undefined).map((t) => t.name).join(
-            ', ',
-          )
-        }.`,
+        `address. It applies to ${applies}.`,
     };
   }
   return { ok: true, spec, url: rawUrl };

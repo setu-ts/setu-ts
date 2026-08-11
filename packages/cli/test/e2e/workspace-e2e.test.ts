@@ -17,28 +17,17 @@ import { expect } from '@std/expect';
 import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
-import { bootAndProbe, denoCheck, useWorkspacePackages } from '../fixtures/generated-project.ts';
+import {
+  bootAndProbe,
+  denoCheck,
+  unusedPort,
+  useWorkspacePackages,
+} from '../fixtures/generated-project.ts';
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 
 const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
-
-/**
- * Finds a port nothing is listening on.
- *
- * The workspace's base port is taken from here rather than from the CLI's
- * default 3000: this gate binds REAL sockets, and a constant would collide with
- * whatever else the machine happens to be running.
- *
- * @returns A free TCP port on loopback
- */
-function freePort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
-}
 
 /**
  * The probe `orders` runs: resolve `billing` through the discovery capability
@@ -103,7 +92,7 @@ describe('workspace scaffolding — end to end', () => {
     root = await Deno.makeTempDir({ prefix: 'setu-ws-' });
     out = [];
     err = [];
-    base = freePort();
+    base = unusedPort();
   });
 
   afterEach(async () => {
@@ -146,8 +135,10 @@ describe('workspace scaffolding — end to end', () => {
     const ws = await twoMembers();
     const orders = await Deno.readTextFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`);
     const billing = await Deno.readTextFile(`${ws}/apps/billing/${DISCOVERY_MODULE}`);
-    expect(orders).toContain(`'billing': [{ host: '127.0.0.1', port: ${base + 1} }]`);
-    expect(billing).toContain(`'orders': [{ host: '127.0.0.1', port: ${base} }]`);
+    expect(orders).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
+    expect(orders).toContain(`port: ${base + 1},`);
+    expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') ?? '127.0.0.1'");
+    expect(billing).toContain(`port: ${base},`);
   });
 
   it('gives every member the start task the root dev task runs', async () => {
@@ -216,6 +207,75 @@ describe('workspace scaffolding — end to end', () => {
       `${project}/setu.config.ts`,
     ]);
     expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // A frontend member was refused outright until its one real blocker was
+  // measured: its Vite build needs `node_modules`, and Deno accepts
+  // `nodeModulesDir` only in the workspace ROOT. With the root declaring it, a
+  // real `react-router build` and an SSR 200 both work inside a member — verified
+  // by hand, because this suite has no network grant and so cannot run the npm
+  // install that build needs.
+  //
+  // What it CAN check is everything up to the build: the member exists, the root
+  // gained exactly one field, and the server-side modules type-check.
+  it('adds a full-stack member and enables node_modules at the root', async () => {
+    expect(await run(['new', 'shop', '--workspace', '--port', String(base)])).toBe(0);
+    const ws = `${root}/shop`;
+    expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
+
+    const rootManifest = JSON.parse(await Deno.readTextFile(`${ws}/deno.json`)) as {
+      nodeModulesDir?: string;
+      workspace?: string[];
+      tasks?: Record<string, string>;
+    };
+    expect(rootManifest.nodeModulesDir).toBe('auto');
+    // The merge keeps what the root already declared: a regenerated root would
+    // drop the globs that make it a workspace at all.
+    expect(rootManifest.workspace).toEqual(['./apps/*', './libs/*']);
+    expect(rootManifest.tasks?.['dev']).toBe('deno task --recursive start');
+
+    // The route whose absence made `/` a blank 200 in every scaffolded
+    // full-stack project. Asserted as a file because proving it functionally
+    // needs the real build.
+    const project = `${ws}/apps/web`;
+    expect((await Deno.stat(`${project}/app/routes/_app/_index.tsx`)).isFile).toBe(true);
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      `${project}/app/lib/load-context.ts`,
+    ]);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // The whole claim of a library member is that it needs NO wiring: a Deno
+  // workspace resolves a member by its declared name, so a sibling importing
+  // `@acme/shared` resolves with no entry in its own import map and none in the
+  // root's. Nothing but a real type-check of a member that imports one can prove
+  // that — a unit test can only assert the manifest fields.
+  it('lets a member import a generated library by name, with no import map entry', async () => {
+    const ws = await twoMembers();
+    expect(await run(['g', 'library', 'shared', '--dir', ws])).toBe(0);
+
+    const project = `${ws}/apps/orders`;
+    // The member's own manifest is NOT touched by the library command, which is
+    // exactly what makes this test meaningful.
+    const before = await Deno.readTextFile(`${project}/deno.json`);
+    expect(before).not.toContain('@acme/shared');
+
+    // A module in the member that imports the library and uses its export.
+    await Deno.writeTextFile(
+      `${project}/src/uses-library.ts`,
+      `import { shared } from '@acme/shared';\n\n` +
+        `export const describeIt = (): string => shared('orders');\n`,
+    );
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, [`${project}/src/uses-library.ts`]);
+    expect(stderr).not.toContain('Relative import path');
     expect(code).toBe(0);
   });
 

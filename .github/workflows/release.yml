@@ -67,7 +67,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          deno-version: 2.9.5
 
       # ── Gates ────────────────────────────────────────────────────────────
       # Same four gates as CI, re-run here so a tag can never publish a tree
