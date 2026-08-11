@@ -16,7 +16,14 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { APP_VERB, EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
+import {
+  APP_VERB,
+  EXIT_ERROR,
+  EXIT_OK,
+  EXIT_USAGE,
+  PROGRAM_NAME,
+  TEMPLATES,
+} from '../constants.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
@@ -35,6 +42,7 @@ import {
   SERVICE_PORT_EXPORT,
 } from '../workspace/discovery-module.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
+import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
 import {
   allocatePort,
@@ -65,18 +73,6 @@ export interface AppDependencies {
 }
 
 /**
- * The template a workspace member may not use, and why.
- *
- * Measured, not cautious: `full-stack` emits a `package.json` for its Vite
- * build, which switches Deno to node_modules resolution, and such a project
- * needs `nodeModulesDir` in its own manifest. Deno refuses that in a member —
- * `"nodeModulesDir" field can only be specified in the workspace root deno.json
- * file` — so the member would scaffold cleanly and then fail to resolve its own
- * dependencies. Refusing at scaffold time beats that.
- */
-const REFUSED_TEMPLATE = 'full-stack';
-
-/**
  * Prints the command's usage.
  *
  * @param log - Output sink
@@ -91,7 +87,10 @@ function printUsage(log: (message: string) => void): void {
   log(`port, and registers it in every other member's static discovery map.`);
   log('');
   log('Options:');
-  log('  --template <name>   rest | microservice | nest');
+  // From the constant, not a hand-written list: this said
+  // `rest | microservice | nest` while `full-stack` was refused, and would have
+  // gone on saying it after the refusal was lifted.
+  log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
   log('  --di                Register DiPlugin in this member');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
   log('  --dir <path>        The workspace root, instead of the working directory');
@@ -172,6 +171,7 @@ function planMember(
   next: WorkspaceManifest,
   args: ParsedArgs,
   transport: TransportSpec,
+  rootManifest: string,
 ): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
   readonly ok: false;
   readonly message: string;
@@ -180,14 +180,34 @@ function planMember(
   // is no npm-workspace design here to put a `node` member into.
   const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
-  if (choice.template?.name === REFUSED_TEMPLATE) {
-    return {
-      ok: false,
-      message:
-        `The "${REFUSED_TEMPLATE}" template cannot be a workspace member: its frontend build ` +
-        `needs \`nodeModulesDir\`, which Deno accepts only in the workspace root deno.json. ` +
-        `Scaffold it standalone with \`${PROGRAM_NAME} new <name> --template ${REFUSED_TEMPLATE}\`.`,
-    };
+
+  const extra: GeneratedFile[] = [];
+
+  // A template with a frontend build needs `node_modules`, which only the root
+  // may enable. Measured: a real `react-router build` and an SSR 200 both work
+  // inside a member once the root declares it.
+  if (choice.template?.manifest?.npmBuildScript !== undefined) {
+    // …but the transport must be able to reach it first. A starter-composed
+    // template owns its whole plugin set, so a transport that appends a plugin
+    // or rewrites `MessagingPlugin`'s arguments would have its contribution
+    // SILENTLY DROPPED by the renderer's factory branch — the member would join
+    // a workspace on a bus it is not actually connected to.
+    const contributes = transport.plugins.length > 0 || transport.messagingArgs !== undefined;
+    if (choice.template.appFactory !== undefined && contributes) {
+      return {
+        ok: false,
+        message: `The "${choice.template.name}" template composes its whole plugin set through ` +
+          `${choice.template.appFactory.symbol}, so this workspace's "${transport.name}" ` +
+          `transport cannot reach it — the plugin it contributes would be dropped and the member ` +
+          `would look connected while talking to nobody. Add it to a workspace on ` +
+          `--transport http or memory, or scaffold it standalone with ` +
+          `\`${PROGRAM_NAME} new <name> --template ${choice.template.name}\`.`,
+      };
+    }
+
+    const plan = planRootNodeModulesDir(rootManifest, name);
+    if (plan.kind === 'refused') return { ok: false, message: plan.message };
+    if (plan.kind === 'update') extra.push(plan.file);
   }
 
   const host = withWorkspaceMember(
@@ -220,6 +240,8 @@ function planMember(
     contents: renderWorkspaceManifest(next),
     managed: true,
   });
+
+  for (const file of extra) files.push(file);
 
   return { ok: true, files };
 }
@@ -349,9 +371,22 @@ export async function runAppCommand(
     members: [...read.manifest.members, { name, port }],
   };
 
+  // Read unconditionally, because whether it is NEEDED depends on the template,
+  // which `planMember` resolves. An unreadable root is not an error by itself —
+  // only a frontend member has to edit it — so the failure is carried as an empty
+  // string and turned into a refusal there, naming the member that needed it.
+  let rootManifest = '';
+  try {
+    rootManifest = new TextDecoder().decode(
+      await deps.fs.readFile(joinPath(deps.dir, ROOT_MANIFEST)),
+    );
+  } catch {
+    // Left empty: `planRootNodeModulesDir` refuses an unparseable root.
+  }
+
   // Total: the manifest reader refuses a transport it does not know, so this
   // resolves without a "cannot happen" branch.
-  const plan = planMember(name, next, args, transportSpec(next.transport));
+  const plan = planMember(name, next, args, transportSpec(next.transport), rootManifest);
   if (!plan.ok) {
     deps.error(plan.message);
     return EXIT_USAGE;

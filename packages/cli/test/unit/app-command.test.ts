@@ -10,6 +10,7 @@ import {
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
+import { ROOT_MANIFEST } from '../../src/workspace/root-manifest.ts';
 import type { TransportName } from '../../src/workspace/transport.ts';
 
 interface Harness {
@@ -34,6 +35,7 @@ function harness(
   members?: readonly WorkspaceMember[],
   basePort = 3000,
   transport: TransportName = 'http',
+  root?: string,
 ): Harness {
   const seed: Record<string, string> = {};
   if (members !== undefined) {
@@ -43,6 +45,17 @@ function harness(
       transport,
       members,
     });
+    // A real workspace root has this, and leaving it out made a refusal pass for
+    // the wrong reason: the full-stack case was asserted to fail on
+    // `nodeModulesDir`, and with no root manifest to read it failed because the
+    // file was missing rather than because of anything the template needed.
+    seed[`/ws/${ROOT_MANIFEST}`] = root ?? `${
+      JSON.stringify(
+        { workspace: ['./apps/*'], tasks: { dev: 'deno task --recursive start' } },
+        null,
+        2,
+      )
+    }\n`;
   }
   const fs = createFakeFs(seed);
   const out = createRecorder();
@@ -93,13 +106,16 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'orders', '--runtime', 'deno'])).toBe(0);
     });
 
-    // Measured: a member may not declare `nodeModulesDir`, which that
-    // template's Vite build needs, so it would scaffold and then fail to
-    // resolve its own dependencies.
-    it('refuses the full-stack template, naming nodeModulesDir', async () => {
-      const h = harness([]);
+    // The template itself is now allowed as a member — what is refused is the
+    // pairing. It composes through a starter factory, so `TemplateHost.plugins`
+    // must stay empty, and a broker transport's contribution would be dropped by
+    // the renderer's factory branch: the member would look connected to the bus
+    // and reach nobody.
+    it('refuses a starter-composed template on a transport that adds a plugin', async () => {
+      const h = harness([], 3000, 'redis');
       expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(2);
-      expect(h.err.text()).toContain('nodeModulesDir');
+      expect(h.err.text()).toContain('createFullStackAppFromConfig');
+      expect(h.err.text()).toContain('talking to nobody');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -138,6 +154,80 @@ describe('runAppCommand', () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--port'])).toBe(2);
       expect(h.err.text()).toContain('--port needs a value');
+      expect(h.fs.writes).toEqual([]);
+    });
+  });
+
+  // A frontend member is the one case that needs a field only the workspace ROOT
+  // may declare, so it is also the one case where this command edits a file it
+  // did not just create.
+  describe('a member with a frontend build', () => {
+    /**
+     * Reads a workspace root manifest out of the fake filesystem.
+     *
+     * @param h - The harness
+     * @returns The parsed root manifest
+     */
+    function rootOf(h: Harness): Record<string, unknown> {
+      return JSON.parse(h.fs.read(`/ws/${ROOT_MANIFEST}`)) as Record<string, unknown>;
+    }
+
+    it('adds nodeModulesDir to the workspace root', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+      const root = rootOf(h);
+      expect(root['nodeModulesDir']).toBe('auto');
+      // Everything else the root held survives: this is a one-key merge, not a
+      // regeneration, so a task the developer added is not discarded.
+      expect(root['workspace']).toEqual(['./apps/*']);
+      expect(root['tasks']).toEqual({ dev: 'deno task --recursive start' });
+    });
+
+    // Every OTHER member must leave the root alone. Declaring it up front would
+    // make an ordinary member's first `deno check` materialise every npm package
+    // the framework lazily imports — the AWS SDK, the Kafka and Redis clients —
+    // into node_modules, none of which it uses.
+    it('leaves the root untouched for a member with no frontend build', async () => {
+      const h = harness([]);
+      const before = h.fs.read(`/ws/${ROOT_MANIFEST}`);
+      expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
+      expect(h.fs.read(`/ws/${ROOT_MANIFEST}`)).toBe(before);
+      expect(rootOf(h)['nodeModulesDir']).toBeUndefined();
+    });
+
+    it('writes the root once, not again on a second frontend member', async () => {
+      const first = harness([]);
+      expect(await first.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+      const updated = first.fs.read(`/ws/${ROOT_MANIFEST}`);
+
+      const second = harness(
+        JSON.parse(first.fs.read(`/ws/${WORKSPACE_MANIFEST}`)).members as WorkspaceMember[],
+        3000,
+        'http',
+        updated,
+      );
+      expect(await second.run(['app', 'admin', '--template', 'full-stack'])).toBe(0);
+      expect(second.fs.writes).not.toContain(`/ws/${ROOT_MANIFEST}`);
+    });
+
+    // `none` is a deliberate choice to keep every dependency in Deno's global
+    // cache. Overwriting it would reverse a decision without saying so.
+    it('refuses a root that answers nodeModulesDir differently', async () => {
+      const h = harness(
+        [],
+        3000,
+        'http',
+        `${JSON.stringify({ workspace: ['./apps/*'], nodeModulesDir: 'none' })}\n`,
+      );
+      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(2);
+      expect(h.err.text()).toContain('"none"');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses a root it cannot parse rather than rewriting it', async () => {
+      const h = harness([], 3000, 'http', '{ "workspace": ["./apps/*"], // a comment\n}');
+      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(2);
+      expect(h.err.text()).toContain('Add that field by hand');
       expect(h.fs.writes).toEqual([]);
     });
   });
