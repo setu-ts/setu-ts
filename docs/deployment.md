@@ -43,7 +43,7 @@ workspace. Build without the root `deno.json` and Deno resolves that specifier a
 of the local workspace member:
 
 ```
-error: Could not find version of '@setu-ts/common' that matches specified version constraint '^0.1.0-alpha.6'
+error: Could not find version of '@setu-ts/common' that matches specified version constraint '^0.1.0-alpha.7'
 ```
 
 Building from source also means an image tracks your working tree rather than a published snapshot,

@@ -25,6 +25,7 @@ import {
   checkPackageCatalog,
   checkReadmeApiLink,
   checkRequiredGuides,
+  checkVersionClaims,
   findSwallowedHeadings,
   publicApiAnchors,
   scanFences,
@@ -1280,5 +1281,115 @@ describe('documentation gate — install-snippet versions', () => {
       'one: jsr:@setu-ts/cli@^0.1.0-alpha.5\n\nthree: jsr:@setu-ts/sdk@^0.1.0-alpha.3\n';
     const findings = checkInstallVersions(doc('docs/cli.md', source), '0.1.0-alpha.6');
     expect(findings.map((finding) => finding.line)).toEqual([1, 3]);
+  });
+});
+
+describe('documentation gate — bare version claims', () => {
+  /**
+   * Builds the one-document map the checker takes.
+   *
+   * @param file - Path the finding should carry
+   * @param source - Document contents
+   * @returns The map `checkVersionClaims` takes
+   */
+  function doc(file: string, source: string): Map<string, string> {
+    return new Map([[file, source]]);
+  }
+
+  // Cutting 0.1.0-alpha.7 found four stale claims `checkInstallVersions` could
+  // not see, because none carried a package name. This is the first line of
+  // README.md — the first thing a reader reads.
+  it('reports a status sentence naming a version the workspace no longer ships', () => {
+    const findings = checkVersionClaims(
+      doc('README.md', '**Status: all 47 packages are published in `v0.1.0-alpha.6`.**\n'),
+      '0.1.0-alpha.7',
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.line).toBe(1);
+    expect(findings[0]?.message).toContain('0.1.0-alpha.6');
+    expect(findings[0]?.message).toContain('0.1.0-alpha.7');
+  });
+
+  it('reads a claim outside markdown, which is where a chart states its target', () => {
+    const findings = checkVersionClaims(
+      doc('k8s/chart/Chart.yaml', "version: 0.1.0\nappVersion: '0.1.0-alpha.6'\n"),
+      '0.1.0-alpha.7',
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.line).toBe(2);
+  });
+
+  it('accepts the shipping version with or without the leading v', () => {
+    const source = 'published in `v0.1.0-alpha.7`\n\npinned at 0.1.0-alpha.7\n';
+    expect(checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7')).toEqual([]);
+  });
+
+  // "`v0.1.0-alpha.5` renamed the project" is TRUE and must never be rewritten.
+  // A bare version cannot be told apart from a current claim by its shape, so
+  // the exemption is explicit rather than guessed from phrasing.
+  it('skips a block carrying the history marker', () => {
+    const source = '<!-- version:history --> `v0.1.0-alpha.5` renamed the project\n';
+    expect(checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7')).toEqual([]);
+  });
+
+  // `deno fmt` forces blank lines around an HTML comment, so an inline marker is
+  // reformatted into its own block and would otherwise stop covering the
+  // sentence it was attached to.
+  it('lets a marker standing alone cover the block after it', () => {
+    const source = '<!-- version:history -->\n\n`v0.1.0-alpha.5` renamed the project\n';
+    expect(checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7')).toEqual([]);
+  });
+
+  it('carries a standalone marker across a blockquote break, not only a blank line', () => {
+    const source = '> [!IMPORTANT]\n> **Status: `v0.1.0-alpha.7`**\n>\n' +
+      '> <!-- version:history -->\n>\n> `v0.1.0-alpha.5` renamed the project\n';
+    expect(checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7')).toEqual([]);
+  });
+
+  // Otherwise one marked paragraph would exempt everything below it.
+  it('stops carrying after the block the standalone marker covers', () => {
+    const source = '<!-- version:history -->\n\n`v0.1.0-alpha.5` renamed it\n\n' +
+      'ships `v0.1.0-alpha.6`\n';
+    const findings = checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.line).toBe(5);
+  });
+
+  // A marker sharing its block with prose exempts that block and nothing more.
+  it('does not carry from a block holding more than the marker', () => {
+    const source =
+      '<!-- version:history --> `v0.1.0-alpha.5` renamed it\n\nships `v0.1.0-alpha.6`\n';
+    const findings = checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.line).toBe(3);
+  });
+
+  it('accepts the marker in yaml and in line-comment syntax', () => {
+    const yaml = '# version:history\n\nappVersion: 0.1.0-alpha.5\n';
+    expect(checkVersionClaims(doc('k8s/chart/Chart.yaml', yaml), '0.1.0-alpha.7')).toEqual([]);
+    const dockerfile = '// version:history\n\n# matched 0.1.0-alpha.5\n';
+    expect(checkVersionClaims(doc('docker/Dockerfile', dockerfile), '0.1.0-alpha.7')).toEqual([]);
+  });
+
+  // A stale install line is checkInstallVersions' finding; reporting it here too
+  // would make one defect produce two entries pointing at the same character.
+  it('leaves a package specifier to the install-version check', () => {
+    const source = 'deno add jsr:@setu-ts/kernel@^0.1.0-alpha.5\n';
+    expect(checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7')).toEqual([]);
+  });
+
+  it('leaves the documents whose old versions are a record alone', () => {
+    for (const file of ['CHANGELOG.md', 'docs/releasing.md', 'plans/milestone-1.md']) {
+      const findings = checkVersionClaims(
+        doc(file, 'shipped `v0.1.0-alpha.1`\n'),
+        '0.1.0-alpha.7',
+      );
+      expect(findings).toEqual([]);
+    }
+  });
+
+  it('reads a path written with a leading ./ as the same document', () => {
+    expect(checkVersionClaims(doc('./CLAUDE.md', 'at `0.1.0-alpha.2`\n'), '0.1.0-alpha.7'))
+      .toEqual([]);
   });
 });

@@ -4862,7 +4862,7 @@ Install it with an explicit binary name, because Deno's default inference would 
 package (`cli`):
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.6/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.7/main
 ```
 
 ### Commands
@@ -7622,7 +7622,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.1.0-alpha.6
+deno add jsr:@setu-ts/sdk@^0.1.0-alpha.7
 ```
 
 ### createClient()
