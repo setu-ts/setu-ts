@@ -4918,18 +4918,22 @@ Any casing of the name produces identical output: `setu g controller user-profil
 
 ### Options
 
-| Option                                          | Commands          | Behavior                                                                                                                                                                                                                                                                               |
-| ----------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate` | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.                                                                 |
-| `--di`                                          | `new`             | Registers `DiPlugin`, so every `@Injectable` is constructed through a container that honors its `scope`. Off by default; see "Decorators and DI are optional" below. A no-op on `--template nest`, which already registers it.                                                         |
-| `--workspace`                                   | `new`             | Creates a monorepo root instead of a project: a `deno.json` declaring `"workspace": ["./apps/*"]` and a `setu.workspace.json`, with no member. Refuses `--template` and a non-Deno `--runtime` rather than ignoring them.                                                              |
-| `--port <n>`                                    | `new --workspace` | Base port for the workspace's members; the first binds it and each later one takes the next free number above the highest in use. Defaults to `3000`. A usage error outside `--workspace`, or when it is not an integer 1–65535.                                                       |
-| `--transport <name>`                            | `new --workspace` | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value. |
-| `--transport-url <url>`                         | `new --workspace` | Broker endpoint for the broker transports, replacing the local default. A usage error for `http`, `grpc` and `memory`, which have no broker to address.                                                                                                                                |
-| `--dir <path>`                                  | `new`, `generate` | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                                                                                 |
-| `--dry-run`                                     | `new`, `generate` | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                                                                           |
-| `--help`, `-h`                                  | both              | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                                                                           |
-| `--version`, `-v`                               | —                 | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                                                                              |
+| Option                                          | Commands                                   | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate`                          | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.                                                                                                                                                                                                                                                           |
+| `--di`                                          | `new`                                      | Registers `DiPlugin`, so every `@Injectable` is constructed through a container that honors its `scope`. Off by default; see "Decorators and DI are optional" below. A no-op on `--template nest`, which already registers it.                                                                                                                                                                                                                                                   |
+| `--workspace`                                   | `new`                                      | Creates a monorepo root instead of a project: a root manifest whose member globs are `apps/*` and `libs/*` (a `deno.json` `workspace` array, or a `package.json` `workspaces` one under `--runtime node\|bun`), plus a `setu.workspace.json`, with no member. Both globs are written once, so neither a service nor a library ever rewrites the root. Refuses `--template`, and `--runtime cloudflare-workers` — each Worker is its own deploy unit — rather than ignoring them. |
+| `--port <n>`                                    | `new --workspace`, `generate app`, `adopt` | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                 |
+| `--transport <name>`                            | `new --workspace`                          | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                  |
+| `--transport-url <url>`                         | `new --workspace`                          | Replaces the baked local fallback for the endpoint-shaped broker transports. A usage error for `http`, `grpc` and `memory`, which have no broker to address, and for `pubsub` and `service-bus`, whose connection value is a project id or a secret read from the environment — that refusal names the variable.                                                                                                                                                                 |
+| `--scope <scope>`                               | `generate library`                         | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                                                                                                                                             |
+| `--name <member>`                               | `adopt`                                    | The member name the converted project takes. Defaults to the project directory name.                                                                                                                                                                                                                                                                                                                                                                                             |
+| `--scope <scope>`                               | `generate library`                         | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                                                                                                                                             |
+| `--name <member>`                               | `adopt`                                    | The member name the converted project takes. Defaults to the project directory name.                                                                                                                                                                                                                                                                                                                                                                                             |
+| `--dir <path>`                                  | `new`, `generate`                          | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                                                                                                                                                                                                                                                                           |
+| `--dry-run`                                     | `new`, `generate`                          | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `--help`, `-h`                                  | both                                       | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `--version`, `-v`                               | —                                          | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 ### Exit codes
 
@@ -5017,7 +5021,10 @@ export const SERVICE_PORT = 3000;
 
 /** Every OTHER member of this workspace, by service name. */
 export const SERVICE_ENDPOINTS = {
-  'billing': [{ host: '127.0.0.1', port: 3001 }],
+  'billing': [{
+    host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1',
+    port: 3001,
+  }],
 };
 ```
 
@@ -5032,21 +5039,47 @@ That module is `managed`: the CLI rewrites it and a hand edit is lost. The data 
 is `setu.workspace.json` at the root, which records each member's name and port — edit a port there
 and the next `setu generate app` rewrites every module from it.
 
-> **The generated map is the LOCAL development topology**, the addresses your members bind on one
-> machine. A deployed topology comes from a real discovery backend (`provider: 'consul'`,
-> `'kubernetes'`, `'dns'`), not from this file. Compose and Kubernetes objects per member are M39's
-> subject, not the CLI's.
+> **Each sibling's host is overridable** — `<MEMBER>_HOST` — and the fallback is the local address.
+> Both halves matter: `deno task dev` on one machine needs loopback, and inside a container loopback
+> is the container ITSELF, so a fixed value would have every member dial itself on its sibling's
+> port. The generated Compose stack and Kubernetes objects set those variables to the service names.
+>
+> **It is still only a LOCAL topology.** A deployed one comes from a real discovery backend
+> (`provider: 'consul'`, `'kubernetes'`, `'dns'`), not from this file.
 
-| Refusal                                             | Why                                                                                                                                                                                                                                                                                                                                                                 |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `generate app` outside a workspace                  | No `setu.workspace.json` in the target directory. Exits `1` naming `setu new <name> --workspace`.                                                                                                                                                                                                                                                                   |
-| A member name already in use                        | Exits `1` naming the directory it already has. The `managed` exemption covers regenerated modules only, never a member's own source.                                                                                                                                                                                                                                |
-| `--runtime` other than `deno`                       | A Setu workspace is a Deno workspace. Exits `2` naming `setu new <name> --runtime <target>` for a standalone project.                                                                                                                                                                                                                                               |
-| `--template full-stack`                             | That template's Vite build needs `nodeModulesDir`, which Deno accepts only in the workspace root deno.json — the member would scaffold cleanly and fail to resolve its own dependencies.                                                                                                                                                                            |
-| `generate app --port`                               | A member's port is allocated from `setu.workspace.json`, so a per-member `--port` would parse and then be dropped. Exits `2` naming `new --workspace --port`.                                                                                                                                                                                                       |
-| `new --workspace --di`                              | A root registers no plugins, so a container has nothing to construct — as with `--template`. Exits `2` naming `generate app <name> --di`.                                                                                                                                                                                                                           |
-| A port in `setu.workspace.json` outside `1`–`65535` | Refused on read, naming the value and the field. Every port there is written into a member's entry point AND into every sibling's map, so one bad number breaks the workspace: `app.start()` throws `Invalid port (out of range)`, and `0` is worse still — it binds an arbitrary free port, so the member looks healthy while every sibling is refused. Exits `1`. |
-| A workspace with no port left                       | `basePort` and its members reach `65535`. Exits `1` rather than allocating `65536`.                                                                                                                                                                                                                                                                                 |
+#### Container and Kubernetes artifacts
+
+`generate app` also writes, and regenerates for the whole workspace on every member:
+
+| Path                  | What it is                                                                                                                                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docker/Dockerfile`   | One parameterized image for every member: `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .` The context is the workspace root, and every `libs/` member is copied in — a service that imports a shared library cannot otherwise resolve it. |
+| `.dockerignore`       | At the workspace ROOT, which is where Docker reads it — one under `docker/` is read by nothing. Keeps `.git` and every `node_modules` out of the context, so the host's copy is never laid over the one the image installed.                                            |
+| `docker/compose.yaml` | Every member plus the transport's backing service, with each member's allocated port published and its siblings' hosts set to their service names.                                                                                                                      |
+| `k8s/members.yaml`    | A Deployment and a Service per member. `${NAMESPACE}` and `${WORKSPACE}` are placeholders — pipe it through `envsubst`.                                                                                                                                                 |
+
+All are `managed`, for the same reason the discovery modules are: a stack that names two of three
+members is worse than none. M39 owns this repository's OWN deployment objects; these are the
+generated project's.
+
+The images and objects carry M39's cluster findings rather than defaults — a numeric `runAsUser`
+(`runAsNonRoot` refuses a named one, and only under Kubernetes), `/tmp` as the only mount (an
+emptyDir over the module cache masks the cache baked in at build time), a pinned namespace, and a
+`terminationGracePeriodSeconds` that is real only because the generated entry installs a SIGTERM
+handler. Probes are `tcpSocket`, because `/live` and `/ready` exist only when a member registers
+`HealthPlugin`. No Ingress is generated: which controller, host and issuer are cluster decisions,
+and a guessed Ingress routes nothing.
+
+| Refusal                                             | Why                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `generate app` outside a workspace                  | No `setu.workspace.json` in the target directory. Exits `1` naming `setu new <name> --workspace`.                                                                                                                                                                                                                                                                    |
+| A member name already in use                        | Exits `1` naming the directory it already has. The `managed` exemption covers regenerated modules only, never a member's own source.                                                                                                                                                                                                                                 |
+| `--runtime` other than `deno`                       | A Setu workspace is a Deno workspace. Exits `2` naming `setu new <name> --runtime <target>` for a standalone project.                                                                                                                                                                                                                                                |
+| `--template full-stack` on a broker transport       | That template composes its whole plugin set through a starter factory, so a transport that appends a plugin or rewrites `MessagingPlugin` would have its contribution silently dropped — the member would look connected and reach nobody. Allowed on `http` and `memory`, where the transport contributes nothing; the root gains `nodeModulesDir` when it arrives. |
+| `generate app --port` on a taken port               | Two members on one port cannot both bind, while every sibling's map names both — so one name would resolve to the other service. Exits `1` naming the member that holds it. A free port is honoured, and allocation still derives from the highest in use, so a hand-picked port moves the ceiling rather than being reused.                                         |
+| `new --workspace --di`                              | A root registers no plugins, so a container has nothing to construct — as with `--template`. Exits `2` naming `generate app <name> --di`.                                                                                                                                                                                                                            |
+| A port in `setu.workspace.json` outside `1`–`65535` | Refused on read, naming the value and the field. Every port there is written into a member's entry point AND into every sibling's map, so one bad number breaks the workspace: `app.start()` throws `Invalid port (out of range)`, and `0` is worse still — it binds an arbitrary free port, so the member looks healthy while every sibling is refused. Exits `1`.  |
+| A workspace with no port left                       | `basePort` and its members reach `65535`. Exits `1` rather than allocating `65536`.                                                                                                                                                                                                                                                                                  |
 
 #### Inter-service transport
 
@@ -5061,18 +5094,120 @@ in one flag. `generate app` therefore refuses `--transport` and names the worksp
 | `memory`                      | The messaging plugin's own in-process default, named rather than implied. **Messages never leave the process.** | —                                                                                                                          |
 | `redis`                       | `MessagingPlugin({ broker: 'redis-streams', url })`                                                             | A real Redis: one service publishes, another receives the payload. Swapping to `memory` makes that test fail.              |
 | `rabbitmq` / `nats` / `kafka` | The matching `MessagingPlugin` arm.                                                                             | Type-checked in the generated project against the plugin's discriminated union; not run in CI, which holds no such broker. |
+| `pubsub`                      | `MessagingPlugin({ broker: 'pubsub', projectId })`, the project id read from `PUBSUB_PROJECT_ID`.               | Two generated members over the real Pub/Sub emulator: one publishes, the other receives the payload.                       |
+| `service-bus`                 | `MessagingPlugin({ broker: 'service-bus', connectionString })`, read from `SERVICE_BUS_CONNECTION_STRING`.      | Two generated members over Microsoft's emulator, started from the generated compose file and its generated entity config.  |
 
 > **There is no raw-TCP transport, and `--transport tcp` says so** rather than quietly handing back
 > HTTP under another name. Every inter-service path here is HTTP over TCP or a broker client over
-> TCP. Google Pub/Sub and Azure Service Bus are omitted for a different reason: each needs a
-> credential no scaffold can invent, and a generated empty `projectId` is a dead option that fails
-> at the first call instead of at scaffold time.
+> TCP.
 
-**Serving your own gRPC services still needs descriptors.** `--transport grpc` makes every member a
-Connect server immediately, which is why the health service answers with no configuration — but a
-service of your own needs a Protobuf-ES descriptor from `buf`/`protoc`, handed to
-`grpc.addService(definition, implementation)`. The CLI has no proto compiler and does not pretend
-to.
+**Every transport with a connection value reads it from the environment**, with the local address as
+the baked fallback: `Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379'`. One mechanism, because
+a literal endpoint is unreachable from inside a container — the Compose stack and the Kubernetes
+objects override the variable with the broker's service name.
+
+`--transport-url` replaces that fallback for the endpoint-shaped arms. It is **refused** for
+`pubsub` and `service-bus`, naming the variable instead: a GCP project id is not a URL, and an Azure
+connection string carries a shared-access key, which is not something to write into a file you
+commit. Their fallbacks are the vendors' own local-emulator settings, which is what lets an emulator
+workspace run with no configuration at all. Two operational facts they carry, because a developer
+cannot guess either: Pub/Sub does **not** create topics (`publish` posts to an existing one), and
+the Service Bus emulator creates **no entities at run time** — every topic must be declared in the
+generated `docker/servicebus-config.json` with a `messaging-consumers` subscription before it
+starts.
+
+**Serving your own gRPC services needs descriptors, and the toolchain to build them ships.**
+`--transport grpc` makes every member a Connect server immediately, which is why the health service
+answers with no configuration. A service of your own needs a Protobuf-ES descriptor, which only a
+compiler can produce — so each member gets an example `proto/`, both `buf` manifests, and:
+
+```bash
+deno task proto:gen      # descriptors land in src/gen/
+```
+
+Nothing needs `buf` or `protoc` on your PATH: both the compiler and the codegen plugin run through
+Deno's npm compatibility, and the member's import map carries `@bufbuild/protobuf` so the generated
+file compiles. Hand the descriptor to `grpc.addService(definition, implementation)`.
+
+#### Node and Bun workspaces
+
+A workspace targets the toolchain you name, because the framework's own claim is runtime
+independence and only the MONOREPO was Deno-only:
+
+```bash
+setu new acme --workspace --runtime node    # or bun, or deno (the default)
+```
+
+The runtime is recorded in `setu.workspace.json` and every later command reads it back. It is a
+WORKSPACE-wide choice, like the transport and for a stronger reason: members share one root manifest
+and one lockfile, so `generate app --runtime` is refused when it disagrees with the workspace — a
+Node member inside a Deno workspace is not a member at all. An absent field means `deno`, so every
+workspace created before this keeps its shape.
+
+|                                      | `deno`                  | `node`                      | `bun`           |
+| ------------------------------------ | ----------------------- | --------------------------- | --------------- |
+| Root manifest                        | `deno.json` `workspace` | `package.json` `workspaces` | same as `node`  |
+| Install                              | `deno install`          | `npm install`               | `bun install`   |
+| Run every member                     | `deno task dev`         | `npm run dev`               | `npm run dev`   |
+| Environment read in generated source | `Deno.env.get(x)`       | `process.env.X`             | `process.env.X` |
+| Library test runner                  | `@std/testing`          | `node:test`                 | `bun test`      |
+| Image                                | `denoland/deno`         | `node:24-alpine`            | `oven/bun`      |
+
+Three facts were measured, and each shaped the result. **Bun needs no root shape of its own** — it
+reads npm `workspaces` — but it installs into each MEMBER's `node_modules` as well as the root, so
+the generated ignore file and image account for both. **A workspace-root `.npmrc` maps the `@jsr`
+scope** for every member, and without it not one framework package resolves. And **a sibling library
+resolves by its package name** under npm exactly as it does under Deno, so libraries needed no
+per-runtime design beyond their manifest.
+
+**Cloudflare Workers is refused as a workspace target**, with the reason: each Worker is its own
+deploy unit with its own `wrangler.toml`, so several in one repository are several deployments
+rather than members of one.
+
+#### Shared libraries
+
+Code two services both need is a workspace member of its own:
+
+```bash
+setu generate library shared          # libs/shared, importable as @acme/shared
+```
+
+It needs **no wiring at all**, and that is a property of Deno workspaces rather than a convenience:
+a member declaring `name` and `exports` is importable by every sibling under exactly that name, with
+no import-map entry anywhere.
+
+```typescript
+import { shared } from '@acme/shared';
+```
+
+The scope defaults to the workspace directory name and `--scope` overrides it. Nothing is recorded
+in `setu.workspace.json`: a library has no port and is not a service, so it must never appear in a
+discovery map or in the Compose stack, and the directory plus the root's `./libs/*` glob already are
+the record. A workspace created before libraries existed has that glob added to its root; anything
+else about the root is left alone.
+
+#### Converting an existing project
+
+```bash
+cd my-service
+setu adopt --port 4000     # my-service becomes a workspace holding apps/my-service
+```
+
+It moves **only files this CLI emits**, from the renderer's own list rather than a directory walk.
+That is a correctness property: a workspace has one lockfile and one history, both at the top, so
+`.git`, CI configuration, `deno.lock` and `node_modules` stay at the root. Anything else you added
+there stays too.
+
+Because `IFileSystem` has no rename, each move is **copy → verify → delete**, in that order: a
+failure part-way leaves the file in both places, which is recoverable and reported, rather than in
+neither. The member's entry is rewritten to bind its allocated port; if it no longer carries the
+literal this replaces, the two lines to change are printed instead of guessed at.
+
+| Refusal                                   | Why                                                                                          |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| A directory that is already a workspace   | `setu.workspace.json` exists. Exits `1` naming `generate app`.                               |
+| A directory with no `setu.config.ts`      | Not a Setu project: there is no application factory to become the member's. Exits `1`.       |
+| A `--name` that cannot form an identifier | Exits `2`. The default comes from the directory name, so this is reachable without the flag. |
 
 ### Plugin gating
 
@@ -7487,7 +7622,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.1.0-alpha.3
+deno add jsr:@setu-ts/sdk@^0.1.0-alpha.6
 ```
 
 ### createClient()

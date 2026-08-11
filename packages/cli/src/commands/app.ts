@@ -16,7 +16,14 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { APP_VERB, EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
+import {
+  APP_VERB,
+  EXIT_ERROR,
+  EXIT_OK,
+  EXIT_USAGE,
+  PROGRAM_NAME,
+  TEMPLATES,
+} from '../constants.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
@@ -34,13 +41,18 @@ import {
   renderDiscoveryModule,
   SERVICE_PORT_EXPORT,
 } from '../workspace/discovery-module.ts';
+import { workspaceContainerFiles } from '../workspace/compose.ts';
+import { workspaceK8sFiles } from '../workspace/k8s.ts';
+import { workspaceProfile, type WorkspaceRuntimeProfile } from '../workspace/runtime-profile.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
+import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
 import {
   allocatePort,
   MAX_PORT,
   MEMBERS_DIR,
   MIN_PORT,
+  readPortFlag,
   readWorkspaceManifest,
   renderWorkspaceManifest,
   WORKSPACE_MANIFEST,
@@ -64,33 +76,26 @@ export interface AppDependencies {
 }
 
 /**
- * The template a workspace member may not use, and why.
- *
- * Measured, not cautious: `full-stack` emits a `package.json` for its Vite
- * build, which switches Deno to node_modules resolution, and such a project
- * needs `nodeModulesDir` in its own manifest. Deno refuses that in a member —
- * `"nodeModulesDir" field can only be specified in the workspace root deno.json
- * file` — so the member would scaffold cleanly and then fail to resolve its own
- * dependencies. Refusing at scaffold time beats that.
- */
-const REFUSED_TEMPLATE = 'full-stack';
-
-/**
  * Prints the command's usage.
  *
  * @param log - Output sink
  */
 function printUsage(log: (message: string) => void): void {
   log(
-    `Usage: ${PROGRAM_NAME} generate ${APP_VERB} <name> [--template <name>] [--di] [--dir <path>]`,
+    `Usage: ${PROGRAM_NAME} generate ${APP_VERB} <name> [--template <name>] [--di] ` +
+      `[--port <n>] [--dir <path>]`,
   );
   log('');
   log(`Adds a service to a Setu workspace: creates ${MEMBERS_DIR}/<name>/, allocates it a`);
   log(`port, and registers it in every other member's static discovery map.`);
   log('');
   log('Options:');
-  log('  --template <name>   rest | microservice | nest');
+  // From the constant, not a hand-written list: this said
+  // `rest | microservice | nest` while `full-stack` was refused, and would have
+  // gone on saying it after the refusal was lifted.
+  log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
   log('  --di                Register DiPlugin in this member');
+  log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
   log('');
@@ -169,34 +174,69 @@ function planMember(
   next: WorkspaceManifest,
   args: ParsedArgs,
   transport: TransportSpec,
+  profile: WorkspaceRuntimeProfile,
+  rootManifest: string,
 ): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
   readonly ok: false;
   readonly message: string;
 } {
-  // Members are Deno projects: a Setu workspace is a Deno workspace, and there
-  // is no npm-workspace design here to put a `node` member into.
   const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
-  if (choice.template?.name === REFUSED_TEMPLATE) {
-    return {
-      ok: false,
-      message:
-        `The "${REFUSED_TEMPLATE}" template cannot be a workspace member: its frontend build ` +
-        `needs \`nodeModulesDir\`, which Deno accepts only in the workspace root deno.json. ` +
-        `Scaffold it standalone with \`${PROGRAM_NAME} new <name> --template ${REFUSED_TEMPLATE}\`.`,
-    };
+
+  const extra: GeneratedFile[] = [];
+
+  // A template with a frontend build needs `node_modules`, which only the root
+  // may enable. Measured: a real `react-router build` and an SSR 200 both work
+  // inside a member once the root declares it.
+  if (choice.template?.manifest?.npmBuildScript !== undefined) {
+    // …but the transport must be able to reach it first. A starter-composed
+    // template owns its whole plugin set, so a transport that appends a plugin
+    // or rewrites `MessagingPlugin`'s arguments would have its contribution
+    // SILENTLY DROPPED by the renderer's factory branch — the member would join
+    // a workspace on a bus it is not actually connected to.
+    const contributes = transport.plugins.length > 0 || transport.messagingArgs !== undefined;
+    if (choice.template.appFactory !== undefined && contributes) {
+      return {
+        ok: false,
+        message: `The "${choice.template.name}" template composes its whole plugin set through ` +
+          `${choice.template.appFactory.symbol}, so this workspace's "${transport.name}" ` +
+          `transport cannot reach it — the plugin it contributes would be dropped and the member ` +
+          `would look connected while talking to nobody. Add it to a workspace on ` +
+          `--transport http or memory, or scaffold it standalone with ` +
+          `\`${PROGRAM_NAME} new <name> --template ${choice.template.name}\`.`,
+      };
+    }
+
+    // Deno only. `nodeModulesDir` is a Deno setting that turns on the real
+    // `node_modules` directory npm and Bun have BY CONSTRUCTION — so on an npm
+    // workspace there is nothing to enable, and asking for the field would mean
+    // reading a `deno.json` that does not exist there. Left ungated, the absent
+    // file lands in the unparseable-root branch and the member is refused with
+    // advice that would change nothing if followed.
+    if (profile.manifestKind === 'deno') {
+      const plan = planRootNodeModulesDir(rootManifest, name);
+      if (plan.kind === 'refused') return { ok: false, message: plan.message };
+      if (plan.kind === 'update') extra.push(plan.file);
+    }
   }
 
+  // The WORKSPACE's runtime, never a per-member flag: members share one root
+  // manifest and one lockfile, so a member built with a different toolchain than
+  // the root that installs it is not a member at all. A runtime swap can still
+  // apply — the template data decides that, per target, exactly as it does for a
+  // standalone project.
   const host = withWorkspaceMember(
-    // A workspace member is always a Deno project (`--runtime` is refused
-    // above), so no runtime swap can apply here.
-    resolveHost(choice.template ?? MINIMAL_HOST, choice.features, 'deno'),
+    resolveHost(choice.template ?? MINIMAL_HOST, choice.features, profile.runtime),
     transport,
-    next.transportUrl,
+    name,
+    profile,
+    // Omitted rather than passed as `undefined`: `exactOptionalPropertyTypes` is
+    // on, and the parameter is optional.
+    ...(next.transportUrl === undefined ? [] : [next.transportUrl]) as [string?],
   );
   const memberRoot = joinPath(MEMBERS_DIR, name);
 
-  const files: GeneratedFile[] = projectFiles(name, 'deno', host, choice.features, {
+  const files: GeneratedFile[] = projectFiles(name, profile.runtime, host, choice.features, {
     symbol: SERVICE_PORT_EXPORT,
     from: DISCOVERY_SPECIFIER,
   }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
@@ -207,7 +247,7 @@ function planMember(
   for (const member of next.members) {
     files.push({
       path: joinPath(MEMBERS_DIR, member.name, DISCOVERY_MODULE),
-      contents: renderDiscoveryModule(member, next.members),
+      contents: renderDiscoveryModule(member, next.members, profile),
       managed: true,
     });
   }
@@ -217,6 +257,14 @@ function planMember(
     contents: renderWorkspaceManifest(next),
     managed: true,
   });
+
+  // Regenerated for the whole workspace on every member, exactly as the discovery
+  // modules are: a stack that names two of three members is worse than none, and
+  // the ports it publishes come from the same manifest the maps do.
+  for (const file of workspaceContainerFiles(next, transport, profile)) files.push(file);
+  for (const file of workspaceK8sFiles(next, transport)) files.push(file);
+
+  for (const file of extra) files.push(file);
 
   return { ok: true, files };
 }
@@ -249,36 +297,11 @@ export async function runAppCommand(
     return EXIT_USAGE;
   }
 
-  // Refused rather than ignored: a member is a Deno project by construction, and
-  // silently swallowing `--runtime node` would hand back something the flag says
-  // it is not. `new` rejects an unknown value the same way.
-  const runtimeFlag = stringFlag(args.flags, 'runtime');
-  if (runtimeFlag !== undefined && runtimeFlag !== 'deno') {
-    deps.error(
-      `A workspace member is always a Deno project, so --runtime ${runtimeFlag} cannot apply: ` +
-        `a Setu workspace is a Deno workspace.`,
-    );
-    deps.error(
-      `Scaffold a standalone project instead: ` +
-        `\`${PROGRAM_NAME} new <name> --runtime ${runtimeFlag}\`.`,
-    );
-    return EXIT_USAGE;
-  }
-
-  // Refused rather than ignored, for the same reason `--runtime` is: a member's
-  // port is allocated from the workspace manifest, so a `--port` here would be
-  // parsed (it is a value flag) and then silently dropped, handing back a member
-  // on a port the user did not choose. `setu new --workspace --port` is where
-  // that number belongs.
-  if (args.flags['port'] !== undefined) {
-    deps.error(
-      `--port sets the BASE port of a whole workspace, not one member's: ` +
-        `\`${PROGRAM_NAME} new <name> --workspace --port <n>\`.`,
-    );
-    deps.error(
-      `A member's port is allocated from ${WORKSPACE_MANIFEST}; edit it there, then run ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB}\` to rewrite every member's map.`,
-    );
+  // Read through the same helper `setu new --workspace --port` uses, so the two
+  // flag sites cannot disagree about what a bindable port is.
+  const requested = readPortFlag(args.flags);
+  if (!requested.ok) {
+    deps.error(requested.message);
     return EXIT_USAGE;
   }
 
@@ -311,6 +334,24 @@ export async function runAppCommand(
   const read = await readWorkspaceManifest(deps.fs, deps.dir);
   if (!read.ok) return reportNoWorkspace(deps.dir, read.problem, deps.error);
 
+  // A member's runtime is the WORKSPACE's. The flag is accepted when it agrees
+  // and refused when it does not, rather than silently scaffolding a member the
+  // root's toolchain cannot install: members share one root manifest and one
+  // lockfile, so a Node member inside a Deno workspace is not a member at all.
+  const runtimeFlag = stringFlag(args.flags, 'runtime');
+  if (runtimeFlag !== undefined && runtimeFlag !== read.manifest.runtime) {
+    deps.error(
+      `This is a ${read.manifest.runtime} workspace, so --runtime ${runtimeFlag} cannot apply to ` +
+        `one of its members: they share a root manifest and a lockfile, and the root is what ` +
+        `installs them.`,
+    );
+    deps.error(
+      `Create a separate workspace for it: ` +
+        `\`${PROGRAM_NAME} new <name> --workspace --runtime ${runtimeFlag}\`.`,
+    );
+    return EXIT_USAGE;
+  }
+
   const name = names.kebab;
   if (read.manifest.members.some((member) => member.name === name)) {
     deps.error(
@@ -320,14 +361,32 @@ export async function runAppCommand(
     return EXIT_ERROR;
   }
 
-  const port = allocatePort(read.manifest);
+  // An explicit `--port` wins over allocation, but never over another member: two
+  // services on one port means the second fails to bind, while every sibling's
+  // map still names both — so one name silently resolves to the OTHER service.
+  // Refusing here is the only place that can see it, since the collision is
+  // between a flag and a file.
+  const taken = read.manifest.members.find((member) => member.port === requested.port);
+  if (taken !== undefined) {
+    deps.error(
+      `Port ${requested.port} is already bound by the member "${taken.name}" in this workspace.`,
+    );
+    deps.error(
+      `Two members on one port cannot both start, and every sibling's map would name both — ` +
+        `so requests for one would reach the other. Choose another port, or omit --port and ` +
+        `let the CLI allocate one.`,
+    );
+    return EXIT_ERROR;
+  }
+
+  const port = requested.port ?? allocatePort(read.manifest);
   if (port === undefined) {
     deps.error(
       `This workspace has no port left to allocate: every number from its base up to ` +
         `${MAX_PORT} is taken.`,
     );
     deps.error(
-      `Lower \`basePort\` in ${WORKSPACE_MANIFEST}, or free a port by removing a member.`,
+      `Lower \`basePort\` in ${WORKSPACE_MANIFEST}, or pass --port to choose one directly.`,
     );
     return EXIT_ERROR;
   }
@@ -337,9 +396,23 @@ export async function runAppCommand(
     members: [...read.manifest.members, { name, port }],
   };
 
+  // Read unconditionally, because whether it is NEEDED depends on the template,
+  // which `planMember` resolves. An unreadable root is not an error by itself —
+  // only a frontend member has to edit it — so the failure is carried as an empty
+  // string and turned into a refusal there, naming the member that needed it.
+  let rootManifest = '';
+  try {
+    rootManifest = new TextDecoder().decode(
+      await deps.fs.readFile(joinPath(deps.dir, ROOT_MANIFEST)),
+    );
+  } catch {
+    // Left empty: `planRootNodeModulesDir` refuses an unparseable root.
+  }
+
   // Total: the manifest reader refuses a transport it does not know, so this
   // resolves without a "cannot happen" branch.
-  const plan = planMember(name, next, args, transportSpec(next.transport));
+  const profile = workspaceProfile(next.runtime);
+  const plan = planMember(name, next, args, transportSpec(next.transport), profile, rootManifest);
   if (!plan.ok) {
     deps.error(plan.message);
     return EXIT_USAGE;
@@ -375,6 +448,13 @@ export async function runAppCommand(
   for (const file of files) deps.log(`created ${file.path}`);
   deps.log('');
   deps.log(`Added ${name} on port ${port}. Next:`);
-  deps.log(`  cd ${joinPath(MEMBERS_DIR, name)} && deno task start`);
+  // From the profile, and from `runScript` rather than `manifestKind`: a Node
+  // member has no `deno task`, and a Bun one — which shares npm's manifest shape
+  // and none of its commands — would otherwise be told to run `npm start` right
+  // after being told to run `bun install`.
+  deps.log(
+    `  ${profile.install} && cd ${joinPath(MEMBERS_DIR, name)} && ` +
+      `${profile.runScript('start')}`,
+  );
   return EXIT_OK;
 }

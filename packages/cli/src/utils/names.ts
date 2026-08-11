@@ -75,7 +75,12 @@ export function deriveNames(raw: string): DerivedNames {
  *
  * - one that normalizes to nothing (`___`), which would emit `class Service`
  *   at the hidden path `src/services/.service.ts`;
- * - one starting with a digit (`2fa`), which would emit `class 2faService`.
+ * - one starting with a digit (`2fa`), which would emit `class 2faService`;
+ * - one carrying no letter at all (`.`, `..`), which survives normalization
+ *   intact and becomes a PATH rather than a name — `setu adopt` derives its
+ *   member name from a directory, so `--dir .` produced `apps/.` and failed
+ *   part-way through the conversion with a bare `mkdir` errno. Requiring a letter
+ *   is also what the refusals around this already claim it checks.
  *
  * Reserved words (`class`, `new`) are NOT rejected: every schematic prefixes or
  * suffixes the derived form, so `class` yields the perfectly valid
@@ -85,5 +90,5 @@ export function deriveNames(raw: string): DerivedNames {
  * @returns True when every schematic can safely interpolate these names
  */
 export function isIdentifierSafe(names: DerivedNames): boolean {
-  return names.kebab !== '' && !/^[0-9]/.test(names.pascal);
+  return /[a-zA-Z]/.test(names.kebab) && !/^[0-9]/.test(names.pascal);
 }

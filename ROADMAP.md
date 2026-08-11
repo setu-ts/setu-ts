@@ -1618,7 +1618,7 @@ Behaviors are consumer-supplied and composable; no built-in behaviors ship in M1
 > Note: the ROADMAP file list included `src/handlers/command-handler.ts` and
 > `src/handlers/query-handler.ts`; these were intentionally omitted (the handler interfaces
 > `ICommandHandler`/`IQueryHandler` are contracts owned by `@setu-ts/common`, so plugin handler
-> files would be empty re-export shells). See `plans/archive/milestone-13-cqrs-plugin.md` §C4.
+> files would be empty re-export shells).
 
 ---
 
@@ -3785,8 +3785,7 @@ sensible defaults.
 > Secrets/Config, etc. KEEP B2BAdmin's layering but REWIRE those `lib/` modules to consume the
 > plugins through the M44 `loadContext` bridge (`context.services.get(CAPABILITIES.X)`) instead of
 > duplicating them; keep only app-specific glue in `app/lib`. A worthwhile validation is migrating
-> B2BAdmin itself off `@react-router/serve` onto the M44 plugin. See the M44 plan §9 (archived under
-> `plans/archive/milestone-44-react-router-plugin.md` once M44 merges).
+> B2BAdmin itself off `@react-router/serve` onto the M44 plugin.
 
 ### Deliverables
 
@@ -5475,8 +5474,6 @@ Durable-Object backplane is its own design — see M52c and M52d.
 
 **Package:** `packages/cloudflare-plugin` (extended). No `common` change, no new capability token.
 
-**Plan:** `plans/archive/milestone-52-b-cloudflare-handlers.md`
-
 ### Scope
 
 - **Queues.** `WorkersQueue` satisfying the committed `IQueue` over a producer binding, opt-in via a
@@ -5571,8 +5568,6 @@ application to export a **DO class** plus a `wrangler.toml` stanza — a contrac
 not have, and the reason this was not M52b.
 
 **Package:** `packages/cloudflare-plugin` (extended)
-
-**Plan:** `plans/archive/milestone-52-d-durable-objects.md`
 
 ### Scope
 
@@ -6463,27 +6458,62 @@ MEASUREMENT rather than by argument:
 
 ### Out of scope
 
-- **Compose / Kubernetes objects per member** — M39, per the boundary above.
-- **Converting an existing single-service project into a workspace.** A migration command is its own
-  design; the first version creates a workspace or adds to one that already exists. Unowned.
-- **Shared library members** (`nest g library`). Deferred until the application case is proven.
-- **`full-stack` members.** Refused for a measured reason: that template emits a `package.json` for
-  its Vite build, which switches Deno to node_modules resolution, and M37c established that such a
-  project needs `nodeModulesDir` in its own manifest — which Deno accepts only in the workspace root
-  (`"nodeModulesDir" field can only be specified in the workspace root deno.json file`). A
-  workspace-root `nodeModulesDir` design is what would unblock it. Unowned.
-- **Non-Deno workspaces** (npm workspaces, for `node` or `bun` members). A different mechanism with
-  its own manifest shape. Unowned.
-- **A per-member `--port` override.** The base port plus a hand-editable `setu.workspace.json`
-  covers the need, and the next `setu generate app` regenerates every module from it. Unowned.
-- **Interactive prompts** for a member's template. The CLI has no prompt surface anywhere and no
-  stdin seam. Unowned.
-- **Generating gRPC service descriptors.** `--transport grpc` makes every member a Connect server —
-  the health service answers with no configuration at all — but serving your OWN protos needs a
-  Protobuf-ES descriptor from `buf`/`protoc` handed to `grpc.addService`. A proto toolchain in a
-  zero-dependency CLI is its own design. Unowned.
-- **Pub/Sub and Service Bus transports.** Both need a credential no scaffold can invent; a generated
-  empty `projectId` is a dead option. Unowned.
+**Every item below except interactive prompts was closed on `fix/m62-out-of-scope-closeout`, after
+M39 landed** (at the maintainer's direction, on one branch rather than a milestone each). The
+reasoning each one was deferred with is kept, followed by what actually closed it — a reader should
+not re-raise them, and should not trust the original reasoning where measurement contradicted it.
+
+- **Compose / Kubernetes objects per member** — was deferred to M39. **Closed, and the boundary was
+  wrong as stated:** M39 owns THIS repository's deployment objects (its Dockerfile builds an example
+  under `apps/`), so nothing there ever produced artifacts for a user's project. `generate app` now
+  emits `docker/Dockerfile`, `docker/compose.yaml` (members plus the transport's broker) and
+  `k8s/members.yaml`, all regenerated for the whole workspace on every member. Verified with a real
+  Docker stack and a real kind cluster.
+- **Converting an existing single-service project into a workspace.** **Closed** as `setu adopt`: it
+  moves only the files the CLI itself emits — so `.git`, CI configuration and `deno.lock` stay at
+  the repository root — and each move is copy → verify → delete, because `IFileSystem` has no rename
+  and a crash must leave the file in both places rather than neither.
+- **Shared library members** (`nest g library`). Deferred until the application case was proven; it
+  is. **Closed** as `setu generate library`, and it needs no wiring at all: a Deno workspace member
+  declaring `name` and `exports` is importable by every sibling under that name with no import-map
+  entry anywhere (measured, then pinned by an e2e that type-checks a member importing one).
+- **`full-stack` members.** The deferral named the unblocking design correctly — a workspace-root
+  `nodeModulesDir` — and **that is what closed it.** Measured: with the root declaring it, a real
+  `deno install` and `react-router build` both work in a member, which then serves SSR on its
+  allocated port. The field is added when a frontend member arrives and NOT before, because with it
+  set an ordinary member's first `deno check` materialises every npm package the framework lazily
+  imports.
+- **Non-Deno workspaces** (npm workspaces, for `node` or `bun` members). **Closed**, at the
+  maintainer's direction: the framework's own README claims runtime independence and a scaffolded
+  standalone project already runs on Node and Bun, so a Deno-only MONOREPO contradicted it exactly
+  where the NestJS equivalent lives. Two of the reasons for deferring did not survive checking — the
+  plugin detector ALREADY falls back to `package.json`, and the `Deno.env.get` problem was two
+  renderers rather than a sweep. A `WorkspaceRuntimeProfile` record states each difference once, and
+  `setu.workspace.json` records the runtime (absent means `deno`, so nothing existing changes).
+  Verified by installing and booting real Node and Bun workspaces: a member serving a request, a
+  sibling resolved through the discovery capability, and a shared library imported across members.
+- **A per-member `--port` override.** **Closed.** `generate app --port` is honoured, through the
+  same reader `new --workspace --port` uses; a port another member already binds is refused, because
+  both would appear in every sibling's map while only one could bind.
+- **Interactive prompts** for a member's template. **Still unowned** — no prompt surface, no stdin
+  seam.
+- **Generating gRPC service descriptors.** **Closed by emitting the toolchain rather than being
+  it.** Each `--transport grpc` member gets an example proto, both `buf` manifests and a `proto:gen`
+  task; `buf` and the codegen plugin both run through Deno's npm compatibility, so nothing needs a
+  PATH install. Declaring the plugin by NAME fails (`executable file not found in $PATH`), so it is
+  declared as a command. Proven end to end: generate, `grpc.addService`, RPC answering `200`.
+- **Pub/Sub and Service Bus transports.** The deferral said each needs a credential no scaffold can
+  invent, which is true — **and the answer is not to invent one.** Both arms read their connection
+  value from the environment and fall back to the vendors' own local-emulator settings, so an
+  unconfigured workspace runs against an emulator. `--transport-url` is refused for both, naming the
+  variable: a project id is not a URL and a connection string is a secret. Verified against both
+  real emulators, cross-member.
+
+Two defects were found while closing them, both in already-released generated output and neither on
+this list: a scaffolded project installed **no SIGTERM handler**, so every container died at exit
+143 with `app.stop()` never run (M39's own finding, fixed in `apps/*` and never in the generator);
+and the `full-stack` template emitted **no root index route**, so `/` served 200 with an empty body
+(M37c's finding, same shape).
 
 ## Progress Tracking
 

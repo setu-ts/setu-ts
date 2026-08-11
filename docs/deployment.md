@@ -200,14 +200,21 @@ an air-gapped cluster.
 
 ## Graceful shutdown
 
-**The framework does not install a signal handler for you, and your application will not drain
-without one.** Deno's default action for `SIGTERM` ends the process immediately: measured in a
-container, `docker stop` returned in 144 ms with exit code 143, meaning `app.stop()` never ran. In
-that state `terminationGracePeriodSeconds` is decorative, in-flight requests are cut, and every
-`onStopping`/`onShutdown` hook — service-discovery deregistration, database and broker disconnects —
-is skipped.
+**A project scaffolded by `setu new` now installs one for you**; anything older, and any entry you
+wrote yourself, needs the handler below.
 
-Add this to your entry point:
+Deno's default action for `SIGTERM` ends the process immediately: measured in a container,
+`docker stop` returned in 144 ms with exit code 143, meaning `app.stop()` never ran. In that state
+`terminationGracePeriodSeconds` is decorative, in-flight requests are cut, and every
+`onStopping`/`onShutdown` hook — service-discovery deregistration, database and broker disconnects —
+is skipped. A generated project reproduced that exactly until the CLI began emitting the listener.
+
+The framework itself still does not install it: a library that grabs process signals has a side
+effect at import time, and the API is runtime-specific — the CLI emits `Deno.addSignalListener` or
+`process.on` depending on the target, and nothing at all for Cloudflare Workers, which has no
+process to signal.
+
+This is what a generated `main.ts` carries, and what to add to an entry you wrote:
 
 ```typescript
 const app = createApp();
@@ -231,9 +238,6 @@ if (Deno.build.os !== 'windows') {
 
 With the handler in place the same container exits **0** rather than 143. Every example the
 deployment gate builds carries it.
-
-This is deliberately application-level rather than something the framework does on import: a library
-that grabs process signals has a side effect at import time, and signal APIs are runtime-specific.
 
 ### How the pieces line up
 
@@ -274,6 +278,49 @@ read permission. Leave it off and the Deployment also sets `automountServiceAcco
 > **Scope.** These are the platform objects. Resolving a name to instances, load-balancing across
 > them, watching for changes and ejecting outliers are the plugin's job, documented with the service
 > discovery plugin.
+
+## Deploying a project the CLI scaffolded
+
+Everything above is about **this repository's** images and objects, which build the examples under
+[`apps/`](../apps/). A workspace created with `setu new --workspace` gets its own, generated and
+regenerated for every member:
+
+| Path                  | What it is                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------ |
+| `docker/Dockerfile`   | One parameterized image: `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders:dev .` |
+| `docker/compose.yaml` | Every member plus the transport's broker, each member on its allocated port                            |
+| `k8s/members.yaml`    | A Deployment and a Service per member                                                                  |
+
+```bash
+docker compose -f docker/compose.yaml up --build
+NAMESPACE=acme WORKSPACE=acme envsubst < k8s/members.yaml | kubectl apply -f -
+```
+
+They carry the findings on this page rather than repeating the mistakes: the build context is the
+workspace root, the base image tag is pinned, the user is numeric, permissions are explicit, and the
+grace period is real because the generated entry handles `SIGTERM`.
+
+### Sibling addresses come from the environment
+
+A member's generated discovery map reads each sibling's host from `<MEMBER>_HOST` and falls back to
+`127.0.0.1`. Inside a container loopback is the container **itself**, so a fixed address would have
+every service dial itself on its sibling's port. The generated Compose stack and Kubernetes objects
+set those variables to the service names; a deployment you write by hand must do the same, or use a
+real discovery provider (`consul`, `kubernetes`, `dns`) instead of the static map.
+
+The same applies to the broker: every transport with a connection value reads it from a variable
+(`REDIS_URL`, `KAFKA_BROKERS`, `PUBSUB_PROJECT_ID`, `SERVICE_BUS_CONNECTION_STRING`) with the local
+address as the fallback.
+
+### What is deliberately not generated
+
+- **An Ingress.** Which controller, host and TLS issuer are cluster decisions; a guessed Ingress
+  applies cleanly and routes nothing.
+- **The broker, in Kubernetes.** For a cluster that is a managed service or a StatefulSet with
+  storage, not the single dev container Compose runs.
+- **HTTP probes.** The generated probes are `tcpSocket`, because `/live` and `/ready` exist only
+  when the member registers `HealthPlugin`. Switch them once it does — it is the better signal,
+  since it waits for the plugins rather than for the socket.
 
 ## Cloudflare Workers
 

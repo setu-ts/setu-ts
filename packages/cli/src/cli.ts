@@ -16,6 +16,7 @@ import {
   VERSION,
 } from './constants.ts';
 import { runGenerateCommand } from './commands/generate.ts';
+import { runAdoptCommand } from './commands/adopt.ts';
 import { runNewCommand } from './commands/new.ts';
 import { listSchematics } from './schematics/registry.ts';
 import type { ModuleLoader } from './schematics/custom.ts';
@@ -72,6 +73,7 @@ function printHelp(log: (message: string) => void): void {
   log(`  new, n <name> --workspace      Scaffold a monorepo root`);
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
   log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
+  log(`  adopt                          Convert this project into a workspace`);
   log(`  commands                       List commands this app's plugins provide`);
   log('');
   log('Options:');
@@ -144,6 +146,14 @@ export async function runCli(
         log: deps.log,
         error: deps.error,
         ...(deps.load === undefined ? {} : { load: deps.load }),
+      });
+
+    case 'adopt':
+      return await runAdoptCommand(rest, {
+        fs: deps.fs,
+        cwd: deps.cwd,
+        log: deps.log,
+        error: deps.error,
       });
 
     case 'commands':

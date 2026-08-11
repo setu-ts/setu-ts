@@ -20,6 +20,7 @@ import {
   checkAppsReadmeCoverage,
   checkDocument,
   checkExamplesCoverage,
+  checkInstallVersions,
   checkLocalLinks,
   checkPackageCatalog,
   checkReadmeApiLink,
@@ -1212,5 +1213,72 @@ describe('documentation gate — generated API tree links', () => {
     const source = '# Docs\n\n- [API](./api/)\n- [Ghost](./api/ghost/index.html)\n';
 
     expect(await checkLocalLinks('docs/README.md', source, ['docs/README.md'], null)).toEqual([]);
+  });
+});
+
+describe('documentation gate — install-snippet versions', () => {
+  /**
+   * Builds a one-document map.
+   *
+   * @param file - The document's path
+   * @param source - Its contents
+   * @returns The map `checkInstallVersions` takes
+   */
+  function doc(file: string, source: string): Map<string, string> {
+    return new Map([[file, source]]);
+  }
+
+  // `packages/sdk/README.md` sat two releases behind while every gate stayed
+  // green — and the command in it WORKS, because a stale-but-real version still
+  // resolves on JSR. That is exactly why nothing else catches this.
+  it('reports an install line naming a version the workspace no longer ships', () => {
+    const findings = checkInstallVersions(
+      doc('packages/sdk/README.md', 'deno add jsr:@setu-ts/sdk@^0.1.0-alpha.4\n'),
+      '0.1.0-alpha.6',
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.line).toBe(1);
+    expect(findings[0]?.message).toContain('0.1.0-alpha.4');
+    expect(findings[0]?.message).toContain('0.1.0-alpha.6');
+  });
+
+  it('accepts a reference to the shipping version, with or without the caret', () => {
+    const source = 'deno add jsr:@setu-ts/kernel@^0.1.0-alpha.6\n' +
+      'jsr:@setu-ts/common@0.1.0-alpha.6\n';
+    expect(checkInstallVersions(doc('README.md', source), '0.1.0-alpha.6')).toEqual([]);
+  });
+
+  // A changelog states what a PAST release did and a runbook walks through one as
+  // a worked example; rewriting either to the current version would falsify it.
+  it('leaves the documents whose old versions are a record alone', () => {
+    for (const file of ['CHANGELOG.md', 'docs/releasing.md', 'plans/milestone-1.md']) {
+      const findings = checkInstallVersions(
+        doc(file, 'deno add jsr:@setu-ts/sdk@^0.1.0-alpha.1\n'),
+        '0.1.0-alpha.6',
+      );
+      expect(findings).toEqual([]);
+    }
+  });
+
+  it('reads a path written with a leading ./ as the same document', () => {
+    const findings = checkInstallVersions(
+      doc('./CHANGELOG.md', 'jsr:@setu-ts/sdk@^0.1.0-alpha.1\n'),
+      '0.1.0-alpha.6',
+    );
+    expect(findings).toEqual([]);
+  });
+
+  // Only this project's own packages: a guide legitimately pins third-party
+  // versions, and a gate that rewrote those would be worse than none.
+  it('ignores a specifier that is not a @setu-ts package', () => {
+    const source = 'npm:@bufbuild/buf@^1.57\njsr:@std/expect@^1.0.0\n';
+    expect(checkInstallVersions(doc('docs/guide.md', source), '0.1.0-alpha.6')).toEqual([]);
+  });
+
+  it('reports every stale reference in a document, with its own line', () => {
+    const source =
+      'one: jsr:@setu-ts/cli@^0.1.0-alpha.5\n\nthree: jsr:@setu-ts/sdk@^0.1.0-alpha.3\n';
+    const findings = checkInstallVersions(doc('docs/cli.md', source), '0.1.0-alpha.6');
+    expect(findings.map((finding) => finding.line)).toEqual([1, 3]);
   });
 });

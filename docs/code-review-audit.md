@@ -14,7 +14,7 @@ review tooling lands), never on a milestone `feat/…` branch.
 - **Scope = the package's CURRENT `src/` on `main`,** not a historical merge diff. It is what ships
   today and folds in the later add-ons (14b/15b/16b/39 live inside their packages). Review the whole
   `src/` tree of the package, guided by `CLAUDE.md` ("Self-review checklist", "Before reporting a
-  task done") and the package's section in `PUBLIC_API.md` and `plans/archive/`.
+  task done") and the package's section in `PUBLIC_API.md`.
 - **These are DEFECTS IN MERGED `main`, so fixes go on `fix/<pkg>-review` branches** — one per
   package — never a `feat/…` branch and never a direct commit to `main` (`CLAUDE.md` §branches).
   Each `fix/…` branch merges via its own PR (human-only push + PR).
