@@ -202,13 +202,15 @@ response. See
 
 ## Monorepos
 
-One repository, many deployable services. The root is a Deno workspace; each member is a full
-project with its own manifest and its own port.
+One repository, many deployable services. The root is a Deno workspace by default and an npm
+workspace under `--runtime node|bun`; each member is a full project with its own manifest and its
+own port.
 
 ```bash
 setu new acme --workspace                          # the root, no member yet
 setu new acme --workspace --port 4100              # base port for its members
 setu new acme --workspace --transport redis        # how members talk to each other
+setu new acme --workspace --runtime node           # npm workspaces instead of a Deno one
 cd acme
 setu generate app orders --template microservice    # apps/orders
 setu generate app billing --template microservice   # apps/billing
@@ -216,8 +218,8 @@ setu generate app billing --template microservice   # apps/billing
 
 ```
 acme/
-├── deno.json               # "workspace": ["./apps/*"]
-├── setu.workspace.json     # members, their ports, the transport
+├── deno.json               # "workspace": ["./apps/*"]   (package.json on the npm arm)
+├── setu.workspace.json     # members, their ports, the transport, the runtime
 └── apps/
     ├── orders/
     └── billing/
@@ -225,9 +227,14 @@ acme/
 
 The root declares its members by **glob**, so adding one rewrites no manifest and
 `deno task
---recursive` reaches every member. Framework pins live in each member's own `deno.json`
+--recursive` reaches every member. Framework pins live in each member's own manifest
 rather than at the root, because plugin detection reads one directory's manifest and never walks up
 — root-only pins would make every gated schematic refuse inside a member.
+
+Under `--runtime node|bun` the root is a `package.json` carrying `"workspaces": ["apps/*"]` instead,
+the members are npm packages, and the install and run-all commands become `npm install` /
+`bun install` and `npm run dev`. Everything else about a workspace is the same. See
+[Node and Bun workspaces](../PUBLIC_API.md#node-and-bun-workspaces).
 
 Ports come from `setu.workspace.json` and are allocated above the highest one in use, so adding a
 name that sorts earlier cannot move a running service's port. `--transport` picks how members reach
@@ -261,9 +268,16 @@ This is the **local development** topology. A deployed one comes from a real pro
 ### Refusals
 
 `generate app` outside a workspace names `setu new <name> --workspace`. A duplicate member names the
-directory it already has. A non-Deno `--runtime` is refused, as is `--template full-stack` — its
-Vite build needs `nodeModulesDir`, which Deno accepts only in a workspace **root**.
-`new --workspace` refuses `--template` and a non-Deno runtime rather than ignoring them.
+directory it already has. A member's runtime is the workspace's, so `generate app --runtime` is
+refused when it **disagrees** with the root rather than when it is not Deno — members share one
+manifest and one lockfile, and the root is what installs them. `--template full-stack` is refused
+only on a **broker** transport, because that template composes its whole plugin set through a
+starter factory, so a transport's contribution would be silently dropped; on `http` and `memory` it
+is allowed, and the root gains `nodeModulesDir` when such a member arrives.
+
+`new --workspace` refuses `--template` rather than ignoring it, and refuses
+`--runtime cloudflare-workers` — each Worker is its own deploy unit with its own `wrangler.toml`, so
+several in one repository are several deployments rather than members of one.
 
 ## Plugin-contributed commands
 

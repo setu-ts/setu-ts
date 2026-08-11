@@ -4994,8 +4994,9 @@ Or run `setu generate route user-profile` — it registers handlers on the route
 
 ### Monorepo workspaces
 
-A Setu workspace is a **Deno workspace**: one repository holding several deployable services, each
-its own scaffolded project under `apps/`.
+A Setu workspace is one repository holding several deployable services, each its own scaffolded
+project under `apps/`. The root is a **Deno workspace** by default and an **npm workspace** under
+`--runtime node|bun`; see [Node and Bun workspaces](#node-and-bun-workspaces) for what that changes.
 
 ```bash
 setu new acme --workspace                                  # the root: deno.json + setu.workspace.json
@@ -5005,12 +5006,12 @@ setu generate app billing --template microservice          # apps/billing, port 
 deno task dev                                              # runs every member's start task
 ```
 
-The root's `deno.json` declares members by **glob** — `"workspace": ["./apps/*"]` — so adding one
-creates a directory and rewrites nothing. Framework packages are pinned in each MEMBER's
-`deno.json`, never at the root: `setu generate` detects installed plugins by reading one directory's
-manifest and never walks up, so root-only pins would make every gated schematic refuse inside a
-member. Members' import maps merge with the root's, so two members may install different plugin
-sets.
+The root manifest declares members by **glob** — `"workspace": ["./apps/*"]` in `deno.json`, or
+`"workspaces": ["apps/*"]` in `package.json` on the npm arm — so adding one creates a directory and
+rewrites nothing. Framework packages are pinned in each MEMBER's own manifest, never at the root:
+`setu generate` detects installed plugins by reading one directory's manifest and never walks up, so
+root-only pins would make every gated schematic refuse inside a member. Members' dependencies
+resolve independently, so two members may install different plugin sets.
 
 **Adding a service registers it with its callers.** Every member carries a CLI-owned
 `src/discovery/services.ts` that is regenerated for all members on each `setu generate app`:
@@ -5070,16 +5071,16 @@ handler. Probes are `tcpSocket`, because `/live` and `/ready` exist only when a 
 `HealthPlugin`. No Ingress is generated: which controller, host and issuer are cluster decisions,
 and a guessed Ingress routes nothing.
 
-| Refusal                                             | Why                                                                                                                                                                                                                                                                                                                                                                  |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `generate app` outside a workspace                  | No `setu.workspace.json` in the target directory. Exits `1` naming `setu new <name> --workspace`.                                                                                                                                                                                                                                                                    |
-| A member name already in use                        | Exits `1` naming the directory it already has. The `managed` exemption covers regenerated modules only, never a member's own source.                                                                                                                                                                                                                                 |
-| `--runtime` other than `deno`                       | A Setu workspace is a Deno workspace. Exits `2` naming `setu new <name> --runtime <target>` for a standalone project.                                                                                                                                                                                                                                                |
-| `--template full-stack` on a broker transport       | That template composes its whole plugin set through a starter factory, so a transport that appends a plugin or rewrites `MessagingPlugin` would have its contribution silently dropped — the member would look connected and reach nobody. Allowed on `http` and `memory`, where the transport contributes nothing; the root gains `nodeModulesDir` when it arrives. |
-| `generate app --port` on a taken port               | Two members on one port cannot both bind, while every sibling's map names both — so one name would resolve to the other service. Exits `1` naming the member that holds it. A free port is honoured, and allocation still derives from the highest in use, so a hand-picked port moves the ceiling rather than being reused.                                         |
-| `new --workspace --di`                              | A root registers no plugins, so a container has nothing to construct — as with `--template`. Exits `2` naming `generate app <name> --di`.                                                                                                                                                                                                                            |
-| A port in `setu.workspace.json` outside `1`–`65535` | Refused on read, naming the value and the field. Every port there is written into a member's entry point AND into every sibling's map, so one bad number breaks the workspace: `app.start()` throws `Invalid port (out of range)`, and `0` is worse still — it binds an arbitrary free port, so the member looks healthy while every sibling is refused. Exits `1`.  |
-| A workspace with no port left                       | `basePort` and its members reach `65535`. Exits `1` rather than allocating `65536`.                                                                                                                                                                                                                                                                                  |
+| Refusal                                             | Why                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `generate app` outside a workspace                  | No `setu.workspace.json` in the target directory. Exits `1` naming `setu new <name> --workspace`.                                                                                                                                                                                                                                                                                             |
+| A member name already in use                        | Exits `1` naming the directory it already has. The `managed` exemption covers regenerated modules only, never a member's own source.                                                                                                                                                                                                                                                          |
+| `--runtime cloudflare-workers`                      | `deno`, `node` and `bun` all host a workspace; Workers does not, and that is a topology difference rather than a missing profile — each Worker is its own deploy unit with its own `wrangler.toml`, so several in one repository are several deployments, not members sharing a root manifest and a lockfile. Exits `2` naming `setu new <name> --runtime <target>` for a standalone project. |
+| `--template full-stack` on a broker transport       | That template composes its whole plugin set through a starter factory, so a transport that appends a plugin or rewrites `MessagingPlugin` would have its contribution silently dropped — the member would look connected and reach nobody. Allowed on `http` and `memory`, where the transport contributes nothing; the root gains `nodeModulesDir` when it arrives.                          |
+| `generate app --port` on a taken port               | Two members on one port cannot both bind, while every sibling's map names both — so one name would resolve to the other service. Exits `1` naming the member that holds it. A free port is honoured, and allocation still derives from the highest in use, so a hand-picked port moves the ceiling rather than being reused.                                                                  |
+| `new --workspace --di`                              | A root registers no plugins, so a container has nothing to construct — as with `--template`. Exits `2` naming `generate app <name> --di`.                                                                                                                                                                                                                                                     |
+| A port in `setu.workspace.json` outside `1`–`65535` | Refused on read, naming the value and the field. Every port there is written into a member's entry point AND into every sibling's map, so one bad number breaks the workspace: `app.start()` throws `Invalid port (out of range)`, and `0` is worse still — it binds an arbitrary free port, so the member looks healthy while every sibling is refused. Exits `1`.                           |
+| A workspace with no port left                       | `basePort` and its members reach `65535`. Exits `1` rather than allocating `65536`.                                                                                                                                                                                                                                                                                                           |
 
 #### Inter-service transport
 
@@ -5172,9 +5173,11 @@ Code two services both need is a workspace member of its own:
 setu generate library shared          # libs/shared, importable as @acme/shared
 ```
 
-It needs **no wiring at all**, and that is a property of Deno workspaces rather than a convenience:
-a member declaring `name` and `exports` is importable by every sibling under exactly that name, with
-no import-map entry anywhere.
+It needs **no wiring at all**, and that is a property of the workspace rather than a convenience: a
+member declaring `name` and `exports` is importable by every sibling under exactly that name, with
+no import-map entry anywhere. It holds on both arms, which is why libraries need no per-runtime
+design — under Deno the workspace resolves the member directly, and under npm the symlinks the
+install creates in the root `node_modules` do the same.
 
 ```typescript
 import { shared } from '@acme/shared';
