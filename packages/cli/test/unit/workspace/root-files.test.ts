@@ -4,6 +4,7 @@ import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
 import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
 import { WORKSPACE_MANIFEST, WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
 import { transportSpec } from '../../../src/workspace/transport.ts';
+import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 
 /** The default transport every existing assertion was written against. */
 const HTTP = transportSpec('http');
@@ -64,6 +65,7 @@ describe('workspaceRootFiles', () => {
     };
     expect(manifest).toEqual({
       version: WORKSPACE_VERSION,
+      runtime: 'deno',
       basePort: 3000,
       transport: 'http',
       members: [],
@@ -95,7 +97,13 @@ describe('the workspace README transport section', () => {
    * @returns The README contents
    */
   function readmeFor(name: Parameters<typeof transportSpec>[0], url?: string): string {
-    const files = workspaceRootFiles('acme', 3000, transportSpec(name), url);
+    const files = workspaceRootFiles(
+      'acme',
+      3000,
+      transportSpec(name),
+      workspaceProfile('deno'),
+      url,
+    );
     return files.find((file) => file.path === 'README.md')?.contents ?? '';
   }
 

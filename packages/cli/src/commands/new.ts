@@ -35,6 +35,11 @@ import {
   TRANSPORTS,
   type TransportSpec,
 } from '../workspace/transport.ts';
+import {
+  isWorkspaceRuntime,
+  WORKSPACE_RUNTIMES,
+  workspaceProfile,
+} from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import { deriveNames } from '../utils/names.ts';
 import {
@@ -82,12 +87,17 @@ function planWorkspace(
   readonly ok: false;
   readonly message: string;
 } {
-  if (runtime !== 'deno') {
+  // Deno, Node and Bun all host a workspace; Cloudflare Workers does not, and
+  // that is a topology difference rather than a missing profile — each Worker is
+  // its own deploy unit with its own `wrangler.toml`, so several in one repository
+  // are several deployments, not members sharing a root manifest and a lockfile.
+  if (!isWorkspaceRuntime(runtime)) {
     return {
       ok: false,
-      message: `A Setu workspace is a Deno workspace, so --runtime ${runtime} cannot apply. ` +
-        `Scaffold a standalone project instead: ` +
-        `\`${PROGRAM_NAME} new ${name} --runtime ${runtime}\`.`,
+      message: `--runtime ${runtime} cannot host a workspace: each Worker is its own deploy ` +
+        `unit with its own wrangler.toml, so several of them are several deployments rather ` +
+        `than members of one. Workspaces target ${WORKSPACE_RUNTIMES.join(', ')}; scaffold a ` +
+        `standalone project instead with \`${PROGRAM_NAME} new ${name} --runtime ${runtime}\`.`,
     };
   }
 
@@ -125,7 +135,9 @@ function planWorkspace(
       name,
       basePort.port ?? DEFAULT_BASE_PORT,
       transport.spec,
-      transport.url,
+      workspaceProfile(runtime),
+      // Omitted rather than passed as `undefined`: exactOptionalPropertyTypes.
+      ...(transport.url === undefined ? [] : [transport.url]),
     ),
   };
 }

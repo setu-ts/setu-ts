@@ -23,7 +23,7 @@ function manifestOf(
   members: readonly { name: string; port: number }[],
   transport: TransportName = 'http',
 ): WorkspaceManifest {
-  return { version: WORKSPACE_VERSION, basePort: 3000, transport, members };
+  return { version: WORKSPACE_VERSION, runtime: 'deno', basePort: 3000, transport, members };
 }
 
 /**

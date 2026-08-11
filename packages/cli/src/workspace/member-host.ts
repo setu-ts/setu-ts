@@ -14,6 +14,7 @@
 
 import type { ResolvedHost } from '../templates/project-files.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_ENDPOINTS_EXPORT } from './discovery-module.ts';
+import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import { renderConnection, type TransportSpec } from './transport.ts';
 
 /** The package whose wiring the discovery overlay rewrites. */
@@ -41,9 +42,10 @@ export function withWorkspaceMember(
   host: ResolvedHost,
   transport: TransportSpec,
   member: string,
+  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
   endpoint?: string,
 ): ResolvedHost {
-  return withTransport(withDiscoveryMap(host), transport, member, endpoint);
+  return withTransport(withDiscoveryMap(host), transport, member, profile, endpoint);
 }
 
 /**
@@ -92,6 +94,7 @@ function withTransport(
   host: ResolvedHost,
   transport: TransportSpec,
   member: string,
+  profile: WorkspaceRuntimeProfile,
   override?: string,
 ): ResolvedHost {
   const args = transport.messagingArgs;
@@ -105,7 +108,7 @@ function withTransport(
     ? host.plugins
     : host.plugins.map((wiring) =>
       wiring.pkg === MESSAGING_PACKAGE
-        ? { ...wiring, args: args(renderConnection(connection, override)) }
+        ? { ...wiring, args: args(renderConnection(connection, profile, override)) }
         : wiring
     );
 

@@ -28,6 +28,7 @@ describe('readWorkspaceManifest', () => {
     const fs = workspace(
       renderWorkspaceManifest({
         version: WORKSPACE_VERSION,
+        runtime: 'deno',
         basePort: 3000,
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
@@ -282,6 +283,7 @@ describe('renderWorkspaceManifest', () => {
   it('round-trips through the reader', async () => {
     const manifest: WorkspaceManifest = {
       version: WORKSPACE_VERSION,
+      runtime: 'deno',
       basePort: 4100,
       transport: 'http',
       members: [{ name: 'orders', port: 4100 }, { name: 'billing', port: 4101 }],
@@ -298,6 +300,7 @@ describe('renderWorkspaceManifest', () => {
   it('ends in a newline, so the file is not truncated on the last line', () => {
     const rendered = renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
+      runtime: 'deno',
       basePort: 3000,
       transport: 'http',
       members: [],
@@ -309,7 +312,13 @@ describe('renderWorkspaceManifest', () => {
 describe('allocatePort', () => {
   it('gives the first member the base port', () => {
     expect(
-      allocatePort({ version: WORKSPACE_VERSION, basePort: 3000, transport: 'http', members: [] }),
+      allocatePort({
+        version: WORKSPACE_VERSION,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'http',
+        members: [],
+      }),
     ).toBe(3000);
   });
 
@@ -317,6 +326,7 @@ describe('allocatePort', () => {
     expect(
       allocatePort({
         version: WORKSPACE_VERSION,
+        runtime: 'deno',
         basePort: 3000,
         transport: 'http',
         members: [{ name: 'a', port: 3000 }, { name: 'b', port: 3001 }],
@@ -330,6 +340,7 @@ describe('allocatePort', () => {
     expect(
       allocatePort({
         version: WORKSPACE_VERSION,
+        runtime: 'deno',
         basePort: 3000,
         transport: 'http',
         members: [{ name: 'a', port: 4100 }, { name: 'b', port: 3001 }],
@@ -342,12 +353,14 @@ describe('allocatePort', () => {
     const ports = [{ name: 'a', port: 3005 }, { name: 'b', port: 3001 }];
     const forwards = allocatePort({
       version: WORKSPACE_VERSION,
+      runtime: 'deno',
       basePort: 3000,
       transport: 'http',
       members: ports,
     });
     const backwards = allocatePort({
       version: WORKSPACE_VERSION,
+      runtime: 'deno',
       basePort: 3000,
       transport: 'http',
       members: [...ports].reverse(),
@@ -362,6 +375,7 @@ describe('allocatePort', () => {
     expect(
       allocatePort({
         version: WORKSPACE_VERSION,
+        runtime: 'deno',
         basePort: MAX_PORT,
         transport: 'http',
         members: [{ name: 'a', port: MAX_PORT }],
@@ -373,6 +387,7 @@ describe('allocatePort', () => {
     expect(
       allocatePort({
         version: WORKSPACE_VERSION,
+        runtime: 'deno',
         basePort: MAX_PORT - 1,
         transport: 'http',
         members: [{ name: 'a', port: MAX_PORT - 1 }],

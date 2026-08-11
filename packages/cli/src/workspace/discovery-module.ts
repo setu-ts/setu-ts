@@ -19,6 +19,7 @@
 
 import { CONFIG_MODULE } from '../constants.ts';
 import type { WorkspaceMember } from './manifest.ts';
+import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 
 /** The module's path, relative to a member's own root. */
 export const DISCOVERY_MODULE = 'src/discovery/services.ts';
@@ -61,6 +62,20 @@ export function hostVariable(name: string): string {
 }
 
 /**
+ * Folds an environment read onto one line.
+ *
+ * The profile renders it wrapped for the deep indentation of a plugin argument in
+ * `setu.config.ts`; here it sits inside a short object literal, where the wrap
+ * would read as a stray blank column.
+ *
+ * @param expression - The rendered read
+ * @returns The same expression on one line
+ */
+function collapse(expression: string): string {
+  return expression.replace(/\s*\n\s*/g, ' ');
+}
+
+/**
  * Renders one member's discovery module.
  *
  * `SERVICE_ENDPOINTS` deliberately EXCLUDES the member itself: discovery is for
@@ -80,6 +95,7 @@ export function hostVariable(name: string): string {
 export function renderDiscoveryModule(
   member: WorkspaceMember,
   all: readonly WorkspaceMember[],
+  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
 ): string {
   // Plain `.sort()`, like every other determinism sort in this package
   // (`seamNames`, `readArtifactNames`, `readModuleNames`). `localeCompare`
@@ -94,7 +110,11 @@ export function renderDiscoveryModule(
   const entries = siblings
     .map((name) =>
       `  '${name}': [{\n` +
-      `    host: Deno.env.get('${hostVariable(name)}') ?? '${LOCAL_HOST}',\n` +
+      // The profile's reader, not a literal `Deno.env.get`: this module is emitted
+      // into Node and Bun members too, where that name does not exist. Its own
+      // line breaks are for the deeper indentation of a plugin argument, so they
+      // collapse here.
+      `    host: ${collapse(profile.envRead(hostVariable(name), LOCAL_HOST))},\n` +
       `    port: ${portOf.get(name)},\n` +
       `  }],\n`
     )

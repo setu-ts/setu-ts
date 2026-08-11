@@ -4928,6 +4928,8 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--transport-url <url>`                         | `new --workspace`                          | Replaces the baked local fallback for the endpoint-shaped broker transports. A usage error for `http`, `grpc` and `memory`, which have no broker to address, and for `pubsub` and `service-bus`, whose connection value is a project id or a secret read from the environment — that refusal names the variable.                                                 |
 | `--scope <scope>`                               | `generate library`                         | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                             |
 | `--name <member>`                               | `adopt`                                    | The member name the converted project takes. Defaults to the project directory name.                                                                                                                                                                                                                                                                             |
+| `--scope <scope>`                               | `generate library`                         | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                             |
+| `--name <member>`                               | `adopt`                                    | The member name the converted project takes. Defaults to the project directory name.                                                                                                                                                                                                                                                                             |
 | `--dir <path>`                                  | `new`, `generate`                          | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                                                                                                                                                           |
 | `--dry-run`                                     | `new`, `generate`                          | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                                                                                                                                                     |
 | `--help`, `-h`                                  | both                                       | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                                                                                                                                                     |
@@ -5125,6 +5127,41 @@ deno task proto:gen      # descriptors land in src/gen/
 Nothing needs `buf` or `protoc` on your PATH: both the compiler and the codegen plugin run through
 Deno's npm compatibility, and the member's import map carries `@bufbuild/protobuf` so the generated
 file compiles. Hand the descriptor to `grpc.addService(definition, implementation)`.
+
+#### Node and Bun workspaces
+
+A workspace targets the toolchain you name, because the framework's own claim is runtime
+independence and only the MONOREPO was Deno-only:
+
+```bash
+setu new acme --workspace --runtime node    # or bun, or deno (the default)
+```
+
+The runtime is recorded in `setu.workspace.json` and every later command reads it back. It is a
+WORKSPACE-wide choice, like the transport and for a stronger reason: members share one root manifest
+and one lockfile, so `generate app --runtime` is refused when it disagrees with the workspace — a
+Node member inside a Deno workspace is not a member at all. An absent field means `deno`, so every
+workspace created before this keeps its shape.
+
+|                                      | `deno`                  | `node`                      | `bun`           |
+| ------------------------------------ | ----------------------- | --------------------------- | --------------- |
+| Root manifest                        | `deno.json` `workspace` | `package.json` `workspaces` | same as `node`  |
+| Install                              | `deno install`          | `npm install`               | `bun install`   |
+| Run every member                     | `deno task dev`         | `npm run dev`               | `npm run dev`   |
+| Environment read in generated source | `Deno.env.get(x)`       | `process.env.X`             | `process.env.X` |
+| Library test runner                  | `@std/testing`          | `node:test`                 | `bun test`      |
+| Image                                | `denoland/deno`         | `node:24-alpine`            | `oven/bun`      |
+
+Three facts were measured, and each shaped the result. **Bun needs no root shape of its own** — it
+reads npm `workspaces` — but it installs into each MEMBER's `node_modules` as well as the root, so
+the generated ignore file and image account for both. **A workspace-root `.npmrc` maps the `@jsr`
+scope** for every member, and without it not one framework package resolves. And **a sibling library
+resolves by its package name** under npm exactly as it does under Deno, so libraries needed no
+per-runtime design beyond their manifest.
+
+**Cloudflare Workers is refused as a workspace target**, with the reason: each Worker is its own
+deploy unit with its own `wrangler.toml`, so several in one repository are several deployments
+rather than members of one.
 
 #### Shared libraries
 

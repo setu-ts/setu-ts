@@ -1023,11 +1023,25 @@ describe('--workspace', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    it('refuses a non-Deno runtime, naming the standalone alternative', async () => {
+    // Node and Bun host a workspace; Cloudflare Workers does not, and that is a
+    // topology difference rather than a missing profile — each Worker is its own
+    // deploy unit with its own wrangler.toml.
+    it('accepts every runtime that can host a workspace', async () => {
+      for (const runtime of ['deno', 'node', 'bun']) {
+        const h = harness();
+        expect(await h.run(['acme', '--workspace', '--runtime', runtime])).toBe(0);
+        const manifest = JSON.parse(h.fs.read('/work/acme/setu.workspace.json')) as {
+          runtime?: string;
+        };
+        expect(manifest.runtime).toBe(runtime);
+      }
+    });
+
+    it('refuses Cloudflare Workers, naming why it is not a workspace target', async () => {
       const h = harness();
-      expect(await h.run(['acme', '--workspace', '--runtime', 'node'])).toBe(2);
-      expect(h.err.text()).toContain('Deno workspace');
-      expect(h.err.text()).toContain('setu new acme --runtime node');
+      expect(await h.run(['acme', '--workspace', '--runtime', 'cloudflare-workers'])).toBe(2);
+      expect(h.err.text()).toContain('own deploy unit');
+      expect(h.err.text()).toContain('setu new acme --runtime cloudflare-workers');
       expect(h.fs.writes).toEqual([]);
     });
 

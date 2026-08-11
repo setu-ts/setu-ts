@@ -17,6 +17,7 @@ import {
   WORKSPACE_VERSION,
 } from './manifest.ts';
 import { LIBS_GLOB } from './library.ts';
+import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import type { TransportSpec } from './transport.ts';
 
 /**
@@ -49,20 +50,44 @@ export function workspaceRootFiles(
   name: string,
   basePort: number,
   transport: TransportSpec,
+  profile: WorkspaceRuntimeProfile = workspaceProfile('deno'),
   transportUrl?: string,
 ): readonly GeneratedFile[] {
-  const denoJson = {
-    // BOTH globs at creation, so neither adding a service nor adding a library
-    // ever rewrites this file: a glob matching nothing is valid (measured), which
-    // is what makes writing them once correct.
-    workspace: [MEMBER_GLOB, LIBS_GLOB],
-    tasks: {
-      // `--recursive` runs the task in every member. Each member binds the port
-      // the CLI allocated it, so the whole workspace comes up on one command
-      // without a port collision.
-      dev: 'deno task --recursive start',
-    },
-  };
+  // BOTH globs at creation, so neither adding a service nor adding a library ever
+  // rewrites this file: a glob matching nothing is valid under both toolchains
+  // (measured), which is what makes writing them once correct.
+  const globs = [MEMBER_GLOB, LIBS_GLOB];
+
+  // Deno declares members under `workspace`, npm under `workspaces`, and Bun reads
+  // npm's — so there are two shapes here, not three. The command that runs every
+  // member differs per toolchain even where the shape does not, which is why it
+  // comes from the profile rather than from this branch.
+  const rootManifest = profile.manifestKind === 'deno'
+    ? {
+      path: 'deno.json',
+      contents: `${
+        JSON.stringify({ workspace: globs, tasks: { dev: profile.runAll } }, null, 2)
+      }\n`,
+    }
+    : {
+      path: 'package.json',
+      contents: `${
+        JSON.stringify(
+          {
+            name,
+            // A root that is never published and never installed as a package:
+            // npm refuses to treat a manifest as a workspace root without it.
+            private: true,
+            // Globs relative to the root, without the `./` Deno's take — npm
+            // matches them as written.
+            workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
+            scripts: { dev: profile.runAll },
+          },
+          null,
+          2,
+        )
+      }\n`,
+    };
 
   const readme = `# ${name}
 
@@ -82,7 +107,8 @@ and is registered in every other service's static discovery map — so
 ## Run every service
 
 \`\`\`bash
-deno task dev
+${profile.install}
+${profile.manifestKind === 'deno' ? 'deno task dev' : 'npm run dev'}
 \`\`\`
 
 ## Ports
@@ -121,11 +147,19 @@ Every service added later inherits it.
 `;
 
   return [
-    { path: 'deno.json', contents: `${JSON.stringify(denoJson, null, 2)}\n` },
+    rootManifest,
+    // The `@jsr` scope has to be mapped for members to install framework packages
+    // through npm compatibility at all — measured in a two-member workspace, where
+    // without it `npm install` cannot resolve `@setu-ts/kernel`. Deno resolves
+    // `jsr:` specifiers itself and needs none.
+    ...(profile.manifestKind === 'npm'
+      ? [{ path: '.npmrc', contents: '@jsr:registry=https://npm.jsr.io\n' }]
+      : []),
     {
       path: WORKSPACE_MANIFEST,
       contents: renderWorkspaceManifest({
         version: WORKSPACE_VERSION,
+        runtime: profile.runtime,
         basePort,
         transport: transport.name,
         // Recorded only when it differs from the transport's own default, so
@@ -136,6 +170,13 @@ Every service added later inherits it.
       }),
     },
     { path: 'README.md', contents: readme },
-    { path: '.gitignore', contents: 'coverage/\n' },
+    {
+      path: '.gitignore',
+      contents: profile.manifestKind === 'deno'
+        ? 'coverage/\n'
+        // Both locations: Bun installs into each MEMBER's node_modules as well as
+        // the root, measured — an ignore listing only the root would commit them.
+        : 'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n',
+    },
   ];
 }

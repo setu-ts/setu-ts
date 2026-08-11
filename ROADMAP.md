@@ -6463,10 +6463,10 @@ MEASUREMENT rather than by argument:
 
 ### Out of scope
 
-**Eight of the nine items below were closed on `fix/m62-out-of-scope-closeout`, after M39 landed**
-(at the maintainer's direction, on one branch rather than a milestone each). The reasoning each one
-was deferred with is kept, followed by what actually closed it — a reader should not re-raise them,
-and should not trust the original reasoning where measurement contradicted it.
+**Every item below except interactive prompts was closed on `fix/m62-out-of-scope-closeout`, after
+M39 landed** (at the maintainer's direction, on one branch rather than a milestone each). The
+reasoning each one was deferred with is kept, followed by what actually closed it — a reader should
+not re-raise them, and should not trust the original reasoning where measurement contradicted it.
 
 - **Compose / Kubernetes objects per member** — was deferred to M39. **Closed, and the boundary was
   wrong as stated:** M39 owns THIS repository's deployment objects (its Dockerfile builds an example
@@ -6488,10 +6488,15 @@ and should not trust the original reasoning where measurement contradicted it.
   allocated port. The field is added when a frontend member arrives and NOT before, because with it
   set an ordinary member's first `deno check` materialises every npm package the framework lazily
   imports.
-- **Non-Deno workspaces** (npm workspaces, for `node` or `bun` members). **Still unowned**, and the
-  original reason stands: it is a second manifest shape throughout, and it now also needs every
-  generated environment read to switch from `Deno.env.get` to `process.env` and the plugin detector
-  to gate off a `package.json`. Its own milestone.
+- **Non-Deno workspaces** (npm workspaces, for `node` or `bun` members). **Closed**, at the
+  maintainer's direction: the framework's own README claims runtime independence and a scaffolded
+  standalone project already runs on Node and Bun, so a Deno-only MONOREPO contradicted it exactly
+  where the NestJS equivalent lives. Two of the reasons for deferring did not survive checking — the
+  plugin detector ALREADY falls back to `package.json`, and the `Deno.env.get` problem was two
+  renderers rather than a sweep. A `WorkspaceRuntimeProfile` record states each difference once, and
+  `setu.workspace.json` records the runtime (absent means `deno`, so nothing existing changes).
+  Verified by installing and booting real Node and Bun workspaces: a member serving a request, a
+  sibling resolved through the discovery capability, and a shared library imported across members.
 - **A per-member `--port` override.** **Closed.** `generate app --port` is honoured, through the
   same reader `new --workspace --port` uses; a port another member already binds is refused, because
   both would appear in every sibling's map while only one could bind.

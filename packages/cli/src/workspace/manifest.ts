@@ -13,7 +13,10 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 
+import { isTargetRuntime, type TargetRuntime } from '../constants.ts';
+
 import { joinPath } from '../utils/file-writer.ts';
+import { isWorkspaceRuntime } from './runtime-profile.ts';
 import { DEFAULT_TRANSPORT, getTransport, type TransportName } from './transport.ts';
 
 /** The workspace manifest's filename, at the workspace root. */
@@ -133,6 +136,18 @@ export interface WorkspaceManifest {
    * Omitted for `http`, `grpc` and `memory`, which have no endpoint to name.
    */
   readonly transportUrl?: string;
+  /**
+   * Which toolchain the workspace is built and run with.
+   *
+   * Recorded at the WORKSPACE level for the same reason the transport is, and
+   * with more force: members share one root manifest and one lockfile, so a
+   * per-member runtime would make an unbuildable workspace expressible in a flag.
+   *
+   * **Absent means `deno`**, so every workspace created before this field existed
+   * keeps its shape and its behaviour — the same compatibility trick `transport`
+   * uses.
+   */
+  readonly runtime: TargetRuntime;
   /** Every member, in creation order. */
   readonly members: readonly WorkspaceMember[];
 }
@@ -167,7 +182,15 @@ export type WorkspaceManifestProblem =
    * the bus the manifest asked for would leave services that cannot reach each
    * other and no diagnostic saying why.
    */
-  | { readonly kind: 'unknown-transport'; readonly transport: string };
+  | { readonly kind: 'unknown-transport'; readonly transport: string }
+  /**
+   * Well-formed, but naming a runtime no workspace can be built with.
+   *
+   * Refused rather than defaulted for the same reason an unknown transport is:
+   * quietly rebuilding a workspace with a different toolchain would rewrite every
+   * member's manifest and its image.
+   */
+  | { readonly kind: 'unknown-runtime'; readonly runtime: string };
 
 /** The result of reading a workspace manifest. */
 export type WorkspaceManifestResult =
@@ -257,6 +280,19 @@ export async function readWorkspaceManifest(
     return { ok: false, problem: { kind: 'malformed' } };
   }
 
+  // Absent → `deno`, so a workspace created before this field existed keeps its
+  // shape. An unrecognised value is refused rather than defaulted, exactly as an
+  // unknown transport is: silently rebuilding a workspace with the wrong
+  // toolchain would rewrite every member's manifest and its Dockerfile.
+  const rawRuntime = record['runtime'];
+  const runtime = rawRuntime === undefined ? 'deno' : rawRuntime;
+  if (
+    typeof runtime !== 'string' || !isTargetRuntime(runtime) ||
+    !isWorkspaceRuntime(runtime)
+  ) {
+    return { ok: false, problem: { kind: 'unknown-runtime', runtime: String(runtime) } };
+  }
+
   const rawMembers = record['members'];
   if (!Array.isArray(rawMembers)) return { ok: false, problem: { kind: 'malformed' } };
 
@@ -287,6 +323,7 @@ export async function readWorkspaceManifest(
       version,
       basePort,
       transport: transport as TransportName,
+      runtime,
       ...(rawUrl === undefined ? {} : { transportUrl: rawUrl }),
       members,
     },
