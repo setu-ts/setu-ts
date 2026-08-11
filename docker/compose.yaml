@@ -1,0 +1,69 @@
+# Setu-TS — local development stack (M39).
+#
+#   docker compose -f docker/compose.yaml up --build              # app + redis
+#   APP=rest-api docker compose -f docker/compose.yaml up --build  # any other example
+#   docker compose -f docker/compose.yaml --profile telemetry up   # + OTel collector fan-out
+#
+# The build context is `..` (the repository root) because an example's deno.json maps only its
+# direct dependencies — see the comment at the top of docker/Dockerfile.
+
+name: setu-ts
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        # `realtime` is the default because it is the example with a real external dependency,
+        # so the default `up` exercises the Redis wiring rather than a standalone process.
+        APP: ${APP:-realtime}
+    ports:
+      - '${APP_PORT:-3000}:3000'
+    environment:
+      # Service name, not localhost: the app resolves `redis` on the Compose network.
+      REDIS_URL: redis://redis:6379
+      # Consumed by TelemetryPlugin({ exporter: 'otlp' }) when the telemetry profile is running.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Mirrors the chart's terminationGracePeriodSeconds. The examples install a SIGTERM handler
+    # that calls app.stop(); without one, Deno's default action ends the process immediately and
+    # this window would be decorative. See docs/deployment.md.
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:7
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    healthcheck:
+      # `depends_on: service_healthy` above waits on this, so the app never starts against a
+      # Redis that is not yet accepting commands.
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  otel-collector:
+    # Behind a profile because this config REQUIRES five cloud credentials (Datadog, New Relic,
+    # Azure). Started unconditionally it would crash-loop on a developer's machine, so a default
+    # `up` leaves it out and `--profile telemetry` opts in.
+    profiles: [telemetry]
+    # The contrib distribution is mandatory: the `datadog` and `azuremonitor` exporters this
+    # config uses are absent from the core `otelcol` build.
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    command: ['--config=/etc/otelcol-contrib/config.yaml']
+    volumes:
+      # M24c owns this file; it is mounted, never copied — a second copy would be the duplicate
+      # that milestone's own note exists to prevent.
+      - ./otel-collector/collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - '4317:4317' # OTLP/gRPC
+      - '4318:4318' # OTLP/HTTP — the endpoint TelemetryPlugin posts to
+    environment:
+      DD_API_KEY: ${DD_API_KEY:-}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      NEW_RELIC_OTLP_ENDPOINT: ${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY:-}
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:-}

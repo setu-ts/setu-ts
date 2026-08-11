@@ -75,6 +75,7 @@ building production-ready applications with our plugin-first, runtime-independen
 ## Deployment
 
 - [Runtime Deployment](./runtime-deployment.md)
+- [Deployment: Docker and Kubernetes](./deployment.md)
   - Node.js deployment
   - Deno deployment
   - Bun deployment

@@ -1,0 +1,58 @@
+# Setu-TS — `deno compile` → distroless image (M39).
+#
+#   docker build -f docker/Dockerfile.compiled --build-arg APP=compiled-binary -t setu/compiled .
+#
+# Produces a single self-contained binary and ships it on a base with no shell, no package manager
+# and no interpreter — a much smaller attack surface than a full runtime image.
+#
+# `scratch` is NOT reachable, and this was measured rather than assumed: `ldd` on the compiled
+# output reports libc.so.6, libgcc_s.so.1, libm, libpthread, librt and libdl, so the binary is
+# dynamically linked against glibc. `gcr.io/distroless/cc-debian12` (which carries glibc + libgcc)
+# is the floor.
+#
+# The size win is real but modest — 44.9 MB against 52.4 MB for the runtime image — because the
+# compiled binary embeds the whole Deno runtime. The reason to prefer this image is the removed
+# shell and toolchain, not an order-of-magnitude size drop.
+#
+# The build stage uses the DEBIAN base, not alpine: alpine links against musl, and a musl-linked
+# binary will not run on a glibc distroless base.
+
+ARG DENO_VERSION=2.9.5
+
+FROM denoland/deno:${DENO_VERSION} AS build
+
+ARG APP=compiled-binary
+
+WORKDIR /srv
+
+# Same workspace-root requirement as docker/Dockerfile — see the comment there.
+COPY deno.json deno.lock ./
+COPY packages ./packages
+COPY apps/${APP} ./apps/${APP}
+
+WORKDIR /srv/apps/${APP}
+
+# Permissions are baked into the binary at compile time; a compiled binary takes no permission
+# flags at runtime, so this set must match what the application actually needs.
+RUN deno compile \
+  --allow-net \
+  --allow-env \
+  --allow-read \
+  --allow-sys \
+  --output /srv/server \
+  main.ts
+
+FROM gcr.io/distroless/cc-debian12
+
+# NUMERIC, not `USER nonroot`. Kubernetes' `runAsNonRoot: true` cannot verify a non-numeric user
+# and refuses to start the container; Docker resolves the name and runs it, so the failure appears
+# only under Kubernetes. 65532 is distroless's `nonroot`.
+USER 65532:65532
+
+COPY --from=build --chown=65532:65532 /srv/server /server
+
+EXPOSE 3000
+
+# There is no shell on this base, so the exec form is mandatory rather than stylistic.
+ENTRYPOINT ["/server"]
+CMD ["3000"]
