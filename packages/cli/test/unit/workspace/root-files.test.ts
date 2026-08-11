@@ -82,3 +82,48 @@ describe('workspaceRootFiles', () => {
     expect(readme).toContain(WORKSPACE_MANIFEST);
   });
 });
+
+// The README's transport section renders differently for each shape a transport
+// can take, and a scaffolded workspace's only documentation of its own bus is this
+// file — so each arm is rendered rather than assumed.
+describe('the workspace README transport section', () => {
+  /**
+   * Renders the README for a transport.
+   *
+   * @param name - The transport
+   * @param url - A `--transport-url` override, when one applies
+   * @returns The README contents
+   */
+  function readmeFor(name: Parameters<typeof transportSpec>[0], url?: string): string {
+    const files = workspaceRootFiles('acme', 3000, transportSpec(name), url);
+    return files.find((file) => file.path === 'README.md')?.contents ?? '';
+  }
+
+  it('says nothing about a connection for a transport that has none', () => {
+    const readme = readmeFor('http');
+    expect(readme).toContain('Services talk over **http**');
+    expect(readme).not.toContain('reads its connection value');
+    // …and offers no stack, because there is no broker to run.
+    expect(readme).not.toContain('Run the stack');
+  });
+
+  it('names the variable and the fallback for a broker transport', () => {
+    const readme = readmeFor('redis');
+    expect(readme).toContain('REDIS_URL');
+    expect(readme).toContain('redis://127.0.0.1:6379');
+    expect(readme).toContain('Run the stack');
+  });
+
+  it('shows the override in place of the local default when one is given', () => {
+    const readme = readmeFor('redis', 'redis://shared:6379');
+    expect(readme).toContain('redis://shared:6379');
+    expect(readme).not.toContain('redis://127.0.0.1:6379');
+  });
+
+  // Both cloud arms carry an operational fact a developer cannot guess, and the
+  // generated README is where they would look for it.
+  it('carries the transport operational note when it has one', () => {
+    expect(readmeFor('pubsub')).toContain('Topics are NOT');
+    expect(readmeFor('service-bus')).toContain('NO entities');
+  });
+});
