@@ -1,0 +1,25 @@
+---
+# Source: setu-ts/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: setu-setu-ts
+  namespace: setu
+  labels:
+    helm.sh/chart: setu-ts-0.1.0
+    app.kubernetes.io/name: setu-ts
+    app.kubernetes.io/instance: setu
+    app.kubernetes.io/version: "0.1.0-alpha.6"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  rules:
+    - host: "setu.example.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: setu-setu-ts
+                port:
+                  number: 3000

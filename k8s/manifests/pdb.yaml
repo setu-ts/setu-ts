@@ -1,0 +1,19 @@
+---
+# Source: setu-ts/templates/pdb.yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: setu-setu-ts
+  namespace: setu
+  labels:
+    helm.sh/chart: setu-ts-0.1.0
+    app.kubernetes.io/name: setu-ts
+    app.kubernetes.io/instance: setu
+    app.kubernetes.io/version: "0.1.0-alpha.6"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: setu-ts
+      app.kubernetes.io/instance: setu

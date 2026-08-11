@@ -1,0 +1,95 @@
+---
+# Source: setu-ts/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: setu-setu-ts
+  namespace: setu
+  labels:
+    helm.sh/chart: setu-ts-0.1.0
+    app.kubernetes.io/name: setu-ts
+    app.kubernetes.io/instance: setu
+    app.kubernetes.io/version: "0.1.0-alpha.6"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: setu-ts
+      app.kubernetes.io/instance: setu
+  template:
+    metadata:
+      annotations:
+        checksum/config: f3bf8d6461d0e3caeb4f3b95d3421143601603fa53d7ec9f4634d2a6722b32f2
+      labels:
+        app.kubernetes.io/name: setu-ts
+        app.kubernetes.io/instance: setu
+    spec:
+      serviceAccountName: setu-setu-ts
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: "setu/rest-api:m39"
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --allow-net
+            - --allow-env
+            - --allow-read
+            - --allow-sys
+            - main.ts
+            - "3000"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: setu-setu-ts-config
+          startupProbe:
+            httpGet:
+              path: /live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

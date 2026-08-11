@@ -282,16 +282,26 @@ deno run -A main.ts
 #### Docker
 
 ```dockerfile
-FROM denoland/deno:alpine
+# Pin the tag: a base older than the Deno that wrote your deno.lock fails with
+# "Unsupported lockfile version".
+FROM denoland/deno:alpine-2.9.5
 
 WORKDIR /app
 
 COPY . .
 RUN deno cache main.ts
 
+# Numeric, not `USER deno`: Kubernetes' runAsNonRoot refuses an image whose user is a name.
+USER 1000:1000
+
 EXPOSE 3000
 CMD ["run", "--allow-net", "--allow-env", "main.ts"]
 ```
+
+> This snippet is for **your own** project, where dependencies come from JSR. To build an image of
+> an example in this repository, use the parameterized [`docker/Dockerfile`](../docker/Dockerfile)
+> instead — it builds from the repository root, which the workspace requires. See
+> [Deployment](./deployment.md).
 
 #### Compiled Binary
 

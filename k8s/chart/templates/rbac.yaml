@@ -1,0 +1,44 @@
+{{- if .Values.serviceDiscovery.enabled }}
+{{/*
+RBAC for ServiceDiscoveryPlugin({ provider: 'kubernetes' }).
+
+The verbs and the apiGroup are taken from what the provider actually requests, not from
+convention: it GETs
+  {apiServer}/apis/discovery.k8s.io/v1/namespaces/{ns}/endpointslices
+and re-LISTs on every watch event, so it needs `list` AND `watch` on `endpointslices` in the
+`discovery.k8s.io` group. It authenticates with the projected service-account token at
+/var/run/secrets/kubernetes.io/serviceaccount/token, which is why the Deployment keeps
+automountServiceAccountToken on when this is enabled.
+
+Namespace-scoped (Role, not ClusterRole) because the provider takes a single `namespace` option
+and never reads across namespaces. Granting cluster-wide read would hand the app visibility it
+cannot use.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "setu-ts.fullname" . }}-discovery
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "setu-ts.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ['discovery.k8s.io']
+    resources: ['endpointslices']
+    verbs: ['get', 'list', 'watch']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "setu-ts.fullname" . }}-discovery
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "setu-ts.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "setu-ts.fullname" . }}-discovery
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "setu-ts.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

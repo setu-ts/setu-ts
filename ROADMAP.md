@@ -4016,21 +4016,64 @@ M51b's npm-client interop suite for `apps/graphql-demo` is manual.
 
 ### Docker
 
-- Dockerfiles for each example (`denoland/deno` base images)
-- `deno compile` multi-stage builds producing minimal distroless/scratch images
-- Docker Compose for local dev
+- **One parameterized `docker/Dockerfile`** (`denoland/deno` base, `--build-arg APP=<name>`) that
+  builds any example, rather than fifteen near-identical files — §11.1 forbids the duplication, and
+  every example stays containerizable. The gate builds four (`minimal`, `rest-api`, `realtime`,
+  `compiled-binary`), each chosen for a distinct build property. **Corrected from "Dockerfiles for
+  each example".**
+- `deno compile` multi-stage build → `gcr.io/distroless/cc-debian12`. **`scratch` is impossible**
+  and this was measured, not assumed: the compiled binary is dynamically linked against glibc
+  (`libc.so.6`, `libgcc_s.so.1`, …), so distroless/cc is the floor. The size win is also modest —
+  44.9 MB against 52.4 MB for the runtime image, because the binary embeds the whole Deno runtime —
+  so the reason to prefer it is the removed shell and toolchain, not size. **Corrected from "minimal
+  distroless/scratch images".**
+- Docker Compose for local dev, with the OTel collector behind a `telemetry` profile (the M24c
+  config requires five cloud credentials and would otherwise crash-loop) and Redis as a real backing
+  service.
+- The build context is the **repository root**, which is a correctness requirement rather than a
+  convention: an example maps only its direct dependencies, so `@setu-ts/common` resolves through
+  the root workspace and a context without `deno.json` fails to build.
 
 ### Kubernetes
 
 - Deployments, Services, Ingress
 - ConfigMaps, Secrets
 - HPA, PDB
+- ServiceAccount + **RBAC granting `list`/`watch` on `discovery.k8s.io/endpointslices`** — M50
+  shipped a `kubernetes` discovery provider that cannot work without it, and no committed document
+  described it. Gated off by default for least privilege.
 
 ### Deliverables
 
-- [ ] Docker configurations
-- [ ] Kubernetes manifests
-- [ ] Helm chart (optional)
+- [x] Docker configurations (parameterized Dockerfile + distroless compiled variant + Compose)
+- [x] Kubernetes manifests (`k8s/manifests/`, rendered from the chart and committed)
+- [x] Helm chart — **promoted from "(optional)" to required, and made the single authored source.**
+      The raw manifests are rendered artifacts; `deno task check:deploy --render` re-renders and
+      fails on drift, so the chart and the YAML cannot disagree.
+- [x] Cloudflare Workers deploy path documented (`wrangler deploy`, not a container — a Worker has
+      no `listen()`), per this milestone's own Hono-migration note.
+- [x] `deno task check:deploy` gate: builds real images, checks render drift, validates the Compose
+      model, and with `--cluster` applies the manifests to a real kind cluster, waits for the
+      rollout, serves a request through the Service, and verifies the discovery RBAC with
+      `kubectl auth can-i`.
+- [x] Graceful shutdown made real. **Found by deploying:** nothing in the framework or any example
+      handled `SIGTERM`, so a container died in 144 ms with exit code 143 and `app.stop()` never ran
+      — `terminationGracePeriodSeconds` was decorative and no `onStopping`/`onShutdown` hook fired.
+      Fixed at the application layer (a framework-level signal seam would be a `common` widening;
+      see "Out of scope") and documented as the recommended pattern.
+
+### Out of scope
+
+- **A framework-level signal seam.** Teaching `packages/runtime` to install a SIGTERM handler behind
+  an `IRuntimeServices` member, so every application drains without writing the handler itself, is a
+  `common` widening and a real capability addition. Deferred with the measured evidence recorded
+  above.
+- **Consul deployment objects.** Named under this milestone's platform side, but M50's Consul
+  provider is exercised by its own suite, and a Consul StatefulSet would add a second orchestration
+  story. The Kubernetes EndpointSlice path is the one M39 proves.
+- **Deployment to a live cloud** (EKS/GKE/AKS, a published image registry, a real Cloudflare
+  account). CI holds no cloud credentials; the proof here is a local kind cluster. M40 owns release
+  mechanics.
 
 ---
 
@@ -6498,7 +6541,7 @@ MEASUREMENT rather than by argument:
 | 37b       | ✅     | examples + Redis startup fix          |
 | 37c       | ✅     | full-stack example (apps/full-stack)  |
 | 38        | ✅     | documentation                         |
-| 39        | ⬜     | docker/kubernetes                     |
+| 39        | ✅     | docker/kubernetes                     |
 | 40        | ⬜     | final release                         |
 | 58        | ✅     | cli (domain module scaffolding)       |
 | 59        | ✅     | cloudflare-plugin (workers messaging) |

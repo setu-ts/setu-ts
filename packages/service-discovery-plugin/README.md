@@ -172,6 +172,22 @@ its first check passes and every read here sends `passing=true`.
 Configuring `selfRegistration` with any other provider throws `SelfRegistrationNotSupportedError` at
 `register()` rather than silently doing nothing.
 
+## Kubernetes RBAC
+
+The `kubernetes` provider reads EndpointSlices with the pod's projected ServiceAccount token, so it
+needs permission the plugin cannot grant itself:
+
+```yaml
+rules:
+  - apiGroups: ['discovery.k8s.io']
+    resources: ['endpointslices']
+    verbs: ['get', 'list', 'watch']
+```
+
+`watch` is required as well as `list` — the provider re-LISTs on every watch event. The framework's
+Helm chart renders this Role and its RoleBinding when `serviceDiscovery.enabled=true`; see the
+[deployment guide](https://github.com/setu-ts/hono-enterprise/blob/main/docs/deployment.md).
+
 ## Kubernetes in-cluster TLS
 
 The API server presents a cluster-internal CA that `fetch` rejects. No code change fixes this from

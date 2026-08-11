@@ -57,6 +57,8 @@
     "docs:api": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",
     "release:docs": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",
     "check:plan": "deno run --allow-read scripts/plan-lint.ts",
+    "check:deploy": "deno run --allow-read --allow-write --allow-run --allow-env scripts/check-deploy.ts",
+    "deploy:render": "deno run --allow-read --allow-write --allow-run --allow-env scripts/check-deploy.ts --render --write",
     "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git --allow-write packages test",
     "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git --allow-write packages test --coverage=coverage --coverage-raw-data-only && deno run --allow-run=deno scripts/coverage.ts && deno run --allow-run=deno scripts/script-coverage.ts coverage",
     "audit": "deno audit --level=high",
@@ -108,7 +110,9 @@
       ".verify",
       ".verify-milestone",
       "packages/sdk/test/fixtures/generated-client.ts",
-      "packages/sdk/test/fixtures/params-client.ts"
+      "packages/sdk/test/fixtures/params-client.ts",
+      "k8s/chart/templates",
+      "k8s/manifests"
     ]
   },
   "imports": {
