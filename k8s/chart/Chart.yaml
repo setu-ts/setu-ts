@@ -6,6 +6,13 @@ description: |
   service-discovery plugin's `kubernetes` provider needs to read EndpointSlices.
 type: application
 
+# `lifecycle.preStop.sleep` is beta and enabled by default only from 1.30. On 1.28 the API server
+# REJECTS the Deployment outright (verified against a real 1.28 cluster: strict decoding error,
+# unknown field "spec.template.spec.containers[0].lifecycle.preStop.sleep"), and on 1.29 the field
+# is alpha behind the PodLifecycleSleepAction gate, so it parses but the drain window silently
+# never happens. Declaring the floor makes `helm install` refuse with a clear message instead.
+kubeVersion: '>=1.30.0-0'
+
 # The chart's own version. Bumped when the templates change shape, independently of the
 # framework version below.
 version: 0.1.0

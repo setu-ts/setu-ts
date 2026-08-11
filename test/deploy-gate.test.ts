@@ -270,12 +270,82 @@ describe('chart', () => {
     expect(valuesConfig).toMatch(/serviceDiscovery:\s*\n\s*enabled:\s*false/);
   });
 
+  it('declares a minimum Kubernetes version for the preStop sleep action', () => {
+    // lifecycle.preStop.sleep is beta/default-on only from 1.30. A 1.28 API server REJECTS the
+    // Deployment outright (verified on a real 1.28 cluster) and 1.29 accepts the field while the
+    // action stays inert behind a gate, silently removing the drain window.
+    const chart = read('k8s/chart/Chart.yaml');
+    expect(chart).toMatch(/kubeVersion:\s*'>=1\.30/);
+  });
+
+  it('guards the inlined podSecurityContext so an empty map cannot break the render', () => {
+    // A bare toYaml inlined into an existing mapping emits `{}` mid-mapping when the value is
+    // nulled, and helm fails with an unhelpful "could not find expected ':'".
+    expect(deployment).toMatch(/\{\{-\s*with\s+\.Values\.podSecurityContext\s*\}\}/);
+  });
+
   it('keeps automountServiceAccountToken tied to the discovery gate', () => {
     // The provider reads its bearer token from the projected volume, so automounting must stay
     // on exactly when discovery is enabled.
     expect(deployment).toContain(
       'automountServiceAccountToken: {{ .Values.serviceDiscovery.enabled }}',
     );
+  });
+});
+
+describe('skip contract', () => {
+  it('exits 77 — not 1 — when a required tool is absent', async () => {
+    // The module doc promises SKIP_EXIT_CODE for any mode whose tooling is absent. Only the
+    // cluster mode honoured it; render/build/compose exited 1, so a contributor without helm got
+    // a hard FAILED and CI could not tell "tool missing" from "gate genuinely failed".
+    //
+    // PATH is narrowed to Deno's own directory so `helm` cannot be found while `deno` still can.
+    const denoDir = Deno.execPath().replace(/\/[^/]+$/, '');
+    const result = await new Deno.Command(Deno.execPath(), {
+      args: [
+        'run',
+        '--allow-read',
+        '--allow-write',
+        '--allow-run',
+        '--allow-env',
+        'scripts/check-deploy.ts',
+        '--render',
+      ],
+      env: { PATH: denoDir },
+      clearEnv: true,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+
+    expect(result.code).toBe(SKIP_EXIT_CODE);
+  });
+});
+
+describe('graceful shutdown in the containerized examples', () => {
+  const MATRIX_ENTRY_POINTS = [
+    'apps/minimal/main.ts',
+    'apps/rest-api/main.ts',
+    'apps/realtime/main.ts',
+    'apps/compiled-binary/main.ts',
+  ];
+
+  it('every containerized example installs a SIGTERM handler', () => {
+    // Without one, Deno's default action ends the process immediately (measured: 144 ms, exit
+    // 143) and app.stop() never runs, making terminationGracePeriodSeconds decorative.
+    for (const path of MATRIX_ENTRY_POINTS) {
+      const source = read(path);
+      expect(source).toContain('addSignalListener');
+      expect(source).toContain('SIGTERM');
+      expect(source).toContain('app.stop()');
+    }
+  });
+
+  it('handles a REJECTING stop() rather than leaving an unhandled rejection', () => {
+    // A rejecting onShutdown hook makes stop() reject. Verified against a real app: without
+    // .catch the process dies with "Uncaught (in promise)" and Deno.exit(0) never runs.
+    for (const path of MATRIX_ENTRY_POINTS) {
+      expect(read(path)).toMatch(/app\.stop\(\)[\s\S]{0,300}\.catch\(/);
+    }
   });
 });
 
