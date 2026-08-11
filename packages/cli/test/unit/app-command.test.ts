@@ -122,15 +122,84 @@ describe('runAppCommand', () => {
       expect(h.err.text()).toContain('Unknown template "nope"');
     });
 
-    // `port` is a VALUE flag, so it parses cleanly and would otherwise be read
-    // by nothing — handing back a member on a port the user did not choose,
-    // with no diagnostic. The same class as `--runtime` above.
-    it('refuses --port, naming where a member port comes from', async () => {
+    // Through the same reader `setu new --workspace --port` uses, so a value the
+    // one flag site rejects can never be accepted by the other.
+    it('refuses a member port no service can bind', async () => {
       const h = harness([]);
-      expect(await h.run(['app', 'orders', '--port', '4444'])).toBe(2);
-      expect(h.err.text()).toContain('--workspace --port');
-      expect(h.err.text()).toContain(WORKSPACE_MANIFEST);
+      expect(await h.run(['app', 'orders', '--port', '99999'])).toBe(2);
+      expect(h.err.text()).toContain('Invalid --port "99999"');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    // `parseArgs` records a valued flag as boolean `true` when the next token is
+    // flag-shaped or absent, so a negative number reads as "no value" rather
+    // than as the number the user typed.
+    it('refuses --port with no value', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--port'])).toBe(2);
+      expect(h.err.text()).toContain('--port needs a value');
+      expect(h.fs.writes).toEqual([]);
+    });
+  });
+
+  describe('--port', () => {
+    it('binds the requested port instead of the allocated one', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'billing', '--port', '4444'])).toBe(0);
+
+      const manifest = JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
+        members: { name: string; port: number }[];
+      };
+      expect(manifest.members).toEqual([
+        { name: 'orders', port: 3000 },
+        { name: 'billing', port: 4444 },
+      ]);
+      // The chosen port has to reach BOTH sides of the one datum: what this
+      // member binds, and what its sibling dials.
+      expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
+        'export const SERVICE_PORT = 4444;',
+      );
+      expect(h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`)).toContain(
+        `'billing': [{ host: '127.0.0.1', port: 4444 }]`,
+      );
+    });
+
+    // Two members on one port cannot both start, and every sibling's map names
+    // both — so one name resolves to the other service. The collision is between
+    // a flag and a file, so this command is the only place that can see it.
+    it('refuses a port another member already binds, naming that member', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'billing', '--port', '3000'])).toBe(1);
+      expect(h.err.text()).toContain('already bound by the member "orders"');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    // Allocation is derived from the HIGHEST port in use, so a hand-picked port
+    // above the base moves the ceiling rather than being skipped over — the next
+    // member cannot land on it.
+    it('allocates above a hand-picked port for the next member', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'billing', '--port', '4444'])).toBe(0);
+
+      const next = harness(
+        JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`)).members as WorkspaceMember[],
+      );
+      expect(await next.run(['app', 'shipping'])).toBe(0);
+      const manifest = JSON.parse(next.fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
+        members: { name: string; port: number }[];
+      };
+      expect(manifest.members.at(-1)).toEqual({ name: 'shipping', port: 4445 });
+    });
+
+    // The escape hatch from the exhausted-range refusal the workspace gate
+    // covers: an explicit port is never allocated, so a workspace based at the
+    // top of the range can still take a member.
+    it('takes a member even when allocation has no port left', async () => {
+      const h = harness([{ name: 'orders', port: 65535 }], 65535);
+      expect(await h.run(['app', 'billing', '--port', '3000'])).toBe(0);
+      expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
+        'export const SERVICE_PORT = 3000;',
+      );
     });
   });
 

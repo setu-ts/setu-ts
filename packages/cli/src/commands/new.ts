@@ -26,7 +26,7 @@ import { listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost } from '../templates/project-files.ts';
-import { DEFAULT_BASE_PORT, isUsablePort, MAX_PORT, MIN_PORT } from '../workspace/manifest.ts';
+import { DEFAULT_BASE_PORT, readPortFlag } from '../workspace/manifest.ts';
 import {
   DEFAULT_TRANSPORT,
   getTransport,
@@ -58,47 +58,6 @@ export interface NewDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
-}
-
-/**
- * Reads and validates `--port`.
- *
- * The range comes from `workspace/manifest.ts` rather than a local constant, so
- * the flag and the manifest reader cannot disagree about what a bindable port
- * is — they did, and an out-of-range port hand-edited into the manifest reached
- * every generated module unchecked.
- *
- * @param args - The parsed arguments
- * @returns The base port, `undefined` when the flag is absent, or the refusal
- */
-function readBasePort(
-  args: ParsedArgs,
-): { readonly ok: true; readonly port?: number } | {
-  readonly ok: false;
-  readonly message: string;
-} {
-  // Presence, not `stringFlag`. `parseArgs` records a valued flag as the boolean
-  // `true` when the next token is itself flag-shaped or absent, so
-  // `--port -1` and a trailing `--port` both read as "no value" — and testing
-  // for a string would let the number the user typed vanish without a word.
-  const raw = args.flags['port'];
-  if (raw === undefined) return { ok: true };
-  if (typeof raw !== 'string') {
-    return {
-      ok: false,
-      message: `--port needs a value: expected an integer between ${MIN_PORT} and ${MAX_PORT}. ` +
-        `A negative number is read as another flag, so there is no port below ${MIN_PORT}.`,
-    };
-  }
-
-  const port = Number(raw);
-  if (!isUsablePort(port)) {
-    return {
-      ok: false,
-      message: `Invalid --port "${raw}": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
-    };
-  }
-  return { ok: true, port };
 }
 
 /**
@@ -154,7 +113,7 @@ function planWorkspace(
     };
   }
 
-  const basePort = readBasePort(args);
+  const basePort = readPortFlag(args.flags);
   if (!basePort.ok) return { ok: false, message: basePort.message };
 
   const transport = readTransport(args);
