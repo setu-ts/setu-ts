@@ -1,0 +1,23 @@
+{{/*
+The Service is also the object the service-discovery plugin's `kubernetes` provider discovers
+through: Kubernetes generates EndpointSlices from this Service's selector, and the provider LISTs
+those. A selector matching no pod therefore produces an EMPTY EndpointSlice rather than an error —
+`kubectl apply` succeeds, schema validation succeeds, and discovery silently returns nothing. That
+is why the selector comes from the shared helper instead of being written out here.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "setu-ts.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "setu-ts.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "setu-ts.selectorLabels" . | nindent 4 }}

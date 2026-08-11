@@ -540,3 +540,4 @@ When adding a new example:
 - [Getting Started](./getting-started.md) - Set up your first application
 - [Plugin Architecture](./plugin-architecture.md) - Deep dive into plugins
 - [Runtime Deployment](./runtime-deployment.md) - Deploy to production
+- [Docker and Kubernetes](./deployment.md) - Containerize and orchestrate an example

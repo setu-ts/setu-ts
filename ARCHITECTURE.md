@@ -33,7 +33,8 @@
 16. [Testing Strategy](#16-testing-strategy)
 17. [Extending the Framework](#17-extending-the-framework)
 18. [Future Evolution](#18-future-evolution)
-19. [Conclusion](#conclusion)
+19. [Deployment](#19-deployment)
+20. [Conclusion](#conclusion)
 
 ---
 
@@ -2780,6 +2781,49 @@ When breaking changes are necessary:
 3. **Provide replacement** — Offer a new API that replaces the old one.
 4. **Wait** — Allow at least one minor version for migration.
 5. **Remove** — Remove the deprecated API in the next major version.
+
+---
+
+## 19. Deployment
+
+The framework's deployment model follows directly from the runtime abstraction in §4: a Setu-TS
+application is an ordinary process that binds a socket, so it containerizes like any other, and
+Cloudflare Workers — which has no `listen()` — deploys through its own platform instead.
+
+Operator-facing detail lives in [`docs/deployment.md`](docs/deployment.md); this section records
+only the architectural constraints.
+
+### 19.1 Images build from the repository root
+
+An application's `deno.json` maps only the packages it imports directly. `@setu-ts/common` reaches
+`@setu-ts/kernel` through the **root workspace**, so a container image must carry the root
+`deno.json` alongside `packages/`. Without it, Deno resolves the workspace member's `jsr:` specifier
+against the registry and the build fails outright. This is why the build context is the repository
+root rather than the application directory.
+
+### 19.2 Health endpoints are the orchestration contract
+
+`HealthPlugin` registers `/health`, `/live` and `/ready`. The latter two are what a Kubernetes
+`livenessProbe` and `readinessProbe` consume, which makes them part of the deployment contract
+rather than a convenience: an application that does not register the plugin cannot express readiness
+to an orchestrator at all, and will never pass a rollout.
+
+### 19.3 Graceful shutdown is the application's responsibility
+
+`ILifecycleApi.onStopping` runs at the start of `stop()`, before the socket closes, so a service can
+deregister while it is still reachable. **Nothing calls `stop()` on `SIGTERM` automatically.** The
+framework installs no signal handler: doing so would be a side effect at import time (§11.5 of the
+guidelines) and signal APIs are runtime-specific (§4.1), so it belongs to application code, which is
+why `stop()` is a public programmatic API. Applications that skip it are killed outright and run no
+shutdown hooks.
+
+### 19.4 Boundary with service discovery
+
+This layer owns the **platform** objects — the Kubernetes `Service`, the `EndpointSlice`s it
+generates, and the RBAC a pod needs to read them. Resolving a name to instances, balancing across
+them, watching for changes and ejecting outliers belong to `@setu-ts/service-discovery-plugin`. The
+split matters because the plugin cannot grant itself the permission it needs; that grant is a
+deployment artifact.
 
 ---
 

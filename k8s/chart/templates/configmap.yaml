@@ -1,0 +1,15 @@
+{{- if .Values.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "setu-ts.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "setu-ts.labels" . | nindent 4 }}
+data:
+  {{- /* quote: an unquoted `true` or `8080` is a YAML bool/int, and ConfigMap data must be
+         strings — the API server rejects the object otherwise. */}}
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,15 @@
+---
+# Source: setu-ts/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: setu-setu-ts-config
+  namespace: setu
+  labels:
+    helm.sh/chart: setu-ts-0.1.0
+    app.kubernetes.io/name: setu-ts
+    app.kubernetes.io/instance: setu
+    app.kubernetes.io/version: "0.1.0-alpha.6"
+    app.kubernetes.io/managed-by: Helm
+data:
+  LOG_LEVEL: "info"

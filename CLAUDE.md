@@ -1989,16 +1989,87 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   explicitly-registered Cloudflare factory where it is hardcoded, so it passed with the bug in
   place. **Not verified against a deployed Worker** — CI holds no Cloudflare account) — complete (PR
   #145)
-- **Next milestone** — **M39** (docker/kubernetes), then M40. M60–M62 came from a measured audit
-  after M58: a project with all fourteen schematics generated type-checked clean while its entry
-  points imported exactly ONE generated path, so thirteen of fourteen generated artifacts were
-  unreachable — that, not breadth, was the distance from NestJS. **All three are now closed**: M60
-  wired eleven of the thirteen, M61 made decorators and DI independent choices, and M62 added
-  monorepos, so the CLI parity work is done. M59 came from an external DX review; note what that
-  review got wrong, since the ROADMAP section says so and a reader should not re-raise it: it
-  claimed the framework has no decorators (M9/M36b ship them) and that Workers queues are still
-  blocked (M52b shipped them). Its suggested HTTP-polling adapters were rejected with cause — a
-  Worker has no ambient loop to poll from.
+- **Milestone 39** (`docker/` + `k8s/` + `scripts/` + `docs/` — containerization and orchestration.
+  The framework could be _served_ on four runtimes and _found_ by an orchestrator (M50) but not
+  _shipped_ to one: `git ls-files` returned exactly ONE deployment artifact, M24c's collector
+  config, and no Dockerfile, Compose file, Kubernetes object or deploy guide existed anywhere. Ships
+  ONE parameterized `docker/Dockerfile` (`ARG APP`, builds any example — §11.1 forbids fifteen
+  near-copies, so the ROADMAP's "Dockerfiles for each example" was corrected), a
+  `Dockerfile.compiled` `deno compile` → distroless variant, a Compose stack, a Helm chart as the
+  single authored source with **rendered manifests committed** beside it, and
+  `deno task
+  check:deploy`. **No `packages/` source, no capability token, no export changed.**
+
+  **Three ROADMAP claims did not survive measurement.** `scratch` is **impossible** — `ldd` on the
+  compiled binary shows it dynamically linked against glibc, so `distroless/cc-debian12` is the
+  floor; the size win is 44.9 MB vs 52.4 MB, not an order of magnitude, because the binary embeds
+  the whole Deno runtime, so the reason to prefer it is the removed shell, not size; and the Helm
+  chart was promoted from "(optional)" to the single source, with `--render` failing on drift so
+  chart and YAML cannot disagree.
+
+  **The build context must be the repository root**, which is a correctness requirement rather than
+  a convention: an example's `deno.json` maps only its DIRECT dependencies, so `@setu-ts/common`
+  reaches `kernel` through the root workspace, and an image without root `deno.json` fails with
+  `Could not find version of '@setu-ts/common' that matches '^0.1.0-alpha.6'` — the specifier
+  resolves against JSR instead of the local member.
+
+  **The milestone's headline finding came from trying to deploy: nothing in the framework or any
+  example handled SIGTERM.** `grep` over `packages/*/src` and `apps/*/main.ts` returned zero hits,
+  and a running container stopped in **144 ms with exit code 143** — killed by the signal, not the
+  137 of a post-grace SIGKILL — so `app.stop()` never ran, `terminationGracePeriodSeconds` was
+  decorative, and every `onStopping`/`onShutdown` hook (M50 deregistration, database and broker
+  disconnects) was skipped. Fixed at the **application** layer at the maintainer's direction (a
+  framework seam would need an `IRuntimeServices` signal member and a `common` widening — deferred
+  and named, not omitted), documented as the recommended pattern, and verified: the same container
+  now exits **0**.
+
+  **Four more defects were caught only by a real cluster, each after all four gates were green.**
+  (1) `runAsNonRoot: true` **refuses a non-numeric image user** — `USER deno` gives
+  `container has runAsNonRoot and image has non-numeric user (deno), cannot verify user is
+  non-root`,
+  and Docker resolves the name happily, so it fails ONLY under Kubernetes; both images now declare
+  numeric UIDs (1000, 65532). (2) An `emptyDir` at `/deno-dir` **masks the build-time module
+  cache**, so every pod re-resolves from jsr.io at startup and dies with
+  `JSR package manifest for '@hono/hono' failed to load` — fatal in an air-gapped cluster; only
+  `/tmp` is mounted. (3) `helm template` defaults `.Release.Namespace` to `default`, so the
+  RoleBinding named a ServiceAccount in the wrong namespace — it applied cleanly and simply granted
+  nothing; every object now pins its namespace. (4) The manifests originally referenced
+  `apps/minimal`, which imports kernel+runtime only and **serves no `/live` or `/ready` at all**, so
+  the Deployment could never pass readiness; they reference `rest-api`, which reaches HealthPlugin
+  through `rest-starter`. Probe paths are `/live` and `/ready`, NOT `/health/live` — verified 404
+  against the running image.
+
+  **The gate itself shipped two bugs that its own first real run exposed**, both in the same class:
+  `helm --version` exits 1 (helm wants a bare `version`) and `kubectl --version` exits 1 too, so
+  probing with a guessed flag reported an INSTALLED tool as missing — a **false skip**, the one
+  outcome the exit-77 machinery exists to prevent. Presence is now resolved by looking for the
+  binary on `PATH`, which cannot rot as those CLIs change. A missing-tool skip also originally
+  returned "pass"; it exits 77.
+
+  **All five negative controls were observed failing and reverted**: a `/health/live` probe drops
+  ready replicas to 0; removing `COPY deno.json` fails the build with the exact resolution error;
+  hand-editing a committed manifest fails `--render` by name; dropping `watch` from the Role makes
+  `kubectl auth can-i watch` answer `no`; and a Service selector matching no pod empties the
+  endpoints and refuses the request **while `kubectl apply` still reports success** — the defect no
+  schema validator can see. Doc deliverables C1–C7 shipped: ROADMAP Docker/distroless/Helm bullets
+  corrected with the measured numbers, a new ARCHITECTURE §19, `docs/deployment.md`, the RBAC the
+  `kubernetes` discovery provider needs (documented NOWHERE before this), and M38's inline
+  Dockerfile snippets fixed for the floating tag and root user they carried. Deliberate deviation
+  from the plan: `check-deploy.ts` is NOT added to `script-coverage.ts`'s `SCRIPT_TARGETS` —
+  `check-apps.ts` is not either, and the file is mostly `docker`/`kind` orchestration a test may not
+  spawn; its decidable logic is exported and unit-tested instead. **Not verified against a managed
+  cloud cluster** — CI holds no cloud credentials; the proof is a real local kind cluster) —
+  complete (PR pending)
+- **Next milestone** — **M40** (final polish and release). M60–M62 came from a measured audit after
+  M58: a project with all fourteen schematics generated type-checked clean while its entry points
+  imported exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable
+  — that, not breadth, was the distance from NestJS. **All three are now closed**: M60 wired eleven
+  of the thirteen, M61 made decorators and DI independent choices, and M62 added monorepos, so the
+  CLI parity work is done. M59 came from an external DX review; note what that review got wrong,
+  since the ROADMAP section says so and a reader should not re-raise it: it claimed the framework
+  has no decorators (M9/M36b ship them) and that Workers queues are still blocked (M52b shipped
+  them). Its suggested HTTP-polling adapters were rejected with cause — a Worker has no ambient loop
+  to poll from.
 
 ## Verification (run before declaring any work done)
 

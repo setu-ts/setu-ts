@@ -1,0 +1,21 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+{{/*
+Guards VOLUNTARY disruption only — node drains and cluster upgrades. It does not protect against
+a crash or an evicted node.
+
+`minAvailable: 1` with `replicaCount: 1` blocks node drains entirely: the single pod can never be
+evicted, so the drain hangs. Enable this only alongside replicaCount >= 2 or autoscaling.
+*/}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "setu-ts.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "setu-ts.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "setu-ts.selectorLabels" . | nindent 6 }}
+{{- end }}

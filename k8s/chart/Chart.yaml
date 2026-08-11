@@ -1,0 +1,24 @@
+apiVersion: v2
+name: setu-ts
+description: |
+  Kubernetes deployment for a Setu-TS application: Deployment, Service, optional Ingress,
+  ConfigMap/Secret env projection, HPA, PodDisruptionBudget, and the ServiceAccount + RBAC the
+  service-discovery plugin's `kubernetes` provider needs to read EndpointSlices.
+type: application
+
+# The chart's own version. Bumped when the templates change shape, independently of the
+# framework version below.
+version: 0.1.0
+
+# The Setu-TS release these manifests are written against. Quoted because a bare
+# 0.1.0-alpha.6 is not a YAML string.
+appVersion: '0.1.0-alpha.6'
+
+keywords:
+  - setu-ts
+  - deno
+  - typescript
+
+home: https://github.com/setu-ts/hono-enterprise
+sources:
+  - https://github.com/setu-ts/hono-enterprise

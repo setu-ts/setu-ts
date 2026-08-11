@@ -1,0 +1,38 @@
+{{- if .Values.ingress.enabled }}
+{{/*
+Requires an ingress controller in the cluster; without one this object is created and simply never
+programmed. Disabled by default, and the chart ships NO cloud-specific annotations, so the default
+render stays applicable on a local kind cluster — `ingress.annotations` is a pass-through for
+whatever the target controller needs.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "setu-ts.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "setu-ts.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.ingress.path }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "setu-ts.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

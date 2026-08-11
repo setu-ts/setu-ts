@@ -75,6 +75,50 @@ jobs:
       - name: Test with coverage
         run: deno task test:coverage
 
+  # Deployment artifacts are YAML and Dockerfiles: `deno fmt`, `deno lint` and
+  # `deno check` cannot see a defect in any of them. Only building the images
+  # and applying the manifests to a real cluster can, and each of these has
+  # already caught something the other gates passed over — a probe path that
+  # 404s, an image whose non-numeric user Kubernetes refuses, a RoleBinding
+  # naming the wrong namespace, and a Service selector matching no pod (which
+  # `kubectl apply` accepts without complaint).
+  deploy:
+    name: Docker / Kubernetes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # Docker is preinstalled on ubuntu-latest; kind, kubectl and helm are not.
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: setu-deploy-gate
+          # Must match the kubectl the runner ships, and the API versions the
+          # chart uses (autoscaling/v2, policy/v1, discovery.k8s.io/v1).
+          node_image: kindest/node:v1.31.2
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      # Render drift, image builds, and the Compose model.
+      - name: Deployment gate
+        run: deno task check:deploy
+
+      # The real proof: apply the COMMITTED manifests to the cluster, wait for
+      # a rollout (which only completes if the readiness probe passes), serve a
+      # request through the Service, and verify the discovery RBAC.
+      #
+      # kind-action already created the cluster, so the gate reuses it.
+      # KEEP_CLUSTER stops the gate deleting a cluster the action owns.
+      - name: Cluster end-to-end
+        run: deno task check:deploy --cluster
+        env:
+          KEEP_CLUSTER: '1'
+
   publish-dry-run:
     name: JSR publish dry-run
     runs-on: ubuntu-latest

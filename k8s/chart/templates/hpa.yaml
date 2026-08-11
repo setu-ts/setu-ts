@@ -1,0 +1,30 @@
+{{- if .Values.autoscaling.enabled }}
+{{/*
+Requires a metrics source (metrics-server). Without one the HPA reports <unknown> targets and
+never scales — it does not error, which is why this is called out here and in docs/deployment.md.
+
+Note this scales on CPU as reported by the kubelet, which is unrelated to the framework's own
+MetricsPlugin `/metrics` endpoint; scaling on those needs an adapter (Prometheus Adapter or KEDA).
+*/}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "setu-ts.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "setu-ts.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "setu-ts.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
