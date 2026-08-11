@@ -129,6 +129,29 @@ CMD ["run", "--allow-net", "--allow-env", "--allow-read", "--allow-sys", "main.t
 }
 
 /**
+ * The environment one member needs to reach everything else in a cluster.
+ *
+ * Shared by the Compose stack and the Kubernetes objects, because the answer is
+ * the same in both and for the same reason: a sibling is reachable by its SERVICE
+ * NAME, never by the loopback address the generated map falls back to. Two copies
+ * of this would let one deployment target keep working while the other silently
+ * routed every request into the caller's own container.
+ *
+ * @param siblings - Every OTHER member of the workspace
+ * @param transport - The workspace's transport
+ * @returns Variable → value
+ */
+export function memberEnvironment(
+  siblings: readonly WorkspaceManifest['members'][number][],
+  transport: TransportSpec,
+): Readonly<Record<string, string>> {
+  return {
+    ...Object.fromEntries(siblings.map((sibling) => [hostVariable(sibling.name), sibling.name])),
+    ...transport.compose?.memberEnv,
+  };
+}
+
+/**
  * Renders one member's Compose service.
  *
  * The container listens on the member's OWN allocated port and publishes it
@@ -151,16 +174,9 @@ function memberService(
 ): string {
   const backing = transport.compose;
 
-  const env: Record<string, string> = {
-    // Each sibling by SERVICE NAME. Without these the member's generated map
-    // falls back to loopback, which inside a container is the member itself.
-    ...Object.fromEntries(
-      siblings.map((sibling) => [hostVariable(sibling.name), sibling.name]),
-    ),
-    ...backing?.memberEnv,
-  };
-
-  const envLines = Object.entries(env)
+  // Each sibling by SERVICE NAME. Without these the member's generated map falls
+  // back to loopback, which inside a container is the member itself.
+  const envLines = Object.entries(memberEnvironment(siblings, transport))
     .map(([key, value]) => `      ${key}: '${value}'`)
     .join('\n');
 
