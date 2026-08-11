@@ -2279,15 +2279,19 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   fix/continuation prompts) because scratch was committed — do not repeat this. Before every commit
   run `git status --short` and `git diff --cached --name-only`; if a transient plan/prompt file is
   staged, `git rm --cached` (or delete) it. When the milestone is complete, in the SAME PR that
-  flips the status: `git mv plans/milestone-<N>-<desc>.md plans/archive/` and confirm
-  `git ls-files plans/ | grep milestone-<N>` returns ONLY the archived path — any stray
-  `plans/milestone-<N>-*` still tracked at the repo's `plans/` root is a defect the PR must remove.
+  flips the status: `git rm plans/milestone-<N>-<desc>.md` and confirm
+  `git ls-files plans/ | grep milestone-<N>` returns NOTHING. A plan is scaffolding for building the
+  milestone; once it has shipped, what it decided lives in the code, the tests, `PUBLIC_API.md`, the
+  ROADMAP section and the CHANGELOG, and the plan itself is a fourth copy that drifts from all of
+  them. The 74-file `plans/archive/` this replaces was deleted for exactly that reason — several of
+  its plans still described designs the implementation had since reversed. The history keeps them:
+  `git log --diff-filter=D --name-only -- plans/` finds any of them by name.
 
 ## Key conventions
 
-- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), archived to
-  `plans/archive/` on completion in the milestone's own PR. All other prompts/notes are scratchpad
-  only and never committed (see the plan-cleanup rule in "Before reporting a task done").
+- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), DELETED on completion
+  in the milestone's own PR — the plan is scaffolding, and git keeps it. All other prompts/notes are
+  scratchpad only and never committed (see the plan-cleanup rule in "Before reporting a task done").
 - Tests: `@std/testing/bdd` (`describe`/`it`) + `@std/expect` (`expect`), in
   `test/{unit,integration,e2e}/` per package. **Write every test with `describe`/`it` from
   `@std/testing/bdd` from the very first line — NEVER start with `Deno.test(...)` and convert it
