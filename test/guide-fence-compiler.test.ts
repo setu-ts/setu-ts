@@ -1,5 +1,5 @@
 /**
- * Actual-fence compiler for every copyable Setu-TS block across all nine guides.
+ * Actual-fence compiler for every copyable Setu-TS block across all ten guides.
  *
  * This test delegates classification and compilation to the shared fence engine
  * at test/fixtures/snippets/fence-engine.ts, which provides:
@@ -66,6 +66,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 3,
   },
+  'docs/cli.md': {
+    total: 11,
+    ts: 1,
+    compile: 1,
+    external: 0,
+    pseudocode: 0,
+    skipped: 10,
+  },
   'docs/plugin-architecture.md': {
     total: 17,
     ts: 17,
@@ -107,9 +115,9 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/runtime-deployment.md': {
-    total: 29,
-    ts: 12,
-    compile: 12,
+    total: 30,
+    ts: 13,
+    compile: 13,
     external: 0,
     pseudocode: 0,
     skipped: 17,
@@ -117,15 +125,15 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
-  total: 242,
-  ts: 207,
-  compile: 175,
+  total: 254,
+  ts: 209,
+  compile: 177,
   external: 32,
   pseudocode: 0,
-  skipped: 35,
+  skipped: 45,
 };
 
-describe('actual-fence compiler — all nine guides (shared engine)', () => {
+describe('actual-fence compiler — all ten guides (shared engine)', () => {
   it('compiles every compile fence against the workspace', async () => {
     const all = await allFences();
     const toCompile = all.filter(

@@ -4862,7 +4862,7 @@ Install it with an explicit binary name, because Deno's default inference would 
 package (`cli`):
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.3/main
+deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.5/main
 ```
 
 ### Commands
