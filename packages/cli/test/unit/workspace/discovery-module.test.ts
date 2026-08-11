@@ -21,8 +21,13 @@ describe('renderDiscoveryModule', () => {
 
   it('names every sibling with its allocated port', () => {
     const source = renderDiscoveryModule(ORDERS, [ORDERS, BILLING, SHIPPING]);
-    expect(source).toContain(`'billing': [{ host: '127.0.0.1', port: 3001 }]`);
-    expect(source).toContain(`'shipping': [{ host: '127.0.0.1', port: 3002 }]`);
+    // The host is an environment read with the local address as its fallback:
+    // inside a container 127.0.0.1 is the container itself, so a fixed value would
+    // have every member dial ITSELF on its sibling's port.
+    expect(source).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
+    expect(source).toContain('port: 3001,');
+    expect(source).toContain("host: Deno.env.get('SHIPPING_HOST') ?? '127.0.0.1'");
+    expect(source).toContain('port: 3002,');
   });
 
   // Discovery is for reaching OTHER services; a self-entry invites a service to

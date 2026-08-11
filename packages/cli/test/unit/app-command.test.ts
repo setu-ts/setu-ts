@@ -250,7 +250,7 @@ describe('runAppCommand', () => {
         'export const SERVICE_PORT = 4444;',
       );
       expect(h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`)).toContain(
-        `'billing': [{ host: '127.0.0.1', port: 4444 }]`,
+        'port: 4444,',
       );
     });
 
@@ -379,9 +379,12 @@ describe('runAppCommand', () => {
     it('inherits the workspace transport for every member it adds', async () => {
       const h = harness([], 3000, 'redis');
       expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
-      expect(h.fs.read('/ws/apps/orders/setu.config.ts')).toContain(
-        "MessagingPlugin({ broker: 'redis-streams', url: 'redis://127.0.0.1:6379' })",
-      );
+      const config = h.fs.read('/ws/apps/orders/setu.config.ts');
+      expect(config).toContain("broker: 'redis-streams'");
+      // Read from the environment with the local address as the fallback, so the
+      // same generated config works on the host and inside the Compose stack.
+      expect(config).toContain(`Deno.env.get('REDIS_URL')`);
+      expect(config).toContain('redis://127.0.0.1:6379');
     });
 
     it('registers the gRPC plugin in every member of a grpc workspace', async () => {
@@ -509,14 +512,16 @@ describe('runAppCommand', () => {
     it('rewrites the first member map to name it', async () => {
       const h = await twoMembers();
       const orders = h.fs.read(`/ws/apps/orders/${DISCOVERY_MODULE}`);
-      expect(orders).toContain(`'billing': [{ host: '127.0.0.1', port: 3001 }]`);
+      expect(orders).toContain("host: Deno.env.get('BILLING_HOST') ?? '127.0.0.1'");
+      expect(orders).toContain('port: 3001,');
       expect(orders).not.toContain(`'orders':`);
     });
 
     it('gives the new member the first one address', async () => {
       const h = await twoMembers();
       const billing = h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`);
-      expect(billing).toContain(`'orders': [{ host: '127.0.0.1', port: 3000 }]`);
+      expect(billing).toContain("host: Deno.env.get('ORDERS_HOST') ?? '127.0.0.1'");
+      expect(billing).toContain('port: 3000,');
     });
 
     // The regenerated modules are `managed`, so rewriting them is not an
