@@ -17,28 +17,17 @@ import { expect } from '@std/expect';
 import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
-import { bootAndProbe, denoCheck, useWorkspacePackages } from '../fixtures/generated-project.ts';
+import {
+  bootAndProbe,
+  denoCheck,
+  unusedPort,
+  useWorkspacePackages,
+} from '../fixtures/generated-project.ts';
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 
 const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
-
-/**
- * Finds a port nothing is listening on.
- *
- * The workspace's base port is taken from here rather than from the CLI's
- * default 3000: this gate binds REAL sockets, and a constant would collide with
- * whatever else the machine happens to be running.
- *
- * @returns A free TCP port on loopback
- */
-function freePort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const { port } = listener.addr as Deno.NetAddr;
-  listener.close();
-  return port;
-}
 
 /**
  * The probe `orders` runs: resolve `billing` through the discovery capability
@@ -103,7 +92,7 @@ describe('workspace scaffolding — end to end', () => {
     root = await Deno.makeTempDir({ prefix: 'setu-ws-' });
     out = [];
     err = [];
-    base = freePort();
+    base = unusedPort();
   });
 
   afterEach(async () => {

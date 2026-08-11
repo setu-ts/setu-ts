@@ -169,25 +169,23 @@ describe('the Node target can run decorated source', () => {
     expect(manifest.devDependencies?.['vite']).toBeDefined();
   });
 
-  it('emits no devDependencies block when there is nothing to declare', async () => {
-    // The Bun + no-template path is the one combination that contributes
-    // neither a runtime devDependency nor a template one, so it is the only
-    // case that exercises the empty-object guard. Asserting the key is ABSENT
-    // is the whole test: an earlier version checked that `dependencies` was
-    // present instead, which passed with the guard deleted.
+  // This used to assert the OPPOSITE — that the Bun + no-template combination
+  // emitted no `devDependencies` at all, because it was the one path
+  // contributing neither a runtime nor a template entry. It no longer exists:
+  // the entry's shutdown listener registers on `process`, whose declarations a
+  // Bun project has to declare, so every project on this branch now carries the
+  // block and the empty-object guard it was testing is gone.
+  it('declares the Bun type declarations even with no template', async () => {
     const h = harness();
     expect(await h.run(['app', '--runtime', 'bun'])).toBe(0);
-    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as Record<string, unknown>;
-    expect(Object.keys(manifest)).not.toContain('devDependencies');
-    // …and the same path with a template that declares them still emits it, so
-    // the guard cannot be satisfied by dropping the key unconditionally.
-    const withTemplate = harness();
-    expect(await withTemplate.run(['app', '--runtime', 'bun', '--template', 'rest'])).toBe(0);
-    const other = JSON.parse(withTemplate.fs.read('/work/app/package.json')) as Record<
-      string,
-      unknown
-    >;
-    expect(Object.keys(other)).toContain('devDependencies');
+    const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
+      devDependencies?: Record<string, string>;
+    };
+    expect(manifest.devDependencies?.['@types/bun']).toBeDefined();
+    // Not `@types/node`: a Bun project declares the package Bun's own docs
+    // prescribe, which supplies the same `process` declarations transitively.
+    expect(manifest.devDependencies?.['@types/node']).toBeUndefined();
+    expect(manifest.devDependencies?.['tsx']).toBeUndefined();
   });
 });
 
