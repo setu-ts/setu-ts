@@ -13,11 +13,13 @@ import {
   EXIT_OK,
   EXIT_USAGE,
   isTargetRuntime,
+  LIBRARY_VERB,
   PROGRAM_NAME,
   TARGET_RUNTIMES,
   type TargetRuntime,
 } from '../constants.ts';
 import { runAppCommand } from './app.ts';
+import { runLibraryCommand } from './library.ts';
 import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import {
@@ -82,6 +84,7 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   }
   log(`  ${CUSTOM_SCHEMATIC} <schematic-name>  (from .setu-ts/schematics/)`);
   log(`  ${APP_VERB} <name>  (adds a service to a workspace)`);
+  log(`  ${LIBRARY_VERB} <name>  (adds shared code to a workspace)`);
   log('');
   log('Options:');
   log('  --dry-run          Print what would be created, write nothing');
@@ -111,6 +114,18 @@ export async function runGenerateCommand(
   // installs nothing) would say nothing about the member being created.
   if (args.positionals[0] === APP_VERB) {
     return await runAppCommand(args, {
+      fs: deps.fs,
+      dir,
+      log: deps.log,
+      error: deps.error,
+    });
+  }
+
+  // Dispatched beside `app`, and for the same reasons: it is not a schematic, and
+  // the detected plugin set of a workspace ROOT — which installs nothing — would
+  // say nothing about a library that depends on no plugin at all.
+  if (args.positionals[0] === LIBRARY_VERB) {
+    return await runLibraryCommand(args, {
       fs: deps.fs,
       dir,
       log: deps.log,

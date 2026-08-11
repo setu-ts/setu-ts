@@ -71,6 +71,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'port',
   'transport',
   'transport-url',
+  'scope',
 ]);
 
 /**
@@ -85,6 +86,15 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
  * in the same command.
  */
 export const APP_VERB = 'app';
+
+/**
+ * The `generate` verb that adds a shared library to a workspace.
+ *
+ * Spelled to match its NestJS analogue (`nest g library`). Not a schematic, for
+ * the same reason {@linkcode APP_VERB} is not: it reads the workspace manifest and
+ * may edit the root's member glob, while a schematic performs no I/O at all.
+ */
+export const LIBRARY_VERB = 'library';
 
 /**
  * Narrows an arbitrary string to a {@linkcode TargetRuntime}.

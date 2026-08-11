@@ -41,6 +41,9 @@ export const NODE_MODULES_DIR = 'nodeModulesDir';
  */
 export const NODE_MODULES_AUTO = 'auto';
 
+/** The `workspace` key whose globs decide what Deno treats as a member. */
+export const WORKSPACE_KEY = 'workspace';
+
 /** What planning the root edit produced. */
 export type RootManifestPlan =
   /** The root already allows it; nothing to write. */
@@ -113,6 +116,72 @@ export function planRootNodeModulesDir(contents: string, member: string): RootMa
       }\n`,
       // The CLI wrote this file and is adding one field to it, so the overwrite
       // check must not treat it as somebody else's.
+      managed: true,
+    },
+  };
+}
+
+/**
+ * Plans the root edit a library needs when the workspace predates libraries.
+ *
+ * A workspace created by this CLI already declares BOTH globs, so this is a no-op
+ * for anything scaffolded now — a glob matching nothing is valid (measured), which
+ * is what lets both be written once and never revisited. It exists for a root
+ * created before `libs/*` was one of them: without the glob Deno does not treat the
+ * library as a member, and every `import '@scope/lib'` in a sibling fails to
+ * resolve with nothing pointing at the cause.
+ *
+ * @param contents - The root manifest as it is on disk
+ * @param glob - The member glob a library needs, e.g. `./libs/*`
+ * @param library - The library being added, named in refusals
+ * @returns Whether to write, and what
+ */
+export function planRootWorkspaceGlob(
+  contents: string,
+  glob: string,
+  library: string,
+): RootManifestPlan {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch {
+    return {
+      kind: 'refused',
+      message:
+        `Cannot read the workspace ${ROOT_MANIFEST} as JSON, and the "${library}" library needs ` +
+        `"${glob}" in its \`${WORKSPACE_KEY}\` list — without it Deno does not treat the library ` +
+        `as a member and no sibling can import it. Add that entry by hand and run this again.`,
+    };
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return {
+      kind: 'refused',
+      message: `The workspace ${ROOT_MANIFEST} is not a JSON object, so there is no ` +
+        `\`${WORKSPACE_KEY}\` list to add "${glob}" to for the "${library}" library.`,
+    };
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const globs = record[WORKSPACE_KEY];
+
+  // A root whose `workspace` is not a list of strings is one this CLI did not
+  // write, and rewriting it would discard whatever shape it has.
+  if (!Array.isArray(globs) || globs.some((entry) => typeof entry !== 'string')) {
+    return {
+      kind: 'refused',
+      message: `The workspace ${ROOT_MANIFEST} does not declare \`${WORKSPACE_KEY}\` as a list ` +
+        `of globs, so "${glob}" cannot be added to it for the "${library}" library.`,
+    };
+  }
+
+  if (globs.includes(glob)) return { kind: 'unchanged' };
+
+  return {
+    kind: 'update',
+    file: {
+      path: ROOT_MANIFEST,
+      contents: `${JSON.stringify({ ...record, [WORKSPACE_KEY]: [...globs, glob] }, null, 2)}\n`,
       managed: true,
     },
   };

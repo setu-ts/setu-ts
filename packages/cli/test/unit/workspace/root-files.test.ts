@@ -36,9 +36,12 @@ describe('workspaceRootFiles', () => {
 
   // A GLOB, parsed rather than substring-matched: this is what makes adding a
   // member touch no file the developer owns.
+  // BOTH globs, written once: a service goes under apps/ and a library under
+  // libs/, and a glob matching nothing is valid (measured), so neither kind of
+  // addition ever has to rewrite this file.
   it('declares members by glob so the root is never rewritten', () => {
     const manifest = JSON.parse(contentsOf('deno.json')) as { workspace?: string[] };
-    expect(manifest.workspace).toEqual(['./apps/*']);
+    expect(manifest.workspace).toEqual(['./apps/*', './libs/*']);
   });
 
   it('gives the root a task that runs every member', () => {
