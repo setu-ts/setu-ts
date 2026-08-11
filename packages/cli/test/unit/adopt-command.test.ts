@@ -280,4 +280,99 @@ describe('runAdoptCommand', () => {
     expect(h.err.text()).toContain('--name');
     expect(h.fs.writes).toEqual([]);
   });
+
+  it('refuses a port no service can bind, through the shared reader', async () => {
+    const h = harness();
+    expect(await h.run(['--port', '99999'])).toBe(2);
+    expect(h.err.text()).toContain('Invalid --port "99999"');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  // A leftover from a half-finished run: `apps/svc/` already holding the module
+  // this would write. The Compose and Kubernetes files are exempt because they are
+  // `managed` — the CLI owns and regenerates those — and the project's own
+  // `deno.json` is exempt because it MOVES out of the way first.
+  it('refuses when a planned file already exists', async () => {
+    const h = harness({
+      ...PROJECT,
+      [`/work/svc/apps/svc/${DISCOVERY_MODULE}`]: 'left over\n',
+    });
+    expect(await h.run([])).toBe(1);
+    expect(h.err.text()).toContain('Refusing to overwrite');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  // Stopping part-way is safe BECAUSE of the copy-verify-delete order, and the
+  // message has to say so — every file moved so far exists in both places.
+  it('stops and says nothing is lost when a move fails', async () => {
+    const fs = createFakeFs(PROJECT);
+    const err = createRecorder();
+    const failing = {
+      ...fs,
+      writeFile: (path: string, data: Uint8Array) =>
+        path.includes('apps/svc/src/')
+          ? Promise.reject(new Error('disk full'))
+          : fs.writeFile(path, data),
+    };
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs: failing,
+      cwd: '/work/svc',
+      log: createRecorder().sink,
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('disk full');
+    expect(err.text()).toContain('nothing is lost');
+  });
+
+  // The guard exists for a file that appears AFTER the plan was made — an editor
+  // writing into `src/` mid-run. An adopted directory is walked wholesale, so
+  // nothing present at plan time is ever left behind; what must never happen is a
+  // recursive delete of something this command did not move.
+  it('keeps and reports a directory that gained a file after the plan', async () => {
+    const fs = createFakeFs(PROJECT);
+    const out = createRecorder();
+    let moved = false;
+    const racing = {
+      ...fs,
+      writeFile: async (path: string, data: Uint8Array) => {
+        await fs.writeFile(path, data);
+        // A real file, written into the directory mid-run, the way an editor
+        // saving would: a fake that only reported the NAME would be caught by the
+        // walk's own stat and prove nothing.
+        if (path.includes('apps/svc/src/') && !moved) {
+          moved = true;
+          await fs.writeFile('/work/svc/src/appeared.ts', new TextEncoder().encode('later\n'));
+        }
+      },
+    };
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs: racing,
+      cwd: '/work/svc',
+      log: out.sink,
+      error: createRecorder().sink,
+    });
+    expect(code).toBe(0);
+    expect(out.text()).toContain('kept src/');
+  });
+
+  it('reports a write failure rather than throwing', async () => {
+    const fs = createFakeFs(PROJECT);
+    const err = createRecorder();
+    const failing = {
+      ...fs,
+      writeFile: (path: string, data: Uint8Array) =>
+        path.endsWith(WORKSPACE_MANIFEST)
+          ? Promise.reject(new Error('read-only volume'))
+          : fs.writeFile(path, data),
+    };
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs: failing,
+      cwd: '/work/svc',
+      log: createRecorder().sink,
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('read-only volume');
+  });
 });

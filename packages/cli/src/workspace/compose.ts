@@ -230,9 +230,10 @@ export function workspaceContainerFiles(
 
   // Sorted, so a manifest a human has reordered does not turn a no-op
   // regeneration into a diff — the same reason the discovery map sorts.
-  const members = [...manifest.members].sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
-  );
+  // Two-way, not three-way: member names are unique by construction (the command
+  // refuses a duplicate), so an equal-names arm would be a branch no input can
+  // reach.
+  const members = [...manifest.members].sort((left, right) => (left.name < right.name ? -1 : 1));
 
   const services = members
     .map((member) =>

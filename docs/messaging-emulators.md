@@ -92,3 +92,31 @@ workflow. The other two do not, for different reasons: the Pub/Sub emulator imag
 mounted config file — two multi-container additions for backends whose logic is a thin translation
 over a pure, fully unit-tested adapter. Running them locally before a release is the intended
 workflow.
+
+## A scaffolded workspace on an emulator
+
+`setu new acme --workspace --transport pubsub` (or `--transport service-bus`) wires every member to
+the transport and emits a Compose stack that starts the emulator beside them, so this needs no
+`docker run` of its own:
+
+```bash
+docker compose -f docker/compose.yaml up -d          # emulator + every member
+```
+
+Neither arm needs a credential. Each reads its connection value from the environment
+(`PUBSUB_PROJECT_ID`, `SERVICE_BUS_CONNECTION_STRING`) and falls back to the vendor's documented
+local-emulator setting, which is what makes an unconfigured workspace work.
+
+Two operational facts a developer cannot guess, both carried in the generated README:
+
+- **Pub/Sub does not create topics.** `publish` posts to an existing topic and `subscribe` creates
+  only the subscription, so create each topic first —
+  `curl -X PUT $PUBSUB_EMULATOR_HOST/v1/projects/$PUBSUB_PROJECT_ID/topics/<name>`.
+- **The Service Bus emulator creates no entities at all.** Every topic must be declared in the
+  generated `docker/servicebus-config.json` with a `messaging-consumers` subscription — the broker's
+  own default consumer group — before the container starts.
+
+Both paths were verified end to end: two generated members, one publishing and one receiving, over
+each real emulator. A stale subscription is worth knowing about on the Pub/Sub side: one bound to a
+deleted topic silently swallows delivery, because `subscribe` treats ALREADY_EXISTS as success and
+then opens a subscription attached to nothing. Reset the emulator between unrelated runs.

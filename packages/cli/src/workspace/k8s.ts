@@ -187,9 +187,10 @@ export function workspaceK8sFiles(
 ): readonly GeneratedFile[] {
   if (manifest.members.length === 0) return [];
 
-  const members = [...manifest.members].sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
-  );
+  // Two-way, not three-way: member names are unique by construction (the command
+  // refuses a duplicate), so an equal-names arm would be a branch no input can
+  // reach.
+  const members = [...manifest.members].sort((left, right) => (left.name < right.name ? -1 : 1));
 
   const documents = members.map((member) =>
     memberObjects(
