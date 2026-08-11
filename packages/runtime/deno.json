@@ -1,14 +1,14 @@
 {
   "name": "@setu-ts/runtime",
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
     "./worker": "./src/worker/define-worker-task.ts"
   },
   "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.5",
-    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.5"
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.6",
+    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.6"
   },
   "test": {
     "permissions": {

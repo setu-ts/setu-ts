@@ -34,7 +34,7 @@ npm install jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
 
 ```bash
 # Install the Setu CLI
-deno install -A -f jsr:@setu-ts/cli@^0.1.0-alpha.5/main
+deno install -A -f jsr:@setu-ts/cli@^0.1.0-alpha.6/main
 
 # Create a new REST application
 setu new my-app --runtime deno
@@ -324,9 +324,9 @@ For npm-based projects, ensure your `package.json` has the correct imports:
 ```json
 {
   "imports": {
-    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.5",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.1.0-alpha.5",
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.5"
+    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.6",
+    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.1.0-alpha.6",
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.6"
   }
 }
 ```
