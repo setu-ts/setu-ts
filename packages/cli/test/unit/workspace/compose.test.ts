@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 import {
   COMPOSE_FILE,
   DOCKERFILE,
+  DOCKERIGNORE,
   workspaceContainerFiles,
 } from '../../../src/workspace/compose.ts';
 import {
@@ -43,12 +44,12 @@ function contentsOf(
 }
 
 describe('workspaceContainerFiles', () => {
-  it('emits a Dockerfile and a Compose file, both managed', () => {
+  it('emits a Dockerfile, an ignore file and a Compose file, all managed', () => {
     const files = workspaceContainerFiles(
       manifestOf([{ name: 'orders', port: 3000 }]),
       transportSpec('http'),
     );
-    expect(files.map((f) => f.path)).toEqual([DOCKERFILE, COMPOSE_FILE]);
+    expect(files.map((f) => f.path)).toEqual([DOCKERFILE, DOCKERIGNORE, COMPOSE_FILE]);
     // Managed, because both are regenerated on every `generate app`: without it
     // the second member would be refused as an overwrite.
     for (const file of files) expect(file.managed).toBe(true);
@@ -102,6 +103,50 @@ describe('workspaceContainerFiles', () => {
     // module, so one parameterized file has no single number to name.
     it('declares no EXPOSE, because the port is per member', () => {
       expect(dockerfile()).not.toContain('\nEXPOSE');
+    });
+
+    // Libraries and this file shipped together and did not compose: a member that
+    // imports `@scope/shared` resolves it through `libs/`, and an image without
+    // that directory fails at `deno cache` with the specifier unresolvable.
+    // Reproduced by staging exactly this copy set outside Docker.
+    //
+    // The bracket glob is the load-bearing part, verified against a real build: a
+    // plain `COPY libs` FAILS the build when the directory is absent, which every
+    // workspace without a library would hit.
+    it('copies every shared library, tolerating a workspace with none', () => {
+      expect(dockerfile()).toContain('COPY lib[s] ./libs/');
+    });
+  });
+
+  describe('the ignore file', () => {
+    const ignore = () =>
+      contentsOf(
+        workspaceContainerFiles(
+          manifestOf([{ name: 'orders', port: 3000 }]),
+          transportSpec('http'),
+        ),
+        DOCKERIGNORE,
+      );
+
+    // Docker reads `<context>/.dockerignore`, and the context is the workspace
+    // ROOT — one under docker/ beside the Dockerfile is read by nothing.
+    it('sits at the workspace root, where Docker looks for it', () => {
+      expect(DOCKERIGNORE).toBe('.dockerignore');
+    });
+
+    // The expensive one: `COPY apps/${MEMBER}` otherwise lays the HOST's
+    // node_modules over the one the image just installed — host-built native
+    // binaries inside a Linux image, and the separated install layer invalidated
+    // by any local install.
+    it('keeps every node_modules out, member and library locations included', () => {
+      const contents = ignore();
+      expect(contents).toContain('\nnode_modules\n');
+      expect(contents).toContain(`${MEMBERS_DIR}/*/node_modules`);
+      expect(contents).toContain('libs/*/node_modules');
+    });
+
+    it('keeps the repository history out of the build context', () => {
+      expect(ignore()).toContain('\n.git\n');
     });
   });
 

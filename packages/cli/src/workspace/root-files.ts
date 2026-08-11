@@ -44,6 +44,9 @@ const MEMBER_GLOB = `./${MEMBERS_DIR}/*`;
  *
  * @param name - The workspace directory name, used in the README
  * @param basePort - The port the first member will bind
+ * @param transport - The bus every member will meet on
+ * @param profile - The workspace's runtime, which decides the root's shape
+ * @param transportUrl - An override for the transport's local address
  * @returns The files to create, relative to the workspace root
  */
 export function workspaceRootFiles(
@@ -108,7 +111,7 @@ and is registered in every other service's static discovery map — so
 
 \`\`\`bash
 ${profile.install}
-${profile.manifestKind === 'deno' ? 'deno task dev' : 'npm run dev'}
+${profile.runScript('dev')}
 \`\`\`
 
 ## Ports
@@ -124,7 +127,7 @@ Services talk over **${transport.name}** — ${transport.description}.${
 
 Every member reads its connection value from \`${transport.connection.variable}\`,
 falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that
-is unset. Both halves matter: \`deno task dev\` on this machine needs the local
+is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs the local
 address, and the generated Compose stack overrides the variable with the broker's
 service name, because two containers do not share a loopback interface.${
       transport.connection.note === undefined ? '' : `\n\n${transport.connection.note}`

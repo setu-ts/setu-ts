@@ -70,8 +70,38 @@ export function joinPath(...segments: readonly string[]): string {
  * @returns An absolute, separator-normalized directory
  */
 export function resolveDir(cwd: string, dir?: string): string {
-  if (dir === undefined || dir === '') return joinPath(cwd);
-  return dir.startsWith('/') ? joinPath(dir) : joinPath(cwd, dir);
+  if (dir === undefined || dir === '') return normalizeDots(joinPath(cwd));
+  return normalizeDots(dir.startsWith('/') ? joinPath(dir) : joinPath(cwd, dir));
+}
+
+/**
+ * Resolves `.` and `..` segments in an already-joined absolute path.
+ *
+ * {@linkcode joinPath} drops empty segments and keeps everything else verbatim,
+ * which is right for the generated relative paths it mostly builds — but a
+ * `--dir` value comes from a person, and `--dir .` is the obvious way to name the
+ * current directory. Left unresolved it produced `/work/svc/.`, which every
+ * filesystem call still honours (so nothing failed loudly) while every path
+ * PRINTED carried a stray `/./` and, in `setu adopt`, the member name derived from
+ * the last segment was literally `.`.
+ *
+ * A `..` that would climb above the root is dropped rather than escaping it,
+ * matching what every filesystem does with `/..`.
+ *
+ * @param path - An absolute path, already separator-normalized
+ * @returns The same path with `.` and `..` segments resolved
+ */
+function normalizeDots(path: string): string {
+  const resolved: string[] = [];
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      resolved.pop();
+      continue;
+    }
+    resolved.push(part);
+  }
+  return path.startsWith('/') ? `/${resolved.join('/')}` : resolved.join('/');
 }
 
 /**

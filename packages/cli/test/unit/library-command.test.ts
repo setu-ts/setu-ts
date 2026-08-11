@@ -10,6 +10,8 @@ import {
 } from '../../src/workspace/manifest.ts';
 import { LIBS_GLOB } from '../../src/workspace/library.ts';
 import { ROOT_MANIFEST } from '../../src/workspace/root-manifest.ts';
+import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+import type { TargetRuntime } from '../../src/constants.ts';
 
 interface Harness {
   readonly fs: FakeFs;
@@ -28,18 +30,25 @@ interface Harness {
  * @param workspace - Whether the workspace manifest exists
  * @returns The harness
  */
-function harness(root?: string, workspace = true): Harness {
+function harness(root?: string, workspace = true, runtime: TargetRuntime = 'deno'): Harness {
   const seed: Record<string, string> = {};
   if (workspace) {
     seed[`/acme/${WORKSPACE_MANIFEST}`] = renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
-      runtime: 'deno',
+      runtime,
       basePort: 3000,
       transport: 'http',
       members: [],
     });
-    seed[`/acme/${ROOT_MANIFEST}`] = root ??
-      `${JSON.stringify({ workspace: ['./apps/*', LIBS_GLOB] }, null, 2)}\n`;
+    const profile = workspaceProfile(runtime);
+    seed[`/acme/${profile.rootManifestFile}`] = root ??
+      `${
+        JSON.stringify(
+          { [profile.globKey]: [profile.memberGlob('apps'), profile.memberGlob('libs')] },
+          null,
+          2,
+        )
+      }\n`;
   }
   const fs = createFakeFs(seed);
   const out = createRecorder();
@@ -178,5 +187,21 @@ describe('runLibraryCommand', () => {
     const h = harness();
     expect(await h.run(['library', 'shared'])).toBe(0);
     expect(h.out.text()).toContain(`import { shared } from '@acme/shared';`);
+  });
+
+  // Measured on a real npm workspace: immediately after this command
+  // `node_modules/@acme` does not exist, and the import printed above fails to
+  // resolve until an install links the package. Deno needs nothing — it resolves a
+  // member from the manifest glob — so the line appears only where it is true.
+  it('says to re-install on npm and Bun, where the link is made by the install', async () => {
+    for (const [runtime, command] of [['node', 'npm install'], ['bun', 'bun install']] as const) {
+      const h = harness(undefined, true, runtime);
+      expect(await h.run(['library', 'shared'])).toBe(0);
+      expect(h.out.text()).toContain(command);
+    }
+
+    const deno = harness();
+    expect(await deno.run(['library', 'shared'])).toBe(0);
+    expect(deno.out.text()).not.toContain('install');
   });
 });
