@@ -8148,6 +8148,13 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   rather than always on. A request whose topic has no responder is **answered with a failure**
   rather than left to time out, and a responder that throws is relayed to the caller and acked —
   never retried, since the caller has already been told and a redelivery would re-run side effects.
+- **One `queue` export serves EVERY queue the Worker consumes.** Cloudflare distinguishes them only
+  by `batch.queue` — the queue name from `wrangler.toml`, which no plugin option can see. A Worker
+  consuming both a message queue and a job queue must route on it: feeding job batches to
+  `createMessagingHandler` fails the envelope guard and retries them until the queue dead-letters
+  them, and leaving a produced queue unconsumed discards every `IQueue.add()` silently.
+  `setu new --template microservice --runtime cloudflare-workers` emits the routing and a consumer
+  stanza for both queues.
 - **A queue carrying RPC MUST set `max_batch_timeout = 0`.** The platform default is 5 seconds and
   `RequestOptions.timeoutMs` defaults to 5000, so on a default queue essentially every `request()`
   times out. `setu new --template microservice --runtime cloudflare-workers` emits the correct

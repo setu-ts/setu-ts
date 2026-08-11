@@ -31,6 +31,7 @@ import type {
   TemplateManifest,
   Wiring,
   WorkerExport,
+  WorkerExportRoute,
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
 
@@ -333,6 +334,65 @@ await app.start({ port: ${portExpression} });
  *
  * @returns The `src/index.ts` contents
  */
+/**
+ * Renders the value imports one worker export's routes need.
+ *
+ * Grouped by package and deduplicated: two routes from one package must not emit
+ * the same import twice, which would not compile.
+ *
+ * @param routes - The export's routes
+ * @returns One import line per contributing package
+ */
+function renderRouteImports(routes: readonly WorkerExportRoute[]): string {
+  const byPackage = new Map<string, Set<string>>();
+  for (const route of routes) {
+    const symbols = byPackage.get(route.pkg) ?? new Set<string>();
+    symbols.add(route.symbol);
+    byPackage.set(route.pkg, symbols);
+  }
+  return [...byPackage]
+    .map(([pkg, symbols]) => `import { ${[...symbols].sort().join(', ')} } from '@setu-ts/${pkg}';`)
+    .join('\n');
+}
+
+/**
+ * Renders the body that dispatches one delivered payload to its handler.
+ *
+ * A single route needs no branch. Several need one on `payload.queue`, because
+ * Cloudflare invokes ONE `queue` export for every queue a Worker consumes: a
+ * Worker that fed both queues to one handler would hand the messaging broker
+ * its job batches, which it cannot read and therefore retries until the queue
+ * dead-letters them.
+ *
+ * An unlisted queue throws rather than falling through to the first route, so a
+ * queue added to `wrangler.toml` without a handler fails loudly instead of
+ * having its work quietly discarded.
+ *
+ * @param entry - The worker export to render
+ * @returns The indented statement block
+ */
+function renderRoutes(entry: WorkerExport): string {
+  const only = entry.routes[0];
+  if (entry.routes.length === 1 && only !== undefined) {
+    return `    await ${only.symbol}(app)(payload);`;
+  }
+
+  const cases = entry.routes
+    .map((route) =>
+      `      case '${route.queueName}':\n` +
+      `        return await ${route.symbol}(app)(payload);`
+    )
+    .join('\n');
+
+  return `    // Cloudflare invokes ONE '${entry.name}' export for every queue this Worker
+    // consumes, distinguished only by the queue NAME from wrangler.toml.
+    switch (payload.queue) {
+${cases}
+      default:
+        throw new Error(\`No handler is registered for queue '\${payload.queue}'.\`);
+    }`;
+}
+
 function workersEntry(
   workerExports: readonly WorkerExport[],
   entryReExports: readonly string[],
@@ -356,8 +416,8 @@ function workersEntry(
   // one would be invisible to the other.
   const exportImports = workerExports
     .map((entry) =>
-      `import type { ${entry.payloadType} } from '@setu-ts/${entry.pkg}';\n` +
-      `import { ${entry.symbol} } from '@setu-ts/${entry.pkg}';`
+      `import type { ${entry.payloadType} } from '@setu-ts/${entry.payloadPkg}';\n` +
+      renderRouteImports(entry.routes)
     )
     .join('\n');
   const exportBlock = workerExports
@@ -368,7 +428,7 @@ function workersEntry(
   ): Promise<void> {
     ${bootedInit}
     const app = await booted;
-    await ${entry.symbol}(app)(payload);
+${renderRoutes(entry)}
   },`
     )
     .join('');

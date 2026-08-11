@@ -355,8 +355,13 @@ describe('template scaffolding — end to end', () => {
     // The consumer half is a module export, which no plugin option can declare.
     const entry = await Deno.readTextFile(`${project}/src/index.ts`);
     expect(entry).toContain('async queue(');
-    expect(entry).toContain('createMessagingHandler(app)(payload)');
     expect(entry).toContain("export { ReplyInboxObject } from './reply-inbox-object.ts';");
+    // Cloudflare invokes ONE queue export for every consumed queue, so messaging
+    // and jobs must be told apart by name — otherwise the messaging broker gets
+    // job batches it cannot read and retries them to the dead-letter queue.
+    expect(entry).toContain('switch (payload.queue)');
+    expect(entry).toContain('createMessagingHandler(app)(payload)');
+    expect(entry).toContain('createQueueHandler(app)(payload)');
 
     // `max_batch_timeout = 0` is what makes request/reply usable at all; the
     // platform default of 5s alone exhausts the default reply budget.

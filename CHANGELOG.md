@@ -46,6 +46,9 @@ All notable changes to this project are documented here. The format follows
   declarative `TemplateDefinition.runtimeSwaps` replaces those two with `CloudflarePlugin` on
   Workers only, and contributes the `queue` module export, the Durable Object class, and the
   wrangler stanzas — including `max_batch_timeout = 0`. The other three runtimes are byte-identical.
+  Because Cloudflare invokes ONE `queue` export for every consumed queue, the emitted handler routes
+  on the queue name and both queues get a consumer: one handler for both would feed the messaging
+  broker its job batches, and an unconsumed producer discards every `IQueue.add()` silently.
   `TemplateDefinition.unsupported` and its refusal branch are **removed**: `microservice` held the
   last entry, so both became unreachable. CLI-internal, never a published export.
 
