@@ -153,6 +153,15 @@ not on `main`.
 > `--dry-run` does not catch it: the registry lookup that needs `--allow-net` is skipped under
 > `--dry-run`, so the dry run exercises neither missing permission.
 
+> **The release job needs the same backend containers as CI.** Its gates re-run the full suite, and
+> `test/apps-gate.test.ts` asserts `REDIS_URL` is reachable whenever `CI` is set — which GitHub sets
+> in **every** workflow, not only `ci.yml`. `release.yml` shipped without the `redis` and
+> `elasticmq` services, so that assertion failed and the job died before publishing anything: it is
+> what killed the `v0.1.0-alpha.5` run, which then had to be published by hand. Both workflows now
+> declare the same `env` and `services` block, and `apps-gate.test.ts` pins it on `release.yml` as
+> well, so the pair cannot drift apart again. Nothing local reproduces this — the assertion is
+> deliberately vacuous off CI, so the first evidence is the tag run itself.
+
 ## Tokenless CI publishing needs each package linked to the repository
 
 JSR accepts a GitHub Actions OIDC identity only for a package it knows belongs to the repository:
