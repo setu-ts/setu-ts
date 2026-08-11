@@ -26,6 +26,6 @@ keywords:
   - deno
   - typescript
 
-home: https://github.com/setu-ts/hono-enterprise
+home: https://github.com/setu-ts/setu-ts
 sources:
-  - https://github.com/setu-ts/hono-enterprise
+  - https://github.com/setu-ts/setu-ts
