@@ -1,0 +1,125 @@
+# Setu-TS chart — default values.
+#
+# Every value here is READ by a template in this chart. A value no template reads is dead surface
+# (AI_GUIDELINES §11 / the plan's §4.1 rule), so none is added "for later".
+
+# -- Number of pods. Ignored when autoscaling.enabled is true, which lets the HPA own the count.
+replicaCount: 2
+
+image:
+  repository: setu/minimal
+  tag: 'm39'
+  pullPolicy: IfNotPresent
+  # Container args. The examples read their port from Deno.args[0], never $PORT, so the port is
+  # passed positionally — see docs/deployment.md. This list REPLACES the image's CMD, so it must
+  # carry the permission flags too.
+  args:
+    - run
+    - --allow-net
+    - --allow-env
+    - --allow-read
+    - --allow-sys
+    - main.ts
+    - '3000'
+
+imagePullSecrets: []
+
+# -- Overrides for the generated resource names.
+nameOverride: ''
+fullnameOverride: ''
+
+service:
+  type: ClusterIP
+  # The Service port AND the container port are both derived from this, so they cannot disagree.
+  port: 3000
+
+# Probe paths. These defaults are the paths HealthPlugin actually registers
+# (`{ health: '/health', live: '/live', ready: '/ready' }`) — NOT `/health/live`, which 404s and
+# would make the kubelet restart-loop a healthy pod.
+probes:
+  enabled: true
+  live: /live
+  ready: /ready
+  # A startup probe on the liveness path lets a slow first boot take up to
+  # failureThreshold * periodSeconds without tripping liveness.
+  startupFailureThreshold: 30
+  periodSeconds: 10
+  timeoutSeconds: 3
+
+# Pod-level security context. `runAsUser` must be NUMERIC and must match the image's user:
+# with runAsNonRoot: true, Kubernetes refuses an image declaring a non-numeric user, and it
+# cannot read /etc/passwd to resolve one.
+#   docker/Dockerfile          → 1000  (the deno user)
+#   docker/Dockerfile.compiled → 65532 (distroless nonroot)
+# Change this when pointing image.repository at the compiled variant.
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    # No CPU limit by default: a limit throttles rather than evicts, and throttling a request
+    # handler shows up as latency that looks like an application bug. Memory IS limited, because
+    # exceeding memory is the failure a limit handles correctly (OOMKill, then restart).
+    memory: 512Mi
+
+# Graceful shutdown. The application must install a SIGTERM handler that calls `app.stop()` —
+# Deno's default action ends the process immediately, which makes this window decorative.
+# See docs/deployment.md.
+terminationGracePeriodSeconds: 30
+# Covers the delay between the pod leaving the Service's endpoints and kube-proxy on every node
+# noticing. Must be comfortably shorter than terminationGracePeriodSeconds.
+preStopSleepSeconds: 5
+
+# -- Non-secret environment, projected with envFrom. Rendered as a ConfigMap when non-empty.
+config: {}
+# Example:
+#   config:
+#     LOG_LEVEL: info
+
+# -- Secret environment, projected with envFrom. Rendered as a Secret when non-empty.
+# For real deployments prefer an external secret manager (the framework ships SecretsPlugin with
+# AWS/GCP/Azure/Vault providers); this exists so the chart is self-contained for local clusters.
+secrets: {}
+
+ingress:
+  enabled: false
+  className: ''
+  # Pass-through. Deliberately empty by default so the chart carries no cloud-specific
+  # annotation and stays applicable on a local kind cluster.
+  annotations: {}
+  host: setu.example.com
+  path: /
+  pathType: Prefix
+  tls: []
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+serviceAccount:
+  create: true
+  name: ''
+  annotations: {}
+
+# Grants this app's ServiceAccount permission to read EndpointSlices, which is what
+# ServiceDiscoveryPlugin({ provider: 'kubernetes' }) needs. Defaults to FALSE so an app that does
+# not use that provider runs with least privilege.
+serviceDiscovery:
+  enabled: false
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

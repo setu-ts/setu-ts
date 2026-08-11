@@ -1,0 +1,48 @@
+# Values the committed manifests in k8s/manifests/ are rendered from.
+#
+#   deno task check:deploy --render     # re-renders and fails on any difference
+#   helm template setu k8s/chart -f k8s/render-values.yaml --output-dir <dir>
+#
+# The chart is the single authored source; k8s/manifests/ is a rendered ARTIFACT, so this file is
+# what decides which objects appear there. Nearly everything is turned ON so the committed set is
+# a complete reference a reader can see without installing Helm.
+#
+# `secrets` is deliberately left EMPTY. Rendering it would commit a Secret-shaped file whose
+# placeholder values could be mistaken for real credentials; the template is still exercised by
+# test/deploy-gate.test.ts. See docs/deployment.md for wiring secrets.
+
+# The image tag `docker build -f docker/Dockerfile --build-arg APP=rest-api -t setu/rest-api:m39 .`
+# produces, so a reader can build and then apply these manifests with no edit.
+#
+# `rest-api` and NOT `minimal`, because the chart's probes point at /live and /ready and only an
+# application that registers HealthPlugin serves them. `apps/minimal` imports kernel + runtime
+# only and serves a single `/` route, so a Deployment of it would never pass readiness and would
+# sit at 0/2 available forever. rest-api reaches HealthPlugin through rest-starter (which
+# registers it by default), verified against the running image: /live, /ready and /health all
+# answer 200.
+image:
+  repository: setu/rest-api
+  tag: 'm39'
+
+replicaCount: 2
+
+config:
+  LOG_LEVEL: info
+
+ingress:
+  enabled: true
+  host: setu.example.com
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# On, so the committed manifests show the RBAC an app using the kubernetes discovery provider
+# needs. An app that does not use it should leave this off — the chart default is false.
+serviceDiscovery:
+  enabled: true

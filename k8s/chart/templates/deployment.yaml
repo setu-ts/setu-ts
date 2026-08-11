@@ -1,0 +1,141 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "setu-ts.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "setu-ts.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "setu-ts.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- /* Roll the pods when projected config changes: without these checksums a
+               ConfigMap/Secret edit updates the object but leaves every pod running the old
+               values, because envFrom is read only at container start. */}}
+        {{- if .Values.config }}
+        checksum/config: {{ toYaml .Values.config | sha256sum }}
+        {{- end }}
+        {{- if .Values.secrets }}
+        checksum/secret: {{ toYaml .Values.secrets | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "setu-ts.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "setu-ts.serviceAccountName" . }}
+      {{- /* The kubernetes discovery provider reads its bearer token from the projected
+             service-account volume, so automounting must stay ON when it is enabled. */}}
+      automountServiceAccountToken: {{ .Values.serviceDiscovery.enabled }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        {{- /* `with`, not a bare toYaml: this is inlined into an EXISTING mapping, so an empty
+               or nulled map would emit a bare `{}` in the middle of it and helm would fail with
+               an unhelpful "could not find expected ':'" parse error. */}}
+        {{- with .Values.podSecurityContext }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            {{- toYaml .Values.image.args | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              {{- /* Derived from service.port, so the container and Service can never disagree. */}}
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          {{- if or .Values.config .Values.secrets }}
+          envFrom:
+            {{- if .Values.config }}
+            - configMapRef:
+                name: {{ include "setu-ts.fullname" . }}-config
+            {{- end }}
+            {{- if .Values.secrets }}
+            - secretRef:
+                name: {{ include "setu-ts.fullname" . }}-secret
+            {{- end }}
+          {{- end }}
+          {{- if .Values.probes.enabled }}
+          {{- /* HealthPlugin registers /health, /live and /ready. Using /health/live here would
+                 404, and a 404 liveness probe restart-loops a perfectly healthy pod. */}}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.probes.live }}
+              port: http
+            failureThreshold: {{ .Values.probes.startupFailureThreshold }}
+            periodSeconds: {{ .Values.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.timeoutSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.live }}
+              port: http
+            periodSeconds: {{ .Values.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.timeoutSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.ready }}
+              port: http
+            periodSeconds: {{ .Values.probes.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.timeoutSeconds }}
+          {{- end }}
+          lifecycle:
+            preStop:
+              {{- /* Covers the gap between this pod leaving the Service endpoints and every
+                     node's kube-proxy noticing. SIGTERM is not sent until this returns. */}}
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- /* readOnlyRootFilesystem is on, so the one path the runtime writes needs a
+                   writable mount — and ONLY that one.
+
+                   Do NOT add an emptyDir at /deno-dir. The image caches its whole module graph
+                   there at build time; mounting an empty volume over it masks that cache, so the
+                   container re-resolves from jsr.io and npm at startup. Verified: with /deno-dir
+                   masked the process dies with
+                     JSR package manifest for '@hono/hono' failed to load
+                   and in an air-gapped cluster it could never recover. Left unmounted, the cache
+                   is served read-only from the image layer, which the read-only root filesystem
+                   permits. */}}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
