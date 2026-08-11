@@ -72,6 +72,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'transport',
   'transport-url',
   'scope',
+  'name',
 ]);
 
 /**
