@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.7] — 2026-08-12
+
+**A deployment release.** A generated workspace now emits the artifacts that ship it — a
+parameterized Dockerfile, a Compose stack carrying every member plus the broker its transport needs,
+and a Deployment and Service per member, all regenerated whenever a member is added. This repository
+gained the same for itself: one image that builds any example, a Helm chart with its rendered
+manifests committed beside it, and a deployment guide that finally writes down the RBAC the
+`kubernetes` service-discovery provider has always needed. A workspace is also no longer Deno-only
+(`--runtime node|bun` builds one on npm workspaces), an existing single-service project can become
+one with `setu adopt`, members can share code through `libs/`, and two more transports carry a
+workspace's internal traffic.
+
+Deploying for real is what found the defect that would have undermined all of it: **nothing handled
+`SIGTERM`**. A generated `main.ts` installed no signal handler, so `docker stop` and every pod
+eviction killed the process outright — measured at exit 143 after 1 ms, with `app.stop()` never run:
+no drain, no service-discovery deregistration, no database or broker disconnect, and a
+`terminationGracePeriodSeconds` that did nothing. Fixed in the generator and in every example here.
+
+All 47 packages move as one version, because the CLI stamps its own version as the dependency range
+for every project it scaffolds. Installs still need an explicit version
+(`jsr:@setu-ts/kernel@^0.1.0-alpha.7`) — JSR does not point `latest` at a prerelease — and Deno
+refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
+
 ### Fixed
 
 - **A scaffolded project now survives `SIGTERM`.** A generated `main.ts` installed no signal
@@ -23,6 +46,15 @@ All notable changes to this project are documented here. The format follows
   `/` returned 2761 bytes of shell and no visible text. M37c found and fixed exactly this in
   `apps/full-stack`; the template kept emitting it, because every check requested `/products` and
   `/login` explicitly and nothing ever requested `/`.
+- **Install snippets named versions the workspace no longer shipped.** Six of them, with
+  `packages/sdk/README.md` two releases behind — and a package README is the first thing a new user
+  runs, rendered on jsr.io. Nothing could see it: `release:verify` reads manifests and cross-package
+  specifiers, not prose, and a stale-but-real version still resolves, so the command works and
+  installs something old. `deno task check:docs` now compares every `@setu-ts` specifier in markdown
+  against the shipping version, exempting the changelog and the release runbook, whose old versions
+  are a record; it found two more on its first run. Also corrected: `packages/cli/README.md` still
+  called the framework Hono Enterprise, the name dropped in `v0.1.0-alpha.5`, and three
+  `github.com/setu-ts/hono-enterprise` links 404'd — the repository is `setu-ts/setu-ts`.
 
 ### Added
 
@@ -33,6 +65,33 @@ All notable changes to this project are documented here. The format follows
   `k8s/members.yaml` (a Deployment and a Service per member), all regenerated for the whole
   workspace whenever a member is added. M39 owns this repository's own deployment objects; nothing
   produced any for a user's project.
+- **Containerization and Kubernetes orchestration for the framework itself** (M39). The framework
+  could be served on four runtimes and found by an orchestrator, but nothing here showed how to ship
+  it to one: a single collector config was the only deployment artifact in the repository. Now
+  [`docker/Dockerfile`](docker/Dockerfile) builds **any** example through one file
+  (`--build-arg APP=<name>`, rather than fifteen near-copies),
+  [`docker/Dockerfile.compiled`](docker/Dockerfile.compiled) offers a `deno compile` → distroless
+  variant, [`docker/compose.yaml`](docker/compose.yaml) runs the stack, and
+  [`k8s/chart/`](k8s/chart/) is a Helm chart — Deployment, Service, Ingress, ConfigMap/Secret
+  projection, HPA, PodDisruptionBudget, and the ServiceAccount + RBAC — with its rendered manifests
+  committed beside it in [`k8s/manifests/`](k8s/manifests/) and `deno task check:deploy` failing on
+  any drift between the two.
+
+  [`docs/deployment.md`](docs/deployment.md) is the guide, and it documents the thing that was
+  written down nowhere: the exact Role the `kubernetes` service-discovery provider needs to read
+  EndpointSlices. Two things a reader might expect are corrected there rather than left implied —
+  `scratch` is impossible, because the compiled binary is dynamically linked against glibc, and the
+  distroless win is 44.9 MB against 52.4 MB rather than an order of magnitude, since the binary
+  embeds the whole Deno runtime. The reason to prefer it is the absent shell, not the size.
+
+  The build context **must** be the repository root: an example's `deno.json` maps only its direct
+  dependencies, so `@setu-ts/common` reaches `kernel` through the root workspace, and an image built
+  without the root manifest fails resolution against JSR instead. Three defects only a real cluster
+  surfaced are fixed in what ships: `runAsNonRoot` refuses a non-numeric image user (both images
+  declare numeric UIDs), an `emptyDir` at `/deno-dir` masks the build-time module cache and makes
+  every pod re-resolve from jsr.io at startup, and `helm template` defaults `.Release.Namespace`, so
+  the RoleBinding named a ServiceAccount in the wrong namespace and granted nothing while applying
+  cleanly.
 - **`--transport pubsub` and `--transport service-bus`.** Both were previously refused because each
   needs a value no scaffold can invent. Every transport with a connection value now reads it from
   the environment with a local fallback, and for these two that fallback is the vendor's own
@@ -1700,6 +1759,10 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.1.0-alpha.7]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.5
+[0.1.0-alpha.4]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.4
+[0.1.0-alpha.3]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.3
+[0.1.0-alpha.2]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.1
