@@ -129,9 +129,26 @@ describe('real-backend CI wiring', () => {
     expect(allowSkip.split(',').map((name) => name.trim())).not.toContain('full-stack');
   });
 
+  it('declares the same backend wiring on the release job', async () => {
+    // GitHub sets CI=true in EVERY workflow, so the runtime assertion below
+    // fires in release.yml exactly as it does in ci.yml — and release.yml runs
+    // this same suite before publishing. It shipped without the service block,
+    // so the v0.1.0-alpha.5 release run died on that assertion and the release
+    // was published by hand. The two workflows must therefore agree on the
+    // backend environment, not merely on which tasks they call.
+    const workflow = await Deno.readTextFile('.github/workflows/release.yml');
+    expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
+    expect(workflow).toContain('image: redis:7');
+    expect(workflow).toContain('- 6379:6379');
+    expect(workflow).toContain('image: softwaremill/elasticmq-native:1.7.1');
+    expect(workflow).toContain('SQS_ENDPOINT_URL: http://localhost:9324');
+  });
+
   it('has REDIS_URL available whenever CI provides the container', () => {
     // Vacuous locally by design; in CI it fails if the job env stops reaching
-    // the test step, which the static checks above cannot observe.
+    // the test step, which the static checks above cannot observe. Every
+    // workflow running this suite must therefore provide the container — see
+    // the release-job assertion above.
     if (Deno.env.get('CI') === undefined) return;
     expect(Deno.env.get('REDIS_URL')).toBeDefined();
   });
