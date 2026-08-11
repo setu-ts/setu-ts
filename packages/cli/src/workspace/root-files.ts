@@ -16,6 +16,7 @@ import {
   WORKSPACE_MANIFEST,
   WORKSPACE_VERSION,
 } from './manifest.ts';
+import { LIBS_GLOB } from './library.ts';
 import type { TransportSpec } from './transport.ts';
 
 /**
@@ -51,7 +52,10 @@ export function workspaceRootFiles(
   transportUrl?: string,
 ): readonly GeneratedFile[] {
   const denoJson = {
-    workspace: [MEMBER_GLOB],
+    // BOTH globs at creation, so neither adding a service nor adding a library
+    // ever rewrites this file: a glob matching nothing is valid (measured), which
+    // is what makes writing them once correct.
+    workspace: [MEMBER_GLOB, LIBS_GLOB],
     tasks: {
       // `--recursive` runs the task in every member. Each member binds the port
       // the CLI allocated it, so the whole workspace comes up on one command

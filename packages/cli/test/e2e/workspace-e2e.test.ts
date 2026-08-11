@@ -231,8 +231,8 @@ describe('workspace scaffolding — end to end', () => {
     };
     expect(rootManifest.nodeModulesDir).toBe('auto');
     // The merge keeps what the root already declared: a regenerated root would
-    // drop the glob that makes it a workspace at all.
-    expect(rootManifest.workspace).toEqual(['./apps/*']);
+    // drop the globs that make it a workspace at all.
+    expect(rootManifest.workspace).toEqual(['./apps/*', './libs/*']);
     expect(rootManifest.tasks?.['dev']).toBe('deno task --recursive start');
 
     // The route whose absence made `/` a blank 200 in every scaffolded
@@ -248,6 +248,34 @@ describe('workspace scaffolding — end to end', () => {
       `${project}/app/lib/load-context.ts`,
     ]);
     expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
+  // The whole claim of a library member is that it needs NO wiring: a Deno
+  // workspace resolves a member by its declared name, so a sibling importing
+  // `@acme/shared` resolves with no entry in its own import map and none in the
+  // root's. Nothing but a real type-check of a member that imports one can prove
+  // that — a unit test can only assert the manifest fields.
+  it('lets a member import a generated library by name, with no import map entry', async () => {
+    const ws = await twoMembers();
+    expect(await run(['g', 'library', 'shared', '--dir', ws])).toBe(0);
+
+    const project = `${ws}/apps/orders`;
+    // The member's own manifest is NOT touched by the library command, which is
+    // exactly what makes this test meaningful.
+    const before = await Deno.readTextFile(`${project}/deno.json`);
+    expect(before).not.toContain('@acme/shared');
+
+    // A module in the member that imports the library and uses its export.
+    await Deno.writeTextFile(
+      `${project}/src/uses-library.ts`,
+      `import { shared } from '@acme/shared';\n\n` +
+        `export const describeIt = (): string => shared('orders');\n`,
+    );
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, [`${project}/src/uses-library.ts`]);
+    expect(stderr).not.toContain('Relative import path');
     expect(code).toBe(0);
   });
 

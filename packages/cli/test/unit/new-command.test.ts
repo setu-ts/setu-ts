@@ -976,7 +976,9 @@ describe('--workspace', () => {
     const h = harness();
     await h.run(['acme', '--workspace']);
     const manifest = JSON.parse(h.fs.read('/work/acme/deno.json')) as { workspace?: string[] };
-    expect(manifest.workspace).toEqual(['./apps/*']);
+    // Services under apps/, libraries under libs/ — both declared at creation, so
+    // neither kind of addition rewrites this file.
+    expect(manifest.workspace).toEqual(['./apps/*', './libs/*']);
   });
 
   it('records the default base port', async () => {
