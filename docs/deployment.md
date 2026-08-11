@@ -102,6 +102,14 @@ collector build. See [the fan-out guide](./telemetry-collector-fanout.md).
 
 ## Kubernetes
 
+**Requires Kubernetes 1.30 or newer**, declared as `kubeVersion` in the chart so `helm install`
+refuses an older cluster with a clear message rather than failing obscurely. The constraint comes
+from `lifecycle.preStop.sleep`, which is beta and enabled by default only from 1.30: a 1.28 API
+server rejects the Deployment outright (`unknown field "…lifecycle.preStop.sleep"`), and on 1.29 the
+field parses while the action stays inert behind the `PodLifecycleSleepAction` gate — which would
+silently remove the drain window. To run on an older cluster, set `preStopSleepSeconds` aside and
+replace the `preStop` block with an `exec` sleep (note the distroless image has no shell).
+
 The chart in [`k8s/chart/`](../k8s/chart) is the single authored source. The plain YAML in
 [`k8s/manifests/`](../k8s/manifests) is **rendered from it** and committed, so you can read and
 apply the objects without installing Helm:
@@ -208,7 +216,14 @@ await app.start({ port });
 if (Deno.build.os !== 'windows') {
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     Deno.addSignalListener(signal, () => {
-      void app.stop().then(() => Deno.exit(0));
+      // A rejecting onShutdown hook makes stop() reject; without .catch the process dies with
+      // an unhandled rejection instead of reporting why.
+      void app.stop()
+        .then(() => Deno.exit(0))
+        .catch((error: unknown) => {
+          console.error('Graceful shutdown failed:', error);
+          Deno.exit(1);
+        });
     });
   }
 }

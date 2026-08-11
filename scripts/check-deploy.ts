@@ -332,12 +332,12 @@ async function readManifestDir(directory: string): Promise<Map<string, string>> 
   return files;
 }
 
-async function checkRender(write: boolean): Promise<boolean> {
+async function checkRender(write: boolean): Promise<CheckOutcome> {
   console.log('\n▸ render: committed manifests match the chart');
 
   if (!(await onPath('helm'))) {
-    console.log('  helm not found — cannot verify render drift');
-    return false;
+    console.log('  SKIP — missing tool(s): helm');
+    return 'skipped';
   }
 
   const temporary = await Deno.makeTempDir({ prefix: 'setu-render-' });
@@ -359,7 +359,7 @@ async function checkRender(write: boolean): Promise<boolean> {
     ], { quiet: true });
     if (!rendered.success) {
       console.error('  helm template failed');
-      return false;
+      return 'failed';
     }
 
     const fresh = await readManifestDir(`${temporary}/setu-ts/templates`);
@@ -372,14 +372,14 @@ async function checkRender(write: boolean): Promise<boolean> {
         await Deno.writeTextFile(`${MANIFEST_DIR}/${name}`, content);
       }
       console.log(`  ✓ wrote ${fresh.size} manifest(s) to ${MANIFEST_DIR}/`);
-      return true;
+      return 'passed';
     }
 
     const report = renderDrift(fresh, committed);
 
     if (isClean(report)) {
       console.log(`  ✓ ${committed.size} manifest(s) up to date`);
-      return true;
+      return 'passed';
     }
 
     console.error('  ✗ k8s/manifests/ is out of date with k8s/chart/');
@@ -387,19 +387,31 @@ async function checkRender(write: boolean): Promise<boolean> {
     for (const name of report.removed) console.error(`      - ${name} (committed, not rendered)`);
     for (const name of report.changed) console.error(`      ~ ${name} (content differs)`);
     console.error('    Re-render with: deno task deploy:render');
-    return false;
+    return 'failed';
   } finally {
     await Deno.remove(temporary, { recursive: true });
   }
 }
 
-async function checkBuild(): Promise<boolean> {
+async function checkBuild(): Promise<CheckOutcome> {
   console.log('\n▸ build: container images');
 
   if (!(await onPath('docker'))) {
-    console.log('  docker not found — cannot build images');
-    return false;
+    console.log('  SKIP — missing tool(s): docker');
+    return 'skipped';
   }
+
+  // Report what is deliberately NOT built, so "excluded on purpose" is visible to whoever runs
+  // the gate rather than living only in a test assertion.
+  for (const excluded of EXCLUDED_EXAMPLES) {
+    if (excluded.kind === 'unsupported') {
+      console.log(`  – ${excluded.app} (not containerizable): ${excluded.reason}`);
+    }
+  }
+  const redundant = EXCLUDED_EXAMPLES.filter((e) => e.kind === 'redundant').map((e) => e.app);
+  console.log(
+    `  – ${redundant.length} example(s) buildable but not gated: ${redundant.join(', ')}`,
+  );
 
   let ok = true;
   for (const target of BUILD_MATRIX) {
@@ -418,15 +430,15 @@ async function checkBuild(): Promise<boolean> {
     console.log(`  ${built.success ? '✓' : '✗'} ${target.app} → ${target.tag}`);
     if (!built.success) ok = false;
   }
-  return ok;
+  return ok ? 'passed' : 'failed';
 }
 
-async function checkCompose(): Promise<boolean> {
+async function checkCompose(): Promise<CheckOutcome> {
   console.log('\n▸ compose: local development stack');
 
   if (!(await onPath('docker'))) {
-    console.log('  docker not found — cannot validate the Compose model');
-    return false;
+    console.log('  SKIP — missing tool(s): docker');
+    return 'skipped';
   }
 
   let ok = true;
@@ -441,7 +453,7 @@ async function checkCompose(): Promise<boolean> {
     console.log(`  ${result.success ? '✓' : '✗'} ${label} resolves`);
     if (!result.success) ok = false;
   }
-  return ok;
+  return ok ? 'passed' : 'failed';
 }
 
 const MANIFEST_DIR = 'k8s/manifests';
@@ -626,9 +638,9 @@ async function main(): Promise<void> {
   }
 
   const results: CheckOutcome[] = [];
-  if (modes.render) results.push((await checkRender(modes.write)) ? 'passed' : 'failed');
-  if (modes.build) results.push((await checkBuild()) ? 'passed' : 'failed');
-  if (modes.compose) results.push((await checkCompose()) ? 'passed' : 'failed');
+  if (modes.render) results.push(await checkRender(modes.write));
+  if (modes.build) results.push(await checkBuild());
+  if (modes.compose) results.push(await checkCompose());
   if (modes.cluster) results.push(await checkCluster());
 
   if (results.includes('failed')) {

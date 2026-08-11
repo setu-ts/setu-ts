@@ -44,7 +44,12 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: true
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- /* `with`, not a bare toYaml: this is inlined into an EXISTING mapping, so an empty
+               or nulled map would emit a bare `{}` in the middle of it and helm would fail with
+               an unhelpful "could not find expected ':'" parse error. */}}
+        {{- with .Values.podSecurityContext }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         seccompProfile:
           type: RuntimeDefault
       containers:
