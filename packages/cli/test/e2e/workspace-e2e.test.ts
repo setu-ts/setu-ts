@@ -208,6 +208,47 @@ describe('workspace scaffolding — end to end', () => {
     expect(code).toBe(0);
   });
 
+  // A frontend member was refused outright until its one real blocker was
+  // measured: its Vite build needs `node_modules`, and Deno accepts
+  // `nodeModulesDir` only in the workspace ROOT. With the root declaring it, a
+  // real `react-router build` and an SSR 200 both work inside a member — verified
+  // by hand, because this suite has no network grant and so cannot run the npm
+  // install that build needs.
+  //
+  // What it CAN check is everything up to the build: the member exists, the root
+  // gained exactly one field, and the server-side modules type-check.
+  it('adds a full-stack member and enables node_modules at the root', async () => {
+    expect(await run(['new', 'shop', '--workspace', '--port', String(base)])).toBe(0);
+    const ws = `${root}/shop`;
+    expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
+
+    const rootManifest = JSON.parse(await Deno.readTextFile(`${ws}/deno.json`)) as {
+      nodeModulesDir?: string;
+      workspace?: string[];
+      tasks?: Record<string, string>;
+    };
+    expect(rootManifest.nodeModulesDir).toBe('auto');
+    // The merge keeps what the root already declared: a regenerated root would
+    // drop the glob that makes it a workspace at all.
+    expect(rootManifest.workspace).toEqual(['./apps/*']);
+    expect(rootManifest.tasks?.['dev']).toBe('deno task --recursive start');
+
+    // The route whose absence made `/` a blank 200 in every scaffolded
+    // full-stack project. Asserted as a file because proving it functionally
+    // needs the real build.
+    const project = `${ws}/apps/web`;
+    expect((await Deno.stat(`${project}/app/routes/_app/_index.tsx`)).isFile).toBe(true);
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      `${project}/app/lib/load-context.ts`,
+    ]);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
   // A member is a project like any other: `setu generate` reads ITS manifest,
   // not the root's, so a gated schematic has to work inside one.
   it('generates a gated schematic inside a member', async () => {
