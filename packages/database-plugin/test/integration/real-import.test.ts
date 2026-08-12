@@ -2,25 +2,28 @@
  * Integration test for real ORM imports.
  *
  * Attempts to dynamically import Prisma and Drizzle from npm: specifiers.
- * Guards with try/catch so network failures or missing binaries don't fail CI.
+ * The Prisma probe verifies the ungenerated package boundary; the adapter
+ * therefore requires an application-generated client to be injected.
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 describe('Real ORM imports (guarded)', () => {
-  it('prisma client import either succeeds or throws descriptive error', async () => {
+  it('prisma v7 ungenerated package has an explicit generated-client boundary', async () => {
     let imported: unknown = undefined;
     let error: Error | null = null;
     try {
-      // Match the version the adapter lazily imports (see prisma-adapter.ts).
+      // This is intentionally the published, ungenerated package rather than
+      // application-local output. Prisma v7 must not be treated as usable here.
       imported = await import('npm:@prisma/client@7.8.0');
     } catch (e) {
       error = e instanceof Error ? e : new Error(String(e));
     }
 
     if (imported !== undefined) {
-      // Import succeeded — Prisma client module loaded.
-      expect(imported).toBeDefined();
+      const PrismaClient = (imported as Record<string, unknown>).PrismaClient;
+      expect(typeof PrismaClient).toBe('function');
+      expect(() => new (PrismaClient as new () => unknown)()).toThrow(/generate|client/i);
     } else {
       // Import failed — error must be descriptive (not a silent failure).
       expect(error).not.toBeNull();

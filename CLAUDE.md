@@ -2172,7 +2172,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the fix narrows the diagnostic rather than disabling it. An empty-list arm added with it dropped
   the file to 50% branch and was DELETED rather than tested: this barrel is never scaffolded, only
   rendered by the schematic, which always passes the name being generated) — complete (PR #155).
-- **Next milestone** — **M66** (database adapters that have been executed). M63–M68 come from the
+- **Milestone 66** (`packages/database-plugin` — executable Prisma v7 and Drizzle adapters) —
+  complete (PR pending). Prisma requires an application-injected generated v7 client; Drizzle
+  resolves actual table columns and executes its query builder, guarded by a real proxy-driver SQL
+  proof.
+- **Next milestone** — **M67** (scaffold defaults and workspace ergonomics). M63–M68 come from the
   same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
   M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated
   type-checked clean while its entry points imported exactly ONE generated path, so thirteen of

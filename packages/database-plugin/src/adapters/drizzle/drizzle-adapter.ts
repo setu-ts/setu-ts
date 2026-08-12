@@ -1,6 +1,6 @@
 /**
- * Drizzle ORM adapter — lazily loads Drizzle via `npm:drizzle-orm` import
- * or accepts an injected database instance.
+ * Drizzle ORM adapter — accepts an injected database instance and lazily
+ * loads the matching Drizzle query operators.
  *
  * Transaction bridging uses the same two-deferred pattern as Prisma so that
  * `commit()` / `rollback()` properly await the outer transaction promise.
@@ -10,12 +10,6 @@
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
 import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
-import {
-  applyOrderBy,
-  applyPagination,
-  matchesWhere,
-  projectFields,
-} from '../../query/query-builder.ts';
 
 // ---------------------------------------------------------------------------
 // Drizzle database type — lazily resolved at connect() time.
@@ -27,39 +21,44 @@ import {
  * The instance is injected via `options.drizzleInstance`.
  */
 export type DrizzleInstance = {
-  select(): DrizzleSelect;
-  insert(table: unknown): DrizzleInsert;
-  update(table: unknown): DrizzleUpdate;
-  delete(table: unknown): DrizzleDelete;
+  select(fields?: Record<string, unknown>): DrizzleSelect;
+  insert(table: DrizzleTable): DrizzleInsert;
+  update(table: DrizzleTable): DrizzleUpdate;
+  delete(table: DrizzleTable): DrizzleDelete;
   execute(values: unknown): Promise<unknown>;
   query?: Record<string, unknown>;
   transaction<T>(cb: (tx: DrizzleInstance) => Promise<T>): Promise<T>;
 };
 
 type DrizzleSelect = {
-  from(table: unknown): Promise<Record<string, unknown>[]>;
-  where?(expr: unknown): Promise<Record<string, unknown>[]>;
+  from(table: DrizzleTable): DrizzleSelectQuery;
+};
+
+type DrizzleSelectQuery = PromiseLike<Record<string, unknown>[]> & {
+  where(expr: unknown): DrizzleSelectQuery;
+  orderBy(...expressions: unknown[]): DrizzleSelectQuery;
+  limit(value: number): DrizzleSelectQuery;
+  offset(value: number): DrizzleSelectQuery;
 };
 
 type DrizzleInsert = {
-  values(data: Record<string, unknown> | Record<string, unknown>[]): DrizzleInsertChained;
+  values(data: Record<string, unknown> | Record<string, unknown>[]): DrizzleWriteQuery;
 };
 
-type DrizzleInsertChained = {
-  execute(): Promise<Record<string, unknown>[]>;
+type DrizzleWriteQuery = {
+  where?(expr: unknown): DrizzleWriteQuery;
+  returning(): PromiseLike<Record<string, unknown>[]>;
 };
 
 type DrizzleUpdate = {
-  set(data: Record<string, unknown>): DrizzleUpdateChained;
-};
-
-type DrizzleUpdateChained = {
-  where(expr: unknown): Promise<Record<string, unknown>[]>;
+  set(data: Record<string, unknown>): DrizzleWriteQuery;
 };
 
 type DrizzleDelete = {
-  where(expr: unknown): Promise<unknown>;
+  where(expr: unknown): DrizzleWriteQuery;
 };
+
+type DrizzleTable = Record<string, unknown>;
 
 /**
  * Deferred promise — resolves or rejects exactly once.
@@ -102,24 +101,6 @@ export type DrizzleOperators = {
   desc: (col: unknown) => unknown;
 };
 
-/**
- * Default operator builders — used with a fake instance during testing and as
- * a fallback when `drizzle-orm` cannot be imported. Real drizzle-orm operators
- * override these when the import succeeds.
- *
- * Not re-exported from `src/index.ts`; internal to this package.
- *
- * @internal
- */
-export function createDefaultDrizzleOperators(): DrizzleOperators {
-  return {
-    eq: (col, val) => ({ op: 'eq', col, val }),
-    and: (...exprs) => ({ op: 'and', exprs }),
-    asc: (col) => ({ op: 'asc', col }),
-    desc: (col) => ({ op: 'desc', col }),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Drizzle adapter
 // ---------------------------------------------------------------------------
@@ -127,8 +108,10 @@ export function createDefaultDrizzleOperators(): DrizzleOperators {
 /**
  * Drizzle adapter wrapping a Drizzle database instance.
  *
- * The instance is either injected via `options.drizzleInstance` or lazily
- * loaded through `import('npm:drizzle-orm@0.45.2')`.
+ * The application injects a configured Drizzle driver through
+ * `options.drizzleInstance`; this adapter lazily loads only Drizzle's query
+ * operators. `options.drizzleTables` supplies the real table and column
+ * objects used for every operation.
  *
  * @since 0.1.0
  */
@@ -146,21 +129,31 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   async connect(): Promise<void> {
     this._db = await this.resolveDb();
 
-    // Always set defaults so the adapter is usable with a fake instance (and as
-    // a fallback when drizzle-orm cannot be imported). Real drizzle-orm
-    // operators override these when the import succeeds.
-    this._operators = createDefaultDrizzleOperators();
     try {
       const orm = await import('npm:drizzle-orm@0.45.2');
       const ns = orm as Record<string, unknown>;
-      this._operators = {
+      const operators: DrizzleOperators = {
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
         and: ns.and as (...exprs: unknown[]) => unknown,
         asc: ns.asc as (col: unknown) => unknown,
         desc: ns.desc as (col: unknown) => unknown,
       };
-    } catch {
-      // Keep the defaults set above (drizzle-orm not installed / unreachable).
+      if (
+        typeof operators.eq !== 'function' ||
+        typeof operators.and !== 'function' ||
+        typeof operators.asc !== 'function' ||
+        typeof operators.desc !== 'function'
+      ) {
+        throw new Error('drizzle-orm did not export the required query operators');
+      }
+      this._operators = operators;
+    } catch (error) {
+      throw new Error(
+        `Failed to load Drizzle query operators: ${
+          error instanceof Error ? error.message : String(error)
+        }. ` +
+          'Install drizzle-orm alongside the injected drizzleInstance.',
+      );
     }
 
     // Validate table registry if provided.
@@ -169,10 +162,10 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         .drizzleTables;
     if (tables) {
       for (const [name, table] of Object.entries(tables)) {
-        if (table == null || typeof table !== 'object') {
+        if (table == null || typeof table !== 'object' || !hasColumn(table, 'id')) {
           throw new Error(
-            `Drizzle table '${name}' is not a valid table object; ` +
-              `provide a proper Drizzle table definition in options.drizzleTables.`,
+            `Drizzle table '${name}' must be a table definition with an 'id' column; ` +
+              'provide a proper Drizzle table definition in options.drizzleTables.',
           );
         }
       }
@@ -300,29 +293,21 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Resolve the Drizzle database instance from options or lazy import.
+   * Resolve the application-configured Drizzle database instance.
    *
    * @returns Drizzle database instance
-   * @throws {Error} If Drizzle cannot be loaded
+   * @throws {Error} If no configured Drizzle instance was injected
    */
-  private async resolveDb(): Promise<DrizzleInstance> {
+  private resolveDb(): DrizzleInstance {
     // Prefer injected instance.
     if (this._options?.drizzleInstance) {
       return this.validateInstance(this._options.drizzleInstance);
     }
 
-    // Lazy-load Drizzle — the adapter needs a driver instance, so bare import
-    // is mostly a fallback that validates availability.
-    try {
-      await import('npm:drizzle-orm@0.45.2');
-      throw new Error(
-        'Drizzle adapter requires options.drizzleInstance to be provided (a configured database instance).',
-      );
-    } catch (error) {
-      throw new Error(
-        `Failed to load Drizzle: ${(error as Error).message}. Inject via options.drizzleInstance.`,
-      );
-    }
+    throw new Error(
+      'DrizzleAdapter requires options.drizzleInstance: construct a configured Drizzle driver in ' +
+        'the application, then inject it into DatabasePlugin.',
+    );
   }
 
   /** Structural validation: injected instance must have select / transaction. */
@@ -330,11 +315,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const ns = instance as Record<string, unknown>;
     if (
       typeof ns.select !== 'function' ||
-      typeof ns.transaction !== 'function'
+      typeof ns.transaction !== 'function' ||
+      typeof ns.insert !== 'function' ||
+      typeof ns.update !== 'function' ||
+      typeof ns.delete !== 'function' ||
+      typeof ns.execute !== 'function'
     ) {
       throw new Error(
         'Injected drizzleInstance does not look like a Drizzle instance ' +
-          '(missing select / transaction).',
+          '(missing select / insert / update / delete / execute / transaction).',
       );
     }
     return instance as DrizzleInstance;
@@ -375,78 +364,157 @@ function createDrizzleDataSourceInner(
   operators: DrizzleOperators,
 ): DataSource {
   const table = tables[entity];
-  if (table == null) {
+  if (table == null || typeof table !== 'object') {
     throw new Error(
       `Unknown entity '${entity}' for Drizzle adapter — register it in options.drizzleTables.`,
     );
   }
+  const drizzleTable = table as DrizzleTable;
+  const idColumn = columnFor(drizzleTable, entity, 'id');
 
   return {
     async findById(id) {
-      const rows = await instance.select().from(table);
-      const row = rows.find((r) => r['id'] === id);
-      if (!row) return null;
-      return row;
+      const rows = await instance.select().from(drizzleTable).where(operators.eq(idColumn, id));
+      return rows[0] ?? null;
     },
 
     async findAll(query) {
-      // Drizzle operators are query-builder expressions the fake/driver cannot
-      // evaluate structurally, so filter/sort/paginate/project in-memory using
-      // the SAME shared helpers as the memory adapter and BaseRepository.
-      const rows = await instance.select().from(table);
-      const filtered = Object.keys(query.where).length > 0
-        ? rows.filter((row) => matchesWhere(row, query.where))
-        : rows;
-      const sorted = applyOrderBy(filtered, query.orderBy);
-      const paginated = applyPagination(sorted, query.offset, query.limit);
-      if (query.select.length > 0) {
-        return paginated.map((row) => projectFields(row, query.select) as Record<string, unknown>);
+      const fields = selectedColumns(drizzleTable, entity, query.select);
+      let builder = instance.select(fields).from(drizzleTable);
+      const predicate = predicateFor(drizzleTable, entity, query.where, operators);
+      if (predicate !== undefined) {
+        builder = builder.where(predicate);
       }
-      return paginated;
+      const order = orderFor(drizzleTable, entity, query.orderBy, operators);
+      if (order.length > 0) {
+        builder = builder.orderBy(...order);
+      }
+      if (query.limit > 0) {
+        builder = builder.limit(query.limit);
+      }
+      if (query.offset > 0) {
+        builder = builder.offset(query.offset);
+      }
+      return await builder;
     },
 
     async create(data) {
-      await instance.insert(table).values(data).execute();
-      // Read the row back (no .returning() — not portable across MySQL).
-      const id = data['id'] as string | number | undefined;
-      if (id) {
-        const rows = await instance.select().from(table);
-        const row = rows.find((r) => r['id'] === id);
-        return row ?? data;
-      }
-      // Without a known id, return the input data (best effort).
-      return data;
+      const rows = await returningRows(
+        instance.insert(drizzleTable).values(data),
+        entity,
+        'create',
+      );
+      return oneReturnedRow(entity, 'create', rows);
     },
 
     async update(id, data) {
-      const eqFn = operators.eq;
-      const idCol = { column: 'id', table }; // placeholder column reference
-      await instance.update(table).set(data).where(eqFn(idCol, id));
-      // Read the row back.
-      const rows = await instance.select().from(table);
-      const row = rows.find((r) => r['id'] === id);
-      if (!row) {
-        throw new Error(`Entity '${entity}' with id '${id}' not found`);
-      }
-      return row;
+      const rows = await returningRows(
+        instance.update(drizzleTable).set(data).where!(operators.eq(idColumn, id)),
+        entity,
+        'update',
+      );
+      return oneReturnedRow(entity, 'update', rows, id);
     },
 
     async delete(id) {
-      const eqFn = operators.eq;
-      const idCol = { column: 'id', table }; // placeholder column reference
-      await instance.delete(table).where(eqFn(idCol, id));
-      // Check if the row still exists.
-      const rows = await instance.select().from(table);
-      const row = rows.find((r) => r['id'] === id);
-      return row === undefined;
+      const rows = await returningRows(
+        instance.delete(drizzleTable).where(operators.eq(idColumn, id)),
+        entity,
+        'delete',
+      );
+      return rows.length > 0;
     },
 
     async count(where) {
-      const rows = await instance.select().from(table);
-      if (Object.keys(where).length > 0) {
-        return rows.filter((row) => matchesWhere(row, where)).length;
+      let builder = instance.select().from(drizzleTable);
+      const predicate = predicateFor(drizzleTable, entity, where, operators);
+      if (predicate !== undefined) {
+        builder = builder.where(predicate);
       }
-      return rows.length;
+      return (await builder).length;
     },
   };
+}
+
+function hasColumn(value: unknown, field: string): boolean {
+  return value !== null && typeof value === 'object' &&
+    Object.prototype.hasOwnProperty.call(value, field) &&
+    (value as Record<string, unknown>)[field] !== undefined;
+}
+
+function columnFor(table: DrizzleTable, entity: string, field: string): unknown {
+  if (!hasColumn(table, field)) {
+    throw new Error(
+      `Drizzle table '${entity}' has no '${field}' column required by the database repository.`,
+    );
+  }
+  return table[field];
+}
+
+function predicateFor(
+  table: DrizzleTable,
+  entity: string,
+  where: Record<string, unknown>,
+  operators: DrizzleOperators,
+): unknown | undefined {
+  const predicates = Object.entries(where).map(([field, value]) =>
+    operators.eq(columnFor(table, entity, field), value)
+  );
+  if (predicates.length === 0) return undefined;
+  if (predicates.length === 1) return predicates[0];
+  return operators.and(...predicates);
+}
+
+function orderFor(
+  table: DrizzleTable,
+  entity: string,
+  orderBy: Record<string, 'asc' | 'desc'>,
+  operators: DrizzleOperators,
+): unknown[] {
+  return Object.entries(orderBy).map(([field, direction]) => {
+    const column = columnFor(table, entity, field);
+    return direction === 'asc' ? operators.asc(column) : operators.desc(column);
+  });
+}
+
+function selectedColumns(
+  table: DrizzleTable,
+  entity: string,
+  fields: readonly string[],
+): Record<string, unknown> | undefined {
+  if (fields.length === 0) return undefined;
+  const selected: Record<string, unknown> = {};
+  for (const field of fields) {
+    selected[field] = columnFor(table, entity, field);
+  }
+  return selected;
+}
+
+function oneReturnedRow(
+  entity: string,
+  operation: 'create' | 'update',
+  rows: readonly Record<string, unknown>[],
+  id?: string | number,
+): Record<string, unknown> {
+  const row = rows[0];
+  if (row !== undefined) return row;
+  if (operation === 'update') {
+    throw new Error(`Entity '${entity}' with id '${id}' not found`);
+  }
+  throw new Error(
+    `Drizzle ${operation} for entity '${entity}' returned no row; configure a driver that supports RETURNING.`,
+  );
+}
+
+function returningRows(
+  query: DrizzleWriteQuery,
+  entity: string,
+  operation: 'create' | 'update' | 'delete',
+): PromiseLike<Record<string, unknown>[]> {
+  if (typeof query.returning !== 'function') {
+    throw new Error(
+      `Drizzle ${operation} for entity '${entity}' requires a driver that supports RETURNING.`,
+    );
+  }
+  return query.returning();
 }
