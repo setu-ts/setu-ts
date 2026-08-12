@@ -138,6 +138,58 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
   }
 });
 
+describe('a scaffolded project can install the versions it was pinned to', () => {
+  /**
+   * Rewrites the emitted manifest's dependency-age setting.
+   *
+   * @param project - The project directory
+   * @param value - The value to set, or null to remove the key entirely
+   */
+  async function setDependencyAge(project: string, value: number | null): Promise<void> {
+    const path = `${project}/deno.json`;
+    const manifest = JSON.parse(await Deno.readTextFile(path)) as Record<string, unknown>;
+    delete manifest['minimumDependencyAge'];
+    delete manifest['//minimumDependencyAge'];
+    if (value !== null) manifest['minimumDependencyAge'] = value;
+    await Deno.writeTextFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
+    await Deno.remove(`${project}/deno.lock`).catch(() => {});
+  }
+
+  it('installs under a policy that would otherwise refuse every version', async () => {
+    // D1 only bites while the pinned version is inside the age window, so the
+    // obvious test is reproducible for one day per release and vacuous after.
+    // Raising the threshold instead makes EVERY published version "too new",
+    // which reproduces the same refusal deterministically and forever — the
+    // scaffold's own `minimumDependencyAge: 0` is then the only thing that can
+    // let the install through.
+    expect(await run(['new', 'shop'])).toBe(0);
+    const project = `${root}/shop`;
+
+    // What the scaffold actually emitted, asserted here rather than only in the
+    // unit test: the two legs below prove the VALUE has the effect, and this
+    // line is what ties that to the value the CLI writes. Without it the test
+    // would still pass if `setu new` emitted no key at all.
+    const emitted = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
+      minimumDependencyAge?: unknown;
+    };
+    expect(emitted.minimumDependencyAge).toBe(0);
+
+    // 10 years in minutes. Without this leg the second one proves nothing: an
+    // install that succeeds under a policy that was never going to refuse
+    // anything is not evidence that the emitted key does the work.
+    await setDependencyAge(project, 5_256_000);
+    const refused = await denoRun(project, ['install']);
+    expect(refused.code, refused.output).toBe(1);
+    expect(refused.output).toContain('minimum dependency age');
+
+    // What the CLI actually emits.
+    await setDependencyAge(project, 0);
+    const allowed = await denoRun(project, ['install']);
+    expect(allowed.code, allowed.output).toBe(0);
+    expect(allowed.output).not.toContain('minimum dependency age');
+  });
+});
+
 describe('a scaffolded full-stack project type-checks its own routes', () => {
   it('runs the generated check:app task over the app tree', async () => {
     expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);

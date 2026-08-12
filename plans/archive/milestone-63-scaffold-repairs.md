@@ -229,8 +229,15 @@ failed is not known to discriminate:
 
 Observed: control 1 failed all three boot steps with the exact `Requires sys access to "hostname"`
 500; control 2, in its corrected form, failed with `TS2686`; control 3 failed with
-`Task not found: check:app`; control 4 named `app/routes/_auth/login.tsx`. Control 5 is not
-reproducible outside a release window, so the emitted key carries a unit assertion instead.
+`Task not found: check:app`; control 4 named `app/routes/_auth/login.tsx`.
+
+Control 5's "not reproducible outside a release window" was WRONG, and the correction shipped as a
+real test. The window is only one direction: raising the threshold instead makes every published
+version "too new", which reproduces the identical refusal deterministically and forever. Measured on
+one scaffold at one moment — no key: `deno install` exits 1 carrying the policy error; the emitted
+`minimumDependencyAge: 0`: exits 0 with no error. So D1 needs no publish to verify, and
+`scaffold-runs-e2e.test.ts` now covers it behaviourally rather than by asserting the emitted key
+alone.
 
 ## 8. Risks & mitigations
 
