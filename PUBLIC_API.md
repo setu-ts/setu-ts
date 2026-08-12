@@ -829,15 +829,26 @@ Provides database access with repository pattern and unit of work.
 
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { PrismaClient } from './generated/prisma/client.ts';
+
+const prismaClient = new PrismaClient();
 
 app.register(DatabasePlugin({
   type: 'prisma',
   options: {
-    url: config.get('DATABASE_URL'),
+    prismaClient,
     logQueries: config.get('NODE_ENV') === 'development',
   },
 }));
 ```
+
+Prisma v7 clients are generated into an application-selected output path, so the Prisma adapter
+requires an application-created `options.prismaClient`; it never imports or constructs that client.
+`DatabaseAdapterOptions.url` remains source-compatible but is deprecated for Prisma configuration.
+Drizzle requires both `options.drizzleInstance` and `options.drizzleTables`; the registry's tables
+must carry an `id` column and the adapter translates every repository field to a real Drizzle
+column. Drizzle `create`, `update`, and `delete` require a driver with `RETURNING` support so their
+results are actual driver rows; an unsupported dialect throws a descriptive error.
 
 ### Repository Pattern
 

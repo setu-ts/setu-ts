@@ -3,16 +3,20 @@
  *
  * Exercises createDrizzleDataSource CRUD read-back, transaction bridge
  * commit/rollback, rawQuery, createDataSourceForEntity, and connect-time
- * branches (fallback operators, table validation, lazy-throw).
+ * branches (operator loading, table validation, injected-driver errors).
  */
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   createDrizzleDataSource,
   DrizzleAdapter,
+  type DrizzleInstance,
   type DrizzleOperators,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { normalizeQuery } from '../../src/query/query-builder.ts';
@@ -21,7 +25,7 @@ import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 describe('DrizzleAdapter — CRUD data-source coverage', () => {
   let fakeDb: ReturnType<typeof createFakeDrizzleInstance>;
   let adapter: DrizzleAdapter;
-  const tables = { user: {}, post: {} };
+  const tables = { user: createFakeDrizzleTable('user'), post: createFakeDrizzleTable('post') };
 
   beforeEach(() => {
     fakeDb = createFakeDrizzleInstance();
@@ -34,11 +38,10 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
   describe('createDrizzleDataSource CRUD read-back', () => {
     let ds: DataSource;
     const ops: DrizzleOperators = {
-      // Fake extractWhereId checks 'id' in obj — return { id: val } so the fake can match.
-      eq: (_col: unknown, val: unknown) => ({ id: val }),
-      and: (..._exprs: unknown[]) => ({}),
-      asc: (_col: unknown) => ({}),
-      desc: (_col: unknown) => ({}),
+      eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
+      and: (...exprs: unknown[]) => ({ op: 'and', exprs }),
+      asc: (col: unknown) => ({ op: 'asc', col }),
+      desc: (col: unknown) => ({ op: 'desc', col }),
     };
 
     beforeEach(async () => {
@@ -53,6 +56,22 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       const found = await ds.findById('100');
       expect(found).not.toBeNull();
       expect(found!.name).toBe('Alice');
+    });
+
+    it('rejects writes when the configured dialect has no RETURNING support', async () => {
+      const withoutReturning = {
+        ...fakeDb,
+        insert: () => ({ values: () => ({}) }),
+      };
+      const unsupported = createDrizzleDataSource(
+        withoutReturning as unknown as DrizzleInstance,
+        'user',
+        tables,
+        ops,
+      );
+      await expect(unsupported.create({ id: 'no-returning' })).rejects.toThrow(
+        'requires a driver that supports RETURNING',
+      );
     });
 
     it('findAll() returns rows after inserts', async () => {
@@ -179,9 +198,9 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
     it('throws when no drizzleInstance and import fails', async () => {
       const noDbAdapter = new DrizzleAdapter({
         url: 'postgresql://localhost/test',
-        drizzleTables: { user: {} },
+        drizzleTables: { user: createFakeDrizzleTable('user') },
       });
-      await expect(noDbAdapter.connect()).rejects.toThrow('Failed to load Drizzle');
+      await expect(noDbAdapter.connect()).rejects.toThrow('requires options.drizzleInstance');
     });
 
     it('validates drizzleTables entries', async () => {
@@ -189,7 +208,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         drizzleInstance: fakeDb,
         drizzleTables: { bad: null },
       });
-      await expect(badAdapter.connect()).rejects.toThrow("table 'bad' is not a valid");
+      await expect(badAdapter.connect()).rejects.toThrow("table 'bad' must be a table definition");
     });
   });
 
@@ -204,6 +223,18 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       const bad = { select: () => {} };
       const a = new DrizzleAdapter({ drizzleInstance: bad, drizzleTables: tables });
       await expect(a.connect()).rejects.toThrow('missing');
+    });
+
+    it('rejects instance missing execute', async () => {
+      const bad = {
+        select: () => {},
+        insert: () => {},
+        update: () => {},
+        delete: () => {},
+        transaction: () => {},
+      };
+      const a = new DrizzleAdapter({ drizzleInstance: bad, drizzleTables: tables });
+      await expect(a.connect()).rejects.toThrow('execute');
     });
   });
 
@@ -248,7 +279,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
     it('throws for unknown entity', async () => {
       await adapter.connect();
       const ops: DrizzleOperators = {
-        eq: () => ({}),
+        eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
         and: () => ({}),
         asc: () => ({}),
         desc: () => ({}),
@@ -263,7 +294,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
     it('returns data when no id provided', async () => {
       await adapter.connect();
       const ops: DrizzleOperators = {
-        eq: () => ({}),
+        eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
         and: () => ({}),
         asc: () => ({}),
         desc: () => ({}),
@@ -278,7 +309,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
     it('filters by where clause', async () => {
       await adapter.connect();
       const ops: DrizzleOperators = {
-        eq: () => ({}),
+        eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
         and: () => ({}),
         asc: () => ({}),
         desc: () => ({}),

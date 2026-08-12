@@ -456,14 +456,13 @@ import { DatabasePlugin } from '@setu-ts/database-plugin';
 
 // The built-in arm selects the ORM via `type`; adapter-specific config lives
 // under `options` (a `DatabaseAdapterOptions`), not a top-level `prisma`
-// field. For Prisma, inject a pre-loaded client via `options.prismaClient`
-// (bypasses the lazy `import('npm:@prisma/client')` path), or omit it to let
-// the adapter load the client lazily from the connection URL.
+// field. For Prisma v7, generate and construct the client in application code,
+// then inject it through `options.prismaClient`; its generated output path is
+// application-owned and cannot be located by this package.
 app.register(DatabasePlugin({
   type: 'prisma',
   options: {
-    url: 'postgresql://localhost:5432/mydb',
-    // prismaClient: myPrismaClient, // optional: inject a pre-loaded client
+    prismaClient: myPrismaClient,
   },
 }));
 

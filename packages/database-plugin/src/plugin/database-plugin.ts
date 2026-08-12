@@ -44,11 +44,11 @@ const PLUGIN_NAME = 'database-plugin';
  * // Memory adapter (default, zero deps)
  * app.register(DatabasePlugin());
  *
- * // Prisma adapter with options
+ * // Prisma adapter with an application-generated Prisma v7 client
  * app.register(DatabasePlugin({
  *   type: 'prisma',
  *   options: {
- *     url: config.get('DATABASE_URL'),
+ *     prismaClient,
  *     logQueries: true,
  *   },
  * }));
@@ -57,7 +57,7 @@ const PLUGIN_NAME = 'database-plugin';
  * app.register(DatabasePlugin({
  *   type: 'prisma',
  *   name: 'analytics',
- *   options: { url: config.get('ANALYTICS_DATABASE_URL') },
+ *   options: { prismaClient: analyticsPrismaClient },
  * }));
  * ```
  * @param options - Plugin configuration

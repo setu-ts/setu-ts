@@ -6613,7 +6613,7 @@ plain exported function has none to have — no plugin option takes a list of fu
 `src/services/index.ts`, but as a convenience re-export nothing imports for you, and both the barrel
 header and the emitted JSDoc say so rather than implying wiring that does not exist.
 
-## Milestone 66: Database Adapters That Have Been Executed
+## Milestone 66: Database Adapters That Have Been Executed ✅ COMPLETE
 
 **Package:** `@setu-ts/database-plugin`
 
@@ -6762,6 +6762,6 @@ test passes `{ roles: {} }` purely to satisfy the type.
 | 63        | ✅     | cli (scaffold repairs)                |
 | 64        | ✅     | decorator-plugin (`@Ctx()`)           |
 | 65        | ✅     | cli (functional default, two worlds)  |
-| 66        | ⬜     | database-plugin (prisma v7, drizzle)  |
+| 66        | ✅     | database-plugin (prisma v7, drizzle)  |
 | 67        | ⬜     | cli + starters (scaffold defaults)    |
 | 68        | ⬜     | common + kernel (contract gaps)       |

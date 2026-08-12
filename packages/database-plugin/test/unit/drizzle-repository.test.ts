@@ -15,7 +15,10 @@ import {
 } from '../../src/adapters/drizzle/drizzle-repository.ts';
 import type { DrizzleInstance } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
-import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
 
 describe('DrizzleRepository', () => {
   it('instantiates with a data source', () => {
@@ -23,7 +26,7 @@ describe('DrizzleRepository', () => {
     const ds = createDrizzleDataSource(
       fakeDb as unknown as DrizzleInstance,
       'user',
-      { user: {} },
+      { user: createFakeDrizzleTable('user') },
       {
         eq: (col, val) => ({ _operator: 'eq', arguments: [col, val], id: val }),
         and: (...exprs) => ({ _operator: 'and', arguments: exprs }),
@@ -71,7 +74,7 @@ describe('createDrizzleDataSource — with fake instance', () => {
     ds = createDrizzleDataSource(
       fakeDb as unknown as DrizzleInstance,
       'user',
-      { user: {} },
+      { user: createFakeDrizzleTable('user') },
       {
         eq: (col, val) => ({ _operator: 'eq', arguments: [col, val], id: val }),
         and: (...exprs) => ({ _operator: 'and', arguments: exprs }),

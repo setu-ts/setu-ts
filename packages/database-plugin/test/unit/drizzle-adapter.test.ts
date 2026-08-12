@@ -13,21 +13,26 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
-  createDefaultDrizzleOperators,
   createDrizzleDataSource,
   DrizzleAdapter,
   type DrizzleOperators,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 
 /** Default operator builders matching the adapter's fallback `eq` shape. */
 const OPERATORS: DrizzleOperators = {
-  eq: (_col, val) => ({ op: 'eq', val }),
+  eq: (col, val) => ({ op: 'eq', col, val }),
   and: (...exprs) => ({ op: 'and', exprs }),
-  asc: (col) => col,
-  desc: (col) => col,
+  asc: (col) => ({ op: 'asc', col }),
+  desc: (col) => ({ op: 'desc', col }),
 };
+
+const USER_TABLE = createFakeDrizzleTable('user');
+const POST_TABLE = createFakeDrizzleTable('post');
 
 /** Build a NormalizedQuery from partial options with concrete defaults. */
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
@@ -48,7 +53,7 @@ describe('DrizzleAdapter', () => {
     fakeDb = createFakeDrizzleInstance();
     adapter = new DrizzleAdapter({
       drizzleInstance: fakeDb,
-      drizzleTables: { user: {}, post: {} },
+      drizzleTables: { user: USER_TABLE, post: POST_TABLE },
     });
   });
 
@@ -75,18 +80,18 @@ describe('DrizzleAdapter', () => {
       expect(adapter.isReady()).toBe(true);
     });
 
-    it('rejects missing drizzleInstance with import error', async () => {
+    it('rejects missing drizzleInstance with a configured-driver requirement', async () => {
       const noDbAdapter = new DrizzleAdapter({
         url: 'postgresql://localhost/test',
-        drizzleTables: { user: {} },
+        drizzleTables: { user: USER_TABLE },
       });
-      await expect(noDbAdapter.connect()).rejects.toThrow('Failed to load Drizzle');
+      await expect(noDbAdapter.connect()).rejects.toThrow('requires options.drizzleInstance');
     });
 
     it('validates drizzleTables at connect', async () => {
       const adapter = new DrizzleAdapter({
         drizzleInstance: fakeDb,
-        drizzleTables: { user: {} },
+        drizzleTables: { user: USER_TABLE },
       });
       await adapter.connect();
       expect(adapter.isReady()).toBe(true);
@@ -120,19 +125,9 @@ describe('DrizzleAdapter', () => {
   });
 
   describe('constructor options', () => {
-    it('accepts no options', async () => {
+    it('requires an injected configured driver when options are absent', async () => {
       const noDbAdapter = new DrizzleAdapter();
-      await expect(noDbAdapter.connect()).rejects.toThrow('Failed to load Drizzle');
-    });
-  });
-
-  describe('createDefaultDrizzleOperators', () => {
-    it('builds eq / and / asc / desc expressions', () => {
-      const ops = createDefaultDrizzleOperators();
-      expect(ops.eq('col', 1)).toEqual({ op: 'eq', col: 'col', val: 1 });
-      expect(ops.and('a', 'b')).toEqual({ op: 'and', exprs: ['a', 'b'] });
-      expect(ops.asc('col')).toEqual({ op: 'asc', col: 'col' });
-      expect(ops.desc('col')).toEqual({ op: 'desc', col: 'col' });
+      await expect(noDbAdapter.connect()).rejects.toThrow('requires options.drizzleInstance');
     });
   });
 
@@ -156,7 +151,7 @@ describe('DrizzleAdapter', () => {
       expect(await ds.findById('nope')).toBeNull();
     });
 
-    it('create without id returns the input (best effort)', async () => {
+    it('create without id returns the driver-generated row', async () => {
       await adapter.connect();
       const ds = adapter.createDataSourceForEntity('user');
       const created = await ds.create({ name: 'NoId' });
@@ -168,7 +163,7 @@ describe('DrizzleAdapter', () => {
     let ds: ReturnType<typeof createDrizzleDataSource>;
 
     beforeEach(async () => {
-      ds = createDrizzleDataSource(fakeDb, 'user', { user: {} }, OPERATORS);
+      ds = createDrizzleDataSource(fakeDb, 'user', { user: USER_TABLE }, OPERATORS);
       await ds.create({ id: 'u1', name: 'Alice', role: 'admin' });
       await ds.create({ id: 'u2', name: 'Bob', role: 'user' });
       await ds.create({ id: 'u3', name: 'Carol', role: 'admin' });
@@ -231,11 +226,12 @@ describe('DrizzleAdapter', () => {
           insert: () => ({ values: () => ({ execute: () => Promise.resolve([]) }) }),
           update: () => ({ set: () => ({ where: () => Promise.resolve([]) }) }),
           delete: () => ({ where: () => Promise.resolve() }),
+          $count: () => Promise.resolve(0),
           execute: () => Promise.resolve({ rows: [] }),
           query: {},
           transaction: () => Promise.reject(new Error('driver down')),
         },
-        drizzleTables: { user: {} },
+        drizzleTables: { user: USER_TABLE },
       });
       await failing.connect();
       await expect(failing.beginTransaction()).rejects.toThrow(
@@ -251,6 +247,7 @@ describe('DrizzleAdapter', () => {
           insert: inner.insert.bind(inner),
           update: inner.update.bind(inner),
           delete: inner.delete.bind(inner),
+          $count: inner.$count.bind(inner),
           execute: inner.execute.bind(inner),
           query: inner.query,
           transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -262,7 +259,7 @@ describe('DrizzleAdapter', () => {
             }
           },
         },
-        drizzleTables: { user: {} },
+        drizzleTables: { user: USER_TABLE },
       });
       await wrapping.connect();
       const txn = await wrapping.beginTransaction();

@@ -22,6 +22,22 @@ interface Store {
   idCounter: number;
 }
 
+/** A contract-faithful table with concrete column objects for adapter tests. */
+export function createFakeDrizzleTable(name: string): Record<string, unknown> {
+  const column = (columnName: string): Record<string, string> => ({
+    name: columnName,
+    table: name,
+  });
+  return {
+    __setuTable: name,
+    id: column('id'),
+    name: column('name'),
+    email: column('email'),
+    role: column('role'),
+    title: column('title'),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Recorded calls for test assertions
 // ---------------------------------------------------------------------------
@@ -38,6 +54,13 @@ export interface RecordedCall {
 
 type FakeDrizzleInstance = ReturnType<typeof createFakeDrizzleInstance>;
 
+interface FakeSelectQuery extends PromiseLike<Record<string, unknown>[]> {
+  where(expr: unknown): FakeSelectQuery;
+  orderBy(...expressions: unknown[]): FakeSelectQuery;
+  limit(value: number): FakeSelectQuery;
+  offset(value: number): FakeSelectQuery;
+}
+
 // ---------------------------------------------------------------------------
 // Fake Drizzle instance factory
 // ---------------------------------------------------------------------------
@@ -50,24 +73,26 @@ type FakeDrizzleInstance = ReturnType<typeof createFakeDrizzleInstance>;
  */
 export function createFakeDrizzleInstance(): {
   select: () => {
-    from: (table: string) => Promise<Record<string, unknown>[]>;
-    where: (expr: unknown) => Promise<Record<string, unknown>[]>;
+    from: (table: Record<string, unknown>) => FakeSelectQuery;
   };
-  insert: (table: string) => {
+  insert: (table: string | Record<string, unknown>) => {
     values: (
       data: Record<string, unknown> | Record<string, unknown>[],
     ) => {
       execute: () => Promise<Record<string, unknown>[]>;
+      returning: () => Promise<Record<string, unknown>[]>;
     };
   };
-  update: (table: string) => {
+  update: (table: string | Record<string, unknown>) => {
     set: (data: Record<string, unknown>) => {
-      where: (expr: unknown) => Promise<Record<string, unknown>[]>;
+      returning: () => Promise<Record<string, unknown>[]>;
+      where: (expr: unknown) => { returning: () => Promise<Record<string, unknown>[]> };
     };
   };
-  delete: (table: string) => {
-    where: (expr: unknown) => Promise<void>;
+  delete: (table: string | Record<string, unknown>) => {
+    where: (expr: unknown) => { returning: () => Promise<Record<string, unknown>[]> };
   };
+  $count: (table: Record<string, unknown>, expr?: unknown) => Promise<number>;
   execute: (values: unknown) => Promise<{ rows: unknown[] }>;
   query: Record<string, unknown>;
   transaction: <T>(cb: (tx: FakeDrizzleInstance) => Promise<T>) => Promise<T>;
@@ -88,6 +113,9 @@ export function createFakeDrizzleInstance(): {
   // Helper: extract table name from table reference (string or object)
   function extractTableName(table: unknown): string {
     if (typeof table === 'string') return table;
+    if (table !== null && typeof table === 'object' && '__setuTable' in table) {
+      return String((table as Record<string, unknown>).__setuTable);
+    }
     // Try to find the matching store key by reference or name
     for (const key of Object.keys(stores)) {
       return key;
@@ -121,19 +149,116 @@ export function createFakeDrizzleInstance(): {
           if (id) return id;
         }
       }
+      const chunks = obj.queryChunks;
+      if (Array.isArray(chunks)) {
+        for (const chunk of chunks) {
+          if (typeof chunk === 'string' || typeof chunk === 'number') {
+            return String(chunk);
+          }
+          const nested = extractWhereId(chunk);
+          if (nested) return nested;
+          if (chunk !== null && typeof chunk === 'object') {
+            const value = (chunk as Record<string, unknown>).value;
+            if (value !== undefined && typeof value !== 'object') return String(value);
+          }
+        }
+      }
     }
     return null;
   }
 
-  // Helper — extract table name from expression for select().where()
-  function extractTableFromExpr(expr: unknown): string | null {
-    if (expr && typeof expr === 'object' && !Array.isArray(expr)) {
-      const obj = expr as Record<string, unknown>;
-      if ('_table' in obj) {
-        return String(obj._table);
+  function conditionsFor(expr: unknown): ReadonlyArray<readonly [string, unknown]> {
+    if (expr !== null && typeof expr === 'object') {
+      const object = expr as Record<string, unknown>;
+      if (object.op === 'eq' && object.col !== undefined) {
+        const column = object.col as Record<string, unknown>;
+        return [[String(column.name ?? 'id'), object.val]];
+      }
+      if (object.op === 'and' && Array.isArray(object.exprs)) {
+        return object.exprs.flatMap((part) => conditionsFor(part));
+      }
+      const chunks = object.queryChunks;
+      if (Array.isArray(chunks)) {
+        const conditions: Array<readonly [string, unknown]> = [];
+        let column: string | null = null;
+        for (const chunk of chunks) {
+          if ((typeof chunk === 'string' || typeof chunk === 'number') && column !== null) {
+            conditions.push([column, chunk]);
+            column = null;
+          }
+          if (chunk !== null && typeof chunk === 'object') {
+            const value = chunk as Record<string, unknown>;
+            if (typeof value.name === 'string') column = value.name;
+            if (value.value !== undefined && !Array.isArray(value.value) && column !== null) {
+              conditions.push([column, value.value]);
+              column = null;
+            }
+            conditions.push(...conditionsFor(chunk));
+          }
+        }
+        return conditions;
       }
     }
-    return null;
+    return [];
+  }
+
+  function selectQuery(
+    table: Record<string, unknown>,
+    fields: Record<string, unknown> | undefined,
+  ): FakeSelectQuery {
+    let predicate: unknown = undefined;
+    let order: readonly unknown[] = [];
+    let limit: number | undefined;
+    let offset: number | undefined;
+    const query: FakeSelectQuery = {
+      where(expression: unknown): FakeSelectQuery {
+        predicate = expression;
+        recordedCalls.push({ action: 'where', args: { expression } });
+        return query;
+      },
+      orderBy(...expressions: unknown[]): FakeSelectQuery {
+        order = expressions;
+        return query;
+      },
+      limit(value: number): FakeSelectQuery {
+        limit = value;
+        return query;
+      },
+      offset(value: number): FakeSelectQuery {
+        offset = value;
+        return query;
+      },
+      then<TResult1 = Record<string, unknown>[], TResult2 = never>(
+        onfulfilled?:
+          | ((value: Record<string, unknown>[]) => TResult1 | PromiseLike<TResult1>)
+          | null,
+        onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+      ): PromiseLike<TResult1 | TResult2> {
+        let rows = Array.from(getStore(extractTableName(table)).records.values());
+        const conditions = conditionsFor(predicate);
+        for (const [field, value] of conditions) {
+          rows = rows.filter((row) => row[field] === value);
+        }
+        const firstOrder = order[0] as Record<string, unknown> | undefined;
+        const field = firstOrder?.col !== undefined
+          ? String((firstOrder.col as Record<string, unknown>).name)
+          : undefined;
+        if (field !== undefined) {
+          rows.sort((left, right) => String(left[field]).localeCompare(String(right[field])));
+          if (firstOrder?.op === 'desc') rows.reverse();
+        }
+        rows = rows.slice(offset ?? 0, limit === undefined ? undefined : (offset ?? 0) + limit);
+        if (fields !== undefined) {
+          rows = rows.map((row) =>
+            Object.fromEntries(
+              Object.keys(fields).map((fieldName) => [fieldName, row[fieldName]]),
+            )
+          );
+        }
+        return Promise.resolve(rows).then(onfulfilled, onrejected);
+      },
+    };
+    return query;
   }
 
   // Build instance — uses `self` for self-reference in transaction()
@@ -152,24 +277,12 @@ export function createFakeDrizzleInstance(): {
     get stores(): Record<string, Store> {
       return stores;
     },
-    select() {
+    select(fields?: Record<string, unknown>) {
       return {
-        async from(table: unknown): Promise<Record<string, unknown>[]> {
+        from(table: Record<string, unknown>): FakeSelectQuery {
           const tableName = extractTableName(table);
-          recordedCalls.push({ action: 'select', entity: tableName, args: { table } });
-          return Array.from(getStore(tableName).records.values());
-        },
-        async where(expr: unknown): Promise<Record<string, unknown>[]> {
-          const table = extractTableFromExpr(expr) ?? 'unknown';
-          recordedCalls.push({ action: 'select', entity: table, args: { expr } });
-          const allRecords = Array.from(getStore(table).records.values());
-          const id = extractWhereId(expr);
-          if (id) {
-            return [getStore(table).records.get(id) ?? null].filter(
-              (r): r is Record<string, unknown> => r !== null,
-            );
-          }
-          return allRecords;
+          recordedCalls.push({ action: 'select', entity: tableName, args: { table, fields } });
+          return selectQuery(table, fields);
         },
       };
     },
@@ -183,7 +296,7 @@ export function createFakeDrizzleInstance(): {
           const items = Array.isArray(data) ? data : [data];
           recordedCalls.push({ action: 'insert', entity: tableName, args: { data: items } });
           return {
-            async execute(): Promise<Record<string, unknown>[]> {
+            execute: async (): Promise<Record<string, unknown>[]> => {
               const store = getStore(tableName);
               const results: Record<string, unknown>[] = [];
               for (const item of items) {
@@ -192,11 +305,13 @@ export function createFakeDrizzleInstance(): {
                   store.idCounter += 1;
                   row.id = String(store.idCounter);
                 }
-                const id = String(row.id);
-                store.records.set(id, row);
+                store.records.set(String(row.id), row);
                 results.push({ ...row });
               }
               return results;
+            },
+            async returning(): Promise<Record<string, unknown>[]> {
+              return this.execute();
             },
           };
         },
@@ -209,18 +324,25 @@ export function createFakeDrizzleInstance(): {
         set(data: Record<string, unknown>) {
           recordedCalls.push({ action: 'update', entity: tableName, args: { data } });
           return {
-            async where(expr: unknown): Promise<Record<string, unknown>[]> {
-              const id = extractWhereId(expr);
-              const store = getStore(tableName);
-              if (id) {
-                const existing = store.records.get(id);
-                if (existing) {
-                  const updated = { ...existing, ...data };
-                  store.records.set(id, updated);
-                  return [{ ...updated }];
-                }
-              }
+            async returning(): Promise<Record<string, unknown>[]> {
               return [];
+            },
+            where(expr: unknown): { returning: () => Promise<Record<string, unknown>[]> } {
+              return {
+                async returning(): Promise<Record<string, unknown>[]> {
+                  const id = extractWhereId(expr);
+                  const store = getStore(tableName);
+                  if (id) {
+                    const existing = store.records.get(id);
+                    if (existing) {
+                      const updated = { ...existing, ...data };
+                      store.records.set(id, updated);
+                      return [{ ...updated }];
+                    }
+                  }
+                  return [];
+                },
+              };
             },
           };
         },
@@ -230,13 +352,27 @@ export function createFakeDrizzleInstance(): {
       const tableName = extractTableName(table);
       recordedCalls.push({ action: 'delete', entity: tableName, args: {} });
       return {
-        async where(expr: unknown): Promise<void> {
-          const id = extractWhereId(expr);
-          if (id) {
-            getStore(tableName).records.delete(id);
-          }
+        where(expr: unknown): { returning: () => Promise<Record<string, unknown>[]> } {
+          return {
+            async returning(): Promise<Record<string, unknown>[]> {
+              const id = extractWhereId(expr);
+              if (!id) return [];
+              const store = getStore(tableName);
+              const existing = store.records.get(id);
+              if (!existing) return [];
+              store.records.delete(id);
+              return [{ ...existing }];
+            },
+          };
         },
       };
+    },
+    async $count(table: Record<string, unknown>, expr?: unknown): Promise<number> {
+      let rows = Array.from(getStore(extractTableName(table)).records.values());
+      for (const [field, value] of conditionsFor(expr)) {
+        rows = rows.filter((row) => row[field] === value);
+      }
+      return rows.length;
     },
     async execute(values: unknown): Promise<{ rows: unknown[] }> {
       recordedCalls.push({ action: 'execute', args: { values } });

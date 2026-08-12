@@ -22,6 +22,10 @@ import type {
   IRouterApi,
 } from '@setu-ts/common';
 import type { IConfig, IRuntimeServices, IServiceRegistry, TimerHandle } from '@setu-ts/common';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
 
 /** Minimal fake config. */
 function createFakeConfig(): IConfig {
@@ -316,38 +320,24 @@ describe('DatabasePlugin integration', () => {
   });
 
   it('registers with drizzle adapter type', async () => {
-    const fakeDrizzle = {
-      select: () => ({ from: async () => [] }),
-      insert: () => ({ values: () => ({ execute: async () => [] }) }),
-      update: () => ({ set: () => ({ where: async () => [] }) }),
-      delete: () => ({ where: async () => {} }),
-      execute: async () => ({ rows: [] }),
-      transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(fakeDrizzle),
-    };
+    const fakeDrizzle = createFakeDrizzleInstance();
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
       type: 'drizzle',
-      options: { drizzleInstance: fakeDrizzle as never },
+      options: { drizzleInstance: fakeDrizzle },
     });
     await plugin.register!(ctx);
     expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(true);
   });
 
   it('drizzle adapter getRepository returns a repository', async () => {
-    const fakeDrizzle = {
-      select: () => ({ from: async () => [] }),
-      insert: () => ({ values: () => ({ execute: async () => [] }) }),
-      update: () => ({ set: () => ({ where: async () => [] }) }),
-      delete: () => ({ where: async () => {} }),
-      execute: async () => ({ rows: [] }),
-      transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(fakeDrizzle),
-    };
+    const fakeDrizzle = createFakeDrizzleInstance();
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
       type: 'drizzle',
       options: {
-        drizzleInstance: fakeDrizzle as never,
-        drizzleTables: { users: {} },
+        drizzleInstance: fakeDrizzle,
+        drizzleTables: { users: createFakeDrizzleTable('users') },
       },
     });
     await plugin.register!(ctx);
