@@ -37,4 +37,15 @@ describe('generateModule', () => {
     expect(controller?.contents).toContain('@Ctx() ctx: IRequestContext');
     expect(controller?.contents).toContain('status(201)');
   });
+
+  it('renders the first class module when older callers omit modules', () => {
+    const files = generateModule(deriveNames('user-profile'), {
+      runtime: 'deno',
+      plugins: new Set(['decorator-plugin']),
+      now: () => 0,
+    });
+
+    expect(files.find((file) => file.path === 'src/modules/index.ts')?.contents)
+      .toContain('UserProfileController');
+  });
 });

@@ -156,8 +156,8 @@ const ROUTE_ALTERNATIVE: SchematicAlternative = {
  */
 const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, SchematicMetadata>([
   ['plugin', { factory: generatePlugin }],
-  // Gated for the same reason as `controller`: the module's emitted controller
-  // imports @Controller/@Get/@Inject/@Post.
+  // Mode-aware: the functional default emits routes and functions, while the
+  // class-based composition emits the decorated controller/service aggregate.
   ['module', { factory: generateModule }],
   // Gated: the emitted class uses @Controller/@Get/@Post, so a project without
   // the decorator plugin gets source that cannot resolve its own import.

@@ -6580,7 +6580,7 @@ without decorators.
 The design is a single axis with two complete positions, not a spectrum. **Default — functional:**
 no `DiPlugin`, no `DecoratorPlugin`; `ctx`-first handlers, plain-function data access, capabilities
 resolved through `ctx.services`, which is to say the context is the injector. **Opted in —
-NestJS-shaped:** one flag brings both plugins and switches _every_ schematic to class-based output —
+class-based:** one flag brings both plugins and switches _every_ schematic to class-based output —
 `@Controller` classes, `@Injectable` providers, constructor injection, module barrels.
 
 The load-bearing part is that the flag selects a **generator mode**, not just a plugin:
@@ -6590,10 +6590,10 @@ otherwise, which means the choice has to be readable long after `new` ran — pe
 manifest, or inferred from the import map the way gating already works. Sequencing is a hard
 constraint: dropping `DecoratorPlugin` from `rest` must land in the same change as the functional
 `g module`, since doing it first would leave the new default world with no aggregate schematic at
-all. `nest` becomes the pre-opted-in template rather than a separate concept. Measured in the smoke
-workspace, the two styles cost 241 and 255 lines for comparable services — the functional path is
-not more verbose; what it removes is two barrel files, a hand-matched token string, and a plugin
-whose presence silently changes how every service is constructed.
+all. `class-based` is the explicit opt-in template rather than a separate framework concept.
+Measured in the smoke workspace, the two styles cost 241 and 255 lines for comparable services — the
+functional path is not more verbose; what it removes is two barrel files, a hand-matched token
+string, and a plugin whose presence silently changes how every service is constructed.
 
 ## Milestone 66: Database Adapters That Have Been Executed
 
@@ -6743,7 +6743,7 @@ test passes `{ roles: {} }` purely to satisfy the type.
 | 57        | ✅     | derived openapi security              |
 | 63        | ✅     | cli (scaffold repairs)                |
 | 64        | ✅     | decorator-plugin (`@Ctx()`)           |
-| 65        | ⬜     | cli (functional default, two worlds)  |
+| 65        | ✅     | cli (functional default, two worlds)  |
 | 66        | ⬜     | database-plugin (prisma v7, drizzle)  |
 | 67        | ⬜     | cli + starters (scaffold defaults)    |
 | 68        | ⬜     | common + kernel (contract gaps)       |

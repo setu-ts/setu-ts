@@ -2113,7 +2113,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   controls were each observed failing and reverted, including `Symbol.for` → `Symbol()`, which fails
   exactly the two cross-copy tests while the guard and the rejection cases still pass) — complete
   (PR #154)
-- **Next milestone** — **M65** (functional default, NestJS-shaped opt-in). M63–M68 come from the
+- **Milestone 65** (`packages/cli` — functional default and `class-based` opt-in: REST and
+  microservice scaffolds omit decorators and DI; `--template class-based` installs the coherent
+  decorator-and-DI pair; `generate service` and `generate module` follow the persisted composition;
+  functional modules register `ctx`-first routes; and generated decorated writes use `@Ctx()` for
+  their `201` response) — complete (PR pending).
+- **Next milestone** — **M66** (database adapters that have been executed). M63–M68 come from the
   same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
   M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated
   type-checked clean while its entry points imported exactly ONE generated path, so thirteen of
