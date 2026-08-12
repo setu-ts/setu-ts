@@ -84,13 +84,20 @@ Reproductions, all against `0.1.0-alpha.7` on Deno 2.9.5:
 
 - **Decision:** Add `TemplateManifest.denoCompilerOptions`, merged into the generated member
   `deno.json`. `rest`/`microservice`/`nest` supply `{ experimentalDecorators: true }`; `full-stack`
-  supplies `{ jsx: 'react-jsx', jsxImportSource: 'react' }` and does not supply
-  `experimentalDecorators`, which it never uses.
+  supplies `{ jsx, jsxImportSource, lib }` and does NOT supply `experimentalDecorators`, which it
+  never uses. The no-template host keeps `experimentalDecorators`, so a developer who adds
+  `decorator-plugin` by hand to a bare project does not meet a compile error from a manifest they
+  never wrote.
 - **Why:** `tsconfigCompilerOptions` already exists for the npm toolchain and Vite reads it; Deno
-  reads `deno.json` and nothing populates that. One field per consumer keeps the two toolchains from
-  being conflated, which is the confusion that produced the defect.
-- **Test home:** `full-stack-typechecks.e2e.test.ts` — scaffolds `full-stack` and runs the generated
-  `check:app` task.
+  reads `deno.json` and nothing populates that. **The mechanism is sharper than "full-stack was
+  missing `jsx`", and was established by measurement only after the first negative control failed to
+  discriminate:** a manifest with NO `compilerOptions` key type-checks JSX cleanly, because Deno
+  applies its own `react-jsx` default — but declaring ANY option replaces that default set. The
+  previously-hardcoded `experimentalDecorators` was therefore the CAUSE of the 79 errors, not a
+  redundant extra sitting beside a missing setting. That is also why the option stays free on the
+  no-template host, which emits no JSX, and why it could not stay on `full-stack`.
+- **Test home:** the `check:app` step of `scaffold-runs-e2e.test.ts`. Its negative control must
+  restore `{ experimentalDecorators: true }` rather than delete the key — deleting it passes.
 
 ### 3.3 How full-stack route modules become reachable by the type-checker
 
@@ -210,13 +217,20 @@ failed is not known to discriminate:
 
 1. Remove `--allow-sys` from the `rest` manifest — `permissions-are-sufficient` must fail with the
    500 quoted in §1, not with a timeout.
-2. Remove `denoCompilerOptions` from `full-stack` — `full-stack-typechecks` must fail with `TS2686`.
-3. Remove the `check:app` task while keeping the compiler options — the same suite must fail because
-   the task does not exist, proving the two fixes are independently load-bearing.
-4. Revert one `.tsx` emitter to double-quoted JSX — `scaffold-formats-clean` must name that file.
-5. Remove `minimumDependencyAge` — `scaffold-installs` must fail during the release window and is
-   expected to pass outside it; record which condition the run was under, since a pass proves
-   nothing on its own.
+2. Set `full-stack`'s `denoCompilerOptions` back to `{ experimentalDecorators: true }` — the
+   `check:app` step must fail with `TS2686`. NOT by deleting the key: that was tried first and
+   PASSED, because Deno's own defaults then apply. See §3.2.
+3. Remove the `check:app` task while keeping the compiler options — the same suite must fail with
+   `Task not found: check:app`, proving the two fixes are independently load-bearing.
+4. Revert one `.tsx` emitter to double-quoted JSX — the format step must name that file.
+5. Remove `minimumDependencyAge` — an install must fail during the release window and is expected to
+   pass outside it; record which condition the run was under, since a pass proves nothing on its
+   own.
+
+Observed: control 1 failed all three boot steps with the exact `Requires sys access to "hostname"`
+500; control 2, in its corrected form, failed with `TS2686`; control 3 failed with
+`Task not found: check:app`; control 4 named `app/routes/_auth/login.tsx`. Control 5 is not
+reproducible outside a release window, so the emitted key carries a unit assertion instead.
 
 ## 8. Risks & mitigations
 

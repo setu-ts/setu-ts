@@ -2082,6 +2082,18 @@ deno task test
 
 All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`).
 
+**A milestone that changes what `packages/cli` GENERATES ALSO boots a scaffolded project — the gates
+above type-check generated output and stop there.** M63 repaired four defects that every one of the
+four gates, both publish gates, and the per-file coverage bar passed over, and three of them are
+invisible to a type-checker by construction: a scaffolded project could not `deno install` at all
+(no `minimumDependencyAge`, and `setu new` pins the CLI's own just-published version); a stock
+`--template rest` project answered **500 on `/health`** because its generated `start` task never
+requested `--allow-sys`; and a fresh scaffold failed `deno fmt --check` on 62 of 74 files the CLI
+itself had just written. `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` is the gate — it formats,
+lints, installs, type-checks and BOOTS each template, then requests the endpoints the project
+advertises. Its boot deliberately does not use `-A`: a permission the generated task forgot to ask
+for is unobservable under a blanket grant.
+
 **A milestone that adds or changes a package ALSO runs the two publish gates — the four above cannot
 see a publish-blocking defect.**
 
