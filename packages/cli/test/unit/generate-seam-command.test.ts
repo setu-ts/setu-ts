@@ -124,6 +124,56 @@ describe('setu generate, with seams', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  // The skip report exists to name a STALE artifact. Pointing it at a correct one is
+  // worse than saying nothing: a functional project's services are exactly what the CLI
+  // just wrote, there is no `DecoratorPlugin` barrel for them to be listed in, and
+  // "Regenerate it to bring it up to date" loops — the regenerated file is identical.
+  //
+  // The cause was that the scan used ONE spec per family while `service` has two
+  // shapes, so a functional project was scanned with the class spec and every service
+  // failed the `<Pascal>Service` export check.
+  describe('a functional project scanned for services', () => {
+    const FUNCTIONAL = {
+      '/app/deno.json': manifest('health-plugin'),
+      '/app/src/services/billing.service.ts':
+        "export function describeBilling(): string { return 'billing'; }",
+    };
+
+    it('reports no skipped artifact for a service it wrote itself', async () => {
+      const h = harness(FUNCTIONAL);
+
+      expect(await h.run(['route', 'orders'])).toBe(0);
+
+      expect(h.err.lines.join('\n')).not.toContain('Skipped');
+    });
+
+    it('lists the existing service in the regenerated barrel', async () => {
+      const h = harness(FUNCTIONAL);
+
+      expect(await h.run(['service', 'orders'])).toBe(0);
+
+      const barrel = h.fs.read('/app/src/services/index.ts');
+      expect(barrel).toContain("export { describeBilling } from './billing.service.ts';");
+      expect(barrel).toContain("export { describeOrders } from './orders.service.ts';");
+    });
+
+    // The class spec is still what a class project is scanned by, so a genuinely
+    // stale artifact is still reported there — this fix narrows the report, it does
+    // not disable it.
+    it('still reports a class-shaped service that exports nothing the barrel names', async () => {
+      const h = harness({
+        ...WIRED,
+        '/app/src/services/billing.service.ts': 'export const nothing = 1;',
+      });
+
+      expect(await h.run(['service', 'orders'])).toBe(0);
+
+      const reported = h.err.lines.join('\n');
+      expect(reported).toContain('src/services/billing.service.ts');
+      expect(reported).toContain('BillingService');
+    });
+  });
+
   // The upgrade path. `middleware` gained a second export in M60, so an artifact
   // generated earlier has the right filename and the wrong exports. Before the scanner
   // checked exports, the regenerated barrel named a constant that file did not have and
@@ -261,8 +311,13 @@ describe('setu generate, with seams', () => {
       });
 
       expect(await h.run(['service', 'widget'])).toBe(0);
-      // And no barrel, because the seam is conditional on the same plugin.
-      expect(h.fs.writes).toEqual(['/app/src/services/widget.service.ts']);
+      // The barrel it writes is the functional one — a re-export, not the
+      // `APP_SERVICES` registration, which is what would actually collide.
+      expect(h.fs.writes).toEqual([
+        '/app/src/services/widget.service.ts',
+        '/app/src/services/index.ts',
+      ]);
+      expect(h.fs.read('/app/src/services/index.ts')).not.toContain('APP_SERVICES');
     });
   });
 });

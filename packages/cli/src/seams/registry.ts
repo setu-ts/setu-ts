@@ -35,7 +35,8 @@ import { METRICS_SEAM } from './metrics.ts';
 import { MIDDLEWARE_SEAM } from './middleware.ts';
 import { PLUGINS_SEAM } from './plugins.ts';
 import { ROUTES_SEAM } from './routes.ts';
-import { SERVICES_SEAM } from './services.ts';
+import { FUNCTIONAL_SERVICES_SEAM, SERVICES_SEAM } from './services.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
 
 /**
  * Every wired family, keyed by the schematic name that emits it.
@@ -70,4 +71,28 @@ const SEAM_REGISTRY: ReadonlyMap<string, SeamSpec> = new Map<string, SeamSpec>([
  */
 export function listSeamSpecs(): readonly SeamSpec[] {
   return [...SEAM_REGISTRY.values()];
+}
+
+/**
+ * The seams to SCAN a target project with, for its generator mode.
+ *
+ * The registry describes the class-based shape of each family, because that is the
+ * shape whose barrel a `setu.config.ts` imports. Scanning is different: it reads the
+ * files a project actually holds, and one family — `service` — has two shapes.
+ * `readArtifactNames` admits a file only when it exports every symbol the barrel will
+ * import, so scanning a functional project with the class spec rejects every service
+ * the CLI itself wrote and reports it as needing regeneration. It does not; the
+ * regenerated file is identical.
+ *
+ * Selected here rather than inside the scanner so the registry stays the one place
+ * that decides which spec describes a family.
+ *
+ * @param installed - The `@setu-ts` packages detected in the target project
+ * @returns Every family's seam, with the service family in the project's own shape
+ */
+export function scanSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
+  if (generatorMode(installed) === 'class-based') return listSeamSpecs();
+  return listSeamSpecs().map((spec) =>
+    spec.schematic === SERVICES_SEAM.schematic ? FUNCTIONAL_SERVICES_SEAM : spec
+  );
 }

@@ -40,7 +40,7 @@ import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts'
 import { readModuleNames } from '../utils/module-scanner.ts';
 import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
-import { listSeamSpecs } from '../seams/registry.ts';
+import { scanSeamSpecs } from '../seams/registry.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -229,7 +229,7 @@ export async function runGenerateCommand(
   // Same reasoning, for the ten families that regenerate a seam barrel. One `readdir`
   // per family against paths that usually do not exist; a custom schematic reads it
   // too, so it cannot be gated on a built-in name.
-  const scan = await scanArtifacts(deps.fs, dir, listSeamSpecs());
+  const scan = await scanArtifacts(deps.fs, dir, scanSeamSpecs(installed));
 
   // A candidate the scan rejected is reported, never silently dropped. This is the path
   // an artifact generated before its family gained a second export takes: the barrel

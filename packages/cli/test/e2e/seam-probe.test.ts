@@ -37,10 +37,7 @@ const fs: IFileSystem = runtime.fs!;
 const ARTIFACTS: readonly (readonly [schematic: string, name: string])[] = [
   ['route', 'widget-route'],
   ['route', 'gadget-route'],
-  ['controller', 'widget-ctl'],
   ['module', 'widget-mod'],
-  ['service', 'widget-svc'],
-  ['service', 'gadget-svc'],
   ['middleware', 'widget'],
   ['plugin', 'widget'],
   ['plugin', 'gadget'],
@@ -48,6 +45,20 @@ const ARTIFACTS: readonly (readonly [schematic: string, name: string])[] = [
   ['health-indicator', 'gadget'],
   ['metric', 'widget'],
   ['metric', 'gadget'],
+];
+
+/**
+ * The two families only a class-based project can wire.
+ *
+ * `controller` is gated on `decorator-plugin`, and `service` emits a barrel only
+ * there — in a functional project it is a plain exported function with no
+ * registration site, so generating it here would add a file no probe could read
+ * through.
+ */
+const CLASS_BASED_ONLY: readonly (readonly [schematic: string, name: string])[] = [
+  ['controller', 'widget-ctl'],
+  ['service', 'widget-svc'],
+  ['service', 'gadget-svc'],
 ];
 
 /** The CQRS and events artifacts, which only the microservice template can host. */
@@ -82,14 +93,11 @@ const routed = await read('http://x/widget-route/');
 out['route'] = { status: routed.status, body: routed.body };
 out['middlewareHeader'] = routed.widgetHeader;
 
-// controller and module: both decorated classes are registered and reachable.
-const ctl = await read('http://x/widget-ctl');
-out['controller'] = { status: ctl.status, body: ctl.body };
+// module: the aggregate is reachable in whichever style this host generates.
 const mod = await read('http://x/widget-mod');
 out['module'] = { status: mod.status, body: mod.body };
 
-// service: the @Injectable landed in the registry under its token.
-out['serviceToken'] = services.get<{ describe(): string }>('widget-svc-service').describe();
+__CLASS__
 
 // plugin: the generated plugin registered its own capability token.
 out['pluginToken'] = services.get<{ describe(): string }>('widget').describe();
@@ -109,6 +117,28 @@ __CQRS__
 
 console.log('__PROBE_RESULT__' + JSON.stringify(out));
 await app.stop();
+`;
+
+/**
+ * The decorated half of the probe, appended for the class-based host only.
+ *
+ * The service assertion resolves through the CONTAINER, not through
+ * `services.get(token)`. That is not interchangeable: `DecoratorPlugin`
+ * registers an `@Injectable` as a provider ON the container when one is present
+ * and does NOT put it in the kernel registry, so the registry call throws — the
+ * M61 finding, and the reason this assertion was dropped rather than moved when
+ * the host changed from `rest` to `class-based`. The generated service's own
+ * JSDoc names exactly this route, so the probe is also what keeps that JSDoc
+ * honest.
+ */
+const CLASS_PROBE = `
+// controller: the decorated class reached DecoratorPlugin through its barrel.
+const ctl = await read('http://x/widget-ctl');
+out['controller'] = { status: ctl.status, body: ctl.body };
+
+// service: the @Injectable reached the container through the services barrel.
+const container = services.get<import('@setu-ts/common').IContainer>(CAPABILITIES.DI_CONTAINER);
+out['serviceToken'] = container.resolve<{ describe(): string }>('widget-svc-service').describe();
 `;
 
 /** The CQRS and events half of the probe, appended for the microservice host only. */
@@ -217,30 +247,38 @@ describe('generated artifacts are wired — end to end', () => {
     expect(result['pluginToken']).toBe('widget');
   });
 
-  for (const template of ['rest', 'microservice'] as const) {
+  // Both opt-in hosts, because each carries seams the other cannot.
+  // `class-based` is the only one with the decorator families; `microservice` is
+  // the only one registering `CqrsPlugin` and `EventsPlugin`, so it is the only
+  // place the command, query and event handlers are wired at all — and it is
+  // FUNCTIONAL since M65, which makes it the proof that the seams work with
+  // neither decorators nor a container.
+  for (const template of ['class-based', 'microservice'] as const) {
     it(`serves every wired artifact on --template ${template}`, async () => {
       expect(await run(['new', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
 
-      const wanted = template === 'microservice' ? [...ARTIFACTS, ...MICROSERVICE_ONLY] : ARTIFACTS;
+      const classBased = template === 'class-based';
+      const wanted = classBased
+        ? [...ARTIFACTS, ...CLASS_BASED_ONLY]
+        : [...ARTIFACTS, ...MICROSERVICE_ONLY];
       for (const [schematic, name] of wanted) {
         expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
       }
 
       await useWorkspacePackages(project);
-      const probe = PROBE.replace('__CQRS__', template === 'microservice' ? CQRS_PROBE : '');
+      const probe = PROBE
+        .replace('__CLASS__', classBased ? CLASS_PROBE : '')
+        .replace('__CQRS__', classBased ? '' : CQRS_PROBE);
       const result = await bootAndProbe(project, probe);
 
       // The generated route module was called with `app.router` from `createApp()`.
       expect(result['route']).toEqual({ status: 200, body: '{"items":[]}' });
       // The generated middleware was added, and ran — its header is on that response.
       expect(result['middlewareHeader']).toBe('true');
-      // The standalone controller reached DecoratorPlugin through its own barrel.
-      expect(result['controller']).toEqual({ status: 200, body: '{"items":[]}' });
-      // And the M58 module barrel still works beside the new seams.
+      // The module answers in whichever style this host generates: the M58
+      // decorated aggregate, or the M65 functional route module.
       expect(result['module']).toEqual({ status: 200, body: '{"items":[]}' });
-      // The @Injectable service resolves under the token its own JSDoc names.
-      expect(result['serviceToken']).toBe('widget-svc');
       // The generated plugin registered its capability token.
       expect(result['pluginToken']).toBe('widget');
       // Both indicators were handed to HealthPlugin({ indicators }).
@@ -251,8 +289,14 @@ describe('generated artifacts are wired — end to end', () => {
       expect(result['metricDeclared']).toBe(true);
       expect(result['metricSampled']).toBe(false);
 
-      if (template === 'microservice') {
-        // Both buses route to the generated handlers, through the new plugin options.
+      if (classBased) {
+        // The standalone controller reached DecoratorPlugin through its own barrel.
+        expect(result['controller']).toEqual({ status: 200, body: '{"items":[]}' });
+        // The @Injectable service resolves under the token its own JSDoc names —
+        // through the container, which is where this composition puts it.
+        expect(result['serviceToken']).toBe('widget-svc');
+      } else {
+        // Both buses route to the generated handlers, through the plugin options.
         expect(result['commandResult']).toEqual({ id: 'c-1' });
         expect(result['queryResult']).toEqual({ id: 'q-1' });
         expect(result['eventDelivered']).toBe(true);
@@ -283,7 +327,7 @@ export function auditLogMiddleware(): MiddlewareFunction {
 `;
 
     it('leaves the regenerated barrel compiling', async () => {
-      expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+      expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
       await Deno.mkdir(`${project}/src/middleware`, { recursive: true });
       await Deno.writeTextFile(
@@ -320,7 +364,7 @@ export function auditLogMiddleware(): MiddlewareFunction {
   // failures — a 500 on every module request, and a silently unreachable route.
   describe('the collision refusal', () => {
     it('refuses each colliding pair, and writes nothing', async () => {
-      expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+      expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(0);
       expect(await run(['g', 'controller', 'gizmo', '--dir', project])).toBe(0);

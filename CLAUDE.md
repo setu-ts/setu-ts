@@ -2113,7 +2113,66 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   controls were each observed failing and reverted, including `Symbol.for` → `Symbol()`, which fails
   exactly the two cross-copy tests while the guard and the rejection cases still pass) — complete
   (PR #154)
-- **Next milestone** — **M65** (functional default, NestJS-shaped opt-in). M63–M68 come from the
+- **Milestone 65** (`packages/cli` — functional default and `class-based` opt-in. `REST_PLUGINS`
+  drops `DecoratorPlugin`, so `rest` and the `microservice` set it composes from install neither
+  opt-in plugin; `--template class-based` installs the coherent decorator-and-DI pair. The selector
+  is the generated manifest itself — one internal `generatorMode(plugins)` reading
+  `decorator-plugin` — so `SchematicOptions` gains NO field and a later `generate` cannot silently
+  emit the other style. Functional `generate module` is **ungated** and emits its registration
+  through the existing routes seam rather than a new barrel, so the module is live at startup;
+  decorated write handlers take M64's `@Ctx()`, which is what lets them answer a real `201`. **Two
+  published CLI options were removed**, both with named refusals rather than silence: `--di` (the
+  independent axis produced two incoherent compositions) points at `--template class-based`, and
+  `nest` — renamed to `class-based`, since the framework has a class-based mode, not a NestJS one —
+  is refused through a `RENAMED_TEMPLATES` map rather than the generic unknown-name error (§9.2: a
+  published template name is public surface, and "expected one of: …" does not say which entry took
+  over). Two capabilities are genuinely gone and are recorded rather than implied:
+  `--template full-stack` has no DI opt-in at all now, so `FullStackStarterOptions.di` is again
+  unreachable from `setu new` (M61 made it reachable and proved it with a real build and boot), and
+  `generate service` in the default composition has **no registration site** — a plain function has
+  none to have, so M60's "eleven of thirteen wired" no longer describes the default world; it emits
+  a `src/services/index.ts` re-export for convenience, and both that barrel's header and the emitted
+  JSDoc say it registers nothing.
+
+  **Verification found one defect and two deleted proofs.** Ungating `module` made every host able
+  to emit a `*.service.test.ts`, but only the templates carrying `FUNCTIONAL_MODULE_MANIFEST`
+  declared `@std/testing`/`@std/expect` — so the no-template and `full-stack` hosts scaffolded
+  cleanly, reported `created …/widget.service.test.ts`, and then failed `deno check` on an import
+  the CLI itself had just written. That is the M58 defect exactly, reintroduced by ungating, and no
+  gate saw it because the module e2e ran on `class-based` alone while the minimal seam probe
+  generates route/middleware/plugin and never a module. The deps moved to their own
+  `templates/test-deps.ts` and are now asserted across every host by iteration rather than by name,
+  plus a real `deno check` of the emitted test in three project shapes; reverting fails 4 unit steps
+  and 2 e2e steps while `--template rest` still passes, so the check discriminates. The seam probe
+  had also DROPPED the microservice host with its `CQRS_PROBE`, leaving the generated command, query
+  and event handlers wired by nothing observable, and dropped the service-token read rather than
+  re-pointing it at the container — where `DecoratorPlugin` actually puts an `@Injectable` once
+  `DiPlugin` is present (the M61 finding, and the reason the old `services.get` form would have
+  thrown on the new host). Both are restored, the probe now boots BOTH opt-in hosts, and each
+  restored assertion was observed failing against a deliberately wrong expectation. ~530 net lines
+  of unit coverage had also been deleted rather than adapted: the module-barrel dedup and
+  byte-identity guards, the never-`Deno.test` check, `assertSeamContract('service', …)`, name-casing
+  idempotence, and the whole M61 JSDoc-resolution suite whose text still ships — all restored across
+  both style arms.
+
+  **A second defect surfaced from a question about the unwired service, not from a gate.** The
+  artifact scan admits a file only when it exports every symbol the barrel would import, and it ran
+  ONE spec per family — but `service` now has two shapes, so a functional project was scanned with
+  the CLASS spec and every service the CLI had just written failed the `<Pascal>Service` check.
+  Every `setu generate` after the first `g service` therefore printed
+  `Skipped src/services/x.service.ts: it does not export XService` and
+  `Regenerate it to bring it up to date`: there is no `DecoratorPlugin` barrel in that project, the
+  file is exactly what was generated, and the advice LOOPS, since regenerating produces an identical
+  file. Fixed with `FUNCTIONAL_SERVICES_SEAM` plus a `scanSeamSpecs(installed)` accessor, so the
+  registry stays the one place deciding which spec describes a family; the exported symbol has one
+  owner read by both the renderer and the scanner, which is exactly the split that caused it. The
+  same change delivers the convenience the maintainer asked for — a managed `src/services/index.ts`
+  re-export — whose header states it is not a registration, since no plugin option takes a list of
+  functions. Reverting fails both new tests while the stale-class-service report keeps passing, so
+  the fix narrows the diagnostic rather than disabling it. An empty-list arm added with it dropped
+  the file to 50% branch and was DELETED rather than tested: this barrel is never scaffolded, only
+  rendered by the schematic, which always passes the name being generated) — complete (PR #155).
+- **Next milestone** — **M66** (database adapters that have been executed). M63–M68 come from the
   same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
   M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated
   type-checked clean while its entry points imported exactly ONE generated path, so thirteen of

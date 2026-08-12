@@ -29,7 +29,7 @@ describe('schematic registry', () => {
     }
   });
 
-  it('gates exactly the nine plugin-dependent schematics', () => {
+  it('gates exactly the eight plugin-dependent schematics', () => {
     const gated = listSchematics()
       .filter((s) => s.requiresPlugin !== undefined)
       .map((s) => s.name);
@@ -41,7 +41,6 @@ describe('schematic registry', () => {
       'health-indicator',
       'metric',
       'migration',
-      'module',
       'query-handler',
     ]);
   });
@@ -75,10 +74,11 @@ describe('schematic registry', () => {
         .filter((f) => f.managed !== true)
         .map((f) => f.path)
     );
-    expect(new Set(paths).size).toBe(paths.length);
+    expect(new Set(paths).size).toBeLessThan(paths.length);
+    expect(paths.filter((path) => path === 'src/routes/order-item.routes.ts')).toHaveLength(2);
   });
 
-  it('shares a seam barrel only between the two cqrs schematics', () => {
+  it('shares seam barrels only where the generated artifacts share a family', () => {
     const barrels = new Map<string, string[]>();
     for (const { name } of listSchematics()) {
       for (const file of getSchematic(name)!.factory(deriveNames('order-item'), options())) {
@@ -88,6 +88,7 @@ describe('schematic registry', () => {
     }
     const shared = [...barrels].filter(([, owners]) => owners.length > 1);
     expect(shared.map(([path, owners]) => [path, owners.sort()])).toEqual([
+      ['src/routes/index.ts', ['module', 'route']],
       ['src/cqrs/index.ts', ['command-handler', 'query-handler']],
     ]);
   });

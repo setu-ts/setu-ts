@@ -13,31 +13,8 @@ import type { TargetRuntime, TemplateName } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { FULL_STACK_TEMPLATE } from './full-stack.ts';
 import { MICROSERVICE_TEMPLATE } from './microservice.ts';
-import { NEST_TEMPLATE } from './nest.ts';
+import { CLASS_BASED_TEMPLATE } from './class-based.ts';
 import { REST_TEMPLATE } from './rest.ts';
-
-/**
- * The per-project choices a template renders differently for.
- *
- * Declared here with the rest of the template contract rather than beside the
- * `--di` wiring, because {@linkcode AppFactoryWiring.args} takes it: having it
- * in `di.ts` meant `registry.ts` imported `di.ts` for the type while `di.ts`
- * imported `registry.ts` for {@linkcode Wiring}. Both edges were `import type`
- * and therefore erased, so nothing misbehaved — but a type-only cycle is still
- * a cycle to a reader and to any future graph check (AI_GUIDELINES §11.3).
- *
- * An object rather than a bare boolean: a positional boolean at a factory's
- * `args` call site would be unreadable, and a second flag on the same axis
- * extends this type instead of every signature that carries it.
- */
-export interface TemplateFeatures {
-  /**
-   * Register `DiPlugin`, so every `@Injectable` is constructed through a
-   * container that honors its `scope` rather than through the kernel's
-   * `ServiceRegistry`.
-   */
-  readonly di: boolean;
-}
 
 /**
  * One symbol a generated `setu.config.ts` imports and calls.
@@ -135,13 +112,10 @@ export interface AppFactoryWiring {
    *
    * The rendered call is always `await`ed, so a factory may be sync or async.
    *
-   * Takes the project's {@linkcode TemplateFeatures} as a second parameter
-   * because a starter-composed template cannot express `--di` as a
-   * {@linkcode Wiring}: {@linkcode TemplateHost.plugins} must stay empty
-   * when a factory is set, so the choice has to reach the factory's own options
-   * object instead.
+   * Receives the selected runtime because factory composition can vary by
+   * platform while the public template name stays the same.
    */
-  readonly args?: (runtime: TargetRuntime, features: TemplateFeatures) => string;
+  readonly args?: (runtime: TargetRuntime) => string;
 }
 
 /**
@@ -493,7 +467,7 @@ export interface TemplateDefinition extends TemplateHost {
 const TEMPLATE_REGISTRY: ReadonlyMap<string, TemplateDefinition> = new Map([
   [REST_TEMPLATE.name, REST_TEMPLATE],
   [MICROSERVICE_TEMPLATE.name, MICROSERVICE_TEMPLATE],
-  [NEST_TEMPLATE.name, NEST_TEMPLATE],
+  [CLASS_BASED_TEMPLATE.name, CLASS_BASED_TEMPLATE],
   [FULL_STACK_TEMPLATE.name, FULL_STACK_TEMPLATE],
 ]);
 

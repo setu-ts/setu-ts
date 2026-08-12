@@ -4871,9 +4871,9 @@ deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.7/main
 # Scaffold a project (creates ./my-app)
 setu new my-app
 setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers
-setu new my-app --template rest                # rest | microservice | nest | full-stack
+setu new my-app --template rest                # rest | microservice | class-based | full-stack
 setu new my-app --template microservice --runtime bun
-setu new my-app --template rest --di           # add a DI container to any template
+setu new my-app --template class-based          # decorators and DI together
 
 # Scaffold a monorepo (creates ./acme, no member yet)
 setu new acme --workspace
@@ -4887,7 +4887,7 @@ setu commands
 setu db:migrate up 3                           # runs a plugin-registered command
 
 # Generate code
-setu generate module orders                    # requires @setu-ts/decorator-plugin
+setu generate module orders                    # functional by default; class output with decorator-plugin
 setu generate plugin my-plugin
 setu generate controller user-profile
 setu generate service user-profile
@@ -4921,7 +4921,6 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | Option                                          | Commands                                   | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate`                          | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.                                                                                                                                                                                                                                                           |
-| `--di`                                          | `new`                                      | Registers `DiPlugin`, so every `@Injectable` is constructed through a container that honors its `scope`. Off by default; see "Decorators and DI are optional" below. A no-op on `--template nest`, which already registers it.                                                                                                                                                                                                                                                   |
 | `--workspace`                                   | `new`                                      | Creates a monorepo root instead of a project: a root manifest whose member globs are `apps/*` and `libs/*` (a `deno.json` `workspace` array, or a `package.json` `workspaces` one under `--runtime node\|bun`), plus a `setu.workspace.json`, with no member. Both globs are written once, so neither a service nor a library ever rewrites the root. Refuses `--template`, and `--runtime cloudflare-workers` — each Worker is its own deploy unit — rather than ignoring them. |
 | `--port <n>`                                    | `new --workspace`, `generate app`, `adopt` | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                 |
 | `--transport <name>`                            | `new --workspace`                          | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                  |
@@ -4946,22 +4945,33 @@ Any casing of the name produces identical output: `setu g controller user-profil
 ### Decorators and DI are optional
 
 AI_GUIDELINES states that decorators are optional, dependency injection is optional, and that
-**everything has a programmatic API — no feature requires decorators or reflection.** The two axes
-are independent, and the CLI selects them separately: the template decides decorators, `--di`
-decides the container.
+**everything has a programmatic API — no feature requires decorators or reflection.** The CLI has
+two coherent compositions: functional is the default; `--template class-based` opts into both
+decorators and dependency injection.
 
-| You want                    | Scaffold with                       | You get                                                                                                                      |
-| --------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Neither                     | `setu new app`                      | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g job` all work and are wired.                |
-| Decorators, no container    | `setu new app --template rest`      | `DecoratorPlugin`, so `g controller` and `g module` work. `@Injectable` classes resolve from the kernel's `ServiceRegistry`. |
-| A container, no decorators  | `setu new app --di`                 | `DiPlugin` on the minimal set. Nothing generated changes shape; there is simply a container present.                         |
-| Both                        | `setu new app --template rest --di` | `DecoratorPlugin` + `DiPlugin`: `@Injectable` classes are constructed through the container and their `scope` is honored.    |
-| Both, plus a worked example | `setu new app --template nest`      | The above, with a decorated controller and an injected service already written.                                              |
+| You want    | Scaffold with                         | You get                                                                                                          |
+| ----------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Neither     | `setu new app`                        | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g job` all work and are wired.    |
+| Functional  | `setu new app --template rest`        | Router functions and explicit request context; `g module` creates a registered route with GET and POST handlers. |
+| Class-based | `setu new app --template class-based` | `DecoratorPlugin` + `DiPlugin`, plus decorated controllers, injectable services, and class module registration.  |
 
-`--di` changes the **composition**, never the generated source: `DecoratorPlugin` branches on the
-container's presence, so the same `@Injectable` class works with and without it — what changes is
-the lifecycle it gets. Adding `--di` to `--template nest` is a no-op, because that template already
-registers `DiPlugin` and the kernel refuses a duplicate plugin name at `start()`.
+The independent `--di` flag is no longer supported. It is refused with guidance to use
+`--template class-based`, which always installs the decorator and DI pair together, and
+`--template nest` is refused with a message naming `class-based` as its new name.
+`--template
+full-stack` therefore has no DI opt-in from the CLI; an application composing the
+starter directly still has `FullStackStarterOptions.di`.
+
+The style is read from the target project's manifest on every `setu generate`, so it PERSISTS: a
+project holding `decorator-plugin` keeps producing decorated classes — including one that holds it
+without `di-plugin`, which only a project predating `--template class-based` can — and a project
+without it keeps producing functional output. One consequence is worth stating plainly:
+`setu generate service` has **no registration site in a functional project**. A plain exported
+function has none to have — no plugin option takes a list of functions — so nothing wires it for
+you. It still emits a managed `src/services/index.ts`, but that barrel is a convenience re-export
+rather than a registration: `setu.config.ts` does not import it, and you import from it where the
+function is needed. In a class-based project the same path holds the `APP_SERVICES` array of
+`@Injectable` classes, which the scaffolded config does pass to `DecoratorPlugin`.
 
 > **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
 > support (`--experimental-strip-types`) ERASES types without transforming code, so it cannot run a
@@ -5078,7 +5088,7 @@ and a guessed Ingress routes nothing.
 | `--runtime cloudflare-workers`                      | `deno`, `node` and `bun` all host a workspace; Workers does not, and that is a topology difference rather than a missing profile — each Worker is its own deploy unit with its own `wrangler.toml`, so several in one repository are several deployments, not members sharing a root manifest and a lockfile. Exits `2` naming `setu new <name> --runtime <target>` for a standalone project. |
 | `--template full-stack` on a broker transport       | That template composes its whole plugin set through a starter factory, so a transport that appends a plugin or rewrites `MessagingPlugin` would have its contribution silently dropped — the member would look connected and reach nobody. Allowed on `http` and `memory`, where the transport contributes nothing; the root gains `nodeModulesDir` when it arrives.                          |
 | `generate app --port` on a taken port               | Two members on one port cannot both bind, while every sibling's map names both — so one name would resolve to the other service. Exits `1` naming the member that holds it. A free port is honoured, and allocation still derives from the highest in use, so a hand-picked port moves the ceiling rather than being reused.                                                                  |
-| `new --workspace --di`                              | A root registers no plugins, so a container has nothing to construct — as with `--template`. Exits `2` naming `generate app <name> --di`.                                                                                                                                                                                                                                                     |
+| `new --workspace --di`                              | The independent DI switch is retired. Exits `2` directing the caller to `--template class-based`.                                                                                                                                                                                                                                                                                             |
 | A port in `setu.workspace.json` outside `1`–`65535` | Refused on read, naming the value and the field. Every port there is written into a member's entry point AND into every sibling's map, so one bad number breaks the workspace: `app.start()` throws `Invalid port (out of range)`, and `0` is worse still — it binds an arbitrary free port, so the member looks healthy while every sibling is refused. Exits `1`.                           |
 | A workspace with no port left                       | `basePort` and its members reach `65535`. Exits `1` rather than allocating `65536`.                                                                                                                                                                                                                                                                                                           |
 
@@ -5293,11 +5303,11 @@ without it. A repeat generate of the _same_ schematic is the ordinary overwrite 
 
 A project scaffolded before a seam existed has no import of its barrel. Each barrel's header states
 the exact lines to add to `setu.config.ts`; add them once and every later generate is wired. The
-`rest`, `microservice` and `nest` templates emit every applicable seam from scaffold time, so a new
-project is wired before anything is generated — and so does the **no-template path**, for the three
-seams that need no plugin (`route`, `middleware`, `plugin`). `--template full-stack` is deliberately
-not a host: its layering is `routes → features → services`, it composes through a starter factory,
-and its `createApp` has no plugin array to spread into.
+`rest`, `microservice` and `class-based` templates emit every applicable seam from scaffold time, so
+a new project is wired before anything is generated — and so does the **no-template path**, for the
+three seams that need no plugin (`route`, `middleware`, `plugin`). `--template full-stack` is
+deliberately not a host: its layering is `routes → features → services`, it composes through a
+starter factory, and its `createApp` has no plugin array to spread into.
 
 **Artifacts generated before their family gained a second export are skipped, and reported.** A
 barrel imports specific symbols from each artifact, and two families gained one in this release:
@@ -5321,26 +5331,45 @@ default export is not; an undetected export means the artifact is skipped and re
 broken barrel is written.
 
 Which seams a host carries depends on which plugins it registers: the no-template path carries the
-three that need none (`src/routes/`, `src/middleware/`, `src/plugins/`), `rest` and `nest` carry
-eight barrels, and `microservice` additionally carries `src/cqrs/` and `src/events/`, because it is
-the only template registering `CqrsPlugin` and `EventsPlugin`.
+three that need none (`src/routes/`, `src/middleware/`, `src/plugins/`), the functional templates
+carry only the seams their plugins consume, and `class-based` additionally carries controller,
+service and module barrels. `microservice` additionally carries `src/cqrs/` and `src/events/`,
+because it is the only template registering `CqrsPlugin` and `EventsPlugin`.
 
 ### Domain modules
 
-`setu generate module <name>` is the one aggregate schematic. It emits a whole domain sub-module and
-wires it in, without editing `setu.config.ts`:
+`setu generate module <name>` is the aggregate schematic, and it is **ungated** — it runs in every
+project shape, including one scaffolded with no template. Which of two file sets it emits is decided
+by whether `@setu-ts/decorator-plugin` is installed.
+
+Functional (the default composition):
+
+```
+src/modules/<name>/<name>.service.ts        export function list<Name>()
+src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
+src/modules/<name>/index.ts                 the module's own re-exports
+src/routes/<name>.routes.ts                 register<Name>Routes — GET / and POST / (201)
+src/routes/index.ts                         the routes barrel     (managed — regenerated)
+```
+
+The route module registers through the same seam `setu generate route` uses, so the module answers
+`GET /<name>` and `POST /<name>` with no edit to `setu.config.ts`. Because both write
+`src/routes/<name>.routes.ts`, a `route` and a `module` sharing one name is refused by the ordinary
+overwrite check.
+
+Class-based (`--template class-based`, or any project holding `decorator-plugin`):
 
 ```
 src/modules/<name>/<name>.service.ts        @Injectable, token '<name>-service'
-src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), parameter-level @Inject
+src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), parameter-level @Inject, @Ctx()
 src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
 src/modules/<name>/index.ts                 the module's own re-exports
 src/modules/index.ts                        the aggregate barrel  (managed — regenerated)
 ```
 
-The aggregate barrel exports `MODULE_CONTROLLERS` and `MODULE_SERVICES`, and the `rest`,
-`microservice` and `nest` templates scaffold a `setu.config.ts` that already imports both and passes
-them to `DecoratorPlugin`:
+The aggregate barrel exports `MODULE_CONTROLLERS` and `MODULE_SERVICES`, and the `class-based`
+template scaffolds a `setu.config.ts` that already imports both and passes them to
+`DecoratorPlugin`:
 
 ```typescript
 import { MODULE_CONTROLLERS, MODULE_SERVICES } from './src/modules/index.ts';
@@ -5403,9 +5432,9 @@ export function createApp(): IApplication {
 | Template       | Plugin set                                                                                                 |
 | -------------- | ---------------------------------------------------------------------------------------------------------- |
 | _(none)_       | `RuntimePlugin` only.                                                                                      |
-| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
+| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi + `errorHandler()`.            |
 | `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry, ServiceDiscovery (`'static'` arm), Cqrs, Events.      |
-| `nest`         | `rest` plus `DiPlugin`, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`.     |
+| `class-based`  | `rest` plus `DecoratorPlugin` and `DiPlugin`, an `@Injectable` service, and a `@Controller`.               |
 | `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton. |
 
 Three of the four templates emit **inline wiring**, not imports of the `@setu-ts/*-starter`
@@ -5466,11 +5495,11 @@ Notes:
   the SSR plugin needs to import its own server build and read client assets.
 - **React Router is pinned to v8**, matching the `npm:react-router@8` the SSR plugin imports.
 
-The `nest` template additionally emits `src/greeting-service.ts` and `src/greeting-controller.ts`,
-and its `setu.config.ts` imports both to pass them to `DecoratorPlugin({ controllers, services })`.
-It refuses no runtime target. `--template microservice --runtime
-cloudflare-workers` is refused
-(`2`): the messaging and queue plugins need raw sockets, which Workers does not provide.
+The `class-based` template additionally emits `src/greeting-service.ts` and
+`src/greeting-controller.ts`, and its `setu.config.ts` imports both to pass them to
+`DecoratorPlugin({ controllers, services })`. It supports every runtime target. On Cloudflare
+Workers, the microservice template swaps its socket-bound messaging and queue plugins for the
+platform implementation.
 
 ### Plugin-contributed commands
 

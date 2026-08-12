@@ -20,52 +20,31 @@ import {
   SERVICES_EXPORT,
 } from '../schematics/module-barrel.ts';
 import type { LocalImport, TemplateManifest, Wiring } from './registry.ts';
+import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 
 /** Specifier the generated `setu.config.ts` imports the barrel from. */
 const BARREL_SPECIFIER = `./${MODULES_DIR}/index.ts`;
 
 /**
- * Test dependencies the module schematic's emitted `*.service.test.ts` imports.
+ * Manifest additions every functional module-hosting template merges in.
  *
- * A host template MUST declare these, or the first `deno test` a developer runs
- * fails with `Import "@std/testing/bdd" not a dependency and not in import map` —
- * the CLI would have generated a test file that cannot run.
- *
- * Both forms are needed because the two target families resolve differently:
- * `deno.json` `imports` for Deno and Cloudflare Workers, and npm aliases for Node
- * and Bun, which get a `package.json` and no `deno.json` at all. The alias form
- * matches how those targets already reach `@setu-ts/*`.
+ * The test dependencies come from {@linkcode TEST_DEPENDENCY_MANIFEST}, which
+ * every host carries now that `setu generate module` is ungated. What is added
+ * here is the REST baseline's health permission; the decorator compiler setting
+ * is restricted to the class-based opt-in below.
  */
-const TEST_DEPENDENCY_VERSIONS = {
-  '@std/testing': '1.0.19',
-  '@std/expect': '1.0.20',
-} as const;
-
-/**
- * Manifest additions every module-hosting template merges in.
- *
- * The three templates that share this — `rest`, `microservice`, `nest` — are
- * exactly the three that wire `HealthPlugin` and emit decorated classes, so the
- * permission and compiler settings both belong here rather than being repeated
- * per template. The no-template host wires neither and correctly receives
- * neither: it registers only the runtime plugin, and `setu generate service`
- * emits a plain class in a project with no decorator plugin.
- */
-export const MODULE_SEAM_MANIFEST: TemplateManifest = {
-  denoImports: Object.fromEntries(
-    Object.entries(TEST_DEPENDENCY_VERSIONS).map(([pkg, v]) => [pkg, `jsr:${pkg}@^${v}`]),
-  ),
-  npmDevDependencies: Object.fromEntries(
-    Object.entries(TEST_DEPENDENCY_VERSIONS).map((
-      [pkg, v],
-    ) => [pkg, `npm:@jsr/${pkg.slice(1).replace('/', '__')}@^${v}`]),
-  ),
+export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
+  ...TEST_DEPENDENCY_MANIFEST,
   // `HealthPlugin`'s `self` indicator reads `runtime.hostname()` on every probe.
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.
   denoPermissions: ['--allow-sys'],
-  // The decorator and OpenAPI plugins ship legacy decorators, so a generated
-  // @Controller class only type-checks with this enabled.
+};
+
+/** Manifest additions unique to the class-based module composition. */
+export const CLASS_BASED_MODULE_MANIFEST: TemplateManifest = {
+  ...FUNCTIONAL_MODULE_MANIFEST,
+  // The class-based template emits decorated classes.
   denoCompilerOptions: { experimentalDecorators: true },
 };
 
@@ -89,9 +68,8 @@ export const MODULE_SEAM_LOCAL_IMPORT: LocalImport = {
  * Rewrites a wiring list so the `decorator-plugin` entry passes the barrel
  * arrays.
  *
- * Takes the list rather than mutating a shared constant so `rest` and `nest` can
- * each apply it to their own set — the technique `NEST_PLUGINS` already uses to
- * override that same wiring.
+ * Takes the list rather than mutating a shared constant so the class-based
+ * template can apply it to its own set without changing the REST baseline.
  *
  * @param wirings - The template's plugin wirings
  * @param extraControllers - Identifiers listed before the barrel spread

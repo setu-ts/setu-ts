@@ -6580,7 +6580,7 @@ without decorators.
 The design is a single axis with two complete positions, not a spectrum. **Default — functional:**
 no `DiPlugin`, no `DecoratorPlugin`; `ctx`-first handlers, plain-function data access, capabilities
 resolved through `ctx.services`, which is to say the context is the injector. **Opted in —
-NestJS-shaped:** one flag brings both plugins and switches _every_ schematic to class-based output —
+class-based:** one flag brings both plugins and switches _every_ schematic to class-based output —
 `@Controller` classes, `@Injectable` providers, constructor injection, module barrels.
 
 The load-bearing part is that the flag selects a **generator mode**, not just a plugin:
@@ -6590,10 +6590,28 @@ otherwise, which means the choice has to be readable long after `new` ran — pe
 manifest, or inferred from the import map the way gating already works. Sequencing is a hard
 constraint: dropping `DecoratorPlugin` from `rest` must land in the same change as the functional
 `g module`, since doing it first would leave the new default world with no aggregate schematic at
-all. `nest` becomes the pre-opted-in template rather than a separate concept. Measured in the smoke
-workspace, the two styles cost 241 and 255 lines for comparable services — the functional path is
-not more verbose; what it removes is two barrel files, a hand-matched token string, and a plugin
-whose presence silently changes how every service is constructed.
+all. `class-based` is the explicit opt-in template rather than a separate framework concept.
+Measured in the smoke workspace, the two styles cost 241 and 255 lines for comparable services — the
+functional path is not more verbose; what it removes is two barrel files, a hand-matched token
+string, and a plugin whose presence silently changes how every service is constructed.
+
+**Two published CLI options were removed to get there, and neither is silent.** `--di` was the
+independent axis this section replaces; it is refused with a message naming
+`--template
+class-based`. `--template nest` was renamed to `class-based` — the composition is
+unchanged, and the old name is refused through a renamed-template map rather than the generic
+unknown-name error, because a published template name is public surface (AI_GUIDELINES §9.2) and
+"expected one of: …" does not say which entry took over.
+
+**Two capabilities are genuinely lost, deliberately.** `--template full-stack` now has no DI opt-in
+from the CLI at all, so `FullStackStarterOptions.di` — which M61 made reachable from `setu new` and
+proved with a real build and boot — is again reachable only by an application composing the starter
+itself; giving that template a class-based variant would reintroduce the spectrum this milestone
+removes. And `setu generate service` in the default composition has no registration site, because a
+plain exported function has none to have — no plugin option takes a list of functions — so M60's
+"eleven of thirteen artifacts wired" no longer describes the default world. It still emits a
+`src/services/index.ts`, but as a convenience re-export nothing imports for you, and both the barrel
+header and the emitted JSDoc say so rather than implying wiring that does not exist.
 
 ## Milestone 66: Database Adapters That Have Been Executed
 
@@ -6743,7 +6761,7 @@ test passes `{ roles: {} }` purely to satisfy the type.
 | 57        | ✅     | derived openapi security              |
 | 63        | ✅     | cli (scaffold repairs)                |
 | 64        | ✅     | decorator-plugin (`@Ctx()`)           |
-| 65        | ⬜     | cli (functional default, two worlds)  |
+| 65        | ✅     | cli (functional default, two worlds)  |
 | 66        | ⬜     | database-plugin (prisma v7, drizzle)  |
 | 67        | ⬜     | cli + starters (scaffold defaults)    |
 | 68        | ⬜     | common + kernel (contract gaps)       |

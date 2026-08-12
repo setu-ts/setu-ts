@@ -46,7 +46,7 @@ describe('the duplicate-path guard', () => {
 // `node --experimental-strip-types main.ts` — what this CLI emitted through
 // alpha.5 — cannot run a legacy decorator or a constructor parameter property.
 // Measured on Node v24: a scaffolded Node project booted until the first
-// `g service|controller|module`, and `--template nest` never booted at all,
+// `g service|controller|module`, and the old class template never booted at all,
 // while Deno, Bun and Workers ran every combination.
 // `wrangler` bundles `src/index.ts` with esbuild, which resolves neither `jsr:`
 // specifiers nor a Deno import map. Before this, a scaffolded Workers project
@@ -373,7 +373,7 @@ describe('runNewCommand', () => {
       // in the drift gate.
       expect(config).toContain('HealthPlugin({ indicators: [...HEALTH_INDICATORS] })');
       expect(config).toContain('MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })');
-      expect(config).toContain('DecoratorPlugin({');
+      expect(config).not.toContain('DecoratorPlugin');
     });
 
     it('renders the plugin list, middleware, setup calls, then the index route', async () => {
@@ -443,92 +443,11 @@ describe('runNewCommand', () => {
       expect(h.fs.has('/work/bare/src/cqrs/index.ts')).toBe(false);
     });
 
-    describe('--di', () => {
-      // The flag's whole contract: it forks the COMPOSITION, never the generated
-      // source. Every file but the config must be untouched.
-      it('changes setu.config.ts and nothing else', async () => {
-        const plain = harness();
-        const withDi = harness();
-        expect(await plain.run(['app', '--template', 'rest'])).toBe(0);
-        expect(await withDi.run(['app', '--template', 'rest', '--di'])).toBe(0);
-
-        for (const path of plain.fs.writes) {
-          if (path.endsWith('setu.config.ts')) continue;
-          // deno.json is the one legitimate exception: it must gain the pin.
-          if (path.endsWith('deno.json')) continue;
-          expect(withDi.fs.read(path)).toBe(plain.fs.read(path));
-        }
-      });
-
-      it('adds exactly one plugin call to a plugin-list template', async () => {
-        const plain = harness();
-        const withDi = harness();
-        await plain.run(['app', '--template', 'rest']);
-        await withDi.run(['app', '--template', 'rest', '--di']);
-
-        const before = plain.fs.read('/work/app/setu.config.ts');
-        const after = withDi.fs.read('/work/app/setu.config.ts');
-
-        expect(before).not.toContain('DiPlugin');
-        expect(after).toContain('      DiPlugin(),');
-        expect(after).toContain("import { DiPlugin } from '@setu-ts/di-plugin';");
-        // Exactly one: a second would throw `Duplicate plugin name` at start().
-        expect(after.match(/DiPlugin\(\)/g)?.length).toBe(1);
-      });
-
-      it('declares di-plugin in the manifest it now imports', async () => {
-        // The renderer and the manifest writer read ONE resolved plugin list, so
-        // a --di project can never import a package it does not declare.
-        const h = harness();
-        await h.run(['app', '--template', 'rest', '--di']);
-        const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
-        expect(manifest.imports['@setu-ts/di-plugin']).toContain('jsr:@setu-ts/di-plugin@');
-      });
-
-      it('wires DI into a template-less project too', async () => {
-        const h = harness();
-        await h.run(['bare', '--di']);
-        const config = h.fs.read('/work/bare/setu.config.ts');
-        expect(config).toContain('DiPlugin(),');
-        expect(JSON.parse(h.fs.read('/work/bare/deno.json')).imports['@setu-ts/di-plugin'])
-          .toBeDefined();
-      });
-
-      // The defect this milestone was most likely to ship: `nest` ALREADY
-      // registers DiPlugin, and the kernel throws `Duplicate plugin name 'di'`
-      // at start(). A second registration type-checks and passes every file
-      // assertion; only booting the project would catch it.
-      it('leaves --template nest byte-identical, because it already has DI', async () => {
-        const plain = harness();
-        const withDi = harness();
-        expect(await plain.run(['app', '--template', 'nest'])).toBe(0);
-        expect(await withDi.run(['app', '--template', 'nest', '--di'])).toBe(0);
-
-        expect(withDi.fs.writes).toEqual(plain.fs.writes);
-        for (const path of plain.fs.writes) {
-          expect(withDi.fs.read(path)).toBe(plain.fs.read(path));
-        }
-
-        const config = withDi.fs.read('/work/app/setu.config.ts');
-        expect(config.match(/DiPlugin\(\)/g)?.length).toBe(1);
-      });
-
-      it('reaches full-stack through the starter option, not the plugin list', async () => {
-        // `TemplateHost.plugins` must stay empty when an appFactory is set, so a
-        // wiring appended there would be silently dropped by the renderer.
-        const h = harness();
-        expect(await h.run(['shop', '--template', 'full-stack', '--di'])).toBe(0);
-        const config = h.fs.read('/work/shop/setu.config.ts');
-        expect(config).toContain('di: {},');
-        expect(config).not.toContain('DiPlugin');
-        expect(config).not.toContain('createApplication');
-      });
-
-      it('leaves full-stack without the option when the flag is absent', async () => {
-        const h = harness();
-        await h.run(['shop', '--template', 'full-stack']);
-        expect(h.fs.read('/work/shop/setu.config.ts')).not.toContain('di: {}');
-      });
+    it('refuses the retired independent DI switch', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'rest', '--di'])).toBe(2);
+      expect(h.err.text()).toContain('--template class-based');
+      expect(h.fs.writes).toEqual([]);
     });
 
     it('adds errorHandler through middleware.add, not the plugin list', async () => {
@@ -692,7 +611,7 @@ describe('runNewCommand', () => {
     // package.json switches Deno to node_modules resolution, so a project whose
     // import graph reaches a lazily-imported npm driver stops resolving on a cold
     // checkout — the trap `apps/full-stack` documents.
-    for (const template of ['rest', 'microservice', 'nest']) {
+    for (const template of ['rest', 'microservice', 'class-based']) {
       it(`emits no npm manifest for --template ${template}`, async () => {
         const h = harness();
 
@@ -1045,13 +964,10 @@ describe('--workspace', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    // Same class as --template: a root registers no plugins, so a container has
-    // nothing to construct and the flag would simply vanish.
-    it('refuses --di, naming where a container belongs', async () => {
+    it('refuses the retired independent DI switch', async () => {
       const h = harness();
       expect(await h.run(['acme', '--workspace', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('no container to add');
-      expect(h.err.text()).toContain('generate app <name> --di');
+      expect(h.err.text()).toContain('--template class-based');
       expect(h.fs.writes).toEqual([]);
     });
 

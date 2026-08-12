@@ -22,8 +22,8 @@ import { listSeamSpecs } from '../../src/seams/registry.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { seamSpecFor } from './schematics/_shared.ts';
 
-/** The templates that host generated-artifact seams — M58's host set, unchanged. */
-const HOSTS = ['rest', 'microservice', 'nest'] as const;
+/** The templates that host generated-artifact seams. */
+const HOSTS = ['rest', 'microservice', 'class-based'] as const;
 
 /**
  * Every barrel path a template emits.
@@ -52,7 +52,7 @@ describe('the no-template host', () => {
 
   it('is not a template — --help still lists exactly the four that exist', () => {
     const names = listTemplates().map((t) => t.name);
-    expect(names).toEqual(['rest', 'microservice', 'nest', 'full-stack']);
+    expect(names).toEqual(['rest', 'microservice', 'class-based', 'full-stack']);
     expect(getTemplate('minimal')).toBeUndefined();
     expect(getTemplate('none')).toBeUndefined();
   });
@@ -180,14 +180,16 @@ describe('seam hosts', () => {
     });
   }
 
-  it('gives rest and nest the same seven seams, and microservice all ten', () => {
-    expect(barrels(getTemplate('rest')!)).toEqual(barrels(getTemplate('nest')!));
-    expect(barrels(getTemplate('rest')!)).toHaveLength(8); // 7 seams + the module barrel
-    expect(barrels(getTemplate('microservice')!)).toHaveLength(10); // + cqrs + events
+  it('keeps functional hosts decorator-free while class-based hosts class seams', () => {
+    expect(barrels(getTemplate('rest')!)).not.toContain('src/controllers/index.ts');
+    expect(barrels(getTemplate('rest')!)).not.toContain('src/services/index.ts');
+    expect(barrels(getTemplate('class-based')!)).toContain('src/controllers/index.ts');
+    expect(barrels(getTemplate('class-based')!)).toContain('src/services/index.ts');
+    expect(barrels(getTemplate('microservice')!)).toContain('src/cqrs/index.ts');
   });
 
   it('gives the cqrs and events seams to microservice alone', () => {
-    for (const name of ['rest', 'nest'] as const) {
+    for (const name of ['rest', 'class-based'] as const) {
       expect(barrels(getTemplate(name)!)).not.toContain('src/cqrs/index.ts');
       expect(barrels(getTemplate(name)!)).not.toContain('src/events/index.ts');
     }
