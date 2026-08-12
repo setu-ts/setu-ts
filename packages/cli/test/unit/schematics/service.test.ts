@@ -12,6 +12,7 @@ import { expect } from '@std/expect';
 
 import { generateService } from '../../../src/schematics/service.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
+import { FUNCTIONAL_SERVICES_SEAM } from '../../../src/seams/services.ts';
 import { assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('service schematic', () => {
@@ -22,10 +23,44 @@ describe('service schematic', () => {
   describe('in a functional project', () => {
     const files = generateService(deriveNames('order-item'), options());
 
-    it('emits exactly one file, and no seam barrel', () => {
-      expect(files).toHaveLength(1);
-      expect(files[0].path).toBe('src/services/order-item.service.ts');
-      expect(files.some((f) => f.managed === true)).toBe(false);
+    it('emits the service and a convenience re-export barrel', () => {
+      expect(files.map((f) => f.path)).toEqual([
+        'src/services/order-item.service.ts',
+        'src/services/index.ts',
+      ]);
+      // Managed, so a second `g service` rewrites it rather than refusing.
+      expect(files.filter((f) => f.managed === true).map((f) => f.path))
+        .toEqual(['src/services/index.ts']);
+    });
+
+    it('re-exports the function, and registers nothing', () => {
+      const barrel = files[1].contents;
+      expect(barrel).toContain(
+        "export { describeOrderItem } from './order-item.service.ts';",
+      );
+      // A plain function has no registration site, and the barrel must not imply
+      // one: `APP_SERVICES` is the class barrel's export, read by DecoratorPlugin.
+      expect(barrel).not.toContain('APP_SERVICES');
+      expect(barrel).not.toContain('DecoratorPlugin');
+      expect(barrel).toContain('not a registration');
+    });
+
+    it('unions the services already present with the new one', () => {
+      const barrel = generateService(
+        deriveNames('order-item'),
+        options([], [], { service: ['gizmo', 'billing'] }),
+      )[1].contents;
+      for (const symbol of ['describeGizmo', 'describeBilling', 'describeOrderItem']) {
+        expect(barrel).toContain(`export { ${symbol} }`);
+      }
+    });
+
+    it('lists a regenerated service exactly once', () => {
+      const barrel = generateService(
+        deriveNames('billing'),
+        options([], [], { service: ['billing'] }),
+      )[1].contents;
+      expect(barrel.match(/describeBilling/g)?.length).toBe(1);
     });
 
     it('produces non-empty contents ending in a newline', () => {
@@ -43,6 +78,17 @@ describe('service schematic', () => {
       // that while an applied import or decorator is what actually matters.
       expect(files[0].contents).not.toMatch(/^import /m);
       expect(files[0].contents).not.toMatch(/^@Injectable/m);
+    });
+
+    // The symbol the module exports and the symbol the barrel imports have ONE
+    // owner, `functionalServiceSymbol` — which is also what the scanner admits
+    // files by. Splitting those is the M60 defect this seam nearly repeated.
+    it('exports exactly the symbol its seam requires', () => {
+      const required = FUNCTIONAL_SERVICES_SEAM.importSymbols(deriveNames('order-item'));
+      expect(required).toEqual(['describeOrderItem']);
+      for (const symbol of required) {
+        expect(files[0].contents).toContain(`export function ${symbol}(`);
+      }
     });
 
     it('derives identical output from any casing of the same name', () => {
