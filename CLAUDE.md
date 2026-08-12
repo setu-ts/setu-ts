@@ -2129,9 +2129,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   over). Two capabilities are genuinely gone and are recorded rather than implied:
   `--template full-stack` has no DI opt-in at all now, so `FullStackStarterOptions.di` is again
   unreachable from `setu new` (M61 made it reachable and proved it with a real build and boot), and
-  `generate service` in the default composition emits a file with **no registration site** — a plain
-  function has none to have, so M60's "eleven of thirteen wired" no longer describes the default
-  world.
+  `generate service` in the default composition has **no registration site** — a plain function has
+  none to have, so M60's "eleven of thirteen wired" no longer describes the default world; it emits
+  a `src/services/index.ts` re-export for convenience, and both that barrel's header and the emitted
+  JSDoc say it registers nothing.
 
   **Verification found one defect and two deleted proofs.** Ungating `module` made every host able
   to emit a `*.service.test.ts`, but only the templates carrying `FUNCTIONAL_MODULE_MANIFEST`
@@ -2152,7 +2153,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   of unit coverage had also been deleted rather than adapted: the module-barrel dedup and
   byte-identity guards, the never-`Deno.test` check, `assertSeamContract('service', …)`, name-casing
   idempotence, and the whole M61 JSDoc-resolution suite whose text still ships — all restored across
-  both style arms) — complete (PR pending).
+  both style arms.
+
+  **A second defect surfaced from a question about the unwired service, not from a gate.** The
+  artifact scan admits a file only when it exports every symbol the barrel would import, and it ran
+  ONE spec per family — but `service` now has two shapes, so a functional project was scanned with
+  the CLASS spec and every service the CLI had just written failed the `<Pascal>Service` check.
+  Every `setu generate` after the first `g service` therefore printed
+  `Skipped src/services/x.service.ts: it does not export XService` and
+  `Regenerate it to bring it up to date`: there is no `DecoratorPlugin` barrel in that project, the
+  file is exactly what was generated, and the advice LOOPS, since regenerating produces an identical
+  file. Fixed with `FUNCTIONAL_SERVICES_SEAM` plus a `scanSeamSpecs(installed)` accessor, so the
+  registry stays the one place deciding which spec describes a family; the exported symbol has one
+  owner read by both the renderer and the scanner, which is exactly the split that caused it. The
+  same change delivers the convenience the maintainer asked for — a managed `src/services/index.ts`
+  re-export — whose header states it is not a registration, since no plugin option takes a list of
+  functions. Reverting fails both new tests while the stale-class-service report keeps passing, so
+  the fix narrows the diagnostic rather than disabling it. An empty-list arm added with it dropped
+  the file to 50% branch and was DELETED rather than tested: this barrel is never scaffolded, only
+  rendered by the schematic, which always passes the name being generated) — complete (PR pending).
 - **Next milestone** — **M66** (database adapters that have been executed). M63–M68 come from the
   same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
   M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated
