@@ -33,7 +33,7 @@ export { Inject, Injectable, Optional } from './decorators/injection.ts';
 export type { InjectableOptions } from './decorators/injection.ts';
 
 // --- Security decorators ---
-export { CurrentUser, Permissions, Public, Roles } from './decorators/security.ts';
+export { Ctx, CurrentUser, Permissions, Public, Roles } from './decorators/security.ts';
 
 // --- Pipeline decorators ---
 export { UseFilters, UseGuards, UseInterceptors } from './decorators/pipeline.ts';

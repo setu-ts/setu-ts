@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 import type { IPrincipal } from '@setu-ts/common';
 
 import { createFakeRequestContext } from '../fixtures/fake-request-context.ts';
+import { CONTEXT_PARAMETER_METADATA } from '../../src/decorators/security.ts';
 import {
   clearParameterResolvers,
   getParameterResolver,
@@ -58,6 +59,26 @@ describe('parameter resolver', () => {
     const ctx = createFakeRequestContext({ user });
     expect(await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'current-user' }))
       .toBe(user);
+  });
+
+  it('resolves @Ctx to the active request context before registered resolvers', async () => {
+    const ctx = createFakeRequestContext();
+    registerParameterResolver('context', () => 'replacement');
+    expect(
+      await resolveParameter(ctx, {
+        index: 0,
+        type: 'custom',
+        customType: 'context',
+        metadata: CONTEXT_PARAMETER_METADATA,
+      }),
+    ).toBe(ctx);
+  });
+
+  it('resolves an application-defined context parameter through its registered resolver', async () => {
+    const ctx = createFakeRequestContext();
+    registerParameterResolver('context', () => 'custom-context');
+    expect(await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'context' }))
+      .toBe('custom-context');
   });
 
   it('resolves a custom parameter via a registered resolver', async () => {
