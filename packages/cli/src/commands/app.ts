@@ -15,7 +15,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
-import { stringFlag } from '../args.ts';
+import { stringFlag, stringFlags } from '../args.ts';
 import {
   APP_VERB,
   EXIT_ERROR,
@@ -25,8 +25,9 @@ import {
   TEMPLATES,
 } from '../constants.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
-import { projectFiles, resolveHost } from '../templates/project-files.ts';
+import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
+import { readEnvFilePath } from '../templates/env-file.ts';
 import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
@@ -44,6 +45,7 @@ import {
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from '../workspace/runtime-profile.ts';
+import type { PortProbe } from '../workspace/port-probe.ts';
 import { withWorkspaceMember } from '../workspace/member-host.ts';
 import { planRootNodeModulesDir, ROOT_MANIFEST } from '../workspace/root-manifest.ts';
 import { TRANSPORTS, type TransportSpec, transportSpec } from '../workspace/transport.ts';
@@ -73,6 +75,8 @@ export interface AppDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
+  /** Checks whether a candidate port is currently bindable. */
+  readonly portAvailable?: PortProbe;
 }
 
 /**
@@ -95,6 +99,7 @@ function printUsage(log: (message: string) => void): void {
   // gone on saying it after the refusal was lifted.
   log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
+  log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
   log('');
@@ -181,6 +186,8 @@ function planMember(
 } {
   const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
+  const envFile = readEnvFilePath(args.flags);
+  if (!envFile.ok) return { ok: false, message: envFile.message };
 
   const extra: GeneratedFile[] = [];
 
@@ -224,8 +231,17 @@ function planMember(
   // the root that installs it is not a member at all. A runtime swap can still
   // apply — the template data decides that, per target, exactly as it does for a
   // standalone project.
+  const resolved = resolveHost(choice.template ?? MINIMAL_HOST, profile.runtime);
+  const envHost = envFile.path === undefined ? resolved : withEnvFile(resolved, envFile.path);
+  if (envHost === undefined) {
+    return {
+      ok: false,
+      message:
+        '--env-file requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
+    };
+  }
   const host = withWorkspaceMember(
-    resolveHost(choice.template ?? MINIMAL_HOST, profile.runtime),
+    envHost,
     transport,
     name,
     profile,
@@ -360,6 +376,27 @@ export async function runAppCommand(
     return EXIT_ERROR;
   }
 
+  const dependencies = stringFlags(args.flags, 'depends-on');
+  if (args.flags['depends-on'] !== undefined && dependencies === undefined) {
+    deps.error('--depends-on needs a member name. Repeat the flag for each prerequisite.');
+    return EXIT_USAGE;
+  }
+  const dependsOn = dependencies ?? [];
+  if (new Set(dependsOn).size !== dependsOn.length) {
+    deps.error('Each --depends-on member may be named only once.');
+    return EXIT_USAGE;
+  }
+  if (dependsOn.includes(name)) {
+    deps.error(`Member "${name}" cannot depend on itself.`);
+    return EXIT_USAGE;
+  }
+  const existingNames = new Set(read.manifest.members.map((member) => member.name));
+  const missing = dependsOn.find((dependency) => !existingNames.has(dependency));
+  if (missing !== undefined) {
+    deps.error(`--depends-on "${missing}" is not an existing workspace member.`);
+    return EXIT_USAGE;
+  }
+
   // An explicit `--port` wins over allocation, but never over another member: two
   // services on one port means the second fails to bind, while every sibling's
   // map still names both — so one name silently resolves to the OTHER service.
@@ -378,7 +415,16 @@ export async function runAppCommand(
     return EXIT_ERROR;
   }
 
-  const port = requested.port ?? allocatePort(read.manifest);
+  let port = requested.port ?? allocatePort(read.manifest);
+  if (deps.portAvailable !== undefined && requested.port === undefined) {
+    while (port !== undefined && !(await deps.portAvailable(port))) {
+      const occupied: WorkspaceManifest = {
+        ...read.manifest,
+        members: [...read.manifest.members, { name: '__occupied__', port }],
+      };
+      port = allocatePort(occupied);
+    }
+  }
   if (port === undefined) {
     deps.error(
       `This workspace has no port left to allocate: every number from its base up to ` +
@@ -389,10 +435,18 @@ export async function runAppCommand(
     );
     return EXIT_ERROR;
   }
+  if (deps.portAvailable !== undefined && !(await deps.portAvailable(port))) {
+    deps.error(`Port ${port} is already in use outside this workspace.`);
+    deps.error('Choose another --port, or omit it and let the CLI find the next bindable port.');
+    return EXIT_ERROR;
+  }
 
   const next: WorkspaceManifest = {
     ...read.manifest,
-    members: [...read.manifest.members, { name, port }],
+    members: [
+      ...read.manifest.members,
+      { name, port, ...(dependsOn.length === 0 ? {} : { dependsOn }) },
+    ],
   };
 
   // Read unconditionally, because whether it is NEEDED depends on the template,

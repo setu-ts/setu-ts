@@ -41,6 +41,31 @@ describe('readWorkspaceManifest', () => {
     expect(result.manifest.members).toEqual([{ name: 'orders', port: 3000 }]);
   });
 
+  it('reads dependency metadata only when every named sibling exists', async () => {
+    const fs = workspace(renderWorkspaceManifest({
+      version: WORKSPACE_VERSION,
+      runtime: 'deno',
+      basePort: 3000,
+      transport: 'http',
+      members: [
+        { name: 'orders', port: 3000 },
+        { name: 'billing', port: 3001, dependsOn: ['orders'] },
+      ],
+    }));
+    const result = await readWorkspaceManifest(fs, '/ws');
+    expect(result.ok).toBe(true);
+
+    const invalid = workspace(JSON.stringify({
+      version: WORKSPACE_VERSION,
+      runtime: 'deno',
+      basePort: 3000,
+      transport: 'http',
+      members: [{ name: 'billing', port: 3001, dependsOn: ['orders'] }],
+    }));
+    const refused = await readWorkspaceManifest(invalid, '/ws');
+    expect(refused.ok).toBe(false);
+  });
+
   // "Not a workspace" and "this workspace is broken" need different advice, so
   // the two are reported distinctly rather than as one failure.
   it('reports an absent manifest as absent, not malformed', async () => {

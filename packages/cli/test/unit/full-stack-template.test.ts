@@ -191,7 +191,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
 
 describe('full-stack template | the runtime-dependent argument', () => {
   const argsFor = (runtime: TargetRuntime): string =>
-    FULL_STACK_TEMPLATE.appFactory?.args?.(runtime) ?? '';
+    FULL_STACK_TEMPLATE.appFactory?.args?.({ runtime }) ?? '';
 
   it('serves assets from the client build on Deno, Node and Bun', () => {
     for (const runtime of ['deno', 'node', 'bun'] as const) {
@@ -227,7 +227,7 @@ describe('full-stack template | the runtime-dependent argument', () => {
     // is undefined and the factory reads the platform environment as usual, so
     // one call shape serves all four targets.
     for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
-      expect(argsFor(runtime)).toContain('{ env }');
+      expect(argsFor(runtime)).toContain("{ env, config: { envFilePath: '.env' } }");
     }
   });
 

@@ -21,6 +21,7 @@ import { SsePlugin } from '@setu-ts/sse-plugin';
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 import { SessionPlugin } from '@setu-ts/session-plugin';
 import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
+import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 import { errorHandler } from '@setu-ts/exceptions';
 import type { RestStarterOptions } from './options.ts';
 
@@ -58,6 +59,7 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
     ...(options.session ? [SessionPlugin(options.session)] : []),
     ...(options.di ? [DiPlugin(options.di)] : []),
     ...(options.graphql ? [GraphqlPlugin(options.graphql)] : []),
+    ...(options.serviceDiscovery ? [ServiceDiscoveryPlugin(options.serviceDiscovery)] : []),
     ...(options.realtime?.backplane ? [RealtimeBackplanePlugin(options.realtime.backplane)] : []),
     ...(options.realtime?.websocket ? [WebSocketPlugin(options.realtime.websocket)] : []),
     ...(options.realtime?.sse ? [SsePlugin(options.realtime.sse)] : []),

@@ -269,6 +269,7 @@ export async function bootAndProbe(
       `${project}/deno.json`,
       `${project}/run-probe.ts`,
     ],
+    cwd: project,
     stdout: 'piped',
     stderr: 'piped',
   });

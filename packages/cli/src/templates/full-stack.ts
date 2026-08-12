@@ -12,8 +12,7 @@
  * @module
  */
 
-import type { TargetRuntime } from '../constants.ts';
-import type { TemplateDefinition } from './registry.ts';
+import type { AppFactoryRenderContext, TemplateDefinition } from './registry.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
@@ -46,10 +45,12 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
  * binding, which is what a Workers deployment should use anyway. Everywhere
  * else the framework serves the client build directly.
  *
- * @param runtime - The selected runtime target
+ * @param context - The selected runtime and any workspace-only factory inputs
  * @returns Source for the call's arguments, without the enclosing parentheses
  */
-function fullStackArgs(runtime: TargetRuntime): string {
+function fullStackArgs(context: AppFactoryRenderContext): string {
+  const { runtime, serviceEndpoints } = context;
+  const envFilePath = context.envFilePath ?? '.env';
   const assets = runtime === 'cloudflare-workers'
     // Assets are served by the platform binding, not the framework.
     ? ''
@@ -62,6 +63,10 @@ function fullStackArgs(runtime: TargetRuntime): string {
   // parameter is undefined and the factory reads the platform environment as
   // usual; on Workers it is the per-request bindings object, which is the only
   // place configuration exists there.
+  const discovery = serviceEndpoints === undefined
+    ? ''
+    : `\n    serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
+
   return `(config) => ({
     reactRouter: {
       // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
@@ -83,8 +88,8 @@ function fullStackArgs(runtime: TargetRuntime): string {
     session: {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
       csrf: {},
-    },
-  }), { env }`;
+    },${discovery}
+  }), { env, config: { envFilePath: '${envFilePath}' } }`;
 }
 
 /**
@@ -122,6 +127,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   files: [...FULL_STACK_APP_FILES, ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES)],
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
+    envFilePath: '.env',
     // The one template with a real frontend build, and the only one that should
     // therefore carry an npm manifest on a Deno or Workers target.
     npmBuildScript: 'react-router build',

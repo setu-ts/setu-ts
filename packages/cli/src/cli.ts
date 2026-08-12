@@ -18,9 +18,11 @@ import {
 import { runGenerateCommand } from './commands/generate.ts';
 import { runAdoptCommand } from './commands/adopt.ts';
 import { runNewCommand } from './commands/new.ts';
+import { runWorkspaceCommand } from './commands/workspace.ts';
 import { listSchematics } from './schematics/registry.ts';
 import type { ModuleLoader } from './schematics/custom.ts';
 import type { AppLoader } from './app-loader.ts';
+import type { PortProbe } from './workspace/port-probe.ts';
 import {
   dispatchPluginCommand,
   type PluginCommandDependencies,
@@ -53,6 +55,8 @@ export interface CliDependencies {
    * `import()`. Only the plugin-command paths use it.
    */
   readonly loadApp?: AppLoader;
+  /** Checks whether a workspace port can bind before the CLI assigns it. */
+  readonly portAvailable?: PortProbe;
 }
 
 /**
@@ -74,6 +78,7 @@ function printHelp(log: (message: string) => void): void {
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
   log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
   log(`  adopt                          Convert this project into a workspace`);
+  log(`  workspace ports --reallocate    Reassign workspace ports that are currently bindable`);
   log(`  commands                       List commands this app's plugins provide`);
   log('');
   log('Options:');
@@ -135,6 +140,7 @@ export async function runCli(
         cwd: deps.cwd,
         log: deps.log,
         error: deps.error,
+        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
       });
 
     case 'generate':
@@ -146,6 +152,7 @@ export async function runCli(
         log: deps.log,
         error: deps.error,
         ...(deps.load === undefined ? {} : { load: deps.load }),
+        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
       });
 
     case 'adopt':
@@ -154,6 +161,16 @@ export async function runCli(
         cwd: deps.cwd,
         log: deps.log,
         error: deps.error,
+        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+      });
+
+    case 'workspace':
+      return await runWorkspaceCommand(rest, {
+        fs: deps.fs,
+        cwd: deps.cwd,
+        log: deps.log,
+        error: deps.error,
+        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
       });
 
     case 'commands':

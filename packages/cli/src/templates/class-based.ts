@@ -151,7 +151,7 @@ export const CLASS_BASED_TEMPLATE: TemplateDefinition = {
   middleware: REST_MIDDLEWARE,
   localImports: CLASS_BASED_LOCAL_IMPORTS,
   files: CLASS_BASED_FILES,
-  manifest: CLASS_BASED_MODULE_MANIFEST,
+  manifest: { ...CLASS_BASED_MODULE_MANIFEST, envFilePath: '.env' },
   pluginSpreads: seamPluginSpreads(CLASS_BASED_SEAMS),
   setupCalls: seamSetupCalls(CLASS_BASED_SEAMS),
 };
