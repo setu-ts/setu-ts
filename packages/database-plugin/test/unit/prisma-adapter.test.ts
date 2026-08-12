@@ -83,9 +83,9 @@ describe('PrismaAdapter', () => {
       expect(adapter.isReady()).toBe(true);
     });
 
-    it('rejects missing prismaClient with import error', async () => {
+    it('rejects missing prismaClient with a generated-client requirement', async () => {
       const noClientAdapter = new PrismaAdapter({ url: 'postgresql://localhost/test' });
-      await expect(noClientAdapter.connect()).rejects.toThrow('Failed to load Prisma');
+      await expect(noClientAdapter.connect()).rejects.toThrow('requires options.prismaClient');
     });
 
     it('uses the fake client (not unused)', async () => {

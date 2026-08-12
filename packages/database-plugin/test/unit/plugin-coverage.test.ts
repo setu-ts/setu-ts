@@ -25,7 +25,10 @@ import type {
 } from '@setu-ts/common';
 import type { IConfig, IRuntimeServices, IServiceRegistry, TimerHandle } from '@setu-ts/common';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
-import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
 
 function createFakeConfig(): IConfig {
   return {
@@ -162,13 +165,13 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       expect(db).toBeDefined();
     });
 
-    it('throws descriptive error when no prisma client', async () => {
+    it('throws a generated-client requirement when no prisma client is injected', async () => {
       const ctx = createFakeContext();
       const plugin = DatabasePlugin({
         type: 'prisma',
         options: { url: 'postgresql://localhost/test' },
       });
-      await expect(plugin.register!(ctx)).rejects.toThrow('Failed to load Prisma');
+      await expect(plugin.register!(ctx)).rejects.toThrow('requires options.prismaClient');
     });
   });
 
@@ -180,7 +183,7 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
         type: 'drizzle',
         options: {
           drizzleInstance: fakeDb,
-          drizzleTables: { user: {} },
+          drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });
       await plugin.register!(ctx);
@@ -194,10 +197,10 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
         type: 'drizzle',
         options: {
           url: 'postgresql://localhost/test',
-          drizzleTables: { user: {} },
+          drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });
-      await expect(plugin.register!(ctx)).rejects.toThrow('Failed to load Drizzle');
+      await expect(plugin.register!(ctx)).rejects.toThrow('requires options.drizzleInstance');
     });
   });
 
@@ -276,7 +279,7 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
         type: 'drizzle',
         options: {
           drizzleInstance: fakeDb,
-          drizzleTables: { user: {} },
+          drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });
       await plugin.register!(ctx);
@@ -310,7 +313,7 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
         type: 'drizzle',
         options: {
           drizzleInstance: fakeDb,
-          drizzleTables: { user: {} },
+          drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });
       await plugin.register!(ctx);

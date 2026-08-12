@@ -3,8 +3,8 @@
 Database access with the repository pattern and Unit of Work. Registers an `IDatabaseService` under
 `CAPABILITIES.DATABASE` (`'database'`).
 
-Three adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter` (over
-`npm:@prisma/client`), and `DrizzleAdapter`.
+Three adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, and
+`DrizzleAdapter`. The application owns the optional ORM clients and injects them into the plugin.
 
 ## Installation
 
@@ -19,11 +19,14 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { DatabasePlugin, type IDatabaseService } from '@setu-ts/database-plugin';
 import { CAPABILITIES } from '@setu-ts/common';
+import { PrismaClient } from './generated/prisma/client.ts';
+
+const prismaClient = new PrismaClient();
 
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
-    DatabasePlugin({ type: 'prisma', options: { url: 'postgresql://localhost:5432/app' } }),
+    DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
   ],
 });
 await app.start({ port: 3000 });
@@ -55,6 +58,24 @@ await db.transaction(async (uow) => {
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
+
+For Prisma v7, generate and construct the client in the application, then pass it as
+`options.prismaClient`. A framework package cannot locate an application's generated-client output.
+
+For Drizzle, pass both the configured driver and a table registry. The table objects must expose an
+`id` column, and every field supplied to repository `where`, `orderBy`, or `select` must be a real
+column on that table. Its `create`, `update`, and `delete` operations require a dialect that
+supports `RETURNING`, so the adapter can return the actual persisted row instead of guessing:
+
+```typescript
+DatabasePlugin({
+  type: 'drizzle',
+  options: {
+    drizzleInstance: db,
+    drizzleTables: { User: users },
+  },
+});
+```
 
 ## Transactions
 

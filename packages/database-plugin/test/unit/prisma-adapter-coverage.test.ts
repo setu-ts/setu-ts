@@ -226,10 +226,10 @@ describe('PrismaAdapter — CRUD data-source coverage', () => {
     });
   });
 
-  describe('resolveClient lazy import path', () => {
-    it('throws descriptive error when no client and import fails', async () => {
+  describe('resolveClient generated-client requirement', () => {
+    it('throws descriptive error when no client is injected', async () => {
       const noClient = new PrismaAdapter({ url: 'postgresql://localhost/test' });
-      await expect(noClient.connect()).rejects.toThrow('Failed to load Prisma');
+      await expect(noClient.connect()).rejects.toThrow('requires options.prismaClient');
     });
   });
 });
