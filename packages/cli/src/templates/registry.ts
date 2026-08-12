@@ -115,7 +115,17 @@ export interface AppFactoryWiring {
    * Receives the selected runtime because factory composition can vary by
    * platform while the public template name stays the same.
    */
-  readonly args?: (runtime: TargetRuntime) => string;
+  readonly args?: (context: AppFactoryRenderContext) => string;
+}
+
+/** Inputs a template factory needs while its call is rendered. */
+export interface AppFactoryRenderContext {
+  /** The runtime target selected for the generated project. */
+  readonly runtime: TargetRuntime;
+  /** Identifier naming the workspace member's generated endpoint map, when any. */
+  readonly serviceEndpoints?: string;
+  /** Dotenv file passed through a config-driven starter factory. */
+  readonly envFilePath?: string;
 }
 
 /**
@@ -148,6 +158,8 @@ export interface PackageImport {
  * Cloudflare Workers, which otherwise have no npm manifest at all).
  */
 export interface TemplateManifest {
+  /** Dotenv path emitted with a tracked example and passed to ConfigPlugin. */
+  readonly envFilePath?: string;
   /** npm packages the running application needs, merged into `dependencies`. */
   readonly npmDependencies?: Readonly<Record<string, string>>;
   /** npm packages the build or tests need, merged into `devDependencies`. */
@@ -256,6 +268,8 @@ export interface TemplateHost {
    * choose.
    */
   readonly appFactory?: AppFactoryWiring;
+  /** Additional renderer context for an app factory, supplied by a workspace overlay. */
+  readonly appFactoryContext?: Omit<AppFactoryRenderContext, 'runtime'>;
   /**
    * Packages the template needs beyond those its wirings name.
    *

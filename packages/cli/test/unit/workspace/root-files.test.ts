@@ -22,12 +22,13 @@ function contentsOf(path: string): string {
 }
 
 describe('workspaceRootFiles', () => {
-  it('emits the four root files and nothing else', () => {
+  it('emits the root files and its development runner', () => {
     expect(workspaceRootFiles('acme', 3000, HTTP).map((file) => file.path).sort()).toEqual([
       '.gitignore',
       'README.md',
       WORKSPACE_MANIFEST,
       'deno.json',
+      'scripts/dev.ts',
     ].sort());
   });
 
@@ -45,9 +46,11 @@ describe('workspaceRootFiles', () => {
     expect(manifest.workspace).toEqual(['./apps/*', './libs/*']);
   });
 
-  it('gives the root a task that runs every member', () => {
+  it('gives the root a readiness-aware development task', () => {
     const manifest = JSON.parse(contentsOf('deno.json')) as { tasks?: Record<string, string> };
-    expect(manifest.tasks?.['dev']).toBe('deno task --recursive start');
+    expect(manifest.tasks?.['dev']).toBe(
+      'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+    );
   });
 
   // Framework pins belong to members: `setu generate` detects installed plugins

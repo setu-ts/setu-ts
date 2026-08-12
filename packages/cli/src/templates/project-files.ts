@@ -20,6 +20,7 @@ import {
 } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type {
+  AppFactoryRenderContext,
   AppFactoryWiring,
   LocalImport,
   MiddlewareWiring,
@@ -105,6 +106,7 @@ export interface ResolvedHost {
    */
   readonly extraImports: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
+  readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
   readonly manifest?: TemplateManifest | undefined;
 }
 
@@ -140,7 +142,27 @@ export function resolveHost(
     extraTasks: { ...host.extraTasks },
     extraImports: {},
     appFactory: host.appFactory,
+    appFactoryContext: {
+      ...(host.manifest?.envFilePath === undefined
+        ? {}
+        : { envFilePath: host.manifest.envFilePath }),
+      ...host.appFactoryContext,
+    },
     manifest: host.manifest,
+  };
+}
+
+/**
+ * Replaces the dotenv path for a host that registers ConfigPlugin.
+ *
+ * @returns The adjusted host, or undefined when its composition has no config arm.
+ */
+export function withEnvFile(host: ResolvedHost, envFilePath: string): ResolvedHost | undefined {
+  if (host.manifest?.envFilePath === undefined) return undefined;
+  return {
+    ...host,
+    manifest: { ...host.manifest, envFilePath },
+    appFactoryContext: { ...host.appFactoryContext, envFilePath },
   };
 }
 
@@ -196,6 +218,10 @@ function configModule(
     pluginSpreads,
     setupCalls,
   } = host;
+  const pluginArgs = (wiring: Wiring): string =>
+    wiring.pkg === 'config-plugin' && host.manifest?.envFilePath !== undefined
+      ? `{ envFilePath: '${host.manifest.envFilePath}' }`
+      : wiring.args ?? '';
   // `common` is always imported for the return type, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
   // second import of the same module.
@@ -226,7 +252,9 @@ function configModule(
 
   const middlewareLines = middleware.length === 0 ? '' : `\n${
     middleware
-      .map((m) => `  app.middleware.add(${m.symbol}()${renderAddOptions(m.addOptions)});`)
+      .map((m) =>
+        `  app.middleware.add(${m.symbol}(${m.args ?? ''})${renderAddOptions(m.addOptions)});`
+      )
       .join('\n')
   }\n`;
 
@@ -256,7 +284,12 @@ function configModule(
 export async function ${CONFIG_EXPORT}(
   env?: Readonly<Record<string, unknown>>,
 ): Promise<IApplication> {
-  const app = await ${appFactory.symbol}(${appFactory.args?.(runtime) ?? ''});
+  const app = await ${appFactory.symbol}(${
+      appFactory.args?.({
+        runtime,
+        ...host.appFactoryContext,
+      }) ?? ''
+    });
 ${middlewareLines}
   return app;
 }
@@ -269,7 +302,9 @@ ${middlewareLines}
   const onWorkers = runtime === 'cloudflare-workers';
   const pluginList = [
     ...plugins
-      .map((p) => `      ${p.symbol}(${(onWorkers ? p.workersArgs ?? p.args : p.args) ?? ''}),`),
+      .map((p) =>
+        `      ${p.symbol}(${onWorkers ? p.workersArgs ?? pluginArgs(p) : pluginArgs(p)}),`
+      ),
     ...pluginSpreads.map((spread) => `      ${spread},`),
   ].join('\n');
 
@@ -670,7 +705,14 @@ function sortSpecifiers(symbols: readonly string[]): readonly string[] {
  * @returns The space-separated flags
  */
 function denoPermissions(manifest?: TemplateManifest): string {
-  return ['--allow-net', '--allow-env', ...manifest?.denoPermissions ?? []].join(' ');
+  return [
+    ...new Set([
+      '--allow-net',
+      '--allow-env',
+      ...(manifest?.envFilePath === undefined ? [] : ['--allow-read']),
+      ...manifest?.denoPermissions ?? [],
+    ]),
+  ].join(' ');
 }
 
 /**
@@ -923,7 +965,9 @@ ${PROGRAM_NAME} generate --help
 \`\`\`
 `;
 
-  const gitignore = runtime === 'deno' ? 'coverage/\n' : 'node_modules/\ncoverage/\n.wrangler/\n';
+  const gitignore = `${runtime === 'deno' ? '' : 'node_modules\n'}coverage/\n.wrangler/\n${
+    manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`
+  }`;
 
   const files: GeneratedFile[] = [
     { path: 'README.md', contents: readme },
@@ -1008,6 +1052,17 @@ ${PROGRAM_NAME} generate --help
     path: CONFIG_MODULE,
     contents: configModule(runtime, host),
   });
+
+  if (manifest?.envFilePath !== undefined) {
+    files.push({
+      path: manifest.envFilePath,
+      contents: '# Local configuration. This file is ignored by Git.\n',
+    });
+    files.push({
+      path: `${manifest.envFilePath}.example`,
+      contents: '# Copy this file to the configured env-file path and fill in local values.\n',
+    });
+  }
 
   if (runtime === 'cloudflare-workers') {
     files.push({

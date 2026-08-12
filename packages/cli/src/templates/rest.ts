@@ -35,7 +35,7 @@ export const RUNTIME_WIRING: Wiring = {
  */
 export const REST_PLUGINS: readonly Wiring[] = [
   RUNTIME_WIRING,
-  { pkg: 'config-plugin', symbol: 'ConfigPlugin' },
+  { pkg: 'config-plugin', symbol: 'ConfigPlugin', args: "{ envFilePath: '.env' }" },
   { pkg: 'logger-plugin', symbol: 'LoggerPlugin' },
   { pkg: 'validation-plugin', symbol: 'ValidationPlugin' },
   { pkg: 'http-security-plugin', symbol: 'HttpSecurityPlugin' },
@@ -71,7 +71,12 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
   // of them escapes to the adapter backstop: a bare 500 with no error body and
   // no error log. Nothing first-party registers at or below 0, so this slot is
   // unambiguous rather than merely early.
-  { pkg: 'exceptions', symbol: 'errorHandler', addOptions: { priority: 0, name: 'error-handler' } },
+  {
+    pkg: 'exceptions',
+    symbol: 'errorHandler',
+    args: "{ format: 'rfc9457' }",
+    addOptions: { priority: 0, name: 'error-handler' },
+  },
 ];
 
 /**
@@ -94,5 +99,5 @@ export const REST_TEMPLATE: TemplateDefinition = {
   files: seamFiles(REST_SEAMS),
   pluginSpreads: seamPluginSpreads(REST_SEAMS),
   setupCalls: seamSetupCalls(REST_SEAMS),
-  manifest: FUNCTIONAL_MODULE_MANIFEST,
+  manifest: { ...FUNCTIONAL_MODULE_MANIFEST, envFilePath: '.env' },
 };

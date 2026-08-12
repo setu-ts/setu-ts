@@ -55,6 +55,16 @@ export function withWorkspaceMember(
  * @returns The host with the discovery wiring and import, or the input unchanged
  */
 function withDiscoveryMap(host: ResolvedHost): ResolvedHost {
+  if (host.appFactory !== undefined) {
+    return {
+      ...host,
+      appFactoryContext: { ...host.appFactoryContext, serviceEndpoints: SERVICE_ENDPOINTS_EXPORT },
+      localImports: [
+        ...host.localImports,
+        { symbols: [SERVICE_ENDPOINTS_EXPORT], from: DISCOVERY_SPECIFIER },
+      ],
+    };
+  }
   if (!host.plugins.some((wiring) => wiring.pkg === DISCOVERY_PACKAGE)) return host;
 
   return {

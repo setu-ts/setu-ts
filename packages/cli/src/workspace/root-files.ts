@@ -1,7 +1,7 @@
 /**
  * The workspace root — the files `setu new <name> --workspace` creates.
  *
- * Four files and no member. The root registers no plugins and starts no server;
+ * Root metadata, a dev runner, and no member. The root registers no plugins and starts no server;
  * it exists so Deno sees one workspace and the CLI has somewhere to record its
  * members.
  *
@@ -19,6 +19,7 @@ import {
 import { rootManifestSettings } from '../templates/root-settings.ts';
 import { LIBS_GLOB } from './library.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
+import { workspaceDevRunner } from './dev-runner.ts';
 import type { TransportSpec } from './transport.ts';
 
 /**
@@ -124,11 +125,25 @@ ${profile.install}
 ${profile.runScript('dev')}
 \`\`\`
 
+When a service needs another one during startup, declare it as it is added:
+
+\`\`\`bash
+${PROGRAM_NAME} generate app billing --template microservice --depends-on orders
+\`\`\`
+
+The generated dev runner starts prerequisites first and waits for each prerequisite's \`/ready\`
+endpoint before it starts a dependent. Dependencies are explicit because a discovery map describes
+where a service is, not whether this service must wait for it at startup.
+
 ## Ports
 
 \`${WORKSPACE_MANIFEST}\` records the port each service binds. It is the source the generated
 \`src/discovery/services.ts\` modules are rendered from; change a port there and the next
 \`${PROGRAM_NAME} generate app\` rewrites them all.
+
+If a local process occupies a port, the CLI skips it during allocation. To repair existing
+assignments, run \`${PROGRAM_NAME} workspace ports --reallocate\`; it rewrites the manifest, maps,
+and deployment artifacts together.
 
 ## Transport
 
@@ -160,6 +175,7 @@ members can only meet on a bus they share. Every service added later inherits it
 
   return [
     rootManifest,
+    workspaceDevRunner(profile),
     // The `@jsr` scope has to be mapped for members to install framework packages
     // through npm compatibility at all — measured in a two-member workspace, where
     // without it `npm install` cannot resolve `@setu-ts/kernel`. Deno resolves

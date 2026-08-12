@@ -4885,6 +4885,7 @@ setu new my-app --runtime node                 # deno | node | bun | cloudflare-
 setu new my-app --template rest                # rest | microservice | class-based | full-stack
 setu new my-app --template microservice --runtime bun
 setu new my-app --template class-based          # decorators and DI together
+setu new my-app --template rest --env-file config/.env.local
 
 # Scaffold a monorepo (creates ./acme, no member yet)
 setu new acme --workspace
@@ -4892,6 +4893,8 @@ setu new acme --workspace --port 4100          # base port for its members
 setu new acme --workspace --transport redis    # http | grpc | memory | redis | rabbitmq | nats | kafka
 setu generate app orders --template microservice
 setu generate app billing --template microservice
+setu generate app shipping --template microservice --depends-on orders --depends-on billing
+setu workspace ports --reallocate
 
 # Commands this application's plugins provide
 setu commands
@@ -4934,6 +4937,8 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate`                          | On `new`, selects the entry shape and manifest. On `generate`, passed to the schematic as `SchematicOptions.runtime` (read by custom schematics). Defaults to `deno`; an unknown value is a usage error (`2`) on both.                                                                                                                                                                                                                                                           |
 | `--workspace`                                   | `new`                                      | Creates a monorepo root instead of a project: a root manifest whose member globs are `apps/*` and `libs/*` (a `deno.json` `workspace` array, or a `package.json` `workspaces` one under `--runtime node\|bun`), plus a `setu.workspace.json`, with no member. Both globs are written once, so neither a service nor a library ever rewrites the root. Refuses `--template`, and `--runtime cloudflare-workers` — each Worker is its own deploy unit — rather than ignoring them. |
 | `--port <n>`                                    | `new --workspace`, `generate app`, `adopt` | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                 |
+| `--env-file <path>`                             | `new`, `generate app`                      | ConfigPlugin-backed templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath })`. It is refused by minimal templates and workspace roots. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                               |
+| `--depends-on <member>`                         | `generate app`                             | Repeat for each existing prerequisite. The member records the names in `setu.workspace.json`; the root dev runner starts prerequisites first and waits for `/ready`. Duplicate or missing names are usage errors.                                                                                                                                                                                                                                                                |
 | `--transport <name>`                            | `new --workspace`                          | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                  |
 | `--transport-url <url>`                         | `new --workspace`                          | Replaces the baked local fallback for the endpoint-shaped broker transports. A usage error for `http`, `grpc` and `memory`, which have no broker to address, and for `pubsub` and `service-bus`, whose connection value is a project id or a secret read from the environment — that refusal names the variable.                                                                                                                                                                 |
 | `--scope <scope>`                               | `generate library`                         | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                                                                                                                                             |
@@ -5024,7 +5029,7 @@ setu new acme --workspace                                  # the root: deno.json
 cd acme
 setu generate app orders --template microservice           # apps/orders, port 3000
 setu generate app billing --template microservice          # apps/billing, port 3001
-deno task dev                                              # runs every member's start task
+deno task dev                                              # dependency-aware startup, gated by /ready
 ```
 
 The root manifest declares members by **glob** — `"workspace": ["./apps/*"]` in `deno.json`, or
@@ -5052,14 +5057,23 @@ export const SERVICE_ENDPOINTS = {
 
 The member's `main.ts` binds `SERVICE_PORT` and — when its template installs
 `@setu-ts/service-discovery-plugin` — its `setu.config.ts` passes `SERVICE_ENDPOINTS` to
-`ServiceDiscoveryPlugin({ provider: 'static', services: SERVICE_ENDPOINTS })`. So the port a member
-binds and the port its siblings dial are the same datum, and `discovery.resolveUrl('billing')` works
-from any sibling with no configuration. A member without that plugin is still listed in every other
-member's map; being reachable and consuming the map are separate properties.
+`ServiceDiscoveryPlugin({ provider: 'static', services: SERVICE_ENDPOINTS })`; the full-stack
+factory passes the same typed option through its starter composition. So the port a member binds and
+the port its siblings dial are the same datum, and `discovery.resolveUrl('billing')` works from any
+sibling with no configuration. A member without that plugin is still listed in every other member's
+map; being reachable and consuming the map are separate properties.
 
 That module is `managed`: the CLI rewrites it and a hand edit is lost. The data it is rendered from
-is `setu.workspace.json` at the root, which records each member's name and port — edit a port there
-and the next `setu generate app` rewrites every module from it.
+is `setu.workspace.json` at the root, which records each member's name, port, and optional
+`dependsOn` list — edit a port there and the next `setu generate app` rewrites every module from it.
+`setu workspace ports --reallocate` instead assigns currently bindable ports and rewrites all
+managed maps and deployment artifacts in one operation.
+
+`deno task dev` (or the Node/Bun equivalent) reads that dependency metadata at runtime. It starts a
+prerequisite first, waits until `http://127.0.0.1:<port>/ready` succeeds, then starts each
+dependent; it names a cycle or readiness timeout and terminates children on failure or shutdown. A
+discovery map does not imply a startup dependency, so only services declared with `--depends-on` are
+gated.
 
 > **Each sibling's host is overridable** — `<MEMBER>_HOST` — and the fallback is the local address.
 > Both halves matter: `deno task dev` on one machine needs loopback, and inside a container loopback
@@ -5433,8 +5447,10 @@ import { ConfigPlugin } from '@setu-ts/config-plugin';
 import { errorHandler } from '@setu-ts/exceptions';
 
 export function createApp(): IApplication {
-  const app = createApplication({ plugins: [RuntimePlugin(), ConfigPlugin()] });
-  app.middleware.add(errorHandler());
+  const app = createApplication({
+    plugins: [RuntimePlugin(), ConfigPlugin({ envFilePath: '.env' })],
+  });
+  app.middleware.add(errorHandler({ format: 'rfc9457' }));
   app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
   return app;
 }
@@ -5443,7 +5459,7 @@ export function createApp(): IApplication {
 | Template       | Plugin set                                                                                                 |
 | -------------- | ---------------------------------------------------------------------------------------------------------- |
 | _(none)_       | `RuntimePlugin` only.                                                                                      |
-| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi + `errorHandler()`.            |
+| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi + RFC 9457 `errorHandler()`.   |
 | `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry, ServiceDiscovery (`'static'` arm), Cqrs, Events.      |
 | `class-based`  | `rest` plus `DecoratorPlugin` and `DiPlugin`, an `@Injectable` service, and a `@Controller`.               |
 | `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton. |
