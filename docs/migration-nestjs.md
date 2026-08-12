@@ -459,6 +459,11 @@ import { DatabasePlugin } from '@setu-ts/database-plugin';
 // field. For Prisma v7, generate and construct the client in application code,
 // then inject it through `options.prismaClient`; its generated output path is
 // application-owned and cannot be located by this package.
+//
+// In a real application this import points at your own `prisma generate`
+// output, e.g. `import { PrismaClient } from './generated/prisma/client.ts';`
+declare const myPrismaClient: unknown;
+
 app.register(DatabasePlugin({
   type: 'prisma',
   options: {

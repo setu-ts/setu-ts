@@ -32,6 +32,7 @@ describe('DrizzleRepository', () => {
         and: (...exprs) => ({ _operator: 'and', arguments: exprs }),
         asc: (col) => ({ _operator: 'asc', arguments: [col] }),
         desc: (col) => ({ _operator: 'desc', arguments: [col] }),
+        count: () => ({ op: 'count' }),
       },
     );
     const repo = new DrizzleRepository(ds);
@@ -80,6 +81,7 @@ describe('createDrizzleDataSource — with fake instance', () => {
         and: (...exprs) => ({ _operator: 'and', arguments: exprs }),
         asc: (col) => ({ _operator: 'asc', arguments: [col] }),
         desc: (col) => ({ _operator: 'desc', arguments: [col] }),
+        count: () => ({ op: 'count' }),
       },
     );
   });
