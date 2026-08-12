@@ -173,3 +173,34 @@ export const FULL_STACK_TSCONFIG_OPTIONS: Readonly<Record<string, unknown>> = {
 export const FULL_STACK_DENO_IMPORTS: Readonly<Record<string, string>> = {
   '~/': './app/',
 };
+
+/**
+ * `compilerOptions` the emitted `app/` tree needs under Deno.
+ *
+ * The Deno counterpart of {@linkcode FULL_STACK_TSCONFIG_OPTIONS}'s `jsx` entry.
+ * Both are required and neither substitutes for the other: Vite reads
+ * `tsconfig.json` and `deno check` reads `deno.json`, so a project carrying only
+ * the first builds cleanly while every `.tsx` route fails to type-check with
+ * `TS2686 'React' refers to a UMD global, but the current file is a module`.
+ *
+ * `lib` names the DOM because these modules render in a browser as well as on
+ * the server; without it `deno check` rejects every DOM reference in a component.
+ */
+export const FULL_STACK_DENO_COMPILER_OPTIONS: Readonly<Record<string, unknown>> = {
+  jsx: 'react-jsx',
+  jsxImportSource: 'react',
+  lib: ['deno.window', 'dom', 'dom.iterable', 'esnext'],
+};
+
+/**
+ * The task that type-checks the emitted `app/` tree.
+ *
+ * `deno check main.ts` reaches only what the entry statically imports, and the
+ * route modules are loaded through the compiled server build — so without this
+ * task nothing type-checks them at all. A glob rather than a file list, because
+ * `app/routes.ts` resolves routes through `flatRoutes()` at build time and
+ * statically imports none of them.
+ */
+export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
+  'check:app': 'deno check app/**/*.ts app/**/*.tsx',
+};

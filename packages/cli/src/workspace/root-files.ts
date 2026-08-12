@@ -16,6 +16,7 @@ import {
   WORKSPACE_MANIFEST,
   WORKSPACE_VERSION,
 } from './manifest.ts';
+import { rootManifestSettings } from '../templates/root-settings.ts';
 import { LIBS_GLOB } from './library.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import type { TransportSpec } from './transport.ts';
@@ -69,7 +70,17 @@ export function workspaceRootFiles(
     ? {
       path: 'deno.json',
       contents: `${
-        JSON.stringify({ workspace: globs, tasks: { dev: profile.runAll } }, null, 2)
+        JSON.stringify(
+          {
+            workspace: globs,
+            tasks: { dev: profile.runAll },
+            // Root-only, and inherited by every member: a member declaring them
+            // is redundant at best and refused at worst.
+            ...rootManifestSettings(),
+          },
+          null,
+          2,
+        )
       }\n`,
     }
     : {
@@ -94,8 +105,7 @@ export function workspaceRootFiles(
 
   const readme = `# ${name}
 
-A [Setu-TS](https://github.com/setu-ts/setu-ts) workspace: one repository, many
-deployable services.
+A [Setu-TS](https://github.com/setu-ts/setu-ts) workspace: one repository, many deployable services.
 
 ## Add a service
 
@@ -103,9 +113,9 @@ deployable services.
 ${PROGRAM_NAME} generate app orders --template microservice
 \`\`\`
 
-Each service lives in \`${MEMBERS_DIR}/<name>/\`, binds a port the CLI allocates,
-and is registered in every other service's static discovery map — so
-\`discovery.resolveUrl('orders')\` works from any sibling with no configuration.
+Each service lives in \`${MEMBERS_DIR}/<name>/\`, binds a port the CLI allocates, and is registered in every
+other service's static discovery map — so \`discovery.resolveUrl('orders')\` works from any sibling
+with no configuration.
 
 ## Run every service
 
@@ -116,9 +126,9 @@ ${profile.runScript('dev')}
 
 ## Ports
 
-\`${WORKSPACE_MANIFEST}\` records the port each service binds. It is the source
-the generated \`src/discovery/services.ts\` modules are rendered from; change a
-port there and the next \`${PROGRAM_NAME} generate app\` rewrites them all.
+\`${WORKSPACE_MANIFEST}\` records the port each service binds. It is the source the generated
+\`src/discovery/services.ts\` modules are rendered from; change a port there and the next
+\`${PROGRAM_NAME} generate app\` rewrites them all.
 
 ## Transport
 
@@ -144,9 +154,8 @@ docker compose -f docker/compose.yaml up --build
 That builds every member and starts the ${transport.name} service they share.`
   }
 
-The transport is a property of the whole workspace, recorded in
-\`${WORKSPACE_MANIFEST}\`, because members can only meet on a bus they share.
-Every service added later inherits it.
+The transport is a property of the whole workspace, recorded in \`${WORKSPACE_MANIFEST}\`, because
+members can only meet on a bus they share. Every service added later inherits it.
 `;
 
   return [
