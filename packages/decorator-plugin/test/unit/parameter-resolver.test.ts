@@ -60,6 +60,13 @@ describe('parameter resolver', () => {
       .toBe(user);
   });
 
+  it('resolves @Ctx to the active request context before registered resolvers', async () => {
+    const ctx = createFakeRequestContext();
+    registerParameterResolver('context', () => 'replacement');
+    expect(await resolveParameter(ctx, { index: 0, type: 'custom', customType: 'context' }))
+      .toBe(ctx);
+  });
+
   it('resolves a custom parameter via a registered resolver', async () => {
     const ctx = createFakeRequestContext();
     registerParameterResolver('current-tenant', () => 'tenant-1');

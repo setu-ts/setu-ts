@@ -3,7 +3,7 @@ import { expect } from '@std/expect';
 
 import { Controller } from '../../src/decorators/controller.ts';
 import { Get } from '../../src/decorators/http.ts';
-import { CurrentUser, Permissions, Public, Roles } from '../../src/decorators/security.ts';
+import { Ctx, CurrentUser, Permissions, Public, Roles } from '../../src/decorators/security.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 
 describe('Security decorators', () => {
@@ -84,6 +84,19 @@ describe('Security decorators', () => {
     }
     const p = metadataStore.getRoutesFor(C)[0].params[0];
     expect(p).toMatchObject({ type: 'custom', customType: 'current-user' });
+  });
+
+  it('@Ctx stores a custom context parameter at its declared index', () => {
+    @Controller('/x')
+    class C {
+      @Get('/create')
+      create(_ignored: unknown, @Ctx() ctx: unknown) {
+        return ctx;
+      }
+    }
+    expect(metadataStore.getRoutesFor(C)[0].params).toEqual([
+      { index: 1, type: 'custom', customType: 'context' },
+    ]);
   });
 
   it('@Permissions at class level stores default permissions', () => {

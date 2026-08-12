@@ -7326,7 +7326,7 @@ carry full JSDoc.
 | `Controller`                                         | function | Class decorator — base path prefix                                                                                  |
 | `Version`                                            | function | Class decorator — API version prefix                                                                                |
 | `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                              |
-| `Body`/`Query`/`Param`/`Header`/`Cookie`             | function | Request parameter decorators                                                                                        |
+| `Body`/`Query`/`Param`/`Header`/`Cookie`/`Ctx`       | function | Request parameter decorators; `Ctx` injects the active `IRequestContext`                                            |
 | `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                 |
 | `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens |
 | `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider          |
@@ -7383,11 +7383,14 @@ Contract notes:
   empty result with a warning) and loads modules with `await import()` (no `require`/`eval`).
   Snapshot-diff against the store attributes newly-decorated classes to each file. Discovery
   failures never crash the application.
+- **`@Ctx` response control**: `Ctx` resolves the live `IRequestContext`, so a decorated handler can
+  configure `ctx.response` (status, headers, or a stream) and return its `HandlerResult`; it is a
+  built-in custom parameter type and needs no resolver registration.
 - **Custom decorators**: `createDecorator` records class/method metadata replayed against
   `DecoratorHandler`s registered via `ctx.decorators.register()` (collected under
   `CAPABILITIES.DECORATOR_HANDLER`). `createParameterDecorator` records parameter metadata resolved
-  by `resolveParameters` via `registerParameterResolver`; the `current-user` built-in resolves
-  `ctx.request.user`.
+  by `resolveParameters` via `registerParameterResolver`; the `context` and `current-user` built-ins
+  resolve directly to `ctx` and `ctx.request.user`, respectively.
 - **`@Inject` has two positions, and a token is always required.** The preferred form is on each
   constructor parameter, binding one token to that argument by position:
 

@@ -31,8 +31,8 @@ const customResolvers = new Map<string, CustomParameterResolver>();
 
 /**
  * Registers a resolver for a custom parameter type created with
- * {@linkcode createParameterDecorator}. The `current-user` built-in resolves
- * `ctx.request.user` and need not be registered.
+ * {@linkcode createParameterDecorator}. The `context` and `current-user`
+ * built-ins resolve directly and need not be registered.
  *
  * @param name - The custom parameter type name
  * @param resolver - The resolver function
@@ -110,10 +110,14 @@ export function resolveParameter(
 }
 
 /**
- * Resolves a custom parameter. `current-user` is built in; other types look
- * up a resolver registered via {@linkcode registerParameterResolver}.
+ * Resolves a custom parameter. `context` and `current-user` are built in;
+ * other types look up a resolver registered via
+ * {@linkcode registerParameterResolver}.
  */
 async function resolveCustom(ctx: IRequestContext, param: ParameterMetadata): Promise<unknown> {
+  if (param.customType === 'context') {
+    return ctx;
+  }
   if (param.customType === 'current-user') {
     return ctx.request.user;
   }
