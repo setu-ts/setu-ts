@@ -651,12 +651,25 @@ function renderImport(symbols: readonly string[], from: string): string {
  * to leave alone. Emitting them unsorted means the formatter rewrites a file the
  * CLI just wrote.
  *
+ * The comparison is by CODE POINT on the lowercased name, never
+ * `String.localeCompare`. Measured against `deno fmt`: it orders
+ * `$dollar, _under, alpha` — `$` (36) before `_` (95) before the letters — while
+ * `localeCompare` deprioritises punctuation and answers `_under, $dollar, alpha`.
+ * No template emits a `$`- or `_`-prefixed import today, so the disagreement is
+ * latent; it is pinned because a helper whose only job is matching the formatter
+ * must not diverge from it silently.
+ *
  * @param symbols - The bindings, as written
  * @returns The same bindings in the formatter's order
  */
 function sortSpecifiers(symbols: readonly string[]): readonly string[] {
   const bareName = (s: string) => s.replace(/^type\s+/, '').toLowerCase();
-  return [...symbols].sort((a, b) => bareName(a).localeCompare(bareName(b)));
+  return [...symbols].sort((a, b) => {
+    const left = bareName(a);
+    const right = bareName(b);
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+  });
 }
 
 /**
