@@ -34,7 +34,7 @@ import type {
   ServiceMetadata,
 } from '../metadata/metadata-store.ts';
 import { discoverControllers } from '../discovery/controller-discovery.ts';
-import { resolveParameters } from '../resolvers/parameter-resolver.ts';
+import { findUnresolvableParameters, resolveParameters } from '../resolvers/parameter-resolver.ts';
 import { className, isHandlerResult, joinPaths } from '../internal.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -410,6 +410,75 @@ function registerOnRouter(
 }
 
 /**
+ * Warns about a class passed explicitly in `controllers` that carries no
+ * `@Controller` metadata, because `registerController` skips it silently and
+ * every one of its routes then answers 404 with nothing logged.
+ *
+ * The likeliest cause is two copies of this package in one process: decorators
+ * write to the `metadataStore` of the copy the application imported, while this
+ * plugin reads its own copy's store and finds it empty. The other cause is a
+ * missing `@Controller`. Only the explicit list is checked — auto-discovery
+ * filters to decorated classes already, so a discovered class is never a
+ * developer mistake.
+ */
+function warnControllersWithoutMetadata(
+  ctx: IPluginContext,
+  controllers: readonly Constructor[],
+): void {
+  if (ctx.logger === undefined) {
+    return;
+  }
+  for (const target of controllers) {
+    if (!metadataStore.hasController(target)) {
+      ctx.logger.warn(
+        'Controller has no @Controller metadata and registers no routes',
+        {
+          controller: className(target),
+          hint:
+            'Add @Controller(), or check that the application and DecoratorPlugin resolve to the ' +
+            'same @setu-ts/decorator-plugin copy — decorators write to the metadata store of the ' +
+            'copy that defines them.',
+        },
+      );
+    }
+  }
+}
+
+/**
+ * Warns about custom parameters that no resolver can satisfy, which would
+ * otherwise reach the handler as `undefined` and fail on first use with no
+ * indication of the cause.
+ *
+ * Warns rather than throws: `resolveParameter` has always returned `undefined`
+ * for an unregistered custom type, and an application may legitimately register
+ * its resolvers after the plugin registers, in which case this reading is
+ * stale. A warning names the problem without breaking that arrangement.
+ */
+function warnUnresolvableParameters(
+  ctx: IPluginContext,
+  target: Constructor,
+  route: RouteMetadata,
+): void {
+  if (ctx.logger === undefined) {
+    return;
+  }
+  for (const param of findUnresolvableParameters(route.params)) {
+    ctx.logger.warn(
+      'Decorated parameter cannot be resolved and will be undefined',
+      {
+        controller: className(target),
+        handler: route.handler,
+        parameterIndex: param.index,
+        customType: param.customType ?? '(none)',
+        hint:
+          'Register a resolver with registerParameterResolver(), or — for @Ctx() — check that ' +
+          'the application and DecoratorPlugin resolve to the same @setu-ts/decorator-plugin version.',
+      },
+    );
+  }
+}
+
+/**
  * Registers all routes for a controller: instantiates it, then for each
  * route metadata entry builds a {@linkcode RouteDefinition} (merging class-
  * and method-level middleware/schema) and registers it on the router.
@@ -423,6 +492,7 @@ function registerController(ctx: IPluginContext, target: Constructor): void {
   const instance = instantiate(target, ctx);
   for (const route of metadataStore.getRoutesFor(target)) {
     const fullPath = joinPaths(ctrlMeta.version ?? '', ctrlMeta.path, route.path);
+    warnUnresolvableParameters(ctx, target, route);
     const handler = createHandler(instance, route.handler, route.params);
     const middleware = composeMiddleware(ctrlMeta, route);
     const schema = buildRouteSchema(ctrlMeta, route);
@@ -514,6 +584,8 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
           }
         }
       }
+
+      warnControllersWithoutMetadata(ctx, opts.controllers ?? []);
 
       const controllers = dedup([...(opts.controllers ?? []), ...discoveredControllers]);
       const services = dedup([...(opts.services ?? []), ...discoveredServices]);
