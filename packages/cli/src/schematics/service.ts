@@ -17,9 +17,7 @@
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { APP_SERVICES_EXPORT, SERVICES_SEAM, serviceSeamToken } from '../seams/services.ts';
 import { seamNames } from '../seams/seam-spec.ts';
-
-/** The `@setu-ts` package whose presence turns the service into an `@Injectable`. */
-const DECORATOR_PLUGIN = 'decorator-plugin';
+import { generatorMode } from '../utils/generator-mode.ts';
 
 /**
  * Renders the plain, framework-free class.
@@ -27,23 +25,18 @@ const DECORATOR_PLUGIN = 'decorator-plugin';
  * @param names - Naming forms derived from the user's input
  * @returns The file contents
  */
-function renderPlainService(names: DerivedNames): string {
+function renderFunctionalService(names: DerivedNames): string {
   return `/**
  * ${names.pascal} domain service.
  *
- * No framework registration: this class has no decorator and no capability token, so
- * it is used by whatever imports it. Install \`@setu-ts/decorator-plugin\` and
- * regenerate to get an \`@Injectable\` registered under \`${serviceSeamToken(names.kebab)}\`.
+ * This is a plain function: import it where it is needed, or close over it from a
+ * route-registration function. The functional application style uses the request
+ * context as its explicit capability injector rather than constructor injection.
+ *
+ * @returns A placeholder value
  */
-export class ${names.pascal}Service {
-  /**
-   * Replace with the service's real behavior.
-   *
-   * @returns A placeholder value
-   */
-  describe(): string {
-    return '${names.kebab}';
-  }
+export function describe${names.pascal}(): string {
+  return '${names.kebab}';
 }
 `;
 }
@@ -75,7 +68,7 @@ function renderInjectableService(names: DerivedNames): string {
  * - without \`DiPlugin\`: the class is instantiated once and stored in the kernel's
  *   registry — \`services.get('${serviceSeamToken(names.kebab)}')\`. \`scope\` is ignored,
  *   because there is one instance.
- * - with \`DiPlugin\` (\`setu new --di\`, or \`--template nest\`): the class is registered
+ * - with \`DiPlugin\` (the \`--template class-based\` composition): the class is registered
  *   as a PROVIDER on the container and is NOT in the kernel registry, so
  *   \`services.get(...)\` throws. Resolve through the container —
  *   \`services.get<IContainer>(CAPABILITIES.DI_CONTAINER).resolve('${
@@ -108,13 +101,13 @@ export function generateService(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const injectable = options.plugins.has(DECORATOR_PLUGIN);
+  const classBased = generatorMode(options.plugins) === 'class-based';
   const service: GeneratedFile = {
     path: `src/services/${names.kebab}.service.ts`,
-    contents: injectable ? renderInjectableService(names) : renderPlainService(names),
+    contents: classBased ? renderInjectableService(names) : renderFunctionalService(names),
   };
 
-  if (!injectable) return [service];
+  if (!classBased) return [service];
 
   return [
     service,

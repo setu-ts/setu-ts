@@ -20,7 +20,6 @@ describe('resolveTemplateChoice', () => {
     expect(choice.ok).toBe(true);
     if (!choice.ok) return;
     expect(choice.template).toBeUndefined();
-    expect(choice.features).toEqual({ di: false });
   });
 
   it('resolves a known template', () => {
@@ -30,11 +29,11 @@ describe('resolveTemplateChoice', () => {
     expect(choice.template?.name).toBe('rest');
   });
 
-  it('reads --di as a boolean flag', () => {
+  it('refuses the retired independent DI flag', () => {
     const choice = choose(['--di']);
-    expect(choice.ok).toBe(true);
-    if (!choice.ok) return;
-    expect(choice.features).toEqual({ di: true });
+    expect(choice.ok).toBe(false);
+    if (choice.ok) return;
+    expect(choice.message).toContain('--template class-based');
   });
 
   it('refuses an unknown template, naming every real one', () => {

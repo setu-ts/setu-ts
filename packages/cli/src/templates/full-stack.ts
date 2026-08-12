@@ -13,7 +13,7 @@
  */
 
 import type { TargetRuntime } from '../constants.ts';
-import type { TemplateDefinition, TemplateFeatures } from './registry.ts';
+import type { TemplateDefinition } from './registry.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
 import {
   buildFullStackBuildFiles,
@@ -45,24 +45,14 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
  * binding, which is what a Workers deployment should use anyway. Everywhere
  * else the framework serves the client build directly.
  *
- * `--di` reaches this template through the starter's own `di` arm rather than
- * through a plugin wiring: `TemplateHost.plugins` must stay empty when an
- * `appFactory` is set, so there is no list to append to. The arm is
- * truthiness-gated (`rest-starter/src/app.ts:59`), which is why the emitted
- * value is `{}` rather than an omitted key — `di: undefined` would read as
- * opted-in while registering nothing.
- *
  * @param runtime - The selected runtime target
- * @param features - The per-project choices, read for `di`
  * @returns Source for the call's arguments, without the enclosing parentheses
  */
-function fullStackArgs(runtime: TargetRuntime, features: TemplateFeatures): string {
+function fullStackArgs(runtime: TargetRuntime): string {
   const assets = runtime === 'cloudflare-workers'
     // Assets are served by the platform binding, not the framework.
     ? ''
     : `\n      assetsDir: './build/client/assets',`;
-
-  const di = features.di ? `\n    di: {},` : '';
 
   // Indented to sit inside `const app = await …(` at two spaces, so the
   // generated file reads as hand-written source rather than as output.
@@ -92,7 +82,7 @@ function fullStackArgs(runtime: TargetRuntime, features: TemplateFeatures): stri
     session: {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
       csrf: {},
-    },${di}
+    },
   }), { env }`;
 }
 

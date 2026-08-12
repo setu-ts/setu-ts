@@ -48,7 +48,7 @@ describe('runGenerateCommand', () => {
     expect(await h.run(['service', 'user-profile'])).toBe(0);
     expect(h.fs.writes).toEqual(['/app/src/services/user-profile.service.ts']);
     expect(h.fs.read('/app/src/services/user-profile.service.ts'))
-      .toContain('export class UserProfileService');
+      .toContain('export function describeUserProfile');
     expect(h.out.text()).toContain('created /app/src/services/user-profile.service.ts');
   });
 
@@ -159,7 +159,7 @@ describe('runGenerateCommand', () => {
   // plugin" told a developer the opposite — that decorators are the way to get
   // an HTTP handler — when `g route` is ungated, wired, and right there.
   describe('the decorator-free alternative in a gate refusal', () => {
-    for (const schematic of ['controller', 'module'] as const) {
+    for (const schematic of ['controller'] as const) {
       it(`names \`generate route\` when ${schematic} is refused`, async () => {
         const h = harness();
         expect(await h.run([schematic, 'widget'])).toBe(1);
@@ -174,6 +174,12 @@ describe('runGenerateCommand', () => {
         expect(h.fs.writes).toEqual([]);
       });
     }
+
+    it('allows a functional module when decorators are absent', async () => {
+      const h = harness();
+      expect(await h.run(['module', 'widget'])).toBe(0);
+      expect(h.fs.read('/app/src/routes/widget.routes.ts')).toContain('registerWidgetRoutes');
+    });
 
     it('suggests the name the user actually typed', async () => {
       const h = harness();

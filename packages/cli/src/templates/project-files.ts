@@ -19,14 +19,12 @@ import {
   VERSION,
 } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
-import { withDiPlugin } from './di.ts';
 import type {
   AppFactoryWiring,
   LocalImport,
   MiddlewareWiring,
   PackageImport,
   RuntimeSwap,
-  TemplateFeatures,
   TemplateHost,
   TemplateManifest,
   Wiring,
@@ -111,11 +109,7 @@ export interface ResolvedHost {
 }
 
 /**
- * Fills in a host's optional members and applies the project's feature choices.
- *
- * `--di` is applied HERE, once, so it cannot be honored by the renderer and
- * missed by the manifest writer — the generated `setu.config.ts` would then
- * import a package the project does not declare.
+ * Fills in a host's optional members and applies its runtime swap.
  *
  * Every host in the registry happens to declare `localImports` and `files`, so
  * those two fallbacks are unreachable through `runNewCommand` today; they are
@@ -123,22 +117,17 @@ export interface ResolvedHost {
  * future host may omit either.
  *
  * @param host - The selected template, or the no-template host
- * @param features - The per-project choices parsed from the flags
  * @returns The host with every member present
  */
 export function resolveHost(
   host: TemplateHost,
-  features: TemplateFeatures,
   runtime: TargetRuntime,
 ): ResolvedHost {
   const swap = host.runtimeSwaps?.[runtime];
   const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
 
   return {
-    // A starter-composed template owns its whole plugin set, so `--di` reaches
-    // it through the factory's options instead (see `fullStackArgs`). Appending
-    // here would be silently dropped by the renderer's factory branch.
-    plugins: host.appFactory === undefined ? withDiPlugin(swapped, features) : swapped,
+    plugins: swapped,
     workerExports: swap?.workerExports ?? [],
     entryReExports: swap?.entryReExports ?? [],
     wranglerToml: swap?.wranglerToml ?? '',
@@ -192,13 +181,11 @@ function applyRuntimeSwap(
  *
  * @param runtime - The selected runtime target
  * @param host - The resolved template host
- * @param features - The per-project choices, handed to a starter factory's args
  * @returns The `setu.config.ts` contents
  */
 function configModule(
   runtime: TargetRuntime,
   host: ResolvedHost,
-  features: TemplateFeatures,
 ): string {
   const {
     plugins,
@@ -269,7 +256,7 @@ function configModule(
 export async function ${CONFIG_EXPORT}(
   env?: Readonly<Record<string, unknown>>,
 ): Promise<IApplication> {
-  const app = await ${appFactory.symbol}(${appFactory.args?.(runtime, features) ?? ''});
+  const app = await ${appFactory.symbol}(${appFactory.args?.(runtime) ?? ''});
 ${middlewareLines}
   return app;
 }
@@ -574,8 +561,8 @@ function frameworkPackages(host: ResolvedHost): readonly string[] {
     packages.add(host.appFactory.pkg);
   }
   for (const entry of host.packageImports) packages.add(entry.pkg);
-  // Reads the SAME resolved plugin list the renderer emits, so a `--di` project
-  // can never import `@setu-ts/di-plugin` without declaring it.
+  // Reads the SAME resolved plugin list the renderer emits, so a project never
+  // imports a framework package without declaring it.
   for (const pkg of packagesOf(host.plugins, host.middleware)) packages.add(pkg);
   return [...packages];
 }
@@ -717,7 +704,8 @@ function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
  * different toolchains: Vite and `tsc` read `tsconfig.json`, while `deno check`
  * and `deno task start` read this one. The options are entirely the template's
  * to declare — a template emitting decorated classes needs
- * `experimentalDecorators` and one emitting JSX needs `jsx`, and neither has any
+ * `experimentalDecorators` and one emitting JSX needs `jsx`, and neither needs
+ * either setting.
  * use for the other's.
  *
  * @param manifest - The template's manifest contributions, when it declares them
@@ -766,7 +754,7 @@ function npmScripts(
  *
  * Measured on Node v24: with `--experimental-strip-types` a scaffolded Node
  * project boots until the first `setu generate service|controller|module`, and
- * `--template nest` never boots at all. `tsx` runs all of them, reading the
+ * the former class template never booted at all. `tsx` runs all of them, reading the
  * `experimentalDecorators` the generated `tsconfig.json` already sets.
  */
 const NODE_RUNNER = 'tsx';
@@ -898,7 +886,6 @@ function standaloneNpmFiles(
  * @param runtime - The selected runtime target
  * @param host - The resolved template host: its plugins, middleware, imports,
  * extra source files, and manifest additions
- * @param features - The per-project choices, threaded to the config renderer
  * @param port - Where the entry gets its port, when it is not the literal
  * default (a workspace member imports it)
  * @returns The files to create, relative to the project root
@@ -907,7 +894,6 @@ export function projectFiles(
   projectName: string,
   runtime: TargetRuntime,
   host: ResolvedHost,
-  features: TemplateFeatures,
   port?: EntryPort,
 ): readonly GeneratedFile[] {
   const manifest = host.manifest;
@@ -1020,7 +1006,7 @@ ${PROGRAM_NAME} generate --help
 
   files.push({
     path: CONFIG_MODULE,
-    contents: configModule(runtime, host, features),
+    contents: configModule(runtime, host),
   });
 
   if (runtime === 'cloudflare-workers') {

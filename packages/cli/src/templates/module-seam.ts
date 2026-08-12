@@ -42,16 +42,13 @@ const TEST_DEPENDENCY_VERSIONS = {
 } as const;
 
 /**
- * Manifest additions every module-hosting template merges in.
+ * Manifest additions every functional module-hosting template merges in.
  *
- * The three templates that share this — `rest`, `microservice`, `nest` — are
- * exactly the three that wire `HealthPlugin` and emit decorated classes, so the
- * permission and compiler settings both belong here rather than being repeated
- * per template. The no-template host wires neither and correctly receives
- * neither: it registers only the runtime plugin, and `setu generate service`
- * emits a plain class in a project with no decorator plugin.
+ * Functional and class-based module tests both import the standard test
+ * packages. The health permission belongs to the REST baseline, while the
+ * decorator compiler setting is restricted to the class-based opt-in below.
  */
-export const MODULE_SEAM_MANIFEST: TemplateManifest = {
+export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
   denoImports: Object.fromEntries(
     Object.entries(TEST_DEPENDENCY_VERSIONS).map(([pkg, v]) => [pkg, `jsr:${pkg}@^${v}`]),
   ),
@@ -64,8 +61,12 @@ export const MODULE_SEAM_MANIFEST: TemplateManifest = {
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.
   denoPermissions: ['--allow-sys'],
-  // The decorator and OpenAPI plugins ship legacy decorators, so a generated
-  // @Controller class only type-checks with this enabled.
+};
+
+/** Manifest additions unique to the class-based module composition. */
+export const CLASS_BASED_MODULE_MANIFEST: TemplateManifest = {
+  ...FUNCTIONAL_MODULE_MANIFEST,
+  // The class-based template emits decorated classes.
   denoCompilerOptions: { experimentalDecorators: true },
 };
 
@@ -89,9 +90,8 @@ export const MODULE_SEAM_LOCAL_IMPORT: LocalImport = {
  * Rewrites a wiring list so the `decorator-plugin` entry passes the barrel
  * arrays.
  *
- * Takes the list rather than mutating a shared constant so `rest` and `nest` can
- * each apply it to their own set — the technique `NEST_PLUGINS` already uses to
- * override that same wiring.
+ * Takes the list rather than mutating a shared constant so the class-based
+ * template can apply it to its own set without changing the REST baseline.
  *
  * @param wirings - The template's plugin wirings
  * @param extraControllers - Identifiers listed before the barrel spread

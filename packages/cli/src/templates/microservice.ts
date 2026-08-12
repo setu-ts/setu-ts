@@ -6,14 +6,8 @@
 
 import type { RuntimeSwap, TemplateDefinition, Wiring } from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
+import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
 import {
-  MODULE_SEAM_FILES,
-  MODULE_SEAM_LOCAL_IMPORT,
-  MODULE_SEAM_MANIFEST,
-  withModuleSeam,
-} from './module-seam.ts';
-import {
-  decoratorSeamExtras,
   seamFiles,
   seamLocalImports,
   seamPluginSpreads,
@@ -194,9 +188,6 @@ const MICROSERVICE_PACKAGES: ReadonlySet<string> = new Set(
  */
 const MICROSERVICE_SEAMS = seamsFor(MICROSERVICE_PACKAGES);
 
-/** The standalone controller and service barrels the decorator wiring must also name. */
-const MICROSERVICE_DECORATOR_EXTRAS = decoratorSeamExtras(MICROSERVICE_SEAMS);
-
 /**
  * `microservice` — `rest` plus the pieces a service needs to talk to others:
  * messaging, background queues, resilience policies, tracing, service discovery, and
@@ -219,19 +210,12 @@ export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   name: 'microservice',
   description:
     'REST plus messaging, queues, resilience, telemetry, service discovery, CQRS, and events',
-  plugins: withPluginOptionSeams(
-    withModuleSeam(
-      MICROSERVICE_PLUGINS,
-      MICROSERVICE_DECORATOR_EXTRAS.controllers,
-      MICROSERVICE_DECORATOR_EXTRAS.services,
-    ),
-    MICROSERVICE_SEAMS,
-  ),
+  plugins: withPluginOptionSeams(MICROSERVICE_PLUGINS, MICROSERVICE_SEAMS),
   middleware: REST_MIDDLEWARE,
-  localImports: [MODULE_SEAM_LOCAL_IMPORT, ...seamLocalImports(MICROSERVICE_SEAMS)],
-  files: [...MODULE_SEAM_FILES, ...seamFiles(MICROSERVICE_SEAMS)],
-  manifest: MODULE_SEAM_MANIFEST,
+  localImports: seamLocalImports(MICROSERVICE_SEAMS),
+  files: seamFiles(MICROSERVICE_SEAMS),
   pluginSpreads: seamPluginSpreads(MICROSERVICE_SEAMS),
   setupCalls: seamSetupCalls(MICROSERVICE_SEAMS),
+  manifest: FUNCTIONAL_MODULE_MANIFEST,
   runtimeSwaps: { 'cloudflare-workers': WORKERS_SWAP },
 };

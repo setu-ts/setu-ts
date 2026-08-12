@@ -62,7 +62,7 @@ describe('setu end-to-end on a real filesystem', () => {
     expect(await run(['g', 'service', 'user-profile', '--dir', project])).toBe(0);
 
     const written = await Deno.readTextFile(`${project}/src/services/user-profile.service.ts`);
-    expect(written).toContain('export class UserProfileService');
+    expect(written).toContain('export function describeUserProfile');
     expect(written).toContain("return 'user-profile';");
   });
 

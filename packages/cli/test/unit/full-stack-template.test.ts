@@ -15,7 +15,6 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import type { TargetRuntime } from '../../src/constants.ts';
-import type { TemplateFeatures } from '../../src/templates/registry.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
 import { FULL_STACK_APP_FILES } from '../../src/templates/full-stack-app-files.ts';
 import {
@@ -191,8 +190,8 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
 });
 
 describe('full-stack template | the runtime-dependent argument', () => {
-  const argsFor = (runtime: TargetRuntime, features: TemplateFeatures = { di: false }): string =>
-    FULL_STACK_TEMPLATE.appFactory?.args?.(runtime, features) ?? '';
+  const argsFor = (runtime: TargetRuntime): string =>
+    FULL_STACK_TEMPLATE.appFactory?.args?.(runtime) ?? '';
 
   it('serves assets from the client build on Deno, Node and Bun', () => {
     for (const runtime of ['deno', 'node', 'bun'] as const) {
@@ -204,22 +203,6 @@ describe('full-stack template | the runtime-dependent argument', () => {
     for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
       expect(argsFor(runtime)).not.toContain('di:');
     }
-  });
-
-  it('adds the starter di arm under --di, on every runtime', () => {
-    // `TemplateHost.plugins` must stay empty when an appFactory is set, so the
-    // choice reaches this template through the starter's own option instead.
-    // `{}` rather than an omitted key: the arm is truthiness-gated, so
-    // `di: undefined` would read as opted-in while registering nothing.
-    for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
-      expect(argsFor(runtime, { di: true })).toContain('di: {},');
-    }
-  });
-
-  it('changes nothing but that one line', () => {
-    const plain = argsFor('deno');
-    const withDi = argsFor('deno', { di: true });
-    expect(withDi.replace('\n    di: {},', '')).toBe(plain);
   });
 
   it('omits the asset option on Cloudflare Workers', () => {

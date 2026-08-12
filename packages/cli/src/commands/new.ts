@@ -111,15 +111,13 @@ function planWorkspace(
     };
   }
 
-  // Same reason as `--template`, and refused rather than ignored for the same
-  // one: a container with nothing to construct is not a no-op the user asked
-  // for, it is a flag that vanished. DI belongs to a member.
+  // The independent DI flag is no longer a valid composition choice. Refuse it
+  // here too because a workspace root never reaches template resolution.
   if (args.flags['di'] === true) {
     return {
       ok: false,
-      message: `A workspace root registers no plugins, so --di has no container to add. ` +
-        `Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --di\`.`,
+      message:
+        '`--di` is no longer supported. Use `--template class-based` for decorators and DI together.',
     };
   }
 
@@ -221,7 +219,7 @@ function readTransport(
  *
  * @param name - The project directory name
  * @param runtime - The selected runtime target
- * @param args - The parsed arguments, read for `--template`, `--di` and `--port`
+ * @param args - The parsed arguments, read for `--template` and `--port`
  * @returns The planned files, or the refusal to print
  */
 function planProject(
@@ -261,8 +259,8 @@ function planProject(
 
   // The no-template path is a HOST like any other — that is what gives a bare
   // project the seams needing no plugin, so `setu generate route` lands wired.
-  const host = resolveHost(choice.template ?? MINIMAL_HOST, choice.features, runtime);
-  return { ok: true, files: projectFiles(name, runtime, host, choice.features) };
+  const host = resolveHost(choice.template ?? MINIMAL_HOST, runtime);
+  return { ok: true, files: projectFiles(name, runtime, host) };
 }
 
 /**
@@ -281,7 +279,7 @@ export async function runNewCommand(
   deps: NewDependencies,
 ): Promise<number> {
   const usage = `Usage: ${PROGRAM_NAME} new <project-name> [--template <name>] ` +
-    `[--runtime <target>] [--di] [--workspace] [--dir <path>]`;
+    `[--runtime <target>] [--workspace] [--dir <path>]`;
 
   // `--help` is never an error.
   if (args.flags['help'] === true || args.flags['h'] === true) {
@@ -296,7 +294,6 @@ export async function runNewCommand(
     deps.log('Options:');
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
-    deps.log('  --di                Register DiPlugin, so @Injectable classes get a container');
     deps.log(
       `  --workspace         Create a monorepo root; add services with ` +
         `\`${PROGRAM_NAME} generate ${APP_VERB} <name>\``,

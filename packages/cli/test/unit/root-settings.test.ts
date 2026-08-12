@@ -48,8 +48,8 @@ describe('generated imports match the formatter the project ships with', () => {
    * @returns The emitted statement, whitespace-collapsed
    */
   function commonImportOf(): string {
-    const host = resolveHost(getTemplate('full-stack')!, { di: false }, 'deno');
-    const files = projectFiles('shop', 'deno', host, { di: false });
+    const host = resolveHost(getTemplate('full-stack')!, 'deno');
+    const files = projectFiles('shop', 'deno', host);
     const config = files.find((f) => f.path === 'setu.config.ts')!;
     const match = config.contents.match(/import \{[^}]*\} from '@setu-ts\/common';/s);
     return (match?.[0] ?? '').replace(/\s+/g, ' ');
@@ -73,8 +73,8 @@ describe('generated imports match the formatter the project ships with', () => {
       ...getTemplate('rest')!,
       localImports: [{ symbols: ['alpha', '_under', 'Zeta', '$dollar'], from: './x.ts' }],
     };
-    const resolved = resolveHost(host, { di: false }, 'deno');
-    const files = projectFiles('shop', 'deno', resolved, { di: false });
+    const resolved = resolveHost(host, 'deno');
+    const files = projectFiles('shop', 'deno', resolved);
     const config = files.find((f) => f.path === 'setu.config.ts')!;
 
     expect(config.contents).toContain(
@@ -97,8 +97,8 @@ describe('where the root settings are emitted', () => {
   });
 
   it('puts them in a standalone project root', () => {
-    const host = resolveHost(getTemplate('rest')!, { di: false }, 'deno');
-    const manifest = manifestOf(projectFiles('shop', 'deno', host, { di: false }), 'deno.json');
+    const host = resolveHost(getTemplate('rest')!, 'deno');
+    const manifest = manifestOf(projectFiles('shop', 'deno', host), 'deno.json');
 
     expect(manifest['minimumDependencyAge']).toBe(0);
     expect(manifest['fmt']).toBeDefined();
@@ -108,8 +108,8 @@ describe('where the root settings are emitted', () => {
     // A member inherits both from its root, and Deno refuses some root-only
     // settings in a member outright — `nodeModulesDir` is the precedent. The
     // port argument is what marks a member.
-    const host = resolveHost(getTemplate('rest')!, { di: false }, 'deno');
-    const member = projectFiles('shop', 'deno', host, { di: false }, {
+    const host = resolveHost(getTemplate('rest')!, 'deno');
+    const member = projectFiles('shop', 'deno', host, {
       symbol: 'SERVICE_PORT',
       from: './src/discovery/services.ts',
     });

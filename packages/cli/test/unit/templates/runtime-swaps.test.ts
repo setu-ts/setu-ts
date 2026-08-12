@@ -12,15 +12,13 @@ import { expect } from '@std/expect';
 
 import type { TargetRuntime } from '../../../src/constants.ts';
 import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';
-import type { TemplateFeatures, TemplateHost } from '../../../src/templates/registry.ts';
+import type { TemplateHost } from '../../../src/templates/registry.ts';
 import { MICROSERVICE_TEMPLATE } from '../../../src/templates/microservice.ts';
 import { REST_TEMPLATE } from '../../../src/templates/rest.ts';
 
-const FEATURES: TemplateFeatures = { di: false };
-
 /** The bare package names a host registers on one runtime. */
 function packagesOn(host: TemplateHost, runtime: TargetRuntime): readonly string[] {
-  return resolveHost(host, FEATURES, runtime).plugins.map((wiring) => wiring.pkg);
+  return resolveHost(host, runtime).plugins.map((wiring) => wiring.pkg);
 }
 
 /** One file's contents from a rendered project, or undefined. */
@@ -29,8 +27,8 @@ function fileAt(
   runtime: TargetRuntime,
   path: string,
 ): string | undefined {
-  const resolved = resolveHost(host, FEATURES, runtime);
-  return projectFiles('proj', runtime, resolved, FEATURES).find((f) => f.path === path)?.contents;
+  const resolved = resolveHost(host, runtime);
+  return projectFiles('proj', runtime, resolved).find((f) => f.path === path)?.contents;
 }
 
 describe('runtime swaps', () => {
@@ -165,7 +163,7 @@ describe('runtime swaps', () => {
     // A defect in this repository's own template data, never something a user
     // can reach — and silently dropping it would leave a swap that no longer
     // removes what its author believed it did.
-    expect(() => resolveHost(broken, FEATURES, 'cloudflare-workers')).toThrow('not-installed');
-    expect(() => resolveHost(broken, FEATURES, 'deno')).not.toThrow();
+    expect(() => resolveHost(broken, 'cloudflare-workers')).toThrow('not-installed');
+    expect(() => resolveHost(broken, 'deno')).not.toThrow();
   });
 });

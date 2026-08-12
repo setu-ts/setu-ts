@@ -14,8 +14,6 @@ import {
 /** The default transport, which contributes nothing — so those assertions stay about discovery. */
 const HTTP = transportSpec('http');
 
-const FEATURES = { di: false } as const;
-
 /**
  * Resolves a template by name, failing the test when it is missing.
  *
@@ -25,7 +23,7 @@ const FEATURES = { di: false } as const;
 function hostOf(name: string) {
   const template = getTemplate(name);
   expect(template).toBeDefined();
-  return resolveHost(template ?? MINIMAL_HOST, FEATURES, 'deno');
+  return resolveHost(template ?? MINIMAL_HOST, 'deno');
 }
 
 describe('withWorkspaceMember', () => {
@@ -68,7 +66,7 @@ describe('withWorkspaceMember', () => {
   });
 
   it('changes nothing for a member scaffolded with no template', () => {
-    const base = resolveHost(MINIMAL_HOST, FEATURES, 'deno');
+    const base = resolveHost(MINIMAL_HOST, 'deno');
     expect(withWorkspaceMember(base, HTTP, 'orders')).toEqual(base);
   });
 });
@@ -145,7 +143,7 @@ describe('withWorkspaceMember — the transport overlay', () => {
   // Appending a transport plugin a template already registers would trip the
   // kernel's duplicate-name check, so no transport may collide with any template.
   it('contributes no plugin any template already registers', () => {
-    for (const template of ['rest', 'microservice', 'nest']) {
+    for (const template of ['rest', 'microservice', 'class-based']) {
       const base = hostOf(template);
       for (
         const name of ['http', 'grpc', 'memory', 'redis', 'rabbitmq', 'nats', 'kafka'] as const

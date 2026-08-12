@@ -5,7 +5,10 @@ import { generateController } from '../../../src/schematics/controller.ts';
 import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('controller schematic', () => {
-  const files = generateController(deriveNames('order-item'), options());
+  const files = generateController(
+    deriveNames('order-item'),
+    options(['decorator-plugin', 'di-plugin']),
+  );
   const file = artifactOf(files, 'controller');
 
   it('emits the controller plus its seam barrel', () => {
@@ -16,7 +19,9 @@ describe('controller schematic', () => {
   });
 
   it('satisfies the seam contract', () => {
-    assertSeamContract('controller', 'order-item', ['gizmo', 'billing']);
+    assertSeamContract('controller', 'order-item', ['gizmo', 'billing'], {
+      plugins: ['decorator-plugin', 'di-plugin'],
+    });
   });
 
   it('lists the class in the barrel for DecoratorPlugin({ controllers })', () => {
@@ -39,7 +44,10 @@ describe('controller schematic', () => {
   });
 
   it('derives identical output from any casing of the same name', () => {
-    const pascal = generateController(deriveNames('OrderItem'), options());
+    const pascal = generateController(
+      deriveNames('OrderItem'),
+      options(['decorator-plugin', 'di-plugin']),
+    );
     expect(pascal).toEqual(files);
   });
 
@@ -50,18 +58,13 @@ describe('controller schematic', () => {
 
   it('imports the decorators it uses', () => {
     expect(file.contents).toContain(
-      "import { Body, Controller, Get, Post } from '@setu-ts/decorator-plugin';",
+      "import { Body, Controller, Ctx, Get, Post } from '@setu-ts/decorator-plugin';",
     );
   });
 
-  it('declares no request-context parameter on a handler', () => {
-    // This assertion previously pinned the OPPOSITE — it required the
-    // `IRequestContext` import — which is how a controller that answered 500 on
-    // every request stayed "covered". The plugin builds a handler's arguments from
-    // parameter metadata alone and never passes the context positionally, so a
-    // `ctx` parameter arrives `undefined` and the first `ctx.response` throws.
-    // The e2e that boots a scaffolded app is the real proof; this is the fast one.
-    expect(file.contents).not.toContain('IRequestContext');
-    expect(file.contents).not.toContain('ctx.response');
+  it('uses the built-in context decorator for a status-sensitive write handler', () => {
+    expect(file.contents).toContain('import type { IRequestContext }');
+    expect(file.contents).toContain('@Ctx() ctx: IRequestContext');
+    expect(file.contents).toContain('ctx.response.status(201)');
   });
 });
