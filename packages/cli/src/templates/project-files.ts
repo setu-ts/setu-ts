@@ -34,6 +34,7 @@ import type {
   WorkerExportRoute,
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
+import { rootManifestSettings } from './root-settings.ts';
 
 /** Semver range the scaffolded project pins framework packages to. */
 const RANGE = `^${VERSION}`;
@@ -147,7 +148,7 @@ export function resolveHost(
     files: [...(host.files ?? []), ...(swap?.files ?? [])],
     pluginSpreads: host.pluginSpreads ?? [],
     setupCalls: host.setupCalls ?? [],
-    extraTasks: {},
+    extraTasks: { ...host.extraTasks },
     extraImports: {},
     appFactory: host.appFactory,
     manifest: host.manifest,
@@ -218,24 +219,22 @@ function configModule(
   // emitted before this merge existed, so their output is unchanged.
   const commonImport = extraCommonSymbols.length === 0
     ? `import type { IApplication } from '@setu-ts/common';`
-    : `import { ${
-      [...extraCommonSymbols, 'type IApplication'].join(', ')
-    } } from '@setu-ts/common';`;
+    : renderImport([...extraCommonSymbols, 'type IApplication'], '@setu-ts/common');
 
   const imports = [
     // A starter factory returns the application, so the kernel is not imported
     // at all on that path — the generated file names only what it uses.
     ...(appFactory === undefined
-      ? [`import { createApplication } from '@setu-ts/kernel';`]
-      : [`import { ${appFactory.symbol} } from '@setu-ts/${appFactory.pkg}';`]),
+      ? [renderImport(['createApplication'], '@setu-ts/kernel')]
+      : [renderImport([appFactory.symbol], `@setu-ts/${appFactory.pkg}`)]),
     commonImport,
-    ...plugins.map((p) => `import { ${p.symbol} } from '@setu-ts/${p.pkg}';`),
-    ...middleware.map((m) => `import { ${m.symbol} } from '@setu-ts/${m.pkg}';`),
+    ...plugins.map((p) => renderImport([p.symbol], `@setu-ts/${p.pkg}`)),
+    ...middleware.map((m) => renderImport([m.symbol], `@setu-ts/${m.pkg}`)),
     ...packageImports
       .filter((p) => p.pkg !== 'common' && p.symbols !== undefined && p.symbols.length > 0)
-      .map((p) => `import { ${p.symbols?.join(', ')} } from '@setu-ts/${p.pkg}';`),
+      .map((p) => renderImport(p.symbols ?? [], `@setu-ts/${p.pkg}`)),
     // Project-local last, so the generated file reads package imports first.
-    ...localImports.map((l) => `import { ${l.symbols.join(', ')} } from '${l.from}';`),
+    ...localImports.map((l) => renderImport(l.symbols, l.from)),
   ].join('\n');
 
   const middlewareLines = middleware.length === 0 ? '' : `\n${
@@ -613,6 +612,54 @@ function npmDependencies(host: ResolvedHost): Record<string, string> {
 }
 
 /**
+ * The line width a generated project is formatted at.
+ *
+ * Matches the `fmt.lineWidth` the root manifest declares, so source this module
+ * emits already satisfies the formatter that project ships with.
+ */
+const LINE_WIDTH = 100;
+
+/**
+ * Renders one import statement, wrapped when it would overflow.
+ *
+ * A generated file has to be formatted the way the project's own
+ * `deno fmt` would leave it, since the first thing many projects run is
+ * `deno fmt --check`. A single-line import of four long symbols overflows
+ * {@linkcode LINE_WIDTH}, and the formatter then rewrites a file the CLI just
+ * wrote — which is what made a fresh scaffold fail its own format check.
+ *
+ * The multi-line form matches `deno fmt`'s output exactly: one symbol per line,
+ * two-space indent, trailing comma.
+ *
+ * @param symbols - The imported bindings, in the order they should appear
+ * @param from - The module specifier
+ * @returns The statement, without a trailing newline
+ */
+function renderImport(symbols: readonly string[], from: string): string {
+  const sorted = sortSpecifiers(symbols);
+  const oneLine = `import { ${sorted.join(', ')} } from '${from}';`;
+  if (oneLine.length <= LINE_WIDTH) return oneLine;
+  return `import {\n${sorted.map((s) => `  ${s},`).join('\n')}\n} from '${from}';`;
+}
+
+/**
+ * Orders named import specifiers the way `deno fmt` does.
+ *
+ * The formatter sorts the bindings inside the braces case-insensitively by the
+ * symbol name, ignoring a leading `type ` — so `ServerRouter, type EntryContext`
+ * is rewritten to `type EntryContext, ServerRouter` even on a line short enough
+ * to leave alone. Emitting them unsorted means the formatter rewrites a file the
+ * CLI just wrote.
+ *
+ * @param symbols - The bindings, as written
+ * @returns The same bindings in the formatter's order
+ */
+function sortSpecifiers(symbols: readonly string[]): readonly string[] {
+  const bareName = (s: string) => s.replace(/^type\s+/, '').toLowerCase();
+  return [...symbols].sort((a, b) => bareName(a).localeCompare(bareName(b)));
+}
+
+/**
  * The permission flags the generated Deno `start` task runs with.
  *
  * Network and environment access are unconditional — every generated project
@@ -648,6 +695,27 @@ function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
     skipLibCheck: true,
     ...manifest?.tsconfigCompilerOptions,
   };
+}
+
+/**
+ * The `compilerOptions` a generated `deno.json` carries.
+ *
+ * Kept apart from {@linkcode tsconfigOptions} because the two files are read by
+ * different toolchains: Vite and `tsc` read `tsconfig.json`, while `deno check`
+ * and `deno task start` read this one. The options are entirely the template's
+ * to declare — a template emitting decorated classes needs
+ * `experimentalDecorators` and one emitting JSX needs `jsx`, and neither has any
+ * use for the other's.
+ *
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The compiler options, or undefined when the template declares none,
+ * so the key is omitted rather than emitted empty
+ */
+function denoCompilerOptions(
+  manifest?: TemplateManifest,
+): Readonly<Record<string, unknown>> | undefined {
+  const options = manifest?.denoCompilerOptions;
+  return options && Object.keys(options).length > 0 ? options : undefined;
 }
 
 /**
@@ -865,6 +933,12 @@ ${PROGRAM_NAME} generate --help
 
   if (runtime === 'deno' || runtime === 'cloudflare-workers') {
     const entry = runtime === 'deno' ? 'main.ts' : 'src/index.ts';
+    // A workspace member is the only caller that passes a port, and a member's
+    // manifest must not carry the root-only settings below: the workspace root
+    // already declares them for every member, and Deno refuses some of them
+    // outright in a member (`nodeModulesDir` is the precedent).
+    const isWorkspaceMember = port !== undefined;
+    const compilerOptions = denoCompilerOptions(manifest);
     files.push({
       path: 'deno.json',
       contents: `${
@@ -874,9 +948,11 @@ ${PROGRAM_NAME} generate --help
               start: `deno run ${denoPermissions(manifest)} ${entry}`,
               ...host.extraTasks,
             },
-            // The decorator and OpenAPI plugins ship legacy decorators, so a
-            // generated @Controller class only type-checks with this enabled.
-            compilerOptions: { experimentalDecorators: true },
+            ...(isWorkspaceMember ? {} : rootManifestSettings()),
+            // Declared by the template rather than fixed here: `deno check` reads
+            // this file, and what it needs depends on what the template emits —
+            // decorated classes need `experimentalDecorators`, JSX needs `jsx`.
+            ...(compilerOptions === undefined ? {} : { compilerOptions }),
             imports: jsrImports(host),
           },
           null,

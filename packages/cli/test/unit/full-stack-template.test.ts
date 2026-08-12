@@ -152,7 +152,10 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     const login = contentsOf('app/routes/_auth/login.tsx');
 
     expect(login).toContain('export async function action');
-    expect(login).toContain('<Form method="post">');
+    // Single-quoted: the generated project's own `fmt` config sets
+    // `singleQuote`, so double-quoted JSX would make it fail `deno fmt --check`
+    // on a file the CLI just wrote.
+    expect(login).toContain(`<Form method='post'>`);
     // The action writes to the session, which is what the plugin commits onto
     // the response — otherwise the login would not stick.
     expect(login).toContain('getSession(context)');
@@ -282,7 +285,36 @@ describe('full-stack template | manifest contributions', () => {
   });
 
   it('asks for the read permission the SSR plugin needs on Deno', () => {
-    expect(FULL_STACK_TEMPLATE.manifest?.denoPermissions).toEqual(['--allow-read']);
+    expect(FULL_STACK_TEMPLATE.manifest?.denoPermissions).toContain('--allow-read');
+  });
+
+  it('asks for the sys permission the health indicator needs', () => {
+    // The full-stack starter composes HealthPlugin, whose `self` indicator reads
+    // runtime.hostname() on every probe. Without this the project scaffolds,
+    // starts, and answers 500 on /health.
+    expect(FULL_STACK_TEMPLATE.manifest?.denoPermissions).toContain('--allow-sys');
+  });
+
+  it('gives Deno the JSX options, not just tsconfig', () => {
+    // Vite reads tsconfig.json and `deno check` reads deno.json. A project
+    // carrying only the first builds cleanly while every .tsx route fails to
+    // type-check with TS2686 'React' refers to a UMD global.
+    const deno = FULL_STACK_TEMPLATE.manifest?.denoCompilerOptions;
+
+    expect(deno?.['jsx']).toBe('react-jsx');
+    expect(deno?.['jsxImportSource']).toBe('react');
+    // This template registers no decorator plugin and emits no decorated class,
+    // so it must NOT inherit the option the decorator-hosting templates need.
+    expect(deno?.['experimentalDecorators']).toBeUndefined();
+  });
+
+  it('emits a task that type-checks the app tree', () => {
+    // `deno check main.ts` reaches only what the entry statically imports, and
+    // the route modules load through the compiled server build — so without this
+    // task nothing type-checks them at all.
+    expect(FULL_STACK_TEMPLATE.extraTasks?.['check:app']).toBe(
+      'deno check app/**/*.ts app/**/*.tsx',
+    );
   });
 
   it('declares the packages its emitted files import', () => {

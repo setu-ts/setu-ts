@@ -73,10 +73,11 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
   ]);
 
   const imports = [
-    `import type {\n` +
-    `  CommandHandlerRegistration,\n` +
-    `  QueryHandlerRegistration,\n` +
-    `} from '@setu-ts/cqrs-plugin';`,
+    // One line: at 97 characters it fits the 100-column width the generated
+    // project is formatted at, so the wrapped form fails that project's own
+    // `deno fmt --check` on a file the CLI just wrote.
+    `import type { CommandHandlerRegistration, QueryHandlerRegistration } ` +
+    `from '@setu-ts/cqrs-plugin';`,
     renderSeamImports(
       commands,
       commandImportSymbols,
