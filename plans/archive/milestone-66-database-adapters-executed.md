@@ -1,6 +1,6 @@
 # Milestone 66 — Database Adapters That Have Been Executed (`@setu-ts/database-plugin`)
 
-> **Status:** Complete (PR pending). Branch: `feat/m66-database-adapters-that-have-been-executed`.
+> **Status:** Complete (PR #156). Branch: `feat/m66-database-adapters-that-have-been-executed`.
 > `main` is protected — all work (implementation + fixes) stays on this one branch until it merges
 > via a single PR.
 
