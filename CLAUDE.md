@@ -2082,8 +2082,36 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   installs, type-checks and BOOTS every template, then requests what it advertises — booting
   deliberately without `-A`, since a forgotten permission is unobservable under a blanket grant.
   Four negative controls were each observed failing and reverted
-- **Milestone 64** (`packages/decorator-plugin` — `@Ctx()` built-in parameter decorator resolving
-  the active `IRequestContext`, so decorated handlers can set status/headers or stream) — complete
+- **Milestone 64** (`packages/decorator-plugin` — `@Ctx()`, the built-in parameter decorator that
+  resolves the live `IRequestContext`, so a decorated handler can set a status code, add a header,
+  or stream without dropping the whole route down to `app.router.post(...)`. A missing export rather
+  than a feature: `createParameterDecorator` and `registerParameterResolver` were already public and
+  a custom resolver is already handed the context, so this ships the ten lines every application was
+  writing, as a built-in `customType` beside `current-user`. **Recognition is by neither of the two
+  obvious mechanisms, and both were tried.** Matching the NAME `context` (the first commit) silently
+  steals an application's own `createParameterDecorator('context')`, which was legal and documented
+  before this. Matching the metadata object's IDENTITY (the second) fixes that but is fragile under
+  any module duplication, so the marker is a `Symbol.for` VALUE — the `SECURITY_METADATA` precedent
+  in `common/src/http.ts:383`. **The failure that fragility was first justified with does not
+  happen, and building a real two-copy scenario is what showed it.** Two copies of this package
+  duplicate the metadata STORE too, so decorators populate copy A's store while the plugin reads
+  copy B's, `registerController` returns early on the missing `@Controller` metadata, and every
+  route answers **404 with nothing logged** — louder and more confusing than the silent `undefined`
+  context that was assumed, and it never reaches the marker at all. Hence two startup warnings, both
+  of which **warn and never throw**: a class listed in `controllers` carrying no `@Controller`
+  metadata (the duplication signal, since auto-discovery filters to decorated classes and so is
+  never a developer mistake), and a custom parameter no resolver can satisfy, named by controller,
+  handler and index. Not a throw because `resolveParameter` has always returned `undefined` for an
+  unregistered custom type — released API, §9.4 — and because an application may register its
+  resolvers after the plugin registers, which would make a startup reading stale. One
+  `classifyCustom` feeds both the startup check and request-time resolution, so the two cannot drift
+  about what resolves. `autoDiscover` is deliberately NOT covered: it has no in-repo consumer (not
+  the CLI templates, not the starters, not any of the 15 apps) and a bad `controllersPath` already
+  warns through `result.errors`. The cross-copy test imports a genuinely separate module instance
+  under a distinct URL rather than hand-building a stand-in, and carries a vacuity guard asserting
+  the copies really are distinct, so it cannot pass if Deno ever deduplicates them; four negative
+  controls were each observed failing and reverted, including `Symbol.for` → `Symbol()`, which fails
+  exactly the two cross-copy tests while the guard and the rejection cases still pass) — complete
   (PR pending)
 - **Next milestone** — **M65** (functional default, NestJS-shaped opt-in). M63–M68 come from the
   same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
