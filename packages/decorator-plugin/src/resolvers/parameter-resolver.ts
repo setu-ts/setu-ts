@@ -10,6 +10,7 @@
 import type { IRequestContext } from '@setu-ts/common';
 import { parseCookie } from '@setu-ts/common';
 
+import { CONTEXT_PARAMETER_METADATA } from '../decorators/security.ts';
 import type { ParameterMetadata } from '../metadata/metadata-store.ts';
 
 /**
@@ -31,8 +32,9 @@ const customResolvers = new Map<string, CustomParameterResolver>();
 
 /**
  * Registers a resolver for a custom parameter type created with
- * {@linkcode createParameterDecorator}. The `context` and `current-user`
- * built-ins resolve directly and need not be registered.
+ * {@linkcode createParameterDecorator}. `current-user` resolves directly;
+ * `Ctx()` uses an internal marker and also resolves directly. Application
+ * custom parameter types, including one named `context`, use this registry.
  *
  * @param name - The custom parameter type name
  * @param resolver - The resolver function
@@ -110,12 +112,12 @@ export function resolveParameter(
 }
 
 /**
- * Resolves a custom parameter. `context` and `current-user` are built in;
- * other types look up a resolver registered via
+ * Resolves a custom parameter. The internal `@Ctx()` marker and `current-user`
+ * are built in; other types look up a resolver registered via
  * {@linkcode registerParameterResolver}.
  */
 async function resolveCustom(ctx: IRequestContext, param: ParameterMetadata): Promise<unknown> {
-  if (param.customType === 'context') {
+  if (param.metadata === CONTEXT_PARAMETER_METADATA) {
     return ctx;
   }
   if (param.customType === 'current-user') {

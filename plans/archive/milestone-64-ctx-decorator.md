@@ -45,7 +45,8 @@ resolver-registration side effect.
 ### 3.1 Built-in context metadata
 
 - **Decision:** `Ctx()` will live beside `CurrentUser()` in `src/decorators/security.ts` and store
-  `{ index, type: 'custom', customType: 'context' }` through the existing metadata store.
+  `{ index, type: 'custom', customType: 'context', metadata: CONTEXT_PARAMETER_METADATA }` through
+  the existing metadata store. The opaque metadata object is module-private from the public barrel.
 - **Why:** The established built-in custom-parameter mechanism already carries the required behavior
   without expanding `ParameterType` or creating an application-visible registration. Keeping both
   built-ins together makes the direct resolution rule discoverable in one place.
@@ -54,14 +55,16 @@ resolver-registration side effect.
 
 ### 3.2 Resolver behavior and precedence
 
-- **Decision:** `resolveCustom` will recognize `customType === 'context'` and return the exact
-  `IRequestContext` instance before consulting the registered custom-resolver map; `current-user`,
-  registered custom types, and unknown types retain their current behavior.
-- **Why:** A built-in must work when an application has registered nothing and must not be
-  replaceable accidentally by a registry entry of the same name. This mirrors the existing direct
-  `current-user` branch and keeps custom resolver extension behavior unchanged for all other names.
-- **Test home:** `test/unit/parameter-resolver.test.ts` checks identity equality for `context`,
-  including when a resolver named `context` is registered; existing tests pin the non-context paths.
+- **Decision:** `resolveCustom` will recognize `Ctx()`'s opaque metadata identity and return the
+  exact `IRequestContext` instance before consulting the registered custom-resolver map;
+  `current-user`, registered custom types, and unknown types retain their current behavior.
+- **Why:** Public applications were already permitted to create and register a custom parameter
+  named `context`. Matching the name alone would silently change those handlers to receive the
+  request context. The private identity marker keeps `@Ctx()` registration-independent without
+  reserving an existing application extension name.
+- **Test home:** `test/unit/parameter-resolver.test.ts` checks both the marked built-in identity and
+  an unmarked application-defined `context` resolver; the e2e application test proves the public
+  `createParameterDecorator` path retains that compatibility.
 
 ### 3.3 Handler-level response behavior
 
@@ -99,18 +102,18 @@ None (checked): `Ctx()` accepts no options, and this milestone adds no configura
 | File                                  | Purpose                                                                                                                                        |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/decorators/security.ts`          | Add the documented `Ctx()` parameter decorator alongside the existing `CurrentUser()` built-in.                                                |
-| `src/resolvers/parameter-resolver.ts` | Resolve the `context` built-in custom type to the active request context before custom resolver lookup.                                        |
+| `src/resolvers/parameter-resolver.ts` | Resolve the marked `@Ctx()` built-in to the active request context before custom resolver lookup.                                              |
 | `src/index.ts`                        | Re-export `Ctx` from the public decorator-plugin barrel.                                                                                       |
 | `README.md`                           | Add `Ctx` to the package's parameter/export documentation.                                                                                     |
 | `PUBLIC_API.md`                       | Add `Ctx` to the authoritative decorator-plugin values table and explain that it injects `IRequestContext` for response control and streaming. |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                          | src covered                                                            | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                           |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/decorator-plugin/test/unit/security-decorator.test.ts`   | `src/decorators/security.ts`                                           | A controller method `create(@Ctx() ctx: IRequestContext)` stores one parameter record at its declared index with `type: 'custom'` and `customType: 'context'`.                                                                                             |
-| `packages/decorator-plugin/test/unit/parameter-resolver.test.ts`   | `src/resolvers/parameter-resolver.ts`                                  | `resolveParameter(ctx, { index: 0, type: 'custom', customType: 'context' })` returns the same `IRequestContext`; a registered `context` resolver cannot replace the built-in. Existing custom and unknown-type tests preserve all other branches.          |
-| `packages/decorator-plugin/test/e2e/decorator-application.test.ts` | `src/index.ts`; end-to-end path through the three changed source files | Imports `Ctx` from the package barrel, boots a decorated controller, then its `create(@Ctx() ctx: IRequestContext)` returns `ctx.response.status(201).header('Location', '/users/2').json({ id: '2' })`; `app.inject()` asserts 201, `Location`, and body. |
+| Test file                                                          | src covered                                                            | Key assertions (and the signature each call type-checks against)                                                                                                                                                              |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/decorator-plugin/test/unit/security-decorator.test.ts`   | `src/decorators/security.ts`                                           | A controller method `create(@Ctx() ctx: IRequestContext)` stores one marked parameter record at its declared index with `type: 'custom'` and `customType: 'context'`.                                                         |
+| `packages/decorator-plugin/test/unit/parameter-resolver.test.ts`   | `src/resolvers/parameter-resolver.ts`                                  | A marked `context` parameter returns the same `IRequestContext`, while an unmarked `context` parameter still invokes its registered application resolver. Existing custom and unknown-type tests preserve all other branches. |
+| `packages/decorator-plugin/test/e2e/decorator-application.test.ts` | `src/index.ts`; end-to-end path through the three changed source files | Imports `Ctx` and custom-parameter APIs from the package barrel, proves the `201`/`Location` response path, and proves a pre-existing `createParameterDecorator('context')` handler receives its registered custom value.     |
 
 ## 7. Verification gates
 
@@ -136,9 +139,9 @@ grep -rn "new Function\|eval(\| require(\|as any\|@ts-ignore\|Date.now()\|global
 
 - The e2e test could prove only serialization while hiding lost response headers → assert `Location`
   explicitly through `app.inject()`, whose `InjectResponse.headers` exposes them.
-- A registry entry accidentally overriding the built-in would make application behavior
-  order-dependent → test direct built-in precedence with a deliberately registered resolver of the
-  same name.
+- A name-only built-in check would steal an existing application `context` resolver → tag only
+  `@Ctx()` metadata with an opaque identity and test both the built-in and public custom-decorator
+  paths with a registered resolver of that name.
 - A barrel omission can leave internal tests green → import `Ctx` from `src/index.ts` in the
   behavioral test and run the documentation export check.
 
