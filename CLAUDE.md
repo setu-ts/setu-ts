@@ -2173,7 +2173,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the file to 50% branch and was DELETED rather than tested: this barrel is never scaffolded, only
   rendered by the schematic, which always passes the name being generated) — complete (PR #155).
 - **Milestone 66** (`packages/database-plugin` — executable Prisma v7 and Drizzle adapters) —
-  complete (PR pending). `PrismaAdapter` no longer constructs a client: Prisma v7 generates into an
+  complete (PR #156). `PrismaAdapter` no longer constructs a client: Prisma v7 generates into an
   application-selected output path a JSR package cannot locate, and the removed lazy import passed
   the legacy `datasources` option v7 rejects, so `options.prismaClient` is now required and
   validated at `connect()`. `DrizzleAdapter` translates every repository operation into real builder
