@@ -212,8 +212,17 @@ export interface TemplateManifest {
    *
    * This is the set `deno check` and `deno task start` actually honor. A
    * template that emits decorated classes needs `experimentalDecorators`; a
-   * template that emits JSX needs `jsx` and `jsxImportSource`. Neither is a
-   * default, because a template emitting one has no use for the other.
+   * template that emits JSX needs `jsx` and `jsxImportSource`.
+   *
+   * **A template emitting JSX must declare `jsx` whenever it declares anything
+   * here at all.** Measured: a manifest with no `compilerOptions` key checks
+   * JSX clean, because Deno applies its own `react-jsx` default — but declaring
+   * ANY option replaces that default set, so
+   * `{ experimentalDecorators: true }` alone silently reverts JSX to the classic
+   * transform and every `.tsx` fails with `TS2686 'React' refers to a UMD
+   * global`. That is why this is per template rather than a fixed block: the
+   * previous fixed `experimentalDecorators` was itself the cause of the
+   * full-stack template's 79 type errors, not merely a redundant extra.
    */
   readonly denoCompilerOptions?: Readonly<Record<string, unknown>>;
   /** Entries merged into the Deno import map, for aliases `deno check` must resolve. */
