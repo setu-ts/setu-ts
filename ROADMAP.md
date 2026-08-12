@@ -6607,10 +6607,11 @@ unknown-name error, because a published template name is public surface (AI_GUID
 from the CLI at all, so `FullStackStarterOptions.di` — which M61 made reachable from `setu new` and
 proved with a real build and boot — is again reachable only by an application composing the starter
 itself; giving that template a class-based variant would reintroduce the spectrum this milestone
-removes. And `setu generate service` in the default composition emits a file with no registration
-site, because a plain exported function has none to have: M60's "eleven of thirteen artifacts wired"
-no longer describes the default world, and the emitted JSDoc says so rather than implying a barrel
-that is not written.
+removes. And `setu generate service` in the default composition has no registration site, because a
+plain exported function has none to have — no plugin option takes a list of functions — so M60's
+"eleven of thirteen artifacts wired" no longer describes the default world. It still emits a
+`src/services/index.ts`, but as a convenience re-export nothing imports for you, and both the barrel
+header and the emitted JSDoc say so rather than implying wiring that does not exist.
 
 ## Milestone 66: Database Adapters That Have Been Executed
 
