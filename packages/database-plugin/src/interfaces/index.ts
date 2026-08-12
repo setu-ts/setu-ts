@@ -279,6 +279,12 @@ export interface DatabaseAdapterOptions {
   /**
    * Database connection URL (e.g., `postgresql://localhost:5432/mydb`).
    *
+   * @deprecated Prisma v7 clients are generated at an application-selected
+   * output path and receive their connection configuration when the
+   * application constructs them. Inject that generated client through
+   * `prismaClient` instead. This field remains for source compatibility and
+   * is not read by the Prisma adapter.
+   *
    * @since 0.1.0
    */
   readonly url?: string;
@@ -291,16 +297,18 @@ export interface DatabaseAdapterOptions {
   readonly logQueries?: boolean;
 
   /**
-   * Inject a pre-loaded Prisma client instance, bypassing the lazy
-   * `import('npm:@prisma/client')` path. Useful for testing.
+   * Inject an application-generated Prisma v7 client. This is required for
+   * the Prisma adapter because generated-client output belongs to the
+   * application rather than this package.
    *
    * @since 0.1.0
    */
   readonly prismaClient?: unknown;
 
   /**
-   * Registry mapping entity name → Drizzle table definition. Required when
-   * `type: 'drizzle'`; the adapter validates each table at connect() time.
+   * Registry mapping entity name → a real Drizzle table definition. Required
+   * when `type: 'drizzle'`; the adapter validates each table has an `id`
+   * column and resolves all repository fields from it.
    *
    * @since 0.1.0
    */
@@ -315,8 +323,9 @@ export interface DatabaseAdapterOptions {
   readonly transactionTimeout?: number;
 
   /**
-   * Inject a pre-loaded Drizzle database instance, bypassing the lazy
-   * `import('npm:drizzle-orm')` path. Useful for testing.
+   * Inject the application's configured Drizzle database instance. Required
+   * when `type: 'drizzle'`; this package loads query operators but cannot
+   * construct a dialect-specific driver.
    *
    * @since 0.1.0
    */

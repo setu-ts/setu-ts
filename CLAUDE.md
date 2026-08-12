@@ -2172,7 +2172,39 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the fix narrows the diagnostic rather than disabling it. An empty-list arm added with it dropped
   the file to 50% branch and was DELETED rather than tested: this barrel is never scaffolded, only
   rendered by the schematic, which always passes the name being generated) — complete (PR #155).
-- **Next milestone** — **M66** (database adapters that have been executed). M63–M68 come from the
+- **Milestone 66** (`packages/database-plugin` — executable Prisma v7 and Drizzle adapters) —
+  complete (PR #156). `PrismaAdapter` no longer constructs a client: Prisma v7 generates into an
+  application-selected output path a JSR package cannot locate, and the removed lazy import passed
+  the legacy `datasources` option v7 rejects, so `options.prismaClient` is now required and
+  validated at `connect()`. `DrizzleAdapter` translates every repository operation into real builder
+  calls against real columns — it previously selected whole tables and filtered, ordered, paginated
+  and projected them in JavaScript, and passed a fabricated `{ column: 'id' }` to `eq`, so `update`
+  and `delete` addressed nothing. `drizzleTables` is now required with an `id` column per table, the
+  silent fallback to placeholder operators is gone, and writes read their result from `RETURNING`
+  rather than echoing input back as persisted. The proof is a real `pgTable` driven through
+  drizzle's actual SQL generator over a `pg-proxy` driver — no server, no credentials — and it
+  discriminates: restoring the placeholder column fails it.
+
+  **Verification found three defects the branch's own gates had passed, all fixed here.** The
+  headline one is the milestone's own thesis applied incompletely: `count()` still evaluated in
+  memory, selecting every matching row and measuring the resulting array's length, so counting a
+  million-row table transferred a million rows. It now selects drizzle-orm's `count(*)` and reads
+  the one aggregate row the database returns (`count` is exported by the pinned `0.45.2` — probed,
+  not assumed, along with its `mapWith(Number)` decoding of pg's string bigint). Every fake-backed
+  test passed either way, which is why it survived; the real-Drizzle proof now pins `count(*)` in
+  the emitted SQL and pins that it names no columns, verified to fail against the old form. The test
+  fixture had to be corrected with it — a real driver answers an aggregate select with ONE row, not
+  a projected row per match, so a fake that kept projecting would have reported `NaN` through a
+  shape no driver produces. Second: **the full suite did not pass on the branch.** M38's doc-fence
+  gate compiles `docs/migration-nestjs.md`, and the rewritten Prisma example referenced an
+  undeclared `myPrismaClient` — `deno task test` failed on it, so the four mandated gates were
+  evidently not all re-run after the doc edit. Third, no CHANGELOG entry existed for what are two
+  breaking configuration changes (a Prisma adapter configured by `url` alone, and a Drizzle adapter
+  without `drizzleTables`, both now fail at startup); both now carry migration text. Coverage also
+  gained the three genuinely uncovered branches found while checking it — missing-column rejection
+  for `where`/`orderBy`/`select`, and the multi-condition `and()` combination, which no test had
+  ever exercised — taking `drizzle-adapter.ts` from 94.0 to 96.4 branch.
+- **Next milestone** — **M67** (scaffold defaults and workspace ergonomics). M63–M68 come from the
   same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
   M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated
   type-checked clean while its entry points imported exactly ONE generated path, so thirteen of

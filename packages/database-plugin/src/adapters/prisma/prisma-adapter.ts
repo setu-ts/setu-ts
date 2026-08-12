@@ -1,6 +1,5 @@
 /**
- * Prisma ORM adapter — lazily loads Prisma via `npm:@prisma/client` import
- * or accepts an injected client.
+ * Prisma ORM adapter over an application-injected generated Prisma v7 client.
  *
  * Transaction bridging uses **two deferreds** (`txReady` + `hold`) so that
  * `beginTransaction()` does not return until the Prisma `$transaction`
@@ -15,14 +14,15 @@ import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 
 // ---------------------------------------------------------------------------
-// Prisma client type — lazily resolved at connect() time.
+// Prisma client type — resolved from the application at connect() time.
 // ---------------------------------------------------------------------------
 
 /**
  * Structural shape of the Prisma client used by this adapter.
  *
- * The client is either injected via `options.prismaClient` or lazily loaded
- * through `import('npm:@prisma/client@7.8.0')`.
+ * The client is injected via `options.prismaClient`. Prisma v7 generates its
+ * client into an application-selected output path, which this package cannot
+ * discover safely.
  */
 type PrismaClient = {
   $connect(): Promise<void>;
@@ -99,8 +99,8 @@ class Deferred<T> {
 /**
  * Prisma adapter wrapping the official Prisma client.
  *
- * The client is either injected via `options.prismaClient` or lazily loaded
- * through `import('npm:@prisma/client@7.8.0')`.
+ * The application injects a generated Prisma v7 client through
+ * `options.prismaClient`.
  *
  * @since 0.1.0
  */
@@ -244,34 +244,19 @@ export class PrismaAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Resolve the Prisma client from options or lazy import.
+   * Resolve the application-generated Prisma v7 client from options.
    *
    * @returns Prisma client instance
-   * @throws {Error} If Prisma cannot be loaded
+   * @throws {Error} If no generated Prisma client was injected
    */
-  private async resolveClient(): Promise<PrismaClient> {
-    // Prefer injected client.
+  private resolveClient(): PrismaClient {
     if (this._options?.prismaClient) {
       return this.validateClient(this._options.prismaClient);
     }
-
-    // Lazy-load Prisma.
-    try {
-      const prismaModule = await import('npm:@prisma/client@7.8.0');
-      const PrismaClient = (prismaModule as Record<string, unknown>).PrismaClient as new (
-        opts: Record<string, unknown>,
-      ) => PrismaClient;
-      const client = new PrismaClient({
-        datasources: { db: { url: this._options?.url } },
-      });
-      return this.validateClient(client);
-    } catch (error) {
-      throw new Error(
-        `Failed to load Prisma: ${
-          (error as Error).message
-        }. Install @prisma/client AND run \`prisma generate\`, or inject via options.prismaClient.`,
-      );
-    }
+    throw new Error(
+      'PrismaAdapter requires options.prismaClient: construct and generate a Prisma v7 client in ' +
+        'the application, then inject it into DatabasePlugin.',
+    );
   }
 
   /**

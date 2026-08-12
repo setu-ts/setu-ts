@@ -8,6 +8,35 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The Prisma and Drizzle database adapters now execute their drivers, and both require the
+  application to own the client.** Both shipped with paths that could not work against a real
+  server, so each is a breaking configuration change rather than a tuning option.
+
+  `PrismaAdapter` no longer constructs a client. Prisma v7 generates its client into an
+  application-selected output path, which a JSR package cannot locate, and the removed lazy
+  `import('npm:@prisma/client')` path passed the legacy `datasources` constructor option that v7
+  rejects outright. `options.prismaClient` is now required and is validated at `connect()`.
+
+  Migration: generate the client in the application, construct it, and inject it —
+  `DatabasePlugin({ type: 'prisma', options: { prismaClient } })`. `options.url` is still accepted
+  for source compatibility but is no longer a working Prisma connection mechanism; an adapter
+  configured without a client now fails at startup with a message naming the requirement, where it
+  previously failed at the first query.
+
+  `DrizzleAdapter` now translates every repository operation into real Drizzle builder calls against
+  real columns. It previously selected whole tables and filtered, ordered, paginated and projected
+  them in JavaScript, and passed a fabricated `{ column: 'id' }` object to `eq` for writes — so
+  `update` and `delete` addressed nothing. `options.drizzleTables` is now required, each registered
+  table must carry an `id` column, and every field named by `where`, `orderBy` or `select` must be a
+  real column on it. `drizzle-orm` must be installed alongside the injected instance; the previous
+  silent fallback to placeholder operators is gone, since it produced expressions no driver could
+  execute. `create`, `update` and `delete` read their result from the driver's `RETURNING` clause
+  and throw descriptively on a dialect without it, rather than echoing the input back as if it had
+  been persisted.
+
+  Migration: pass a table registry beside the instance —
+  `DatabasePlugin({ type: 'drizzle', options: { drizzleInstance: db, drizzleTables: { User: users } } })`.
+
 - **Generated projects are functional by default, and decorators plus DI are one opt-in.**
   `--template rest` and `--template microservice` no longer register `DecoratorPlugin`, and
   `setu generate` now derives its output style from the packages the target project actually holds:
@@ -25,6 +54,13 @@ All notable changes to this project are documented here. The format follows
   `DecoratorPlugin` without `DiPlugin`.
 
 ### Fixed
+
+- **`IRepository.count()` on the Drizzle adapter no longer drags the whole match set over the
+  wire.** It selected every matching row and measured the resulting array's length in JavaScript, so
+  counting a million-row table transferred a million rows. It now selects drizzle-orm's `count(*)`
+  aggregate and reads the single row the database returns. Every fake-backed test passed either way;
+  the guarded real-Drizzle proof now asserts the emitted SQL contains `count(*)` and names no
+  columns.
 
 - **A functional project no longer reports its own services as stale.** `setu generate` scans each
   generated family and refuses to list a file that does not export what the barrel would import,
