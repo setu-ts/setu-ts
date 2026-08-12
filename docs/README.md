@@ -33,7 +33,7 @@ building production-ready applications with our plugin-first, runtime-independen
 ## Tooling
 
 - [CLI Guide](./cli.md)
-  - Scaffolding projects: templates, runtimes, `--di`
+  - Scaffolding projects: templates, runtimes, and the functional/class-based choice
   - Generating code: the schematics and where each one is wired
   - Domain modules
   - Monorepo workspaces and service discovery

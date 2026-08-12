@@ -1,8 +1,7 @@
 # Milestone 65 — Functional Default (`@setu-ts/cli`)
 
-> **Status:** Implemented; verification pending. Branch: `feat/m65-functional-default`. `main` is
-> protected — all work (implementation + fixes) stays on this one branch until it merges via a
-> single PR.
+> **Status:** Complete and verified. Branch: `feat/m65-functional-default`. Archived on completion;
+> the verification pass and its fixes are recorded in the CLAUDE.md milestone entry.
 
 ## 0. Objective & scope
 

@@ -4956,7 +4956,20 @@ decorators and dependency injection.
 | Class-based | `setu new app --template class-based` | `DecoratorPlugin` + `DiPlugin`, plus decorated controllers, injectable services, and class module registration.  |
 
 The independent `--di` flag is no longer supported. It is refused with guidance to use
-`--template class-based`, which always installs the decorator and DI pair together.
+`--template class-based`, which always installs the decorator and DI pair together, and
+`--template nest` is refused with a message naming `class-based` as its new name.
+`--template
+full-stack` therefore has no DI opt-in from the CLI; an application composing the
+starter directly still has `FullStackStarterOptions.di`.
+
+The style is read from the target project's manifest on every `setu generate`, so it PERSISTS: a
+project holding `decorator-plugin` keeps producing decorated classes — including one that holds it
+without `di-plugin`, which only a project predating `--template class-based` can — and a project
+without it keeps producing functional output. One consequence is worth stating plainly:
+`setu generate service` has **no registration site in a functional project**. A plain exported
+function has none to have; it emits one file and no barrel, and you import it where it is needed or
+close over it from a route-registration function. In a class-based project it is an `@Injectable`
+listed in the managed `src/services/index.ts` barrel.
 
 > **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
 > support (`--experimental-strip-types`) ERASES types without transforming code, so it cannot run a
@@ -5323,14 +5336,30 @@ because it is the only template registering `CqrsPlugin` and `EventsPlugin`.
 
 ### Domain modules
 
-`setu generate module <name>` is the aggregate schematic. In a functional project it emits a domain
-service, test, module export, and registered route with `GET /<name>` and `POST /<name>` (`201`). In
-a class-based project it emits the decorated service/controller aggregate and its managed module
-barrel:
+`setu generate module <name>` is the aggregate schematic, and it is **ungated** — it runs in every
+project shape, including one scaffolded with no template. Which of two file sets it emits is decided
+by whether `@setu-ts/decorator-plugin` is installed.
+
+Functional (the default composition):
 
 ```
-src/modules/<name>/<name>.service.ts        class-based: @Injectable, token '<name>-service'
-src/modules/<name>/<name>.controller.ts     class-based: @Controller('/<name>'), parameter-level @Inject
+src/modules/<name>/<name>.service.ts        export function list<Name>()
+src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
+src/modules/<name>/index.ts                 the module's own re-exports
+src/routes/<name>.routes.ts                 register<Name>Routes — GET / and POST / (201)
+src/routes/index.ts                         the routes barrel     (managed — regenerated)
+```
+
+The route module registers through the same seam `setu generate route` uses, so the module answers
+`GET /<name>` and `POST /<name>` with no edit to `setu.config.ts`. Because both write
+`src/routes/<name>.routes.ts`, a `route` and a `module` sharing one name is refused by the ordinary
+overwrite check.
+
+Class-based (`--template class-based`, or any project holding `decorator-plugin`):
+
+```
+src/modules/<name>/<name>.service.ts        @Injectable, token '<name>-service'
+src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), parameter-level @Inject, @Ctx()
 src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
 src/modules/<name>/index.ts                 the module's own re-exports
 src/modules/index.ts                        the aggregate barrel  (managed — regenerated)

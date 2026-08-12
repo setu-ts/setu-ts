@@ -22,50 +22,59 @@ executable after the package, so you would be typing `cli new my-app`.
 setu new my-app                                # minimal: the runtime plugin alone
 setu new my-app --template rest                # a REST composition
 setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers
-setu new my-app --template rest --di           # add a DI container
+setu new my-app --template class-based         # decorators and a DI container
 setu new my-app --dry-run                      # print the plan, write nothing
 ```
 
 ### Templates
 
-| Template       | Plugins it registers                                                                                                     |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| _(none)_       | `RuntimePlugin` only                                                                                                     |
-| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenAPI, Decorator + the `errorHandler()` middleware |
-| `microservice` | The REST set + Messaging, Queue, Resilience, Telemetry, CQRS, Events, ServiceDiscovery                                   |
-| `nest`         | The REST set + `DiPlugin`, with a decorated controller and an injected service already written                           |
-| `full-stack`   | Composed through `@setu-ts/full-stack-starter`, plus a React Router 8 framework-mode app skeleton                        |
+| Template       | Plugins it registers                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| _(none)_       | `RuntimePlugin` only                                                                                                 |
+| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenAPI + the `errorHandler()` middleware        |
+| `microservice` | The REST set + Messaging, Queue, Resilience, Telemetry, CQRS, Events, ServiceDiscovery                               |
+| `class-based`  | The REST set + `DecoratorPlugin` and `DiPlugin`, with a decorated controller and an injected service already written |
+| `full-stack`   | Composed through `@setu-ts/full-stack-starter`, plus a React Router 8 framework-mode app skeleton                    |
 
-`exceptions` ships middleware rather than a plugin, which is why `rest` registers nine plugins and
-adds `errorHandler()` to the pipeline separately.
+`exceptions` ships middleware rather than a plugin, which is why `rest` registers eight plugins and
+adds `errorHandler()` to the pipeline separately. `class-based` was previously called `nest`; the
+old name is refused with a message naming the new one.
 
 Every scaffolded project — templated or not — exports `createApp()` from `setu.config.ts`. `main.ts`
 imports it to start the server and the CLI imports it to discover plugin-contributed commands, so
 the plugin list has exactly one home. The factory does not start the app: importing a module that
 binds a socket would make command discovery bind one too.
 
-### Decorators and DI are independent choices
+### Decorators and DI are one choice, and functional is the default
 
-Decorators are optional, dependency injection is optional, and the two are separate axes. The
-template decides decorators; `--di` decides the container.
+Decorators are optional and dependency injection is optional — and they are one axis with two
+complete positions rather than a spectrum. The default is **functional**: no `DecoratorPlugin`, no
+`DiPlugin`, `ctx`-first handlers, plain exported functions for services. `--template class-based` is
+the opt-in, and it always brings both plugins together.
 
-| You want                    | Scaffold with                       | You get                                                                                                                      |
-| --------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Neither                     | `setu new app`                      | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service` and `g job` all work.                           |
-| Decorators, no container    | `setu new app --template rest`      | `DecoratorPlugin`, so `g controller` and `g module` work. `@Injectable` classes resolve from the kernel's `ServiceRegistry`. |
-| A container, no decorators  | `setu new app --di`                 | `DiPlugin` on the minimal set. Nothing generated changes shape; there is simply a container present.                         |
-| Both                        | `setu new app --template rest --di` | `@Injectable` classes are constructed through the container and their `scope` is honored.                                    |
-| Both, plus a worked example | `setu new app --template nest`      | The above, with the decorated controller and injected service written for you.                                               |
+| You want    | Scaffold with                         | You get                                                                                                        |
+| ----------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Neither     | `setu new app`                        | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g module` and `g job` all work. |
+| Functional  | `setu new app --template rest`        | The REST plugin set. `g module` writes a plain service and a registered route with `GET` and `POST` handlers.  |
+| Class-based | `setu new app --template class-based` | `DecoratorPlugin` + `DiPlugin`, decorated controllers, `@Injectable` services, and class module barrels.       |
 
-`--di` changes the **composition**, never the generated source: `DecoratorPlugin` branches on the
-container's presence, so the same `@Injectable` class works either way — what changes is the
-lifecycle it gets. Adding `--di` to `--template nest` is a no-op, because that template already
-registers `DiPlugin` and the kernel refuses a duplicate plugin name at `start()`.
+The choice **persists**. `setu generate` reads the target project's manifest, so a project holding
+`@setu-ts/decorator-plugin` gets class output and one without it gets functional output — a later
+generate cannot silently emit the other style. That is also why `g controller` is refused in a
+functional project: its emitted source imports `@setu-ts/decorator-plugin`, so an ungated one could
+not resolve its own import. The refusal names `setu generate route`, which registers handlers on the
+router API and needs no decorators.
+
+**The independent `--di` flag was removed.** It is refused with a message pointing at
+`--template class-based`; there is no longer a decorator-only or container-only composition, because
+those are the incoherent middle of the axis. A project scaffolded with the old flag keeps working —
+generation reads the packages it actually has.
 
 One consequence worth knowing before you reach for it: `DecoratorPlugin.registerService` registers a
 provider on the container when one is present and never touches the kernel registry, so
-`services.get('<name>-service')` resolves a decorated service **only in a project without `--di`**.
-See [Decorators — Injectable Classes](./decorators.md#injectable-classes).
+`services.get('<name>-service')` resolves a decorated service **only in a project without
+`DiPlugin`**. In a `class-based` project, resolve through the container instead. See
+[Decorators — Injectable Classes](./decorators.md#injectable-classes).
 
 ### Runtime targets
 
@@ -172,12 +181,28 @@ schematics that render a barrel — the `modules` and `artifacts` already presen
 
 ## Domain modules
 
-`setu generate module` is the one aggregate schematic. It emits five files and rewrites the
-aggregate barrel:
+`setu generate module` is the aggregate schematic, and its output follows the project's style.
 
 ```bash
 setu g module orders
 ```
+
+In a **functional** project it writes a plain service, its test, a module barrel, and a route module
+the managed routes barrel already registers — so the module serves requests with no edit to
+`setu.config.ts`:
+
+```
+src/modules/orders/
+├── index.ts                      # the module's own barrel
+├── orders.service.ts             # export function listOrders()
+└── orders.service.test.ts        # describe/it + expect
+src/routes/
+├── index.ts                      # managed: registerGeneratedRoutes(app.router)
+└── orders.routes.ts              # registerOrdersRoutes — GET / and POST / (201)
+```
+
+In a **class-based** project it writes the decorated aggregate and rewrites the module barrel, which
+the scaffolded `setu.config.ts` already spreads into `DecoratorPlugin`:
 
 ```
 src/modules/
@@ -189,15 +214,15 @@ src/modules/
     └── orders.service.test.ts    # describe/it + expect
 ```
 
-`setu.config.ts` already spreads both aggregate arrays into `DecoratorPlugin`, so the module serves
-requests immediately. It needs `@setu-ts/decorator-plugin`, so scaffold with `--template rest`,
-`microservice` or `nest`.
+The schematic is **ungated**: it works in every project shape, including one scaffolded with no
+template at all. Which of the two shapes you get is decided by whether `@setu-ts/decorator-plugin`
+is installed.
 
 **A decorated handler receives only its decorated parameters.** The plugin builds the argument list
-from parameter metadata alone and never passes the request context positionally, so a `ctx`
-parameter would arrive `undefined`. Return a plain value and the plugin serializes it as JSON; reach
-for `setu generate route` when a handler needs the context itself — to set a status code or stream a
-response. See
+from parameter metadata alone and never passes the request context positionally, so a bare `ctx`
+parameter would arrive `undefined` — a `500` on every request. Use `@Ctx()`, the built-in parameter
+decorator, when a handler needs the context itself; that is how the generated `create` method sets a
+real `201`. Return a plain value and the plugin serializes it as JSON. See
 [Decorators — The Authenticated Principal](./decorators.md#the-authenticated-principal).
 
 ## Monorepos

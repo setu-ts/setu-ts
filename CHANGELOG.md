@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Generated projects are functional by default, and decorators plus DI are one opt-in.**
+  `--template rest` and `--template microservice` no longer register `DecoratorPlugin`, and
+  `setu generate` now derives its output style from the packages the target project actually holds:
+  a project with `@setu-ts/decorator-plugin` gets decorated classes, and one without it gets
+  `ctx`-first routes and plain exported functions. `setu generate module` is **ungated** as a result
+  — in a functional project it writes a service plus a `src/routes/<name>.routes.ts` module the
+  managed routes barrel already registers, so the module serves `GET /<name>` and `POST /<name>` (a
+  real `201`) with no edit to `setu.config.ts`. Decorated write handlers now take `@Ctx()`, which is
+  how they set that status.
+
+  **Nothing about an existing project changes.** Style is read from its manifest, so a project
+  scaffolded with decorators keeps generating decorated classes, including one that holds
+  `DecoratorPlugin` without `DiPlugin`.
+
+### Removed
+
+- **`--template nest` was renamed to `--template class-based`.** The composition is unchanged — the
+  REST set plus `DecoratorPlugin` and `DiPlugin`, with a decorated controller and an injected
+  service written for you. The framework has a class-based mode, not a NestJS mode, and the name
+  said otherwise. The old name is refused with a message naming the new one rather than falling into
+  the generic unknown-template error.
+- **`setu new --di` was removed**, and is refused with a message pointing at
+  `--template class-based`. Decorators and dependency injection were independently selectable, which
+  made four compositions out of one axis; two of them — decorators without a container, and a
+  container with nothing decorated to construct — are the incoherent middle. `--template full-stack`
+  consequently has no DI opt-in from the CLI at all; `FullStackStarterOptions.di` is still there for
+  an application composing the starter itself.
+
+  Migration: `--template rest --di` and `--template nest --di` both become `--template class-based`;
+  a bare `--di` has no direct equivalent, and a project wanting a container without decorators
+  should register `DiPlugin()` in its own `setu.config.ts`.
+
 ### Added
 
 - **`@Ctx()` for decorated controller handlers.** The decorator-plugin now injects the active

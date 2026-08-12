@@ -20,43 +20,21 @@ import {
   SERVICES_EXPORT,
 } from '../schematics/module-barrel.ts';
 import type { LocalImport, TemplateManifest, Wiring } from './registry.ts';
+import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 
 /** Specifier the generated `setu.config.ts` imports the barrel from. */
 const BARREL_SPECIFIER = `./${MODULES_DIR}/index.ts`;
 
 /**
- * Test dependencies the module schematic's emitted `*.service.test.ts` imports.
- *
- * A host template MUST declare these, or the first `deno test` a developer runs
- * fails with `Import "@std/testing/bdd" not a dependency and not in import map` —
- * the CLI would have generated a test file that cannot run.
- *
- * Both forms are needed because the two target families resolve differently:
- * `deno.json` `imports` for Deno and Cloudflare Workers, and npm aliases for Node
- * and Bun, which get a `package.json` and no `deno.json` at all. The alias form
- * matches how those targets already reach `@setu-ts/*`.
- */
-const TEST_DEPENDENCY_VERSIONS = {
-  '@std/testing': '1.0.19',
-  '@std/expect': '1.0.20',
-} as const;
-
-/**
  * Manifest additions every functional module-hosting template merges in.
  *
- * Functional and class-based module tests both import the standard test
- * packages. The health permission belongs to the REST baseline, while the
- * decorator compiler setting is restricted to the class-based opt-in below.
+ * The test dependencies come from {@linkcode TEST_DEPENDENCY_MANIFEST}, which
+ * every host carries now that `setu generate module` is ungated. What is added
+ * here is the REST baseline's health permission; the decorator compiler setting
+ * is restricted to the class-based opt-in below.
  */
 export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
-  denoImports: Object.fromEntries(
-    Object.entries(TEST_DEPENDENCY_VERSIONS).map(([pkg, v]) => [pkg, `jsr:${pkg}@^${v}`]),
-  ),
-  npmDevDependencies: Object.fromEntries(
-    Object.entries(TEST_DEPENDENCY_VERSIONS).map((
-      [pkg, v],
-    ) => [pkg, `npm:@jsr/${pkg.slice(1).replace('/', '__')}@^${v}`]),
-  ),
+  ...TEST_DEPENDENCY_MANIFEST,
   // `HealthPlugin`'s `self` indicator reads `runtime.hostname()` on every probe.
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.

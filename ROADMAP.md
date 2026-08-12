@@ -6595,6 +6595,23 @@ Measured in the smoke workspace, the two styles cost 241 and 255 lines for compa
 functional path is not more verbose; what it removes is two barrel files, a hand-matched token
 string, and a plugin whose presence silently changes how every service is constructed.
 
+**Two published CLI options were removed to get there, and neither is silent.** `--di` was the
+independent axis this section replaces; it is refused with a message naming
+`--template
+class-based`. `--template nest` was renamed to `class-based` — the composition is
+unchanged, and the old name is refused through a renamed-template map rather than the generic
+unknown-name error, because a published template name is public surface (AI_GUIDELINES §9.2) and
+"expected one of: …" does not say which entry took over.
+
+**Two capabilities are genuinely lost, deliberately.** `--template full-stack` now has no DI opt-in
+from the CLI at all, so `FullStackStarterOptions.di` — which M61 made reachable from `setu new` and
+proved with a real build and boot — is again reachable only by an application composing the starter
+itself; giving that template a class-based variant would reintroduce the spectrum this milestone
+removes. And `setu generate service` in the default composition emits a file with no registration
+site, because a plain exported function has none to have: M60's "eleven of thirteen artifacts wired"
+no longer describes the default world, and the emitted JSDoc says so rather than implying a barrel
+that is not written.
+
 ## Milestone 66: Database Adapters That Have Been Executed
 
 **Package:** `@setu-ts/database-plugin`

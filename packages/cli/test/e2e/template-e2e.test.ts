@@ -602,6 +602,37 @@ describe('setu generate module, end to end', () => {
     expect(barrel.match(/from '\.\/user\/user\.controller\.ts'/g)?.length).toBe(1);
   });
 
+  // The module schematic is UNGATED since M65, so it emits a runnable test into
+  // every host — including the two that declared none of what that test
+  // imports. Both scaffolded cleanly, generated cleanly, reported `created
+  // …/widget.service.test.ts`, and then failed the developer's first `deno
+  // test` with `Import "@std/testing/bdd" not a dependency and not in import
+  // map`: the M58 defect, reintroduced by ungating.
+  //
+  // Checked with a real `deno check` of the emitted TEST file, not a manifest
+  // assertion — a manifest assertion is what the unit gate does, and it cannot
+  // see whether Deno actually resolves the specifier from the project.
+  for (
+    const [label, argv] of [
+      ['no template', ['new', 'bare']],
+      ['--template rest', ['new', 'bare', '--template', 'rest']],
+      ['--template full-stack', ['new', 'bare', '--template', 'full-stack']],
+    ] as const
+  ) {
+    it(`type-checks the module test it generates into a ${label} project`, async () => {
+      expect(await run(argv)).toBe(0);
+      const project = `${root}/bare`;
+      expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(0);
+
+      await useWorkspacePackages(project);
+      const { code, stderr } = await denoCheck(project, [
+        `${project}/src/modules/widget/widget.service.test.ts`,
+      ]);
+      expect(stderr).not.toContain('not in import map');
+      expect(code).toBe(0);
+    });
+  }
+
   /**
    * Boots a scaffolded project in a subprocess and returns the probe's JSON.
    *

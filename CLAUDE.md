@@ -2113,11 +2113,46 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   controls were each observed failing and reverted, including `Symbol.for` → `Symbol()`, which fails
   exactly the two cross-copy tests while the guard and the rejection cases still pass) — complete
   (PR #154)
-- **Milestone 65** (`packages/cli` — functional default and `class-based` opt-in: REST and
-  microservice scaffolds omit decorators and DI; `--template class-based` installs the coherent
-  decorator-and-DI pair; `generate service` and `generate module` follow the persisted composition;
-  functional modules register `ctx`-first routes; and generated decorated writes use `@Ctx()` for
-  their `201` response) — complete (PR pending).
+- **Milestone 65** (`packages/cli` — functional default and `class-based` opt-in. `REST_PLUGINS`
+  drops `DecoratorPlugin`, so `rest` and the `microservice` set it composes from install neither
+  opt-in plugin; `--template class-based` installs the coherent decorator-and-DI pair. The selector
+  is the generated manifest itself — one internal `generatorMode(plugins)` reading
+  `decorator-plugin` — so `SchematicOptions` gains NO field and a later `generate` cannot silently
+  emit the other style. Functional `generate module` is **ungated** and emits its registration
+  through the existing routes seam rather than a new barrel, so the module is live at startup;
+  decorated write handlers take M64's `@Ctx()`, which is what lets them answer a real `201`. **Two
+  published CLI options were removed**, both with named refusals rather than silence: `--di` (the
+  independent axis produced two incoherent compositions) points at `--template class-based`, and
+  `nest` — renamed to `class-based`, since the framework has a class-based mode, not a NestJS one —
+  is refused through a `RENAMED_TEMPLATES` map rather than the generic unknown-name error (§9.2: a
+  published template name is public surface, and "expected one of: …" does not say which entry took
+  over). Two capabilities are genuinely gone and are recorded rather than implied:
+  `--template full-stack` has no DI opt-in at all now, so `FullStackStarterOptions.di` is again
+  unreachable from `setu new` (M61 made it reachable and proved it with a real build and boot), and
+  `generate service` in the default composition emits a file with **no registration site** — a plain
+  function has none to have, so M60's "eleven of thirteen wired" no longer describes the default
+  world.
+
+  **Verification found one defect and two deleted proofs.** Ungating `module` made every host able
+  to emit a `*.service.test.ts`, but only the templates carrying `FUNCTIONAL_MODULE_MANIFEST`
+  declared `@std/testing`/`@std/expect` — so the no-template and `full-stack` hosts scaffolded
+  cleanly, reported `created …/widget.service.test.ts`, and then failed `deno check` on an import
+  the CLI itself had just written. That is the M58 defect exactly, reintroduced by ungating, and no
+  gate saw it because the module e2e ran on `class-based` alone while the minimal seam probe
+  generates route/middleware/plugin and never a module. The deps moved to their own
+  `templates/test-deps.ts` and are now asserted across every host by iteration rather than by name,
+  plus a real `deno check` of the emitted test in three project shapes; reverting fails 4 unit steps
+  and 2 e2e steps while `--template rest` still passes, so the check discriminates. The seam probe
+  had also DROPPED the microservice host with its `CQRS_PROBE`, leaving the generated command, query
+  and event handlers wired by nothing observable, and dropped the service-token read rather than
+  re-pointing it at the container — where `DecoratorPlugin` actually puts an `@Injectable` once
+  `DiPlugin` is present (the M61 finding, and the reason the old `services.get` form would have
+  thrown on the new host). Both are restored, the probe now boots BOTH opt-in hosts, and each
+  restored assertion was observed failing against a deliberately wrong expectation. ~530 net lines
+  of unit coverage had also been deleted rather than adapted: the module-barrel dedup and
+  byte-identity guards, the never-`Deno.test` check, `assertSeamContract('service', …)`, name-casing
+  idempotence, and the whole M61 JSDoc-resolution suite whose text still ships — all restored across
+  both style arms) — complete (PR pending).
 - **Next milestone** — **M66** (database adapters that have been executed). M63–M68 come from the
   same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
   M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated

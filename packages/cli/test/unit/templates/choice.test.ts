@@ -44,6 +44,17 @@ describe('resolveTemplateChoice', () => {
     expect(choice.message).toContain('microservice');
   });
 
+  // A published template name is public surface (§9.2). The generic refusal
+  // lists four names without saying which one took over, so a `nest` user is
+  // left guessing that `class-based` is the same template renamed.
+  it('names the replacement for a renamed template', () => {
+    const choice = choose(['--template', 'nest']);
+    expect(choice.ok).toBe(false);
+    if (choice.ok) return;
+    expect(choice.message).toContain('was renamed to "class-based"');
+    expect(choice.message).not.toContain('Unknown template');
+  });
+
   // The registry is a Map, so an inherited property name misses cleanly rather
   // than resolving something off Object.prototype.
   it('refuses an inherited property name', () => {

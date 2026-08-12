@@ -60,9 +60,13 @@ app.register(DecoratorPlugin()); // Required for decorator processing
 `DecoratorPlugin` branches on the container's presence: with `DiPlugin` registered, an `@Injectable`
 class is constructed through the container and its `scope` is honored; without it, the class is
 constructed once and registered in the kernel's `ServiceRegistry`. The decorated source is identical
-either way — what changes is the lifecycle. Scaffolding the two combinations is
-`setu new app --template rest` and `setu new app --template rest --di` (see the
-[CLI Guide](./cli.md#decorators-and-di-are-independent-choices)).
+either way — what changes is the lifecycle.
+
+`setu new app --template class-based` scaffolds both together, which is the only combination the CLI
+writes: the default templates install neither plugin, and the independent `--di` flag has been
+removed. An older project may hold `DecoratorPlugin` alone, and it keeps working — that is the
+container-less path described above. See the
+[CLI Guide](./cli.md#decorators-and-di-are-one-choice-and-functional-is-the-default).
 
 ## Controllers
 
