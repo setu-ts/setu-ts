@@ -3,7 +3,7 @@
  * `--template`.
  *
  * `setu new` and `setu generate app` both choose a template, refuse an unknown
- * name, and read `--di`. Duplicating that would duplicate the user-facing
+ * name. Duplicating that would duplicate the user-facing
  * message as well as the logic (AI_GUIDELINES §11.1), and two copies of a
  * refusal drift the moment one of them is improved.
  *
@@ -13,7 +13,7 @@
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import { TEMPLATES } from '../constants.ts';
-import { getTemplate, type TemplateDefinition, type TemplateFeatures } from './registry.ts';
+import { getTemplate, type TemplateDefinition } from './registry.ts';
 
 /**
  * The outcome of reading the template-related flags.
@@ -26,8 +26,6 @@ export type TemplateChoice =
     readonly ok: true;
     /** The selected template, or undefined when none was named. */
     readonly template?: TemplateDefinition;
-    /** The per-project choices the renderer branches on. */
-    readonly features: TemplateFeatures;
   }
   | {
     readonly ok: false;
@@ -36,7 +34,8 @@ export type TemplateChoice =
   };
 
 /**
- * Reads `--template` and `--di`, refusing a template that does not exist.
+ * Reads `--template`, refusing a template that does not exist or the retired
+ * independent DI switch.
  *
  * The runtime target is deliberately NOT a parameter. It used to be, to refuse
  * a template/runtime pairing the template declared unsupported — but no
@@ -46,16 +45,19 @@ export type TemplateChoice =
  * registers, in `resolveHost`, rather than by refusing the pairing here.
  *
  * @param args - The parsed arguments for the verb
- * @returns The chosen template and features, or the refusal to print
+ * @returns The chosen template, or the refusal to print
  */
 export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
-  // Read once, here, so the flag cannot be honored by one renderer and ignored
-  // by another. `--di` is boolean: it is absent from VALUE_FLAGS, so `parseArgs`
-  // records it as `true` rather than consuming the next token.
-  const features: TemplateFeatures = { di: args.flags['di'] === true };
+  if (args.flags['di'] === true) {
+    return {
+      ok: false,
+      message:
+        '`--di` is no longer supported. Use `--template class-based` for decorators and DI together.',
+    };
+  }
 
   const templateFlag = stringFlag(args.flags, 'template');
-  if (templateFlag === undefined) return { ok: true, features };
+  if (templateFlag === undefined) return { ok: true };
 
   // The registry lookup IS the unknown-name test: it is a `Map`, so an
   // inherited property name (`constructor`, `__proto__`) misses cleanly. A
@@ -69,5 +71,5 @@ export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
     };
   }
 
-  return { ok: true, template, features };
+  return { ok: true, template };
 }

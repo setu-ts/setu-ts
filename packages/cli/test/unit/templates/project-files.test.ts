@@ -25,7 +25,6 @@ describe('resolveHost', () => {
   it('fills in every optional member of a bare host', () => {
     const resolved = resolveHost(
       { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
-      { di: false },
       'deno',
     );
     expect(resolved.localImports).toEqual([]);
@@ -37,22 +36,9 @@ describe('resolveHost', () => {
     expect(resolved.manifest).toBeUndefined();
   });
 
-  it('applies --di to a plugin-list host', () => {
-    const resolved = resolveHost(
-      { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
-      { di: true },
-      'deno',
-    );
-    expect(resolved.plugins.map((w) => w.pkg)).toEqual(['runtime', 'di-plugin']);
-  });
-
-  // A starter factory owns the whole plugin set, so a wiring appended here
-  // would be silently dropped by the renderer's factory branch. The flag
-  // reaches that template through the factory's own options instead.
-  it('leaves a factory host plugin list alone under --di', () => {
+  it('leaves a factory host plugin list alone', () => {
     const resolved = resolveHost(
       { plugins: [], middleware: [], appFactory: { pkg: 'full-stack-starter', symbol: 'x' } },
-      { di: true },
       'deno',
     );
     expect(resolved.plugins).toEqual([]);
@@ -62,7 +48,6 @@ describe('resolveHost', () => {
 describe('the entry port', () => {
   const host = resolveHost(
     { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
-    { di: false },
     'deno',
   );
 
@@ -70,7 +55,7 @@ describe('the entry port', () => {
   // entry must not change shape when a member's does. The shutdown half follows
   // it and is asserted separately below.
   it('binds a literal 3000 with no port import', () => {
-    const main = contentsOf([...projectFiles('svc', 'deno', host, { di: false })], 'main.ts');
+    const main = contentsOf([...projectFiles('svc', 'deno', host)], 'main.ts');
     expect(main.startsWith(
       `import { createApp } from './setu.config.ts';\n` +
         `\n` +
@@ -85,7 +70,7 @@ describe('the entry port', () => {
   // a literal that could drift from the generated map.
   it('imports the port when one is named', () => {
     const main = contentsOf(
-      [...projectFiles('svc', 'deno', host, { di: false }, {
+      [...projectFiles('svc', 'deno', host, {
         symbol: 'SERVICE_PORT',
         from: './src/discovery/services.ts',
       })],
@@ -99,7 +84,7 @@ describe('the entry port', () => {
   // Workers has no socket to bind: `start()` takes no port at all, so a port
   // import there would name an identifier nothing reads.
   it('is ignored on the Workers entry, which binds nothing', () => {
-    const files = projectFiles('svc', 'cloudflare-workers', host, { di: false }, {
+    const files = projectFiles('svc', 'cloudflare-workers', host, {
       symbol: 'SERVICE_PORT',
       from: './src/discovery/services.ts',
     });
@@ -114,7 +99,6 @@ describe('the entry port', () => {
 describe('the entry shutdown handler', () => {
   const host = resolveHost(
     { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
-    { di: false },
     'deno',
   );
 
@@ -126,7 +110,7 @@ describe('the entry shutdown handler', () => {
    */
   function entryFor(runtime: TargetRuntime): string {
     return contentsOf(
-      [...projectFiles('svc', runtime, host, { di: false })],
+      [...projectFiles('svc', runtime, host)],
       runtime === 'cloudflare-workers' ? 'src/index.ts' : 'main.ts',
     );
   }
@@ -168,7 +152,7 @@ describe('the entry shutdown handler', () => {
     it(`declares the types the ${runtime} listener needs`, () => {
       const expected = runtime === 'node' ? '@types/node' : '@types/bun';
       const manifest = JSON.parse(
-        contentsOf([...projectFiles('svc', runtime, host, { di: false })], 'package.json'),
+        contentsOf([...projectFiles('svc', runtime, host)], 'package.json'),
       ) as { devDependencies?: Record<string, string> };
       expect(manifest.devDependencies?.[expected]).toBeDefined();
     });

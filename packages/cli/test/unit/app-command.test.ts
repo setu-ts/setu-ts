@@ -549,10 +549,10 @@ describe('runAppCommand', () => {
       expect(h.fs.has(`/ws/apps/web/${DISCOVERY_MODULE}`)).toBe(true);
     });
 
-    it('passes --di through to the member', async () => {
+    it('rejects the retired independent DI flag', async () => {
       const h = harness([]);
-      expect(await h.run(['app', 'orders', '--di'])).toBe(0);
-      expect(h.fs.read('/ws/apps/orders/setu.config.ts')).toContain('DiPlugin()');
+      expect(await h.run(['app', 'orders', '--di'])).toBe(2);
+      expect(h.err.text()).toContain('--template class-based');
     });
   });
 

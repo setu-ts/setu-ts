@@ -10,7 +10,7 @@ import {
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS, REST_TEMPLATE } from '../../src/templates/rest.ts';
 import { MICROSERVICE_TEMPLATE } from '../../src/templates/microservice.ts';
-import { NEST_TEMPLATE } from '../../src/templates/nest.ts';
+import { CLASS_BASED_TEMPLATE } from '../../src/templates/class-based.ts';
 
 const symbols = (wirings: readonly Wiring[]) => wirings.map((w) => w.symbol);
 
@@ -65,7 +65,6 @@ describe('rest template', () => {
       'HealthPlugin',
       'MetricsPlugin',
       'OpenApiPlugin',
-      'DecoratorPlugin',
     ]);
   });
 
@@ -211,20 +210,12 @@ describe('every template', () => {
     }
   });
 
-  // A factory returns the application, so anything in `plugins` would be
-  // silently dropped by the renderer. Enforced across the registry here rather
-  // than by a runtime check no user input could ever reach.
-  // `--di` reaches a plugin-list template by appending a wiring, and a
-  // starter-composed one through its factory's own options — two mechanisms, so
-  // a new `appFactory` template that forgets the second would accept the flag
-  // and silently ignore it, with nothing failing. `full-stack` is the only such
-  // template today; this makes the next one fail here instead.
-  it('honors --di in every factory template that renders arguments', () => {
+  it('renders each factory template from its runtime alone', () => {
     for (const template of listTemplates()) {
       const args = template.appFactory?.args;
       if (args === undefined) continue;
       for (const runtime of TARGET_RUNTIMES) {
-        expect(args(runtime, { di: true })).not.toBe(args(runtime, { di: false }));
+        expect(args(runtime).length).toBeGreaterThan(0);
       }
     }
   });
@@ -264,13 +255,17 @@ describe('packagesOf', () => {
   });
 });
 
-describe('nest template', () => {
-  it('is the rest set plus DiPlugin', () => {
-    expect(symbols(NEST_TEMPLATE.plugins)).toEqual([...symbols(REST_PLUGINS), 'DiPlugin']);
+describe('class-based template', () => {
+  it('is the functional REST set plus decorators and DI', () => {
+    expect(symbols(CLASS_BASED_TEMPLATE.plugins)).toEqual([
+      ...symbols(REST_PLUGINS),
+      'DecoratorPlugin',
+      'DiPlugin',
+    ]);
   });
 
   it('reuses the rest middleware, so errorHandler stays outermost', () => {
-    expect(NEST_TEMPLATE.middleware).toEqual(REST_MIDDLEWARE);
+    expect(CLASS_BASED_TEMPLATE.middleware).toEqual(REST_MIDDLEWARE);
   });
 
   it('carries the decorator class lists as rendered args', () => {
@@ -278,7 +273,7 @@ describe('nest template', () => {
     // controller and service barrels, then the module barrel — so `setu g controller`
     // and `setu g module` both ADD to this registration rather than displacing the
     // template's own showcase classes.
-    const decorator = NEST_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
+    const decorator = CLASS_BASED_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
     expect(decorator?.args).toBe(
       '{\n' +
         '        controllers: [GreetingController, ...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
@@ -291,7 +286,7 @@ describe('nest template', () => {
     // Three plugins now take a seam. Everything else must stay a bare call, or a
     // template has grown configuration nothing asked for.
     const withSeams = new Set(['decorator-plugin', 'health-plugin', 'metrics-plugin']);
-    for (const wiring of NEST_TEMPLATE.plugins) {
+    for (const wiring of CLASS_BASED_TEMPLATE.plugins) {
       if (withSeams.has(wiring.pkg)) {
         expect(wiring.args).toBeDefined();
         continue;
@@ -301,39 +296,33 @@ describe('nest template', () => {
   });
 
   it('does not leak its example classes into the shared REST_PLUGINS list', () => {
-    // NEST_PLUGINS is built by mapping REST_PLUGINS; a mutating implementation
+    // CLASS_BASED_PLUGINS is built from REST_PLUGINS; a mutating implementation
     // would leak the args string into the rest and microservice templates.
     //
-    // `REST_PLUGINS` is the raw constant, so its decorator entry carries no args
-    // at all — the seam is applied per template, not to the shared list.
-    const restDecorator = REST_PLUGINS.find((w) => w.pkg === 'decorator-plugin');
-    expect(restDecorator?.args).toBeUndefined();
+    expect(REST_PLUGINS.some((w) => w.pkg === 'decorator-plugin')).toBe(false);
 
-    // The other two templates DO carry the seams, but must not have picked up nest's
-    // showcase classes along with them.
+    // The other templates must not have picked up the class-based showcase.
     for (const plugins of [REST_TEMPLATE.plugins, MICROSERVICE_TEMPLATE.plugins]) {
       const decorator = plugins.find((w) => w.pkg === 'decorator-plugin');
-      expect(decorator?.args).toContain('...APP_CONTROLLERS, ...MODULE_CONTROLLERS');
-      expect(decorator?.args).toContain('...APP_SERVICES, ...MODULE_SERVICES');
-      expect(decorator?.args).not.toContain('Greeting');
+      expect(decorator).toBeUndefined();
     }
   });
 
   it('imports every identifier its args string names', () => {
-    const imported = (NEST_TEMPLATE.localImports ?? []).flatMap((l) => l.symbols);
+    const imported = (CLASS_BASED_TEMPLATE.localImports ?? []).flatMap((l) => l.symbols);
     expect(imported).toContain('GreetingController');
     expect(imported).toContain('GreetingService');
   });
 
   it('emits a source file for each locally imported module', () => {
-    const emitted = (NEST_TEMPLATE.files ?? []).map((f) => `./${f.path}`);
-    for (const local of NEST_TEMPLATE.localImports ?? []) {
+    const emitted = (CLASS_BASED_TEMPLATE.files ?? []).map((f) => `./${f.path}`);
+    for (const local of CLASS_BASED_TEMPLATE.localImports ?? []) {
       expect(emitted).toContain(local.from);
     }
   });
 
   it('emits the controller, the service, and every seam barrel it can consume', () => {
-    expect((NEST_TEMPLATE.files ?? []).map((f) => f.path)).toEqual([
+    expect((CLASS_BASED_TEMPLATE.files ?? []).map((f) => f.path)).toEqual([
       'src/greeting-service.ts',
       'src/greeting-controller.ts',
       'src/modules/index.ts',
@@ -347,18 +336,16 @@ describe('nest template', () => {
     ]);
   });
 
-  // `nest` is the REST set plus `DiPlugin`, and `DiPlugin` hosts no seam — so its seam
-  // list must equal the REST one. A divergence here means the two templates picked up
-  // different seam sets, which is exactly the drift the shared `REST_SEAMS` prevents.
-  it('hosts the same seams as rest, and neither hosts the cqrs or events ones', () => {
+  it('hosts class seams without the microservice cqrs or events seams', () => {
     const seamPaths = (files: readonly { readonly path: string }[]) =>
       files.map((f) => f.path).filter((p) => p.endsWith('/index.ts')).sort();
-    expect(seamPaths(NEST_TEMPLATE.files ?? [])).toEqual(seamPaths(REST_TEMPLATE.files ?? []));
-    expect(seamPaths(NEST_TEMPLATE.files ?? [])).not.toContain('src/cqrs/index.ts');
+    expect(seamPaths(CLASS_BASED_TEMPLATE.files ?? [])).not.toContain('src/cqrs/index.ts');
     expect(seamPaths(REST_TEMPLATE.files ?? [])).not.toContain('src/events/index.ts');
   });
 
   it('declares di-plugin in the packages a manifest must pin', () => {
-    expect(packagesOf(NEST_TEMPLATE.plugins, NEST_TEMPLATE.middleware)).toContain('di-plugin');
+    expect(packagesOf(CLASS_BASED_TEMPLATE.plugins, CLASS_BASED_TEMPLATE.middleware)).toContain(
+      'di-plugin',
+    );
   });
 });

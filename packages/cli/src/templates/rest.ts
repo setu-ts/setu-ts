@@ -5,14 +5,8 @@
  */
 
 import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
+import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
 import {
-  MODULE_SEAM_FILES,
-  MODULE_SEAM_LOCAL_IMPORT,
-  MODULE_SEAM_MANIFEST,
-  withModuleSeam,
-} from './module-seam.ts';
-import {
-  decoratorSeamExtras,
   seamFiles,
   seamLocalImports,
   seamPluginSpreads,
@@ -48,9 +42,6 @@ export const REST_PLUGINS: readonly Wiring[] = [
   { pkg: 'health-plugin', symbol: 'HealthPlugin' },
   { pkg: 'metrics-plugin', symbol: 'MetricsPlugin' },
   { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin' },
-  // Present so `setu generate controller` works in a scaffolded REST project:
-  // that schematic emits @Controller/@Get/@Post and is gated on this package.
-  { pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' },
 ];
 
 /**
@@ -63,9 +54,6 @@ const REST_PACKAGES: ReadonlySet<string> = new Set(REST_PLUGINS.map((p) => p.pkg
 
 /** The generated-artifact seams a REST project can consume. */
 export const REST_SEAMS: ReturnType<typeof seamsFor> = seamsFor(REST_PACKAGES);
-
-/** The standalone controller and service barrels the decorator wiring must also name. */
-const REST_DECORATOR_EXTRAS = decoratorSeamExtras(REST_SEAMS);
 
 /**
  * Middleware added with `app.middleware.add(...)`.
@@ -100,18 +88,11 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
 export const REST_TEMPLATE: TemplateDefinition = {
   name: 'rest',
   description: 'REST API — config, logging, validation, security, health, metrics, OpenAPI',
-  plugins: withPluginOptionSeams(
-    withModuleSeam(
-      REST_PLUGINS,
-      REST_DECORATOR_EXTRAS.controllers,
-      REST_DECORATOR_EXTRAS.services,
-    ),
-    REST_SEAMS,
-  ),
+  plugins: withPluginOptionSeams(REST_PLUGINS, REST_SEAMS),
   middleware: REST_MIDDLEWARE,
-  localImports: [MODULE_SEAM_LOCAL_IMPORT, ...seamLocalImports(REST_SEAMS)],
-  files: [...MODULE_SEAM_FILES, ...seamFiles(REST_SEAMS)],
-  manifest: MODULE_SEAM_MANIFEST,
+  localImports: seamLocalImports(REST_SEAMS),
+  files: seamFiles(REST_SEAMS),
   pluginSpreads: seamPluginSpreads(REST_SEAMS),
   setupCalls: seamSetupCalls(REST_SEAMS),
+  manifest: FUNCTIONAL_MODULE_MANIFEST,
 };

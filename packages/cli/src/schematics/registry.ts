@@ -158,11 +158,7 @@ const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, Schemat
   ['plugin', { factory: generatePlugin }],
   // Gated for the same reason as `controller`: the module's emitted controller
   // imports @Controller/@Get/@Inject/@Post.
-  ['module', {
-    factory: generateModule,
-    requiresPlugin: 'decorator-plugin',
-    alternative: ROUTE_ALTERNATIVE,
-  }],
+  ['module', { factory: generateModule }],
   // Gated: the emitted class uses @Controller/@Get/@Post, so a project without
   // the decorator plugin gets source that cannot resolve its own import.
   ['controller', {

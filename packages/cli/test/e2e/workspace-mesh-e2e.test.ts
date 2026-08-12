@@ -389,11 +389,8 @@ describe('a three-service workspace — end to end', () => {
       for (const file of ['deno.json', 'main.ts', 'setu.config.ts', 'README.md', '.gitignore']) {
         expect((await Deno.stat(`${dir}/${file}`)).isFile).toBe(true);
       }
-      // The seam directories a generated artifact lands in, all present from
-      // scaffold time so `setu generate` never has to edit the config.
-      for (
-        const seam of ['routes', 'middleware', 'plugins', 'controllers', 'services', 'modules']
-      ) {
+      // Functional members have only the seams their composition can consume.
+      for (const seam of ['routes', 'middleware', 'plugins']) {
         expect((await Deno.stat(`${dir}/src/${seam}/index.ts`)).isFile).toBe(true);
       }
       expect((await Deno.stat(`${dir}/${DISCOVERY_MODULE}`)).isFile).toBe(true);
@@ -408,8 +405,7 @@ describe('a three-service workspace — end to end', () => {
       await run(['new', 'acme', '--workspace', '--port', String(base)]),
     ).toBe(0);
     const ws = `${root}/acme`;
-    // --di gives the member a container; --template nest brings the decorators.
-    expect(await run(['g', 'app', 'orders', '--template', 'nest', '--di', '--dir', ws])).toBe(0);
+    expect(await run(['g', 'app', 'orders', '--template', 'class-based', '--dir', ws])).toBe(0);
 
     const project = `${ws}/apps/orders`;
     expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(0);

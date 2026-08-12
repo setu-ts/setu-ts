@@ -47,21 +47,18 @@ describe('help output', () => {
     expect(text).toContain('--dir');
   });
 
-  it('documents --di on new, where the flag is accepted', async () => {
+  it('documents class-based as the decorators-and-DI opt-in', async () => {
     const text = await helpText(['new', '--help']);
-    expect(text).toContain('--di');
-    expect(text).toContain('DiPlugin');
-    // Also in the usage line, so it is visible without reading the options list.
-    expect(text).toContain('[--di]');
+    expect(text).toContain('class-based');
+    expect(text).toContain('decorators, constructor injection');
+    expect(/--di\b/.test(text)).toBe(false);
   });
 
-  // `generate` reads the project's manifest to learn what is installed, so a
-  // --di flag there would be a second, contradictable source of the same fact.
-  it('does not offer --di on generate', async () => {
+  it('does not offer the retired independent DI switch', async () => {
     // Word-boundary matched, not substring: `generate --help` documents
     // `--dir <path>`, which contains `--di`.
     expect(/--di\b/.test(await helpText(['generate', '--help']))).toBe(false);
-    expect(/--di\b/.test(await helpText(['new', '--help']))).toBe(true);
+    expect(/--di\b/.test(await helpText(['new', '--help']))).toBe(false);
   });
 
   it('lists every registered schematic, from the registry', async () => {

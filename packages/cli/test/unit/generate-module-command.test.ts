@@ -21,8 +21,8 @@ const manifest = (...packages: readonly string[]) =>
     ),
   });
 
-/** A project whose manifest satisfies the module schematic's gate. */
-const DECORATED = { '/app/deno.json': manifest('decorator-plugin') };
+/** A class-based project manifest. */
+const CLASS_BASED = { '/app/deno.json': manifest('decorator-plugin', 'di-plugin') };
 
 interface Harness {
   readonly fs: FakeFs;
@@ -31,7 +31,7 @@ interface Harness {
   run(argv: readonly string[]): Promise<number>;
 }
 
-function harness(seed: Readonly<Record<string, string>> = DECORATED): Harness {
+function harness(seed: Readonly<Record<string, string>> = CLASS_BASED): Harness {
   const fs = createFakeFs(seed);
   const out = createRecorder();
   const err = createRecorder();
@@ -68,13 +68,13 @@ describe('setu generate module', () => {
     expect(h.fs.read('/app/src/modules/index.ts')).toContain('UserController');
   });
 
-  it('refuses when the decorator plugin is absent, writing nothing', async () => {
+  it('writes functional route output when decorators are absent', async () => {
     const h = harness({ '/app/deno.json': manifest('logger-plugin') });
 
-    expect(await h.run(['module', 'user'])).toBe(1);
+    expect(await h.run(['module', 'user'])).toBe(0);
 
-    expect(h.fs.writes).toEqual([]);
-    expect(h.err.text()).toContain('@setu-ts/decorator-plugin');
+    expect(h.fs.writes).toContain('/app/src/routes/user.routes.ts');
+    expect(h.fs.read('/app/src/routes/user.routes.ts')).toContain('status(201)');
   });
 
   it('lists a previously generated module alongside the new one', async () => {
@@ -156,11 +156,12 @@ describe('setu generate module', () => {
     expect(h.out.text()).not.toContain('module  (unavailable');
   });
 
-  it('is listed unavailable when the decorator plugin is absent', async () => {
+  it('is listed when the decorator plugin is absent', async () => {
     const h = harness({ '/app/deno.json': manifest('logger-plugin') });
 
     expect(await h.run(['--help'])).toBe(0);
 
-    expect(h.out.text()).toContain('module  (unavailable — install @setu-ts/decorator-plugin)');
+    expect(h.out.text()).toContain('module');
+    expect(h.out.text()).not.toContain('module  (unavailable');
   });
 });

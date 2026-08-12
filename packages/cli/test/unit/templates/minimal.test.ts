@@ -49,7 +49,7 @@ describe('MINIMAL_HOST', () => {
     expect(MINIMAL_HOST.middleware).toEqual([]);
   });
 
-  it('composes no starter factory, so --di reaches its plugin list', () => {
+  it('composes no starter factory', () => {
     expect(MINIMAL_HOST.appFactory).toBeUndefined();
   });
 

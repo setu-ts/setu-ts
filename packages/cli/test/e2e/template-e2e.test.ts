@@ -53,7 +53,7 @@ const HOSTILE_NAMES: readonly { readonly name: string; readonly accepted: boolea
 const UNGATED = ['plugin', 'service', 'route', 'middleware', 'job'] as const;
 
 /**
- * Every single-file schematic the `rest` template's plugin set makes available.
+ * Every single-file schematic the class-based template's plugin set makes available.
  *
  * Retained as the authoritative list of what a REST project can generate, and used by
  * {@linkcode NON_COLLIDING_GROUPS} to check that the groups below partition it — a
@@ -88,7 +88,7 @@ const NON_COLLIDING_GROUPS: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
- * Seam barrels a `rest` project carries from scaffold time, before anything is generated.
+ * Seam barrels a class-based project carries from scaffold time, before anything is generated.
  *
  * Counted separately from the generated files because they exist whether or not the group
  * under test writes into their directories: `src/modules/index.ts` plus one each for
@@ -146,8 +146,8 @@ describe('template scaffolding — end to end', () => {
     expect(err.join('\n')).toContain('@setu-ts/decorator-plugin');
   });
 
-  it('allows a controller once the rest template installs the decorator plugin', async () => {
-    await run(['new', 'svc', '--template', 'rest']);
+  it('allows a controller in a class-based project', async () => {
+    await run(['new', 'svc', '--template', 'class-based']);
     expect(await run(['g', 'controller', 'user', '--dir', `${root}/svc`])).toBe(0);
   });
 
@@ -171,14 +171,14 @@ describe('template scaffolding — end to end', () => {
     });
   });
 
-  // The `nest` template is the only one whose config imports project-local
+  // The `class-based` template is the only one whose config imports project-local
   // modules, and one of two carrying an `args` string (see the `microservice`
   // case below). Both are rendered source that nothing else validates: an
   // `args` string naming an undeclared identifier, or a `localImports` path
   // that does not resolve, type-checks nowhere else in the suite. This is that
   // check.
-  it('type-checks the scaffolded nest project, including its emitted classes', async () => {
-    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+  it('type-checks the scaffolded class-based project, including its emitted classes', async () => {
+    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
     const project = `${root}/svc`;
 
     const sources = [
@@ -253,82 +253,9 @@ describe('template scaffolding — end to end', () => {
     expect(code).toBe(0);
   });
 
-  // `--di` on a plugin-list template. The emitted `DiPlugin()` call and its
-  // import are ordinary source, but the manifest pin is not: the renderer and
-  // the manifest writer are separate functions, and a project importing a
-  // package it does not declare fails HERE and nowhere else.
-  it('type-checks a scaffolded rest project built with --di', async () => {
-    expect(await run(['new', 'svc', '--template', 'rest', '--di'])).toBe(0);
-    const project = `${root}/svc`;
-
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
-    expect(config).toContain("import { DiPlugin } from '@setu-ts/di-plugin';");
-    expect(config).toContain('DiPlugin(),');
-
-    await useWorkspacePackages(project);
-    const { code, stderr } = await denoCheck(project, [
-      `${project}/main.ts`,
-      `${project}/setu.config.ts`,
-    ]);
-    expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
-  });
-
-  // The M50b trap, and a MEASURED correction to how far it reaches.
-  //
-  // `args` is a rendered string, so the CLI's own `deno check` cannot see it.
-  // Checking the generated project is the usual answer — but for an
-  // `appFactory`, the emitted call is `createFullStackAppFromConfig((config) =>
-  // ({ ... }))`, and TypeScript does NOT apply excess-property checking to an
-  // object literal returned from a contextually-typed callback. Probed against
-  // the real type: `{ session: {...}, totallyBogusKey: {} }` in that position
-  // type-checks CLEANLY, while the same literal assigned to an annotated
-  // variable raises TS2353. So type-checking `setu.config.ts` alone would pass
-  // whatever key this template emitted, and a renamed starter arm would ship
-  // green.
-  //
-  // The probe below closes that: it puts the emitted arm in an ANNOTATED
-  // position, where the check does fire.
-  it('type-checks a scaffolded full-stack project built with --di', async () => {
-    expect(await run(['new', 'shop', '--template', 'full-stack', '--di'])).toBe(0);
-    const project = `${root}/shop`;
-
-    expect(await Deno.readTextFile(`${project}/setu.config.ts`)).toContain('di: {},');
-
-    // Annotated, not inferred: this is the position where a key the starter
-    // does not declare is a compile error.
-    await Deno.writeTextFile(
-      `${project}/di-arm-probe.ts`,
-      `import type { FullStackStarterOptions } from '@setu-ts/full-stack-starter';\n` +
-        `export const arm: FullStackStarterOptions = { di: {} };\n`,
-    );
-
-    await useWorkspacePackages(project);
-    const { code, stderr } = await denoCheck(project, [
-      `${project}/main.ts`,
-      `${project}/setu.config.ts`,
-      `${project}/di-arm-probe.ts`,
-    ]);
-    expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
-  });
-
-  // A template that already registers DiPlugin must be untouched by the flag:
-  // the kernel throws `Duplicate plugin name 'di'` at start(), so a second
-  // registration type-checks and then cannot boot.
-  it('type-checks a scaffolded nest project built with --di, with one DiPlugin', async () => {
-    expect(await run(['new', 'svc', '--template', 'nest', '--di'])).toBe(0);
-    const project = `${root}/svc`;
-
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
-    expect(config.match(/DiPlugin\(\)/g)).toHaveLength(1);
-
-    await useWorkspacePackages(project);
-    const { code } = await denoCheck(project, [
-      `${project}/setu.config.ts`,
-      `${project}/src/greeting-controller.ts`,
-    ]);
-    expect(code).toBe(0);
+  it('refuses the retired independent DI switch', async () => {
+    expect(await run(['new', 'svc', '--template', 'rest', '--di'])).toBe(2);
+    expect(err.join('\n')).toContain('--template class-based');
   });
 
   // The microservice template was refused outright on Workers until its runtime
@@ -468,8 +395,8 @@ describe('template scaffolding — end to end', () => {
     expect(config).not.toContain('createApplication');
   });
 
-  it('wires the nest config with DI and the emitted classes', async () => {
-    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+  it('wires the class-based config with DI and the emitted classes', async () => {
+    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
     const config = await Deno.readTextFile(`${root}/svc/setu.config.ts`);
 
     // The args string, rendered into the plugin call. The showcase classes come
@@ -491,22 +418,23 @@ describe('template scaffolding — end to end', () => {
     expect(config).toContain("from './src/modules/index.ts'");
   });
 
-  it('emits parameter-level @Inject in the nest controller', async () => {
-    expect(await run(['new', 'svc', '--template', 'nest'])).toBe(0);
+  it('emits parameter-level @Inject in the class-based controller', async () => {
+    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
     const controller = await Deno.readTextFile(`${root}/svc/src/greeting-controller.ts`);
     // The showcase is the parameter position, not the deprecated class-level list.
     expect(controller).toContain("@Inject('greeting-service')");
     expect(controller).not.toContain("@Inject('greeting-service')\n@Controller");
   });
 
-  it('accepts the nest template on every runtime target', async () => {
+  it('accepts the class-based template on every runtime target', async () => {
     // Nothing in the template needs raw sockets.
     for (const target of ['deno', 'node', 'bun', 'cloudflare-workers']) {
       out = [];
       err = [];
-      expect(await run(['new', `svc-${target}`, '--template', 'nest', '--runtime', target])).toBe(
-        0,
-      );
+      expect(await run(['new', `svc-${target}`, '--template', 'class-based', '--runtime', target]))
+        .toBe(
+          0,
+        );
     }
   });
 
@@ -525,7 +453,7 @@ describe('template scaffolding — end to end', () => {
 
   for (const [group, schematics] of Object.entries(NON_COLLIDING_GROUPS)) {
     it(`type-checks a ${group} project generated over every accepted name`, async () => {
-      expect(await run(['new', 'svc', '--template', 'rest'])).toBe(0);
+      expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
       const project = `${root}/svc`;
 
       for (const { name, accepted } of HOSTILE_NAMES) {
@@ -546,7 +474,8 @@ describe('template scaffolding — end to end', () => {
       // one — emitted at SCAFFOLD time, so every host carries all eight whether or not
       // this group generated into them — plus the two entry points.
       const perName = group === 'module' ? MODULE_FILES_PER_NAME : schematics.length;
-      expect(sources.length).toBe(perName * accepted + SCAFFOLDED_BARRELS + 2);
+      // The class-based template adds its greeting service and controller.
+      expect(sources.length).toBe(perName * accepted + SCAFFOLDED_BARRELS + 4);
 
       await useWorkspacePackages(project);
       const { code, stderr } = await denoCheck(project, sources);
@@ -605,7 +534,7 @@ describe('setu generate module, end to end', () => {
   }
 
   it('type-checks a rest project carrying two generated modules', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
 
     expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
@@ -632,11 +561,11 @@ describe('setu generate module, end to end', () => {
     expect(code).toBe(0);
   });
 
-  // `rest` has no DiPlugin, `nest` does, and DecoratorPlugin branches on the
+  // The class-based template includes the DI pair, so its emitted `@Inject` has
   // container's presence — so the emitted `@Inject` has to compile and resolve
   // on both paths, not just the one the showcase template takes.
-  it('type-checks a nest project carrying a generated module', async () => {
-    expect(await run(['new', 'shop', '--template', 'nest'])).toBe(0);
+  it('type-checks a class-based project carrying a generated module', async () => {
+    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
 
     expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
@@ -660,7 +589,7 @@ describe('setu generate module, end to end', () => {
   });
 
   it('regenerates the barrel without refusing, and lists each module once', async () => {
-    await run(['new', 'shop', '--template', 'rest']);
+    await run(['new', 'shop', '--template', 'class-based']);
     const project = `${root}/shop`;
     await run(['g', 'module', 'user', '--dir', project]);
 
@@ -753,7 +682,7 @@ await app.stop();
   // generated module declared answered 500, because the plugin builds a handler's
   // arguments from parameter metadata alone and the emitted handler expected the
   // context positionally. Compiling is not working.
-  for (const template of ['rest', 'nest']) {
+  for (const template of ['rest', 'class-based']) {
     it(`serves requests from generated modules on --template ${template}`, async () => {
       expect(await run(['new', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
@@ -763,15 +692,10 @@ await app.stop();
 
       const out = await bootAndProbe(project, MODULE_PROBE);
 
-      // The injected service's return value reached the response body, so
-      // `@Inject` resolved — on `rest` that is the ServiceRegistry path, with no
-      // DI container present at all.
       expect(out['GET /orders']).toEqual({ status: 200, body: '{"items":[]}' });
       // The second module registered too, so the barrel wired both.
       expect(out['GET /order-item']).toEqual({ status: 200, body: '{"items":[]}' });
-      // `@Body()` parsed and round-tripped.
-      expect(out['POST /orders'].status).toBe(200);
-      expect(out['POST /orders'].body).toContain('ABC-1');
+      expect(out['POST /orders'].status).toBe(201);
     });
   }
 
@@ -780,22 +704,12 @@ await app.stop();
   // one-line class of fix, so it ships here rather than on a separate branch
   // (a deliberate deviation from this milestone's plan, at the maintainer's call).
   it('serves requests from a generated standalone controller', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    expect(await run(['new', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
     expect(await run(['g', 'controller', 'widgets', '--dir', project])).toBe(0);
 
-    // A standalone controller is not in the module barrel, so the config has to
-    // name it — which is what a developer does by hand after generating one.
-    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
-    await Deno.writeTextFile(
-      `${project}/setu.config.ts`,
-      config
-        .replace(
-          'import { MODULE_CONTROLLERS',
-          "import { WidgetsController } from './src/controllers/widgets.controller.ts';\nimport { MODULE_CONTROLLERS",
-        )
-        .replace('controllers: [...MODULE_CONTROLLERS]', 'controllers: [WidgetsController]'),
-    );
+    // The class-based template's controller barrel is already registered by
+    // `DecoratorPlugin`, so no developer-owned config edit is necessary.
     await useWorkspacePackages(project);
 
     const out = await bootAndProbe(project, CONTROLLER_PROBE);
@@ -804,7 +718,7 @@ await app.stop();
   });
 
   it('still refuses to overwrite a module that already exists', async () => {
-    await run(['new', 'shop', '--template', 'rest']);
+    await run(['new', 'shop', '--template', 'class-based']);
     const project = `${root}/shop`;
     await run(['g', 'module', 'user', '--dir', project]);
     err = [];

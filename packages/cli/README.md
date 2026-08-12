@@ -17,20 +17,20 @@ a package called `cli` would install a binary named `cli`. All help text shows `
 ```bash
 setu new my-app                                  # Deno, minimal (runtime plugin only)
 setu new my-app --runtime node                   # deno | node | bun | cloudflare-workers
-setu new my-app --template rest                  # rest | microservice | nest | full-stack
+setu new my-app --template rest                  # rest | microservice | class-based | full-stack
 ```
 
 Every project gets a `setu.config.ts` exporting `createApp()` — the one place its plugin list lives.
 `main.ts` imports it to start the server, and `setu` imports it to find plugin commands, so the two
 cannot disagree. The factory does **not** start the application.
 
-| Template       | Plugin set                                                                                                 |
-| -------------- | ---------------------------------------------------------------------------------------------------------- |
-| _(none)_       | `RuntimePlugin` only.                                                                                      |
-| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi, Decorator + `errorHandler()`. |
-| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                       |
-| `nest`         | `rest` plus `DiPlugin`, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`.     |
-| `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton. |
+| Template       | Plugin set                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| _(none)_       | `RuntimePlugin` only.                                                                                         |
+| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi + `errorHandler()`.               |
+| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                          |
+| `class-based`  | `rest` plus decorators and DI, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`. |
+| `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton.    |
 
 `--template microservice --runtime cloudflare-workers` is refused: the messaging and queue plugins
 need raw sockets, which Workers does not provide.
@@ -101,7 +101,7 @@ install, and `setu generate --help` lists only what is available here.
 | `--dry-run`          | Prints `would create <path>` per file and writes absolutely nothing.                            |
 | `--dir <path>`       | Operate on this directory instead of the working directory.                                     |
 | `--runtime <target>` | On `new`, the entry shape and manifest; on `generate`, passed to the schematic. Default `deno`. |
-| `--template <name>`  | `new` only: `rest` or `microservice`. Omitted yields the minimal plugin set.                    |
+| `--template <name>`  | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.    |
 | `--config <path>`    | Load the app from this module instead of `./setu.config.ts`.                                    |
 | `--help`, `-h`       | Prints usage.                                                                                   |
 | `--version`, `-v`    | Prints the version.                                                                             |
