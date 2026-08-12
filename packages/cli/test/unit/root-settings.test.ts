@@ -41,6 +41,48 @@ describe('root manifest settings', () => {
   });
 });
 
+describe('generated imports match the formatter the project ships with', () => {
+  /**
+   * Renders one config and returns the `@setu-ts/common` import line.
+   *
+   * @returns The emitted statement, whitespace-collapsed
+   */
+  function commonImportOf(): string {
+    const host = resolveHost(getTemplate('full-stack')!, { di: false }, 'deno');
+    const files = projectFiles('shop', 'deno', host, { di: false });
+    const config = files.find((f) => f.path === 'setu.config.ts')!;
+    const match = config.contents.match(/import \{[^}]*\} from '@setu-ts\/common';/s);
+    return (match?.[0] ?? '').replace(/\s+/g, ' ');
+  }
+
+  it('sorts named specifiers by the symbol, ignoring a leading type', () => {
+    // `deno fmt` reorders the bindings inside the braces even on a line short
+    // enough to leave alone, so emitting them unsorted makes the formatter
+    // rewrite a file the CLI just wrote.
+    expect(commonImportOf()).toContain(
+      'CAPABILITIES, type IApplication, type ILogger, type ISecretManager',
+    );
+  });
+
+  it('orders punctuation by code point, the way dprint does', () => {
+    // Measured against `deno fmt`: `$dollar, _under, alpha` — `$` (36) before
+    // `_` (95) before the letters. `String.localeCompare` deprioritises
+    // punctuation and answers `_under, $dollar, alpha`, which would emit a file
+    // failing the project's own `deno fmt --check`.
+    const host = {
+      ...getTemplate('rest')!,
+      localImports: [{ symbols: ['alpha', '_under', 'Zeta', '$dollar'], from: './x.ts' }],
+    };
+    const resolved = resolveHost(host, { di: false }, 'deno');
+    const files = projectFiles('shop', 'deno', resolved, { di: false });
+    const config = files.find((f) => f.path === 'setu.config.ts')!;
+
+    expect(config.contents).toContain(
+      `import { $dollar, _under, alpha, Zeta } from './x.ts';`,
+    );
+  });
+});
+
 describe('where the root settings are emitted', () => {
   it('puts them in a workspace root', () => {
     const manifest = manifestOf(

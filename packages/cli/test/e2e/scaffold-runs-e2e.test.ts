@@ -143,9 +143,18 @@ describe('a scaffolded full-stack project type-checks its own routes', () => {
     expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
     const project = `${root}/shop`;
 
-    // `deno install` first, and that ordering is load-bearing: the app tree
-    // imports `@react-router/fs-routes` from npm, so a check before the install
-    // fails on module resolution rather than on anything the template emitted.
+    // Against THIS workspace, not the published packages the scaffold pins.
+    // Without it the emitted `app/` tree — which imports `@setu-ts/common` and
+    // `@setu-ts/react-router-plugin` — is checked against a JSR snapshot, so the
+    // gate cannot see drift from HEAD, and during a version bump it resolves a
+    // version that is not published yet and blocks the release that would
+    // publish it. That is the deadlock D1 describes.
+    await useWorkspacePackages(project);
+
+    // `deno install` after the repoint and before the check, and that ordering
+    // is load-bearing: the app tree imports `@react-router/fs-routes` from npm,
+    // so a check before the install fails on module resolution rather than on
+    // anything the template emitted.
     const installed = await denoRun(project, ['install', '--allow-scripts']);
     expect(installed.code, installed.output).toBe(0);
 

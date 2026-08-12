@@ -360,15 +360,21 @@ export async function bootWithGeneratedPermissions(
     }
   }
 
-  if (served) {
-    for (const path of paths) {
-      const response = await fetch(`http://127.0.0.1:${port}${path}`);
-      statuses[path] = response.status;
-      bodies[path] = await response.text();
+  try {
+    if (served) {
+      for (const path of paths) {
+        const response = await fetch(`http://127.0.0.1:${port}${path}`);
+        statuses[path] = response.status;
+        bodies[path] = await response.text();
+      }
     }
+  } finally {
+    // In a `finally`, because a probe that rejects — a connection reset, or the
+    // server dying after it answered readiness — would otherwise leave a bound
+    // subprocess alive for the rest of the suite.
+    child.kill('SIGKILL');
   }
 
-  child.kill('SIGKILL');
   const status = await child.status;
   const output = `${await new Response(child.stdout).text()}${await new Response(child.stderr)
     .text()}`;
