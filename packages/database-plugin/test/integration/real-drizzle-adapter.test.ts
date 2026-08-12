@@ -35,7 +35,8 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     const calls: Array<{ sql: string; params: readonly unknown[]; method: string }> = [];
     const database = drizzle((sql, params, method) => {
       calls.push({ sql, params, method });
-      return Promise.resolve({ rows: [] });
+      // A count query answers with one aggregate row; everything else is empty.
+      return Promise.resolve({ rows: sql.includes('count(*)') ? [['4']] : [] });
     });
     const adapter = new DrizzleAdapter({
       drizzleInstance: database,
@@ -43,6 +44,8 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     });
     await adapter.connect();
     const source = adapter.createDataSource('User');
+
+    let counted = 0;
 
     await source.findById('u1');
     await source.findAll(query({
@@ -52,7 +55,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       offset: 1,
       select: ['name'],
     }));
-    await source.count({ role: 'admin' });
+    counted = await source.count({ role: 'admin' });
     await expect(source.create({ id: 'u1', name: 'Ada', role: 'admin' })).rejects.toThrow(
       'returned no row',
     );
@@ -71,5 +74,13 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     expect(calls[1]?.sql).toContain('order by "users"."name" desc');
     expect(calls[1]?.sql).toContain('limit $2 offset $3');
     expect(calls[1]?.params).toEqual(['admin', 2, 1]);
+
+    // count() must aggregate in the database. Selecting the rows and measuring
+    // the result set in JavaScript would pass every fake-backed test while
+    // dragging the whole match set over the wire on a real server.
+    expect(calls[2]?.sql).toContain('count(*)');
+    expect(calls[2]?.sql).not.toContain('"users"."name"');
+    expect(calls[2]?.params).toEqual(['admin']);
+    expect(counted).toBe(4);
   });
 });

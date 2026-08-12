@@ -99,6 +99,12 @@ export type DrizzleOperators = {
   and: (...exprs: unknown[]) => unknown;
   asc: (col: unknown) => unknown;
   desc: (col: unknown) => unknown;
+  /**
+   * Builds Drizzle's `count(*)` aggregate. Selecting it makes the database
+   * return the tally as a single row instead of streaming every matching row
+   * back for the adapter to measure.
+   */
+  count: () => unknown;
 };
 
 // ---------------------------------------------------------------------------
@@ -137,12 +143,14 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         and: ns.and as (...exprs: unknown[]) => unknown,
         asc: ns.asc as (col: unknown) => unknown,
         desc: ns.desc as (col: unknown) => unknown,
+        count: ns.count as () => unknown,
       };
       if (
         typeof operators.eq !== 'function' ||
         typeof operators.and !== 'function' ||
         typeof operators.asc !== 'function' ||
-        typeof operators.desc !== 'function'
+        typeof operators.desc !== 'function' ||
+        typeof operators.count !== 'function'
       ) {
         throw new Error('drizzle-orm did not export the required query operators');
       }
@@ -429,15 +437,22 @@ function createDrizzleDataSourceInner(
     },
 
     async count(where) {
-      let builder = instance.select().from(drizzleTable);
+      // `count(*)` is selected so the database returns one aggregate row. A
+      // bare `select()` would stream every matching row back just to measure
+      // its length, which is the in-memory evaluation this adapter avoids.
+      let builder = instance.select({ [COUNT_ALIAS]: operators.count() }).from(drizzleTable);
       const predicate = predicateFor(drizzleTable, entity, where, operators);
       if (predicate !== undefined) {
         builder = builder.where(predicate);
       }
-      return (await builder).length;
+      const rows = await builder;
+      return Number(rows[0]?.[COUNT_ALIAS] ?? 0);
     },
   };
 }
+
+/** Result alias the `count(*)` aggregate is read back under. */
+const COUNT_ALIAS = 'value';
 
 function hasColumn(value: unknown, field: string): boolean {
   return value !== null && typeof value === 'object' &&

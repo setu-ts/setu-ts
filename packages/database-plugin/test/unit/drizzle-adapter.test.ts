@@ -29,6 +29,7 @@ const OPERATORS: DrizzleOperators = {
   and: (...exprs) => ({ op: 'and', exprs }),
   asc: (col) => ({ op: 'asc', col }),
   desc: (col) => ({ op: 'desc', col }),
+  count: () => ({ op: 'count' }),
 };
 
 const USER_TABLE = createFakeDrizzleTable('user');

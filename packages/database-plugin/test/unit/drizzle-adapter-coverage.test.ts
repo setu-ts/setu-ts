@@ -42,6 +42,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       and: (...exprs: unknown[]) => ({ op: 'and', exprs }),
       asc: (col: unknown) => ({ op: 'asc', col }),
       desc: (col: unknown) => ({ op: 'desc', col }),
+      count: () => ({ op: 'count' }),
     };
 
     beforeEach(async () => {
@@ -151,6 +152,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
           and: () => ({}),
           asc: () => ({}),
           desc: () => ({}),
+          count: () => ({ op: 'count' }),
         },
       );
       const found = await mainDs.findById('tx1');
@@ -283,6 +285,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         and: () => ({}),
         asc: () => ({}),
         desc: () => ({}),
+        count: () => ({ op: 'count' }),
       };
       expect(
         () => createDrizzleDataSource(fakeDb, 'nonexistent', tables, ops),
@@ -298,6 +301,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         and: () => ({}),
         asc: () => ({}),
         desc: () => ({}),
+        count: () => ({ op: 'count' }),
       };
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       const created = await ds.create({ name: 'NoId' });
@@ -313,6 +317,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         and: () => ({}),
         asc: () => ({}),
         desc: () => ({}),
+        count: () => ({ op: 'count' }),
       };
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await ds.create({ id: 'c1', name: 'Alice' });
@@ -343,6 +348,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         and: () => ({}),
         asc: () => ({}),
         desc: () => ({}),
+        count: () => ({ op: 'count' }),
       };
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await ds.create({ id: 'o1', name: 'A' });
@@ -361,6 +367,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         and: () => ({}),
         asc: () => ({}),
         desc: () => ({}),
+        count: () => ({ op: 'count' }),
       };
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await ds.create({ id: 'p1', name: 'A' });
@@ -369,6 +376,86 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       const q = normalizeQuery({ offset: 2 });
       const rows = await ds.findAll(q);
       expect(rows.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('column resolution against the registered table', () => {
+    const ops: DrizzleOperators = {
+      eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
+      and: (...exprs: unknown[]) => ({ op: 'and', exprs }),
+      asc: (col: unknown) => ({ op: 'asc', col }),
+      desc: (col: unknown) => ({ op: 'desc', col }),
+      count: () => ({ op: 'count' }),
+    };
+
+    it('rejects a where field that is not a column on the table', async () => {
+      await adapter.connect();
+      const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
+      await expect(ds.findAll(normalizeQuery({ where: { nickname: 'x' } }))).rejects.toThrow(
+        "Drizzle table 'user' has no 'nickname' column",
+      );
+    });
+
+    it('rejects an orderBy field that is not a column on the table', async () => {
+      await adapter.connect();
+      const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
+      await expect(ds.findAll(normalizeQuery({ orderBy: { nickname: 'asc' } }))).rejects.toThrow(
+        "has no 'nickname' column",
+      );
+    });
+
+    it('rejects a select field that is not a column on the table', async () => {
+      await adapter.connect();
+      const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
+      await expect(ds.findAll(normalizeQuery({ select: ['nickname'] }))).rejects.toThrow(
+        "has no 'nickname' column",
+      );
+    });
+
+    it('combines multiple where fields with and()', async () => {
+      await adapter.connect();
+      const combined: unknown[] = [];
+      const recordingOps: DrizzleOperators = {
+        ...ops,
+        and: (...exprs: unknown[]) => {
+          combined.push(exprs);
+          return { op: 'and', exprs };
+        },
+      };
+      const ds = createDrizzleDataSource(fakeDb, 'user', tables, recordingOps);
+      await ds.create({ id: 'm1', name: 'Ada', role: 'admin' });
+      await ds.create({ id: 'm2', name: 'Ada', role: 'user' });
+
+      const rows = await ds.findAll(normalizeQuery({ where: { name: 'Ada', role: 'admin' } }));
+
+      // A single predicate must NOT be wrapped; two must be combined once.
+      expect(combined.length).toBe(1);
+      expect((combined[0] as unknown[]).length).toBe(2);
+      expect(rows.length).toBe(1);
+      expect(rows[0].id).toBe('m1');
+    });
+  });
+
+  describe('count aggregate', () => {
+    it('reports 0 when the driver returns no aggregate row', async () => {
+      await adapter.connect();
+      const emptyDriver = {
+        ...fakeDb,
+        select: () => ({ from: () => Promise.resolve([]) }),
+      };
+      const ds = createDrizzleDataSource(
+        emptyDriver as unknown as DrizzleInstance,
+        'user',
+        tables,
+        {
+          eq: () => ({}),
+          and: () => ({}),
+          asc: () => ({}),
+          desc: () => ({}),
+          count: () => ({ op: 'count' }),
+        },
+      );
+      expect(await ds.count({})).toBe(0);
     });
   });
 });

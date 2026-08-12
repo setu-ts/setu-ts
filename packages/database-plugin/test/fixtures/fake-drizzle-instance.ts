@@ -202,6 +202,30 @@ export function createFakeDrizzleInstance(): {
     return [];
   }
 
+  /**
+   * Identify an aggregate selection the way a real driver does.
+   *
+   * Drizzle hands `select()` either a column (a `PgColumn` carrying a `name`)
+   * or an `SQL` expression (carrying `queryChunks`) such as `count(*)`. A real
+   * database answers the latter with one aggregate row rather than a projected
+   * row per match, so the fake must too — otherwise it would report a row shape
+   * the driver never produces.
+   */
+  function aggregateAlias(fields: Record<string, unknown> | undefined): string | null {
+    if (fields === undefined) return null;
+    for (const [alias, expression] of Object.entries(fields)) {
+      if (expression === null || typeof expression !== 'object') continue;
+      const object = expression as Record<string, unknown>;
+      // Real drizzle-orm `count()` is an `SQL` carrying `queryChunks`; unit
+      // tests supply the `{ op: 'count' }` marker, the same dual shape this
+      // fixture already accepts for `eq`.
+      if ('queryChunks' in object || object.op === 'count') {
+        return alias;
+      }
+    }
+    return null;
+  }
+
   function selectQuery(
     table: Record<string, unknown>,
     fields: Record<string, unknown> | undefined,
@@ -238,6 +262,12 @@ export function createFakeDrizzleInstance(): {
         const conditions = conditionsFor(predicate);
         for (const [field, value] of conditions) {
           rows = rows.filter((row) => row[field] === value);
+        }
+        const alias = aggregateAlias(fields);
+        if (alias !== null) {
+          // WHERE has been applied; the aggregate collapses the match set to
+          // one row. Ordering and pagination do not apply to a bare count.
+          return Promise.resolve([{ [alias]: rows.length }]).then(onfulfilled, onrejected);
         }
         const firstOrder = order[0] as Record<string, unknown> | undefined;
         const field = firstOrder?.col !== undefined
