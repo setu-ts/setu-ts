@@ -1,8 +1,8 @@
 /**
- * The `nest` project template — the NestJS-familiarity showcase.
+ * The class-based project template.
  *
  * Emits a project whose first files are a decorated controller and an injected
- * service, so a developer arriving from NestJS sees the composition immediately
+ * service, so a developer who prefers decorators sees the composition immediately
  * rather than reading about it. Wiring stays INLINE, like `rest` and
  * `microservice`: this is not the deferred `setu new --starter` path.
  *
@@ -12,11 +12,11 @@
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { LocalImport, TemplateDefinition, Wiring } from './registry.ts';
 import { DI_WIRING } from './di.ts';
-import { REST_MIDDLEWARE, REST_PLUGINS, REST_SEAMS } from './rest.ts';
+import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
 import {
+  CLASS_BASED_MODULE_MANIFEST,
   MODULE_SEAM_FILES,
   MODULE_SEAM_LOCAL_IMPORT,
-  MODULE_SEAM_MANIFEST,
   withModuleSeam,
 } from './module-seam.ts';
 import {
@@ -25,8 +25,14 @@ import {
   seamLocalImports,
   seamPluginSpreads,
   seamSetupCalls,
+  seamsFor,
   withPluginOptionSeams,
 } from './seam.ts';
+
+/** The class-based world adds decorators to the functional REST composition. */
+const DECORATOR_WIRING: Wiring = { pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' };
+
+const CLASS_BASED_SEAMS = seamsFor(new Set([...REST_PLUGINS, DECORATOR_WIRING].map((p) => p.pkg)));
 
 /** Where the emitted example classes live in the scaffolded project. */
 const SERVICE_PATH = './src/greeting-service.ts';
@@ -87,23 +93,22 @@ export class GreetingController {
 /**
  * The two example source files this template emits, plus the seam barrels.
  *
- * `nest` registers exactly the REST plugin set plus `DiPlugin`, and `DiPlugin` hosts no
- * seam, so its seam set is `REST_SEAMS` — reused rather than recomputed, which is what
- * keeps this template from drifting into a different seam list than `rest`.
+ * The class-based template registers the REST plugin set plus its decorator and
+ * DI pair. Its seams include the class-oriented controller and service barrels.
  */
-export const NEST_FILES: readonly GeneratedFile[] = [
+export const CLASS_BASED_FILES: readonly GeneratedFile[] = [
   { path: 'src/greeting-service.ts', contents: SERVICE_SOURCE },
   { path: 'src/greeting-controller.ts', contents: CONTROLLER_SOURCE },
   ...MODULE_SEAM_FILES,
-  ...seamFiles(REST_SEAMS),
+  ...seamFiles(CLASS_BASED_SEAMS),
 ];
 
 /** The classes `setu.config.ts` must import to pass them to `DecoratorPlugin`. */
-export const NEST_LOCAL_IMPORTS: readonly LocalImport[] = [
+export const CLASS_BASED_LOCAL_IMPORTS: readonly LocalImport[] = [
   { symbols: ['GreetingService'], from: SERVICE_PATH },
   { symbols: ['GreetingController'], from: CONTROLLER_PATH },
   MODULE_SEAM_LOCAL_IMPORT,
-  ...seamLocalImports(REST_SEAMS),
+  ...seamLocalImports(CLASS_BASED_SEAMS),
 ];
 
 /**
@@ -117,37 +122,36 @@ export const NEST_LOCAL_IMPORTS: readonly LocalImport[] = [
  * scoped providers to be there.
  *
  * The wiring comes from `templates/di.ts` rather than a literal here, so this
- * list and the `--di` flag name the same package. That is what lets
- * `withDiPlugin` recognize the plugin as already present and leave
- * `--template nest --di` byte-identical to `--template nest` — appending a
- * second one would throw `Duplicate plugin name 'di'` at `start()`.
+ * list has one owner: the class-based template. It always installs the
+ * decorator and DI pair together, so generated classes are coherent with their
+ * registered runtime composition.
  */
-export const NEST_PLUGINS: readonly Wiring[] = withPluginOptionSeams(
+export const CLASS_BASED_PLUGINS: readonly Wiring[] = withPluginOptionSeams(
   withModuleSeam(
-    REST_PLUGINS,
+    [...REST_PLUGINS, DECORATOR_WIRING],
     // The showcase classes come first, then the seam barrels, then the module barrel —
     // so `setu g controller` and `setu g module` both ADD to this registration rather
     // than displacing the template's own example.
-    ['GreetingController', ...decoratorSeamExtras(REST_SEAMS).controllers],
-    ['GreetingService', ...decoratorSeamExtras(REST_SEAMS).services],
+    ['GreetingController', ...decoratorSeamExtras(CLASS_BASED_SEAMS).controllers],
+    ['GreetingService', ...decoratorSeamExtras(CLASS_BASED_SEAMS).services],
   ),
-  REST_SEAMS,
+  CLASS_BASED_SEAMS,
 ).concat([DI_WIRING]);
 
 /**
- * `nest` — the REST set plus a DI container, a decorated controller, and an
- * injected service.
+ * Class-based — the REST set plus decorators, a DI container, a decorated
+ * controller, and an injected service.
  *
  * Nothing here needs raw sockets, so all four runtime targets work.
  */
-export const NEST_TEMPLATE: TemplateDefinition = {
-  name: 'nest',
-  description: 'NestJS-style — REST set plus DI container, decorated controller, injected service',
-  plugins: NEST_PLUGINS,
+export const CLASS_BASED_TEMPLATE: TemplateDefinition = {
+  name: 'class-based',
+  description: 'Class-based API — decorators, constructor injection, and modules',
+  plugins: CLASS_BASED_PLUGINS,
   middleware: REST_MIDDLEWARE,
-  localImports: NEST_LOCAL_IMPORTS,
-  files: NEST_FILES,
-  manifest: MODULE_SEAM_MANIFEST,
-  pluginSpreads: seamPluginSpreads(REST_SEAMS),
-  setupCalls: seamSetupCalls(REST_SEAMS),
+  localImports: CLASS_BASED_LOCAL_IMPORTS,
+  files: CLASS_BASED_FILES,
+  manifest: CLASS_BASED_MODULE_MANIFEST,
+  pluginSpreads: seamPluginSpreads(CLASS_BASED_SEAMS),
+  setupCalls: seamSetupCalls(CLASS_BASED_SEAMS),
 };

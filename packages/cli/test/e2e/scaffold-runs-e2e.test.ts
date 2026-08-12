@@ -36,14 +36,14 @@ const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /** Templates that wire an HTTP surface and boot without an npm build. */
-const BOOTABLE = ['rest', 'microservice', 'nest'] as const;
+const BOOTABLE = ['rest', 'microservice', 'class-based'] as const;
 
 /** Every host a scaffold can produce, including the no-template one. */
 const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
   ['no-template', []],
   ['rest', ['--template', 'rest']],
   ['microservice', ['--template', 'microservice']],
-  ['nest', ['--template', 'nest']],
+  ['class-based', ['--template', 'class-based']],
   ['full-stack', ['--template', 'full-stack']],
 ];
 

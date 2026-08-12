@@ -13,8 +13,8 @@ import type { TemplateHost } from '../../src/templates/registry.ts';
  * @returns The task's command line
  */
 function startTaskOf(host: TemplateHost): string {
-  const resolved = resolveHost(host, { di: false }, 'deno');
-  const files = projectFiles('shop', 'deno', resolved, { di: false });
+  const resolved = resolveHost(host, 'deno');
+  const files = projectFiles('shop', 'deno', resolved);
   const manifest = files.find((f) => f.path === 'deno.json');
   const parsed = JSON.parse(manifest!.contents) as { tasks: Record<string, string> };
   return parsed.tasks['start'] ?? '';
@@ -27,8 +27,8 @@ function startTaskOf(host: TemplateHost): string {
  * @returns The options, or undefined when the key is omitted
  */
 function compilerOptionsOf(host: TemplateHost): Record<string, unknown> | undefined {
-  const resolved = resolveHost(host, { di: false }, 'deno');
-  const files = projectFiles('shop', 'deno', resolved, { di: false });
+  const resolved = resolveHost(host, 'deno');
+  const files = projectFiles('shop', 'deno', resolved);
   const manifest = files.find((f) => f.path === 'deno.json');
   const parsed = JSON.parse(manifest!.contents) as {
     compilerOptions?: Record<string, unknown>;
@@ -37,7 +37,7 @@ function compilerOptionsOf(host: TemplateHost): Record<string, unknown> | undefi
 }
 
 /** The templates whose plugin set includes HealthPlugin. */
-const HEALTH_TEMPLATES = ['rest', 'microservice', 'nest', 'full-stack'] as const;
+const HEALTH_TEMPLATES = ['rest', 'microservice', 'class-based', 'full-stack'] as const;
 
 describe('generated start-task permissions', () => {
   it('always grants network and environment access', () => {
@@ -71,7 +71,7 @@ describe('generated start-task permissions', () => {
 
 describe('generated Deno compiler options', () => {
   it('gives the decorator-hosting templates the decorator option', () => {
-    for (const name of ['rest', 'microservice', 'nest'] as const) {
+    for (const name of ['class-based'] as const) {
       expect(compilerOptionsOf(getTemplate(name)!)?.['experimentalDecorators']).toBe(true);
     }
   });

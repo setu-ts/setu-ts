@@ -1,63 +1,69 @@
 /**
- * Module schematic — a whole domain sub-module in one command.
- *
- * The aggregate the other thirteen schematics could not express: a controller, a
- * service, a test, a per-module barrel, and a regenerated aggregate barrel that
- * wires the module in without touching `setu.config.ts`.
- *
- * Pure, like every schematic. The existing module names it needs to render the
- * aggregate barrel arrive through `SchematicOptions.modules`, gathered by the
- * command layer — see `utils/module-scanner.ts`.
+ * Domain-module schematic for functional and class-based applications.
  *
  * @module
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
+import { ROUTES_SEAM } from '../seams/routes.ts';
+import { seamNames } from '../seams/seam-spec.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
 import { MODULES_DIR } from '../utils/module-scanner.ts';
-import { CONTROLLERS_EXPORT, renderModuleBarrel } from './module-barrel.ts';
+import { renderModuleBarrel } from './module-barrel.ts';
 
-/**
- * The capability token the module's service registers under.
- *
- * Derived from the module name rather than the class name so it is stable and
- * predictable: the controller's `@Inject` names this exact string, and an
- * explicit token is mandatory because `emitDecoratorMetadata` is absent
- * repo-wide (Deno does not support it), so the parameter's type cannot be read.
- *
- * @param names - The module's derived naming forms
- * @returns The token, e.g. `user-profile-service`
- */
 function serviceToken(names: DerivedNames): string {
   return `${names.kebab}-service`;
 }
 
-/**
- * Renders the module's service class.
- *
- * @param names - The module's derived naming forms
- * @returns The file contents
- */
-function renderService(names: DerivedNames): string {
+function functionalService(names: DerivedNames): string {
+  return `/** Lists ${names.kebab} records. */
+export function list${names.pascal}(): readonly Record<string, unknown>[] {
+  return [];
+}
+`;
+}
+
+function functionalRoutes(names: DerivedNames): string {
+  return `import type { IRouterApi } from '@setu-ts/common';
+
+import { list${names.pascal} } from '../modules/${names.kebab}/${names.kebab}.service.ts';
+
+/** Registers the ${names.kebab} HTTP routes. */
+export function register${names.pascal}Routes(router: IRouterApi): void {
+  router.group('/${names.kebab}', (routes) => {
+    routes.get('/', (ctx) => ctx.response.json({ items: list${names.pascal}() }));
+    routes.post('/', (ctx) => ctx.response.status(201).json({ created: true }));
+  });
+}
+`;
+}
+
+function functionalTest(names: DerivedNames): string {
+  return `import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+
+import { list${names.pascal} } from './${names.kebab}.service.ts';
+
+describe('list${names.pascal}', () => {
+  it('starts with no records', () => {
+    expect(list${names.pascal}()).toEqual([]);
+  });
+});
+`;
+}
+
+function functionalIndex(names: DerivedNames): string {
+  return `export { list${names.pascal} } from './${names.kebab}.service.ts';
+`;
+}
+
+function classService(names: DerivedNames): string {
   return `import { Injectable } from '@setu-ts/decorator-plugin';
 
-/**
- * Domain service for ${names.kebab}.
- *
- * \`token\` is the name this registers under — the string the controller's
- * \`@Inject\` resolves. It works with or without \`DiPlugin\`: with a container the
- * service is constructed through it, and without one it lands in the kernel's
- * service registry.
- */
+/** Domain service for ${names.kebab}. */
 @Injectable({ token: '${serviceToken(names)}' })
 export class ${names.pascal}Service {
-  /**
-   * Lists ${names.kebab} records.
-   *
-   * Replace this with a repository call — see the database plugin's
-   * \`getRepository\` — or with whatever this module's data source is.
-   *
-   * @returns The records
-   */
+  /** Lists ${names.kebab} records. */
   list(): readonly Record<string, unknown>[] {
     return [];
   }
@@ -65,75 +71,36 @@ export class ${names.pascal}Service {
 `;
 }
 
-/**
- * Renders the module's controller class.
- *
- * @param names - The module's derived naming forms
- * @returns The file contents
- */
-function renderController(names: DerivedNames): string {
-  return `import { Body, Controller, Get, Inject, Post } from '@setu-ts/decorator-plugin';
+function classController(names: DerivedNames): string {
+  return `import { Body, Controller, Ctx, Get, Inject, Post } from '@setu-ts/decorator-plugin';
+import type { IRequestContext } from '@setu-ts/common';
 
 import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
-/**
- * HTTP controller for the ${names.kebab} resource.
- *
- * Registered through the \`${CONTROLLERS_EXPORT}\` barrel in \`src/modules/index.ts\`,
- * which \`setu.config.ts\` passes to \`DecoratorPlugin\` — so this class needs no
- * further wiring.
- *
- * A decorated handler receives ONLY its decorated parameters: the plugin builds
- * the argument list from parameter metadata alone and never passes the request
- * context positionally, so a \`ctx\` parameter would arrive \`undefined\`. Return a
- * plain value and the plugin serializes it as JSON. Reach for
- * \`app.router.get(...)\` (see \`setu generate route\`) when a handler needs the
- * context itself — to set a status code or stream a response.
- */
+/** HTTP controller for the ${names.kebab} resource. */
 @Controller('/${names.kebab}')
 export class ${names.pascal}Controller {
-  /**
-   * @param ${names.camel}s - The domain service, injected by token
-   */
-  constructor(
-    @Inject('${serviceToken(names)}') private readonly ${names.camel}s: ${names.pascal}Service,
-  ) {}
+  constructor(@Inject('${serviceToken(names)}') private readonly service: ${names.pascal}Service) {}
 
-  /**
-   * Lists ${names.kebab} records.
-   *
-   * @returns The records, serialized as JSON
-   */
+  /** Lists ${names.kebab} records. */
   @Get('/')
   list(): { readonly items: readonly Record<string, unknown>[] } {
-    return { items: this.${names.camel}s.list() };
+    return { items: this.service.list() };
   }
 
-  /**
-   * Creates a ${names.kebab} record.
-   *
-   * @param body - The parsed request body
-   * @returns The created record, serialized as JSON
-   */
+  /** Creates a ${names.kebab} record. */
   @Post('/')
-  create(@Body() body: Record<string, unknown>): { readonly created: Record<string, unknown> } {
-    return { created: body };
+  create(
+    @Body() body: Record<string, unknown>,
+    @Ctx() ctx: IRequestContext,
+  ): unknown {
+    return ctx.response.status(201).json({ created: body });
   }
 }
 `;
 }
 
-/**
- * Renders the module's service test.
- *
- * A controller test is deliberately not emitted: asserting one would need a
- * booted application or a hand-built `IRequestContext`, and a generated test
- * that asserts nothing is worse than no test at all.
- *
- * @param names - The module's derived naming forms
- * @returns The file contents
- */
-function renderServiceTest(names: DerivedNames): string {
+function classTest(names: DerivedNames): string {
   return `import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
@@ -141,61 +108,53 @@ import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 describe('${names.pascal}Service', () => {
   it('starts with no records', () => {
-    const service = new ${names.pascal}Service();
-
-    expect(service.list()).toEqual([]);
+    expect(new ${names.pascal}Service().list()).toEqual([]);
   });
 });
 `;
 }
 
-/**
- * Renders the per-module barrel.
- *
- * @param names - The module's derived naming forms
- * @returns The file contents
- */
-function renderModuleIndex(names: DerivedNames): string {
-  return `/**
- * The ${names.kebab} module's public surface.
- *
- * @module
- */
-
-export { ${names.pascal}Controller } from './${names.kebab}.controller.ts';
+function classIndex(names: DerivedNames): string {
+  return `export { ${names.pascal}Controller } from './${names.kebab}.controller.ts';
 export { ${names.pascal}Service } from './${names.kebab}.service.ts';
 `;
 }
 
 /**
- * Generates a domain module: controller, service, service test, per-module
- * barrel, and the regenerated aggregate barrel that wires it in.
+ * Generates a complete domain aggregate in the target project's selected style.
  *
  * @param names - Naming forms derived from the user's input
- * @param options - Runtime target, detected plugins, the clock, and the modules
- *   already present in the project
- * @returns Five files under `src/modules/`, of which only the aggregate barrel
- *   is `managed`
+ * @param options - Detected packages, module names, and existing route artifacts
+ * @returns Files that implement and register the domain aggregate
  */
 export function generateModule(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const dir = `${MODULES_DIR}/${names.kebab}`;
+  if (generatorMode(options.plugins) === 'functional') {
+    return [
+      { path: `${dir}/${names.kebab}.service.ts`, contents: functionalService(names) },
+      { path: `${dir}/${names.kebab}.service.test.ts`, contents: functionalTest(names) },
+      { path: `${dir}/index.ts`, contents: functionalIndex(names) },
+      { path: `src/routes/${names.kebab}.routes.ts`, contents: functionalRoutes(names) },
+      {
+        path: ROUTES_SEAM.barrel,
+        contents: ROUTES_SEAM.renderBarrel({
+          route: seamNames(options.artifacts, 'route', names.kebab),
+        }),
+        managed: true,
+      },
+    ];
+  }
 
   return [
-    { path: `${dir}/${names.kebab}.service.ts`, contents: renderService(names) },
-    { path: `${dir}/${names.kebab}.controller.ts`, contents: renderController(names) },
-    { path: `${dir}/${names.kebab}.service.test.ts`, contents: renderServiceTest(names) },
-    { path: `${dir}/index.ts`, contents: renderModuleIndex(names) },
+    { path: `${dir}/${names.kebab}.service.ts`, contents: classService(names) },
+    { path: `${dir}/${names.kebab}.controller.ts`, contents: classController(names) },
+    { path: `${dir}/${names.kebab}.service.test.ts`, contents: classTest(names) },
+    { path: `${dir}/index.ts`, contents: classIndex(names) },
     {
       path: `${MODULES_DIR}/index.ts`,
-      // Union rather than append: regenerating over an existing module must list
-      // it exactly once, so `setu g module user` twice is idempotent in the
-      // barrel even though it refuses on the module's own files.
-      //
-      // `?? []` covers a caller that predates the `modules` option — it is
-      // optional on the published interface, so an older harness may omit it.
       contents: renderModuleBarrel([...(options.modules ?? []), names.kebab]),
       managed: true,
     },

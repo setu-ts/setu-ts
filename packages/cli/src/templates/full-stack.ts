@@ -13,8 +13,9 @@
  */
 
 import type { TargetRuntime } from '../constants.ts';
-import type { TemplateDefinition, TemplateFeatures } from './registry.ts';
+import type { TemplateDefinition } from './registry.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
+import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
   buildFullStackBuildFiles,
   FULL_STACK_CHECK_TASK,
@@ -45,24 +46,14 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
  * binding, which is what a Workers deployment should use anyway. Everywhere
  * else the framework serves the client build directly.
  *
- * `--di` reaches this template through the starter's own `di` arm rather than
- * through a plugin wiring: `TemplateHost.plugins` must stay empty when an
- * `appFactory` is set, so there is no list to append to. The arm is
- * truthiness-gated (`rest-starter/src/app.ts:59`), which is why the emitted
- * value is `{}` rather than an omitted key — `di: undefined` would read as
- * opted-in while registering nothing.
- *
  * @param runtime - The selected runtime target
- * @param features - The per-project choices, read for `di`
  * @returns Source for the call's arguments, without the enclosing parentheses
  */
-function fullStackArgs(runtime: TargetRuntime, features: TemplateFeatures): string {
+function fullStackArgs(runtime: TargetRuntime): string {
   const assets = runtime === 'cloudflare-workers'
     // Assets are served by the platform binding, not the framework.
     ? ''
     : `\n      assetsDir: './build/client/assets',`;
-
-  const di = features.di ? `\n    di: {},` : '';
 
   // Indented to sit inside `const app = await …(` at two spaces, so the
   // generated file reads as hand-written source rather than as output.
@@ -92,7 +83,7 @@ function fullStackArgs(runtime: TargetRuntime, features: TemplateFeatures): stri
     session: {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
       csrf: {},
-    },${di}
+    },
   }), { env }`;
 }
 
@@ -135,9 +126,15 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     // therefore carry an npm manifest on a Deno or Workers target.
     npmBuildScript: 'react-router build',
     npmDependencies: FULL_STACK_NPM_DEPENDENCIES,
-    npmDevDependencies: FULL_STACK_NPM_DEV_DEPENDENCIES,
+    // The test packages are merged in because `setu generate module` is ungated
+    // since M65: this template can emit a `*.service.test.ts` too, and a host
+    // that emits a test file must declare what that file imports.
+    npmDevDependencies: {
+      ...TEST_DEPENDENCY_MANIFEST.npmDevDependencies,
+      ...FULL_STACK_NPM_DEV_DEPENDENCIES,
+    },
     tsconfigCompilerOptions: FULL_STACK_TSCONFIG_OPTIONS,
-    denoImports: FULL_STACK_DENO_IMPORTS,
+    denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, ...FULL_STACK_DENO_IMPORTS },
     // Vite reads `tsconfig.json`; `deno check` reads `deno.json` and ignores it.
     // Without the same JSX settings in both, `vite build` succeeds while
     // `deno check` fails on every route with `TS2686 'React' refers to a UMD

@@ -20,7 +20,8 @@ export function generateController(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  const contents = `import { Body, Controller, Get, Post } from '@setu-ts/decorator-plugin';
+  const contents = `import { Body, Controller, Ctx, Get, Post } from '@setu-ts/decorator-plugin';
+import type { IRequestContext } from '@setu-ts/common';
 
 /**
  * HTTP controller for the ${names.kebab} resource.
@@ -55,8 +56,8 @@ export class ${names.pascal}Controller {
    * @returns The created record, serialized as JSON
    */
   @Post('/')
-  create(@Body() body: Record<string, unknown>): { readonly created: Record<string, unknown> } {
-    return { created: body };
+  create(@Body() body: Record<string, unknown>, @Ctx() ctx: IRequestContext): unknown {
+    return ctx.response.status(201).json({ created: body });
   }
 }
 `;

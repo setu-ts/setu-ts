@@ -169,6 +169,13 @@ describe('runAppCommand', () => {
       expect(h.err.text()).toContain('Unknown template "nope"');
     });
 
+    it('refuses the retired independent DI switch through the shared selector', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--di'])).toBe(2);
+      expect(h.err.text()).toContain('--template class-based');
+      expect(h.fs.writes).toEqual([]);
+    });
+
     // Through the same reader `setu new --workspace --port` uses, so a value the
     // one flag site rejects can never be accepted by the other.
     it('refuses a member port no service can bind', async () => {
@@ -549,10 +556,10 @@ describe('runAppCommand', () => {
       expect(h.fs.has(`/ws/apps/web/${DISCOVERY_MODULE}`)).toBe(true);
     });
 
-    it('passes --di through to the member', async () => {
+    it('rejects the retired independent DI flag', async () => {
       const h = harness([]);
-      expect(await h.run(['app', 'orders', '--di'])).toBe(0);
-      expect(h.fs.read('/ws/apps/orders/setu.config.ts')).toContain('DiPlugin()');
+      expect(await h.run(['app', 'orders', '--di'])).toBe(2);
+      expect(h.err.text()).toContain('--template class-based');
     });
   });
 

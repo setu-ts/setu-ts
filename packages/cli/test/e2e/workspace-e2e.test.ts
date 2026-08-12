@@ -280,12 +280,12 @@ describe('workspace scaffolding — end to end', () => {
   });
 
   // A member is a project like any other: `setu generate` reads ITS manifest,
-  // not the root's, so a gated schematic has to work inside one.
-  it('generates a gated schematic inside a member', async () => {
+  // so functional module output has to work inside one too.
+  it('generates a functional module inside a member', async () => {
     const ws = await twoMembers();
-    expect(await run(['g', 'controller', 'invoice', '--dir', `${ws}/apps/billing`])).toBe(0);
+    expect(await run(['g', 'module', 'invoice', '--dir', `${ws}/apps/billing`])).toBe(0);
     expect(
-      (await Deno.stat(`${ws}/apps/billing/src/controllers/invoice.controller.ts`)).isFile,
+      (await Deno.stat(`${ws}/apps/billing/src/routes/invoice.routes.ts`)).isFile,
     ).toBe(true);
   });
 

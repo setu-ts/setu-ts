@@ -82,7 +82,7 @@ export interface AppDependencies {
  */
 function printUsage(log: (message: string) => void): void {
   log(
-    `Usage: ${PROGRAM_NAME} generate ${APP_VERB} <name> [--template <name>] [--di] ` +
+    `Usage: ${PROGRAM_NAME} generate ${APP_VERB} <name> [--template <name>] ` +
       `[--port <n>] [--dir <path>]`,
   );
   log('');
@@ -91,10 +91,9 @@ function printUsage(log: (message: string) => void): void {
   log('');
   log('Options:');
   // From the constant, not a hand-written list: this said
-  // `rest | microservice | nest` while `full-stack` was refused, and would have
+  // an incomplete hand-written list while `full-stack` was refused, and would have
   // gone on saying it after the refusal was lifted.
   log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
-  log('  --di                Register DiPlugin in this member');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');
@@ -166,7 +165,7 @@ function reportNoWorkspace(
  *
  * @param name - The member's kebab-case name
  * @param next - The manifest as it will be after this member is added
- * @param args - The parsed arguments, read for `--template` and `--di`
+ * @param args - The parsed arguments, read for `--template`
  * @returns The planned files, or the usage refusal to print
  */
 function planMember(
@@ -226,7 +225,7 @@ function planMember(
   // apply — the template data decides that, per target, exactly as it does for a
   // standalone project.
   const host = withWorkspaceMember(
-    resolveHost(choice.template ?? MINIMAL_HOST, choice.features, profile.runtime),
+    resolveHost(choice.template ?? MINIMAL_HOST, profile.runtime),
     transport,
     name,
     profile,
@@ -236,7 +235,7 @@ function planMember(
   );
   const memberRoot = joinPath(MEMBERS_DIR, name);
 
-  const files: GeneratedFile[] = projectFiles(name, profile.runtime, host, choice.features, {
+  const files: GeneratedFile[] = projectFiles(name, profile.runtime, host, {
     symbol: SERVICE_PORT_EXPORT,
     from: DISCOVERY_SPECIFIER,
   }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));

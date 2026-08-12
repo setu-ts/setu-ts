@@ -69,10 +69,11 @@ export interface NameConflict {
 /**
  * Reports an existing artifact the requested one would collide with.
  *
- * Only fires when the collision is REAL. Both groups depend on `decorator-plugin`: the
- * DI token is emitted only when it is installed (`generateService`), and `controller`
- * and `module` are gated on it, so without that package no pair in either group can
- * exist. Checking it here keeps the refusal off projects where the artifacts are inert.
+ * Only fires when the collision is REAL. The DI-token group depends on
+ * `decorator-plugin`; functional modules instead share a route filename with a
+ * same-named route, and the ordinary overwrite check refuses that exact path.
+ * Checking the decorator composition here keeps class-only collision advice off
+ * functional projects.
  *
  * A schematic never conflicts with ITSELF: a second `setu g route widget` is the
  * ordinary overwrite refusal, which reports the file rather than a name clash.

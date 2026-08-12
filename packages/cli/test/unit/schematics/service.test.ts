@@ -1,48 +1,94 @@
+/**
+ * Unit tests for the `service` schematic.
+ *
+ * The one schematic whose emitted shape depends on the target project's
+ * composition, so both arms are pinned rather than only the one the default
+ * template takes.
+ *
+ * @module
+ */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { deriveNames } from '../../../src/utils/names.ts';
+
 import { generateService } from '../../../src/schematics/service.ts';
-import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
+import { deriveNames } from '../../../src/utils/names.ts';
+import { FUNCTIONAL_SERVICES_SEAM } from '../../../src/seams/services.ts';
+import { assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
 
 describe('service schematic', () => {
-  describe('in a project without decorator-plugin', () => {
-    const files = generateService(deriveNames('order-item'), options());
-    const [file] = files;
+  it('is ungated, so it runs in a project with no plugins at all', () => {
+    expect(gateOf('service')).toBeUndefined();
+  });
 
-    // Pins the promise the conditional shape is built on: a bare project's output does
-    // not move at all, so `g service` keeps working exactly as it did while staying
-    // ungated. If this ever fails, the schematic has silently become decorator-only.
-    it('emits exactly one file, and no seam barrel', () => {
-      expect(files).toHaveLength(1);
-      expect(file!.path).toBe('src/services/order-item.service.ts');
-      expect(files.some((f) => f.managed === true)).toBe(false);
+  describe('in a functional project', () => {
+    const files = generateService(deriveNames('order-item'), options());
+
+    it('emits the service and a convenience re-export barrel', () => {
+      expect(files.map((f) => f.path)).toEqual([
+        'src/services/order-item.service.ts',
+        'src/services/index.ts',
+      ]);
+      // Managed, so a second `g service` rewrites it rather than refusing.
+      expect(files.filter((f) => f.managed === true).map((f) => f.path))
+        .toEqual(['src/services/index.ts']);
+    });
+
+    it('re-exports the function, and registers nothing', () => {
+      const barrel = files[1].contents;
+      expect(barrel).toContain(
+        "export { describeOrderItem } from './order-item.service.ts';",
+      );
+      // A plain function has no registration site, and the barrel must not imply
+      // one: `APP_SERVICES` is the class barrel's export, read by DecoratorPlugin.
+      expect(barrel).not.toContain('APP_SERVICES');
+      expect(barrel).not.toContain('DecoratorPlugin');
+      expect(barrel).toContain('not a registration');
+    });
+
+    it('unions the services already present with the new one', () => {
+      const barrel = generateService(
+        deriveNames('order-item'),
+        options([], [], { service: ['gizmo', 'billing'] }),
+      )[1].contents;
+      for (const symbol of ['describeGizmo', 'describeBilling', 'describeOrderItem']) {
+        expect(barrel).toContain(`export { ${symbol} }`);
+      }
+    });
+
+    it('lists a regenerated service exactly once', () => {
+      const barrel = generateService(
+        deriveNames('billing'),
+        options([], [], { service: ['billing'] }),
+      )[1].contents;
+      expect(barrel.match(/describeBilling/g)?.length).toBe(1);
     });
 
     it('produces non-empty contents ending in a newline', () => {
-      expect(file!.contents.length).toBeGreaterThan(0);
-      expect(file!.contents.endsWith('\n')).toBe(true);
+      expect(files[0].contents.length).toBeGreaterThan(0);
+      expect(files[0].contents.endsWith('\n')).toBe(true);
     });
 
-    it('declares the service class', () => {
-      expect(file!.contents).toContain('export class OrderItemService');
+    it('exports a plain function', () => {
+      expect(files[0].contents).toContain('export function describeOrderItem(): string');
     });
 
     it('needs no framework import', () => {
-      // Matched as STATEMENTS at the start of a line, not as substrings: the JSDoc says
-      // the class "is used by whatever imports it" and names `@Injectable` as what you
-      // get with the plugin installed, so bare `toContain` checks would both trip on
-      // prose while an applied import or decorator is what actually matters.
-      expect(file!.contents).not.toMatch(/^import /m);
-      expect(file!.contents).not.toMatch(/^@Injectable/m);
+      // Matched as STATEMENTS at the start of a line, not as substrings: the JSDoc
+      // names the functional style in prose, so a bare `toContain` would trip on
+      // that while an applied import or decorator is what actually matters.
+      expect(files[0].contents).not.toMatch(/^import /m);
+      expect(files[0].contents).not.toMatch(/^@Injectable/m);
     });
 
-    it('says it is unregistered, and how to change that', () => {
-      expect(file!.contents).toContain('No framework registration');
-      expect(file!.contents).toContain('@setu-ts/decorator-plugin');
-    });
-
-    it('is ungated, so it runs in a project with no plugins at all', () => {
-      expect(gateOf('service')).toBe(undefined);
+    // The symbol the module exports and the symbol the barrel imports have ONE
+    // owner, `functionalServiceSymbol` — which is also what the scanner admits
+    // files by. Splitting those is the M60 defect this seam nearly repeated.
+    it('exports exactly the symbol its seam requires', () => {
+      const required = FUNCTIONAL_SERVICES_SEAM.importSymbols(deriveNames('order-item'));
+      expect(required).toEqual(['describeOrderItem']);
+      for (const symbol of required) {
+        expect(files[0].contents).toContain(`export function ${symbol}(`);
+      }
     });
 
     it('derives identical output from any casing of the same name', () => {
@@ -50,9 +96,9 @@ describe('service schematic', () => {
     });
   });
 
-  describe('in a project with decorator-plugin', () => {
-    const files = generateService(deriveNames('order-item'), options(['decorator-plugin']));
-    const file = artifactOf(files, 'service');
+  describe('in a class-based project', () => {
+    const plugins = ['decorator-plugin', 'di-plugin'];
+    const files = generateService(deriveNames('order-item'), options(plugins));
 
     it('emits the service plus its seam barrel', () => {
       expect(files.map((f) => f.path)).toEqual([
@@ -64,8 +110,10 @@ describe('service schematic', () => {
     it('decorates the class with an explicit token', () => {
       // Explicit because `emitDecoratorMetadata` is unavailable under Deno, so a
       // consumer's `@Inject` cannot read the parameter's type.
-      expect(file.contents).toContain("@Injectable({ token: 'order-item-service' })");
-      expect(file.contents).toContain(`import { Injectable } from '@setu-ts/decorator-plugin';`);
+      expect(files[0].contents).toContain("@Injectable({ token: 'order-item-service' })");
+      expect(files[0].contents).toContain(
+        `import { Injectable } from '@setu-ts/decorator-plugin';`,
+      );
     });
 
     it('lists the class in the barrel for DecoratorPlugin({ services })', () => {
@@ -74,15 +122,23 @@ describe('service schematic', () => {
     });
 
     it('satisfies the seam contract', () => {
-      assertSeamContract('service', 'order-item', ['gizmo', 'billing'], {
-        plugins: ['decorator-plugin'],
-      });
+      assertSeamContract('service', 'order-item', ['gizmo', 'billing'], { plugins });
     });
 
     it('derives identical output from any casing of the same name', () => {
-      expect(generateService(deriveNames('OrderItem'), options(['decorator-plugin'])))
-        .toEqual(files);
+      expect(generateService(deriveNames('OrderItem'), options(plugins))).toEqual(files);
     });
+  });
+
+  // Only a project predating `--template class-based` can hold decorators
+  // without a container, and its generation must keep working — that is the
+  // whole reason the mode classifier reads `decorator-plugin` alone.
+  it('emits the class for a legacy decorator-only project', () => {
+    const files = generateService(deriveNames('order-item'), options(['decorator-plugin']));
+    expect(files.map((f) => f.path)).toEqual([
+      'src/services/order-item.service.ts',
+      'src/services/index.ts',
+    ]);
   });
 });
 
@@ -90,20 +146,14 @@ describe('service schematic', () => {
 // class, and the two compositions genuinely differ: with a container the class
 // is a provider ON the container and is absent from the kernel registry, so
 // `services.get(token)` throws. Verified by booting both, not inferred — see the
-// M61 matrix. Before `--di` existed only `--template nest` had a container, so
-// the old "or services.get(...)" advice was almost always right; it is now wrong
-// on every template the flag is used with.
+// M61 matrix, and `test/e2e/seam-probe.test.ts`, which resolves the generated
+// service through the container exactly as this text instructs.
 describe('the injectable service JSDoc names the right resolution route', () => {
   const injectable = () =>
-    generateService(deriveNames('billing'), {
-      runtime: 'deno',
-      plugins: new Set(['decorator-plugin']),
-      now: () => 0,
-    })[0].contents;
+    generateService(deriveNames('billing'), options(['decorator-plugin', 'di-plugin']))[0].contents;
 
   it('does not present services.get as unconditional', () => {
-    const src = injectable();
-    expect(src).not.toContain('constructor parameter, or `services.get(');
+    expect(injectable()).not.toContain('constructor parameter, or `services.get(');
   });
 
   it('names the container route and says the registry one throws', () => {

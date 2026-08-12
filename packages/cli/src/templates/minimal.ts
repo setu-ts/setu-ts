@@ -24,6 +24,7 @@
 import type { SeamSpec } from '../seams/seam-spec.ts';
 import type { TemplateHost } from './registry.ts';
 import { RUNTIME_WIRING } from './rest.ts';
+import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
   seamFiles,
   seamLocalImports,
@@ -59,6 +60,11 @@ export const MINIMAL_HOST: TemplateHost = {
   pluginSpreads: seamPluginSpreads(MINIMAL_SEAMS),
   setupCalls: seamSetupCalls(MINIMAL_SEAMS),
   manifest: {
+    // `setu generate module` is ungated since M65, so this host can emit a
+    // `*.service.test.ts` — and a host that emits a test file must declare the
+    // packages it imports, or the first `deno test` fails on an import the CLI
+    // itself wrote.
+    ...TEST_DEPENDENCY_MANIFEST,
     // Kept even though nothing this host emits is decorated: a developer who
     // adds `@setu-ts/decorator-plugin` by hand would otherwise get a compile
     // error from a manifest they did not write. It is free here in a way it is
