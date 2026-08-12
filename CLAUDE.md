@@ -2060,8 +2060,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   spawn; its decidable logic is exported and unit-tested instead. **Not verified against a managed
   cloud cluster** — CI holds no cloud credentials; the proof is a real local kind cluster) —
   complete (PR #149)
-- **Milestone 63** (`packages/cli` — scaffold repairs) — complete (PR pending). Four defects found
-  by building a three-service monorepo on the PUBLISHED `0.1.0-alpha.7` packages against real
+- **Milestone 63** (`packages/cli` — scaffold repairs) — complete (PR #153). Four defects found by
+  building a three-service monorepo on the PUBLISHED `0.1.0-alpha.7` packages against real
   PostgreSQL, every one of which passed all four gates, both publish gates, and the coverage bar.
   **D1:** a project scaffolded on release day could not `deno install` at all — Deno 2.9 refuses a
   dependency published in the last 24 hours and `setu new` pins the CLI's own version, so the root
