@@ -196,18 +196,49 @@ export interface TemplateManifest {
    * into Deno ones, which switches Deno to node_modules resolution.
    */
   readonly npmBuildScript?: string;
-  /** `compilerOptions` merged into `tsconfig.json`. */
+  /**
+   * `compilerOptions` merged into `tsconfig.json`, which the npm toolchain reads.
+   *
+   * Vite and `tsc` read `tsconfig.json`; Deno reads `deno.json` and ignores it
+   * entirely. A template whose options must reach `deno check` sets
+   * {@linkcode TemplateManifest.denoCompilerOptions} instead — the two are
+   * separate because they are consumed by different toolchains, and conflating
+   * them is what shipped a `full-stack` project whose every `.tsx` route failed
+   * `deno check` with 79 `TS2686` errors while `vite build` succeeded.
+   */
   readonly tsconfigCompilerOptions?: Readonly<Record<string, unknown>>;
+  /**
+   * `compilerOptions` merged into the generated `deno.json`.
+   *
+   * This is the set `deno check` and `deno task start` actually honor. A
+   * template that emits decorated classes needs `experimentalDecorators`; a
+   * template that emits JSX needs `jsx` and `jsxImportSource`.
+   *
+   * **A template emitting JSX must declare `jsx` whenever it declares anything
+   * here at all.** Measured: a manifest with no `compilerOptions` key checks
+   * JSX clean, because Deno applies its own `react-jsx` default — but declaring
+   * ANY option replaces that default set, so
+   * `{ experimentalDecorators: true }` alone silently reverts JSX to the classic
+   * transform and every `.tsx` fails with `TS2686 'React' refers to a UMD
+   * global`. That is why this is per template rather than a fixed block: the
+   * previous fixed `experimentalDecorators` was itself the cause of the
+   * full-stack template's 79 type errors, not merely a redundant extra.
+   */
+  readonly denoCompilerOptions?: Readonly<Record<string, unknown>>;
   /** Entries merged into the Deno import map, for aliases `deno check` must resolve. */
   readonly denoImports?: Readonly<Record<string, string>>;
   /**
-   * Permission flags the generated Deno `start` task needs beyond the default
+   * Permission flags the generated Deno `start` task needs beyond the base
    * `--allow-net --allow-env`.
    *
-   * A server-rendering template needs `--allow-read`: it loads its own compiled
-   * server build and serves static assets through the runtime filesystem, so
-   * without it the scaffolded project scaffolds cleanly and then fails on its
-   * first request.
+   * The set is a property of the plugins the template wires, not of the
+   * template's own code, so it is declared per template rather than defaulted:
+   * anything wiring `HealthPlugin` needs `--allow-sys`, because the `self`
+   * indicator reads `runtime.hostname()` on every probe and a project without it
+   * scaffolds cleanly, starts, and then answers 500 on `/health` — the endpoint
+   * the generated Kubernetes probes point at. A server-rendering template
+   * additionally needs `--allow-read`: it loads its own compiled server build and
+   * serves static assets through the runtime filesystem.
    */
   readonly denoPermissions?: readonly string[];
 }
@@ -278,6 +309,19 @@ export interface TemplateHost {
    * silently winning.
    */
   readonly files?: readonly GeneratedFile[];
+  /**
+   * Tasks merged into the generated `deno.json` beyond `start`.
+   *
+   * A template contributes one when its emitted source needs a command the fixed
+   * set does not cover: the full-stack template's `check:app` type-checks the
+   * `app/` tree, which `deno check main.ts` never reaches because those modules
+   * are loaded through the compiled server build rather than imported by the
+   * entry.
+   *
+   * Merged alongside the workspace transport's own task contributions, which is
+   * why this is a record rather than a list.
+   */
+  readonly extraTasks?: Readonly<Record<string, string>>;
   /**
    * Extra entries appended to the `plugins: [...]` array, rendered verbatim.
    *

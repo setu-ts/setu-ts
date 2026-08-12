@@ -41,7 +41,16 @@ const TEST_DEPENDENCY_VERSIONS = {
   '@std/expect': '1.0.20',
 } as const;
 
-/** Manifest additions every module-hosting template merges in. */
+/**
+ * Manifest additions every module-hosting template merges in.
+ *
+ * The three templates that share this — `rest`, `microservice`, `nest` — are
+ * exactly the three that wire `HealthPlugin` and emit decorated classes, so the
+ * permission and compiler settings both belong here rather than being repeated
+ * per template. The no-template host wires neither and correctly receives
+ * neither: it registers only the runtime plugin, and `setu generate service`
+ * emits a plain class in a project with no decorator plugin.
+ */
 export const MODULE_SEAM_MANIFEST: TemplateManifest = {
   denoImports: Object.fromEntries(
     Object.entries(TEST_DEPENDENCY_VERSIONS).map(([pkg, v]) => [pkg, `jsr:${pkg}@^${v}`]),
@@ -51,6 +60,13 @@ export const MODULE_SEAM_MANIFEST: TemplateManifest = {
       [pkg, v],
     ) => [pkg, `npm:@jsr/${pkg.slice(1).replace('/', '__')}@^${v}`]),
   ),
+  // `HealthPlugin`'s `self` indicator reads `runtime.hostname()` on every probe.
+  // Without this the project scaffolds, starts, and answers 500 on `/health` —
+  // the path the generated Kubernetes probes point at.
+  denoPermissions: ['--allow-sys'],
+  // The decorator and OpenAPI plugins ship legacy decorators, so a generated
+  // @Controller class only type-checks with this enabled.
+  denoCompilerOptions: { experimentalDecorators: true },
 };
 
 /**

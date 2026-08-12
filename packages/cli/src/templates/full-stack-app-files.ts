@@ -41,8 +41,15 @@ export default [
 ] satisfies RouteConfig;
 `;
 
-const rootModule =
-  `import { isRouteErrorResponse, Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteError } from 'react-router';
+const rootModule = `import {
+  isRouteErrorResponse,
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+  useRouteError,
+} from 'react-router';
 
 import './app.css';
 
@@ -51,10 +58,10 @@ import './app.css';
  */
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang='en'>
       <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta charSet='utf-8' />
+        <meta name='viewport' content='width=device-width, initial-scale=1' />
         <Meta />
         <Links />
       </head>
@@ -83,7 +90,7 @@ export function ErrorBoundary() {
 
   if (isRouteErrorResponse(error)) {
     return (
-      <main className="error">
+      <main className='error'>
         <h1>{error.status}</h1>
         <p>{error.statusText}</p>
       </main>
@@ -91,7 +98,7 @@ export function ErrorBoundary() {
   }
 
   return (
-    <main className="error">
+    <main className='error'>
       <h1>Something went wrong</h1>
     </main>
   );
@@ -99,7 +106,7 @@ export function ErrorBoundary() {
 `;
 
 const entryServerModule = `import { renderToReadableStream } from 'react-dom/server';
-import { ServerRouter, type EntryContext } from 'react-router';
+import { type EntryContext, ServerRouter } from 'react-router';
 
 /**
  * Server entry.
@@ -418,7 +425,7 @@ export default function AppLayout() {
   const { pathname } = useLocation();
 
   return (
-    <div className="app-shell">
+    <div className='app-shell'>
       <nav>
         {APP_NAV.map((item) => (
           <NavLink
@@ -443,7 +450,7 @@ const loginLayout = `import { Outlet } from 'react-router';
 /** Chrome for unauthenticated pages. */
 export default function LoginLayout() {
   return (
-    <div className="auth-shell">
+    <div className='auth-shell'>
       <main>
         <Outlet />
       </main>
@@ -494,19 +501,19 @@ export default function IndexRoute() {
       <p>
         {signedInAs === null ? <>You are not signed in.</> : (
           <>
-            Signed in as <strong>{signedInAs}</strong> — the session is server-authoritative and
-            the cookie is HttpOnly.
+            Signed in as <strong>{signedInAs}</strong>{' '}
+            — the session is server-authoritative and the cookie is HttpOnly.
           </>
         )}
       </p>
       <ul>
         <li>
-          <Link to='/products'>Products</Link> — rows read through the database capability by a
-          loader.
+          <Link to='/products'>Products</Link>{' '}
+          — rows read through the database capability by a loader.
         </li>
         <li>
-          <Link to='/login'>Sign in</Link> — a form guarded by the session's synchronizer CSRF
-          token.
+          <Link to='/login'>Sign in</Link>{' '}
+          — a form guarded by the session's synchronizer CSRF token.
         </li>
       </ul>
     </section>
@@ -602,16 +609,16 @@ export default function LoginRoute() {
   const actionData = useActionData<typeof action>();
 
   return (
-    <Form method="post">
-      {actionData?.error ? <p role="alert">{actionData.error}</p> : null}
-      <input type="hidden" name="_csrf" value={csrfToken} />
+    <Form method='post'>
+      {actionData?.error ? <p role='alert'>{actionData.error}</p> : null}
+      <input type='hidden' name='_csrf' value={csrfToken} />
       <label>
-        Email <input type="email" name="email" required />
+        Email <input type='email' name='email' required />
       </label>
       <label>
-        Password <input type="password" name="password" required />
+        Password <input type='password' name='password' required />
       </label>
-      <button type="submit">Sign in</button>
+      <button type='submit'>Sign in</button>
     </Form>
   );
 }
