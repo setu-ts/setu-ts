@@ -5,13 +5,14 @@ import type {
   HandlerResult,
   IPlugin,
   IPluginContext,
+  IRequestContext,
   IRuntimeServices,
   MiddlewareFunction,
 } from '@setu-ts/common';
 
 import { createApplication } from '@setu-ts/kernel';
 
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '../../src/index.ts';
+import { Body, Controller, Ctx, Get, Param, Post, Query, UseGuards } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -92,6 +93,26 @@ describe('decorator-driven application (e2e)', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ id: '2', name: 'Bob', source: 'api' });
+    await app.stop();
+  });
+
+  it('injects @Ctx so a decorated handler can configure its response', async () => {
+    @Controller('/users')
+    class UserController {
+      @Post('/')
+      create(@Ctx() ctx: IRequestContext) {
+        return ctx.response.status(201).header('Location', '/users/2').json({ id: '2' });
+      }
+    }
+
+    const app = createApplication({
+      plugins: [testRuntimePlugin(), DecoratorPlugin({ controllers: [UserController] })],
+    });
+    await app.start();
+    const res = await app.inject({ method: 'POST', url: 'http://localhost/users' });
+    expect(res.statusCode).toBe(201);
+    expect(res.headers.get('Location')).toBe('/users/2');
+    expect(res.json()).toEqual({ id: '2' });
     await app.stop();
   });
 

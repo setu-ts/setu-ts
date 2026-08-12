@@ -2082,18 +2082,20 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   installs, type-checks and BOOTS every template, then requests what it advertises — booting
   deliberately without `-A`, since a forgotten permission is unobservable under a blanket grant.
   Four negative controls were each observed failing and reverted
-- **Next milestone** — **M64** (`decorator-plugin`: ship `@Ctx()`), then **M65** (functional
-  default, NestJS-shaped opt-in). M63–M68 come from the same alpha.7 smoke test; see the ROADMAP
-  section. Previously — **M40** (final polish and release). M60–M62 came from a measured audit after
-  M58: a project with all fourteen schematics generated type-checked clean while its entry points
-  imported exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable
-  — that, not breadth, was the distance from NestJS. **All three are now closed**: M60 wired eleven
-  of the thirteen, M61 made decorators and DI independent choices, and M62 added monorepos, so the
-  CLI parity work is done. M59 came from an external DX review; note what that review got wrong,
-  since the ROADMAP section says so and a reader should not re-raise it: it claimed the framework
-  has no decorators (M9/M36b ship them) and that Workers queues are still blocked (M52b shipped
-  them). Its suggested HTTP-polling adapters were rejected with cause — a Worker has no ambient loop
-  to poll from.
+- **Milestone 64** (`packages/decorator-plugin` — `@Ctx()` built-in parameter decorator resolving
+  the active `IRequestContext`, so decorated handlers can set status/headers or stream) — complete
+  (PR pending)
+- **Next milestone** — **M65** (functional default, NestJS-shaped opt-in). M63–M68 come from the
+  same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
+  M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated
+  type-checked clean while its entry points imported exactly ONE generated path, so thirteen of
+  fourteen generated artifacts were unreachable — that, not breadth, was the distance from NestJS.
+  **All three are now closed**: M60 wired eleven of the thirteen, M61 made decorators and DI
+  independent choices, and M62 added monorepos, so the CLI parity work is done. M59 came from an
+  external DX review; note what that review got wrong, since the ROADMAP section says so and a
+  reader should not re-raise it: it claimed the framework has no decorators (M9/M36b ship them) and
+  that Workers queues are still blocked (M52b shipped them). Its suggested HTTP-polling adapters
+  were rejected with cause — a Worker has no ambient loop to poll from.
 
 ## Verification (run before declaring any work done)
 

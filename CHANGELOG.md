@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`@Ctx()` for decorated controller handlers.** The decorator-plugin now injects the active
+  `IRequestContext` into a decorated handler, so it can configure `ctx.response` (including status
+  and headers) or return a streaming response without leaving the class-based routing API.
+
 ## [0.1.0-alpha.7] — 2026-08-12
 
 **A deployment release.** A generated workspace now emits the artifacts that ship it — a

@@ -73,6 +73,26 @@ export function CurrentUser(): ParameterDecorator {
 }
 
 /**
+ * Injects the active request context. Use it when a decorated handler needs
+ * to configure its response or return a streaming response.
+ *
+ * Resolved by {@linkcode resolveParameters} as a custom parameter of type
+ * `'context'`.
+ *
+ * @returns A parameter decorator
+ * @since 0.1.0
+ */
+export function Ctx(): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    metadataStore.storeParam(protoToCtor(target), String(propertyKey), {
+      index: parameterIndex,
+      type: 'custom',
+      customType: 'context',
+    });
+  };
+}
+
+/**
  * Marks a route as public — authentication and authorization are bypassed.
  * Takes precedence over `@Roles`/`@Permissions` on the same target.
  *
