@@ -58,4 +58,15 @@ export const MINIMAL_HOST: TemplateHost = {
   files: seamFiles(MINIMAL_SEAMS),
   pluginSpreads: seamPluginSpreads(MINIMAL_SEAMS),
   setupCalls: seamSetupCalls(MINIMAL_SEAMS),
+  manifest: {
+    // Kept even though nothing this host emits is decorated: a developer who
+    // adds `@setu-ts/decorator-plugin` by hand would otherwise get a compile
+    // error from a manifest they did not write. It is free here in a way it is
+    // NOT on the full-stack template — declaring any compiler option replaces
+    // Deno's default set, which is how the fixed `experimentalDecorators`
+    // silently disabled `jsx` there.
+    denoCompilerOptions: { experimentalDecorators: true },
+    // No extra permissions: this host registers only the runtime plugin, so it
+    // has no health indicator reading the hostname and no server build to read.
+  },
 };

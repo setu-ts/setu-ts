@@ -283,3 +283,103 @@ export async function bootAndProbe(
   if (line === undefined) throw new Error(`probe printed no result:\n${out}`);
   return JSON.parse(line.slice(PROBE_MARKER.length)) as Record<string, unknown>;
 }
+
+/** What a project booted under its own permissions answered. */
+export interface ProbeOutcome {
+  /** The status each requested path answered with. */
+  readonly statuses: Readonly<Record<string, number>>;
+  /** The body of each requested path. */
+  readonly bodies: Readonly<Record<string, string>>;
+  /** Everything the process wrote, for a failure message. */
+  readonly output: string;
+}
+
+/**
+ * Boots a scaffolded project with the permissions ITS OWN generated `start` task
+ * declares, then requests each path.
+ *
+ * The permission set is the point. Every other fixture here boots with `-A`,
+ * which grants what the generated task may have forgotten to ask for and so
+ * cannot observe a permission defect at all: a `rest` project shipped for five
+ * releases answering 500 on `/health` because its task never requested
+ * `--allow-sys`, and an `-A` boot passes that every time.
+ *
+ * `--config` and `--node-modules-dir` are added on top, since neither grants a
+ * permission — the flags under test are exactly the ones the template declared.
+ *
+ * @param project - The project directory, already repointed at the workspace
+ * @param paths - The paths to request once it is serving
+ * @returns The status and body of each path
+ * @throws {Error} If the entry has no literal port to rebind, or never serves
+ */
+export async function bootWithGeneratedPermissions(
+  project: string,
+  paths: readonly string[],
+): Promise<ProbeOutcome> {
+  const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
+    tasks?: Record<string, string>;
+  };
+  const start = manifest.tasks?.['start'];
+  if (start === undefined) throw new Error(`No start task in ${project}/deno.json.`);
+
+  // Everything between `deno run` and the entry module is the permission set.
+  const flags = start.replace(/^deno run\s+/, '').replace(/\s+\S+\.ts$/, '').split(/\s+/)
+    .filter((flag) => flag.startsWith('--'));
+
+  const port = unusedPort();
+  const entry = `${project}/main.ts`;
+  const source = await Deno.readTextFile(entry);
+  const patched = source.replace(/port: \d+/, `port: ${port}`);
+  if (patched === source) throw new Error(`No literal port to rebind in ${entry}.`);
+  await Deno.writeTextFile(entry, patched);
+
+  const child = new Deno.Command(Deno.execPath(), {
+    args: [
+      'run',
+      ...flags,
+      '--node-modules-dir=none',
+      '--config',
+      `${project}/deno.json`,
+      entry,
+    ],
+    stdout: 'piped',
+    stderr: 'piped',
+  }).spawn();
+
+  const statuses: Record<string, number> = {};
+  const bodies: Record<string, string> = {};
+  let served = false;
+  for (let attempt = 0; attempt < 150; attempt++) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/`);
+      await response.body?.cancel();
+      served = true;
+      break;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
+  try {
+    if (served) {
+      for (const path of paths) {
+        const response = await fetch(`http://127.0.0.1:${port}${path}`);
+        statuses[path] = response.status;
+        bodies[path] = await response.text();
+      }
+    }
+  } finally {
+    // In a `finally`, because a probe that rejects — a connection reset, or the
+    // server dying after it answered readiness — would otherwise leave a bound
+    // subprocess alive for the rest of the suite.
+    child.kill('SIGKILL');
+  }
+
+  const status = await child.status;
+  const output = `${await new Response(child.stdout).text()}${await new Response(child.stderr)
+    .text()}`;
+  if (!served) {
+    throw new Error(`The project never served a request (exit ${status.code}):\n${output}`);
+  }
+  return { statuses, bodies, output };
+}

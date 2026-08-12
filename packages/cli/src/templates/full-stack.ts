@@ -17,6 +17,8 @@ import type { TemplateDefinition, TemplateFeatures } from './registry.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
 import {
   buildFullStackBuildFiles,
+  FULL_STACK_CHECK_TASK,
+  FULL_STACK_DENO_COMPILER_OPTIONS,
   FULL_STACK_DENO_IMPORTS,
   FULL_STACK_NPM_DEPENDENCIES,
   FULL_STACK_NPM_DEV_DEPENDENCIES,
@@ -127,6 +129,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     { pkg: 'react-router-plugin' },
   ],
   files: [...FULL_STACK_APP_FILES, ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES)],
+  extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
     // The one template with a real frontend build, and the only one that should
     // therefore carry an npm manifest on a Deno or Workers target.
@@ -135,10 +138,17 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     npmDevDependencies: FULL_STACK_NPM_DEV_DEPENDENCIES,
     tsconfigCompilerOptions: FULL_STACK_TSCONFIG_OPTIONS,
     denoImports: FULL_STACK_DENO_IMPORTS,
+    // Vite reads `tsconfig.json`; `deno check` reads `deno.json` and ignores it.
+    // Without the same JSX settings in both, `vite build` succeeds while
+    // `deno check` fails on every route with `TS2686 'React' refers to a UMD
+    // global`. `experimentalDecorators` is deliberately absent: this template
+    // registers no decorator plugin and emits no decorated class.
+    denoCompilerOptions: FULL_STACK_DENO_COMPILER_OPTIONS,
     // The SSR plugin imports the compiled server build and reads client assets
     // through the runtime filesystem; without this the project starts and then
-    // fails on its first request.
-    denoPermissions: ['--allow-read'],
+    // fails on its first request. `--allow-sys` is for `HealthPlugin`, which the
+    // full-stack starter composes — its `self` indicator reads the hostname.
+    denoPermissions: ['--allow-read', '--allow-sys'],
   },
   // Every runtime is supported: a missing filesystem makes the asset handler
   // answer 404 rather than throw, and this template omits the asset route

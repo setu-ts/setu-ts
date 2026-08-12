@@ -2060,7 +2060,31 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   spawn; its decidable logic is exported and unit-tested instead. **Not verified against a managed
   cloud cluster** — CI holds no cloud credentials; the proof is a real local kind cluster) —
   complete (PR #149)
-- **Next milestone** — **M40** (final polish and release). M60–M62 came from a measured audit after
+- **Milestone 63** (`packages/cli` — scaffold repairs) — complete (PR #153). Four defects found by
+  building a three-service monorepo on the PUBLISHED `0.1.0-alpha.7` packages against real
+  PostgreSQL, every one of which passed all four gates, both publish gates, and the coverage bar.
+  **D1:** a project scaffolded on release day could not `deno install` at all — Deno 2.9 refuses a
+  dependency published in the last 24 hours and `setu new` pins the CLI's own version, so the root
+  now emits `minimumDependencyAge`. **D2:** a stock `--template rest` project answered **500 on
+  `/health`**, the path its own generated Kubernetes probes point at, because the generated `start`
+  task never requested `--allow-sys` for `selfIndicator`'s `runtime.hostname()`; the per-template
+  `denoPermissions` seam already existed and simply had no entry. **D3:** every `.tsx` route in a
+  `full-stack` project failed `deno check` with 79 `TS2686`. The mechanism is sharper than the
+  obvious reading and was established only after the first negative control PASSED: a manifest with
+  NO `compilerOptions` key type-checks JSX cleanly, because Deno applies its own `react-jsx` default
+  — declaring ANY option replaces that set, so the unconditional `experimentalDecorators` was the
+  CAUSE, not a redundant extra. Compiler options are now per template (`denoCompilerOptions`), and
+  `full-stack` gains the `check:app` task that reaches route modules `deno check main.ts` never
+  sees. **D6:** a fresh workspace failed `deno fmt --check` on 62 of 74 files the CLI itself wrote —
+  no `fmt` config was emitted, and with one added the `.tsx` emitters still disagreed, so generated
+  imports are now sorted and wrapped the way `deno fmt` does and emitted JSX is single-quoted. The
+  deliverable that keeps them fixed is `test/e2e/scaffold-runs-e2e.test.ts`, which formats, lints,
+  installs, type-checks and BOOTS every template, then requests what it advertises — booting
+  deliberately without `-A`, since a forgotten permission is unobservable under a blanket grant.
+  Four negative controls were each observed failing and reverted
+- **Next milestone** — **M64** (`decorator-plugin`: ship `@Ctx()`), then **M65** (functional
+  default, NestJS-shaped opt-in). M63–M68 come from the same alpha.7 smoke test; see the ROADMAP
+  section. Previously — **M40** (final polish and release). M60–M62 came from a measured audit after
   M58: a project with all fourteen schematics generated type-checked clean while its entry points
   imported exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable
   — that, not breadth, was the distance from NestJS. **All three are now closed**: M60 wired eleven
@@ -2081,6 +2105,18 @@ deno task test
 ```
 
 All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`).
+
+**A milestone that changes what `packages/cli` GENERATES ALSO boots a scaffolded project — the gates
+above type-check generated output and stop there.** M63 repaired four defects that every one of the
+four gates, both publish gates, and the per-file coverage bar passed over, and three of them are
+invisible to a type-checker by construction: a scaffolded project could not `deno install` at all
+(no `minimumDependencyAge`, and `setu new` pins the CLI's own just-published version); a stock
+`--template rest` project answered **500 on `/health`** because its generated `start` task never
+requested `--allow-sys`; and a fresh scaffold failed `deno fmt --check` on 62 of 74 files the CLI
+itself had just written. `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` is the gate — it formats,
+lints, installs, type-checks and BOOTS each template, then requests the endpoints the project
+advertises. Its boot deliberately does not use `-A`: a permission the generated task forgot to ask
+for is unobservable under a blanket grant.
 
 **A milestone that adds or changes a package ALSO runs the two publish gates — the four above cannot
 see a publish-blocking defect.**
@@ -2278,20 +2314,21 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `git add` it. M10 shipped four `plans/milestone-10-*.md` files into the tree (main plan + three
   fix/continuation prompts) because scratch was committed — do not repeat this. Before every commit
   run `git status --short` and `git diff --cached --name-only`; if a transient plan/prompt file is
-  staged, `git rm --cached` (or delete) it. When the milestone is complete, in the SAME PR that
-  flips the status: `git rm plans/milestone-<N>-<desc>.md` and confirm
-  `git ls-files plans/ | grep milestone-<N>` returns NOTHING. A plan is scaffolding for building the
-  milestone; once it has shipped, what it decided lives in the code, the tests, `PUBLIC_API.md`, the
-  ROADMAP section and the CHANGELOG, and the plan itself is a fourth copy that drifts from all of
-  them. The 74-file `plans/archive/` this replaces was deleted for exactly that reason — several of
-  its plans still described designs the implementation had since reversed. The history keeps them:
-  `git log --diff-filter=D --name-only -- plans/` finds any of them by name.
+  staged, `git rm --cached` (or delete) it. **A completed milestone's plan is ARCHIVED, never
+  deleted** — move it to `plans/archive/milestone-<N>-<desc>.md` in the same PR that flips the
+  status, so `plans/` root holds only the plan being built. Deleting a plan is the maintainer's call
+  and theirs alone: do not remove one unless asked, even when the milestone has shipped. (A previous
+  revision of this file mandated `git rm` here, on the reasoning that a shipped plan is a fourth
+  copy of what the code, tests, ROADMAP and CHANGELOG already say, and that
+  `git log --diff-filter=D --name-only -- plans/` recovers it. That reasoning is superseded: an
+  archived plan stays readable without an archaeology step.)
 
 ## Key conventions
 
-- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), DELETED on completion
-  in the milestone's own PR — the plan is scaffolding, and git keeps it. All other prompts/notes are
-  scratchpad only and never committed (see the plan-cleanup rule in "Before reporting a task done").
+- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), moved to
+  `plans/archive/` on completion in the milestone's own PR — archived, never deleted; removal is the
+  maintainer's call. All other prompts/notes are scratchpad only and never committed (see the
+  plan-cleanup rule in "Before reporting a task done").
 - Tests: `@std/testing/bdd` (`describe`/`it`) + `@std/expect` (`expect`), in
   `test/{unit,integration,e2e}/` per package. **Write every test with `describe`/`it` from
   `@std/testing/bdd` from the very first line — NEVER start with `Deno.test(...)` and convert it
