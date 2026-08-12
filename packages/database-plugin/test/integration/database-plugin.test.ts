@@ -319,15 +319,15 @@ describe('DatabasePlugin integration', () => {
     expect(repo).toBeDefined();
   });
 
-  it('registers with drizzle adapter type', async () => {
+  it('rejects a drizzle registration without its required table registry', async () => {
     const fakeDrizzle = createFakeDrizzleInstance();
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
       type: 'drizzle',
       options: { drizzleInstance: fakeDrizzle },
     });
-    await plugin.register!(ctx);
-    expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(true);
+    await expect(plugin.register!(ctx)).rejects.toThrow('requires options.drizzleTables');
+    expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(false);
   });
 
   it('drizzle adapter getRepository returns a repository', async () => {

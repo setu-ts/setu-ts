@@ -322,11 +322,16 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
     });
   });
 
-  describe('connect with no tables', () => {
-    it('connects without drizzleTables option', async () => {
-      const a = new DrizzleAdapter({ drizzleInstance: fakeDb });
-      await a.connect();
-      expect(a.isReady()).toBe(true);
+  describe('connect with missing table registry', () => {
+    it('rejects an omitted or empty drizzleTables registry before reporting ready', async () => {
+      for (const drizzleTables of [undefined, {}] as const) {
+        const options = drizzleTables === undefined
+          ? { drizzleInstance: fakeDb }
+          : { drizzleInstance: fakeDb, drizzleTables };
+        const a = new DrizzleAdapter(options);
+        await expect(a.connect()).rejects.toThrow('requires options.drizzleTables');
+        expect(a.isReady()).toBe(false);
+      }
     });
   });
 

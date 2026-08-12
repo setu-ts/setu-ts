@@ -156,18 +156,21 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       );
     }
 
-    // Validate table registry if provided.
+    // A usable Drizzle adapter must know how entity names map to real tables.
     const tables =
       (this._options as DatabaseAdapterOptions & { drizzleTables?: Record<string, unknown> })
         .drizzleTables;
-    if (tables) {
-      for (const [name, table] of Object.entries(tables)) {
-        if (table == null || typeof table !== 'object' || !hasColumn(table, 'id')) {
-          throw new Error(
-            `Drizzle table '${name}' must be a table definition with an 'id' column; ` +
-              'provide a proper Drizzle table definition in options.drizzleTables.',
-          );
-        }
+    if (tables === undefined || Object.keys(tables).length === 0) {
+      throw new Error(
+        'DrizzleAdapter requires options.drizzleTables with at least one real Drizzle table definition.',
+      );
+    }
+    for (const [name, table] of Object.entries(tables)) {
+      if (table == null || typeof table !== 'object' || !hasColumn(table, 'id')) {
+        throw new Error(
+          `Drizzle table '${name}' must be a table definition with an 'id' column; ` +
+            'provide a proper Drizzle table definition in options.drizzleTables.',
+        );
       }
     }
 
@@ -284,7 +287,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     return this.createDataSource(entity);
   }
 
-  /** Resolve the drizzleTables option (defaults to empty). */
+  /** Resolve the validated drizzleTables option. */
   private resolveTables(): Record<string, unknown> {
     const opts = this._options as DatabaseAdapterOptions & {
       drizzleTables?: Record<string, unknown>;
