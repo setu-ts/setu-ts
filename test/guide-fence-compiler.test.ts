@@ -67,12 +67,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 3,
   },
   'docs/cli.md': {
-    total: 11,
+    // One more shell/tree fence than before M65: the domain-module section now
+    // shows the functional file set beside the class-based one.
+    total: 12,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 10,
+    skipped: 11,
   },
   'docs/plugin-architecture.md': {
     total: 17,
@@ -125,12 +127,12 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
-  total: 254,
+  total: 255,
   ts: 209,
   compile: 177,
   external: 32,
   pseudocode: 0,
-  skipped: 45,
+  skipped: 46,
 };
 
 describe('actual-fence compiler — all ten guides (shared engine)', () => {

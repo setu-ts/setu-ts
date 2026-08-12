@@ -249,7 +249,11 @@ describe('full-stack template | the runtime-dependent argument', () => {
 describe('full-stack template | manifest contributions', () => {
   it('declares the alias every emitted module imports through', () => {
     expect(FULL_STACK_TSCONFIG_OPTIONS['paths']).toEqual({ '~/*': ['./app/*'] });
-    expect(FULL_STACK_TEMPLATE.manifest?.denoImports).toEqual({ '~/': './app/' });
+    // The alias specifically, not the whole map: this template's import map also
+    // carries the shared test dependencies, because `setu generate module` is
+    // ungated and can emit a `*.service.test.ts` here too. Those are pinned
+    // across every host by `templates/test-deps.test.ts`.
+    expect(FULL_STACK_TEMPLATE.manifest?.denoImports?.['~/']).toBe('./app/');
   });
 
   it('carries the frontend build toolchain as dev dependencies', () => {

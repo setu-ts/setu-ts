@@ -15,6 +15,7 @@
 import type { TargetRuntime } from '../constants.ts';
 import type { TemplateDefinition } from './registry.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
+import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
   buildFullStackBuildFiles,
   FULL_STACK_CHECK_TASK,
@@ -125,9 +126,15 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     // therefore carry an npm manifest on a Deno or Workers target.
     npmBuildScript: 'react-router build',
     npmDependencies: FULL_STACK_NPM_DEPENDENCIES,
-    npmDevDependencies: FULL_STACK_NPM_DEV_DEPENDENCIES,
+    // The test packages are merged in because `setu generate module` is ungated
+    // since M65: this template can emit a `*.service.test.ts` too, and a host
+    // that emits a test file must declare what that file imports.
+    npmDevDependencies: {
+      ...TEST_DEPENDENCY_MANIFEST.npmDevDependencies,
+      ...FULL_STACK_NPM_DEV_DEPENDENCIES,
+    },
     tsconfigCompilerOptions: FULL_STACK_TSCONFIG_OPTIONS,
-    denoImports: FULL_STACK_DENO_IMPORTS,
+    denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, ...FULL_STACK_DENO_IMPORTS },
     // Vite reads `tsconfig.json`; `deno check` reads `deno.json` and ignores it.
     // Without the same JSX settings in both, `vite build` succeeds while
     // `deno check` fails on every route with `TS2686 'React' refers to a UMD
