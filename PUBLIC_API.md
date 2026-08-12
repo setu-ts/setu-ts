@@ -7318,34 +7318,34 @@ carry full JSDoc.
 
 ### Values (decorator-plugin exports)
 
-| Export                                               | Kind     | Purpose                                                                                                             |
-| ---------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                      |
-| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                |
-| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                 |
-| `Controller`                                         | function | Class decorator — base path prefix                                                                                  |
-| `Version`                                            | function | Class decorator — API version prefix                                                                                |
-| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                              |
-| `Body`/`Query`/`Param`/`Header`/`Cookie`             | function | Request parameter decorators                                                                                        |
-| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                 |
-| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens |
-| `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider          |
-| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                 |
-| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                    |
-| `Public`                                             | function | Method decorator — bypasses auth                                                                                    |
-| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                    |
-| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                                                                       |
-| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                      |
-| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                      |
-| `createDecorator`                                    | function | Custom class/method decorator factory                                                                               |
-| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                  |
-| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                          |
-| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                   |
-| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                    |
-| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                |
-| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                         |
-| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                   |
-| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                   |
+| Export                                               | Kind     | Purpose                                                                                                                               |
+| ---------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                                        |
+| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                                  |
+| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                                   |
+| `Controller`                                         | function | Class decorator — base path prefix                                                                                                    |
+| `Version`                                            | function | Class decorator — API version prefix                                                                                                  |
+| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                                                |
+| `Body`/`Query`/`Param`/`Header`/`Cookie`/`Ctx`       | function | Request parameter decorators; `Ctx` injects the active `IRequestContext` without reserving the application custom type name `context` |
+| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                                   |
+| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens                   |
+| `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider                            |
+| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                                   |
+| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                                      |
+| `Public`                                             | function | Method decorator — bypasses auth                                                                                                      |
+| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                                      |
+| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                                                                                         |
+| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                                        |
+| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                                        |
+| `createDecorator`                                    | function | Custom class/method decorator factory                                                                                                 |
+| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                                    |
+| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                                            |
+| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                                     |
+| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                                      |
+| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                                  |
+| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                                           |
+| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                                     |
+| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                                     |
 
 ### Types
 
@@ -7383,11 +7383,24 @@ Contract notes:
   empty result with a warning) and loads modules with `await import()` (no `require`/`eval`).
   Snapshot-diff against the store attributes newly-decorated classes to each file. Discovery
   failures never crash the application.
+- **`@Ctx` response control**: `Ctx` resolves the live `IRequestContext`, so a decorated handler can
+  configure `ctx.response` (status, headers, or a stream) and return its `HandlerResult`; it is a
+  built-in custom parameter type and needs no resolver registration. It is recognised by a marker
+  registered with `Symbol.for`, so it keeps working if two copies of the package share a process,
+  and an application's own `createParameterDecorator('context')` still reaches its own resolver.
+- **Startup diagnostics**: when a logger is registered, `DecoratorPlugin.register()` warns (never
+  throws) about two silent misconfigurations. A class passed in `controllers` that carries no
+  `@Controller` metadata registers no routes — the usual cause is two copies of the package, where
+  decorators populate one copy's metadata store while the plugin reads the other's, so every route
+  404s. And a custom parameter with no matching resolver reaches the handler as `undefined`; the
+  warning names the controller, handler, and parameter index. The parameter check reflects the
+  resolvers registered when the plugin registers, so call `registerParameterResolver` before
+  `app.start()`.
 - **Custom decorators**: `createDecorator` records class/method metadata replayed against
   `DecoratorHandler`s registered via `ctx.decorators.register()` (collected under
   `CAPABILITIES.DECORATOR_HANDLER`). `createParameterDecorator` records parameter metadata resolved
-  by `resolveParameters` via `registerParameterResolver`; the `current-user` built-in resolves
-  `ctx.request.user`.
+  by `resolveParameters` via `registerParameterResolver`; the `context` and `current-user` built-ins
+  resolve directly to `ctx` and `ctx.request.user`, respectively.
 - **`@Inject` has two positions, and a token is always required.** The preferred form is on each
   constructor parameter, binding one token to that argument by position:
 

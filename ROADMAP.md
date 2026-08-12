@@ -6742,7 +6742,7 @@ test passes `{ roles: {} }` purely to satisfy the type.
 | 56        | ✅     | rfc9457 problem details               |
 | 57        | ✅     | derived openapi security              |
 | 63        | ✅     | cli (scaffold repairs)                |
-| 64        | ⬜     | decorator-plugin (`@Ctx()`)           |
+| 64        | ✅     | decorator-plugin (`@Ctx()`)           |
 | 65        | ⬜     | cli (functional default, two worlds)  |
 | 66        | ⬜     | database-plugin (prisma v7, drizzle)  |
 | 67        | ⬜     | cli + starters (scaffold defaults)    |

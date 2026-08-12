@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`@Ctx()` for decorated controller handlers.** The decorator-plugin now injects the active
+  `IRequestContext` into a decorated handler, so it can configure `ctx.response` (including status
+  and headers) or return a streaming response without leaving the class-based routing API.
+- **Startup warnings for two silent decorator misconfigurations.** When a logger is registered,
+  `DecoratorPlugin.register()` now warns about a class listed in `controllers` that carries no
+  `@Controller` metadata (which registers no routes, so every path 404s — usually caused by two
+  copies of the package in one process), and about a custom parameter that no registered resolver
+  can satisfy (which reaches the handler as `undefined`). Both warn rather than throw, so no working
+  application changes behavior.
+
 ## [0.1.0-alpha.7] — 2026-08-12
 
 **A deployment release.** A generated workspace now emits the artifacts that ship it — a

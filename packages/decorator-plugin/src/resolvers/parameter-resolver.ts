@@ -10,6 +10,7 @@
 import type { IRequestContext } from '@setu-ts/common';
 import { parseCookie } from '@setu-ts/common';
 
+import { isContextParameter } from '../decorators/security.ts';
 import type { ParameterMetadata } from '../metadata/metadata-store.ts';
 
 /**
@@ -31,8 +32,9 @@ const customResolvers = new Map<string, CustomParameterResolver>();
 
 /**
  * Registers a resolver for a custom parameter type created with
- * {@linkcode createParameterDecorator}. The `current-user` built-in resolves
- * `ctx.request.user` and need not be registered.
+ * {@linkcode createParameterDecorator}. `current-user` resolves directly;
+ * `Ctx()` uses an internal marker and also resolves directly. Application
+ * custom parameter types, including one named `context`, use this registry.
  *
  * @param name - The custom parameter type name
  * @param resolver - The resolver function
@@ -110,20 +112,74 @@ export function resolveParameter(
 }
 
 /**
- * Resolves a custom parameter. `current-user` is built in; other types look
- * up a resolver registered via {@linkcode registerParameterResolver}.
+ * How a `custom` parameter will be resolved at request time. `unresolvable`
+ * means no rule matches, so the handler would receive `undefined`.
  */
-async function resolveCustom(ctx: IRequestContext, param: ParameterMetadata): Promise<unknown> {
+type CustomResolution =
+  | { readonly kind: 'context' }
+  | { readonly kind: 'current-user' }
+  | { readonly kind: 'registered'; readonly resolver: CustomParameterResolver }
+  | { readonly kind: 'unresolvable' };
+
+/**
+ * Classifies a `custom` parameter against the resolution rules. Single source
+ * of truth for both request-time resolution and the startup check, so the two
+ * cannot disagree about what resolves.
+ */
+function classifyCustom(param: ParameterMetadata): CustomResolution {
+  if (isContextParameter(param.metadata)) {
+    return { kind: 'context' };
+  }
   if (param.customType === 'current-user') {
-    return ctx.request.user;
+    return { kind: 'current-user' };
   }
   if (param.customType !== undefined) {
     const resolver = customResolvers.get(param.customType);
     if (resolver !== undefined) {
-      return await resolver(ctx, param.metadata);
+      return { kind: 'registered', resolver };
     }
   }
-  return undefined;
+  return { kind: 'unresolvable' };
+}
+
+/**
+ * Reports the `custom` parameters that no rule can resolve, so a caller can
+ * warn about them before the first request rather than letting the handler
+ * receive `undefined`.
+ *
+ * Reflects the resolvers registered at the moment of the call — register custom
+ * resolvers before the application starts for this to be accurate.
+ *
+ * Internal — not exported from the package barrel.
+ *
+ * @param params - The handler's parameter metadata
+ * @returns The unresolvable parameters, in declaration order
+ */
+export function findUnresolvableParameters(
+  params: readonly ParameterMetadata[],
+): readonly ParameterMetadata[] {
+  return params.filter(
+    (param) => param.type === 'custom' && classifyCustom(param).kind === 'unresolvable',
+  );
+}
+
+/**
+ * Resolves a custom parameter. The built-in `@Ctx()` marker and `current-user`
+ * resolve directly; other types look up a resolver registered via
+ * {@linkcode registerParameterResolver}.
+ */
+async function resolveCustom(ctx: IRequestContext, param: ParameterMetadata): Promise<unknown> {
+  const resolution = classifyCustom(param);
+  switch (resolution.kind) {
+    case 'context':
+      return ctx;
+    case 'current-user':
+      return ctx.request.user;
+    case 'registered':
+      return await resolution.resolver(ctx, param.metadata);
+    case 'unresolvable':
+      return undefined;
+  }
 }
 
 /**

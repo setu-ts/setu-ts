@@ -39,7 +39,7 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
 
 - **Routing** — `@Controller`, `@Version`,
   `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`/`@Head`/`@Options`
-- **Parameters** — `@Body`, `@Query`, `@Param`, `@Header`, `@Cookie`
+- **Parameters** — `@Body`, `@Query`, `@Param`, `@Header`, `@Cookie`, `@Ctx`
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
 - **Security** — `@Roles`, `@Permissions`, `@Public`, `@CurrentUser`
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
@@ -72,6 +72,7 @@ Discovery failures are logged as warnings and never crash the application.
 | `Cookie`                    | function  |
 | `createDecorator`           | function  |
 | `createParameterDecorator`  | function  |
+| `Ctx`                       | function  |
 | `CurrentUser`               | function  |
 | `DecoratorPlugin`           | function  |
 | `discoverControllers`       | function  |
