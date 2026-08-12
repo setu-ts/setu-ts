@@ -6746,8 +6746,8 @@ app.register(LoggerPlugin());
 // Add config
 app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 
-// Add database
-app.register(DatabasePlugin({ type: 'prisma' }));
+// Add database (memory adapter, zero configuration)
+app.register(DatabasePlugin());
 
 // Add auth
 app.register(AuthPlugin({ jwt: { secret: config.get('JWT_SECRET') } }));
