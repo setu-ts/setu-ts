@@ -51,6 +51,13 @@ describe('resolveTemplateChoice', () => {
     expect(choice.ok).toBe(false);
   });
 
+  it('treats a template flag without a value as the functional default', () => {
+    const choice = choose(['--template']);
+    expect(choice.ok).toBe(true);
+    if (!choice.ok) return;
+    expect(choice.template).toBeUndefined();
+  });
+
   // Selection no longer depends on the runtime target at all: a template that
   // renders differently per runtime declares a `RuntimeSwap` instead, applied
   // in `resolveHost`. Every template in the registry is therefore selectable.
