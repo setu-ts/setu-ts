@@ -4967,9 +4967,11 @@ project holding `decorator-plugin` keeps producing decorated classes — includi
 without `di-plugin`, which only a project predating `--template class-based` can — and a project
 without it keeps producing functional output. One consequence is worth stating plainly:
 `setu generate service` has **no registration site in a functional project**. A plain exported
-function has none to have; it emits one file and no barrel, and you import it where it is needed or
-close over it from a route-registration function. In a class-based project it is an `@Injectable`
-listed in the managed `src/services/index.ts` barrel.
+function has none to have — no plugin option takes a list of functions — so nothing wires it for
+you. It still emits a managed `src/services/index.ts`, but that barrel is a convenience re-export
+rather than a registration: `setu.config.ts` does not import it, and you import from it where the
+function is needed. In a class-based project the same path holds the `APP_SERVICES` array of
+`@Injectable` classes, which the scaffolded config does pass to `DecoratorPlugin`.
 
 > **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
 > support (`--experimental-strip-types`) ERASES types without transforming code, so it cannot run a

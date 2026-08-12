@@ -46,7 +46,10 @@ describe('runGenerateCommand', () => {
   it('generates an ungated schematic and reads the write back', async () => {
     const h = harness();
     expect(await h.run(['service', 'user-profile'])).toBe(0);
-    expect(h.fs.writes).toEqual(['/app/src/services/user-profile.service.ts']);
+    expect(h.fs.writes).toEqual([
+      '/app/src/services/user-profile.service.ts',
+      '/app/src/services/index.ts',
+    ]);
     expect(h.fs.read('/app/src/services/user-profile.service.ts'))
       .toContain('export function describeUserProfile');
     expect(h.out.text()).toContain('created /app/src/services/user-profile.service.ts');
@@ -55,7 +58,10 @@ describe('runGenerateCommand', () => {
   it('roots generated paths at --dir', async () => {
     const h = harness();
     expect(await h.run(['service', 'billing', '--dir', '/elsewhere'])).toBe(0);
-    expect(h.fs.writes).toEqual(['/elsewhere/src/services/billing.service.ts']);
+    expect(h.fs.writes).toEqual([
+      '/elsewhere/src/services/billing.service.ts',
+      '/elsewhere/src/services/index.ts',
+    ]);
   });
 
   it('creates the parent directory before writing', async () => {
@@ -75,7 +81,12 @@ describe('runGenerateCommand', () => {
     it('reports every path it would create', async () => {
       const h = harness();
       await h.run(['service', 'billing', '--dry-run']);
-      expect(h.out.text()).toBe('would create /app/src/services/billing.service.ts');
+      // Both planned files, so `--dry-run` stays exact: the functional service
+      // now carries its convenience re-export barrel alongside it.
+      expect(h.out.text()).toBe(
+        'would create /app/src/services/billing.service.ts\n' +
+          'would create /app/src/services/index.ts',
+      );
     });
   });
 

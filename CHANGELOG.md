@@ -16,11 +16,24 @@ All notable changes to this project are documented here. The format follows
   — in a functional project it writes a service plus a `src/routes/<name>.routes.ts` module the
   managed routes barrel already registers, so the module serves `GET /<name>` and `POST /<name>` (a
   real `201`) with no edit to `setu.config.ts`. Decorated write handlers now take `@Ctx()`, which is
-  how they set that status.
+  how they set that status. `setu generate service` emits a plain exported function plus a
+  `src/services/index.ts` re-export barrel — a convenience, not a registration: nothing imports it
+  for you, because no plugin option takes a list of functions.
 
   **Nothing about an existing project changes.** Style is read from its manifest, so a project
   scaffolded with decorators keeps generating decorated classes, including one that holds
   `DecoratorPlugin` without `DiPlugin`.
+
+### Fixed
+
+- **A functional project no longer reports its own services as stale.** `setu generate` scans each
+  generated family and refuses to list a file that does not export what the barrel would import,
+  reporting it so the artifact is never silently unwired. The `service` family has two shapes and
+  the scan used only the class one, so in a functional project every `setu generate` printed
+  `Skipped src/services/x.service.ts: it does not export XService` followed by
+  `Regenerate it to bring it up to date` — for a file the CLI had just written, naming a barrel that
+  does not exist there, with advice that loops (the regenerated file is identical). The scan now
+  selects the spec matching the project's own style.
 
 ### Removed
 
