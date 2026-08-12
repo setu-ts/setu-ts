@@ -12,7 +12,19 @@ import type {
 
 import { createApplication } from '@setu-ts/kernel';
 
-import { Body, Controller, Ctx, Get, Param, Post, Query, UseGuards } from '../../src/index.ts';
+import {
+  Body,
+  clearParameterResolvers,
+  Controller,
+  createParameterDecorator,
+  Ctx,
+  Get,
+  Param,
+  Post,
+  Query,
+  registerParameterResolver,
+  UseGuards,
+} from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -33,6 +45,7 @@ function testRuntimePlugin(): IPlugin {
 describe('decorator-driven application (e2e)', () => {
   beforeEach(() => {
     metadataStore.clear();
+    clearParameterResolvers();
   });
 
   it('routes a GET request to a decorated handler and serializes the return value', async () => {
@@ -113,6 +126,28 @@ describe('decorator-driven application (e2e)', () => {
     expect(res.statusCode).toBe(201);
     expect(res.headers.get('Location')).toBe('/users/2');
     expect(res.json()).toEqual({ id: '2' });
+    await app.stop();
+  });
+
+  it('preserves an application-defined context parameter resolver', async () => {
+    const ExistingContext = (): ParameterDecorator => createParameterDecorator('context');
+    registerParameterResolver('context', () => 'custom-context');
+
+    @Controller('/custom-context')
+    class CustomContextController {
+      @Get('/')
+      read(@ExistingContext() value: string) {
+        return { value };
+      }
+    }
+
+    const app = createApplication({
+      plugins: [testRuntimePlugin(), DecoratorPlugin({ controllers: [CustomContextController] })],
+    });
+    await app.start();
+    const res = await app.inject({ method: 'GET', url: 'http://localhost/custom-context' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ value: 'custom-context' });
     await app.stop();
   });
 

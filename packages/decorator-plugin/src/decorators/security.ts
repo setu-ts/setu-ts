@@ -15,6 +15,14 @@ import { metadataStore } from '../metadata/metadata-store.ts';
 import { protoToCtor } from '../internal.ts';
 
 /**
+ * Opaque metadata identity that distinguishes the built-in `@Ctx()` decorator
+ * from an application-defined custom parameter named `context`.
+ *
+ * This is intentionally not re-exported from the package barrel.
+ */
+export const CONTEXT_PARAMETER_METADATA: Readonly<Record<string, unknown>> = Object.freeze({});
+
+/**
  * Requires the authenticated principal to hold any of the given roles. May be
  * applied at the class level (default for all routes) or method level
  * (overrides the class default).
@@ -77,7 +85,8 @@ export function CurrentUser(): ParameterDecorator {
  * to configure its response or return a streaming response.
  *
  * Resolved by {@linkcode resolveParameters} as a custom parameter of type
- * `'context'`.
+ * `'context'`. An internal metadata marker preserves application-defined
+ * custom resolvers that also use the `context` name.
  *
  * @returns A parameter decorator
  * @since 0.1.0
@@ -88,6 +97,7 @@ export function Ctx(): ParameterDecorator {
       index: parameterIndex,
       type: 'custom',
       customType: 'context',
+      metadata: CONTEXT_PARAMETER_METADATA,
     });
   };
 }
