@@ -6515,6 +6515,147 @@ this list: a scaffolded project installed **no SIGTERM handler**, so every conta
 and the `full-stack` template emitted **no root index route**, so `/` served 200 with an empty body
 (M37c's finding, same shape).
 
+## Milestones 63–68: alpha.7 smoke-test remediation
+
+These six come from one source: a three-service monorepo (`auth`, `todos`, a React Router SSR front
+end) scaffolded entirely with the CLI and run against real PostgreSQL, consuming `@setu-ts/*` from
+JSR at `0.1.0-alpha.7` rather than from source. Six defects and ten shortcomings were reproduced by
+execution. Their common shape is worth stating once, because it points at one gate rather than six
+fixes: **every defect lives in the seam between "the CLI generates it" and "does it actually run"**,
+and every one passed the existing drift gate, which stops at `deno check`. Three of them — an
+install failure, a runtime permission error, and a formatter disagreement — cannot be caught by a
+type-checker even in principle.
+
+## Milestone 63: CLI Scaffold Repairs — Making a Stock Scaffold Run
+
+**Package:** `@setu-ts/cli`
+
+Four reproduced defects, all in generated output, all mechanical. **D1:** Deno 2.9 refuses a
+dependency published in the last 24 hours and `setu new` pins generated projects to the CLI's own
+version, so on release day a scaffolded project cannot `deno install` at all. **D2:** the `rest`
+template wires `HealthPlugin`, whose `selfIndicator` reads `runtime.hostname()`, while the generated
+start task grants only `--allow-net --allow-env` — a stock scaffold answers **500 on `/health`**,
+the endpoint the generated Kubernetes probes point at. The extension seam already exists
+(`TemplateManifest.denoPermissions`, used today by `full-stack` for `--allow-read`), so the fix is
+data. **D3:** the `full-stack` template writes `experimentalDecorators` — which that member never
+uses — into `deno.json` but no `jsx` setting, so `deno check` on any route fails with 79 errors;
+compounding it, `deno check main.ts` never reaches route modules at all, since they load through the
+compiled server build. **D6:** a fresh scaffold fails `deno fmt --check` on 62 of 74 files, because
+no `fmt` config is emitted and Deno's default is double quotes; adding the framework's own
+`singleQuote: true` leaves 13 failing, since the CLI's `.tsx` templates emit double-quoted JSX while
+its `.ts` templates emit single. Both halves are needed.
+
+The deliverable that keeps them fixed is a gate that **boots** a scaffolded project and issues real
+requests, rather than stopping at type-check. Plan: `plans/milestone-63-scaffold-repairs.md`.
+
+## Milestone 64: `@Ctx()` — Removing the Decorated-Handler Cliff
+
+**Package:** `@setu-ts/decorator-plugin`
+
+A decorated handler receives only its decorated parameters, and the built-in set (`@Body`, `@Query`,
+`@Param`, `@Header`, `@Cookie`, `@CurrentUser`) has no member for the request context — so it cannot
+set a status code, add a header, or stream. The generated controller's own JSDoc tells the reader to
+drop the whole route down to `app.router.post(...)`, making it all-or-nothing per route; the smoke
+test hit this immediately, since `POST /todos` could not answer `201`.
+
+The machinery already exists and is already public: `createParameterDecorator` and
+`registerParameterResolver` are exported, and a custom resolver is handed the context, so a working
+`@Ctx()` is about ten lines of application code — verified in the smoke workspace, returning `201`
+with a `Location` header. This milestone ships it as a built-in `customType` beside `current-user`.
+It is a missing export rather than a feature, it is backward-compatible, and it is sequenced before
+M65 because it is what makes the class-based world complete enough to be a real choice.
+
+## Milestone 65: Functional by Default — Two Coherent Worlds on One Axis
+
+**Package:** `@setu-ts/cli`
+
+AI_GUIDELINES' "5 Optional Rules" state that decorators are optional, DI is optional, and that no
+feature requires decorators or reflection. The generator inverts all three: `rest.ts:53` puts
+`DecoratorPlugin` in the default template unconditionally, and `g module` and `g controller` — the
+aggregates reached for to build a domain — are decorator-only and gated on that plugin. The
+functional path already exists and is good: `g route` emits `ctx`-first handlers that set a status
+code natively. What is missing is a functional **aggregate**, and any way to ask for a project
+without decorators.
+
+The design is a single axis with two complete positions, not a spectrum. **Default — functional:**
+no `DiPlugin`, no `DecoratorPlugin`; `ctx`-first handlers, plain-function data access, capabilities
+resolved through `ctx.services`, which is to say the context is the injector. **Opted in —
+NestJS-shaped:** one flag brings both plugins and switches _every_ schematic to class-based output —
+`@Controller` classes, `@Injectable` providers, constructor injection, module barrels.
+
+The load-bearing part is that the flag selects a **generator mode**, not just a plugin:
+`setu g
+service` must emit an `@Injectable` class in an opted-in project and an exported function
+otherwise, which means the choice has to be readable long after `new` ran — persisted in the
+manifest, or inferred from the import map the way gating already works. Sequencing is a hard
+constraint: dropping `DecoratorPlugin` from `rest` must land in the same change as the functional
+`g module`, since doing it first would leave the new default world with no aggregate schematic at
+all. `nest` becomes the pre-opted-in template rather than a separate concept. Measured in the smoke
+workspace, the two styles cost 241 and 255 lines for comparable services — the functional path is
+not more verbose; what it removes is two barrel files, a hand-matched token string, and a plugin
+whose presence silently changes how every service is constructed.
+
+## Milestone 66: Database Adapters That Have Been Executed
+
+**Package:** `@setu-ts/database-plugin`
+
+`PrismaAdapter.resolveClient()` lazily imports `npm:@prisma/client@7.8.0` and constructs it with
+`datasources: { db: { url } }`. Both halves fail against that exact version, verified independently:
+the import yields `Cannot find module '.prisma/client/default'` (v7 generates the client to the
+project's own `output` path), and given a real v7 client class the constructor answers
+`Unknown
+property datasources provided to PrismaClient constructor`. The documented
+`options.prismaClient` injection seam works and is what the smoke test used — but the JSDoc
+describes a path that cannot execute, and every adapter test injects a fake, so nothing exercises
+it. This is the contract-violating-double root cause this repo has hit repeatedly.
+
+Decide which Prisma major the framework targets, rewrite or re-pin accordingly, and add the guarded
+real-import test that would have caught it. Then audit the **Drizzle** adapter the same way: reading
+its source, `findById`/`findAll` select every row and filter in memory, and `update`/`delete` build
+`{ column: 'id', table }` — commented in the source as a "placeholder column reference" — and pass
+it to Drizzle's `eq()`, which needs a real Column carrying SQL-building internals. That adapter's
+tests also inject a structural fake. It was not executed during the smoke test, so it is a lead
+rather than a finding.
+
+## Milestone 67: Scaffold Defaults and Workspace Ergonomics
+
+**Packages:** `@setu-ts/cli`, `@setu-ts/starters/*`
+
+Five findings that each cost the developer a hand-edit. **D5:** `setu generate app` writes
+`src/discovery/services.ts` into every member including `full-stack` ones, but no starter in the
+chain has a `serviceDiscovery` arm and `TemplateHost.plugins` must stay empty when an `appFactory`
+is set — the file is generated and then unreachable, so the smoke test registered the plugin by
+hand. M50b deferred this arm deliberately; it is now load-bearing. **S3:** plugin options are read
+at construction, before `ConfigPlugin` has registered, so anything needed to _build_ a plugin must
+come from the environment — and the CLI emits no `.env`, no `.env.example`, and no `--env-file`,
+leaving no generated answer to where secrets go. M36c hit this boundary and rejected per-option
+`urlFromConfig` for the same reason; document the boundary rather than leaving it to be
+rediscovered. **S4:** `errorHandler()` defaults to `format: 'default'`, so a scaffolded project
+answers `{"statusCode":401,"message":"…"}` — M56 shipped RFC 9457 and no template opts in. **S8:**
+workspace ports are fixed at creation with no conflict probe and no re-allocation command; base port
+3000 collided with an unrelated process and the only remedy was deleting and recreating the
+workspace. **S9:** `deno task dev` starts every member at once with no readiness gate, so a member
+can race a sibling it depends on.
+
+## Milestone 68: Contract Gaps
+
+**Packages:** `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/auth-plugin`
+
+Four findings that touch committed contracts and so need the widening discipline already applied
+elsewhere. **S5:** the repository contract is equality-only — `findAll({ where })` supports no
+`contains`, `gt`, `in`, or `OR`, and there is no `findOne`, so a lookup by unique column is
+`findAll({ where, limit: 1 })` then `[0]` and any real search drops to raw `query()`, losing the
+adapter portability that justifies the abstraction. Wants a small filter AST in `common` that each
+adapter translates. **S6:** the kernel keys its entry map on `METHOD path` and a duplicate
+**overwrites**; `setu g route todos` succeeded in a service that already had a
+`@Controller('/todos')`, and the two would have silently shadowed each other. M60 added duplicate
+refusal for token and module collisions, but a path inside a decorator argument is invisible to a
+schematic — so the refusal belongs at kernel startup, where it catches every source. **S7:** nothing
+exposes which paths the plugins own, so an authentication middleware hand-lists
+`['/', '/health', '/ready', '/live', '/metrics']` and that list rots whenever a plugin adds an
+endpoint. **S10:** `AuthPluginOptions.rbac` is required even for a JWT-only deployment, so the smoke
+test passes `{ roles: {} }` purely to satisfy the type.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -6600,3 +6741,9 @@ and the `full-stack` template emitted **no root index route**, so `/` served 200
 | 55        | ✅     | static-plugin                         |
 | 56        | ✅     | rfc9457 problem details               |
 | 57        | ✅     | derived openapi security              |
+| 63        | ⬜     | cli (scaffold repairs)                |
+| 64        | ⬜     | decorator-plugin (`@Ctx()`)           |
+| 65        | ⬜     | cli (functional default, two worlds)  |
+| 66        | ⬜     | database-plugin (prisma v7, drizzle)  |
+| 67        | ⬜     | cli + starters (scaffold defaults)    |
+| 68        | ⬜     | common + kernel (contract gaps)       |
