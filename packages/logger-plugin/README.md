@@ -29,6 +29,19 @@ const logger = app.services.get<ILogger>(CAPABILITIES.LOGGER);
 logger.info('server ready', { port: 3000 });
 ```
 
+## Options
+
+| Option                 | Type                | Default     | Description                                            |
+| ---------------------- | ------------------- | ----------- | ------------------------------------------------------ |
+| `level`                | `LogLevel`          | `'info'`    | Minimum level to emit.                                 |
+| `transport`            | `LoggerTransport`   | `'console'` | Implementation: `'console'`, `'pino'`, or `'noop'`.    |
+| `pretty`               | `boolean`           | `false`     | Pretty-print entries (console transport only).         |
+| `redact`               | `readonly string[]` | `[]`        | Dot-paths to strip from metadata.                      |
+| `requestLogging`       | `boolean`           | `false`     | Register request/response logging middleware.          |
+| `slowRequestThreshold` | `number`            | `5000`      | Requests slower than this (ms) log at `warn`.          |
+| `excludePaths`         | `readonly string[]` | `[]`        | Exact paths excluded from request logging.             |
+| `pinoFactory`          | `PinoFactory`       | —           | Inject a pre-loaded Pino factory, skipping the import. |
+
 ## Pino
 
 `pino` is an **optional** dependency, lazily imported only when `transport: 'pino'` is configured —

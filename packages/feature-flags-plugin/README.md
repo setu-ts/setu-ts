@@ -38,14 +38,29 @@ app.router.get('/beta', {
 });
 ```
 
+## Options
+
+`FeatureFlagsPluginOptions` is a union discriminated on `provider`, so a missing per-arm field is a
+compile error rather than a startup throw:
+
+| Option     | Type                                                               | Description                 |
+| ---------- | ------------------------------------------------------------------ | --------------------------- |
+| `provider` | `'config' \| 'memory' \| 'database' \| 'launchdarkly' \| 'custom'` | Selects the arm.            |
+| `options`  | per-arm shape                                                      | Configuration for that arm. |
+
+`options` is required for `'config'` (`{ flags }`), `'database'`, `'launchdarkly'` and `'custom'`
+(`{ instance }`), and optional for `'memory'`. See [Providers](#providers) for behaviour and
+[LaunchDarkly](#launchdarkly) for that arm's fields.
+
 ## Providers
 
-| `provider`   | Behaviour                                                                     |
-| ------------ | ----------------------------------------------------------------------------- |
-| `'config'`   | Immutable inline flags.                                                       |
-| `'memory'`   | Mutable map — `setFlag` / `removeFlag` / `replaceFlags`.                      |
-| `'database'` | Polls an injected `IFlagStore` on one interval; keeps the last good snapshot. |
-| `'custom'`   | Any `FlagProvider` you supply.                                                |
+| `provider`       | Behaviour                                                                     |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `'config'`       | Immutable inline flags.                                                       |
+| `'memory'`       | Mutable map — `setFlag` / `removeFlag` / `replaceFlags`.                      |
+| `'database'`     | Polls an injected `IFlagStore` on one interval; keeps the last good snapshot. |
+| `'launchdarkly'` | LaunchDarkly, via the SDK's one synchronous read — see below.                 |
+| `'custom'`       | Any `FlagProvider` you supply.                                                |
 
 `DatabaseProvider` arms a single poll timer in `start()`. On a poll failure it retains the previous
 snapshot and reports the degradation rather than flipping every flag off.
@@ -67,9 +82,22 @@ allowed to propagate rather than silently opening the route.
 
 ## LaunchDarkly
 
-Not supported. The LaunchDarkly Node server SDK's `variation`/`allFlagsState` are **async**, which
-no provider can reconcile with the synchronous committed `isEnabled` contract. Use the `'custom'`
-arm as a bridge.
+Supported through the `'launchdarkly'` arm. The Node server SDK's `variation`/`allFlagsState` are
+**async**, which no provider can reconcile with the synchronous committed `isEnabled` directly — the
+bridge is `LDFlagsState.getFlagValue`, the SDK's one synchronous read, behind a per-context snapshot
+cache.
+
+A context whose snapshot has not loaded yet returns `fallbackValue` and schedules a background
+refill, coalesced per key so a hot loop over uncached users does not stampede. `isEnabledAsync`
+carries no such caveat — it awaits the SDK and is the accurate entry point when a cold read matters.
+
+| Option               | Type                      | Default | Description                                                                                  |
+| -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------- |
+| `sdkKey`             | `string`                  | —       | Required unless `client` is injected.                                                        |
+| `client`             | `ILaunchDarklyClient`     | —       | Prebuilt client; the SDK module is never loaded.                                             |
+| `fallbackValue`      | `boolean`                 | `false` | Value for an unloaded context; also the SDK default in `isEnabledAsync`.                     |
+| `initTimeoutSeconds` | `number`                  | `5`     | Initial connection wait. A timeout leaves the provider degraded rather than failing startup. |
+| `ldOptions`          | `Record<string, unknown>` | —       | Forwarded verbatim as the SDK `init()` second argument.                                      |
 
 ## Exports
 

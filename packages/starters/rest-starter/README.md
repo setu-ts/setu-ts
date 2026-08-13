@@ -89,6 +89,38 @@ const app = createApplication({
 });
 ```
 
+## Options
+
+`RestStarterOptions` is one optional field per plugin. Every field is optional and `createRestApp()`
+with no arguments is valid.
+
+Eight fields configure a plugin the starter **always** registers — omitting one takes that plugin's
+defaults:
+
+| Option         | Type                        |
+| -------------- | --------------------------- |
+| `config`       | `ConfigPluginOptions`       |
+| `logger`       | `LoggerPluginOptions`       |
+| `validation`   | `ValidationPluginOptions`   |
+| `httpSecurity` | `HttpSecurityPluginOptions` |
+| `health`       | `HealthPluginOptions`       |
+| `metrics`      | `MetricsPluginOptions`      |
+| `openapi`      | `OpenApiPluginOptions`      |
+| `decorators`   | `DecoratorPluginOptions`    |
+
+The remaining seven are **gated arms** — supplying one registers a plugin that is otherwise absent,
+so the default composition never bundles something unusable:
+
+| Option             | Type                            | Registers when supplied                                                                      |
+| ------------------ | ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `database`         | `DatabasePluginOptions`         | `DatabasePlugin`                                                                             |
+| `auth`             | `AuthPluginOptions`             | `AuthPlugin`. `rbac` is itself optional — `jwt` alone registers no authorization capability. |
+| `session`          | `SessionPluginOptions`          | `SessionPlugin`                                                                              |
+| `di`               | `DiPluginOptions`               | `DiPlugin`, which changes how every decorated service is constructed                         |
+| `graphql`          | `GraphqlPluginOptions`          | `GraphqlPlugin`                                                                              |
+| `serviceDiscovery` | `ServiceDiscoveryPluginOptions` | `ServiceDiscoveryPlugin`                                                                     |
+| `realtime`         | `RealtimeArm`                   | WebSocket, SSE, and backplane — one per sub-arm                                              |
+
 ## Included Plugins
 
 | Plugin             | Description                            |
@@ -105,13 +137,15 @@ const app = createApplication({
 | DatabasePlugin     | Optional — database access layer       |
 | AuthPlugin         | Optional — authentication middleware   |
 | DiPlugin           | Optional — DI container                |
+| GraphqlPlugin      | Optional — GraphQL endpoint            |
+| ServiceDiscovery   | Optional — service resolution          |
 | WebSocketPlugin    | Optional — WebSocket messaging         |
 | SsePlugin          | Optional — Server-Sent Events          |
 | RealtimeBackplane  | Optional — cross-replica fan-out       |
 | SessionPlugin      | Optional — cookie sessions + form CSRF |
 
-Gated plugins (`database`, `auth`, `session`, `di`, and each `realtime` sub-arm) are only included
-when explicitly provided in options.
+Gated plugins (`database`, `auth`, `session`, `di`, `graphql`, `serviceDiscovery`, and each
+`realtime` sub-arm) are only included when explicitly provided in options.
 
 ### The `session` arm
 

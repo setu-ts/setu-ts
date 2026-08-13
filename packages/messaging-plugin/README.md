@@ -31,11 +31,29 @@ await broker.subscribe<{ userId: string }>('user.created', async (message, metad
 await broker.publish('user.created', { userId: '123' });
 ```
 
+## Options
+
+`MessagingPluginOptions` is a union discriminated on `broker`. Two options are shared by every arm:
+
+| Option       | Type                  | Default          | Description                                                                           |
+| ------------ | --------------------- | ---------------- | ------------------------------------------------------------------------------------- |
+| `broker`     | `MessagingBrokerType` | `'memory'`       | Selects the arm. Optional only on the memory arm, so `MessagingPlugin()` stays valid. |
+| `name`       | `string`              | —                | Instance name for multi-instance setups.                                              |
+| `serializer` | `ISerializer`         | `JsonSerializer` | Payload serializer.                                                                   |
+
+Omitting `name` registers under the bare `CAPABILITIES.MESSAGING` token as plugin
+`messaging-plugin`. Supplying one derives both — token `messaging.<name>`, plugin
+`messaging-plugin.<name>` — so several brokers can coexist in one application.
+
+Every other option is arm-specific — `url`/`client` for `'redis-streams'`, credentials for the cloud
+arms, an injected `IMessageBroker` for `'custom'`. A missing per-arm field is a compile error rather
+than a startup throw. See [Brokers](#brokers) for the full arm list.
+
 ## Brokers
 
 | `broker`          | Backing client             | Request-reply |
 | ----------------- | -------------------------- | ------------- |
-| `'in-memory'`     | none                       | yes           |
+| `'memory'`        | none                       | yes           |
 | `'redis-streams'` | `npm:ioredis`              | yes           |
 | `'rabbitmq'`      | `npm:amqplib`              | yes           |
 | `'nats'`          | NATS JetStream client      | yes           |
