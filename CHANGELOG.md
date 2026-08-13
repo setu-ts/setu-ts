@@ -9,12 +9,13 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **Typed native Drizzle query access.** `getDrizzle<typeof drizzleDb>(scope)` returns the exact
-  configured instance for an `IDatabaseService` and Drizzle's callback-scoped native transaction for
-  an `IUnitOfWork`, preserving application schema inference for joins and aggregations while sharing
-  one commit/rollback boundary with repositories. SQLite/libsql-shaped instances without `execute()`
-  now connect for repositories and typed builders; raw `query()` alone rejects with a descriptive
-  limitation. The exported `UnitOfWork` constructor accepts an optional adapter-type third argument
-  while preserving the released two-argument call shape.
+  configured instance for an `IDatabaseService` and a derived `DrizzleTransaction<typeof drizzleDb>`
+  callback-scoped native transaction for an `IUnitOfWork`, preserving application schema inference
+  for joins and aggregations while sharing one commit/rollback boundary with repositories.
+  SQLite/libsql-shaped instances without `execute()` now connect for repositories and typed
+  builders; raw `query()` alone rejects with a descriptive limitation. The exported `UnitOfWork`
+  constructor accepts an optional adapter-type third argument while preserving the released
+  two-argument call shape.
 
 - **`ConfigPluginOptions.envFileOptional`.** When `true`, a path in `envFilePath` that does not
   exist is skipped instead of throwing. The default is `false`, so nothing about an existing

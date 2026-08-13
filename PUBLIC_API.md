@@ -945,14 +945,19 @@ app.router.post('/orders', async (ctx) => {
 ### Typed Drizzle queries
 
 ```typescript
-function getDrizzle<TInstance>(
-  scope: IDatabaseService | IUnitOfWork,
-): TInstance;
+type DrizzleTransaction<TDatabase extends object> = /* Drizzle transaction callback parameter */;
+
+function getDrizzle<TDatabase extends object>(scope: IDatabaseService): TDatabase;
+function getDrizzle<TDatabase extends object>(
+  scope: IUnitOfWork,
+): DrizzleTransaction<TDatabase>;
 ```
 
-Pass the exact application-owned Drizzle instance type explicitly. The service form returns the
-configured outer instance. The Unit-of-Work form returns Drizzle's native callback transaction, so
-native joins and repository writes participate in the same commit or rollback:
+Pass the exact application-owned outer Drizzle database type explicitly. The service overload
+returns that complete configured type. The Unit-of-Work overload structurally derives Drizzle's
+native transaction callback parameter from it, so schema and selected-row inference survive while
+outer-only operations (for example SQLite Proxy's `batch()`) are absent. Native joins and repository
+writes still participate in the same commit or rollback:
 
 ```typescript
 import { eq } from 'drizzle-orm';
@@ -972,8 +977,9 @@ await db.transaction(async (uow) => {
 });
 ```
 
-Use `typeof drizzleDb` at every call: `TInstance` appears only in the return position and cannot be
-inferred through the non-generic capability token. Memory, Prisma, and custom services/UoWs throw
+Use `typeof drizzleDb` at every call: `TDatabase` cannot be inferred through the non-generic
+capability token. Use the service overload for outer-only database operations; a UoW intentionally
+returns only the transaction-safe callback surface. Memory, Prisma, and custom services/UoWs throw
 `Drizzle query access requires adapter 'drizzle'; configured adapter is '<type>'.` A structural
 service or Unit of Work not created by this package throws
 `Drizzle query access requires a database-plugin service or unit of work.`
@@ -1090,6 +1096,7 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                        | classes                           |
 | `PrismaRepository`, `DrizzleRepository`                                                                   | classes                           |
 | `createPrismaDataSource`, `createDrizzleDataSource`, `getDrizzle`                                         | functions                         |
+| `DrizzleTransaction`                                                                                      | type                              |
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                          | interfaces                        |
 | `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`   | types                             |
 | `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                           | types                             |
