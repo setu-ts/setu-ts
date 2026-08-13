@@ -2529,6 +2529,7 @@
           "jsr:@setu-ts/openapi-plugin@~0.1.0-alpha.7",
           "jsr:@setu-ts/realtime-backplane-plugin@~0.1.0-alpha.7",
           "jsr:@setu-ts/runtime@~0.1.0-alpha.7",
+          "jsr:@setu-ts/service-discovery-plugin@~0.1.0-alpha.7",
           "jsr:@setu-ts/session-plugin@~0.1.0-alpha.7",
           "jsr:@setu-ts/sse-plugin@~0.1.0-alpha.7",
           "jsr:@setu-ts/validation-plugin@~0.1.0-alpha.7",

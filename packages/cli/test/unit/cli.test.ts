@@ -115,6 +115,48 @@ describe('runCli', () => {
       expect(await h.run(['g', 'service', 'billing', '--dir', '/other'])).toBe(0);
       expect(h.fs.has('/other/src/services/billing.service.ts')).toBe(true);
     });
+
+    it('routes workspace maintenance with an injected port probe', async () => {
+      const fs = createFakeFs({
+        '/work/setu.workspace.json': JSON.stringify({
+          version: 1,
+          runtime: 'deno',
+          basePort: 3000,
+          transport: 'http',
+          members: [{ name: 'orders', port: 3000 }],
+        }),
+      });
+      const out = createRecorder();
+      expect(
+        await runCli(['workspace', 'ports', '--reallocate'], {
+          fs,
+          cwd: '/work',
+          now: () => 0,
+          log: out.sink,
+          error: createRecorder().sink,
+          portAvailable: () => Promise.resolve(true),
+        }),
+      ).toBe(0);
+      expect(out.text()).toContain('Reallocated workspace ports');
+    });
+
+    it('routes adopt with an injected port probe', async () => {
+      const fs = createFakeFs({
+        '/work/setu.config.ts': 'export function createApp() {}',
+        '/work/main.ts': 'await app.start({ port: 3000 });',
+      });
+      expect(
+        await runCli(['adopt'], {
+          fs,
+          cwd: '/work',
+          now: () => 0,
+          log: createRecorder().sink,
+          error: createRecorder().sink,
+          portAvailable: () => Promise.resolve(true),
+        }),
+      ).toBe(0);
+      expect(fs.has('/work/setu.workspace.json')).toBe(true);
+    });
   });
 
   describe('exit codes', () => {

@@ -127,6 +127,12 @@ export function resolveHost(
 ): ResolvedHost {
   const swap = host.runtimeSwaps?.[runtime];
   const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
+  // Workers receive configuration exclusively through their request bindings.
+  // Leaving an env-file path in the manifest would make ConfigPlugin require a
+  // filesystem that the Workers runtime deliberately does not provide.
+  const manifest = runtime === 'cloudflare-workers' && host.manifest?.envFilePath !== undefined
+    ? withoutEnvFilePath(host.manifest)
+    : host.manifest;
 
   return {
     plugins: swapped,
@@ -143,13 +149,22 @@ export function resolveHost(
     extraImports: {},
     appFactory: host.appFactory,
     appFactoryContext: {
-      ...(host.manifest?.envFilePath === undefined
-        ? {}
-        : { envFilePath: host.manifest.envFilePath }),
+      ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
       ...host.appFactoryContext,
     },
-    manifest: host.manifest,
+    manifest,
   };
+}
+
+/**
+ * Removes the filesystem-only dotenv setting for a Workers project.
+ *
+ * @param manifest - The template manifest that may declare a dotenv path
+ * @returns The manifest without its dotenv path
+ */
+function withoutEnvFilePath(manifest: TemplateManifest): TemplateManifest {
+  const { envFilePath: _envFilePath, ...without } = manifest;
+  return without;
 }
 
 /**
@@ -219,9 +234,13 @@ function configModule(
     setupCalls,
   } = host;
   const pluginArgs = (wiring: Wiring): string =>
-    wiring.pkg === 'config-plugin' && host.manifest?.envFilePath !== undefined
-      ? `{ envFilePath: '${host.manifest.envFilePath}' }`
-      : wiring.args ?? '';
+    wiring.pkg !== 'config-plugin'
+      ? wiring.args ?? ''
+      : runtime === 'cloudflare-workers'
+      ? ''
+      : host.manifest?.envFilePath === undefined
+      ? wiring.args ?? ''
+      : `{ envFilePath: '${host.manifest.envFilePath}' }`;
   // `common` is always imported for the return type, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
   // second import of the same module.

@@ -325,7 +325,38 @@ describe('runNewCommand', () => {
       expect(entry).toContain('booted ??= boot(env)');
       expect(entry).toContain('createApp(env)');
       expect(config).toContain('env?: Readonly<Record<string, unknown>>');
-      expect(config).toContain("{ env, config: { envFilePath: '.env' } }");
+      expect(config).toContain('{ env }');
+      expect(config).not.toContain('envFilePath');
+      expect(h.fs.has('/work/shop/.env')).toBe(false);
+      expect(h.fs.has('/work/shop/.env.example')).toBe(false);
+    });
+
+    it('uses Workers bindings instead of a requested dotenv file', async () => {
+      const h = harness();
+
+      expect(
+        await h.run([
+          'api',
+          '--template',
+          'rest',
+          '--runtime',
+          'cloudflare-workers',
+          '--env-file',
+          '.env.local',
+        ]),
+      ).toBe(2);
+      expect(h.err.text()).toContain('unavailable on Cloudflare Workers');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('omits filesystem dotenv configuration from a Workers REST scaffold', async () => {
+      const h = harness();
+      expect(await h.run(['api', '--template', 'rest', '--runtime', 'cloudflare-workers'])).toBe(0);
+
+      const config = h.fs.read('/work/api/setu.config.ts');
+      expect(config).toContain('ConfigPlugin()');
+      expect(config).not.toContain('envFilePath');
+      expect(h.fs.has('/work/api/.env')).toBe(false);
     });
 
     it('threads env through the Workers entry for a template without a factory too', async () => {

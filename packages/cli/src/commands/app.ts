@@ -99,6 +99,7 @@ function printUsage(log: (message: string) => void): void {
   // gone on saying it after the refusal was lifted.
   log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
+  log('  --env-file <path>   Store local configuration in this ignored relative path');
   log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
   log('  --dir <path>        The workspace root, instead of the working directory');
   log('  --dry-run           Print what would be created, write nothing');

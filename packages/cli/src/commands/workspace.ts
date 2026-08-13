@@ -73,6 +73,10 @@ export async function runWorkspaceCommand(
     deps.error(`Usage: ${PROGRAM_NAME} workspace ports --reallocate [--dir <path>]`);
     return EXIT_USAGE;
   }
+  if (args.flags['dir'] !== undefined && stringFlag(args.flags, 'dir') === undefined) {
+    deps.error('--dir needs a path.');
+    return EXIT_USAGE;
+  }
 
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const read = await readWorkspaceManifest(deps.fs, dir);
