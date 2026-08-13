@@ -2317,14 +2317,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   was missing, NOT because `jwt.secret` was, so making `rbac` optional is what exposed that the
   control had never tested its own claim — complete (PR #158)
 - **Milestone 69** (`packages/database-plugin` — typed Drizzle query seam).
-  `getDrizzle<typeof
-  drizzleDb>(scope)` now preserves the application's exact Drizzle type and
-  returns either the injected outer instance or the callback-scoped native transaction. A real
-  `node:sqlite` join proves repository writes are visible inside that transaction and absent after
-  rollback; exact selected-row inference is compile-time asserted. SQLite/libsql-shaped instances
-  without `execute()` now support repositories and typed builders, while raw `query()` refuses them
-  at the call site with a descriptive error. Portable database contracts, tokens, and manifest
-  exports remain unchanged — complete (PR pending)
+  `getDrizzle<typeof drizzleDb>(scope)` now preserves the application's exact outer Drizzle type for
+  service access and derives the narrower callback-scoped native transaction type for a Unit of
+  Work, excluding outer-only operations. A real `node:sqlite` join proves repository writes are
+  visible inside that transaction and absent after rollback; exact selected-row inference is
+  compile-time asserted. SQLite/libsql-shaped instances without `execute()` now support repositories
+  and typed builders, while raw `query()` refuses them at the call site with a descriptive error.
+  Portable database contracts, tokens, and manifest exports remain unchanged — complete (PR pending)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`

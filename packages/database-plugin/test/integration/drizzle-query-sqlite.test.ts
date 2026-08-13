@@ -7,7 +7,8 @@ import type { SQLInputValue } from 'node:sqlite';
 import { eq } from 'npm:drizzle-orm@0.45.2';
 import { drizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
 import { sqliteTable, text } from 'npm:drizzle-orm@0.45.2/sqlite-core';
-import { DrizzleAdapter, getDrizzle } from '../../src/index.ts';
+import { DrizzleAdapter, type DrizzleTransaction, getDrizzle } from '../../src/index.ts';
+import type { IDatabaseService, IUnitOfWork } from '../../src/interfaces/index.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
 
 const teams = sqliteTable('teams', {
@@ -32,6 +33,23 @@ interface JoinedUserTeam {
   userName: string;
   teamName: string;
 }
+
+/** Compile-only assertions for the two public overloads; this function is never invoked. */
+function assertDrizzleScopeTypes(
+  drizzleDb: ReturnType<typeof drizzle>,
+  service: IDatabaseService,
+  uow: IUnitOfWork,
+): void {
+  const outer = getDrizzle<typeof drizzleDb>(service);
+  outer.batch;
+  assertType<IsExact<typeof outer, typeof drizzleDb>>(true);
+
+  const transaction = getDrizzle<typeof drizzleDb>(uow);
+  assertType<IsExact<typeof transaction, DrizzleTransaction<typeof drizzleDb>>>(true);
+  // @ts-expect-error SQLite Proxy transactions exclude the outer database's batch operation.
+  transaction.batch;
+}
+void assertDrizzleScopeTypes;
 
 interface ArrayReturningStatement {
   run(...params: SQLInputValue[]): unknown;

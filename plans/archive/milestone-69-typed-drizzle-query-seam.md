@@ -3,6 +3,12 @@
 > **Status:** Planning. Branch: `feat/m69-typed-drizzle-query-seam`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
+> **Code-review correction:** The original single unconstrained return type let a caller type a
+> callback-scoped transaction as the full outer database. The shipped design uses overloads: service
+> scope returns `TDatabase`, while UoW scope returns `DrizzleTransaction<TDatabase>` derived from
+> the configured database's transaction callback parameter. This preserves exact query/result
+> inference while excluding outer-only operations such as SQLite Proxy `batch()`.
+
 ## 0. Objective & scope
 
 Add one explicitly Drizzle-specific, generic accessor that returns the application's own injected
@@ -12,12 +18,13 @@ Work accessor returns the callback-scoped Drizzle transaction object, so native 
 relational queries, and other typed Drizzle builders share the same commit/rollback boundary as
 repository operations. The portable repository and adapter contracts remain unchanged.
 
-- **In scope:** `getDrizzle<TInstance>(scope)`; an internal symbol-keyed handle protocol among
-  `DatabaseService`, `UnitOfWork`, and `DrizzleAdapter`; explicit wrong-adapter failures; accepting
-  Drizzle SQLite/libsql-shaped instances that do not expose `execute`; a descriptive raw-query
-  refusal on such instances; a real SQLite transaction/join/rollback proof; compile-time result
-  inference assertions; barrel, README, PUBLIC_API, ARCHITECTURE, ROADMAP, CHANGELOG, and status
-  documentation.
+- **In scope:** overloaded `getDrizzle<TDatabase>(scope)` access for outer services and UoWs;
+  `DrizzleTransaction<TDatabase>` derived from the outer database's transaction callback; an
+  internal symbol-keyed handle protocol among `DatabaseService`, `UnitOfWork`, and `DrizzleAdapter`;
+  explicit wrong-adapter failures; accepting Drizzle SQLite/libsql-shaped instances that do not
+  expose `execute`; a descriptive raw-query refusal on such instances; a real SQLite
+  transaction/join/rollback proof; compile-time result inference assertions; barrel, README,
+  PUBLIC_API, ARCHITECTURE, ROADMAP, CHANGELOG, and status documentation.
 - **NOT this milestone:** A portable join/relation AST (a future relation-traversal milestone);
   changes to `IDataSource`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDatabaseService`, or
   `IUnitOfWork`; Prisma relation traversal; Memory/D1 join emulation; transaction configuration,
@@ -47,29 +54,33 @@ repository operations. The portable repository and adapter contracts remain unch
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                                                                                                                                                                                               | Resolution (picked side)                                                                                                                                                                                                          | Doc deliverable (same PR)                                                                                                                 |
-| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| C1 | `ARCHITECTURE.md:1264` says database-plugin has “no raw SQL in public API”, while committed `IDatabaseService.query` is public at `packages/database-plugin/src/interfaces/index.ts:151-160` and documented in `PUBLIC_API.md:942-952`.                                                                                                                                                                | Source and PUBLIC_API are authoritative: raw SQL remains a released backend-specific escape hatch; M69 adds a separate typed Drizzle escape hatch and does not pretend these escape hatches are portable repository API.          | Correct the database-plugin Rules row in `ARCHITECTURE.md` and describe the typed/native boundary.                                        |
-| C2 | `ARCHITECTURE.md:1264` says Prisma and Drizzle are both “injected or lazy-loaded”; source requires the application-created Prisma client and injected Drizzle instance. Only Drizzle query operators are lazily imported.                                                                                                                                                                              | Preserve source behavior established by M66: ORM clients/instances are injected; only Drizzle operators load from `npm:drizzle-orm@0.45.2`.                                                                                       | Correct the database-plugin Rules row in `ARCHITECTURE.md`.                                                                               |
-| C3 | `PUBLIC_API.md:858-864`, `packages/database-plugin/README.md:65-78`, and source validation say Drizzle needs an injected instance, but only source reveals the extra `execute` requirement that rejects every SQLite/libsql-shaped instance. ROADMAP requires this milestone to decide rather than inherit it.                                                                                         | Relax startup validation to the builder/transaction methods repository and typed access actually need. Keep `execute` optional and make only `IDatabaseService.query()` fail descriptively when the configured instance lacks it. | Document accepted driver shape and raw-query limitation in `PUBLIC_API.md`, `packages/database-plugin/README.md`, and the relevant JSDoc. |
-| C4 | `IDatabaseService.migrate` JSDoc at `packages/database-plugin/src/interfaces/index.ts:162-168` claims Prisma db-push, Drizzle schema sync, and Memory no-op, while `DatabaseService.migrate` at `packages/database-plugin/src/services/database-service.ts:119-124` always rejects because adapters deliberately do not expose migrations. `PUBLIC_API.md:949` repeats the method without the refusal. | Preserve implemented M52c behavior: programmatic migrations are unsupported; each ORM owns migrations through its CLI. This milestone does not add migrations.                                                                    | Correct interface JSDoc and the DatabasePlugin contract note in `PUBLIC_API.md`; add no migration code.                                   |
-| C5 | ROADMAP asks for “a typed accessor returning the Drizzle instance” but its existing `DrizzleInstance` structural stand-in erases join-result inference.                                                                                                                                                                                                                                                | The exported function is generic and returns the caller-supplied application type; the internal structural stand-in remains internal and is never exported as the result type.                                                    | Add exact `getDrizzle<TInstance>` signature/example and inference explanation to `PUBLIC_API.md` and the package README.                  |
+| #  | Conflict                                                                                                                                                                                                                                                                                                                                                                                               | Resolution (picked side)                                                                                                                                                                                                                                | Doc deliverable (same PR)                                                                                                                 |
+| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | `ARCHITECTURE.md:1264` says database-plugin has “no raw SQL in public API”, while committed `IDatabaseService.query` is public at `packages/database-plugin/src/interfaces/index.ts:151-160` and documented in `PUBLIC_API.md:942-952`.                                                                                                                                                                | Source and PUBLIC_API are authoritative: raw SQL remains a released backend-specific escape hatch; M69 adds a separate typed Drizzle escape hatch and does not pretend these escape hatches are portable repository API.                                | Correct the database-plugin Rules row in `ARCHITECTURE.md` and describe the typed/native boundary.                                        |
+| C2 | `ARCHITECTURE.md:1264` says Prisma and Drizzle are both “injected or lazy-loaded”; source requires the application-created Prisma client and injected Drizzle instance. Only Drizzle query operators are lazily imported.                                                                                                                                                                              | Preserve source behavior established by M66: ORM clients/instances are injected; only Drizzle operators load from `npm:drizzle-orm@0.45.2`.                                                                                                             | Correct the database-plugin Rules row in `ARCHITECTURE.md`.                                                                               |
+| C3 | `PUBLIC_API.md:858-864`, `packages/database-plugin/README.md:65-78`, and source validation say Drizzle needs an injected instance, but only source reveals the extra `execute` requirement that rejects every SQLite/libsql-shaped instance. ROADMAP requires this milestone to decide rather than inherit it.                                                                                         | Relax startup validation to the builder/transaction methods repository and typed access actually need. Keep `execute` optional and make only `IDatabaseService.query()` fail descriptively when the configured instance lacks it.                       | Document accepted driver shape and raw-query limitation in `PUBLIC_API.md`, `packages/database-plugin/README.md`, and the relevant JSDoc. |
+| C4 | `IDatabaseService.migrate` JSDoc at `packages/database-plugin/src/interfaces/index.ts:162-168` claims Prisma db-push, Drizzle schema sync, and Memory no-op, while `DatabaseService.migrate` at `packages/database-plugin/src/services/database-service.ts:119-124` always rejects because adapters deliberately do not expose migrations. `PUBLIC_API.md:949` repeats the method without the refusal. | Preserve implemented M52c behavior: programmatic migrations are unsupported; each ORM owns migrations through its CLI. This milestone does not add migrations.                                                                                          | Correct interface JSDoc and the DatabasePlugin contract note in `PUBLIC_API.md`; add no migration code.                                   |
+| C5 | ROADMAP asks for “a typed accessor returning the Drizzle instance” but its existing `DrizzleInstance` structural stand-in erases join-result inference.                                                                                                                                                                                                                                                | The exported service overload returns the caller-supplied application type; the UoW overload returns its structurally derived callback transaction type. The internal structural stand-in remains internal and is never exported as either result type. | Add exact overloads, `DrizzleTransaction<TDatabase>`, examples, and inference explanation to `PUBLIC_API.md` and the package README.      |
 
 ## 3. Design decisions
 
-### 3.1 One generic accessor for both scopes
+### 3.1 One overloaded accessor with scope-safe result types
 
-- **Decision:** Export `getDrizzle<TInstance>(scope: IDatabaseService | IUnitOfWork): TInstance`.
+- **Decision:** Export service and UoW overloads of `getDrizzle<TDatabase>(scope)`. The service
+  overload returns `TDatabase`; the UoW overload returns `DrizzleTransaction<TDatabase>`, which
+  structurally derives the first parameter of the configured database's transaction callback.
   Applications call it as `getDrizzle<typeof drizzleDb>(db)` outside a transaction and
-  `getDrizzle<typeof drizzleDb>(uow)` inside `db.transaction`. The return is the injected instance
-  or Drizzle's callback-scoped transaction object at runtime, while `TInstance` preserves the
-  application's schema/dialect type for joins and aggregates. Do not export or return the adapter's
-  structural `DrizzleInstance` type, and do not add a second outer/UoW helper.
+  `getDrizzle<typeof drizzleDb>(uow)` inside `db.transaction`. Both preserve the application's
+  schema/dialect inference, while the UoW result excludes outer-only operations such as SQLite
+  Proxy's `batch()`. Do not export or return the adapter's structural `DrizzleInstance` type, and do
+  not add a second outer/UoW helper.
 - **Why:** The service registry token cannot carry an application-specific generic, and changing the
   committed portable interfaces to mention Drizzle would break direct implementors or make an
   optional method that contradicts the required throw. One explicitly generic helper keeps the
   backend-specific escape hatch in the owning plugin, accepts both committed interface types, and
-  gives application code an exact `typeof` witness without widening common.
+  gives application code an exact `typeof` witness without widening common. Deriving the callback
+  parameter prevents callers from selecting the complete outer database type for a transaction
+  object whose runtime surface is narrower.
 - **Test home:** `packages/database-plugin/test/unit/drizzle-query.test.ts` asserts outer identity,
   transaction identity, and failures;
   `packages/database-plugin/test/integration/drizzle-query-sqlite.test.ts` uses
@@ -150,16 +161,17 @@ repository operations. The portable repository and adapter contracts remain unch
 
 ### 3.6 Public surface, dependencies, tokens, and lifecycle stay narrow
 
-- **Decision:** The only new package-barrel symbol is `getDrizzle`. Add no option, class, interface,
-  error export, capability token, manifest export, dependency, health behavior, or lifecycle hook.
-  The one change to existing released surface is the OPTIONAL third `UnitOfWork` constructor
-  parameter from §3.3; every existing call shape keeps compiling and behaving identically. Continue
-  the existing exact production import `npm:drizzle-orm@0.45.2`. Test specifiers stay as they are
-  today and are NOT silently re-pinned: `real-drizzle-adapter.test.ts` uses the exact
-  `npm:drizzle-orm@0.45.2` plus its `sqlite-proxy`/`sqlite-core` subpaths, while the guarded
-  `real-import.test.ts` deliberately uses the RANGE `npm:drizzle-orm@^0.45.2`, since it exists to
-  prove a real installed package resolves rather than to pin a build. Existing default/named plugin
-  names and `database` / `database.<name>` tokens are byte-identical.
+- **Decision:** The only new package-barrel value is `getDrizzle`; the accompanying type-only export
+  is `DrizzleTransaction`. Add no option, class, interface, error export, capability token, manifest
+  export, dependency, health behavior, or lifecycle hook. The one change to existing released
+  surface is the OPTIONAL third `UnitOfWork` constructor parameter from §3.3; every existing call
+  shape keeps compiling and behaving identically. Continue the existing exact production import
+  `npm:drizzle-orm@0.45.2`. Test specifiers stay as they are today and are NOT silently re-pinned:
+  `real-drizzle-adapter.test.ts` uses the exact `npm:drizzle-orm@0.45.2` plus its
+  `sqlite-proxy`/`sqlite-core` subpaths, while the guarded `real-import.test.ts` deliberately uses
+  the RANGE `npm:drizzle-orm@^0.45.2`, since it exists to prove a real installed package resolves
+  rather than to pin a build. Existing default/named plugin names and `database` / `database.<name>`
+  tokens are byte-identical.
 - **Why:** Every proposed extra surface would have no independent consumer. The application already
   owns the instance and table schema; the missing capability is only access to the transaction's
   typed native object.
@@ -168,9 +180,10 @@ repository operations. The portable repository and adapter contracts remain unch
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                                                            | Kind             | Consumer / real code path that READS it                                                                                                                                                |
-| -------------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `getDrizzle<TInstance>(scope: IDatabaseService \| IUnitOfWork): TInstance` | generic function | Application query code calls it with `typeof` its injected Drizzle database to run typed outer or transaction-scoped joins/aggregates; the real SQLite integration drives both scopes. |
+| Exported symbol                                      | Kind             | Consumer / real code path that READS it                                                                                                                                                                                       |
+| ---------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getDrizzle<TDatabase>(scope)` service/UoW overloads | generic function | Application query code calls it with `typeof` its injected Drizzle database to run typed outer or transaction-scoped joins/aggregates; the real SQLite integration drives both scopes and proves their distinct static types. |
+| `DrizzleTransaction<TDatabase>`                      | type alias       | The UoW overload and application type annotations derive Drizzle's callback transaction type without a production Drizzle import.                                                                                             |
 
 No existing package export is removed, renamed, or retyped. The exported `UnitOfWork` class gains
 one OPTIONAL constructor parameter (§3.3), which is source-compatible with every existing call.
@@ -189,12 +202,12 @@ deliberately absent from `src/index.ts`.
 
 | File                                                               | Purpose                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/database-plugin/src/query/drizzle-query.ts`              | Define documented public `getDrizzle`, the internal unique-symbol provider protocol, narrowing, and stable error messages.                                                                                                                                    |
+| `packages/database-plugin/src/query/drizzle-query.ts`              | Define documented public `getDrizzle` overloads and `DrizzleTransaction`, the internal unique-symbol provider protocol, narrowing, and stable error messages.                                                                                                 |
 | `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts` | Supply outer and transaction-scoped native handles; make `execute` optional at validation and guard only `rawQuery`.                                                                                                                                          |
 | `packages/database-plugin/src/services/database-service.ts`        | Supply the service-level handle, pass adapter identity to UoWs, and keep transaction orchestration on the existing handle.                                                                                                                                    |
 | `packages/database-plugin/src/unitOfWork/unit-of-work.ts`          | Supply the UoW-level handle and produce named wrong-adapter failures without widening `IUnitOfWork`; accept the adapter type as an OPTIONAL third constructor parameter, because this class is released public surface (§3.3).                                |
 | `packages/database-plugin/src/interfaces/index.ts`                 | Correct the false `migrate()` JSDoc; no signature or interface member changes.                                                                                                                                                                                |
-| `packages/database-plugin/src/index.ts`                            | Export only `getDrizzle` from the new module.                                                                                                                                                                                                                 |
+| `packages/database-plugin/src/index.ts`                            | Export `getDrizzle` and the type-only `DrizzleTransaction` from the new module.                                                                                                                                                                               |
 | `packages/database-plugin/README.md`                               | Document typed outer/UoW examples, exact `typeof` usage, SQLite/libsql acceptance, raw-query limitation, and exports.                                                                                                                                         |
 | `PUBLIC_API.md`                                                    | Add the exact helper signature, transaction join example, failure behavior, driver shape, and migration truth; update the export table.                                                                                                                       |
 | `ARCHITECTURE.md`                                                  | Correct the database-plugin dependency/escape-hatch rules and describe why the seam is Drizzle-specific rather than portable.                                                                                                                                 |
@@ -209,7 +222,8 @@ deliberately absent from `src/index.ts`.
    raw `execute` capability.
 3. Thread the existing adapter type into `UnitOfWork`; implement service/UoW provider methods while
    leaving committed interfaces unchanged.
-4. Export `getDrizzle`, add JSDoc, and add the barrel assertion before writing application examples.
+4. Export `getDrizzle` and `DrizzleTransaction`, add JSDoc, and add the barrel assertion before
+   writing application examples.
 5. Add unit tests for identity, all wrong-adapter paths, external fakes, missing `execute`, and
    unchanged existing-driver behavior.
 6. Add the real SQLite join/visibility/rollback and compile-time exact-result proof.
@@ -218,16 +232,16 @@ deliberately absent from `src/index.ts`.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                | src covered                                                                                                                   | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/database-plugin/test/unit/drizzle-query.test.ts`               | `query/drizzle-query.ts`                                                                                                      | `getDrizzle<typeof fakeDb>(service)` returns the identical outer object; the UoW call returns the identical transaction object; Memory/Prisma/Custom errors name their configured adapter on service and UoW paths; an external `IDatabaseService`/`IUnitOfWork` fake gets the invalid-scope error; no call returns `undefined`.                                                                                                                                |
-| `packages/database-plugin/test/unit/drizzle-adapter.test.ts`             | `adapters/drizzle/drizzle-adapter.ts`                                                                                         | A structurally valid no-`execute` instance connects, opens a transaction, and exposes the exact native objects through the public helper path; `rawQuery<T>` rejects descriptively without `execute`; an instance with `execute` retains params/result behavior; all existing validation/commit/rollback branches remain covered.                                                                                                                               |
-| `packages/database-plugin/test/unit/database-service.test.ts`            | `services/database-service.ts`                                                                                                | Service handle access preserves identity and closed/transaction behavior; one adapter transaction still backs UoW repositories and native handle; callback success commits once and failure rolls back once. Calls type-check against unchanged `IDatabaseService.transaction<T>((uow: IUnitOfWork) => Promise<T>)`.                                                                                                                                            |
-| `packages/database-plugin/test/unit/unit-of-work.test.ts`                | `unitOfWork/unit-of-work.ts`                                                                                                  | Drizzle UoW exposes its transaction handle; all non-Drizzle labels throw the exact configured-adapter error; a UoW constructed with the pre-M69 two-argument shape still compiles, still serves repositories, and throws the INVALID-SCOPE error (never the wrong-adapter one, which would name an adapter nobody configured); repository factory and finalization guards remain unchanged. Calls type-check through `getDrizzle<TInstance>(uow: IUnitOfWork)`. |
-| `packages/database-plugin/test/unit/barrel-exports.test.ts`              | `index.ts`, `interfaces/index.ts`                                                                                             | The barrel exports `getDrizzle` and all previously documented symbols; internal `DRIZZLE_QUERY_HANDLE`, provider type, and structural `DrizzleInstance` do not leak. The corrected migration contract remains a doc-only change.                                                                                                                                                                                                                                |
-| `packages/database-plugin/test/integration/drizzle-query-sqlite.test.ts` | `query/drizzle-query.ts`, `adapters/drizzle/drizzle-adapter.ts`, `services/database-service.ts`, `unitOfWork/unit-of-work.ts` | Real `npm:drizzle-orm@0.45.2/sqlite-proxy` over `node:sqlite` boots through the adapter without `execute`; a repository write is visible to a typed `innerJoin` inside the same UoW; a thrown sentinel rolls both back; outer access sees no row. `assertType<IsExact<Awaited<typeof joined>, ExpectedJoinRow[]>>(true)` proves exact selected-result inference rather than `unknown`/the structural stand-in.                                                  |
-| `packages/database-plugin/test/e2e/database-application.test.ts`         | Public database package path                                                                                                  | A real kernel app resolves `IDatabaseService` from `CAPABILITIES.DATABASE`, obtains the outer handle, and runs a typed query; wrong-adapter resolution through the same public token names `memory`. Existing health and close behavior remain intact.                                                                                                                                                                                                          |
-| `packages/database-plugin/test/integration/real-import.test.ts`          | Production lazy import branch in `adapters/drizzle/drizzle-adapter.ts`                                                        | Unchanged by this milestone. It keeps loading the RANGE `npm:drizzle-orm@^0.45.2` (its existing specifier, deliberately not the exact production pin — it proves an installed package resolves); pure success/failure branching remains unit-covered rather than relying on a skip. No new external dependency loader is added.                                                                                                                                 |
+| Test file                                                                | src covered                                                                                                                   | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/database-plugin/test/unit/drizzle-query.test.ts`               | `query/drizzle-query.ts`                                                                                                      | `getDrizzle<typeof fakeDb>(service)` returns the identical outer object; the UoW call returns the identical transaction object; Memory/Prisma/Custom errors name their configured adapter on service and UoW paths; an external `IDatabaseService`/`IUnitOfWork` fake gets the invalid-scope error; no call returns `undefined`.                                                                                                       |
+| `packages/database-plugin/test/unit/drizzle-adapter.test.ts`             | `adapters/drizzle/drizzle-adapter.ts`                                                                                         | A structurally valid no-`execute` instance connects, opens a transaction, and exposes the exact native objects through the public helper path; `rawQuery<T>` rejects descriptively without `execute`; an instance with `execute` retains params/result behavior; all existing validation/commit/rollback branches remain covered.                                                                                                      |
+| `packages/database-plugin/test/unit/database-service.test.ts`            | `services/database-service.ts`                                                                                                | Service handle access preserves identity and closed/transaction behavior; one adapter transaction still backs UoW repositories and native handle; callback success commits once and failure rolls back once. Calls type-check against unchanged `IDatabaseService.transaction<T>((uow: IUnitOfWork) => Promise<T>)`.                                                                                                                   |
+| `packages/database-plugin/test/unit/unit-of-work.test.ts`                | `unitOfWork/unit-of-work.ts`                                                                                                  | Drizzle UoW exposes its transaction handle; all non-Drizzle labels throw the exact configured-adapter error; a UoW constructed with the pre-M69 two-argument shape still compiles, still serves repositories, and throws the INVALID-SCOPE error (never the wrong-adapter one, which would name an adapter nobody configured); repository factory and finalization guards remain unchanged. Calls type-check through the UoW overload. |
+| `packages/database-plugin/test/unit/barrel-exports.test.ts`              | `index.ts`, `interfaces/index.ts`                                                                                             | The barrel exports `getDrizzle` and all previously documented symbols; internal `DRIZZLE_QUERY_HANDLE`, provider type, and structural `DrizzleInstance` do not leak. The corrected migration contract remains a doc-only change.                                                                                                                                                                                                       |
+| `packages/database-plugin/test/integration/drizzle-query-sqlite.test.ts` | `query/drizzle-query.ts`, `adapters/drizzle/drizzle-adapter.ts`, `services/database-service.ts`, `unitOfWork/unit-of-work.ts` | Real `npm:drizzle-orm@0.45.2/sqlite-proxy` over `node:sqlite` boots through the adapter without `execute`; a repository write is visible to a typed `innerJoin` inside the same UoW; a thrown sentinel rolls both back; outer access sees no row. `assertType<IsExact<Awaited<typeof joined>, ExpectedJoinRow[]>>(true)` proves exact selected-result inference rather than `unknown`/the structural stand-in.                         |
+| `packages/database-plugin/test/e2e/database-application.test.ts`         | Public database package path                                                                                                  | A real kernel app resolves `IDatabaseService` from `CAPABILITIES.DATABASE`, obtains the outer handle, and runs a typed query; wrong-adapter resolution through the same public token names `memory`. Existing health and close behavior remain intact.                                                                                                                                                                                 |
+| `packages/database-plugin/test/integration/real-import.test.ts`          | Production lazy import branch in `adapters/drizzle/drizzle-adapter.ts`                                                        | Unchanged by this milestone. It keeps loading the RANGE `npm:drizzle-orm@^0.45.2` (its existing specifier, deliberately not the exact production pin — it proves an installed package resolves); pure success/failure branching remains unit-covered rather than relying on a skip. No new external dependency loader is added.                                                                                                        |
 
 ### 6.1 Acceptance criteria
 
@@ -238,10 +252,10 @@ deliberately absent from `src/index.ts`.
 - Throwing after the join rolls back the repository write; the outer handle proves it is absent.
 - The real join's selected row type is exactly compile-time asserted at the documented
   `getDrizzle<typeof drizzleDb>(...)` call shape, and is not `unknown`, `Record<string, unknown>`,
-  or the internal `DrizzleInstance` stand-in. This is a property of that call shape, NOT a guarantee
-  the helper enforces: `TInstance` appears only in return position, so an omitted type argument
-  infers `unknown` and a wrong `typeof` is an unchecked cast (§8). Docs therefore show the `typeof`
-  form exclusively.
+  or the internal `DrizzleInstance` stand-in. The service overload is exactly the configured outer
+  type; the UoW overload is exactly `DrizzleTransaction<typeof drizzleDb>`, and a compile-time
+  negative assertion proves SQLite Proxy's outer-only `batch()` is unavailable there. Docs show the
+  explicit `typeof` form because the database type cannot be inferred through a capability token.
 - Memory, Prisma, Custom, and external structural scopes throw descriptive errors; none return
   `undefined`.
 - A `UnitOfWork` built with the pre-M69 two-argument constructor still compiles and still serves
@@ -250,8 +264,8 @@ deliberately absent from `src/index.ts`.
   repositories/native queries; only raw `IDatabaseService.query` rejects, while existing
   `execute`-capable instances remain behavior-identical.
 - No `common` contract, capability token, plugin provider name, manifest export, or dependency is
-  added; only `getDrizzle` joins the package barrel, and the only change to existing released
-  surface is `UnitOfWork`'s optional third constructor parameter.
+  added; only `getDrizzle` and type-only `DrizzleTransaction` join the package barrel, and the only
+  change to existing released surface is `UnitOfWork`'s optional third constructor parameter.
 - Every changed/new `src` file is at least 90% branch, function, and line coverage, with the public
   helper fully covered; docs and source agree on migrations, raw SQL, injection, and driver shape.
 
@@ -298,10 +312,11 @@ PR unless the maintainer explicitly asks in that turn.
 
 ## 8. Risks & mitigations
 
-- A generic return can be instantiated with the wrong application type and TypeScript cannot derive
-  a type through a string capability token. Mitigate by documenting only `typeof drizzleDb`, proving
-  that exact usage with `IsExact`, returning the actual object identity, and never exporting a broad
-  framework stand-in that appears safer than it is.
+- TypeScript cannot derive an application database type through a string capability token. Mitigate
+  by documenting only `typeof drizzleDb`, proving the service result and derived UoW transaction
+  with `IsExact`, negatively asserting that the UoW excludes outer-only operations, returning the
+  actual object identity, and never exporting a broad framework stand-in that appears safer than it
+  is.
 - A transaction accessor could accidentally return the outer database and silently escape rollback.
   Mitigate with one symbol provider on the adapter transaction itself and a real visibility plus
   rollback test whose outer-handle substitution is a required negative control.

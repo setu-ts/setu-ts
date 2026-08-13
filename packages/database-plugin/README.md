@@ -83,9 +83,11 @@ rejects, with guidance to use the typed builder instead.
 
 ### Typed Drizzle queries
 
-Use the application's exact configured type as the generic witness. Outside a transaction the helper
-returns that configured instance; inside `transaction()` it returns Drizzle's native callback-scoped
-transaction, so repository work and native joins share one rollback boundary:
+Use the application's exact configured outer database type as the generic witness. The service
+overload returns that full configured type. The Unit-of-Work overload derives Drizzle's native
+callback transaction type from it, preserving schema and selected-row inference while excluding
+outer-only operations such as SQLite Proxy's `batch()`. Repository work and native joins therefore
+share one rollback boundary without falsely exposing the complete outer database:
 
 ```typescript
 import { eq } from 'drizzle-orm';
@@ -106,8 +108,10 @@ await db.transaction(async (uow) => {
 ```
 
 Always supply `typeof drizzleDb`: the helper cannot infer an application schema through the
-non-generic database capability token. Memory, Prisma, and custom services throw an error naming
-their configured adapter. Objects not created by this plugin throw an invalid-scope error.
+non-generic database capability token. Use the service overload when an outer-only operation is
+needed; the UoW result intentionally exposes only Drizzle's transaction-safe callback surface.
+Memory, Prisma, and custom services throw an error naming their configured adapter. Objects not
+created by this plugin throw an invalid-scope error.
 
 ## Filtering and single-row lookup
 
@@ -159,6 +163,7 @@ imperative begin/commit.
 | `createDrizzleDataSource`   | function  |
 | `createPrismaDataSource`    | function  |
 | `getDrizzle`                | function  |
+| `DrizzleTransaction`        | type      |
 | `DatabasePlugin`            | function  |
 | `BaseRepository`            | class     |
 | `DatabaseService`           | class     |
