@@ -21,6 +21,7 @@ import type { IDatabaseAdapter } from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
+  type NativeDrizzleQueryHandle,
   readDrizzleQueryHandle,
 } from '../query/drizzle-query.ts';
 
@@ -53,6 +54,7 @@ class InternalRepo<Entity, Id = string> extends BaseRepository<Entity, Id> {
 export class DatabaseService implements IDatabaseService {
   private _closed = false;
 
+  /** Creates a database service over one adapter and repository data-source factory. */
   constructor(
     /** The underlying database adapter (internal contract with scoped tx factory). */
     private readonly _adapter: IDatabaseAdapter,
@@ -64,14 +66,14 @@ export class DatabaseService implements IDatabaseService {
     private readonly _options?: DatabaseAdapterOptions,
     /** Optional logger for query logging. */
     private readonly _logger?: { debug(msg: string, meta?: Record<string, unknown>): void },
-    /** Monotonic clock — injected from `ctx.runtime.hrtime()`. NEVER `Date.now()`. */
+    /** Monotonic clock injected from `ctx.runtime.hrtime()` by the plugin. */
     private readonly _now: () => number = (): number => {
       // Fallback for tests that do not inject; uses the global monotonic clock.
       return typeof performance !== 'undefined' ? performance.now() : 0;
     },
   ) {}
 
-  /** @inheritdoc */
+  /** Returns a repository bound to the named entity on the outer database scope. */
   getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id> {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
@@ -81,9 +83,15 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /** Provide the configured native Drizzle instance through the internal protocol. */
-  [DRIZZLE_QUERY_HANDLE](): { readonly database: object; readonly query: unknown } {
+  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
     assertDrizzleAdapter(this._adapterType);
-    return readDrizzleQueryHandle(this._adapter);
+    const handle = readDrizzleQueryHandle(this._adapter);
+    if (handle.scope !== 'outer') {
+      throw new Error(
+        "Drizzle query access expected 'outer' scope but received 'transaction' scope.",
+      );
+    }
+    return handle;
   }
 
   /** @inheritdoc */

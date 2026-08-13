@@ -1,5 +1,17 @@
 # Milestone 69 — Typed Drizzle Query Seam (`@setu-ts/database-plugin`)
 
+> **Final-review correction (2026-08-13):** The implementation supersedes the original witness and
+> overload decisions below. The final API is `createDrizzleDatabase(database, transactionBridge)`,
+> `getDrizzleDatabase(service, configured)`, and `getDrizzleTransaction(uow, configured)`. The
+> package-created configuration is a frozen null-prototype opaque identity whose database and
+> positive Promise-aware transaction bridge live in a private `WeakMap`; structural copies,
+> mutation, cloning, and cross-instance reuse are rejected. Distinct outer and transaction accessors
+> remove the unsound structural overload overlap, and runtime handles carry an explicit scope kind.
+> Unknown Promise-adopting/thenable transaction wrappers are rejected at startup unless the
+> application supplies the explicit source-owned bridge. The original no-`WeakMap`, one-argument
+> factory, overloaded `getDrizzle`, and Promise-identity decisions retained below are historical and
+> no longer normative.
+
 > **Status:** Planning. Branch: `feat/m69-typed-drizzle-query-seam`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 

@@ -8,17 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Typed native Drizzle query access.** `createDrizzleDatabase(drizzleDb)` creates a source-owned
-  typed witness; `getDrizzle(scope, witness)` returns the exact configured instance for an
-  `IDatabaseService` and a derived `DrizzleTransaction<typeof drizzleDb>` callback-scoped native
-  transaction for an `IUnitOfWork`, preserving application schema inference for joins and
-  aggregations while sharing one commit/rollback boundary with repositories. Promise-aware SQLite
-  Proxy/libsql-shaped instances without `execute()` now connect for repositories and typed builders;
-  raw `query()` alone rejects with a descriptive limitation. Synchronous callback drivers are
-  explicitly unsupported and rejected by the witness factory's types (or at startup when unwrapped),
-  because their native transaction closes before awaited UoW work starts. The exported `UnitOfWork`
-  constructor accepts an optional adapter-type third argument while preserving the released
-  two-argument call shape.
+- **Typed native Drizzle query access.** `createDrizzleDatabase(drizzleDb, transactionBridge)`
+  creates an opaque package-owned configuration; `getDrizzleDatabase(service, configured)` returns
+  the exact configured instance and `getDrizzleTransaction(uow, configured)` returns a derived
+  `DrizzleTransaction<typeof drizzleDb>` callback-scoped native transaction for an `IUnitOfWork`,
+  preserving application schema inference for joins and aggregations while sharing one
+  commit/rollback boundary with repositories. Promise-aware SQLite Proxy/libsql-shaped instances
+  without `execute()` now connect for repositories and typed builders; raw `query()` alone rejects
+  with a descriptive limitation. Synchronous callback drivers are explicitly unsupported and
+  rejected by the witness factory's types (or at startup when unwrapped), because their native
+  transaction closes before awaited UoW work starts. The exported `UnitOfWork` constructor accepts
+  an optional adapter-type third argument while preserving the released two-argument call shape.
 
 - **`ConfigPluginOptions.envFileOptional`.** When `true`, a path in `envFilePath` that does not
   exist is skipped instead of throwing. The default is `false`, so nothing about an existing
@@ -122,7 +122,7 @@ All notable changes to this project are documented here. The format follows
   been persisted.
 
   Migration: pass a table registry beside the instance —
-  `DatabasePlugin({ type: 'drizzle', options: { drizzleInstance: createDrizzleDatabase(db), drizzleTables: { User: users } } })`.
+  `DatabasePlugin({ type: 'drizzle', options: { drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)), drizzleTables: { User: users } } })`.
 
 - **Generated projects are functional by default, and decorators plus DI are one opt-in.**
   `--template rest` and `--template microservice` no longer register `DecoratorPlugin`, and

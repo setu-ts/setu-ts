@@ -13,7 +13,8 @@ import {
   DrizzleAdapter,
   type DrizzleDatabase,
   type DrizzleTransaction,
-  getDrizzle,
+  getDrizzleDatabase,
+  getDrizzleTransaction,
 } from '../../src/index.ts';
 import type { IDatabaseService, IUnitOfWork } from '../../src/interfaces/index.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
@@ -47,27 +48,30 @@ type ForgedDatabase<TDatabase extends object> = Omit<TDatabase, 'transaction'> &
 
 declare const synchronousDatabase: BetterSQLite3Database;
 
-/** Compile-only assertions for the two public overloads; this function is never invoked. */
+/** Compile-only assertions for the two public accessors; this function is never invoked. */
 function assertDrizzleScopeTypes(
   drizzleDb: ReturnType<typeof drizzle>,
   database: DrizzleDatabase<ReturnType<typeof drizzle>>,
   service: IDatabaseService,
   uow: IUnitOfWork,
 ): void {
-  const outer = getDrizzle(service, database);
+  const outer = getDrizzleDatabase(service, database);
   outer.batch;
   assertType<IsExact<typeof outer, typeof drizzleDb>>(true);
 
-  const transaction = getDrizzle(uow, database);
+  const transaction = getDrizzleTransaction(uow, database);
   assertType<IsExact<typeof transaction, DrizzleTransaction<typeof drizzleDb>>>(true);
   // @ts-expect-error SQLite Proxy transactions exclude the outer database's batch operation.
   transaction.batch;
 
   // @ts-expect-error The configured witness cannot be reused with a forged database generic.
-  getDrizzle<ForgedDatabase<typeof drizzleDb>>(uow, database).batch;
+  getDrizzleTransaction<ForgedDatabase<typeof drizzleDb>>(uow, database).batch;
 
   // @ts-expect-error Synchronous callback drivers cannot create a supported witness.
-  createDrizzleDatabase(synchronousDatabase);
+  createDrizzleDatabase(
+    synchronousDatabase,
+    (configured, work) => Promise.resolve(configured.transaction(work)),
+  );
 }
 void assertDrizzleScopeTypes;
 
@@ -107,7 +111,10 @@ describe('typed Drizzle query seam on real SQLite', () => {
     const drizzleDb = drizzle((statement, params, method) =>
       executeSqlite(engine, statement, params, method)
     );
-    const database = createDrizzleDatabase(drizzleDb);
+    const database = createDrizzleDatabase(
+      drizzleDb,
+      (configured, work) => configured.transaction(work),
+    );
     const adapter = new DrizzleAdapter({
       drizzleInstance: database,
       drizzleTables: { User: users, Team: teams },
@@ -128,7 +135,7 @@ describe('typed Drizzle query seam on real SQLite', () => {
           teamId: 't1',
         });
 
-        const tx = getDrizzle(uow, database);
+        const tx = getDrizzleTransaction(uow, database);
         expect(tx).not.toBe(drizzleDb);
         const joined = await tx
           .select({
@@ -144,7 +151,7 @@ describe('typed Drizzle query seam on real SQLite', () => {
       }),
     ).rejects.toBe(sentinel);
 
-    const outer = getDrizzle(service, database);
+    const outer = getDrizzleDatabase(service, database);
     expect(outer).toBe(drizzleDb);
     expect(await outer.select().from(users)).toEqual([]);
     expect(await service.getRepository<User>('User').findById('u1')).toBeNull();

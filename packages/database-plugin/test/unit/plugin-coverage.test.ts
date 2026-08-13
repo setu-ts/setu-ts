@@ -183,7 +183,10 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: createDrizzleDatabase(fakeDb),
+          drizzleInstance: createDrizzleDatabase(
+            fakeDb,
+            (database, work) => database.transaction(work),
+          ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });
@@ -279,7 +282,10 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: createDrizzleDatabase(fakeDb),
+          drizzleInstance: createDrizzleDatabase(
+            fakeDb,
+            (database, work) => database.transaction(work),
+          ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });
@@ -313,7 +319,10 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: createDrizzleDatabase(fakeDb),
+          drizzleInstance: createDrizzleDatabase(
+            fakeDb,
+            (database, work) => database.transaction(work),
+          ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });

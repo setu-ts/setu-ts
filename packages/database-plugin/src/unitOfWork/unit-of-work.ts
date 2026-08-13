@@ -10,6 +10,7 @@ import type { DatabaseAdapterType } from '../interfaces/index.ts';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
+  type NativeDrizzleQueryHandle,
   readDrizzleQueryHandle,
 } from '../query/drizzle-query.ts';
 
@@ -23,6 +24,7 @@ export class UnitOfWork implements IUnitOfWork {
   private _committed = false;
   private _rolledBack = false;
 
+  /** Creates a Unit of Work over one active adapter transaction. */
   constructor(
     /** The underlying transaction handle from the adapter. */
     private readonly _transaction: ITransaction,
@@ -38,9 +40,15 @@ export class UnitOfWork implements IUnitOfWork {
   }
 
   /** Provide the transaction-scoped native Drizzle object through the internal protocol. */
-  [DRIZZLE_QUERY_HANDLE](): { readonly database: object; readonly query: unknown } {
+  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
     assertDrizzleAdapter(this._adapterType);
-    return readDrizzleQueryHandle(this._transaction);
+    const handle = readDrizzleQueryHandle(this._transaction);
+    if (handle.scope !== 'transaction') {
+      throw new Error(
+        "Drizzle query access expected 'transaction' scope but received 'outer' scope.",
+      );
+    }
+    return handle;
   }
 
   /**
