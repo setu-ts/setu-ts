@@ -224,6 +224,27 @@ describe('PrismaAdapter', () => {
       });
     });
 
+    it('translates null membership into an explicit null branch', async () => {
+      await ds.findAll(
+        query({
+          filter: {
+            type: 'comparison',
+            field: 'deletedAt',
+            operator: 'in',
+            value: [null, '2026-01-01'],
+          },
+        }),
+      );
+
+      const call = fakeClient.recordedCalls.find((entry) => entry.action === 'findMany');
+      expect(call?.args.where).toEqual({
+        OR: [
+          { deletedAt: null },
+          { deletedAt: { in: ['2026-01-01'] } },
+        ],
+      });
+    });
+
     it('counts with a where filter', async () => {
       expect(await ds.count({})).toBe(3);
       expect(await ds.count({ role: 'admin' })).toBe(2);

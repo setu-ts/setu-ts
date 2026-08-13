@@ -34,6 +34,7 @@ export function createFakeDrizzleTable(name: string): Record<string, unknown> {
     name: column('name'),
     email: column('email'),
     role: column('role'),
+    deletedAt: column('deletedAt'),
     title: column('title'),
   };
 }

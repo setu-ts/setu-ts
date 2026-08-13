@@ -21,7 +21,7 @@ import denoJson from '../../deno.json' with { type: 'json' };
  * Creates a plugin that registers:
  * - IJwtService under CAPABILITIES.JWT
  * - IAuthService under CAPABILITIES.AUTH
- * - IAuthorizationService under CAPABILITIES.AUTHORIZATION
+ * - IAuthorizationService under CAPABILITIES.AUTHORIZATION when `rbac` is configured
  *
  * @param options - Plugin configuration options
  * @returns A configured IPlugin instance

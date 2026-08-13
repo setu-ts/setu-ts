@@ -412,7 +412,20 @@ function prismaFilter(filter: FilterExpression): Record<string, unknown> {
       return { [filter.field]: { lt: filter.value } };
     case 'lte':
       return { [filter.field]: { lte: filter.value } };
-    case 'in':
-      return { [filter.field]: { in: filter.value } };
+    case 'in': {
+      const nonNullValues = filter.value.filter((value) => value !== null);
+      if (!filter.value.includes(null)) {
+        return { [filter.field]: { in: nonNullValues } };
+      }
+      if (nonNullValues.length === 0) {
+        return { [filter.field]: null };
+      }
+      return {
+        OR: [
+          { [filter.field]: null },
+          { [filter.field]: { in: nonNullValues } },
+        ],
+      };
+    }
   }
 }

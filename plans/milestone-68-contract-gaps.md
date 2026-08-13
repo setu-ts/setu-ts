@@ -1,8 +1,7 @@
 # Milestone 68 — Contract Gaps
 
-> **Status:** Implementation complete; final milestone verification is pending the repository-wide
-> coverage baseline. Branch: `feat/68-contract-gaps`. `main` is protected — all implementation and
-> fixes stay on this branch until it merges through one PR.
+> **Status:** Complete (PR pending). Branch: `feat/68-contract-gaps`. `main` is protected — all
+> implementation and fixes stay on this branch until it merges through one PR.
 
 ## 0. Objective & scope
 
