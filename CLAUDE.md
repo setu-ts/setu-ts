@@ -2327,7 +2327,35 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and typed builders, while raw `query()` refuses them at the call site with a descriptive error.
   Synchronous callback drivers are explicitly rejected because the native transaction closes before
   awaited UoW work begins. Portable database contracts, tokens, and manifest exports remain
-  unchanged — complete (PR pending)
+  unchanged.
+
+  **This is a BREAKING configuration change and the one thing an upgrading reader needs first:**
+  `DatabaseAdapterOptions.drizzleInstance` moved from `unknown` to the opaque
+  `DrizzleDatabaseIdentity`, so every existing `type: 'drizzle'` application must wrap its instance
+  in `createDrizzleDatabase(db, (database, work) => database.transaction(work))` — an unwrapped one
+  is a COMPILE error, and `connect()` rejects it at runtime too. The bridge is application-supplied
+  rather than inferred on purpose: a driver whose `transaction` callback is synchronous
+  (better-sqlite3) commits before any awaited unit-of-work runs, so inferring promise-awareness from
+  a structural `transaction` method would report atomicity the database never provided. Those
+  drivers are refused by `createDrizzleDatabase`'s own types — verified by probing an async- and a
+  sync-shaped database type, where the `@ts-expect-error` on the sync one is satisfied, so the guard
+  fires rather than being decorative.
+
+  Code review then found five things every gate had passed. The headline one is a documentation
+  failure rather than a runtime bug, which is exactly why nothing caught it: the breaking change
+  above was filed under CHANGELOG **Added** with no migration text, so an upgrading application
+  would have met it as a compile error with no entry explaining it — now under Changed, with the
+  wrap snippet and the reason. The committed plan also still asserted "No `WeakMap`, module-global
+  registry ... is added" while `drizzle-database.ts` adds exactly that to map a witness back to its
+  database (recorded as a correction rather than quietly left stale); `DrizzleDatabaseIdentity`'s
+  JSDoc claimed the barrel exports the correlated type "instead" when it exports both; and this diff
+  had rewritten TWO deliberate `NEVER Date.now()` guards into neutral prose, unrelated to the
+  milestone — clock-mixing is a named recurring pitfall here, so both were restored. Finally, three
+  NEW defensive branches were reachable but untested, including the outer-scope refusal in
+  `UnitOfWork`, which is the one that would silently escape a transaction — a caller can construct
+  that case through the public two-argument constructor. All three now have tests naming the failure
+  they guard, taking `drizzle-query.ts`, `drizzle-database.ts` and `unit-of-work.ts` to 100%
+  branch/function/line — complete (PR pending)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`
