@@ -13,7 +13,10 @@ import type { DataSource } from '../../repositories/base-repository.ts';
 import {
   DRIZZLE_QUERY_HANDLE,
   type DrizzleQueryHandleProvider,
+  type NativeDrizzleQueryHandle,
 } from '../../query/drizzle-query.ts';
+import { DRIZZLE_DATABASE } from '../../query/drizzle-database.ts';
+import type { DrizzleDatabase } from '../../query/drizzle-database.ts';
 
 // ---------------------------------------------------------------------------
 // Drizzle database type — lazily resolved at connect() time.
@@ -141,6 +144,7 @@ export type DrizzleOperators = {
  */
 export class DrizzleAdapter implements IDatabaseAdapter {
   private _db: DrizzleInstance | null = null;
+  private _configuredDatabase: object | null = null;
   private _connected = false;
   private readonly _options: DatabaseAdapterOptions | undefined;
   private _operators: DrizzleOperators | null = null;
@@ -151,7 +155,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
 
   /** @inheritdoc */
   async connect(): Promise<void> {
-    this._db = await this.resolveDb();
+    const configured = this.resolveDb();
+    this._db = configured.database;
+    this._configuredDatabase = configured.identity;
 
     try {
       const orm = await import('npm:drizzle-orm@0.45.2');
@@ -223,6 +229,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   disconnect(): Promise<void> {
     this._connected = false;
     this._db = null;
+    this._configuredDatabase = null;
     return Promise.resolve();
   }
 
@@ -232,11 +239,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   }
 
   /** Provide the exact configured instance to the package's typed Drizzle accessor. */
-  [DRIZZLE_QUERY_HANDLE](): unknown {
-    if (!this._db) {
+  [DRIZZLE_QUERY_HANDLE](): { readonly database: object; readonly query: unknown } {
+    if (!this._db || !this._configuredDatabase) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
-    return this._db;
+    return { database: this._configuredDatabase, query: this._db };
   }
 
   /**
@@ -249,16 +256,24 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
     const db = this._db!;
+    const configuredDatabase = this._configuredDatabase!;
 
     const txReady = new Deferred<DrizzleInstance>();
     const hold = new Deferred<void>();
     const tables = this.resolveTables();
     const operators = this._operators!;
 
-    const outer = db.transaction(async (tx) => {
+    const outer = db.transaction((tx) => {
       txReady.resolve(tx);
-      await hold.promise;
+      return hold.promise;
     });
+    if (outer === hold.promise) {
+      hold.reject(new Error('Synchronous Drizzle transaction callbacks are unsupported'));
+      await outer.catch(() => {});
+      throw new Error(
+        'Configured Drizzle driver does not await transaction callbacks; synchronous transaction drivers are unsupported.',
+      );
+    }
     // If the transaction rejects before handing back `tx` (e.g. the driver
     // fails to open it), unblock the waiter so beginTransaction rejects
     // instead of hanging on a promise that never settles.
@@ -275,8 +290,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const rollbackSentinel = { code: 'ROLLBACK_SENTINEL' };
 
     const handle: IAdapterTransaction & DrizzleQueryHandleProvider = {
-      [DRIZZLE_QUERY_HANDLE](): unknown {
-        return tx;
+      [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
+        return { database: configuredDatabase, query: tx };
       },
 
       createDataSource(entity: string): DataSource {
@@ -362,16 +377,33 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * @returns Drizzle database instance
    * @throws {Error} If no configured Drizzle instance was injected
    */
-  private resolveDb(): DrizzleInstance {
+  private resolveDb(): { readonly database: DrizzleInstance; readonly identity: object } {
     // Prefer injected instance.
     if (this._options?.drizzleInstance) {
-      return this.validateInstance(this._options.drizzleInstance);
+      const witness = this.validateWitness(this._options.drizzleInstance);
+      const database = witness[DRIZZLE_DATABASE];
+      return { database: this.validateInstance(database), identity: database };
     }
 
     throw new Error(
-      'DrizzleAdapter requires options.drizzleInstance: construct a configured Drizzle driver in ' +
-        'the application, then inject it into DatabasePlugin.',
+      'DrizzleAdapter requires options.drizzleInstance: wrap a configured Promise-aware Drizzle ' +
+        'driver with createDrizzleDatabase(), then inject that witness into DatabasePlugin.',
     );
+  }
+
+  /** Require the source-owned wrapper so sync callback drivers cannot be selected accidentally. */
+  private validateWitness(instance: unknown): DrizzleDatabase<object> {
+    if (
+      instance === null ||
+      typeof instance !== 'object' ||
+      !(DRIZZLE_DATABASE in instance) ||
+      typeof (instance as DrizzleDatabase<object>)[DRIZZLE_DATABASE] !== 'object'
+    ) {
+      throw new Error(
+        'DrizzleAdapter requires options.drizzleInstance to be created by createDrizzleDatabase().',
+      );
+    }
+    return instance as DrizzleDatabase<object>;
   }
 
   /** Structural validation for builders and transaction access. Raw execute is guarded at use. */

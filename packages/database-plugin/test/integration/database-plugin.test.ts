@@ -8,6 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
+import { createDrizzleDatabase } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';
 import type {
   ICliApi,
@@ -324,7 +325,7 @@ describe('DatabasePlugin integration', () => {
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
       type: 'drizzle',
-      options: { drizzleInstance: fakeDrizzle },
+      options: { drizzleInstance: createDrizzleDatabase(fakeDrizzle) },
     });
     await expect(plugin.register!(ctx)).rejects.toThrow('requires options.drizzleTables');
     expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(false);
@@ -336,7 +337,7 @@ describe('DatabasePlugin integration', () => {
     const plugin = DatabasePlugin({
       type: 'drizzle',
       options: {
-        drizzleInstance: fakeDrizzle,
+        drizzleInstance: createDrizzleDatabase(fakeDrizzle),
         drizzleTables: { users: createFakeDrizzleTable('users') },
       },
     });

@@ -12,7 +12,7 @@ import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
 import { UnitOfWork } from '../../src/unitOfWork/unit-of-work.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { getDrizzle } from '../../src/index.ts';
+import { createDrizzleDatabase, getDrizzle } from '../../src/index.ts';
 import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
@@ -58,16 +58,17 @@ function externalService(): IDatabaseService {
 describe('getDrizzle', () => {
   it('returns the identical configured instance and callback-scoped transaction', async () => {
     const fakeDb = createFakeDrizzleInstance();
+    const database = createDrizzleDatabase(fakeDb);
     const adapter = new DrizzleAdapter({
-      drizzleInstance: fakeDb,
+      drizzleInstance: database,
       drizzleTables: { User: createFakeDrizzleTable('user') },
     });
     await adapter.connect();
     const service = adapterService(adapter, 'drizzle');
 
-    expect(getDrizzle<typeof fakeDb>(service)).toBe(fakeDb);
+    expect(getDrizzle(service, database)).toBe(fakeDb);
     await service.transaction(async (uow: IUnitOfWork) => {
-      expect(getDrizzle<typeof fakeDb>(uow)).toBe(fakeDb);
+      expect(getDrizzle(uow, database)).toBe(fakeDb);
     });
   });
 
@@ -83,12 +84,14 @@ describe('getDrizzle', () => {
       };
       const expected =
         `Drizzle query access requires adapter 'drizzle'; configured adapter is '${type}'.`;
-      expect(() => getDrizzle(adapterService(adapter, type))).toThrow(expected);
+      const database = createDrizzleDatabase(createFakeDrizzleInstance());
+      expect(() => getDrizzle(adapterService(adapter, type), database)).toThrow(expected);
       expect(() =>
         getDrizzle(
           new UnitOfWork(transaction(), () => {
             throw new Error('unused');
           }, type),
+          database,
         )
       ).toThrow(expected);
     });
@@ -96,15 +99,35 @@ describe('getDrizzle', () => {
 
   it('rejects external structural service and Unit-of-Work scopes', () => {
     const invalid = 'Drizzle query access requires a database-plugin service or unit of work.';
-    expect(() => getDrizzle(externalService())).toThrow(invalid);
+    const database = createDrizzleDatabase(createFakeDrizzleInstance());
+    expect(() => getDrizzle(externalService(), database)).toThrow(invalid);
     const externalUow: IUnitOfWork = {
       getRepository: <Entity, Id = string>(): IRepository<Entity, Id> => {
         throw new Error('unused');
       },
     };
-    expect(() => getDrizzle(externalUow)).toThrow(invalid);
-    expect(() => getDrizzle(null as unknown as IDatabaseService)).toThrow(invalid);
-    expect(() => getDrizzle('database' as unknown as IDatabaseService)).toThrow(invalid);
-    expect(() => getDrizzle((() => undefined) as unknown as IDatabaseService)).toThrow(invalid);
+    expect(() => getDrizzle(externalUow, database)).toThrow(invalid);
+    expect(() => getDrizzle(null as unknown as IDatabaseService, database)).toThrow(invalid);
+    expect(() => getDrizzle('database' as unknown as IDatabaseService, database)).toThrow(invalid);
+    expect(() => getDrizzle((() => undefined) as unknown as IDatabaseService, database)).toThrow(
+      invalid,
+    );
+  });
+
+  it('rejects a witness belonging to another configured database', async () => {
+    const first = createFakeDrizzleInstance();
+    const second = createFakeDrizzleInstance();
+    const firstDatabase = createDrizzleDatabase(first);
+    const secondDatabase = createDrizzleDatabase(second);
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: firstDatabase,
+      drizzleTables: { User: createFakeDrizzleTable('user') },
+    });
+    await adapter.connect();
+    const service = adapterService(adapter, 'drizzle');
+
+    expect(() => getDrizzle(service, secondDatabase)).toThrow(
+      'Drizzle query access requires the witness configured for this database scope.',
+    );
   });
 });

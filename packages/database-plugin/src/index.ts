@@ -44,8 +44,8 @@ export type {
 export { DatabaseService } from './services/database-service.ts';
 
 // Typed native Drizzle query access
-export { getDrizzle } from './query/drizzle-query.ts';
-export type { DrizzleTransaction } from './query/drizzle-query.ts';
+export { createDrizzleDatabase, getDrizzle } from './query/drizzle-query.ts';
+export type { DrizzleDatabase, DrizzleTransaction } from './query/drizzle-query.ts';
 
 // Repository
 export { BaseRepository } from './repositories/base-repository.ts';

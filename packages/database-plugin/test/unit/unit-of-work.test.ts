@@ -17,8 +17,13 @@ import type { IAdapterTransaction } from '@setu-ts/common';
 import type { IRepository } from '../../src/interfaces/index.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { BaseRepository } from '../../src/repositories/base-repository.ts';
-import { getDrizzle } from '../../src/index.ts';
-import { DRIZZLE_QUERY_HANDLE } from '../../src/query/drizzle-query.ts';
+import { createDrizzleDatabase, getDrizzle } from '../../src/index.ts';
+import { DRIZZLE_DATABASE } from '../../src/query/drizzle-database.ts';
+import {
+  DRIZZLE_QUERY_HANDLE,
+  type NativeDrizzleQueryHandle,
+} from '../../src/query/drizzle-query.ts';
+import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
 
 function mockDataSource(): DataSource {
   return {
@@ -62,21 +67,28 @@ describe('UnitOfWork', () => {
     };
     const uow = new UnitOfWork(txn, mockRepoFactory());
     expect(uow.getRepository('User')).toBeDefined();
-    expect(() => getDrizzle(uow)).toThrow(
+    expect(() => getDrizzle(uow, createDrizzleDatabase(createFakeDrizzleInstance()))).toThrow(
       'Drizzle query access requires a database-plugin service or unit of work.',
     );
   });
 
   it('returns the transaction native handle for a Drizzle Unit of Work', () => {
     const native = { kind: 'native-tx' };
-    const txn: IAdapterTransaction & { [DRIZZLE_QUERY_HANDLE](): unknown } = {
+    const database = createDrizzleDatabase(createFakeDrizzleInstance());
+    const configured = database[DRIZZLE_DATABASE];
+    const txn: IAdapterTransaction & {
+      [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle;
+    } = {
       async commit() {},
       async rollback() {},
       createDataSource: mockDataSource,
-      [DRIZZLE_QUERY_HANDLE]: () => native,
+      [DRIZZLE_QUERY_HANDLE]: () => ({
+        database: configured,
+        query: native,
+      }),
     };
     const uow = new UnitOfWork(txn, mockRepoFactory(), 'drizzle');
-    expect(getDrizzle<typeof native>(uow)).toBe(native);
+    expect(getDrizzle(uow, database)).toBe(native);
   });
   it('getRepository returns a repository', () => {
     const txn: IAdapterTransaction = {

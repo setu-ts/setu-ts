@@ -33,6 +33,7 @@ import {
   createDrizzleDataSource,
   DrizzleAdapter,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
+import { createDrizzleDatabase } from '../../src/index.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
 
 const users = pgTable('users', {
@@ -61,7 +62,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: sql.includes('count(*)') ? [['4']] : [] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: database,
+      drizzleInstance: createDrizzleDatabase(database),
       drizzleTables: { User: users },
     });
     await adapter.connect();
@@ -113,7 +114,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: [] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: database,
+      drizzleInstance: createDrizzleDatabase(database),
       drizzleTables: { User: users },
     });
     await adapter.connect();

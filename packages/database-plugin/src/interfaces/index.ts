@@ -7,6 +7,7 @@
  * @module
  */
 import type { IDatabaseAdapter } from '@setu-ts/common';
+import type { DrizzleDatabase } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
 
 // Re-export query option types so consumers don't need internal paths.
@@ -333,11 +334,13 @@ export interface DatabaseAdapterOptions {
   readonly transactionTimeout?: number;
 
   /**
-   * Inject the application's configured Drizzle database instance. Required
-   * when `type: 'drizzle'`; this package loads query operators but cannot
-   * construct a dialect-specific driver.
+   * Inject the application's configured Promise-aware Drizzle database witness,
+   * created by `createDrizzleDatabase(database)`. Required when
+   * `type: 'drizzle'`; synchronous callback drivers are rejected by that
+   * factory because they cannot safely support the imperative Unit-of-Work
+   * bridge.
    *
    * @since 0.1.0
    */
-  readonly drizzleInstance?: unknown;
+  readonly drizzleInstance?: DrizzleDatabase<object>;
 }
