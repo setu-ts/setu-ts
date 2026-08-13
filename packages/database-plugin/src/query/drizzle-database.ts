@@ -58,8 +58,11 @@ declare const DRIZZLE_DATABASE_TYPE_BRAND: unique symbol;
 /**
  * Erased identity of a package-created Drizzle configuration.
  *
- * This type is exported only for package-internal storage. The public barrel
- * exports the correlated `DrizzleDatabase<TDatabase>` type instead.
+ * This is the type `DatabaseAdapterOptions.drizzleInstance` accepts, so it is
+ * part of the public barrel. Prefer the correlated `DrizzleDatabase<TDatabase>`
+ * wherever the application's own database type is still known — this erased
+ * form deliberately carries no `TDatabase`, and the query accessors will not
+ * take it in place of the correlated configuration.
  */
 export interface DrizzleDatabaseIdentity {
   /** @internal Compile-time opacity; runtime state lives in a private WeakMap. */

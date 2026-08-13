@@ -96,6 +96,36 @@ describe('UnitOfWork', () => {
     const uow = new UnitOfWork(txn, mockRepoFactory(), 'drizzle');
     expect(getDrizzleTransaction(uow, database)).toBe(native);
   });
+
+  // The public constructor accepts any ITransaction, so a caller can hand it a
+  // provider that reports the OUTER scope — the adapter itself is one. Returning
+  // that object would silently escape the transaction: writes would commit
+  // immediately and survive a rollback, which is the one guarantee this seam
+  // exists to provide.
+  it('refuses a transaction handle that reports the outer scope', () => {
+    const database = createDrizzleDatabase(
+      createFakeDrizzleInstance(),
+      (configured, work) => configured.transaction(work),
+    );
+    const outerScoped: IAdapterTransaction & {
+      [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle;
+    } = {
+      async commit() {},
+      async rollback() {},
+      createDataSource: mockDataSource,
+      [DRIZZLE_QUERY_HANDLE]: () => ({
+        database,
+        query: { kind: 'outer-database' },
+        scope: 'outer',
+      }),
+    };
+
+    const uow = new UnitOfWork(outerScoped, mockRepoFactory(), 'drizzle');
+
+    expect(() => getDrizzleTransaction(uow, database)).toThrow(
+      "Drizzle query access expected 'transaction' scope but received 'outer' scope.",
+    );
+  });
   it('getRepository returns a repository', () => {
     const txn: IAdapterTransaction = {
       async commit() {},
