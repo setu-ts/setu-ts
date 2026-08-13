@@ -59,6 +59,13 @@ export interface RouteInfo {
   readonly method: HttpMethod;
   /** Route path pattern (router-style with `:param` segments). */
   readonly path: string;
+  /**
+   * Name of the plugin that registered this route.
+   *
+   * Absent when application code registered the route directly rather than
+   * through a plugin's `register()` method.
+   */
+  readonly owner?: string;
   /** The route definition including handler, middleware, and schema. */
   readonly definition: RouteDefinition;
 }

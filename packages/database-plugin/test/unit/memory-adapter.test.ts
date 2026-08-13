@@ -149,6 +149,31 @@ describe('MemoryAdapter', () => {
       });
       expect(results.map((r) => r.name)).toEqual(['Alice']);
     });
+
+    it('conjoins an expression filter with where for reads and counts', async () => {
+      await adapter.connect();
+      await adapter.insertEntity('User', { id: '1', name: 'Alice', role: 'admin', score: 4 });
+      await adapter.insertEntity('User', { id: '2', name: 'Alicia', role: 'admin', score: 8 });
+      await adapter.insertEntity('User', { id: '3', name: 'Bob', role: 'user', score: 10 });
+      const filter = {
+        type: 'comparison' as const,
+        field: 'score',
+        operator: 'gte' as const,
+        value: 8,
+      };
+
+      const results = await adapter.queryEntities('User', {
+        where: { role: 'admin' },
+        filter,
+        orderBy: {},
+        limit: -1,
+        offset: 0,
+        select: [],
+      });
+
+      expect(results.map((row) => row.id)).toEqual(['2']);
+      expect(await adapter.countEntities('User', { role: 'admin' }, filter)).toBe(1);
+    });
   });
 
   describe('countEntities', () => {

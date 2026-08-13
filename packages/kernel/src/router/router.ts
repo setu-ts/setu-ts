@@ -33,6 +33,8 @@ export interface RouteEntry {
    * in M22.
    */
   statics: number;
+  /** Plugin that registered this route, if it was registered by a plugin. */
+  owner?: string;
 }
 
 // Hono imports — use LinearRouter (not the default SmartRouter) because the
@@ -58,9 +60,19 @@ export class Router implements IRouterApi {
   readonly #hono = new Hono({ strict: false, router: new LinearRouter() });
   /** Maps `${method} ${path}` → the kernel's RouteEntry. */
   readonly #entryMap = new Map<string, RouteEntry>();
+  readonly #owner: () => string | undefined;
+
+  constructor(owner: () => string | undefined = () => undefined) {
+    this.#owner = owner;
+  }
 
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
+    const key = `${method} ${path}`;
+    if (this.#entryMap.has(key)) {
+      throw new Error(`Route '${key}' is already registered.`);
+    }
     const definition: RouteDefinition = typeof route === 'function' ? { handler: route } : route;
+    const owner = this.#owner();
     // Hoist per-request work to registration time (AI_GUIDELINES §14): parse
     // the pattern once here and keep only the static count the tie-break reads.
     const entry: RouteEntry = {
@@ -69,9 +81,10 @@ export class Router implements IRouterApi {
       definition,
       index: this.#index++,
       statics: staticSegmentCount(parsePattern(path)),
+      ...(owner === undefined ? {} : { owner }),
     };
     this.#routes.push(entry);
-    this.#entryMap.set(`${method} ${path}`, entry);
+    this.#entryMap.set(key, entry);
 
     // Register on Hono with a stub handler. The stub does NOT execute the
     // framework handler — it exists only so Hono's matcher records the
@@ -241,6 +254,7 @@ export class Router implements IRouterApi {
     return this.#routes.map((entry) => ({
       method: entry.method,
       path: entry.pattern,
+      ...(entry.owner === undefined ? {} : { owner: entry.owner }),
       definition: entry.definition,
     }));
   }

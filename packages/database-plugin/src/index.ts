@@ -31,6 +31,9 @@ export type {
 // backend author can reach the whole contract from one import, and so the
 // already-exported `DataSource.findAll` parameter type is finally nameable.
 export type {
+  FilterComparison,
+  FilterExpression,
+  FilterOperator,
   IAdapterTransaction,
   IDatabaseAdapter,
   IDataSource,

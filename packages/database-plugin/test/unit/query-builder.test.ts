@@ -8,6 +8,7 @@ import { expect } from '@std/expect';
 import {
   applyOrderBy,
   applyPagination,
+  matchesFilter,
   matchesWhere,
   normalizeCountOptions,
   normalizeQuery,
@@ -37,6 +38,17 @@ describe('normalizeQuery', () => {
     expect(query.limit).toBe(10);
     expect(query.offset).toBe(20);
     expect(query.select).toEqual(['id', 'name']);
+  });
+
+  it('preserves a portable filter expression', () => {
+    const filter = {
+      type: 'comparison' as const,
+      field: 'name',
+      operator: 'contains' as const,
+      value: 'lic',
+    };
+
+    expect(normalizeQuery({ filter }).filter).toEqual(filter);
   });
 
   it('fills missing options with defaults', () => {
@@ -78,6 +90,74 @@ describe('matchesWhere', () => {
   it('returns false when entity lacks a filtered field', () => {
     const entity = { id: '1' };
     expect(matchesWhere(entity, { name: 'Alice' })).toBe(false);
+  });
+});
+
+describe('matchesFilter', () => {
+  const entity = { id: '1', name: 'Alice', score: 10, active: true };
+
+  it('evaluates every comparison operator', () => {
+    expect(
+      matchesFilter(entity, { type: 'comparison', field: 'name', operator: 'eq', value: 'Alice' }),
+    )
+      .toBe(true);
+    expect(
+      matchesFilter(entity, {
+        type: 'comparison',
+        field: 'name',
+        operator: 'contains',
+        value: 'lic',
+      }),
+    ).toBe(true);
+    expect(matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'gt', value: 9 }))
+      .toBe(true);
+    expect(
+      matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'gte', value: 10 }),
+    )
+      .toBe(true);
+    expect(matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'lt', value: 11 }))
+      .toBe(true);
+    expect(
+      matchesFilter(entity, { type: 'comparison', field: 'score', operator: 'lte', value: 10 }),
+    )
+      .toBe(true);
+    expect(
+      matchesFilter(entity, { type: 'comparison', field: 'id', operator: 'in', value: ['0', '1'] }),
+    ).toBe(true);
+  });
+
+  it('returns false for incompatible values and an empty membership list', () => {
+    expect(matchesFilter(entity, { type: 'comparison', field: 'name', operator: 'gt', value: 1 }))
+      .toBe(
+        false,
+      );
+    expect(matchesFilter(entity, { type: 'comparison', field: 'id', operator: 'in', value: [] }))
+      .toBe(
+        false,
+      );
+  });
+
+  it('composes nested AND and OR expressions', () => {
+    expect(
+      matchesFilter(entity, {
+        type: 'and',
+        filters: [
+          { type: 'comparison', field: 'active', operator: 'eq', value: true },
+          {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'score', operator: 'lt', value: 5 },
+              { type: 'comparison', field: 'name', operator: 'contains', value: 'lic' },
+            ],
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it('uses identity values for empty composition groups', () => {
+    expect(matchesFilter(entity, { type: 'and', filters: [] })).toBe(true);
+    expect(matchesFilter(entity, { type: 'or', filters: [] })).toBe(false);
   });
 });
 

@@ -97,6 +97,18 @@ function createFakeContext(): {
 }
 
 describe('AuthPlugin', () => {
+  it('supports JWT-only registration without an RBAC configuration', async () => {
+    const plugin = AuthPlugin({ jwt: { secret: 'test-secret' } });
+    const { ctx, registered } = createFakeContext();
+
+    await plugin.register!(ctx);
+
+    expect(plugin.provides).toEqual([CAPABILITIES.JWT, CAPABILITIES.AUTH]);
+    expect(registered.has(CAPABILITIES.JWT)).toBe(true);
+    expect(registered.has(CAPABILITIES.AUTH)).toBe(true);
+    expect(registered.has(CAPABILITIES.AUTHORIZATION)).toBe(false);
+  });
+
   it('returns a plugin with correct name and version', () => {
     const plugin = AuthPlugin({
       jwt: { secret: 'test-secret' },

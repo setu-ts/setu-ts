@@ -83,6 +83,29 @@ describe('buildSelect', () => {
     });
   });
 
+  it('combines equality filters with a nested portable expression', () => {
+    expect(
+      buildSelect(
+        TARGET,
+        query({
+          where: { active: true },
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'name', operator: 'contains', value: 'ada' },
+              { type: 'comparison', field: 'age', operator: 'gte', value: 21 },
+              { type: 'comparison', field: 'id', operator: 'in', value: ['u1', 'u2'] },
+            ],
+          },
+        }),
+      ),
+    ).toEqual({
+      sql:
+        'SELECT * FROM "users" WHERE "active" = ?1 AND (instr("name", ?2) > 0 OR "age" >= ?3 OR "id" IN (?4, ?5))',
+      params: [true, 'ada', 21, 'u1', 'u2'],
+    });
+  });
+
   it('orders by each field in the given direction', () => {
     expect(buildSelect(TARGET, query({ orderBy: { age: 'desc', name: 'asc' } })).sql).toBe(
       'SELECT * FROM "users" ORDER BY "age" DESC, "name" ASC',
@@ -229,6 +252,21 @@ describe('buildCount', () => {
     expect(buildCount(TARGET, { active: true })).toEqual({
       sql: 'SELECT COUNT(*) AS "count" FROM "users" WHERE "active" = ?1',
       params: [true],
+    });
+  });
+
+  it('counts through a portable expression', () => {
+    expect(
+      buildCount(TARGET, {}, {
+        type: 'and',
+        filters: [
+          { type: 'comparison', field: 'age', operator: 'gt', value: 18 },
+          { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+        ],
+      }),
+    ).toEqual({
+      sql: 'SELECT COUNT(*) AS "count" FROM "users" WHERE ("age" > ?1 AND "role" = ?2)',
+      params: [18, 'admin'],
     });
   });
 
