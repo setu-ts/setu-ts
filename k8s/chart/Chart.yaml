@@ -18,8 +18,8 @@ kubeVersion: '>=1.30.0-0'
 version: 0.1.0
 
 # The Setu-TS release these manifests are written against. Quoted because a bare
-# 0.1.0-alpha.7 is not a YAML string.
-appVersion: '0.1.0-alpha.7'
+# 0.1.0-alpha.8 is not a YAML string.
+appVersion: '0.1.0-alpha.8'
 
 keywords:
   - setu-ts
