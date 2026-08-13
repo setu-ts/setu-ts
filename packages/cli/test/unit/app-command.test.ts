@@ -113,6 +113,7 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', '--help'])).toBe(0);
       expect(h.out.text()).toContain('generate app <name>');
       expect(h.out.text()).toContain('--template');
+      expect(h.out.text()).toContain('--env-file');
     });
 
     it('refuses a missing name with a usage error', async () => {

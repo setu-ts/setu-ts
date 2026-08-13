@@ -278,8 +278,9 @@ function planProject(
   if (configured === undefined) {
     return {
       ok: false,
-      message:
-        '--env-file requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
+      message: runtime === 'cloudflare-workers'
+        ? '--env-file is unavailable on Cloudflare Workers; use Worker bindings for configuration.'
+        : '--env-file requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
     };
   }
   return { ok: true, files: projectFiles(name, runtime, configured) };

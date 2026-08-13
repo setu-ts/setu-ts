@@ -6763,5 +6763,5 @@ test passes `{ roles: {} }` purely to satisfy the type.
 | 64        | ✅     | decorator-plugin (`@Ctx()`)           |
 | 65        | ✅     | cli (functional default, two worlds)  |
 | 66        | ✅     | database-plugin (prisma v7, drizzle)  |
-| 67        | ⬜     | cli + starters (scaffold defaults)    |
+| 67        | ✅     | cli + starters (scaffold defaults)    |
 | 68        | ⬜     | common + kernel (contract gaps)       |

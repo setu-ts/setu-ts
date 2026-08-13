@@ -38,19 +38,20 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
 /**
  * Renders the argument list for `createFullStackAppFromConfig`.
  *
- * The static-asset option is the only runtime-dependent part of this template.
+ * Static assets and dotenv configuration are runtime-dependent in this template.
  * On Cloudflare Workers there is no filesystem, so the framework's asset
  * handler would answer 404 for every asset; omitting `assetsDir` registers no
  * asset route at all and leaves serving to the platform's own static-asset
  * binding, which is what a Workers deployment should use anyway. Everywhere
- * else the framework serves the client build directly.
+ * else the framework serves the client build directly. Workers also have no
+ * filesystem, so their `ConfigPlugin` reads the request bindings rather than a
+ * dotenv path.
  *
  * @param context - The selected runtime and any workspace-only factory inputs
  * @returns Source for the call's arguments, without the enclosing parentheses
  */
 function fullStackArgs(context: AppFactoryRenderContext): string {
   const { runtime, serviceEndpoints } = context;
-  const envFilePath = context.envFilePath ?? '.env';
   const assets = runtime === 'cloudflare-workers'
     // Assets are served by the platform binding, not the framework.
     ? ''
@@ -66,6 +67,9 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const discovery = serviceEndpoints === undefined
     ? ''
     : `\n    serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
+  const config = runtime === 'cloudflare-workers'
+    ? ''
+    : `, config: { envFilePath: '${context.envFilePath ?? '.env'}' }`;
 
   return `(config) => ({
     reactRouter: {
@@ -89,7 +93,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
       csrf: {},
     },${discovery}
-  }), { env, config: { envFilePath: '${envFilePath}' } }`;
+  }), { env${config} }`;
 }
 
 /**

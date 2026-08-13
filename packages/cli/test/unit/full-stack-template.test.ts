@@ -226,9 +226,13 @@ describe('full-stack template | the runtime-dependent argument', () => {
     // be read from a process-wide environment there. Off Workers the parameter
     // is undefined and the factory reads the platform environment as usual, so
     // one call shape serves all four targets.
-    for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
       expect(argsFor(runtime)).toContain("{ env, config: { envFilePath: '.env' } }");
     }
+    // Workers have no filesystem. Their ConfigPlugin reads the request binding
+    // passed through `env`, so a dotenv path here would make startup throw.
+    expect(argsFor('cloudflare-workers')).toContain('{ env }');
+    expect(argsFor('cloudflare-workers')).not.toContain('envFilePath');
   });
 
   it('imports every identifier its argument string names', () => {

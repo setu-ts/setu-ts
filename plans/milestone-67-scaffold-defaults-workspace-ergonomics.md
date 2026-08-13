@@ -1,6 +1,6 @@
 # Milestone 67 — Scaffold Defaults and Workspace Ergonomics (`@setu-ts/cli`, `@setu-ts/starters/*`)
 
-> **Status:** In progress. Branch: `feat/m67-scaffold-defaults-workspace-ergonomics`. `main` is
+> **Status:** Complete. Branch: `feat/m67-scaffold-defaults-workspace-ergonomics`. `main` is
 > protected — all work (implementation + fixes) stays on this one branch until it merges via a
 > single PR.
 
@@ -61,11 +61,12 @@ factory path; it does not gain a second plugin-composition mechanism.
 
 ### 3.2 Environment files and construction-time configuration
 
-- **Decision:** REST-derived scaffolds emit a gitignored `.env` and committed `.env.example`,
-  configure `ConfigPlugin({ envFilePath })` from one template-owned path, and accept
+- **Decision:** REST-derived Deno, Node, and Bun scaffolds emit a gitignored `.env` and committed
+  `.env.example`, configure `ConfigPlugin({ envFilePath })` from one template-owned path, and accept
   `--env-file <path>` on `new` and `generate app` to select that path. Full-stack forwards the same
   path through `createFullStackAppFromConfig(..., { config: { envFilePath } })`; minimal projects
-  reject the flag because they register no config plugin.
+  reject the flag because they register no config plugin. Cloudflare Workers do not emit or read a
+  dotenv file and instead receive configuration through Worker bindings.
 - **Why:** A plugin option is evaluated before `ConfigPlugin` exists, so environment configuration
   must be available as a file and be documented at the generated application boundary rather than
   through a nonexistent config lookup.
@@ -123,7 +124,7 @@ factory path; it does not gain a second plugin-composition mechanism.
 | Option                                | Consumer                                   | Behavior (per implementation)                                                                     |
 | ------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
 | `RestStarterOptions.serviceDiscovery` | `buildRestPlugins`                         | Supplied → registers one `ServiceDiscoveryPlugin`; omitted → preserves prior starter plugin list. |
-| `--env-file`                          | CLI template host/project renderer         | Selects one emitted dotenv path and config loader path; rejected by hosts without `ConfigPlugin`. |
+| `--env-file`                          | CLI template host/project renderer         | Selects one emitted dotenv path and config loader path; rejected by hosts without file access.    |
 | `--depends-on`                        | workspace manifest and dev-runner renderer | Stores unique existing sibling names; runner waits for each before starting the member.           |
 
 ## 5. Implementation files

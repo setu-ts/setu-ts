@@ -25,10 +25,12 @@ Every project gets a `setu.config.ts` exporting `createApp()` — the one place 
 `main.ts` imports it to start the server, and `setu` imports it to find plugin commands, so the two
 cannot disagree. The factory does **not** start the application.
 
-Config-backed templates emit a gitignored `.env` and tracked `.env.example`, and load the selected
-path through `ConfigPlugin({ envFilePath })`. Use `--env-file <path>` to select another relative
-path. Values needed while constructing a plugin must come from this pre-construction environment
-source; `ConfigPlugin` cannot retroactively configure a plugin already built.
+On Deno, Node, and Bun, config-backed templates emit a gitignored `.env` and tracked `.env.example`,
+and load the selected path through `ConfigPlugin({ envFilePath })`. Use `--env-file <path>` to
+select another relative path. Cloudflare Workers use request bindings and therefore emit no dotenv
+file or filesystem configuration; `--env-file` is refused there. Values needed while constructing a
+plugin must come from this pre-construction environment source; `ConfigPlugin` cannot retroactively
+configure a plugin already built.
 
 | Template       | Plugin set                                                                                                    |
 | -------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -102,17 +104,17 @@ install, and `setu generate --help` lists only what is available here.
 
 ## Options
 
-| Option                | Behavior                                                                                        |
-| --------------------- | ----------------------------------------------------------------------------------------------- |
-| `--dry-run`           | Prints `would create <path>` per file and writes absolutely nothing.                            |
-| `--dir <path>`        | Operate on this directory instead of the working directory.                                     |
-| `--runtime <target>`  | On `new`, the entry shape and manifest; on `generate`, passed to the schematic. Default `deno`. |
-| `--template <name>`   | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.    |
-| `--env-file <path>`   | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed templates.        |
-| `--depends-on <name>` | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints.        |
-| `--config <path>`     | Load the app from this module instead of `./setu.config.ts`.                                    |
-| `--help`, `-h`        | Prints usage.                                                                                   |
-| `--version`, `-v`     | Prints the version.                                                                             |
+| Option                | Behavior                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------- |
+| `--dry-run`           | Prints `would create <path>` per file and writes absolutely nothing.                                 |
+| `--dir <path>`        | Operate on this directory instead of the working directory.                                          |
+| `--runtime <target>`  | On `new`, the entry shape and manifest; on `generate`, passed to the schematic. Default `deno`.      |
+| `--template <name>`   | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.         |
+| `--env-file <path>`   | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates. |
+| `--depends-on <name>` | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints.             |
+| `--config <path>`     | Load the app from this module instead of `./setu.config.ts`.                                         |
+| `--help`, `-h`        | Prints usage.                                                                                        |
+| `--version`, `-v`     | Prints the version.                                                                                  |
 
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
 error (unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot

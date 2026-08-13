@@ -270,6 +270,7 @@ describe('a three-service workspace — end to end', () => {
     const servers = ['billing', 'shipping'].map((member) =>
       new Deno.Command(Deno.execPath(), {
         args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
+        cwd: `${ws}/apps/${member}`,
         stdout: 'piped',
         stderr: 'piped',
       }).spawn()
@@ -303,6 +304,7 @@ describe('a three-service workspace — end to end', () => {
     const servers = ['billing', 'shipping'].map((member) =>
       new Deno.Command(Deno.execPath(), {
         args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
+        cwd: `${ws}/apps/${member}`,
         stdout: 'piped',
         stderr: 'piped',
       }).spawn()
@@ -351,6 +353,7 @@ describe('a three-service workspace — end to end', () => {
         `${ws}/apps/billing/deno.json`,
         `${ws}/apps/billing/subscriber.ts`,
       ],
+      cwd: `${ws}/apps/billing`,
       stdout: 'piped',
       stderr: 'piped',
     }).spawn();
