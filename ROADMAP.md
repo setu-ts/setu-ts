@@ -6674,6 +6674,61 @@ exposes which paths the plugins own, so an authentication middleware hand-lists
 endpoint. **S10:** `AuthPluginOptions.rbac` is required even for a JWT-only deployment, so the smoke
 test passes `{ roles: {} }` purely to satisfy the type.
 
+## Milestone 69: Typed Drizzle Query Seam
+
+**Packages:** `@setu-ts/database-plugin`
+
+The repository contract is single-entity by construction. `IDataSource` is six methods — `findAll`,
+`findById`, `create`, `update`, `delete`, `count` — and a grep for `innerJoin`, `leftJoin`,
+`groupBy`, `having` or any aggregate over `packages/database-plugin/src` returns nothing; the only
+aggregate anywhere is the `count(*)` M66 made real. M68 widened _filtering_ (the portable
+`FilterExpression`) but explicitly deferred relation traversal, so a query spanning two tables still
+has nowhere to go.
+
+**The gap is narrower than it looks, and that is what makes this milestone small.** An application
+can already write a Drizzle join today: `drizzleInstance` is a REQUIRED option, so the app
+constructs and owns the very instance the adapter uses. What it cannot do is run that join inside
+`IDatabaseService.transaction()`. `DrizzleAdapter.beginTransaction` closes over Drizzle's `tx`
+inside the object literal it returns and exposes it nowhere; `UnitOfWork` holds that handle in a
+private `_transaction` field narrowed to `ITransaction`, which is `commit`/`rollback` only; and
+`IUnitOfWork` declares exactly one member, `getRepository`. So a hand-written join runs on the outer
+connection — it cannot see the transaction's uncommitted writes and is not undone by its rollback.
+The escape hatch that does exist, `IDatabaseService.query(sql, params)`, is raw SQL with no type
+inference, written per dialect by hand, and routes through `instance.execute(...)`, which is outside
+the transaction for the same reason.
+
+**Scope: a typed accessor returning the Drizzle instance — the outer one, and the transaction-scoped
+one inside a unit of work.** Deliberately Drizzle-specific, and named so that nothing about it reads
+as portable.
+
+**Why not a portable join.** Prisma has no arbitrary-join API — only traversal of declared relations
+— so a join expressed in `IDataSource` could only ever be relation traversal, which Memory would
+need a relation registry to evaluate and D1 would need to assemble from JOIN rows. That is a larger,
+different milestone (relation traversal, deferred), not this one.
+
+**Questions the plan must settle before implementation:**
+
+- **Typing is the substance.** `DrizzleInstance` is the adapter's structural stand-in
+  (`select`/`insert`/`update`/`delete`/`execute`/`transaction`); handing that back yields a join
+  with none of Drizzle's inference, which defeats the purpose. The accessor must be generic over the
+  application's own instance type, and the plan must prove it with a real `pgTable` join whose
+  RESULT TYPE is asserted, not merely executed.
+- **How the handle is reached:** widening `IAdapterTransaction`, a `WeakMap` keyed on the
+  transaction handle, or a public accessor on the already-exported `UnitOfWork` class. Each has a
+  different blast radius on committed contracts.
+- **Wrong-adapter behaviour must throw, naming the configured adapter** — never return `undefined`.
+  A silent `undefined` here is the M50 `authHeader` / M52c D1-binding class that this repository has
+  now shipped three times.
+- **Whether the seam relaxes `validateInstance`'s `execute` requirement**, which today refuses every
+  SQLite, libsql and D1-via-Drizzle instance outright. M68 established this while fixing the
+  `LIKE ESCAPE` defect; it is a decision this milestone should make deliberately rather than
+  inherit.
+
+**Verification bar:** a real join EXECUTED against real SQLite through the seam INSIDE a
+transaction, with a rollback proving the join and the repository writes shared one transaction — no
+fake can demonstrate that. Plus a compile-time assertion that the returned builder carries the
+application's own instance type, since a seam that type-checks as `unknown` has delivered nothing.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -6765,3 +6820,4 @@ test passes `{ roles: {} }` purely to satisfy the type.
 | 66        | ✅     | database-plugin (prisma v7, drizzle)  |
 | 67        | ✅     | cli + starters (scaffold defaults)    |
 | 68        | ✅     | common + kernel (contract gaps)       |
+| 69        | ⬜     | database-plugin (drizzle query seam)  |

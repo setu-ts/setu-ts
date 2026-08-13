@@ -2316,16 +2316,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   during implementation and the repair is worth keeping in mind: it had been passing because `rbac`
   was missing, NOT because `jwt.secret` was, so making `rbac` optional is what exposed that the
   control had never tested its own claim — complete (PR #158)
-- **Next milestone** — **M40** (final polish and release). M60–M62 came from a measured audit after
-  M58: a project with all fourteen schematics generated type-checked clean while its entry points
-  imported exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable
-  — that, not breadth, was the distance from NestJS. **All three are now closed**: M60 wired eleven
-  of the thirteen, M61 made decorators and DI independent choices, and M62 added monorepos, so the
-  CLI parity work is done. M59 came from an external DX review; note what that review got wrong,
-  since the ROADMAP section says so and a reader should not re-raise it: it claimed the framework
-  has no decorators (M9/M36b ship them) and that Workers queues are still blocked (M52b shipped
-  them). Its suggested HTTP-polling adapters were rejected with cause — a Worker has no ambient loop
-  to poll from.
+- **Next milestone** — **M69** (`packages/database-plugin` — typed Drizzle query seam: joins and
+  aggregation, which the single-entity `IDataSource` cannot express and M68 deferred). Note the
+  shape of the gap before re-deriving it: an application can ALREADY write a Drizzle join, because
+  `drizzleInstance` is a required option and the app owns the instance — what it cannot do is run
+  one inside `IDatabaseService.transaction()`, since `beginTransaction` closes over Drizzle's `tx`
+  and exposes it nowhere, `UnitOfWork` narrows the handle to `ITransaction`, and `IUnitOfWork`
+  declares only `getRepository`. A portable join was rejected with cause: Prisma has no
+  arbitrary-join API, only declared-relation traversal. Then — **M40** (final polish and release).
+  M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated
+  type-checked clean while its entry points imported exactly ONE generated path, so thirteen of
+  fourteen generated artifacts were unreachable — that, not breadth, was the distance from NestJS.
+  **All three are now closed**: M60 wired eleven of the thirteen, M61 made decorators and DI
+  independent choices, and M62 added monorepos, so the CLI parity work is done. M59 came from an
+  external DX review; note what that review got wrong, since the ROADMAP section says so and a
+  reader should not re-raise it: it claimed the framework has no decorators (M9/M36b ship them) and
+  that Workers queues are still blocked (M52b shipped them). Its suggested HTTP-polling adapters
+  were rejected with cause — a Worker has no ambient loop to poll from.
 
 ## Verification (run before declaring any work done)
 
