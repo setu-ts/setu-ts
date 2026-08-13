@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { OrderDirection } from '@setu-ts/common';
+import type { FilterExpression, OrderDirection } from '@setu-ts/common';
 
 /**
  * Sort direction for a single field.
@@ -14,7 +14,12 @@ import type { OrderDirection } from '@setu-ts/common';
  *
  * @since 0.1.0
  */
-export type { OrderDirection };
+export type {
+  FilterComparison,
+  FilterExpression,
+  FilterOperator,
+  OrderDirection,
+} from '@setu-ts/common';
 
 /**
  * Options for {@linkcode IRepository.findAll}.
@@ -24,6 +29,8 @@ export type { OrderDirection };
 export interface FindOptions {
   /** Filter conditions keyed by field name. */
   readonly where?: Record<string, unknown>;
+  /** Portable filter expression conjoined with {@linkcode where}. */
+  readonly filter?: FilterExpression;
   /** Field-to-direction sort specification. */
   readonly orderBy?: Record<string, OrderDirection>;
   /** Maximum number of results to return. */
@@ -42,4 +49,6 @@ export interface FindOptions {
 export interface CountOptions {
   /** Filter conditions applied to the count query. */
   readonly where?: Record<string, unknown>;
+  /** Portable filter expression conjoined with {@linkcode where}. */
+  readonly filter?: FilterExpression;
 }

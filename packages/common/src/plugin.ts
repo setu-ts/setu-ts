@@ -59,6 +59,13 @@ export interface RouteInfo {
   readonly method: HttpMethod;
   /** Route path pattern (router-style with `:param` segments). */
   readonly path: string;
+  /**
+   * Name of the plugin that registered this route.
+   *
+   * Absent when application code registered the route directly rather than
+   * through a plugin's `register()` method.
+   */
+  readonly owner?: string;
   /** The route definition including handler, middleware, and schema. */
   readonly definition: RouteDefinition;
 }
@@ -77,6 +84,8 @@ export interface IRouterApi {
    *
    * @param path - Route path; `:name` segments become path parameters
    * @param route - Handler or full route definition
+   * @throws When this method and path are already registered — a duplicate
+   * would otherwise replace the earlier route and silently shadow it
    */
   get(path: string, route: RouteHandler | RouteDefinition): void;
   /**
@@ -84,6 +93,8 @@ export interface IRouterApi {
    *
    * @param path - Route path
    * @param route - Handler or full route definition
+   * @throws When this method and path are already registered — a duplicate
+   * would otherwise replace the earlier route and silently shadow it
    */
   post(path: string, route: RouteHandler | RouteDefinition): void;
   /**
@@ -91,6 +102,8 @@ export interface IRouterApi {
    *
    * @param path - Route path
    * @param route - Handler or full route definition
+   * @throws When this method and path are already registered — a duplicate
+   * would otherwise replace the earlier route and silently shadow it
    */
   put(path: string, route: RouteHandler | RouteDefinition): void;
   /**
@@ -98,6 +111,8 @@ export interface IRouterApi {
    *
    * @param path - Route path
    * @param route - Handler or full route definition
+   * @throws When this method and path are already registered — a duplicate
+   * would otherwise replace the earlier route and silently shadow it
    */
   patch(path: string, route: RouteHandler | RouteDefinition): void;
   /**
@@ -105,6 +120,8 @@ export interface IRouterApi {
    *
    * @param path - Route path
    * @param route - Handler or full route definition
+   * @throws When this method and path are already registered — a duplicate
+   * would otherwise replace the earlier route and silently shadow it
    */
   delete(path: string, route: RouteHandler | RouteDefinition): void;
   /**
@@ -112,6 +129,8 @@ export interface IRouterApi {
    *
    * @param path - Route path
    * @param route - Handler or full route definition
+   * @throws When this method and path are already registered — a duplicate
+   * would otherwise replace the earlier route and silently shadow it
    */
   head(path: string, route: RouteHandler | RouteDefinition): void;
   /**
@@ -119,6 +138,8 @@ export interface IRouterApi {
    *
    * @param path - Route path
    * @param route - Handler or full route definition
+   * @throws When this method and path are already registered — a duplicate
+   * would otherwise replace the earlier route and silently shadow it
    */
   options(path: string, route: RouteHandler | RouteDefinition): void;
   /**

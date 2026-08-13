@@ -27,6 +27,14 @@ import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 const OPERATORS: DrizzleOperators = {
   eq: (col, val) => ({ op: 'eq', col, val }),
   and: (...exprs) => ({ op: 'and', exprs }),
+  or: (...exprs) => ({ op: 'or', exprs }),
+  gt: (col, val) => ({ op: 'gt', col, val }),
+  gte: (col, val) => ({ op: 'gte', col, val }),
+  lt: (col, val) => ({ op: 'lt', col, val }),
+  lte: (col, val) => ({ op: 'lte', col, val }),
+  inArray: (col, values) => ({ op: 'inArray', col, values }),
+  isNull: (col) => ({ op: 'isNull', col }),
+  sql: (strings, ...values) => ({ op: 'sql', text: [...strings], values }),
   asc: (col) => ({ op: 'asc', col }),
   desc: (col) => ({ op: 'desc', col }),
   count: () => ({ op: 'count' }),
@@ -43,6 +51,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     limit: partial.limit ?? -1,
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
+    ...(partial.filter === undefined ? {} : { filter: partial.filter }),
   };
 }
 
@@ -187,6 +196,179 @@ describe('DrizzleAdapter', () => {
     it('returns all rows when no options are given', async () => {
       const all = await ds.findAll(query());
       expect(all.length).toBe(3);
+    });
+
+    it('translates a portable expression into Drizzle operators', async () => {
+      await ds.findAll(
+        query({
+          where: { role: 'admin' },
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'name', operator: 'contains', value: 'Ali' },
+              { type: 'comparison', field: 'id', operator: 'in', value: ['u3'] },
+            ],
+          },
+        }),
+      );
+
+      const call = fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1);
+      expect(call?.args.expression).toEqual({
+        op: 'and',
+        exprs: [
+          { op: 'eq', col: USER_TABLE.role, val: 'admin' },
+          {
+            op: 'or',
+            exprs: [
+              {
+                op: 'sql',
+                text: ['', ' like ', " escape '\\'"],
+                values: [USER_TABLE.name, '%Ali%'],
+              },
+              { op: 'inArray', col: USER_TABLE.id, values: ['u3'] },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('escapes LIKE metacharacters and preserves null membership', async () => {
+      await ds.findAll(
+        query({
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'name', operator: 'contains', value: '50%_off\\now' },
+              {
+                type: 'comparison',
+                field: 'deletedAt',
+                operator: 'in',
+                value: [null, '2026-01-01'],
+              },
+            ],
+          },
+        }),
+      );
+
+      const call = fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1);
+      expect(call?.args.expression).toEqual({
+        op: 'or',
+        exprs: [
+          {
+            op: 'sql',
+            // The trailing chunk carries `ESCAPE '\'`; without it the escaping
+            // in the bound pattern is inert on a dialect (SQLite) that has no
+            // default escape character.
+            text: ['', ' like ', " escape '\\'"],
+            values: [USER_TABLE.name, '%50\\%\\_off\\\\now%'],
+          },
+          {
+            op: 'or',
+            exprs: [
+              { op: 'isNull', col: USER_TABLE.deletedAt },
+              { op: 'inArray', col: USER_TABLE.deletedAt, values: ['2026-01-01'] },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('translates every scalar comparison leaf to its native operator', async () => {
+      const leaves = [
+        ['eq', 'eq'],
+        ['gt', 'gt'],
+        ['gte', 'gte'],
+        ['lt', 'lt'],
+        ['lte', 'lte'],
+      ] as const;
+
+      for (const [operator, expected] of leaves) {
+        await ds.findAll(
+          query({ filter: { type: 'comparison', field: 'name', operator, value: 'Alice' } }),
+        );
+        const call = fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1);
+        expect(call?.args.expression).toEqual({
+          op: expected,
+          col: USER_TABLE.name,
+          val: 'Alice',
+        });
+      }
+    });
+
+    it('translates a null-only membership list to IS NULL', async () => {
+      await ds.findAll(
+        query({
+          filter: { type: 'comparison', field: 'deletedAt', operator: 'in', value: [null] },
+        }),
+      );
+
+      const call = fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1);
+      expect(call?.args.expression).toEqual({ op: 'isNull', col: USER_TABLE.deletedAt });
+    });
+
+    it('emits no predicate for an expression that is true by identity', async () => {
+      const before = fakeDb.recordedCalls.filter((entry) => entry.action === 'where').length;
+
+      await ds.findAll(query({ filter: { type: 'and', filters: [] } }));
+
+      expect(fakeDb.recordedCalls.filter((entry) => entry.action === 'where').length).toBe(before);
+    });
+
+    it('emits a match-nothing predicate for an expression that is false by identity', async () => {
+      await ds.findAll(query({ filter: { type: 'or', filters: [] } }));
+      expect(
+        fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1)?.args.expression,
+      ).toEqual({ op: 'inArray', col: USER_TABLE.id, values: [] });
+
+      await ds.findAll(
+        query({
+          filter: {
+            type: 'and',
+            filters: [
+              { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+              { type: 'or', filters: [] },
+            ],
+          },
+        }),
+      );
+      expect(
+        fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1)?.args.expression,
+      ).toEqual({ op: 'inArray', col: USER_TABLE.id, values: [] });
+    });
+
+    it('counts through a portable expression', async () => {
+      await ds.count({ role: 'admin' }, {
+        type: 'comparison',
+        field: 'name',
+        operator: 'gte',
+        value: 'A',
+      });
+
+      expect(
+        fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1)?.args.expression,
+      ).toEqual({
+        op: 'and',
+        exprs: [
+          { op: 'eq', col: USER_TABLE.role, val: 'admin' },
+          { op: 'gte', col: USER_TABLE.name, val: 'A' },
+        ],
+      });
+    });
+
+    it('refuses a filter when the required operators were not supplied', async () => {
+      const bare = createDrizzleDataSource(fakeDb, 'user', { user: USER_TABLE }, {
+        eq: OPERATORS.eq,
+        and: OPERATORS.and,
+        asc: OPERATORS.asc,
+        desc: OPERATORS.desc,
+        count: OPERATORS.count,
+      });
+
+      await expect(
+        bare.findAll(
+          query({ filter: { type: 'comparison', field: 'name', operator: 'eq', value: 'Alice' } }),
+        ),
+      ).rejects.toThrow('Drizzle filter operators are unavailable');
     });
 
     it('counts with and without a where filter', async () => {

@@ -21,7 +21,7 @@ import denoJson from '../../deno.json' with { type: 'json' };
  * Creates a plugin that registers:
  * - IJwtService under CAPABILITIES.JWT
  * - IAuthService under CAPABILITIES.AUTH
- * - IAuthorizationService under CAPABILITIES.AUTHORIZATION
+ * - IAuthorizationService under CAPABILITIES.AUTHORIZATION when `rbac` is configured
  *
  * @param options - Plugin configuration options
  * @returns A configured IPlugin instance
@@ -53,7 +53,11 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   return {
     name: 'auth-plugin',
     version: denoJson.version,
-    provides: [CAPABILITIES.JWT, CAPABILITIES.AUTH, CAPABILITIES.AUTHORIZATION],
+    provides: [
+      CAPABILITIES.JWT,
+      CAPABILITIES.AUTH,
+      ...(options.rbac === undefined ? [] : [CAPABILITIES.AUTHORIZATION]),
+    ],
     priority: PLUGIN_PRIORITY.NORMAL,
 
     register(ctx: IPluginContext): void {
@@ -129,13 +133,12 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       // Create auth service
       const authService = new AuthService(strategies, localStrategy);
 
-      // Create RBAC service
-      const rbacService = new RbacService(options.rbac);
-
       // Register services
       ctx.services.register(CAPABILITIES.JWT, jwtService);
       ctx.services.register(CAPABILITIES.AUTH, authService);
-      ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
+      if (options.rbac !== undefined) {
+        ctx.services.register(CAPABILITIES.AUTHORIZATION, new RbacService(options.rbac));
+      }
 
       // Cleanup on close
       ctx.lifecycle.onClose(() => {

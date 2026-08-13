@@ -19,7 +19,7 @@
  * @module
  */
 
-import type { NormalizedQuery } from '@setu-ts/common';
+import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { CloudflareUnsupportedError } from '../errors.ts';
 
 /**
@@ -90,27 +90,77 @@ function assertParamBudget(params: readonly unknown[], kind: string): void {
 }
 
 /**
- * Build the `WHERE` fragment for an equality filter.
+ * Build the `WHERE` fragment for equality and portable expression filters.
  *
  * `null` is compared with `IS NULL` rather than `= ?`, because SQL equality
  * against `NULL` is never true — a `where: { deletedAt: null }` filter would
  * silently match nothing otherwise.
  *
  * @param where - The equality conditions
+ * @param filter - Optional portable filter expression
  * @param params - The parameter accumulator, appended to in place
  * @returns The fragment including its leading space, or an empty string
  */
-function buildWhere(where: Record<string, unknown>, params: unknown[]): string {
+function buildWhere(
+  where: Record<string, unknown>,
+  filter: FilterExpression | undefined,
+  params: unknown[],
+): string {
   const entries = Object.entries(where);
-  if (entries.length === 0) return '';
-
   const clauses = entries.map(([column, value]) => {
     const quoted = quoteIdentifier(column, 'filter column');
     if (value === null) return `${quoted} IS NULL`;
     params.push(value);
     return `${quoted} = ?${params.length}`;
   });
+  if (filter !== undefined) {
+    clauses.push(buildFilter(filter, params));
+  }
+  if (clauses.length === 0) return '';
   return ` WHERE ${clauses.join(' AND ')}`;
+}
+
+/** Translate the portable filter AST to a parenthesized SQLite predicate. */
+function buildFilter(filter: FilterExpression, params: unknown[]): string {
+  if (filter.type !== 'comparison') {
+    if (filter.filters.length === 0) return filter.type === 'and' ? '1 = 1' : '0 = 1';
+    const joiner = filter.type === 'and' ? ' AND ' : ' OR ';
+    return `(${filter.filters.map((item) => buildFilter(item, params)).join(joiner)})`;
+  }
+
+  const column = quoteIdentifier(filter.field, 'filter column');
+  if (filter.operator === 'eq') {
+    if (filter.value === null) return `${column} IS NULL`;
+    params.push(filter.value);
+    return `${column} = ?${params.length}`;
+  }
+  if (filter.operator === 'contains') {
+    params.push(filter.value);
+    return `instr(${column}, ?${params.length}) > 0`;
+  }
+  if (filter.operator === 'in') {
+    if (filter.value.length === 0) return '0 = 1';
+    const nonNullValues = filter.value.filter((value) => value !== null);
+    const placeholders = nonNullValues.map((value) => {
+      params.push(value);
+      return `?${params.length}`;
+    });
+    if (!filter.value.includes(null)) {
+      return `${column} IN (${placeholders.join(', ')})`;
+    }
+    if (placeholders.length === 0) return `${column} IS NULL`;
+    return `(${column} IS NULL OR ${column} IN (${placeholders.join(', ')}))`;
+  }
+
+  params.push(filter.value);
+  const operator = filter.operator === 'gt'
+    ? '>'
+    : filter.operator === 'gte'
+    ? '>='
+    : filter.operator === 'lt'
+    ? '<'
+    : '<=';
+  return `${column} ${operator} ?${params.length}`;
 }
 
 /**
@@ -147,7 +197,7 @@ export function buildSelect(target: D1Target, query: NormalizedQuery): D1Stateme
     : query.select.map((c) => quoteIdentifier(c, 'selected column')).join(', ');
 
   let sql = `SELECT ${columns} FROM ${quoteIdentifier(target.table, 'table name')}`;
-  sql += buildWhere(query.where, params);
+  sql += buildWhere(query.where, query.filter, params);
   sql += buildOrderBy(query.orderBy);
 
   if (query.limit > 0) {
@@ -284,11 +334,15 @@ export const D1_COUNT_ALIAS = 'count';
  * @returns The statement and its parameters
  * @throws {CloudflareUnsupportedError} On an invalid identifier or a parameter overflow
  */
-export function buildCount(target: D1Target, where: Record<string, unknown>): D1Statement {
+export function buildCount(
+  target: D1Target,
+  where: Record<string, unknown>,
+  filter?: FilterExpression,
+): D1Statement {
   const params: unknown[] = [];
   let sql = `SELECT COUNT(*) AS "${D1_COUNT_ALIAS}" FROM ` +
     `${quoteIdentifier(target.table, 'table name')}`;
-  sql += buildWhere(where, params);
+  sql += buildWhere(where, filter, params);
 
   assertParamBudget(params, 'count');
   return { sql, params };

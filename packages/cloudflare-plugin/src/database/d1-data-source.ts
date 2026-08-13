@@ -9,7 +9,7 @@
  * @module
  */
 
-import type { IDataSource, NormalizedQuery } from '@setu-ts/common';
+import type { FilterExpression, IDataSource, NormalizedQuery } from '@setu-ts/common';
 import type { ID1Database, ID1PreparedStatement } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import type { D1Statement, D1Target } from './d1-sql.ts';
@@ -95,8 +95,8 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       return result.results.length > 0;
     },
 
-    async count(where: Record<string, unknown>): Promise<number> {
-      const row = await prepareStatement(db, buildCount(target, where)).first();
+    async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {
+      const row = await prepareStatement(db, buildCount(target, where, filter)).first();
       return readCount(row);
     },
   };
@@ -229,9 +229,9 @@ export function createD1TransactionDataSource(
       return true;
     },
 
-    async count(where: Record<string, unknown>): Promise<number> {
+    async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {
       buffer.assertOpen();
-      return await committed.count(where);
+      return await committed.count(where, filter);
     },
   };
 }

@@ -140,6 +140,31 @@ describe('createD1DataSource — reads', () => {
     expect(await source.count({ deletedAt: null })).toBe(2);
   });
 
+  // The portable expression is asserted as SQL text in `d1-sql.test.ts`. That
+  // cannot tell whether SQLite accepts the statement or whether the source
+  // forwards the filter at all — `findAll` and `count` reach the builder
+  // through different call sites, and dropping either argument still compiles.
+  it('EXECUTES a forwarded expression filter on both read paths', async () => {
+    const db = await withRows();
+    const source = createD1DataSource(db, TARGET);
+    await source.update('u2', { deletedAt: '2026-01-01' });
+
+    const filter = {
+      type: 'or',
+      filters: [
+        { type: 'comparison', field: 'age', operator: 'gte', value: 50 },
+        { type: 'comparison', field: 'deletedAt', operator: 'in', value: [null] },
+      ],
+    } as const;
+
+    const rows = await source.findAll(query({ filter, orderBy: { id: 'asc' } }));
+
+    expect(rows.map((r) => r.id)).toEqual(['u1', 'u3']);
+    expect(await source.count({}, filter)).toBe(2);
+    // Conjoined with the equality map rather than replacing it.
+    expect(await source.count({ name: 'ada' }, filter)).toBe(1);
+  });
+
   it('counts rows with and without a filter', async () => {
     const db = await withRows();
     const source = createD1DataSource(db, TARGET);

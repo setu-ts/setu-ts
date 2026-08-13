@@ -2256,17 +2256,76 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it, so a Workers member cannot exist and the branch would have been unreachable — it is a comment
   saying so instead. Six negative controls were each observed failing and reverted) — complete (PR
   #157)
-- **Next milestone** — **M68** (contract gaps: `common` + `kernel` + `auth-plugin`). M63–M68 come
-  from the same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and
-  release). M60–M62 came from a measured audit after M58: a project with all fourteen schematics
-  generated type-checked clean while its entry points imported exactly ONE generated path, so
-  thirteen of fourteen generated artifacts were unreachable — that, not breadth, was the distance
-  from NestJS. **All three are now closed**: M60 wired eleven of the thirteen, M61 made decorators
-  and DI independent choices, and M62 added monorepos, so the CLI parity work is done. M59 came from
-  an external DX review; note what that review got wrong, since the ROADMAP section says so and a
-  reader should not re-raise it: it claimed the framework has no decorators (M9/M36b ship them) and
-  that Workers queues are still blocked (M52b shipped them). Its suggested HTTP-polling adapters
-  were rejected with cause — a Worker has no ambient loop to poll from.
+- **Milestone 68** (contract gaps: `common` + `kernel` + `auth-plugin` + `database-plugin` +
+  `cloudflare-plugin` — the four alpha.7 smoke findings that touch committed contracts). **S5:** a
+  portable `FilterExpression` tree in `common` (`eq`/`contains`/`gt`/`gte`/`lt`/`lte`/`in`, composed
+  with `and`/`or`) plus `IRepository.findOne`. It is **additive** — `filter` sits beside the
+  released equality `where` map rather than replacing it, which keeps every existing call
+  source-compatible AND avoids reserving `or`/`and` as user field names. Each of the four adapters
+  translates natively (Memory evaluates rows, Prisma builds `where` input, Drizzle builds an
+  operator tree, D1 builds bound SQL); nothing filters in JavaScript. Two semantics had to be
+  decided rather than inherited, because SQL and an in-memory `===` disagree: an `in` list
+  containing `null` gets an explicit null branch (SQL `IN` never matches `NULL`), and an EMPTY `in`
+  compiles to a match-nothing predicate that binds no values. `findOne` is `findAll` with
+  `limit: 1`, so there is exactly one evaluation path per adapter. **S6:** the router refuses a
+  duplicate `METHOD path` before mutating anything — a **breaking behaviour change**, since the
+  entry map previously OVERWROTE, making one of the two handlers permanently unreachable with no
+  diagnostic. **S7:** `RouteInfo.owner` (optional, so the addition is source-compatible) reports the
+  plugin whose `register()` created a route, reusing the registration cursor the env-var validator
+  already maintained rather than adding a second registry. **S10:** `AuthPluginOptions.rbac` is
+  optional; absent it, `provides` names only `jwt`/`authentication` and no authorization service
+  exists — guards then fail loudly instead of resolving a permissive fake.
+
+  **Verification then found that the milestone's own gates could not see most of what it shipped.**
+  Every gate was green, coverage exited 0, and both publish gates passed — while
+  `drizzle-adapter.ts` had REGRESSED from 96.4 to 90.3 branch, because `eq`/`gt`/`gte`/`lt`/`lte`,
+  null-only `in`, and both identity short-circuits were translated by code no test executed; the
+  same five leaves were uncovered in Prisma, and D1's `eq`-null, empty `in`, null-only `in` and
+  empty-composition arms in the SQL builder. Four rows of the plan's own test table were never
+  written, including the one that mattered most — D1's filter SQL was asserted only as STRINGS and
+  never executed, which is the exact gap M52c's review had closed once already. Driving all of it
+  found no defect (probed: real SQLite through the repository, and the real Drizzle SQL generator),
+  so the gap was a missing regression guard rather than a bug — an operator-mapping typo would have
+  shipped green. All four rows are now delivered, including a `findOne({ filter })` lookup over HTTP
+  and a JWT-only app driven through a REAL kernel application, since the auth suite's fake registry
+  returns `undefined` for an unregistered token where the kernel's throws — the guard-without-RBAC
+  question is unanswerable against the fake.
+
+  **One real defect was found, and only by asking which dialect the escaping was written for.**
+  `contains` escaped `%`/`_`/`\` and emitted a bare `like()`, which relies on the DEFAULT escape
+  character — a backslash on PostgreSQL and MySQL, and **undefined on SQLite**, where `LIKE` has
+  none. Measured against real SQLite: the emitted pattern matched ZERO rows, so a literal search for
+  a value containing `%` returned nothing at all. The predicate is now built with Drizzle's `sql`
+  tag as `LIKE ? ESCAPE '\'` (standard SQL, verified rendering on both dialects and executing
+  correctly on real SQLite), and `DrizzleOperators` takes `sql` in place of `like`. Two things kept
+  this invisible: the only real-Drizzle test runs on `pg-proxy`, where the bug is unreachable
+  because Postgres happens to define the same escape character — and `DrizzleAdapter` structurally
+  requires `execute`, which no SQLite driver exposes, so the adapter REFUSES a SQLite instance
+  outright today and the bug was latent rather than live. The new regression test therefore drives
+  `createDrizzleDataSource` (public API in its own right) over `sqlite-proxy` against a real
+  `node:sqlite` engine, with `50XYoff now` seeded as the negative control an unescaped wildcard
+  would also return; reverting the clause fails it and its Postgres sibling. Case sensitivity is NOT
+  fixed and is now documented in three sites instead: `contains` follows the column's collation on a
+  `LIKE` backend, which no portable operator can override.
+
+  Also corrected: the seven `IRouterApi` verb methods gained a throw and documented none of it; the
+  `rest-starter` `auth` arm still told callers RBAC was required; the database README got export-
+  table rows but not the prose deliverable the plan named; and the CHANGELOG recorded nothing at all
+  — including the two breaking changes (duplicate-route refusal, and `IRepository.findOne` being
+  required for a direct implementor). The `guide-fence-compiler` B9 negative control was repaired
+  during implementation and the repair is worth keeping in mind: it had been passing because `rbac`
+  was missing, NOT because `jwt.secret` was, so making `rbac` optional is what exposed that the
+  control had never tested its own claim — complete (PR #158)
+- **Next milestone** — **M40** (final polish and release). M60–M62 came from a measured audit after
+  M58: a project with all fourteen schematics generated type-checked clean while its entry points
+  imported exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable
+  — that, not breadth, was the distance from NestJS. **All three are now closed**: M60 wired eleven
+  of the thirteen, M61 made decorators and DI independent choices, and M62 added monorepos, so the
+  CLI parity work is done. M59 came from an external DX review; note what that review got wrong,
+  since the ROADMAP section says so and a reader should not re-raise it: it claimed the framework
+  has no decorators (M9/M36b ship them) and that Workers queues are still blocked (M52b shipped
+  them). Its suggested HTTP-polling adapters were rejected with cause — a Worker has no ambient loop
+  to poll from.
 
 ## Verification (run before declaring any work done)
 

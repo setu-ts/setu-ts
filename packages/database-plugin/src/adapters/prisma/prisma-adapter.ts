@@ -10,7 +10,7 @@
  * @module
  */
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
-import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 
 // ---------------------------------------------------------------------------
@@ -324,8 +324,9 @@ function createPrismaDataSourceInner(
 
     findAll: (query) => {
       const args: Parameters<ModelDelegate['findMany']>[0] = {};
-      if (query.where && Object.keys(query.where).length > 0) {
-        args.where = query.where;
+      const where = prismaWhere(query.where, query.filter);
+      if (where !== undefined) {
+        args.where = where;
       }
       if (query.orderBy && Object.keys(query.orderBy).length > 0) {
         // Translate { field: 'asc'|'desc' } → Prisma { field: 'asc' }
@@ -374,6 +375,57 @@ function createPrismaDataSourceInner(
       }
     },
 
-    count: (where) => delegate.count({ where: where ?? undefined }),
+    count: (where, filter) => {
+      const predicate = prismaWhere(where, filter);
+      return delegate.count(predicate === undefined ? {} : { where: predicate });
+    },
   };
+}
+
+function prismaWhere(
+  where: Record<string, unknown>,
+  filter?: FilterExpression,
+): Record<string, unknown> | undefined {
+  const equality = Object.keys(where).length === 0 ? undefined : where;
+  if (filter === undefined) return equality;
+  const expression = prismaFilter(filter);
+  if (equality === undefined) return expression;
+  return { AND: [equality, expression] };
+}
+
+function prismaFilter(filter: FilterExpression): Record<string, unknown> {
+  if (filter.type !== 'comparison') {
+    return filter.type === 'and'
+      ? { AND: filter.filters.map(prismaFilter) }
+      : { OR: filter.filters.map(prismaFilter) };
+  }
+  switch (filter.operator) {
+    case 'eq':
+      return { [filter.field]: filter.value };
+    case 'contains':
+      return { [filter.field]: { contains: filter.value } };
+    case 'gt':
+      return { [filter.field]: { gt: filter.value } };
+    case 'gte':
+      return { [filter.field]: { gte: filter.value } };
+    case 'lt':
+      return { [filter.field]: { lt: filter.value } };
+    case 'lte':
+      return { [filter.field]: { lte: filter.value } };
+    case 'in': {
+      const nonNullValues = filter.value.filter((value) => value !== null);
+      if (!filter.value.includes(null)) {
+        return { [filter.field]: { in: nonNullValues } };
+      }
+      if (nonNullValues.length === 0) {
+        return { [filter.field]: null };
+      }
+      return {
+        OR: [
+          { [filter.field]: null },
+          { [filter.field]: { in: nonNullValues } },
+        ],
+      };
+    }
+  }
 }

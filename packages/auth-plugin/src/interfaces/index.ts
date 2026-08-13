@@ -70,6 +70,9 @@ export interface AuthPluginOptions {
   readonly apiKey?: ApiKeyOptions;
   /** Local credentials configuration. Optional. */
   readonly local?: LocalOptions;
-  /** RBAC configuration. Required for authorization guards. */
-  readonly rbac: RbacConfig;
+  /**
+   * RBAC configuration. When absent, AuthPlugin registers JWT authentication
+   * only and does not provide the authorization capability.
+   */
+  readonly rbac?: RbacConfig;
 }

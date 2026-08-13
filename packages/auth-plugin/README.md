@@ -7,13 +7,14 @@ All cryptography (HS256/RS256 JWT signing/verification and PBKDF2-SHA256 passwor
 through Web Crypto via `IRuntimeServices` (`runtime.subtle` / `runtime.randomBytes`), so the package
 has **zero npm dependencies** and is cross-runtime (Deno / Node 20+ / Bun).
 
-The plugin registers three services under existing capability tokens:
+The plugin always registers JWT and authentication services. It registers authorization only when
+the optional `rbac` configuration is supplied:
 
-| Service                | Token              | Interface               |
-| ---------------------- | ------------------ | ----------------------- |
-| JWT sign/verify/decode | `'jwt'`            | `IJwtService`           |
-| Authentication         | `'authentication'` | `IAuthService`          |
-| Authorization (RBAC)   | `'authorization'`  | `IAuthorizationService` |
+| Service                | Token              | Interface                                           |
+| ---------------------- | ------------------ | --------------------------------------------------- |
+| JWT sign/verify/decode | `'jwt'`            | `IJwtService`                                       |
+| Authentication         | `'authentication'` | `IAuthService`                                      |
+| Authorization (RBAC)   | `'authorization'`  | `IAuthorizationService` (when `rbac` is configured) |
 
 > **Phasing (M16b):** the **refresh-token strategy** and **rate limiting** are deferred to M16b.
 > `IJwtService` exposes only `sign` / `verify` / `decode` — a refresh token is simply
