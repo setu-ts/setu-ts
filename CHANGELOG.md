@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.8] — 2026-08-14
+
+**A release about what the generator actually produces, and what the database adapters actually
+ran.** Building a three-service monorepo on the published `alpha.7` packages found a scaffold that
+could not be installed on release day, could not answer its own `/health` probe, could not
+type-check its own frontend routes, and failed `deno fmt --check` on 62 of the 74 files the CLI had
+just written — every one of them past the gate that type-checks generated output and stops there.
+The gate now formats, lints, installs, type-checks and **boots** each template and requests what the
+project advertises.
+
+Generation itself changed shape: decorators are no longer the default. `--template rest` and
+`--template microservice` register no `DecoratorPlugin`, `setu generate` reads the style from the
+target project's own manifest, and the decorated-plus-DI composition moved to one opt-in,
+`--template class-based` (the old `--template nest` and `setu new --di` are refused with a message
+naming it).
+
+**The breaking changes ride together, and every one of them is a compile or startup error rather
+than a silent behavior shift:** a Drizzle instance must now be wrapped in `createDrizzleDatabase()`,
+a Prisma client must be constructed by the application and injected, the kernel refuses a duplicate
+`METHOD path` instead of letting the second registration overwrite the first, and a class
+implementing `IRepository` without extending `BaseRepository` must now implement `findOne`. The
+database work is the reason: both ORM adapters shipped paths that could not work against a real
+server — Drizzle filtered, sorted and paginated whole tables in JavaScript and addressed writes with
+a fabricated column, and Prisma's lazy client construction passed an option v7 rejects outright.
+Both now execute their drivers, and repositories gained a portable `filter` expression tree plus
+`findOne` so a search no longer has to drop to raw `query()`.
+
+All 47 packages move as one version, because the CLI stamps its own version as the dependency range
+for every project it scaffolds. Installs still need an explicit version
+(`jsr:@setu-ts/kernel@^0.1.0-alpha.8`) — JSR does not point `latest` at a prerelease — and Deno
+refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
+
 ### Added
 
 - **Typed native Drizzle query access.** `getDrizzleDatabase(service, configured)` returns the exact
@@ -62,6 +94,17 @@ All notable changes to this project are documented here. The format follows
 - **`AuthPluginOptions.rbac` is optional.** A JWT-only application supplies `jwt` alone; AuthPlugin
   then registers `jwt` and `authentication` and neither creates nor advertises the `authorization`
   capability. Supplying `rbac` is unchanged in every respect.
+
+- **`@Ctx()` for decorated controller handlers.** The decorator-plugin now injects the active
+  `IRequestContext` into a decorated handler, so it can configure `ctx.response` (including status
+  and headers) or return a streaming response without leaving the class-based routing API.
+
+- **Startup warnings for two silent decorator misconfigurations.** When a logger is registered,
+  `DecoratorPlugin.register()` now warns about a class listed in `controllers` that carries no
+  `@Controller` metadata (which registers no routes, so every path 404s — usually caused by two
+  copies of the package in one process), and about a custom parameter that no registered resolver
+  can satisfy (which reaches the handler as `undefined`). Both warn rather than throw, so no working
+  application changes behavior.
 
 ### Changed
 
@@ -166,6 +209,34 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A stock scaffold now installs, boots, answers its probes, type-checks and formats clean.** Four
+  defects, all reproduced against the published `alpha.7` packages by building a three-service
+  workspace, and all four passed the drift check that type-checks generated output:
+
+  - `deno install` on a pristine project failed outright on release day —
+    `Could not find version of '@setu-ts/common' that matches '^…' … newer than the specified
+    minimum dependency age`.
+    Deno 2.9 refuses a dependency published in the last 24 hours and `setu new` pins projects to the
+    CLI's own just-published version, so the window was guaranteed. The generated root now sets
+    `minimumDependencyAge`.
+  - `GET /health` on a stock `--template rest` project answered **500** — the path its own generated
+    Kubernetes probes point at. HealthPlugin's `selfIndicator` reads `runtime.hostname()`, which
+    Deno gates behind `--allow-sys`, and the generated `start` task never asked for it. The
+    per-template `denoPermissions` seam already existed and simply had no entry.
+  - Every `.tsx` route in a `--template full-stack` project failed `deno check` with 79 `TS2686`.
+    Declaring **any** `compilerOptions` in a manifest replaces Deno's own `react-jsx` default, so
+    the unconditionally-emitted `experimentalDecorators` was the cause rather than a redundant
+    extra. Compiler options are now per template, and `full-stack` gained the `check:app` task that
+    reaches route modules `deno check main.ts` never sees.
+  - A fresh workspace failed `deno fmt --check` on 62 of the 74 files the CLI itself wrote: no `fmt`
+    configuration was emitted at all, and with one added the `.tsx` emitters still disagreed.
+    Generated imports are now sorted and wrapped the way `deno fmt` does, and emitted JSX is
+    single-quoted.
+
+  The gate that keeps them fixed formats, lints, installs, type-checks and **boots** every template,
+  then requests what the project advertises — deliberately without a blanket permission grant, since
+  a permission the generated task forgot to ask for is unobservable under `-A`.
+
 - **`IRepository.count()` on the Drizzle adapter no longer drags the whole match set over the
   wire.** It selected every matching row and measured the resulting array's length in JavaScript, so
   counting a million-row table transferred a million rows. It now selects drizzle-orm's `count(*)`
@@ -199,18 +270,6 @@ All notable changes to this project are documented here. The format follows
   Migration: `--template rest --di` and `--template nest --di` both become `--template class-based`;
   a bare `--di` has no direct equivalent, and a project wanting a container without decorators
   should register `DiPlugin()` in its own `setu.config.ts`.
-
-### Added
-
-- **`@Ctx()` for decorated controller handlers.** The decorator-plugin now injects the active
-  `IRequestContext` into a decorated handler, so it can configure `ctx.response` (including status
-  and headers) or return a streaming response without leaving the class-based routing API.
-- **Startup warnings for two silent decorator misconfigurations.** When a logger is registered,
-  `DecoratorPlugin.register()` now warns about a class listed in `controllers` that carries no
-  `@Controller` metadata (which registers no routes, so every path 404s — usually caused by two
-  copies of the package in one process), and about a custom parameter that no registered resolver
-  can satisfy (which reaches the handler as `undefined`). Both warn rather than throw, so no working
-  application changes behavior.
 
 ## [0.1.0-alpha.7] — 2026-08-12
 
@@ -1965,6 +2024,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.1.0-alpha.8]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.5
