@@ -2255,7 +2255,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `--runtime cloudflare-workers` at creation and `readWorkspaceManifest` refuses a manifest naming
   it, so a Workers member cannot exist and the branch would have been unreachable — it is a comment
   saying so instead. Six negative controls were each observed failing and reverted) — complete (PR
-  pending)
+  #157)
 - **Next milestone** — **M68** (contract gaps: `common` + `kernel` + `auth-plugin`). M63–M68 come
   from the same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and
   release). M60–M62 came from a measured audit after M58: a project with all fourteen schematics
