@@ -612,6 +612,20 @@ describe('runAppCommand', () => {
     });
   });
 
+  describe('--env-file', () => {
+    it('refuses a member whose template registers no ConfigPlugin', async () => {
+      // The one refusal this path can produce. A Workers arm would be
+      // unreachable: a workspace refuses `--runtime cloudflare-workers` at
+      // creation, and `readWorkspaceManifest` refuses a manifest naming it, so
+      // no member can have a runtime without a filesystem.
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'bare', '--env-file', '.env'])).toBe(2);
+
+      expect(h.err.text()).toContain('registers ConfigPlugin');
+      expect(h.fs.writes).toEqual([]);
+    });
+  });
+
   describe('a member with the discovery plugin', () => {
     it('wires the config at the generated map', async () => {
       const h = harness([]);

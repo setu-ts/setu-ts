@@ -2204,14 +2204,66 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   gained the three genuinely uncovered branches found while checking it — missing-column rejection
   for `where`/`orderBy`/`select`, and the multi-condition `and()` combination, which no test had
   ever exercised — taking `drizzle-adapter.ts` from 94.0 to 96.4 branch.
-- **Next milestone** — **M67** (scaffold defaults and workspace ergonomics). M63–M68 come from the
-  same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and release).
-  M60–M62 came from a measured audit after M58: a project with all fourteen schematics generated
-  type-checked clean while its entry points imported exactly ONE generated path, so thirteen of
-  fourteen generated artifacts were unreachable — that, not breadth, was the distance from NestJS.
-  **All three are now closed**: M60 wired eleven of the thirteen, M61 made decorators and DI
-  independent choices, and M62 added monorepos, so the CLI parity work is done. M59 came from an
-  external DX review; note what that review got wrong, since the ROADMAP section says so and a
+- **Milestone 67** (`packages/cli` + `packages/starters/rest-starter` + `packages/config-plugin` —
+  scaffold defaults and workspace ergonomics: the five alpha.7 findings that each cost a hand-edit.
+  **D5** a `full-stack` workspace member got a generated `src/discovery/services.ts` that nothing
+  could consume, because `TemplateHost.plugins` must stay empty when an `appFactory` is set and no
+  starter had the arm — so `RestStarterOptions.serviceDiscovery` was added and inherits through the
+  REST → microservice → full-stack chain, and an internal `AppFactoryRenderContext` lets the
+  workspace overlay pass `SERVICE_ENDPOINTS` into the factory build object. **S3** the CLI emitted
+  no dotenv file at all, so there was no generated answer to where configuration goes; it now emits
+  a gitignored `.env` beside a tracked `.env.example`, selectable with `--env-file`. **S4** inline
+  templates now pass `{ format: 'rfc9457' }` to `errorHandler`, matching the starter factories;
+  `@setu-ts/exceptions` keeps its own default. **S8** a port probe at workspace creation and member
+  allocation, plus `setu workspace ports --reallocate`, which rewrites manifest, maps, Compose and
+  Kubernetes together. **S9** `--depends-on` records prerequisites and the generated root `dev`
+  runner gates each dependent on its prerequisites' `/ready`.
+
+  **Verification found two behavioural regressions in generated output that all eight gates passed
+  over, and both are the same class: a gate scoped to what its author already believed worked.** The
+  dotenv deliverable produced a project that **could not boot from a clean checkout** — the CLI
+  wrote `.env`, gitignored it, and wired `ConfigPlugin({ envFilePath: '.env' })`, which THROWS on a
+  missing file, so the first colleague's clone, every CI checkout, and any container built from the
+  repository died at `ConfigPlugin.register` before a route existed; the generated README never
+  mentioned the file. Fixed with an additive `ConfigPluginOptions.envFileOptional` (default `false`,
+  so nothing released changes) that skips an ABSENT path while a path that exists and cannot be read
+  still throws — a `stat` probe, because every runtime spells not-found differently and absence and
+  unreadability are different faults. And every generated **workspace** failed `deno fmt --check`
+  AND `deno lint`, which is M63's D6 reintroduced: the new `scripts/dev.ts` carried two empty
+  `catch` blocks and lines past the width its own emitted `fmt` config sets, and a root README
+  paragraph was hand-wrapped to the wrong column. Neither could be seen because
+  `scaffold-runs-e2e.test.ts` — the M63 gate — covers only `setu new <name> --template …` and never
+  `--workspace`, and because **nothing ever executed the dev runner**: it was asserted as
+  `toContain('/ready')` against the template literal that renders it, while the plan had promised a
+  real e2e proving a dependent waits and a subprocess test of the failure path. Both gates now
+  exist: `workspace-e2e` formats and lints a real generated workspace, and a new `dev-runner-e2e`
+  RUNS the emitted runner against fixture members whose prerequisite binds after a deliberate delay
+  — the only way "started after" and "started concurrently" can be told apart, and the control with
+  `dependsOn` removed reports the opposite result from identical fixtures. `scaffold-runs-e2e`
+  gained the assertions the plan had mapped to it and never got: the dotenv pair and its ignore
+  rule, a boot with the file DELETED, a value read back through the configured path, and a thrown
+  error's Problem Details body asserted field by field with `message` absent. Also fixed: the
+  `.env.example` named none of the variables the generated code requires — `full-stack` emits
+  `config.getOrThrow('SESSION_SECRET')` and shipped a blank example — so `TemplateManifest` gained
+  `envVariables`, with a development value in the ignored file and an empty one in the committed
+  example; `--depends-on` was silently accepted on a standalone `new`, unlike every other misapplied
+  flag; a Deno project's `.gitignore` had grown a `.wrangler/` rule for a directory that target
+  cannot produce; and the config-plugin wiring carried a hardcoded dotenv literal beside the
+  manifest one, a second source of truth that `--env-file` silently overrode. **One verification
+  finding was itself wrong and was reversed rather than shipped**: the `--env-file` refusal in
+  `generate app` was reported as missing a Cloudflare Workers arm, but a workspace refuses
+  `--runtime cloudflare-workers` at creation and `readWorkspaceManifest` refuses a manifest naming
+  it, so a Workers member cannot exist and the branch would have been unreachable — it is a comment
+  saying so instead. Six negative controls were each observed failing and reverted) — complete (PR
+  pending)
+- **Next milestone** — **M68** (contract gaps: `common` + `kernel` + `auth-plugin`). M63–M68 come
+  from the same alpha.7 smoke test; see the ROADMAP section. Previously — **M40** (final polish and
+  release). M60–M62 came from a measured audit after M58: a project with all fourteen schematics
+  generated type-checked clean while its entry points imported exactly ONE generated path, so
+  thirteen of fourteen generated artifacts were unreachable — that, not breadth, was the distance
+  from NestJS. **All three are now closed**: M60 wired eleven of the thirteen, M61 made decorators
+  and DI independent choices, and M62 added monorepos, so the CLI parity work is done. M59 came from
+  an external DX review; note what that review got wrong, since the ROADMAP section says so and a
   reader should not re-raise it: it claimed the framework has no decorators (M9/M36b ship them) and
   that Workers queues are still blocked (M52b shipped them). Its suggested HTTP-polling adapters
   were rejected with cause — a Worker has no ambient loop to poll from.

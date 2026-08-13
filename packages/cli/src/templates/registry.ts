@@ -118,6 +118,16 @@ export interface AppFactoryWiring {
   readonly args?: (context: AppFactoryRenderContext) => string;
 }
 
+/** One configuration variable a template's generated source reads. */
+export interface EnvVariable {
+  /** The environment variable name, as the generated source spells it. */
+  readonly name: string;
+  /** One line explaining what it is, written above it in both dotenv files. */
+  readonly description: string;
+  /** A non-secret development value, written to the gitignored dotenv file. */
+  readonly develop: string;
+}
+
 /** Inputs a template factory needs while its call is rendered. */
 export interface AppFactoryRenderContext {
   /** The runtime target selected for the generated project. */
@@ -160,6 +170,15 @@ export interface PackageImport {
 export interface TemplateManifest {
   /** Dotenv path emitted with a tracked example and passed to ConfigPlugin. */
   readonly envFilePath?: string;
+  /**
+   * Variables this template's own generated source reads.
+   *
+   * Declared rather than inferred: a template that emits
+   * `config.getOrThrow('SESSION_SECRET')` and a dotenv file naming nothing
+   * produces a project that cannot start, and the emitted example is then a
+   * blank file rather than an answer to where configuration goes.
+   */
+  readonly envVariables?: readonly EnvVariable[];
   /** npm packages the running application needs, merged into `dependencies`. */
   readonly npmDependencies?: Readonly<Record<string, string>>;
   /** npm packages the build or tests need, merged into `devDependencies`. */

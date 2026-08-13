@@ -142,8 +142,9 @@ where a service is, not whether this service must wait for it at startup.
 \`${PROGRAM_NAME} generate app\` rewrites them all.
 
 If a local process occupies a port, the CLI skips it during allocation. To repair existing
-assignments, run \`${PROGRAM_NAME} workspace ports --reallocate\`; it rewrites the manifest, maps,
-and deployment artifacts together.
+assignments, stop the services and run \`${PROGRAM_NAME} workspace ports --reallocate\`; it rewrites the
+manifest, maps, and deployment artifacts together. It assigns from the base port upward, so a
+service still running holds its own port and is moved off it.
 
 ## Transport
 

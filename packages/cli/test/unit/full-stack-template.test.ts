@@ -227,7 +227,9 @@ describe('full-stack template | the runtime-dependent argument', () => {
     // is undefined and the factory reads the platform environment as usual, so
     // one call shape serves all four targets.
     for (const runtime of ['deno', 'node', 'bun'] as const) {
-      expect(argsFor(runtime)).toContain("{ env, config: { envFilePath: '.env' } }");
+      expect(argsFor(runtime)).toContain(
+        "{ env, config: { envFilePath: '.env', envFileOptional: true } }",
+      );
     }
     // Workers have no filesystem. Their ConfigPlugin reads the request binding
     // passed through `env`, so a dotenv path here would make startup throw.

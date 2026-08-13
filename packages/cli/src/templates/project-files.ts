@@ -22,6 +22,7 @@ import type { GeneratedFile } from '../utils/file-writer.ts';
 import type {
   AppFactoryRenderContext,
   AppFactoryWiring,
+  EnvVariable,
   LocalImport,
   MiddlewareWiring,
   PackageImport,
@@ -33,6 +34,7 @@ import type {
   WorkerExportRoute,
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
+import { renderConfigOptions } from './env-file.ts';
 import { rootManifestSettings } from './root-settings.ts';
 
 /** Semver range the scaffolded project pins framework packages to. */
@@ -157,6 +159,48 @@ export function resolveHost(
 }
 
 /**
+ * Renders the gitignored dotenv file a generated project starts with.
+ *
+ * Each declared variable is written with its development value, so a template
+ * whose own source calls `config.getOrThrow(...)` boots immediately after
+ * `setu new`. The values are placeholders, never secrets — the file is
+ * gitignored precisely so a real one can replace them in place.
+ *
+ * @param variables - The variables this template's generated source reads
+ * @returns The dotenv file contents
+ */
+function envFileContents(variables: readonly EnvVariable[]): string {
+  const header = '# Local configuration. This file is ignored by Git.\n';
+  if (variables.length === 0) return header;
+  return `${header}# The values below are development placeholders. Replace them before deploying.\n${
+    variables.map((variable) => `\n# ${variable.description}\n${variable.name}=${variable.develop}`)
+      .join('\n')
+  }\n`;
+}
+
+/**
+ * Renders the tracked dotenv example.
+ *
+ * It names every variable with an EMPTY value: this file is committed, so a
+ * development placeholder here would be a value someone deploys by accident.
+ *
+ * @param envFilePath - The path this example is copied to
+ * @param variables - The variables this template's generated source reads
+ * @returns The example file contents
+ */
+function envExampleContents(
+  envFilePath: string,
+  variables: readonly EnvVariable[],
+): string {
+  const header = `# Copy this file to \`${envFilePath}\` and fill in local values.\n` +
+    `# \`${envFilePath}\` is ignored by Git; this example is committed.\n`;
+  if (variables.length === 0) return header;
+  return `${header}${
+    variables.map((variable) => `\n# ${variable.description}\n${variable.name}=`).join('')
+  }\n`;
+}
+
+/**
  * Removes the filesystem-only dotenv setting for a Workers project.
  *
  * @param manifest - The template manifest that may declare a dotenv path
@@ -240,7 +284,7 @@ function configModule(
       ? ''
       : host.manifest?.envFilePath === undefined
       ? wiring.args ?? ''
-      : `{ envFilePath: '${host.manifest.envFilePath}' }`;
+      : renderConfigOptions(host.manifest.envFilePath);
   // `common` is always imported for the return type, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
   // second import of the same module.
@@ -984,9 +1028,12 @@ ${PROGRAM_NAME} generate --help
 \`\`\`
 `;
 
-  const gitignore = `${runtime === 'deno' ? '' : 'node_modules\n'}coverage/\n.wrangler/\n${
-    manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`
-  }`;
+  // Deno projects get neither `node_modules/` nor `.wrangler/`: this file is
+  // read by a human, and an ignore rule for a directory the target can never
+  // produce is noise that invites copying it into projects that would need it.
+  const gitignore = `${runtime === 'deno' ? '' : 'node_modules/\n'}coverage/\n${
+    runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''
+  }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}`;
 
   const files: GeneratedFile[] = [
     { path: 'README.md', contents: readme },
@@ -1075,11 +1122,11 @@ ${PROGRAM_NAME} generate --help
   if (manifest?.envFilePath !== undefined) {
     files.push({
       path: manifest.envFilePath,
-      contents: '# Local configuration. This file is ignored by Git.\n',
+      contents: envFileContents(manifest.envVariables ?? []),
     });
     files.push({
       path: `${manifest.envFilePath}.example`,
-      contents: '# Copy this file to the configured env-file path and fill in local values.\n',
+      contents: envExampleContents(manifest.envFilePath, manifest.envVariables ?? []),
     });
   }
 

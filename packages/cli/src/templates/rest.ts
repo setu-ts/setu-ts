@@ -35,7 +35,11 @@ export const RUNTIME_WIRING: Wiring = {
  */
 export const REST_PLUGINS: readonly Wiring[] = [
   RUNTIME_WIRING,
-  { pkg: 'config-plugin', symbol: 'ConfigPlugin', args: "{ envFilePath: '.env' }" },
+  // No `args` here on purpose: the dotenv path is template MANIFEST data, and
+  // `configModule` renders it through one shared `renderConfigOptions`. A
+  // literal here as well would be a second source of truth that `--env-file`
+  // silently overrides.
+  { pkg: 'config-plugin', symbol: 'ConfigPlugin' },
   { pkg: 'logger-plugin', symbol: 'LoggerPlugin' },
   { pkg: 'validation-plugin', symbol: 'ValidationPlugin' },
   { pkg: 'http-security-plugin', symbol: 'HttpSecurityPlugin' },

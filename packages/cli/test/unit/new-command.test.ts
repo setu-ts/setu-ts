@@ -397,8 +397,10 @@ describe('runNewCommand', () => {
       expect(h.fs.read('/work/app/.env.local')).toContain('Local configuration');
       expect(h.fs.read('/work/app/.env.local.example')).toContain('Copy this file');
       expect(h.fs.read('/work/app/.gitignore')).toContain('.env.local');
+      // `envFileOptional` rides along, and is the reason this project starts on
+      // a machine that never ran `setu new` — the emitted file is gitignored.
       expect(h.fs.read('/work/app/setu.config.ts')).toContain(
-        "ConfigPlugin({ envFilePath: '.env.local' })",
+        "ConfigPlugin({ envFilePath: '.env.local', envFileOptional: true })",
       );
     });
 
@@ -406,6 +408,35 @@ describe('runNewCommand', () => {
       const h = harness();
       expect(await h.run(['app', '--env-file', '.env'])).toBe(2);
       expect(h.err.text()).toContain('requires a template that registers ConfigPlugin');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('names the variables its own generated source reads', async () => {
+      // full-stack emits `config.getOrThrow<string>('SESSION_SECRET')`, so a
+      // dotenv pair naming nothing left the one template that REQUIRES a value
+      // unable to start, and its committed example a blank file — which is the
+      // question the dotenv deliverable exists to answer.
+      const h = harness();
+      expect(await h.run(['app', '--template', 'full-stack'])).toBe(0);
+
+      const env = h.fs.read('/work/app/.env');
+      const example = h.fs.read('/work/app/.env.example');
+      expect(env).toContain('SESSION_SECRET=');
+      expect(example).toContain('SESSION_SECRET=');
+      // The gitignored file carries a working development value; the COMMITTED
+      // example carries none, so nothing here can be deployed by accident.
+      expect(env).toContain('SESSION_SECRET=dev-only-insecure-session-secret-change-me');
+      expect(example).toContain('SESSION_SECRET=\n');
+    });
+
+    it('refuses --depends-on, which only a workspace member can honour', async () => {
+      // Every other misapplied flag is refused — `--port`, `--transport`,
+      // `--env-file` on a root — and this one was silently accepted, so a
+      // standalone project scaffolded successfully while the ordering the
+      // developer asked for was read by nothing at all.
+      const h = harness();
+      expect(await h.run(['app', '--template', 'rest', '--depends-on', 'orders'])).toBe(2);
+      expect(h.err.text()).toContain('generate app');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -424,7 +455,7 @@ describe('runNewCommand', () => {
       ) {
         expect(config).toContain(`${symbol}()`);
       }
-      expect(config).toContain("ConfigPlugin({ envFilePath: '.env' })");
+      expect(config).toContain("ConfigPlugin({ envFilePath: '.env', envFileOptional: true })");
       // Three plugins take a generated-artifact seam, so they are NOT argument-free.
       // Asserted by their actual call so a dropped seam shows up here rather than only
       // in the drift gate.
@@ -1032,6 +1063,13 @@ describe('--workspace', () => {
       const h = harness();
       expect(await h.run(['acme', '--workspace', '--di'])).toBe(2);
       expect(h.err.text()).toContain('--template class-based');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses --depends-on on the root, which has no members yet', async () => {
+      const h = harness();
+      expect(await h.run(['acme', '--workspace', '--depends-on', 'orders'])).toBe(2);
+      expect(h.err.text()).toContain('generate app');
       expect(h.fs.writes).toEqual([]);
     });
 

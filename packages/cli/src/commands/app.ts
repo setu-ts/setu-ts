@@ -237,8 +237,12 @@ function planMember(
   if (envHost === undefined) {
     return {
       ok: false,
-      message:
-        '--env-file requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
+      // No Workers arm here, deliberately, unlike the standalone `new` path: a
+      // workspace refuses `--runtime cloudflare-workers` at creation and
+      // `readWorkspaceManifest` refuses a manifest naming it, so a Workers
+      // member cannot exist and a branch for one would be unreachable.
+      message: '--env-file requires a template that registers ConfigPlugin ' +
+        '(rest, microservice, class-based, or full-stack).',
     };
   }
   const host = withWorkspaceMember(
