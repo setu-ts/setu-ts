@@ -40,8 +40,12 @@ configure a plugin already built.
 | `class-based`  | `rest` plus decorators and DI, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`. |
 | `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton.    |
 
-`--template microservice --runtime cloudflare-workers` is refused: the messaging and queue plugins
-need raw sockets, which Workers does not provide.
+`--template microservice --runtime cloudflare-workers` is supported. The messaging and queue plugins
+reach brokers over raw sockets, which Workers does not provide, so on that target they are swapped
+for `CloudflarePlugin`, which serves both capabilities from Cloudflare Queues and a Durable Object.
+The swap also contributes the `queue` module export the platform invokes, the reply-inbox class, and
+the `wrangler.toml` stanzas both need. Service discovery is not part of it: the wiring selects the
+`'static'` arm, which contacts no backend.
 
 ### `--template full-stack`
 
@@ -207,8 +211,8 @@ purpose: `src/main.ts` owns the process boundary, so every other path stays test
 
 ## Not yet supported
 
-- **Starter-backed templates.** `--template` emits inline wiring; templates that resolve to
-  `@setu-ts/*-starter` wait on Milestone 36, which owns those packages.
+- **A general `--starter` flag.** `full-stack` composes through `@setu-ts/full-stack-starter`, but
+  the other templates emit inline wiring and there is no flag to pick a starter for them.
 - **Flags for plugin commands.** Handlers receive positionals only; use `--` to forward flags.
 - **Plugin installation.** `setu` generates and dispatches; it does not edit your manifest.
 
