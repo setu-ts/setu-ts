@@ -25,7 +25,8 @@ import {
 import { listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
-import { projectFiles, resolveHost } from '../templates/project-files.ts';
+import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
+import { readEnvFilePath } from '../templates/env-file.ts';
 import { DEFAULT_BASE_PORT, readPortFlag } from '../workspace/manifest.ts';
 import {
   DEFAULT_TRANSPORT,
@@ -41,6 +42,7 @@ import {
   workspaceProfile,
 } from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
+import type { PortProbe } from '../workspace/port-probe.ts';
 import { deriveNames } from '../utils/names.ts';
 import {
   findExisting,
@@ -63,6 +65,8 @@ export interface NewDependencies {
   readonly log: (message: string) => void;
   /** Writes a line of error output. */
   readonly error: (message: string) => void;
+  /** Checks whether a workspace base port is currently bindable. */
+  readonly portAvailable?: PortProbe;
 }
 
 /**
@@ -119,6 +123,17 @@ function planWorkspace(
       message:
         '`--di` is no longer supported. Use `--template class-based` for decorators and DI together.',
     };
+  }
+
+  if (args.flags['env-file'] !== undefined) {
+    return {
+      ok: false,
+      message: '--env-file applies to a generated application, not a workspace root.',
+    };
+  }
+
+  if (args.flags['depends-on'] !== undefined) {
+    return { ok: false, message: dependsOnRefusal() };
   }
 
   const basePort = readPortFlag(args.flags);
@@ -215,6 +230,19 @@ function readTransport(
 }
 
 /**
+ * Names where `--depends-on` is actually read.
+ *
+ * Shared by the workspace-root and standalone refusals, so both name the one
+ * command that honours the flag rather than only rejecting it.
+ *
+ * @returns The refusal message
+ */
+function dependsOnRefusal(): string {
+  return `--depends-on applies to \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`: it names an ` +
+    `existing workspace member this service waits for, and only a workspace has members.`;
+}
+
+/**
  * Plans an ordinary project.
  *
  * @param name - The project directory name
@@ -241,6 +269,13 @@ function planProject(
     };
   }
 
+  // Same class again: a startup dependency names a sibling, and a standalone
+  // project has no siblings. Nothing reads the flag here, so accepting it would
+  // report success for a project with no ordering of any kind.
+  if (args.flags['depends-on'] !== undefined) {
+    return { ok: false, message: dependsOnRefusal() };
+  }
+
   // Same class: a transport describes how the members of a workspace reach each
   // other, and a standalone project has no members. Accepting it would report
   // success for a project that registers nothing of the kind.
@@ -257,10 +292,22 @@ function planProject(
   const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
 
+  const envFile = readEnvFilePath(args.flags);
+  if (!envFile.ok) return { ok: false, message: envFile.message };
+
   // The no-template path is a HOST like any other — that is what gives a bare
   // project the seams needing no plugin, so `setu generate route` lands wired.
   const host = resolveHost(choice.template ?? MINIMAL_HOST, runtime);
-  return { ok: true, files: projectFiles(name, runtime, host) };
+  const configured = envFile.path === undefined ? host : withEnvFile(host, envFile.path);
+  if (configured === undefined) {
+    return {
+      ok: false,
+      message: runtime === 'cloudflare-workers'
+        ? '--env-file is unavailable on Cloudflare Workers; use Worker bindings for configuration.'
+        : '--env-file requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
+    };
+  }
+  return { ok: true, files: projectFiles(name, runtime, configured) };
 }
 
 /**
@@ -279,7 +326,7 @@ export async function runNewCommand(
   deps: NewDependencies,
 ): Promise<number> {
   const usage = `Usage: ${PROGRAM_NAME} new <project-name> [--template <name>] ` +
-    `[--runtime <target>] [--workspace] [--dir <path>]`;
+    `[--runtime <target>] [--env-file <path>] [--workspace] [--dir <path>]`;
 
   // `--help` is never an error.
   if (args.flags['help'] === true || args.flags['h'] === true) {
@@ -293,6 +340,7 @@ export async function runNewCommand(
     deps.log('');
     deps.log('Options:');
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
+    deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
     deps.log(
       `  --workspace         Create a monorepo root; add services with ` +
@@ -339,6 +387,20 @@ export async function runNewCommand(
   if (!plan.ok) {
     deps.error(plan.message);
     return EXIT_USAGE;
+  }
+
+  if (workspace && deps.portAvailable !== undefined) {
+    const requested = readPortFlag(args.flags);
+    if (!requested.ok) {
+      deps.error(requested.message);
+      return EXIT_USAGE;
+    }
+    const basePort = requested.port ?? DEFAULT_BASE_PORT;
+    if (!(await deps.portAvailable(basePort))) {
+      deps.error(`Port ${basePort} is already in use, so it cannot be this workspace's base port.`);
+      deps.error('Choose another --port, or stop the process currently listening on it.');
+      return EXIT_ERROR;
+    }
   }
 
   const root = joinPath(resolveDir(deps.cwd, stringFlag(args.flags, 'dir')), projectName);

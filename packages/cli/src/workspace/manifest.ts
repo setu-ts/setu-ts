@@ -86,7 +86,9 @@ export type PortFlagResult =
  * @param flags - The parsed flags
  * @returns The port, `ok` with no port when the flag is absent, or the refusal
  */
-export function readPortFlag(flags: Readonly<Record<string, string | boolean>>): PortFlagResult {
+export function readPortFlag(
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+): PortFlagResult {
   const raw = flags['port'];
   if (raw === undefined) return { ok: true };
   if (typeof raw !== 'string') {
@@ -113,6 +115,8 @@ export interface WorkspaceMember {
   readonly name: string;
   /** The port this member binds, and the port its siblings dial. */
   readonly port: number;
+  /** Sibling services that must answer `/ready` before this member starts. */
+  readonly dependsOn?: readonly string[];
 }
 
 /** A workspace's CLI-owned record of itself. */
@@ -212,9 +216,15 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const record = value as Record<string, unknown>;
   const name = record['name'];
   const port = record['port'];
+  const dependsOn = record['dependsOn'];
   if (typeof name !== 'string' || name === '') return undefined;
   if (typeof port !== 'number') return undefined;
-  return { name, port };
+  if (
+    dependsOn !== undefined &&
+    (!Array.isArray(dependsOn) ||
+      !dependsOn.every((entry) => typeof entry === 'string' && entry !== ''))
+  ) return undefined;
+  return { name, port, ...(dependsOn === undefined ? {} : { dependsOn }) };
 }
 
 /**
@@ -315,6 +325,16 @@ export async function readWorkspaceManifest(
       };
     }
     members.push(member);
+  }
+
+  const names = new Set(members.map((member) => member.name));
+  for (const member of members) {
+    const dependencies = member.dependsOn ?? [];
+    if (
+      dependencies.includes(member.name) ||
+      new Set(dependencies).size !== dependencies.length ||
+      dependencies.some((dependency) => !names.has(dependency))
+    ) return { ok: false, problem: { kind: 'malformed' } };
   }
 
   return {

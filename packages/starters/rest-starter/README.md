@@ -49,6 +49,7 @@ const options: RestStarterOptions = {
   health: {/* health plugin options */},
   metrics: {/* metrics plugin options */},
   openapi: {/* openapi plugin options */},
+  serviceDiscovery: { provider: 'static', services: {/* service endpoint map */} },
   decorators: {/* decorator plugin options */},
   database: {/* database plugin options */},
   auth: {/* auth plugin options */},
@@ -63,6 +64,10 @@ const options: RestStarterOptions = {
 
 const app = createRestApp(options);
 ```
+
+`serviceDiscovery` is optional. When supplied it registers one `ServiceDiscoveryPlugin`; because the
+microservice and full-stack option types extend `RestStarterOptions`, the same arm composes through
+those starters without a second registration path.
 
 ### Advanced Plugin Composition
 

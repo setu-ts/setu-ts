@@ -4,6 +4,7 @@ import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.t
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
+import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
 interface Harness {
   readonly fs: FakeFs;
@@ -12,7 +13,7 @@ interface Harness {
   run(argv: readonly string[]): Promise<number>;
 }
 
-function harness(seed: Readonly<Record<string, string>> = {}): Harness {
+function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: PortProbe): Harness {
   const fs = createFakeFs(seed);
   const out = createRecorder();
   const err = createRecorder();
@@ -21,7 +22,13 @@ function harness(seed: Readonly<Record<string, string>> = {}): Harness {
     out,
     err,
     run: (argv) =>
-      runNewCommand(parseArgs(argv), { fs, cwd: '/work', log: out.sink, error: err.sink }),
+      runNewCommand(parseArgs(argv), {
+        fs,
+        cwd: '/work',
+        log: out.sink,
+        error: err.sink,
+        ...(portAvailable === undefined ? {} : { portAvailable }),
+      }),
   };
 }
 
@@ -319,6 +326,37 @@ describe('runNewCommand', () => {
       expect(entry).toContain('createApp(env)');
       expect(config).toContain('env?: Readonly<Record<string, unknown>>');
       expect(config).toContain('{ env }');
+      expect(config).not.toContain('envFilePath');
+      expect(h.fs.has('/work/shop/.env')).toBe(false);
+      expect(h.fs.has('/work/shop/.env.example')).toBe(false);
+    });
+
+    it('uses Workers bindings instead of a requested dotenv file', async () => {
+      const h = harness();
+
+      expect(
+        await h.run([
+          'api',
+          '--template',
+          'rest',
+          '--runtime',
+          'cloudflare-workers',
+          '--env-file',
+          '.env.local',
+        ]),
+      ).toBe(2);
+      expect(h.err.text()).toContain('unavailable on Cloudflare Workers');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('omits filesystem dotenv configuration from a Workers REST scaffold', async () => {
+      const h = harness();
+      expect(await h.run(['api', '--template', 'rest', '--runtime', 'cloudflare-workers'])).toBe(0);
+
+      const config = h.fs.read('/work/api/setu.config.ts');
+      expect(config).toContain('ConfigPlugin()');
+      expect(config).not.toContain('envFilePath');
+      expect(h.fs.has('/work/api/.env')).toBe(false);
     });
 
     it('threads env through the Workers entry for a template without a factory too', async () => {
@@ -352,6 +390,56 @@ describe('runNewCommand', () => {
   });
 
   describe('--template', () => {
+    it('emits an ignored dotenv file, a tracked example, and one matching ConfigPlugin path', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'rest', '--env-file', '.env.local'])).toBe(0);
+
+      expect(h.fs.read('/work/app/.env.local')).toContain('Local configuration');
+      expect(h.fs.read('/work/app/.env.local.example')).toContain('Copy this file');
+      expect(h.fs.read('/work/app/.gitignore')).toContain('.env.local');
+      // `envFileOptional` rides along, and is the reason this project starts on
+      // a machine that never ran `setu new` — the emitted file is gitignored.
+      expect(h.fs.read('/work/app/setu.config.ts')).toContain(
+        "ConfigPlugin({ envFilePath: '.env.local', envFileOptional: true })",
+      );
+    });
+
+    it('refuses an env file for a template without ConfigPlugin', async () => {
+      const h = harness();
+      expect(await h.run(['app', '--env-file', '.env'])).toBe(2);
+      expect(h.err.text()).toContain('requires a template that registers ConfigPlugin');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('names the variables its own generated source reads', async () => {
+      // full-stack emits `config.getOrThrow<string>('SESSION_SECRET')`, so a
+      // dotenv pair naming nothing left the one template that REQUIRES a value
+      // unable to start, and its committed example a blank file — which is the
+      // question the dotenv deliverable exists to answer.
+      const h = harness();
+      expect(await h.run(['app', '--template', 'full-stack'])).toBe(0);
+
+      const env = h.fs.read('/work/app/.env');
+      const example = h.fs.read('/work/app/.env.example');
+      expect(env).toContain('SESSION_SECRET=');
+      expect(example).toContain('SESSION_SECRET=');
+      // The gitignored file carries a working development value; the COMMITTED
+      // example carries none, so nothing here can be deployed by accident.
+      expect(env).toContain('SESSION_SECRET=dev-only-insecure-session-secret-change-me');
+      expect(example).toContain('SESSION_SECRET=\n');
+    });
+
+    it('refuses --depends-on, which only a workspace member can honour', async () => {
+      // Every other misapplied flag is refused — `--port`, `--transport`,
+      // `--env-file` on a root — and this one was silently accepted, so a
+      // standalone project scaffolded successfully while the ordering the
+      // developer asked for was read by nothing at all.
+      const h = harness();
+      expect(await h.run(['app', '--template', 'rest', '--depends-on', 'orders'])).toBe(2);
+      expect(h.err.text()).toContain('generate app');
+      expect(h.fs.writes).toEqual([]);
+    });
+
     it('writes the rest plugin set into setu.config.ts', async () => {
       const h = harness();
       expect(await h.run(['app', '--template', 'rest'])).toBe(0);
@@ -359,7 +447,6 @@ describe('runNewCommand', () => {
       for (
         const symbol of [
           'RuntimePlugin',
-          'ConfigPlugin',
           'LoggerPlugin',
           'ValidationPlugin',
           'HttpSecurityPlugin',
@@ -368,6 +455,7 @@ describe('runNewCommand', () => {
       ) {
         expect(config).toContain(`${symbol}()`);
       }
+      expect(config).toContain("ConfigPlugin({ envFilePath: '.env', envFileOptional: true })");
       // Three plugins take a generated-artifact seam, so they are NOT argument-free.
       // Asserted by their actual call so a dropped seam shows up here rather than only
       // in the drift gate.
@@ -383,7 +471,7 @@ describe('runNewCommand', () => {
 
       const order = [
         'createApplication({',
-        'app.middleware.add(errorHandler()',
+        "app.middleware.add(errorHandler({ format: 'rfc9457' })",
         'registerGeneratedRoutes(app.router);',
         'for (const generated of GENERATED_MIDDLEWARE) {',
         "app.router.get('/'",
@@ -468,7 +556,7 @@ describe('runNewCommand', () => {
       // middleware at 20 — so a throw there escapes the try/catch entirely and
       // the project answers with a bare adapter 500, no RFC 7807 body, no log.
       expect(config).toContain(
-        "app.middleware.add(errorHandler(), { priority: 0, name: 'error-handler' });",
+        "app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0, name: 'error-handler' });",
       );
       expect(config).not.toContain('app.middleware.add(errorHandler());');
     });
@@ -482,7 +570,7 @@ describe('runNewCommand', () => {
       // ordering requirement applies — and it composes REST_MIDDLEWARE, so this
       // guards that the shared list keeps carrying its position.
       expect(config).toContain(
-        "app.middleware.add(errorHandler(), { priority: 0, name: 'error-handler' });",
+        "app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0, name: 'error-handler' });",
       );
     });
 
@@ -774,6 +862,13 @@ describe('runNewCommand', () => {
     });
   });
 
+  it('refuses a workspace base port another local process already holds', async () => {
+    const h = harness({}, () => Promise.resolve(false));
+    expect(await h.run(['platform', '--workspace', '--port', '3000'])).toBe(1);
+    expect(h.err.text()).toContain('Port 3000 is already in use');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   describe('usage errors', () => {
     it('returns 2 when the project name is missing', async () => {
       const h = harness();
@@ -968,6 +1063,13 @@ describe('--workspace', () => {
       const h = harness();
       expect(await h.run(['acme', '--workspace', '--di'])).toBe(2);
       expect(h.err.text()).toContain('--template class-based');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('refuses --depends-on on the root, which has no members yet', async () => {
+      const h = harness();
+      expect(await h.run(['acme', '--workspace', '--depends-on', 'orders'])).toBe(2);
+      expect(h.err.text()).toContain('generate app');
       expect(h.fs.writes).toEqual([]);
     });
 

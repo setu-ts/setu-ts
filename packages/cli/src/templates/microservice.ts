@@ -216,6 +216,6 @@ export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   files: seamFiles(MICROSERVICE_SEAMS),
   pluginSpreads: seamPluginSpreads(MICROSERVICE_SEAMS),
   setupCalls: seamSetupCalls(MICROSERVICE_SEAMS),
-  manifest: FUNCTIONAL_MODULE_MANIFEST,
+  manifest: { ...FUNCTIONAL_MODULE_MANIFEST, envFilePath: '.env' },
   runtimeSwaps: { 'cloudflare-workers': WORKERS_SWAP },
 };

@@ -209,6 +209,7 @@ export async function bootAndSignal(
 
   const child = new Deno.Command(Deno.execPath(), {
     args: ['run', '-A', '--node-modules-dir=none', '--config', `${project}/deno.json`, entry],
+    cwd: project,
     stdout: 'piped',
     stderr: 'piped',
   }).spawn();
@@ -228,7 +229,11 @@ export async function bootAndSignal(
   const stdout = new Response(child.stdout);
   const stderr = new Response(child.stderr);
   if (!served) {
-    child.kill('SIGKILL');
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // The child may already have exited; preserve its useful stderr below.
+    }
     await child.status;
     throw new Error(`The project never served a request:\n${await stderr.text()}`);
   }
@@ -269,6 +274,7 @@ export async function bootAndProbe(
       `${project}/deno.json`,
       `${project}/run-probe.ts`,
     ],
+    cwd: project,
     stdout: 'piped',
     stderr: 'piped',
   });
@@ -342,6 +348,7 @@ export async function bootWithGeneratedPermissions(
       `${project}/deno.json`,
       entry,
     ],
+    cwd: project,
     stdout: 'piped',
     stderr: 'piped',
   }).spawn();
@@ -372,7 +379,11 @@ export async function bootWithGeneratedPermissions(
     // In a `finally`, because a probe that rejects — a connection reset, or the
     // server dying after it answered readiness — would otherwise leave a bound
     // subprocess alive for the rest of the suite.
-    child.kill('SIGKILL');
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // The child may already have exited; preserve its useful stderr below.
+    }
   }
 
   const status = await child.status;

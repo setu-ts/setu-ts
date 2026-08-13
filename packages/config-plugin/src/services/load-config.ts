@@ -46,7 +46,9 @@ import { validateConfig } from '../validators/config-validator.ts';
  * @param options - Loading, expansion, validation, and instance options
  * @returns The configuration snapshot
  * @throws {Error} If `envFilePath` is set and the runtime has no filesystem,
- * if a configured file cannot be read, or if validation rejects the result
+ * if a configured file cannot be read, or if validation rejects the result.
+ * Setting `envFileOptional` narrows the middle case: an ABSENT path is then
+ * skipped, while a path that exists and cannot be read still throws
  * @since 0.2.0
  */
 export async function loadConfig(
@@ -61,7 +63,10 @@ export async function loadConfig(
   }
 
   const envFilePath = options?.envFilePath;
-  const loaderOptions: EnvLoaderOptions = envFilePath === undefined ? {} : { envFilePath };
+  const loaderOptions: EnvLoaderOptions = envFilePath === undefined ? {} : {
+    envFilePath,
+    ...(options?.envFileOptional === undefined ? {} : { envFileOptional: options.envFileOptional }),
+  };
 
   // Load raw string values from environment and files.
   const loaded = await loadEnv(runtime, loaderOptions);

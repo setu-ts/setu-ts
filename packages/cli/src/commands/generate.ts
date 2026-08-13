@@ -19,6 +19,7 @@ import {
   type TargetRuntime,
 } from '../constants.ts';
 import { runAppCommand } from './app.ts';
+import type { PortProbe } from '../workspace/port-probe.ts';
 import { runLibraryCommand } from './library.ts';
 import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
@@ -58,6 +59,8 @@ export interface GenerateDependencies {
   readonly error: (message: string) => void;
   /** Loads a custom schematic module; defaults to a real dynamic `import()`. */
   readonly load?: ModuleLoader;
+  /** Checks whether a workspace port can bind before an app is assigned one. */
+  readonly portAvailable?: PortProbe;
 }
 
 /**
@@ -118,6 +121,7 @@ export async function runGenerateCommand(
       dir,
       log: deps.log,
       error: deps.error,
+      ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
     });
   }
 

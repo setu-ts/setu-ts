@@ -16,7 +16,7 @@ export interface ParsedArgs {
   /** The positional arguments, in order (command, subcommand, name, …). */
   readonly positionals: readonly string[];
   /** Flag values: `true` for boolean flags, the string for valued flags. */
-  readonly flags: Readonly<Record<string, string | boolean>>;
+  readonly flags: Readonly<Record<string, string | boolean | readonly string[]>>;
 }
 
 /**
@@ -41,7 +41,28 @@ export function parseArgs(
   valueFlags: ReadonlySet<string> = VALUE_FLAGS,
 ): ParsedArgs {
   const positionals: string[] = [];
-  const flags: Record<string, string | boolean> = {};
+  const flags: Record<string, string | boolean | readonly string[]> = {};
+
+  const setFlag = (key: string, value: string | boolean): void => {
+    // Dependencies are intentionally repeatable: a service can wait on more
+    // than one sibling, and collapsing a repeated flag would silently discard
+    // a startup edge. All other flags retain their established last-value wins
+    // behavior.
+    if (key !== 'depends-on') {
+      flags[key] = value;
+      return;
+    }
+    const existing = flags[key];
+    if (existing === undefined) {
+      flags[key] = value;
+    } else if (Array.isArray(existing)) {
+      flags[key] = typeof value === 'string' ? [...existing, value] : value;
+    } else {
+      flags[key] = typeof existing === 'string' && typeof value === 'string'
+        ? [existing, value]
+        : value;
+    }
+  };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -63,7 +84,7 @@ export function parseArgs(
       const eq = body.indexOf('=');
       const key = body.slice(0, eq);
       const value = body.slice(eq + 1);
-      flags[key] = value === '' ? true : value;
+      setFlag(key, value === '' ? true : value);
       continue;
     }
 
@@ -71,12 +92,12 @@ export function parseArgs(
     // the next token is not itself a flag.
     const next = argv[i + 1];
     if (valueFlags.has(body) && next !== undefined && next !== '--' && !next.startsWith('-')) {
-      flags[body] = next;
+      setFlag(body, next);
       i++;
       continue;
     }
 
-    flags[body] = true;
+    setFlag(body, true);
   }
 
   return {
@@ -93,9 +114,28 @@ export function parseArgs(
  * @returns The string value, or undefined when absent or supplied as a boolean
  */
 export function stringFlag(
-  flags: Readonly<Record<string, string | boolean>>,
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
   name: string,
 ): string | undefined {
   const value = flags[name];
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Reads every value given to a repeatable string flag.
+ *
+ * @param flags - The parsed flag record
+ * @param name - The repeatable flag name
+ * @returns Each supplied string, or undefined when the flag is absent or malformed
+ */
+export function stringFlags(
+  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+  name: string,
+): readonly string[] | undefined {
+  const value = flags[name];
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value) && value.every((entry): entry is string => typeof entry === 'string')) {
+    return value;
+  }
+  return undefined;
 }

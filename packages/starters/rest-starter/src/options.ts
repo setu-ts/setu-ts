@@ -17,6 +17,7 @@ import type { SsePluginOptions } from '@setu-ts/sse-plugin';
 import type { RealtimeBackplanePluginOptions } from '@setu-ts/realtime-backplane-plugin';
 import type { SessionPluginOptions } from '@setu-ts/session-plugin';
 import type { GraphqlPluginOptions } from '@setu-ts/graphql-plugin';
+import type { ServiceDiscoveryPluginOptions } from '@setu-ts/service-discovery-plugin';
 
 /**
  * The real-time arm: one option grouping the three plugins that together make a
@@ -165,4 +166,9 @@ export interface RestStarterOptions {
    * @since 0.3.0
    */
   graphql?: GraphqlPluginOptions;
+  /**
+   * Optional arm: ServiceDiscoveryPlugin. Provided → service discovery is
+   * registered; omitted → no discovery capability is added.
+   */
+  serviceDiscovery?: ServiceDiscoveryPluginOptions;
 }

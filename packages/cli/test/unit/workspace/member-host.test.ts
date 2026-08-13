@@ -69,6 +69,23 @@ describe('withWorkspaceMember', () => {
     const base = resolveHost(MINIMAL_HOST, 'deno');
     expect(withWorkspaceMember(base, HTTP, 'orders')).toEqual(base);
   });
+
+  it('passes the generated map through the full-stack starter factory', () => {
+    const member = withWorkspaceMember(hostOf('full-stack'), HTTP, 'storefront');
+
+    expect(member.plugins).toEqual([]);
+    expect(member.appFactoryContext.serviceEndpoints).toBe(SERVICE_ENDPOINTS_EXPORT);
+    expect(member.localImports).toContainEqual({
+      symbols: [SERVICE_ENDPOINTS_EXPORT],
+      from: DISCOVERY_SPECIFIER,
+    });
+    expect(
+      member.appFactory?.args?.({
+        runtime: 'deno',
+        ...member.appFactoryContext,
+      }),
+    ).toContain(`serviceDiscovery: { provider: 'static', services: ${SERVICE_ENDPOINTS_EXPORT} }`);
+  });
 });
 
 describe('withWorkspaceMember — the transport overlay', () => {

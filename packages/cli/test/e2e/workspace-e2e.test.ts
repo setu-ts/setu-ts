@@ -113,6 +113,27 @@ describe('workspace scaffolding — end to end', () => {
     return ws;
   }
 
+  it('is formatted and lints clean, like a scaffolded project', async () => {
+    // M63 established this bar for `setu new <name>` and `scaffold-runs-e2e`
+    // gates it there — but only there, so a workspace could be, and was, emitted
+    // failing both while every gate stayed green. The offenders were CLI-owned
+    // files the developer never wrote: the generated `scripts/dev.ts` (two empty
+    // `catch` blocks, and lines past the width its own `fmt` config sets) and a
+    // root README paragraph hand-wrapped to the wrong column.
+    const ws = await twoMembers();
+
+    for (const argv of [['fmt', '--check'], ['lint']]) {
+      const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
+        args: argv,
+        cwd: ws,
+        stdout: 'piped',
+        stderr: 'piped',
+      }).output();
+      const decoder = new TextDecoder();
+      expect(code, `${argv.join(' ')}: ${decoder.decode(stdout)}${decoder.decode(stderr)}`).toBe(0);
+    }
+  });
+
   it('creates a root whose files exist on disk', async () => {
     expect(await run(['new', 'acme', '--workspace'])).toBe(0);
     for (const name of ['deno.json', WORKSPACE_MANIFEST, 'README.md', '.gitignore']) {
@@ -141,17 +162,118 @@ describe('workspace scaffolding — end to end', () => {
     expect(billing).toContain(`port: ${base},`);
   });
 
+  it('reallocates occupied ports across the manifest and every generated artifact', async () => {
+    const ws = await twoMembers();
+    const code = await runCli(['workspace', 'ports', '--reallocate', '--dir', ws], {
+      fs,
+      cwd: root,
+      now: () => runtime.now(),
+      log: (message) => out.push(message),
+      error: (message) => err.push(message),
+      // The first and third candidates are occupied by unrelated local work;
+      // the planner must preserve member order while finding the next two.
+      portAvailable: (port) => Promise.resolve(port !== base && port !== base + 2),
+    });
+
+    expect(code).toBe(0);
+    const manifest = await Deno.readTextFile(`${ws}/${WORKSPACE_MANIFEST}`);
+    expect(manifest).toContain(`"port": ${base + 1}`);
+    expect(manifest).toContain(`"port": ${base + 3}`);
+    expect(await Deno.readTextFile(`${ws}/apps/orders/${DISCOVERY_MODULE}`)).toContain(
+      `port: ${base + 3}`,
+    );
+    expect(await Deno.readTextFile(`${ws}/docker/compose.yaml`)).toContain(`${base + 1}:`);
+    expect(await Deno.readTextFile(`${ws}/k8s/members.yaml`)).toContain(
+      `containerPort: ${base + 3}`,
+    );
+  });
+
   it('gives every member the start task the root dev task runs', async () => {
     const ws = await twoMembers();
     const root = JSON.parse(await Deno.readTextFile(`${ws}/deno.json`)) as {
       tasks?: Record<string, string>;
     };
-    expect(root.tasks?.['dev']).toBe('deno task --recursive start');
+    expect(root.tasks?.['dev']).toBe(
+      'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+    );
     for (const member of ['orders', 'billing']) {
       const manifest = JSON.parse(
         await Deno.readTextFile(`${ws}/apps/${member}/deno.json`),
       ) as { tasks?: Record<string, string> };
       expect(manifest.tasks?.['start']).toContain('main.ts');
+    }
+  });
+
+  it('does not start a dependent until its prerequisite answers /ready', async () => {
+    expect(await run(['new', 'acme', '--workspace', '--port', String(base)])).toBe(0);
+    const ws = `${root}/acme`;
+    expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
+    expect(
+      await run([
+        'g',
+        'app',
+        'billing',
+        '--template',
+        'microservice',
+        '--depends-on',
+        'orders',
+        '--dir',
+        ws,
+      ]),
+    ).toBe(0);
+    for (const member of ['orders', 'billing']) await useWorkspacePackages(`${ws}/apps/${member}`);
+
+    const ordersMain = `${ws}/apps/orders/main.ts`;
+    const original = await Deno.readTextFile(ordersMain);
+    await Deno.writeTextFile(
+      ordersMain,
+      original.replace(
+        'const app = await createApp();',
+        'await new Promise((resolve) => setTimeout(resolve, 800));\nconst app = await createApp();',
+      ),
+    );
+
+    const dev = new Deno.Command(Deno.execPath(), {
+      args: ['task', 'dev'],
+      cwd: ws,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).spawn();
+    const stdout = new Response(dev.stdout).text();
+    const stderr = new Response(dev.stderr).text();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await expect(fetch(`http://127.0.0.1:${base + 1}/ready`)).rejects.toThrow();
+
+      let ready = false;
+      for (let attempt = 0; attempt < 100 && !ready; attempt += 1) {
+        try {
+          ready = (await fetch(`http://127.0.0.1:${base + 1}/ready`)).ok;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      if (!ready) {
+        try {
+          dev.kill('SIGTERM');
+        } catch {
+          // The runner already exited; the captured output below explains why.
+        }
+        await dev.status;
+        throw new Error(
+          `Workspace dev runner did not start billing:\n${await stdout}\n${await stderr}`,
+        );
+      }
+    } finally {
+      try {
+        dev.kill('SIGTERM');
+      } catch {
+        // A startup failure already terminated the runner; its captured streams
+        // below still need releasing so Deno's resource sanitizer can finish.
+      }
+      await dev.status;
+      await stdout;
+      await stderr;
     }
   });
 
@@ -233,7 +355,9 @@ describe('workspace scaffolding — end to end', () => {
     // The merge keeps what the root already declared: a regenerated root would
     // drop the globs that make it a workspace at all.
     expect(rootManifest.workspace).toEqual(['./apps/*', './libs/*']);
-    expect(rootManifest.tasks?.['dev']).toBe('deno task --recursive start');
+    expect(rootManifest.tasks?.['dev']).toBe(
+      'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+    );
 
     // The route whose absence made `/` a blank 200 in every scaffolded
     // full-stack project. Asserted as a file because proving it functionally
@@ -299,7 +423,8 @@ describe('workspace scaffolding — end to end', () => {
     // through its own generated entry — so the port under test is the one the
     // member actually binds, not one this test chose.
     const server = new Deno.Command(Deno.execPath(), {
-      args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/billing/main.ts`],
+      args: ['run', '-A', '--node-modules-dir=none', 'main.ts'],
+      cwd: `${ws}/apps/billing`,
       stdout: 'piped',
       stderr: 'piped',
     }).spawn();

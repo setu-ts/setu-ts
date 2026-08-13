@@ -12,8 +12,8 @@
  * @module
  */
 
-import type { TargetRuntime } from '../constants.ts';
-import type { TemplateDefinition } from './registry.ts';
+import type { AppFactoryRenderContext, TemplateDefinition } from './registry.ts';
+import { renderConfigOptions } from './env-file.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
@@ -39,17 +39,20 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
 /**
  * Renders the argument list for `createFullStackAppFromConfig`.
  *
- * The static-asset option is the only runtime-dependent part of this template.
+ * Static assets and dotenv configuration are runtime-dependent in this template.
  * On Cloudflare Workers there is no filesystem, so the framework's asset
  * handler would answer 404 for every asset; omitting `assetsDir` registers no
  * asset route at all and leaves serving to the platform's own static-asset
  * binding, which is what a Workers deployment should use anyway. Everywhere
- * else the framework serves the client build directly.
+ * else the framework serves the client build directly. Workers also have no
+ * filesystem, so their `ConfigPlugin` reads the request bindings rather than a
+ * dotenv path.
  *
- * @param runtime - The selected runtime target
+ * @param context - The selected runtime and any workspace-only factory inputs
  * @returns Source for the call's arguments, without the enclosing parentheses
  */
-function fullStackArgs(runtime: TargetRuntime): string {
+function fullStackArgs(context: AppFactoryRenderContext): string {
+  const { runtime, serviceEndpoints } = context;
   const assets = runtime === 'cloudflare-workers'
     // Assets are served by the platform binding, not the framework.
     ? ''
@@ -62,6 +65,13 @@ function fullStackArgs(runtime: TargetRuntime): string {
   // parameter is undefined and the factory reads the platform environment as
   // usual; on Workers it is the per-request bindings object, which is the only
   // place configuration exists there.
+  const discovery = serviceEndpoints === undefined
+    ? ''
+    : `\n    serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
+  const config = runtime === 'cloudflare-workers'
+    ? ''
+    : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
+
   return `(config) => ({
     reactRouter: {
       // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
@@ -83,8 +93,8 @@ function fullStackArgs(runtime: TargetRuntime): string {
     session: {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
       csrf: {},
-    },
-  }), { env }`;
+    },${discovery}
+  }), { env${config} }`;
 }
 
 /**
@@ -122,6 +132,14 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   files: [...FULL_STACK_APP_FILES, ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES)],
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
+    envFilePath: '.env',
+    // `fullStackArgs` emits `config.getOrThrow<string>('SESSION_SECRET')`, so
+    // without this the template scaffolds a project that throws at startup.
+    envVariables: [{
+      name: 'SESSION_SECRET',
+      description: 'Signs and encrypts session cookies. Use a long random value in production.',
+      develop: 'dev-only-insecure-session-secret-change-me',
+    }],
     // The one template with a real frontend build, and the only one that should
     // therefore carry an npm manifest on a Deno or Workers target.
     npmBuildScript: 'react-router build',
