@@ -233,7 +233,7 @@ describe('what a Bun workspace renders differently', () => {
       scripts?: Record<string, string>;
     };
     expect(manifest.workspaces).toEqual(['apps/*', 'libs/*']);
-    expect(manifest.scripts?.['dev']).toContain('bun run');
+    expect(manifest.scripts?.['dev']).toBe('bun scripts/dev.mjs');
     expect(manifest.scripts?.['dev']).not.toContain('npm');
   });
 

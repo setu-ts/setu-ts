@@ -75,15 +75,17 @@ describe('microservice-starter / createMicroserviceApp', () => {
     const response = await app.inject({ method: 'GET', url: '/test' });
     expect(response.statusCode).toBe(200);
   });
-  it('inherits the realtime and di arms from the REST tier', () => {
+  it('inherits the realtime, DI, and discovery arms from the REST tier', () => {
     const names = buildMicroservicePlugins({
       di: {},
       realtime: { websocket: {}, sse: {}, backplane: {} },
+      serviceDiscovery: { provider: 'static', services: {} },
     }).map((p) => p.name);
     expect(names).toContain('di-plugin');
     expect(names).toContain('websocket-plugin');
     expect(names).toContain('sse-plugin');
     expect(names).toContain('realtime-backplane-plugin');
+    expect(names).toContain('service-discovery-plugin');
   });
 
   it('omits the inherited arms by default', () => {
@@ -92,6 +94,7 @@ describe('microservice-starter / createMicroserviceApp', () => {
     expect(names).not.toContain('websocket-plugin');
     expect(names).not.toContain('sse-plugin');
     expect(names).not.toContain('realtime-backplane-plugin');
+    expect(names).not.toContain('service-discovery-plugin');
   });
 
   // The 'messaging' backplane transport throws on the REST tier, which supplies no

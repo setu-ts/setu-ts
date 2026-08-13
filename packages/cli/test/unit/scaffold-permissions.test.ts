@@ -62,6 +62,12 @@ describe('generated start-task permissions', () => {
     expect(startTaskOf(getTemplate('full-stack')!)).toContain('--allow-read');
   });
 
+  it('grants every ConfigPlugin-backed template read access for its dotenv file', () => {
+    for (const name of HEALTH_TEMPLATES) {
+      expect(startTaskOf(getTemplate(name)!)).toContain('--allow-read');
+    }
+  });
+
   it('grants the no-template host nothing beyond the base pair', () => {
     // It registers only the runtime plugin, so a wider grant would be
     // privilege it never exercises.

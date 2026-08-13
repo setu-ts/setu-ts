@@ -161,13 +161,14 @@ accepts additional registrations.
 
 ## Realtime and DI arms
 
-`createFullStackApp` inherits the `realtime` and `di` arms from the REST starter — the option type
-extends `RestStarterOptions`, so every sub-arm behaves identically and nothing new is registered by
-default.
+`createFullStackApp` inherits the `realtime`, `di`, and optional `serviceDiscovery` arms from the
+REST starter — the option type extends `RestStarterOptions`, so every sub-arm behaves identically
+and nothing new is registered by default.
 
 ```typescript
 const app = createFullStackApp({
   di: {},
+  serviceDiscovery: { provider: 'static', services: {} },
   realtime: { sse: {}, websocket: {}, backplane: { transport: 'messaging' } },
 });
 ```

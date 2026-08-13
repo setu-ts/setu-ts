@@ -84,7 +84,7 @@ export interface WorkspaceRuntimeProfile {
   readonly envRead: (variable: string, fallback: string) => string;
   /** What a developer runs to install the workspace's dependencies. */
   readonly install: string;
-  /** What runs every member's start script at once. */
+  /** What invokes this workspace's dependency-aware development runner. */
   readonly runAll: string;
   /**
    * Renders the command that runs one named script in the current directory.
@@ -139,7 +139,7 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     memberGlob: (directory) => `./${directory}/*`,
     envRead: denoEnvRead,
     install: 'deno install',
-    runAll: 'deno task --recursive start',
+    runAll: 'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
     runScript: (script) => `deno task ${script}`,
     lockfile: 'deno.lock',
   },
@@ -154,7 +154,7 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     install: 'npm install',
     // `--workspaces` rather than `--filter`: npm's own flag, and it runs the
     // script in every workspace that declares it.
-    runAll: 'npm run --workspaces start',
+    runAll: 'node scripts/dev.mjs',
     runScript: (script) => `npm run ${script}`,
     lockfile: 'package-lock.json',
   },
@@ -167,7 +167,7 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     memberGlob: (directory) => `${directory}/*`,
     envRead: nodeEnvRead,
     install: 'bun install',
-    runAll: "bun run --filter '*' start",
+    runAll: 'bun scripts/dev.mjs',
     runScript: (script) => `bun run ${script}`,
     // Measured: `bun install` populates each MEMBER's `node_modules` as well as
     // the hoisted root — which is why the generated `.gitignore` and
@@ -187,7 +187,7 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     memberGlob: (directory) => `${directory}/*`,
     envRead: nodeEnvRead,
     install: 'npm install',
-    runAll: 'npm run --workspaces start',
+    runAll: 'node scripts/dev.mjs',
     runScript: (script) => `npm run ${script}`,
     lockfile: 'package-lock.json',
   },

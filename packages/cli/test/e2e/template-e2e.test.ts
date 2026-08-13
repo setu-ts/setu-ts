@@ -658,6 +658,7 @@ describe('setu generate module, end to end', () => {
         `${project}/deno.json`,
         `${project}/run-probe.ts`,
       ],
+      cwd: project,
       stdout: 'piped',
       stderr: 'piped',
     });

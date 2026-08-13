@@ -27,5 +27,14 @@ Deno.exit(
     now: () => runtime.now(),
     log: (message) => console.log(message),
     error: (message) => console.error(message),
+    portAvailable: (port: number): Promise<boolean> => {
+      try {
+        const listener = Deno.listen({ hostname: '127.0.0.1', port });
+        listener.close();
+        return Promise.resolve(true);
+      } catch {
+        return Promise.resolve(false);
+      }
+    },
   }),
 );

@@ -17,6 +17,7 @@ import {
 } from '../../src/workspace/runtime-profile.ts';
 import type { TransportName } from '../../src/workspace/transport.ts';
 import type { TargetRuntime } from '../../src/constants.ts';
+import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
 interface Harness {
   readonly fs: FakeFs;
@@ -59,6 +60,7 @@ function harness(
   transport: TransportName = 'http',
   root?: string,
   runtime: TargetRuntime = 'deno',
+  portAvailable?: PortProbe,
 ): Harness {
   const seed: Record<string, string> = {};
   if (members !== undefined) {
@@ -94,7 +96,13 @@ function harness(
     out,
     err,
     run: (argv) =>
-      runAppCommand(parseArgs(argv), { fs, dir: '/ws', log: out.sink, error: err.sink }),
+      runAppCommand(parseArgs(argv), {
+        fs,
+        dir: '/ws',
+        log: out.sink,
+        error: err.sink,
+        ...(portAvailable === undefined ? {} : { portAvailable }),
+      }),
   };
 }
 
@@ -105,6 +113,7 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', '--help'])).toBe(0);
       expect(h.out.text()).toContain('generate app <name>');
       expect(h.out.text()).toContain('--template');
+      expect(h.out.text()).toContain('--env-file');
     });
 
     it('refuses a missing name with a usage error', async () => {
@@ -236,7 +245,9 @@ describe('runAppCommand', () => {
       // Everything else the root held survives: this is a one-key merge, not a
       // regeneration, so a task the developer added is not discarded.
       expect(root['workspace']).toEqual(['./apps/*']);
-      expect(root['tasks']).toEqual({ dev: 'deno task --recursive start' });
+      expect(root['tasks']).toEqual({
+        dev: 'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+      });
     });
 
     // Every OTHER member must leave the root alone. Declaring it up front would
@@ -352,6 +363,28 @@ describe('runAppCommand', () => {
         members: { name: string; port: number }[];
       };
       expect(manifest.members.at(-1)).toEqual({ name: 'shipping', port: 4445 });
+    });
+
+    it('skips ports another local process already holds', async () => {
+      const h = harness(
+        [],
+        3000,
+        'http',
+        undefined,
+        'deno',
+        (port) => Promise.resolve(port !== 3000),
+      );
+      expect(await h.run(['app', 'billing'])).toBe(0);
+      expect(h.fs.read(`/ws/apps/billing/${DISCOVERY_MODULE}`)).toContain(
+        'export const SERVICE_PORT = 3001;',
+      );
+    });
+
+    it('refuses an explicitly requested port another local process holds', async () => {
+      const h = harness([], 3000, 'http', undefined, 'deno', () => Promise.resolve(false));
+      expect(await h.run(['app', 'billing', '--port', '3000'])).toBe(1);
+      expect(h.err.text()).toContain('already in use');
+      expect(h.fs.writes).toEqual([]);
     });
 
     // The escape hatch from the exhausted-range refusal the workspace gate
@@ -534,6 +567,65 @@ describe('runAppCommand', () => {
     });
   });
 
+  describe('--depends-on', () => {
+    it('records each existing prerequisite in the member manifest entry', async () => {
+      const h = harness([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]);
+      expect(
+        await h.run([
+          'app',
+          'shipping',
+          '--depends-on',
+          'orders',
+          '--depends-on',
+          'billing',
+        ]),
+      ).toBe(0);
+      const manifest = JSON.parse(h.fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
+        members: WorkspaceMember[];
+      };
+      expect(manifest.members.at(-1)).toEqual({
+        name: 'shipping',
+        port: 3002,
+        dependsOn: ['orders', 'billing'],
+      });
+    });
+
+    it('refuses a missing or duplicate prerequisite without writes', async () => {
+      const missing = harness([{ name: 'orders', port: 3000 }]);
+      expect(await missing.run(['app', 'billing', '--depends-on', 'payments'])).toBe(2);
+      expect(missing.err.text()).toContain('not an existing workspace member');
+      expect(missing.fs.writes).toEqual([]);
+
+      const duplicate = harness([{ name: 'orders', port: 3000 }]);
+      expect(
+        await duplicate.run([
+          'app',
+          'billing',
+          '--depends-on',
+          'orders',
+          '--depends-on',
+          'orders',
+        ]),
+      ).toBe(2);
+      expect(duplicate.err.text()).toContain('only once');
+      expect(duplicate.fs.writes).toEqual([]);
+    });
+  });
+
+  describe('--env-file', () => {
+    it('refuses a member whose template registers no ConfigPlugin', async () => {
+      // The one refusal this path can produce. A Workers arm would be
+      // unreachable: a workspace refuses `--runtime cloudflare-workers` at
+      // creation, and `readWorkspaceManifest` refuses a manifest naming it, so
+      // no member can have a runtime without a filesystem.
+      const h = harness([{ name: 'orders', port: 3000 }]);
+      expect(await h.run(['app', 'bare', '--env-file', '.env'])).toBe(2);
+
+      expect(h.err.text()).toContain('registers ConfigPlugin');
+      expect(h.fs.writes).toEqual([]);
+    });
+  });
+
   describe('a member with the discovery plugin', () => {
     it('wires the config at the generated map', async () => {
       const h = harness([]);
@@ -546,6 +638,8 @@ describe('runAppCommand', () => {
         `ServiceDiscoveryPlugin({ provider: 'static', services: SERVICE_ENDPOINTS })`,
       );
       expect(config).not.toContain('services: {}');
+      expect(h.fs.has('/ws/apps/orders/.env')).toBe(true);
+      expect(h.fs.has('/ws/apps/orders/.env.example')).toBe(true);
     });
 
     it('leaves a member without that plugin unwired to the map', async () => {
@@ -554,6 +648,19 @@ describe('runAppCommand', () => {
       expect(h.fs.read('/ws/apps/web/setu.config.ts')).not.toContain('SERVICE_ENDPOINTS');
       // It still carries the module, because `main.ts` reads the port from it.
       expect(h.fs.has(`/ws/apps/web/${DISCOVERY_MODULE}`)).toBe(true);
+    });
+
+    it('passes the generated map through the full-stack starter factory', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
+      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+      const config = h.fs.read('/ws/apps/web/setu.config.ts');
+      expect(config).toContain(
+        `import { SERVICE_ENDPOINTS } from './${DISCOVERY_MODULE}';`,
+      );
+      expect(config).toContain(
+        "serviceDiscovery: { provider: 'static', services: SERVICE_ENDPOINTS }",
+      );
     });
 
     it('rejects the retired independent DI flag', async () => {

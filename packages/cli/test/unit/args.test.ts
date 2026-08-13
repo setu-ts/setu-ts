@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { parseArgs, stringFlag } from '../../src/args.ts';
+import { parseArgs, stringFlag, stringFlags } from '../../src/args.ts';
 
 describe('parseArgs', () => {
   it('returns empty positionals and flags for empty argv', () => {
@@ -88,6 +88,11 @@ describe('parseArgs', () => {
     expect(parseArgs(['--dir', '/a', '--dir', '/b']).flags['dir']).toBe('/b');
   });
 
+  it('keeps every repeated dependency flag in order', () => {
+    expect(parseArgs(['--depends-on', 'orders', '--depends-on=billing']).flags['depends-on'])
+      .toEqual(['orders', 'billing']);
+  });
+
   it('honours a caller-supplied value-flag set', () => {
     const args = parseArgs(['--out', 'x'], new Set(['out']));
     expect(args.flags['out']).toBe('x');
@@ -106,5 +111,15 @@ describe('stringFlag', () => {
 
   it('returns undefined for an absent flag', () => {
     expect(stringFlag({}, 'dir')).toBeUndefined();
+  });
+});
+
+describe('stringFlags', () => {
+  it('normalizes a one-time flag and reads repeated values', () => {
+    expect(stringFlags({ dependency: 'orders' }, 'dependency')).toEqual(['orders']);
+    expect(stringFlags({ dependency: ['orders', 'billing'] }, 'dependency')).toEqual([
+      'orders',
+      'billing',
+    ]);
   });
 });

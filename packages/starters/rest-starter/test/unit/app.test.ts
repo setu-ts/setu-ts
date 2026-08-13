@@ -69,6 +69,14 @@ describe('rest-starter / buildRestPlugins', () => {
     expect(names).not.toContain('auth-plugin');
   });
 
+  it('includes service discovery only when its provider arm is supplied', () => {
+    expect(buildRestPlugins().map((p) => p.name)).not.toContain('service-discovery-plugin');
+    expect(
+      buildRestPlugins({ serviceDiscovery: { provider: 'static', services: {} } })
+        .map((p) => p.name),
+    ).toContain('service-discovery-plugin');
+  });
+
   it('includes none of the four M36b arms by default', () => {
     const names = buildRestPlugins().map((p) => p.name);
     expect(names).not.toContain('di-plugin');

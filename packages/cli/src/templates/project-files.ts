@@ -20,7 +20,9 @@ import {
 } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type {
+  AppFactoryRenderContext,
   AppFactoryWiring,
+  EnvVariable,
   LocalImport,
   MiddlewareWiring,
   PackageImport,
@@ -32,6 +34,7 @@ import type {
   WorkerExportRoute,
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
+import { renderConfigOptions } from './env-file.ts';
 import { rootManifestSettings } from './root-settings.ts';
 
 /** Semver range the scaffolded project pins framework packages to. */
@@ -105,6 +108,7 @@ export interface ResolvedHost {
    */
   readonly extraImports: Readonly<Record<string, string>>;
   readonly appFactory?: AppFactoryWiring | undefined;
+  readonly appFactoryContext: Omit<AppFactoryRenderContext, 'runtime'>;
   readonly manifest?: TemplateManifest | undefined;
 }
 
@@ -125,6 +129,12 @@ export function resolveHost(
 ): ResolvedHost {
   const swap = host.runtimeSwaps?.[runtime];
   const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
+  // Workers receive configuration exclusively through their request bindings.
+  // Leaving an env-file path in the manifest would make ConfigPlugin require a
+  // filesystem that the Workers runtime deliberately does not provide.
+  const manifest = runtime === 'cloudflare-workers' && host.manifest?.envFilePath !== undefined
+    ? withoutEnvFilePath(host.manifest)
+    : host.manifest;
 
   return {
     plugins: swapped,
@@ -140,7 +150,78 @@ export function resolveHost(
     extraTasks: { ...host.extraTasks },
     extraImports: {},
     appFactory: host.appFactory,
-    manifest: host.manifest,
+    appFactoryContext: {
+      ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
+      ...host.appFactoryContext,
+    },
+    manifest,
+  };
+}
+
+/**
+ * Renders the gitignored dotenv file a generated project starts with.
+ *
+ * Each declared variable is written with its development value, so a template
+ * whose own source calls `config.getOrThrow(...)` boots immediately after
+ * `setu new`. The values are placeholders, never secrets — the file is
+ * gitignored precisely so a real one can replace them in place.
+ *
+ * @param variables - The variables this template's generated source reads
+ * @returns The dotenv file contents
+ */
+function envFileContents(variables: readonly EnvVariable[]): string {
+  const header = '# Local configuration. This file is ignored by Git.\n';
+  if (variables.length === 0) return header;
+  return `${header}# The values below are development placeholders. Replace them before deploying.\n${
+    variables.map((variable) => `\n# ${variable.description}\n${variable.name}=${variable.develop}`)
+      .join('\n')
+  }\n`;
+}
+
+/**
+ * Renders the tracked dotenv example.
+ *
+ * It names every variable with an EMPTY value: this file is committed, so a
+ * development placeholder here would be a value someone deploys by accident.
+ *
+ * @param envFilePath - The path this example is copied to
+ * @param variables - The variables this template's generated source reads
+ * @returns The example file contents
+ */
+function envExampleContents(
+  envFilePath: string,
+  variables: readonly EnvVariable[],
+): string {
+  const header = `# Copy this file to \`${envFilePath}\` and fill in local values.\n` +
+    `# \`${envFilePath}\` is ignored by Git; this example is committed.\n`;
+  if (variables.length === 0) return header;
+  return `${header}${
+    variables.map((variable) => `\n# ${variable.description}\n${variable.name}=`).join('')
+  }\n`;
+}
+
+/**
+ * Removes the filesystem-only dotenv setting for a Workers project.
+ *
+ * @param manifest - The template manifest that may declare a dotenv path
+ * @returns The manifest without its dotenv path
+ */
+function withoutEnvFilePath(manifest: TemplateManifest): TemplateManifest {
+  const { envFilePath: _envFilePath, ...without } = manifest;
+  return without;
+}
+
+/**
+ * Replaces the dotenv path for a host that registers ConfigPlugin.
+ *
+ * @returns The adjusted host, or undefined when its composition has no config arm.
+ */
+export function withEnvFile(host: ResolvedHost, envFilePath: string): ResolvedHost | undefined {
+  if (host.manifest?.envFilePath === undefined) return undefined;
+  return {
+    ...host,
+    manifest: { ...host.manifest, envFilePath },
+    appFactoryContext: { ...host.appFactoryContext, envFilePath },
   };
 }
 
@@ -196,6 +277,14 @@ function configModule(
     pluginSpreads,
     setupCalls,
   } = host;
+  const pluginArgs = (wiring: Wiring): string =>
+    wiring.pkg !== 'config-plugin'
+      ? wiring.args ?? ''
+      : runtime === 'cloudflare-workers'
+      ? ''
+      : host.manifest?.envFilePath === undefined
+      ? wiring.args ?? ''
+      : renderConfigOptions(host.manifest.envFilePath);
   // `common` is always imported for the return type, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
   // second import of the same module.
@@ -226,7 +315,9 @@ function configModule(
 
   const middlewareLines = middleware.length === 0 ? '' : `\n${
     middleware
-      .map((m) => `  app.middleware.add(${m.symbol}()${renderAddOptions(m.addOptions)});`)
+      .map((m) =>
+        `  app.middleware.add(${m.symbol}(${m.args ?? ''})${renderAddOptions(m.addOptions)});`
+      )
       .join('\n')
   }\n`;
 
@@ -256,7 +347,12 @@ function configModule(
 export async function ${CONFIG_EXPORT}(
   env?: Readonly<Record<string, unknown>>,
 ): Promise<IApplication> {
-  const app = await ${appFactory.symbol}(${appFactory.args?.(runtime) ?? ''});
+  const app = await ${appFactory.symbol}(${
+      appFactory.args?.({
+        runtime,
+        ...host.appFactoryContext,
+      }) ?? ''
+    });
 ${middlewareLines}
   return app;
 }
@@ -269,7 +365,9 @@ ${middlewareLines}
   const onWorkers = runtime === 'cloudflare-workers';
   const pluginList = [
     ...plugins
-      .map((p) => `      ${p.symbol}(${(onWorkers ? p.workersArgs ?? p.args : p.args) ?? ''}),`),
+      .map((p) =>
+        `      ${p.symbol}(${onWorkers ? p.workersArgs ?? pluginArgs(p) : pluginArgs(p)}),`
+      ),
     ...pluginSpreads.map((spread) => `      ${spread},`),
   ].join('\n');
 
@@ -670,7 +768,14 @@ function sortSpecifiers(symbols: readonly string[]): readonly string[] {
  * @returns The space-separated flags
  */
 function denoPermissions(manifest?: TemplateManifest): string {
-  return ['--allow-net', '--allow-env', ...manifest?.denoPermissions ?? []].join(' ');
+  return [
+    ...new Set([
+      '--allow-net',
+      '--allow-env',
+      ...(manifest?.envFilePath === undefined ? [] : ['--allow-read']),
+      ...manifest?.denoPermissions ?? [],
+    ]),
+  ].join(' ');
 }
 
 /**
@@ -923,7 +1028,12 @@ ${PROGRAM_NAME} generate --help
 \`\`\`
 `;
 
-  const gitignore = runtime === 'deno' ? 'coverage/\n' : 'node_modules/\ncoverage/\n.wrangler/\n';
+  // Deno projects get neither `node_modules/` nor `.wrangler/`: this file is
+  // read by a human, and an ignore rule for a directory the target can never
+  // produce is noise that invites copying it into projects that would need it.
+  const gitignore = `${runtime === 'deno' ? '' : 'node_modules/\n'}coverage/\n${
+    runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''
+  }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}`;
 
   const files: GeneratedFile[] = [
     { path: 'README.md', contents: readme },
@@ -1008,6 +1118,17 @@ ${PROGRAM_NAME} generate --help
     path: CONFIG_MODULE,
     contents: configModule(runtime, host),
   });
+
+  if (manifest?.envFilePath !== undefined) {
+    files.push({
+      path: manifest.envFilePath,
+      contents: envFileContents(manifest.envVariables ?? []),
+    });
+    files.push({
+      path: `${manifest.envFilePath}.example`,
+      contents: envExampleContents(manifest.envFilePath, manifest.envVariables ?? []),
+    });
+  }
 
   if (runtime === 'cloudflare-workers') {
     files.push({
