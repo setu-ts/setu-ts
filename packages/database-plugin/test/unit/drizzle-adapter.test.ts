@@ -22,6 +22,8 @@ import {
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
+import { getDrizzle } from '../../src/index.ts';
+import { DatabaseService } from '../../src/services/database-service.ts';
 
 /** Default operator builders matching the adapter's fallback `eq` shape. */
 const OPERATORS: DrizzleOperators = {
@@ -105,6 +107,42 @@ describe('DrizzleAdapter', () => {
       });
       await adapter.connect();
       expect(adapter.isReady()).toBe(true);
+    });
+
+    it('accepts builders without execute and refuses only raw queries', async () => {
+      const noExecute = {
+        select: fakeDb.select,
+        insert: fakeDb.insert,
+        update: fakeDb.update,
+        delete: fakeDb.delete,
+        transaction: fakeDb.transaction,
+      };
+      const noExecuteAdapter = new DrizzleAdapter({
+        drizzleInstance: noExecute,
+        drizzleTables: { user: USER_TABLE },
+      });
+      await noExecuteAdapter.connect();
+
+      const service = new DatabaseService(
+        noExecuteAdapter,
+        (entity) => noExecuteAdapter.createDataSource(entity),
+        'drizzle',
+      );
+      expect(getDrizzle<typeof noExecute>(service)).toBe(noExecute);
+      await service.transaction(async (uow) => {
+        expect(getDrizzle<typeof noExecute>(uow)).toBe(fakeDb);
+        expect(await uow.getRepository('user').findAll()).toEqual([]);
+      });
+      await expect(noExecuteAdapter.rawQuery('SELECT 1')).rejects.toThrow(
+        "Configured Drizzle instance does not support raw execute(); use Drizzle's typed query builder for this driver.",
+      );
+    });
+
+    it('preserves raw execute parameters and row results', async () => {
+      await adapter.connect();
+      expect(await adapter.rawQuery('SELECT ?', [1])).toEqual([]);
+      const call = fakeDb.recordedCalls.find((entry) => entry.action === 'execute');
+      expect(call?.args.values).toEqual({ sql: 'SELECT ?', params: [1] });
     });
   });
 

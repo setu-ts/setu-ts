@@ -861,7 +861,10 @@ requires an application-created `options.prismaClient`; it never imports or cons
 Drizzle requires both `options.drizzleInstance` and `options.drizzleTables`; the registry's tables
 must carry an `id` column and the adapter translates every repository field to a real Drizzle
 column. Drizzle `create`, `update`, and `delete` require a driver with `RETURNING` support so their
-results are actual driver rows; an unsupported dialect throws a descriptive error.
+results are actual driver rows; an unsupported dialect throws a descriptive error. SQLite and
+libsql-shaped Drizzle instances without `execute()` are accepted for repository, transaction, and
+typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects with guidance to
+use Drizzle's typed query builder.
 
 ### Repository Pattern
 
@@ -939,6 +942,42 @@ app.router.post('/orders', async (ctx) => {
 });
 ```
 
+### Typed Drizzle queries
+
+```typescript
+function getDrizzle<TInstance>(
+  scope: IDatabaseService | IUnitOfWork,
+): TInstance;
+```
+
+Pass the exact application-owned Drizzle instance type explicitly. The service form returns the
+configured outer instance. The Unit-of-Work form returns Drizzle's native callback transaction, so
+native joins and repository writes participate in the same commit or rollback:
+
+```typescript
+import { eq } from 'drizzle-orm';
+import { getDrizzle } from '@setu-ts/database-plugin';
+
+const outer = getDrizzle<typeof drizzleDb>(db);
+const rows = await outer.select().from(users);
+
+await db.transaction(async (uow) => {
+  await uow.getRepository<User>('User').create(newUser);
+
+  const tx = getDrizzle<typeof drizzleDb>(uow);
+  const joined = await tx
+    .select({ userId: users.id, teamName: teams.name })
+    .from(users)
+    .innerJoin(teams, eq(users.teamId, teams.id));
+});
+```
+
+Use `typeof drizzleDb` at every call: `TInstance` appears only in the return position and cannot be
+inferred through the non-generic capability token. Memory, Prisma, and custom services/UoWs throw
+`Drizzle query access requires adapter 'drizzle'; configured adapter is '<type>'.` A structural
+service or Unit of Work not created by this package throws
+`Drizzle query access requires a database-plugin service or unit of work.`
+
 ### Database Interface
 
 ```typescript
@@ -962,6 +1001,11 @@ interface IRepository<Entity> {
   count(options?: CountOptions): Promise<number>;
 }
 ```
+
+`query()` is the existing backend-specific raw-SQL escape hatch. It requires a configured Drizzle
+instance with `execute()`; typed builders obtained through `getDrizzle()` do not. Programmatic
+`migrate()` is unsupported by all current adapters and rejects because each ORM owns migrations
+through its CLI.
 
 `FindOptions.filter` and `CountOptions.filter` accept a portable expression tree in addition to the
 existing equality-only `where` map. `where` and `filter` are conjoined, and every built-in adapter
@@ -1045,7 +1089,7 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 | `BaseRepository`, `UnitOfWork`                                                                            | classes                           |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                        | classes                           |
 | `PrismaRepository`, `DrizzleRepository`                                                                   | classes                           |
-| `createPrismaDataSource`, `createDrizzleDataSource`                                                       | functions                         |
+| `createPrismaDataSource`, `createDrizzleDataSource`, `getDrizzle`                                         | functions                         |
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                          | interfaces                        |
 | `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`   | types                             |
 | `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                           | types                             |

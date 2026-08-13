@@ -170,9 +170,10 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
   describe('rawQuery', () => {
     it('delegates to db.execute', async () => {
       await adapter.connect();
-      await adapter.rawQuery('SELECT 1');
+      const result = await adapter.rawQuery('SELECT ?', [1]);
       const call = fakeDb.recordedCalls.find((c) => c.action === 'execute');
-      expect(call).toBeDefined();
+      expect(call?.args.values).toEqual({ sql: 'SELECT ?', params: [1] });
+      expect(result).toEqual([]);
     });
   });
 
@@ -227,16 +228,20 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       await expect(a.connect()).rejects.toThrow('missing');
     });
 
-    it('rejects instance missing execute', async () => {
-      const bad = {
+    it('accepts an instance missing execute and refuses only raw queries', async () => {
+      const sqliteShaped = {
         select: () => {},
         insert: () => {},
         update: () => {},
         delete: () => {},
         transaction: () => {},
       };
-      const a = new DrizzleAdapter({ drizzleInstance: bad, drizzleTables: tables });
-      await expect(a.connect()).rejects.toThrow('execute');
+      const a = new DrizzleAdapter({ drizzleInstance: sqliteShaped, drizzleTables: tables });
+      await a.connect();
+      expect(a.isReady()).toBe(true);
+      await expect(a.rawQuery('select 1')).rejects.toThrow(
+        "does not support raw execute(); use Drizzle's typed query builder",
+      );
     });
   });
 

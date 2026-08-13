@@ -6820,4 +6820,4 @@ application's own instance type, since a seam that type-checks as `unknown` has 
 | 66        | ✅     | database-plugin (prisma v7, drizzle)  |
 | 67        | ✅     | cli + starters (scaffold defaults)    |
 | 68        | ✅     | common + kernel (contract gaps)       |
-| 69        | ⬜     | database-plugin (drizzle query seam)  |
+| 69        | ✅     | database-plugin (drizzle query seam)  |

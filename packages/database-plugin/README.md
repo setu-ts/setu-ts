@@ -77,6 +77,38 @@ DatabasePlugin({
 });
 ```
 
+SQLite/libsql-shaped Drizzle instances are accepted even when they do not expose `execute()`.
+Repositories, transactions, and typed builders remain available; only `IDatabaseService.query()`
+rejects, with guidance to use the typed builder instead.
+
+### Typed Drizzle queries
+
+Use the application's exact configured type as the generic witness. Outside a transaction the helper
+returns that configured instance; inside `transaction()` it returns Drizzle's native callback-scoped
+transaction, so repository work and native joins share one rollback boundary:
+
+```typescript
+import { eq } from 'drizzle-orm';
+import { getDrizzle } from '@setu-ts/database-plugin';
+
+const outer = getDrizzle<typeof drizzleDb>(db);
+const allUsers = await outer.select().from(users);
+
+await db.transaction(async (uow) => {
+  await uow.getRepository<User>('User').create(newUser);
+
+  const tx = getDrizzle<typeof drizzleDb>(uow);
+  const joined = await tx
+    .select({ userId: users.id, teamName: teams.name })
+    .from(users)
+    .innerJoin(teams, eq(users.teamId, teams.id));
+});
+```
+
+Always supply `typeof drizzleDb`: the helper cannot infer an application schema through the
+non-generic database capability token. Memory, Prisma, and custom services throw an error naming
+their configured adapter. Objects not created by this plugin throw an invalid-scope error.
+
 ## Filtering and single-row lookup
 
 `findAll`, `findOne`, and `count` accept an equality `where` map and an optional portable `filter`
@@ -126,6 +158,7 @@ imperative begin/commit.
 | --------------------------- | --------- |
 | `createDrizzleDataSource`   | function  |
 | `createPrismaDataSource`    | function  |
+| `getDrizzle`                | function  |
 | `DatabasePlugin`            | function  |
 | `BaseRepository`            | class     |
 | `DatabaseService`           | class     |

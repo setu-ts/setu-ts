@@ -1259,9 +1259,9 @@ graph TB
 | **Purpose**          | Database access with repository pattern                                                                                               |
 | **Responsibilities** | Provide `IDatabaseService`; repository pattern including portable expression filters and `findOne`; unit of work (transactions); ORM adapters (Prisma, Drizzle, Memory)                   |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                         |
-| **Public API**       | `DatabasePlugin()`; `IDatabaseService`; `IRepository`; `IUnitOfWork`                                                                  |
+| **Public API**       | `DatabasePlugin()`; `IDatabaseService`; `IRepository`; `IUnitOfWork`; Drizzle-specific `getDrizzle()`                                |
 | **Extension Points** | Custom ORM adapter; custom repository; custom transaction strategy                                                                    |
-| **Rules**            | Prisma and Drizzle are optional (injected or lazy-loaded via `npm:` specifiers); Memory adapter for testing; no raw SQL in public API |
+| **Rules**            | Applications inject Prisma clients and configured Drizzle instances; only Drizzle operators are lazy-loaded from `npm:`. Portable repository operations stay backend-neutral, while released raw `query()` and typed `getDrizzle()` are explicit backend-specific escape hatches. Memory remains the zero-dependency default. |
 
 #### @setu-ts/cache-plugin
 

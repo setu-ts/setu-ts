@@ -18,6 +18,11 @@ import { BaseRepository, type DataSource } from '../repositories/base-repository
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
+import {
+  assertDrizzleAdapter,
+  DRIZZLE_QUERY_HANDLE,
+  readDrizzleQueryHandle,
+} from '../query/drizzle-query.ts';
 
 // ---------------------------------------------------------------------------
 // Internal generic repository (was `MemoryRepository` — renamed because it
@@ -75,6 +80,12 @@ export class DatabaseService implements IDatabaseService {
     return new InternalRepo<Entity, Id>(dataSource);
   }
 
+  /** Provide the configured native Drizzle instance through the internal protocol. */
+  [DRIZZLE_QUERY_HANDLE](): unknown {
+    assertDrizzleAdapter(this._adapterType);
+    return readDrizzleQueryHandle(this._adapter);
+  }
+
   /** @inheritdoc */
   async transaction<T>(work: (uow: IUnitOfWork) => Promise<T>): Promise<T> {
     if (this._closed) {
@@ -89,6 +100,7 @@ export class DatabaseService implements IDatabaseService {
           const scopedDs = txn.createDataSource(entity);
           return new InternalRepo<unknown>(this.wrapDataSource(entity, scopedDs));
         },
+        this._adapterType,
       );
       const result = await work(uow);
       await txn.commit();
