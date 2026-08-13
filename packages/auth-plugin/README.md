@@ -16,9 +16,10 @@ the optional `rbac` configuration is supplied:
 | Authentication         | `'authentication'` | `IAuthService`                                      |
 | Authorization (RBAC)   | `'authorization'`  | `IAuthorizationService` (when `rbac` is configured) |
 
-> **Phasing (M16b):** the **refresh-token strategy** and **rate limiting** are deferred to M16b.
-> `IJwtService` exposes only `sign` / `verify` / `decode` — a refresh token is simply
-> `sign({ expiresIn: '7d' })`.
+> **Refresh tokens and rate limiting ship in this package.** `IJwtService` itself exposes only
+> `sign` / `verify` / `decode`, but do not hand-roll a refresh token as `sign({ expiresIn: '7d' })`
+> — that has no rotation and no replay rejection. Use `RefreshTokenService` and
+> `rateLimitMiddleware`, both covered below.
 
 ## Installation
 
@@ -186,7 +187,7 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 Supplying neither `jwt.secret` (HS256) nor `jwt.privateKey` + `jwt.publicKey` (RS256) throws at
 registration.
 
-## Refresh Tokens (M16b)
+## Refresh Tokens
 
 `RefreshTokenService` is an app-instantiated service (like `PasswordHasher`) — it is not an
 `AuthPlugin` option and registers nothing. It mints access + refresh pairs, **rotates** on every
@@ -222,7 +223,7 @@ await refresh.revoke(next!.refreshToken); // logout
 | `accessToken.issuer`    | `string`            | -           | `iss` on both tokens; enforced on verify.      |
 | `refreshTokenExpiresIn` | `string`            | `'7d'`      | Refresh-token lifetime (JWT `exp` AND record). |
 
-## Rate Limiting (M16b)
+## Rate Limiting
 
 `rateLimitMiddleware(options)` is a standalone fixed-window limiter, independent of `AuthPlugin` and
 registered under no capability token. Over-limit requests are short-circuited with **429**
