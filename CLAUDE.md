@@ -2315,7 +2315,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   required for a direct implementor). The `guide-fence-compiler` B9 negative control was repaired
   during implementation and the repair is worth keeping in mind: it had been passing because `rbac`
   was missing, NOT because `jwt.secret` was, so making `rbac` optional is what exposed that the
-  control had never tested its own claim — complete (PR pending)
+  control had never tested its own claim — complete (PR #158)
 - **Next milestone** — **M40** (final polish and release). M60–M62 came from a measured audit after
   M58: a project with all fourteen schematics generated type-checked clean while its entry points
   imported exactly ONE generated path, so thirteen of fourteen generated artifacts were unreachable
