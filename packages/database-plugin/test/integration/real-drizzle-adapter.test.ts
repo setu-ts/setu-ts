@@ -27,6 +27,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     limit: partial.limit ?? -1,
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
+    ...(partial.filter === undefined ? {} : { filter: partial.filter }),
   };
 }
 
@@ -82,5 +83,30 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     expect(calls[2]?.sql).not.toContain('"users"."name"');
     expect(calls[2]?.params).toEqual(['admin']);
     expect(counted).toBe(4);
+  });
+
+  it('binds an escaped literal contains pattern', async () => {
+    const calls: Array<{ sql: string; params: readonly unknown[] }> = [];
+    const database = drizzle((sql, params) => {
+      calls.push({ sql, params });
+      return Promise.resolve({ rows: [] });
+    });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: database,
+      drizzleTables: { User: users },
+    });
+    await adapter.connect();
+
+    await adapter.createDataSource('User').findAll(query({
+      filter: {
+        type: 'comparison',
+        field: 'name',
+        operator: 'contains',
+        value: '50%_off\\now',
+      },
+    }));
+
+    expect(calls[0]?.sql).toContain('like $1');
+    expect(calls[0]?.params).toEqual(['%50\\%\\_off\\\\now%']);
   });
 });

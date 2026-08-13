@@ -135,6 +135,12 @@ describe('matchesFilter', () => {
       .toBe(
         false,
       );
+    expect(
+      matchesFilter(
+        { ...entity, deletedAt: null },
+        { type: 'comparison', field: 'deletedAt', operator: 'in', value: [null] },
+      ),
+    ).toBe(true);
   });
 
   it('composes nested AND and OR expressions', () => {

@@ -140,11 +140,16 @@ function buildFilter(filter: FilterExpression, params: unknown[]): string {
   }
   if (filter.operator === 'in') {
     if (filter.value.length === 0) return '0 = 1';
-    const placeholders = filter.value.map((value) => {
+    const nonNullValues = filter.value.filter((value) => value !== null);
+    const placeholders = nonNullValues.map((value) => {
       params.push(value);
       return `?${params.length}`;
     });
-    return `${column} IN (${placeholders.join(', ')})`;
+    if (!filter.value.includes(null)) {
+      return `${column} IN (${placeholders.join(', ')})`;
+    }
+    if (placeholders.length === 0) return `${column} IS NULL`;
+    return `(${column} IS NULL OR ${column} IN (${placeholders.join(', ')}))`;
   }
 
   params.push(filter.value);

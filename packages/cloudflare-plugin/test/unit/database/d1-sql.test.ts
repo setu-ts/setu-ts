@@ -106,6 +106,25 @@ describe('buildSelect', () => {
     });
   });
 
+  it('preserves null as a member of an in filter', () => {
+    expect(
+      buildSelect(
+        TARGET,
+        query({
+          filter: {
+            type: 'comparison',
+            field: 'deletedAt',
+            operator: 'in',
+            value: [null, '2026-01-01'],
+          },
+        }),
+      ),
+    ).toEqual({
+      sql: 'SELECT * FROM "users" WHERE ("deletedAt" IS NULL OR "deletedAt" IN (?1))',
+      params: ['2026-01-01'],
+    });
+  });
+
   it('orders by each field in the given direction', () => {
     expect(buildSelect(TARGET, query({ orderBy: { age: 'desc', name: 'asc' } })).sql).toBe(
       'SELECT * FROM "users" ORDER BY "age" DESC, "name" ASC',

@@ -103,6 +103,7 @@ export type DrizzleOperators = {
   lt?: (col: unknown, val: unknown) => unknown;
   lte?: (col: unknown, val: unknown) => unknown;
   inArray?: (col: unknown, values: readonly unknown[]) => unknown;
+  isNull?: (col: unknown) => unknown;
   like?: (col: unknown, value: string) => unknown;
   asc: (col: unknown) => unknown;
   desc: (col: unknown) => unknown;
@@ -154,6 +155,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         lt: ns.lt as (col: unknown, val: unknown) => unknown,
         lte: ns.lte as (col: unknown, val: unknown) => unknown,
         inArray: ns.inArray as (col: unknown, values: readonly unknown[]) => unknown,
+        isNull: ns.isNull as (col: unknown) => unknown,
         like: ns.like as (col: unknown, value: string) => unknown,
         asc: ns.asc as (col: unknown) => unknown,
         desc: ns.desc as (col: unknown) => unknown,
@@ -168,6 +170,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         typeof operators.lt !== 'function' ||
         typeof operators.lte !== 'function' ||
         typeof operators.inArray !== 'function' ||
+        typeof operators.isNull !== 'function' ||
         typeof operators.like !== 'function' ||
         typeof operators.asc !== 'function' ||
         typeof operators.desc !== 'function' ||
@@ -539,7 +542,7 @@ function filterPredicateFor(
     case 'eq':
       return operators.eq(column, filter.value);
     case 'contains':
-      return filterOperators.like(column, `%${filter.value}%`);
+      return filterOperators.like(column, `%${escapeLikePattern(filter.value)}%`);
     case 'gt':
       return filterOperators.gt(column, filter.value);
     case 'gte':
@@ -548,17 +551,29 @@ function filterPredicateFor(
       return filterOperators.lt(column, filter.value);
     case 'lte':
       return filterOperators.lte(column, filter.value);
-    case 'in':
-      return filterOperators.inArray(column, filter.value);
+    case 'in': {
+      const nonNullValues = filter.value.filter((value) => value !== null);
+      if (!filter.value.includes(null)) {
+        return filterOperators.inArray(column, nonNullValues);
+      }
+      const nullPredicate = filterOperators.isNull(column);
+      if (nonNullValues.length === 0) return nullPredicate;
+      return filterOperators.or(nullPredicate, filterOperators.inArray(column, nonNullValues));
+    }
   }
 
   throw new Error('Unsupported filter operator');
 }
 
+/** Escape SQL LIKE metacharacters so `contains` remains literal substring matching. */
+function escapeLikePattern(value: string): string {
+  return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+}
+
 type FilterOperators = Required<
   Pick<
     DrizzleOperators,
-    'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'like'
+    'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'isNull' | 'like'
   >
 >;
 
@@ -571,6 +586,7 @@ function requireFilterOperators(operators: DrizzleOperators): FilterOperators {
     typeof operators.lt !== 'function' ||
     typeof operators.lte !== 'function' ||
     typeof operators.inArray !== 'function' ||
+    typeof operators.isNull !== 'function' ||
     typeof operators.like !== 'function'
   ) {
     throw new Error('Drizzle filter operators are unavailable');

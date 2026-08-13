@@ -33,6 +33,7 @@ const OPERATORS: DrizzleOperators = {
   lt: (col, val) => ({ op: 'lt', col, val }),
   lte: (col, val) => ({ op: 'lte', col, val }),
   inArray: (col, values) => ({ op: 'inArray', col, values }),
+  isNull: (col) => ({ op: 'isNull', col }),
   like: (col, value) => ({ op: 'like', col, value }),
   asc: (col) => ({ op: 'asc', col }),
   desc: (col) => ({ op: 'desc', col }),
@@ -221,6 +222,40 @@ describe('DrizzleAdapter', () => {
             exprs: [
               { op: 'like', col: USER_TABLE.name, value: '%Ali%' },
               { op: 'inArray', col: USER_TABLE.id, values: ['u3'] },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('escapes LIKE metacharacters and preserves null membership', async () => {
+      await ds.findAll(
+        query({
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'name', operator: 'contains', value: '50%_off\\now' },
+              {
+                type: 'comparison',
+                field: 'deletedAt',
+                operator: 'in',
+                value: [null, '2026-01-01'],
+              },
+            ],
+          },
+        }),
+      );
+
+      const call = fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1);
+      expect(call?.args.expression).toEqual({
+        op: 'or',
+        exprs: [
+          { op: 'like', col: USER_TABLE.name, value: '%50\\%\\_off\\\\now%' },
+          {
+            op: 'or',
+            exprs: [
+              { op: 'isNull', col: USER_TABLE.deletedAt },
+              { op: 'inArray', col: USER_TABLE.deletedAt, values: ['2026-01-01'] },
             ],
           },
         ],
