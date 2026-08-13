@@ -42,6 +42,18 @@ describe('Router', () => {
     expect(router.match('GET', '/users')?.definition.handler).toBe(first);
   });
 
+  it('refuses a duplicate route registered through a group', () => {
+    const router = new Router();
+    const first = () => ({ __handlerResult: true } as never);
+    router.group('/api', (group) => group.get('/status', first));
+
+    expect(() => router.get('/api/status', () => ({ __handlerResult: true } as never))).toThrow(
+      "Route 'GET /api/status' is already registered.",
+    );
+    expect(router.listRoutes()).toHaveLength(1);
+    expect(router.match('GET', '/api/status')?.definition.handler).toBe(first);
+  });
+
   it('allows the same path under different HTTP methods', () => {
     const router = new Router();
     router.get('/users', () => ({ __handlerResult: true } as never));
