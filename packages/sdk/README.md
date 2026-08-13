@@ -47,6 +47,26 @@ const res = await client.request<User>({
 console.log(res.data); // User
 ```
 
+## Options
+
+`createClient(options)` takes:
+
+| Option                 | Type                          | Default                                 | Description                                       |
+| ---------------------- | ----------------------------- | --------------------------------------- | ------------------------------------------------- |
+| `baseUrl`              | `string`                      | —                                       | Base URL for every request. Required.             |
+| `headers`              | `HeadersInit`                 | —                                       | Headers merged into every request.                |
+| `fetch`                | `typeof fetch`                | global `fetch`                          | Injected transport.                               |
+| `timing`               | `IClientTiming`               | `performance.now()` + abort-aware sleep | Clock and sleep seam, so tests need no real time. |
+| `retry`                | `RetryPolicy`                 | off                                     | Retry with fixed or exponential backoff.          |
+| `circuitBreaker`       | `CircuitBreakerPolicy`        | off                                     | Rolling-window breaker.                           |
+| `rateLimit`            | `ClientRateLimitPolicy`       | off                                     | Sliding-window limiter.                           |
+| `requestInterceptors`  | `ClientRequestInterceptor[]`  | `[]`                                    | Run in order before the request.                  |
+| `responseInterceptors` | `ClientResponseInterceptor[]` | `[]`                                    | Run in order after the response.                  |
+
+`fetch` and `timing` are the two seams that keep the client testable without a network or real time
+— `Date.now()` appears nowhere in this package. See [Resilience](#resilience) for the three policy
+shapes and [Authentication](#authentication) for the bundled interceptors.
+
 ## HTTP Client
 
 `createClient(options)` returns an `IHttpClient` whose single method is

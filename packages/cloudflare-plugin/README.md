@@ -434,9 +434,6 @@ job.
 
 ## Not in this package
 
-- **Durable Objects — M52d.** A DO-backed realtime backplane and distributed lock both need your
-  Worker to export a DO class plus a wrangler migration stanza. `bindings.durableObject('ROOMS')`
-  gives you the namespace today.
 - **Hyperdrive, Vectorize, Workers AI, Analytics Engine.** Reachable now through
   `bindings.get<T>('NAME')`; each becomes a first-class port only when an application needs one.
 

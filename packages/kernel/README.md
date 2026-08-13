@@ -56,6 +56,19 @@ const res = await app.inject({ method: 'GET', url: 'http://localhost/health' });
 console.log(res.statusCode, res.json());
 ```
 
+## Options
+
+`createApplication(options?)` takes one option:
+
+| Option    | Type        | Default | Description                                    |
+| --------- | ----------- | ------- | ---------------------------------------------- |
+| `plugins` | `IPlugin[]` | `[]`    | Plugins registered before `start()` is called. |
+
+Everything else is configured on the application itself: `app.register(plugin)` adds a plugin after
+construction, `app.middleware.add()` installs global middleware, and `app.start({ port })` binds the
+socket. `start()` with no `port` runs the full lifecycle without listening, which is what `inject()`
+and the CLI's command discovery rely on.
+
 ## Rules
 
 - No runtime-specific APIs — all timers, UUIDs, and clocks go through `IRuntimeServices`.

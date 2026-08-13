@@ -15,21 +15,25 @@ import type { TelemetryPluginOptions } from '@setu-ts/telemetry-plugin';
  */
 export interface MicroserviceStarterOptions extends RestStarterOptions {
   /**
-   * Optional arm: {@linkcode MessagingPlugin}. Provided only when the caller
-   * supplies messaging configuration; omitted → in-memory broker default.
+   * Configuration for {@linkcode MessagingPlugin}, which this tier ALWAYS
+   * registers — unlike the gated arms inherited from
+   * {@linkcode RestStarterOptions}, omitting this does not skip the plugin.
+   * Omitted → the memory broker default.
    */
   messaging?: MessagingPluginOptions;
   /**
-   * Optional arm: {@linkcode QueuePlugin}. Provided only when the caller supplies
-   * queue configuration; omitted → memory adapter default.
+   * Configuration for {@linkcode QueuePlugin}, always registered.
+   * Omitted → the memory adapter default.
    */
   queue?: QueuePluginOptions;
   /**
-   * Optional arm: {@linkcode ResiliencePlugin}. Omitted → defaults.
+   * Configuration for {@linkcode ResiliencePlugin}, always registered.
+   * Omitted → plugin defaults.
    */
   resilience?: ResiliencePluginOptions;
   /**
-   * Optional arm: {@linkcode TelemetryPlugin}. Omitted → no-op (no exporter).
+   * Configuration for {@linkcode TelemetryPlugin}, always registered.
+   * Omitted → a `NoopTelemetryService`, since no exporter is configured.
    */
   telemetry?: TelemetryPluginOptions;
 }
