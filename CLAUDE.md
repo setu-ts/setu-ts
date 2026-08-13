@@ -2355,7 +2355,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `UnitOfWork`, which is the one that would silently escape a transaction — a caller can construct
   that case through the public two-argument constructor. All three now have tests naming the failure
   they guard, taking `drizzle-query.ts`, `drizzle-database.ts` and `unit-of-work.ts` to 100%
-  branch/function/line — complete (PR pending)
+  branch/function/line — complete (PR #162)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`
