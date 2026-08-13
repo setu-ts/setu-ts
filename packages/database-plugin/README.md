@@ -62,14 +62,18 @@ the **dot**, not a colon — `createCapabilityToken` rejects colons.
 For Prisma v7, generate and construct the client in the application, then pass it as
 `options.prismaClient`. A framework package cannot locate an application's generated-client output.
 
-For Drizzle, wrap a configured Promise-aware driver with `createDrizzleDatabase()` and pass that
-typed witness beside a table registry. The table objects must expose an `id` column, and every field
-supplied to repository `where`, `orderBy`, or `select` must be a real column on that table. Its
-`create`, `update`, and `delete` operations require a dialect that supports `RETURNING`, so the
-adapter can return the actual persisted row instead of guessing:
+For Drizzle, wrap a configured Promise-aware driver and explicit transaction bridge with
+`createDrizzleDatabase()` and pass that opaque configuration beside a table registry. The table
+objects must expose an `id` column, and every field supplied to repository `where`, `orderBy`, or
+`select` must be a real column on that table. Its `create`, `update`, and `delete` operations
+require a dialect that supports `RETURNING`, so the adapter can return the actual persisted row
+instead of guessing:
 
 ```typescript
-const drizzleDatabase = createDrizzleDatabase(db);
+const drizzleDatabase = createDrizzleDatabase(
+  db,
+  (database, work) => database.transaction(work),
+);
 
 DatabasePlugin({
   type: 'drizzle',
@@ -88,29 +92,36 @@ Synchronous callback drivers such as `better-sqlite3`, Bun SQLite, Expo SQLite, 
 not supported by this adapter. Their transaction callbacks return before awaited Unit-of-Work work
 can run, so accepting them would falsely report atomicity. `createDrizzleDatabase()` rejects their
 published transaction types at compile time; passing an unwrapped instance is rejected during
-startup, and a deliberately wrapped synchronous implementation is rejected at transaction start
-before the adapter returns a Unit of Work or runs application work.
+startup. Unknown Promise-adopting and thenable wrappers are not inferred safe; without an explicit
+source-owned bridge they are rejected before native transaction work or application work begins.
 
 ### Typed Drizzle queries
 
-Use the same typed witness supplied in plugin options. The service overload infers and returns the
-full configured type. The Unit-of-Work overload derives Drizzle's native callback transaction type
-from it, preserving schema and selected-row inference while excluding outer-only operations such as
-SQLite Proxy's `batch()`. Repository work and native joins therefore share one rollback boundary
-without falsely exposing the complete outer database:
+Use the same opaque configuration supplied in plugin options. `getDrizzleDatabase()` infers and
+returns the full configured type. `getDrizzleTransaction()` derives Drizzle's native callback
+transaction type from it, preserving schema and selected-row inference while excluding outer-only
+operations such as SQLite Proxy's `batch()`. Repository work and native joins therefore share one
+rollback boundary without falsely exposing the complete outer database:
 
 ```typescript
 import { eq } from 'drizzle-orm';
-import { createDrizzleDatabase, getDrizzle } from '@setu-ts/database-plugin';
+import {
+  createDrizzleDatabase,
+  getDrizzleDatabase,
+  getDrizzleTransaction,
+} from '@setu-ts/database-plugin';
 
-const drizzleDatabase = createDrizzleDatabase(drizzleDb);
-const outer = getDrizzle(db, drizzleDatabase);
+const drizzleDatabase = createDrizzleDatabase(
+  drizzleDb,
+  (database, work) => database.transaction(work),
+);
+const outer = getDrizzleDatabase(db, drizzleDatabase);
 const allUsers = await outer.select().from(users);
 
 await db.transaction(async (uow) => {
   await uow.getRepository<User>('User').create(newUser);
 
-  const tx = getDrizzle(uow, drizzleDatabase);
+  const tx = getDrizzleTransaction(uow, drizzleDatabase);
   const joined = await tx
     .select({ userId: users.id, teamName: teams.name })
     .from(users)
@@ -118,9 +129,10 @@ await db.transaction(async (uow) => {
 });
 ```
 
-Always supply the same witness object configured on that plugin instance. This correlates the
-inferred type with runtime identity, so a freely selected generic cannot claim another database's
-transaction surface. Use the service overload when an outer-only operation is needed; the UoW result
+Always supply the same opaque object configured on that plugin instance. Package-private storage
+correlates the inferred type, database identity, and transaction bridge, so mutation, cloning, or a
+freely selected generic cannot claim another database's transaction surface. Use
+`getDrizzleDatabase()` when an outer-only operation is needed; `getDrizzleTransaction()`
 intentionally exposes only Drizzle's transaction-safe callback surface. Memory, Prisma, and custom
 services throw an error naming their configured adapter. Objects not created by this plugin throw an
 invalid-scope error.
@@ -175,8 +187,11 @@ imperative begin/commit.
 | `createDrizzleDataSource`   | function  |
 | `createDrizzleDatabase`     | function  |
 | `createPrismaDataSource`    | function  |
-| `getDrizzle`                | function  |
+| `getDrizzleDatabase`        | function  |
+| `getDrizzleTransaction`     | function  |
 | `DrizzleTransaction`        | type      |
+| `DrizzleTransactionBridge`  | type      |
+| `DrizzleDatabaseIdentity`   | interface |
 | `DrizzleDatabase`           | interface |
 | `DatabasePlugin`            | function  |
 | `BaseRepository`            | class     |

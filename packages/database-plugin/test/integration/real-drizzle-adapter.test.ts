@@ -62,7 +62,10 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: sql.includes('count(*)') ? [['4']] : [] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(database),
+      drizzleInstance: createDrizzleDatabase(
+        database,
+        (configured, work) => configured.transaction(work),
+      ),
       drizzleTables: { User: users },
     });
     await adapter.connect();
@@ -114,7 +117,10 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       return Promise.resolve({ rows: [] });
     });
     const adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(database),
+      drizzleInstance: createDrizzleDatabase(
+        database,
+        (configured, work) => configured.transaction(work),
+      ),
       drizzleTables: { User: users },
     });
     await adapter.connect();

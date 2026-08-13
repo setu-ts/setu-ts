@@ -325,7 +325,12 @@ describe('DatabasePlugin integration', () => {
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
       type: 'drizzle',
-      options: { drizzleInstance: createDrizzleDatabase(fakeDrizzle) },
+      options: {
+        drizzleInstance: createDrizzleDatabase(
+          fakeDrizzle,
+          (database, work) => database.transaction(work),
+        ),
+      },
     });
     await expect(plugin.register!(ctx)).rejects.toThrow('requires options.drizzleTables');
     expect(ctx.services.has(CAPABILITIES.DATABASE)).toBe(false);
@@ -337,7 +342,10 @@ describe('DatabasePlugin integration', () => {
     const plugin = DatabasePlugin({
       type: 'drizzle',
       options: {
-        drizzleInstance: createDrizzleDatabase(fakeDrizzle),
+        drizzleInstance: createDrizzleDatabase(
+          fakeDrizzle,
+          (database, work) => database.transaction(work),
+        ),
         drizzleTables: { users: createFakeDrizzleTable('users') },
       },
     });

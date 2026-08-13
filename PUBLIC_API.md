@@ -859,19 +859,21 @@ Prisma v7 clients are generated into an application-selected output path, so the
 requires an application-created `options.prismaClient`; it never imports or constructs that client.
 `DatabaseAdapterOptions.url` remains source-compatible but is deprecated for Prisma configuration.
 Drizzle requires both `options.drizzleInstance` and `options.drizzleTables`. The instance is a
-`DrizzleDatabase<T>` witness created by `createDrizzleDatabase(database)`; the registry's tables
-must carry an `id` column and the adapter translates every repository field to a real Drizzle
-column. Drizzle `create`, `update`, and `delete` require a driver with `RETURNING` support so their
-results are actual driver rows; an unsupported dialect throws a descriptive error. Promise-aware
-SQLite Proxy and libsql-shaped Drizzle instances without `execute()` are accepted for repository,
-transaction, and typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects
-with guidance to use Drizzle's typed query builder.
+opaque `DrizzleDatabase<T>` configuration created by
+`createDrizzleDatabase(database, transactionBridge)`; the registry's tables must carry an `id`
+column and the adapter translates every repository field to a real Drizzle column. Drizzle `create`,
+`update`, and `delete` require a driver with `RETURNING` support so their results are actual driver
+rows; an unsupported dialect throws a descriptive error. Promise-aware SQLite Proxy and
+libsql-shaped Drizzle instances without `execute()` are accepted for repository, transaction, and
+typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects with guidance to
+use Drizzle's typed query builder.
 
 Synchronous callback drivers (`better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite) are
 unsupported: their native transaction closes when the callback returns, before awaited UoW work can
 run. `createDrizzleDatabase()` rejects those published types at compile time, and startup rejects an
-unwrapped structural instance. A deliberately wrapped synchronous implementation is detected at
-transaction start and rejected before a Unit of Work reaches application code.
+unwrapped structural instance. The explicit source-owned bridge is the positive capability that
+asserts the selected driver awaits its callback Promise; unknown adopting-Promise and thenable
+wrappers are rejected at startup before native transaction work begins.
 
 ### Repository Pattern
 
@@ -953,39 +955,52 @@ app.router.post('/orders', async (ctx) => {
 
 ```typescript
 interface DrizzleDatabase<TDatabase extends object> { /* package-owned typed witness */ }
+interface DrizzleDatabaseIdentity { /* erased opaque configuration identity */ }
 type DrizzleTransaction<TDatabase extends object> = /* Drizzle transaction callback parameter */;
+type DrizzleTransactionBridge<TDatabase extends object> = <T>(
+  database: TDatabase,
+  work: (transaction: DrizzleTransaction<TDatabase>) => Promise<T>,
+) => Promise<T>;
 
 function createDrizzleDatabase<const TDatabase extends object>(
   database: TDatabase,
+  transaction: DrizzleTransactionBridge<TDatabase>,
 ): DrizzleDatabase<TDatabase>;
-function getDrizzle<TDatabase extends object>(
-  scope: IDatabaseService,
+function getDrizzleDatabase<TDatabase extends object>(
+  service: IDatabaseService,
   database: DrizzleDatabase<TDatabase>,
 ): TDatabase;
-function getDrizzle<TDatabase extends object>(
-  scope: IUnitOfWork,
+function getDrizzleTransaction<TDatabase extends object>(
+  unitOfWork: IUnitOfWork,
   database: DrizzleDatabase<TDatabase>,
 ): DrizzleTransaction<TDatabase>;
 ```
 
-Pass the same source-owned witness supplied in `options.drizzleInstance`. The service overload
-infers and returns that complete configured type. The Unit-of-Work overload structurally derives
-Drizzle's native transaction callback parameter from it, so schema and selected-row inference
-survive while outer-only operations (for example SQLite Proxy's `batch()`) are absent. Native joins
-and repository writes still participate in the same commit or rollback:
+Pass the same package-created opaque configuration supplied in `options.drizzleInstance`.
+`getDrizzleDatabase()` infers and returns that complete configured type. `getDrizzleTransaction()`
+structurally derives Drizzle's native transaction callback parameter from it, so schema and
+selected-row inference survive while outer-only operations (for example SQLite Proxy's `batch()`)
+are absent. Native joins and repository writes still participate in the same commit or rollback:
 
 ```typescript
 import { eq } from 'drizzle-orm';
-import { createDrizzleDatabase, getDrizzle } from '@setu-ts/database-plugin';
+import {
+  createDrizzleDatabase,
+  getDrizzleDatabase,
+  getDrizzleTransaction,
+} from '@setu-ts/database-plugin';
 
-const drizzleDatabase = createDrizzleDatabase(drizzleDb);
-const outer = getDrizzle(db, drizzleDatabase);
+const drizzleDatabase = createDrizzleDatabase(
+  drizzleDb,
+  (database, work) => database.transaction(work),
+);
+const outer = getDrizzleDatabase(db, drizzleDatabase);
 const rows = await outer.select().from(users);
 
 await db.transaction(async (uow) => {
   await uow.getRepository<User>('User').create(newUser);
 
-  const tx = getDrizzle(uow, drizzleDatabase);
+  const tx = getDrizzleTransaction(uow, drizzleDatabase);
   const joined = await tx
     .select({ userId: users.id, teamName: teams.name })
     .from(users)
@@ -993,10 +1008,14 @@ await db.transaction(async (uow) => {
 });
 ```
 
-The witness carries both compile-time type and runtime identity. A caller cannot select a forged
-generic at the UoW call, and a witness from another configured database throws. Use the service
-overload for outer-only database operations; a UoW intentionally returns only the transaction-safe
-callback surface. Memory, Prisma, and custom services/UoWs throw
+The opaque configuration carries compile-time correlation while its database, bridge, and validity
+remain in package-private storage. It is frozen with a null prototype as defense in depth; mutation,
+spread, assignment, cloning, prototype inheritance, and cross-instance reuse do not create accepted
+identities. A caller cannot select a forged generic at the UoW call, and a configuration from
+another database throws. Use `getDrizzleDatabase()` for outer-only operations;
+`getDrizzleTransaction()` intentionally returns only the transaction-safe callback surface. The
+distinct functions also keep a service widened structurally to `IUnitOfWork` runtime-truthful.
+Memory, Prisma, and custom services/UoWs throw
 `Drizzle query access requires adapter 'drizzle'; configured adapter is '<type>'.` A structural
 service or Unit of Work not created by this package throws
 `Drizzle query access requires a database-plugin service or unit of work.`
@@ -1026,9 +1045,9 @@ interface IRepository<Entity> {
 ```
 
 `query()` is the existing backend-specific raw-SQL escape hatch. It requires a configured Drizzle
-instance with `execute()`; typed builders obtained through `getDrizzle()` do not. Programmatic
-`migrate()` is unsupported by all current adapters and rejects because each ORM owns migrations
-through its CLI.
+instance with `execute()`; typed builders obtained through the Drizzle accessors do not.
+Programmatic `migrate()` is unsupported by all current adapters and rejects because each ORM owns
+migrations through its CLI.
 
 `FindOptions.filter` and `CountOptions.filter` accept a portable expression tree in addition to the
 existing equality-only `where` map. `where` and `filter` are conjoined, and every built-in adapter
@@ -1105,21 +1124,21 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 
 ### Exports
 
-| Export                                                                                                    | Kind                              |
-| --------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `DatabasePlugin`                                                                                          | factory                           |
-| `DatabaseService`                                                                                         | class                             |
-| `BaseRepository`, `UnitOfWork`                                                                            | classes                           |
-| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                        | classes                           |
-| `PrismaRepository`, `DrizzleRepository`                                                                   | classes                           |
-| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzle`                | functions                         |
-| `DrizzleDatabase`, `DrizzleTransaction`                                                                   | types                             |
-| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                          | interfaces                        |
-| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`   | types                             |
-| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                           | types                             |
-| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression` | types                             |
-| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                               | re-exports from `common`          |
-| `DataSource`                                                                                              | deprecated alias of `IDataSource` |
+| Export                                                                                                                      | Kind                              |
+| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `DatabasePlugin`                                                                                                            | factory                           |
+| `DatabaseService`                                                                                                           | class                             |
+| `BaseRepository`, `UnitOfWork`                                                                                              | classes                           |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                                          | classes                           |
+| `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                           |
+| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                         |
+| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                             |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                        |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                             |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                             |
+| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                             |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`          |
+| `DataSource`                                                                                                                | deprecated alias of `IDataSource` |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.

@@ -19,7 +19,11 @@ import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { createDrizzleDatabase, getDrizzle } from '../../src/index.ts';
+import {
+  createDrizzleDatabase,
+  getDrizzleDatabase,
+  getDrizzleTransaction,
+} from '../../src/index.ts';
 import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
@@ -149,7 +153,10 @@ describe('DatabaseService', () => {
 
     it('uses one Drizzle transaction for repositories and native access', async () => {
       const fakeDb = createFakeDrizzleInstance();
-      const database = createDrizzleDatabase(fakeDb);
+      const database = createDrizzleDatabase(
+        fakeDb,
+        (database, work) => database.transaction(work),
+      );
       const drizzleAdapter = new DrizzleAdapter({
         drizzleInstance: database,
         drizzleTables: { User: createFakeDrizzleTable('user') },
@@ -161,9 +168,9 @@ describe('DatabaseService', () => {
         'drizzle',
       );
 
-      expect(getDrizzle(drizzleService, database)).toBe(fakeDb);
+      expect(getDrizzleDatabase(drizzleService, database)).toBe(fakeDb);
       await drizzleService.transaction(async (uow) => {
-        expect(getDrizzle(uow, database)).toBe(fakeDb);
+        expect(getDrizzleTransaction(uow, database)).toBe(fakeDb);
         await uow.getRepository('User').create({ id: 'u1', name: 'Ada' });
       });
       expect(await drizzleService.getRepository('User').findById('u1')).toEqual({

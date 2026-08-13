@@ -31,7 +31,10 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
   beforeEach(() => {
     fakeDb = createFakeDrizzleInstance();
     adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(fakeDb),
+      drizzleInstance: createDrizzleDatabase(
+        fakeDb,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: tables,
     });
   });
@@ -209,7 +212,10 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
 
     it('validates drizzleTables entries', async () => {
       const badAdapter = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(fakeDb),
+        drizzleInstance: createDrizzleDatabase(
+          fakeDb,
+          (database, work) => database.transaction(work),
+        ),
         drizzleTables: { bad: null },
       });
       await expect(badAdapter.connect()).rejects.toThrow("table 'bad' must be a table definition");
@@ -218,33 +224,55 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
 
   describe('validateInstance rejection', () => {
     it('rejects instance missing select', async () => {
-      const bad = { transaction: () => {} };
+      const bad = {
+        transaction: <T>(work: (transaction: object) => Promise<T>): Promise<T> => work({}),
+      };
       const a = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(bad),
+        drizzleInstance: createDrizzleDatabase(
+          bad,
+          (configured, work) => configured.transaction(work),
+        ),
         drizzleTables: tables,
       });
       await expect(a.connect()).rejects.toThrow('missing');
     });
 
     it('rejects instance missing transaction', async () => {
-      const bad = { select: () => {} };
+      const bad = {
+        select: () => {},
+        transaction: <T>(work: (transaction: object) => Promise<T>): Promise<T> => work({}),
+      };
       const a = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(bad),
+        drizzleInstance: createDrizzleDatabase(
+          bad,
+          (configured, work) => configured.transaction(work),
+        ),
         drizzleTables: tables,
       });
       await expect(a.connect()).rejects.toThrow('missing');
     });
 
     it('accepts an instance missing execute and refuses only raw queries', async () => {
-      const sqliteShaped = {
+      interface SqliteShaped {
+        select(): void;
+        insert(): void;
+        update(): void;
+        delete(): void;
+        transaction<T>(work: (transaction: SqliteShaped) => Promise<T>): Promise<T>;
+      }
+      const sqliteShaped: SqliteShaped = {
         select: () => {},
         insert: () => {},
         update: () => {},
         delete: () => {},
-        transaction: () => {},
+        transaction: async <T>(work: (transaction: typeof sqliteShaped) => Promise<T>) =>
+          await work(sqliteShaped),
       };
       const a = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(sqliteShaped),
+        drizzleInstance: createDrizzleDatabase(
+          sqliteShaped,
+          (configured, work) => configured.transaction(work),
+        ),
         drizzleTables: tables,
       });
       await a.connect();
@@ -346,8 +374,17 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
     it('rejects an omitted or empty drizzleTables registry before reporting ready', async () => {
       for (const drizzleTables of [undefined, {}] as const) {
         const options = drizzleTables === undefined
-          ? { drizzleInstance: createDrizzleDatabase(fakeDb) }
-          : { drizzleInstance: createDrizzleDatabase(fakeDb), drizzleTables };
+          ? {
+            drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+              database.transaction(work)),
+          }
+          : {
+            drizzleInstance: createDrizzleDatabase(
+              fakeDb,
+              (database, work) => database.transaction(work),
+            ),
+            drizzleTables,
+          };
         const a = new DrizzleAdapter(options);
         await expect(a.connect()).rejects.toThrow('requires options.drizzleTables');
         expect(a.isReady()).toBe(false);

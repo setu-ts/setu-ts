@@ -2317,16 +2317,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   was missing, NOT because `jwt.secret` was, so making `rbac` optional is what exposed that the
   control had never tested its own claim — complete (PR #158)
 - **Milestone 69** (`packages/database-plugin` — typed Drizzle query seam).
-  `createDrizzleDatabase(drizzleDb)` now creates a source-owned typed/runtime witness and
-  `getDrizzle(scope, witness)` preserves the application's exact outer Drizzle type for service
-  access while deriving the narrower callback-scoped native transaction type for a Unit of Work,
-  excluding outer-only operations. A real `node:sqlite` join proves repository writes are visible
-  inside that transaction and absent after rollback; exact selected-row inference is compile-time
-  asserted. Promise-aware SQLite Proxy/libsql-shaped instances without `execute()` now support
-  repositories and typed builders, while raw `query()` refuses them at the call site with a
-  descriptive error. Synchronous callback drivers are explicitly rejected because the native
-  transaction closes before awaited UoW work begins. Portable database contracts, tokens, and
-  manifest exports remain unchanged — complete (PR pending)
+  `createDrizzleDatabase(drizzleDb, transactionBridge)` now creates an opaque package-owned
+  typed/runtime configuration and distinct `getDrizzleDatabase(service, configured)` /
+  `getDrizzleTransaction(uow, configured)` accessors preserve the exact outer Drizzle type while
+  deriving the narrower callback-scoped native transaction type for a Unit of Work, excluding
+  outer-only operations. A real `node:sqlite` join proves repository writes are visible inside that
+  transaction and absent after rollback; exact selected-row inference is compile-time asserted.
+  Promise-aware SQLite Proxy/libsql-shaped instances without `execute()` now support repositories
+  and typed builders, while raw `query()` refuses them at the call site with a descriptive error.
+  Synchronous callback drivers are explicitly rejected because the native transaction closes before
+  awaited UoW work begins. Portable database contracts, tokens, and manifest exports remain
+  unchanged — complete (PR pending)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`
