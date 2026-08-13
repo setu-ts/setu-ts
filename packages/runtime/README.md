@@ -59,6 +59,22 @@ Force a specific platform (useful for testing):
 RuntimePlugin({ platform: 'node' });
 ```
 
+## Options
+
+| Option         | Type                      | Default           | Description                                                                   |
+| -------------- | ------------------------- | ----------------- | ----------------------------------------------------------------------------- |
+| `platform`     | `RuntimePlatform`         | `detectRuntime()` | Force a platform instead of auto-detecting.                                   |
+| `env`          | `Record<string, unknown>` | —                 | Cloudflare Workers `env`. Only its **string** entries populate `runtime.env`. |
+| `adapters`     | `RuntimeAdapterFactories` | —                 | Internal: override runtime adapter factories.                                 |
+| `httpAdapters` | `HttpAdapterFactories`    | built-in four     | Internal: override HTTP adapter factories.                                    |
+
+`adapters` and `httpAdapters` are marked `@internal` — they exist so unit tests can run without OS
+permissions or real runtime globals, not as application configuration.
+
+`env` matters only on Workers: the edge has no ambient environment, so without it `runtime.env` is
+empty and `ConfigPlugin` reads nothing. Object bindings (KV, R2, D1, …) are filtered out here and
+published separately by `CloudflarePlugin`.
+
 ## Architecture
 
 Cross-runtime operations (UUID, random bytes, SubtleCrypto, `now`, `hrtime`, timers) are identical

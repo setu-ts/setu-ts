@@ -40,6 +40,18 @@ await notifier.send({
 });
 ```
 
+## Options
+
+`NotificationPluginOptions` takes one option:
+
+| Option     | Type          | Default | Description                                           |
+| ---------- | ------------- | ------- | ----------------------------------------------------- |
+| `channels` | `ChannelsMap` | —       | Channel definitions keyed by dispatch name. Required. |
+
+Each entry is a `ChannelConfig`, a union discriminated on `provider`, so a missing credential is a
+compile error rather than a startup throw. Configuring `email` without a registered `mail`
+capability throws during `register()`. See [Channels](#channels) for what each one reads.
+
 ## Channels
 
 | Channel | Reads from `to` | Transport                                       |

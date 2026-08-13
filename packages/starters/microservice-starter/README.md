@@ -74,6 +74,22 @@ const app = createApplication({
 });
 ```
 
+## Options
+
+`MicroserviceStarterOptions` **extends** `RestStarterOptions`, so every REST option above applies
+here unchanged. Four fields are added, one per plugin this tier registers on top:
+
+| Option       | Type                      | Omitted →                      |
+| ------------ | ------------------------- | ------------------------------ |
+| `messaging`  | `MessagingPluginOptions`  | in-memory broker default       |
+| `queue`      | `QueuePluginOptions`      | memory adapter default         |
+| `resilience` | `ResiliencePluginOptions` | plugin defaults                |
+| `telemetry`  | `TelemetryPluginOptions`  | no-op — no exporter configured |
+
+Unlike the REST tier's gated arms, these four plugins are always registered; the options only
+configure them. That is what makes `createMicroserviceApp()` with no arguments a working service
+rather than an inert one.
+
 ## Included Plugins
 
 | Category         | Plugin             | Description               |

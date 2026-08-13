@@ -33,6 +33,19 @@ const app = createApplication({
 await app.start({ port: 3000 });
 ```
 
+## Options
+
+| Option               | Type       | Default      | Description                                                                       |
+| -------------------- | ---------- | ------------ | --------------------------------------------------------------------------------- |
+| `serverBuildPath`    | `string`   | —            | Path to the compiled `ServerBuild`. Required.                                     |
+| `basename`           | `string`   | `'/'`        | Mount point for the SSR catch-all.                                                |
+| `assetsDir`          | `string`   | —            | Directory served as static assets. Omitted → no asset route is registered at all. |
+| `assetUrlPrefix`     | `string`   | `'/assets/'` | URL prefix the asset route claims. Read only when `assetsDir` is set.             |
+| `loadRequestHandler` | `function` | lazy import  | Injectable seam; defaults to importing `npm:react-router` plus the build.         |
+
+On Cloudflare Workers leave `assetsDir` unset — there is no `runtime.fs`, so the asset handler has
+nothing to read, and omitting it registers no route rather than throwing.
+
 ## Toolchain note
 
 This is the **one** place the Deno-only backend toolchain makes an exception. Your frontend is built

@@ -28,6 +28,20 @@ app.router.get('/users/:id', async (ctx) => {
 });
 ```
 
+## Options
+
+`errorHandler(options?)` takes:
+
+| Option              | Type                                   | Default     | Description                                      |
+| ------------------- | -------------------------------------- | ----------- | ------------------------------------------------ |
+| `format`            | `ErrorFormat \| ErrorHandlerFormatter` | `'default'` | Body shape, or a formatter function.             |
+| `includeStackTrace` | `boolean`                              | `false`     | Add the stack to the body. Development only.     |
+| `logErrors`         | `boolean`                              | `true`      | Report handled errors to the resolved `ILogger`. |
+
+`format` accepts `'default'`, `'rfc9457'`, the deprecated `'rfc7807'`, or a function. Passing a
+formatter directly is equivalent to naming it — both paths select the same
+`application/problem+json` content type for Problem Details bodies.
+
 ## What it exports
 
 - **`HttpError`** — the error type, carrying a status, a title, and optional validation details.
