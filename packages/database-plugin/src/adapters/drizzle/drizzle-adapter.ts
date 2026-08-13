@@ -526,7 +526,7 @@ function filterPredicateFor(
   if (filter.type !== 'comparison') {
     const predicates = filter.filters
       .map((item) => filterPredicateFor(table, entity, item, operators))
-    .filter((item): item is unknown => item !== undefined);
+      .filter((item): item is unknown => item !== undefined);
     if (predicates.length === 0) {
       return filterOperators.inArray(columnFor(table, entity, 'id'), []);
     }
