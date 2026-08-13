@@ -106,6 +106,51 @@ describe('buildSelect', () => {
     });
   });
 
+  it('compares an expression equality against null with IS NULL', () => {
+    // `= ?` against NULL is never true in SQL, so an expression `eq` on null
+    // has to become `IS NULL` exactly as the equality map already does.
+    expect(
+      buildSelect(
+        TARGET,
+        query({
+          filter: { type: 'comparison', field: 'deletedAt', operator: 'eq', value: null },
+        }),
+      ),
+    ).toEqual({
+      sql: 'SELECT * FROM "users" WHERE "deletedAt" IS NULL',
+      params: [],
+    });
+  });
+
+  it('compiles an empty membership list to a match-nothing predicate', () => {
+    expect(
+      buildSelect(
+        TARGET,
+        query({ filter: { type: 'comparison', field: 'id', operator: 'in', value: [] } }),
+      ),
+    ).toEqual({ sql: 'SELECT * FROM "users" WHERE 0 = 1', params: [] });
+  });
+
+  it('compiles a null-only membership list to IS NULL', () => {
+    expect(
+      buildSelect(
+        TARGET,
+        query({
+          filter: { type: 'comparison', field: 'deletedAt', operator: 'in', value: [null] },
+        }),
+      ),
+    ).toEqual({ sql: 'SELECT * FROM "users" WHERE "deletedAt" IS NULL', params: [] });
+  });
+
+  it('compiles empty composition groups to their identity predicate', () => {
+    expect(buildSelect(TARGET, query({ filter: { type: 'and', filters: [] } })).sql).toBe(
+      'SELECT * FROM "users" WHERE 1 = 1',
+    );
+    expect(buildSelect(TARGET, query({ filter: { type: 'or', filters: [] } })).sql).toBe(
+      'SELECT * FROM "users" WHERE 0 = 1',
+    );
+  });
+
   it('preserves null as a member of an in filter', () => {
     expect(
       buildSelect(

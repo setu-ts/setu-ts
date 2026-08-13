@@ -84,6 +84,32 @@ function createDatabaseRoutesPlugin(): IPlugin {
         })();
       });
 
+      // GET /users/search?q= — the portable filter through an HTTP route, the
+      // lookup that previously had to drop to findAll({ where }) + [0].
+      ctx.router.get('/users/search', (reqCtx: IRequestContext): Promise<HandlerResult> => {
+        return (async (): Promise<HandlerResult> => {
+          const db = reqCtx.services.get<IDatabaseService>('database');
+          if (!db) {
+            return reqCtx.response.status(500).json({ error: 'Database service not available' });
+          }
+          const repo = db.getRepository<User>('User');
+          const term = reqCtx.query.q ?? '';
+          const user = await repo.findOne({
+            filter: {
+              type: 'or',
+              filters: [
+                { type: 'comparison', field: 'name', operator: 'contains', value: term },
+                { type: 'comparison', field: 'email', operator: 'eq', value: term },
+              ],
+            },
+          });
+          if (!user) {
+            return reqCtx.response.status(404).json({ error: 'User not found' });
+          }
+          return reqCtx.response.json(user);
+        })();
+      });
+
       // POST /users/tx-rollback — transaction that fails mid-way
       ctx.router.post('/users/tx-rollback', (reqCtx: IRequestContext): Promise<HandlerResult> => {
         return (async (): Promise<HandlerResult> => {
@@ -165,6 +191,51 @@ describe('DatabasePlugin E2E — with real application', () => {
     const found = getRes.json<User>();
     expect(found.id).toBe(created.id);
     expect(found.name).toBe('Alice');
+
+    await app.stop();
+  });
+
+  it('writes rows, then looks one up with findOne({ filter }) over HTTP', async () => {
+    const app = createApplication({
+      plugins: [
+        createTestRuntimePlugin(),
+        DatabasePlugin({ type: 'memory' }),
+        createDatabaseRoutesPlugin(),
+      ],
+    });
+
+    await app.start();
+
+    for (
+      const user of [
+        { name: 'Alice', email: 'alice@example.com' },
+        { name: 'Bob', email: 'bob@example.com' },
+      ]
+    ) {
+      expect(
+        (await app.inject({ method: 'POST', url: 'http://localhost/users', body: user }))
+          .statusCode,
+      ).toBe(201);
+    }
+
+    // Substring match on one branch of the OR…
+    const byName = await app.inject({ method: 'GET', url: 'http://localhost/users/search?q=lic' });
+    expect(byName.statusCode).toBe(200);
+    expect(byName.json<User>().name).toBe('Alice');
+
+    // …and exact match on the other, proving both branches are evaluated.
+    const byEmail = await app.inject({
+      method: 'GET',
+      url: 'http://localhost/users/search?q=bob@example.com',
+    });
+    expect(byEmail.statusCode).toBe(200);
+    expect(byEmail.json<User>().name).toBe('Bob');
+
+    // No match is `null` from findOne, not the first row of the table.
+    expect(
+      (await app.inject({ method: 'GET', url: 'http://localhost/users/search?q=nobody' }))
+        .statusCode,
+    ).toBe(404);
 
     await app.stop();
   });

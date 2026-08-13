@@ -77,6 +77,43 @@ DatabasePlugin({
 });
 ```
 
+## Filtering and single-row lookup
+
+`findAll`, `findOne`, and `count` accept an equality `where` map and an optional portable `filter`
+expression. The two are conjoined, so existing `where`-only calls are unchanged. Every built-in
+adapter — Memory, Prisma, Drizzle, and cloudflare-plugin's D1 — translates the same operators: `eq`,
+`contains`, `gt`, `gte`, `lt`, `lte`, and `in`, composed with `and` / `or`.
+
+```typescript
+const repo = db.getRepository<User>('User');
+
+const user = await repo.findOne({
+  filter: { type: 'comparison', field: 'email', operator: 'eq', value: 'ada@example.com' },
+});
+
+const recent = await repo.findAll({
+  where: { active: true },
+  filter: {
+    type: 'or',
+    filters: [
+      { type: 'comparison', field: 'name', operator: 'contains', value: 'Ada' },
+      { type: 'comparison', field: 'age', operator: 'gte', value: 18 },
+    ],
+  },
+  orderBy: { age: 'desc' },
+});
+```
+
+`findOne` returns the first matching row or `null`; it is `findAll` with `limit: 1`, so it shares
+one evaluation path with every adapter. An `in` with an empty list matches nothing, and a list
+containing `null` matches rows whose column is null (SQL `IN` never matches `NULL` on its own, so
+the adapters emit an explicit null branch).
+
+**`contains` is a substring match, and its case sensitivity belongs to the database.** The Memory
+adapter and D1 match case-sensitively; a `LIKE`-based backend follows the column's collation, which
+is case-sensitive on PostgreSQL and case-insensitive on SQLite and most MySQL collations. `%` and
+`_` in the searched value are always data, never wildcards.
+
 ## Transactions
 
 `IUnitOfWork` groups repository work into one transaction. Prisma exposes only callback-style
