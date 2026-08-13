@@ -38,7 +38,7 @@ export class UnitOfWork implements IUnitOfWork {
   }
 
   /** Provide the transaction-scoped native Drizzle object through the internal protocol. */
-  [DRIZZLE_QUERY_HANDLE](): unknown {
+  [DRIZZLE_QUERY_HANDLE](): { readonly database: object; readonly query: unknown } {
     assertDrizzleAdapter(this._adapterType);
     return readDrizzleQueryHandle(this._transaction);
   }

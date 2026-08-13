@@ -18,7 +18,7 @@ import type {
 
 import { createApplication } from '@setu-ts/kernel';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
-import { getDrizzle } from '../../src/index.ts';
+import { createDrizzleDatabase, getDrizzle } from '../../src/index.ts';
 import type { IDatabaseService, IUnitOfWork } from '../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import {
@@ -166,13 +166,14 @@ function createDatabaseRoutesPlugin(): IPlugin {
 describe('DatabasePlugin E2E — with real application', () => {
   it('resolves typed Drizzle access through the public database capability', async () => {
     const drizzleInstance = createFakeDrizzleInstance();
+    const database = createDrizzleDatabase(drizzleInstance);
     const app = createApplication({
       plugins: [
         createTestRuntimePlugin(),
         DatabasePlugin({
           type: 'drizzle',
           options: {
-            drizzleInstance,
+            drizzleInstance: database,
             drizzleTables: { User: createFakeDrizzleTable('user') },
           },
         }),
@@ -180,7 +181,7 @@ describe('DatabasePlugin E2E — with real application', () => {
     });
     await app.start();
     const service = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    expect(getDrizzle<typeof drizzleInstance>(service)).toBe(drizzleInstance);
+    expect(getDrizzle(service, database)).toBe(drizzleInstance);
     await app.stop();
   });
 
@@ -190,7 +191,8 @@ describe('DatabasePlugin E2E — with real application', () => {
     });
     await app.start();
     const service = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    expect(() => getDrizzle(service)).toThrow(
+    const database = createDrizzleDatabase(createFakeDrizzleInstance());
+    expect(() => getDrizzle(service, database)).toThrow(
       "Drizzle query access requires adapter 'drizzle'; configured adapter is 'memory'.",
     );
     await app.stop();

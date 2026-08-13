@@ -7,6 +7,11 @@
  * @module
  */
 import type { DatabaseAdapterType, IDatabaseService, IUnitOfWork } from '../interfaces/index.ts';
+import { DRIZZLE_DATABASE } from './drizzle-database.ts';
+import type { DrizzleDatabase } from './drizzle-database.ts';
+
+export { createDrizzleDatabase } from './drizzle-database.ts';
+export type { DrizzleDatabase } from './drizzle-database.ts';
 
 /**
  * The native transaction object supplied by a configured Drizzle database.
@@ -31,9 +36,15 @@ export type DrizzleTransaction<TDatabase extends object> = TDatabase extends
 /** Internal key used to pass a native Drizzle object without widening portable contracts. */
 export const DRIZZLE_QUERY_HANDLE: unique symbol = Symbol('setu.database.drizzle-query-handle');
 
+/** One correlated configured database and its current outer/transaction query object. */
+export interface NativeDrizzleQueryHandle {
+  readonly database: object;
+  readonly query: unknown;
+}
+
 /** Internal structural provider implemented by plugin-created Drizzle scopes. */
 export interface DrizzleQueryHandleProvider {
-  [DRIZZLE_QUERY_HANDLE](): unknown;
+  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle;
 }
 
 /** Error used when a scope was not created by this package. */
@@ -56,7 +67,7 @@ export function assertDrizzleAdapter(adapterType: DatabaseAdapterType | undefine
 }
 
 /** Read an internal native handle, rejecting external structural stand-ins. */
-export function readDrizzleQueryHandle(value: unknown): unknown {
+export function readDrizzleQueryHandle(value: unknown): NativeDrizzleQueryHandle {
   if (
     value === null ||
     (typeof value !== 'object' && typeof value !== 'function') ||
@@ -64,7 +75,11 @@ export function readDrizzleQueryHandle(value: unknown): unknown {
   ) {
     throw new Error(INVALID_DRIZZLE_SCOPE_ERROR);
   }
-  return (value as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE]();
+  const handle = (value as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE]();
+  if (handle === null || typeof handle !== 'object' || typeof handle.database !== 'object') {
+    throw new Error(INVALID_DRIZZLE_SCOPE_ERROR);
+  }
+  return handle;
 }
 
 /**
@@ -75,41 +90,53 @@ export function readDrizzleQueryHandle(value: unknown): unknown {
  * callback-scoped transaction object, so native builders participate in the
  * same commit or rollback as Unit-of-Work repositories.
  *
- * Supply the application's configured outer database type explicitly. The
- * helper cannot infer a schema through a capability token, and omitting
- * `TDatabase` infers `object`.
+ * Pass the same typed witness supplied as `options.drizzleInstance`. It both
+ * infers the exact application type and proves at runtime that this service or
+ * Unit of Work belongs to that configured database.
  *
- * @typeParam TDatabase - The type of the application's configured outer Drizzle database
  * @param scope - A database-plugin service or transaction Unit of Work
+ * @param database - The typed witness supplied to this plugin instance
  * @returns The identical outer or transaction-scoped native Drizzle object
  * @throws {Error} If the scope is external or is not configured with the built-in Drizzle adapter
  * @example
  * ```typescript
- * const outer = getDrizzle<typeof drizzleDb>(databaseService);
+ * const outer = getDrizzle(databaseService, drizzleDatabase);
  * const rows = await outer.select().from(users);
  *
  * await databaseService.transaction(async (uow) => {
- *   const tx = getDrizzle<typeof drizzleDb>(uow);
+ *   const tx = getDrizzle(uow, drizzleDatabase);
  *   await tx.select().from(users).innerJoin(teams, eq(users.teamId, teams.id));
  * });
  * ```
  * @since 0.2.0
  */
-export function getDrizzle<TDatabase extends object>(scope: IDatabaseService): TDatabase;
+export function getDrizzle<TDatabase extends object>(
+  scope: IDatabaseService,
+  database: DrizzleDatabase<TDatabase>,
+): TDatabase;
 /**
  * Returns Drizzle's transaction-safe callback object for a Unit of Work.
  *
- * @typeParam TDatabase - The application's configured outer Drizzle database type
  * @param scope - A transaction Unit of Work created by the database plugin
+ * @param database - The typed witness supplied to this plugin instance
  * @returns The native callback-scoped transaction object
  * @throws {Error} If the scope is external or is not configured with the built-in Drizzle adapter
  * @since 0.2.0
  */
 export function getDrizzle<TDatabase extends object>(
   scope: IUnitOfWork,
+  database: DrizzleDatabase<TDatabase>,
 ): DrizzleTransaction<TDatabase>;
-export function getDrizzle<TDatabase extends object>(
+export function getDrizzle(
   scope: IDatabaseService | IUnitOfWork,
-): TDatabase | DrizzleTransaction<TDatabase> {
-  return readDrizzleQueryHandle(scope) as TDatabase | DrizzleTransaction<TDatabase>;
+  database: DrizzleDatabase<object>,
+): unknown {
+  const configured = database[DRIZZLE_DATABASE];
+  const handle = readDrizzleQueryHandle(scope);
+  if (handle.database !== configured) {
+    throw new Error(
+      'Drizzle query access requires the witness configured for this database scope.',
+    );
+  }
+  return handle.query;
 }

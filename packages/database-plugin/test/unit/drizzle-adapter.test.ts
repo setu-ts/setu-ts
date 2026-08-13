@@ -22,7 +22,8 @@ import {
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
-import { getDrizzle } from '../../src/index.ts';
+import { createDrizzleDatabase, getDrizzle } from '../../src/index.ts';
+import type { DrizzleDatabase } from '../../src/index.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
 
 /** Default operator builders matching the adapter's fallback `eq` shape. */
@@ -64,7 +65,7 @@ describe('DrizzleAdapter', () => {
   beforeEach(() => {
     fakeDb = createFakeDrizzleInstance();
     adapter = new DrizzleAdapter({
-      drizzleInstance: fakeDb,
+      drizzleInstance: createDrizzleDatabase(fakeDb),
       drizzleTables: { user: USER_TABLE, post: POST_TABLE },
     });
   });
@@ -100,9 +101,60 @@ describe('DrizzleAdapter', () => {
       await expect(noDbAdapter.connect()).rejects.toThrow('requires options.drizzleInstance');
     });
 
+    it('rejects an unwrapped synchronous callback driver before invoking its transaction', async () => {
+      let callbackInvoked = false;
+      const synchronous = {
+        select: fakeDb.select,
+        insert: fakeDb.insert,
+        update: fakeDb.update,
+        delete: fakeDb.delete,
+        transaction(callback: (transaction: typeof fakeDb) => unknown): unknown {
+          callbackInvoked = true;
+          return callback(fakeDb);
+        },
+      };
+      const synchronousAdapter = new DrizzleAdapter({
+        // Deliberate boundary cast models untyped JavaScript configuration;
+        // ordinary TypeScript is rejected by createDrizzleDatabase itself.
+        drizzleInstance: synchronous as unknown as DrizzleDatabase<object>,
+        drizzleTables: { user: USER_TABLE },
+      });
+
+      await expect(synchronousAdapter.connect()).rejects.toThrow(
+        'options.drizzleInstance to be created by createDrizzleDatabase()',
+      );
+      expect(callbackInvoked).toBe(false);
+    });
+
+    it('rejects a wrapped synchronous callback driver before Unit-of-Work work can escape', async () => {
+      const events: string[] = [];
+      const synchronous = {
+        select: fakeDb.select,
+        insert: fakeDb.insert,
+        update: fakeDb.update,
+        delete: fakeDb.delete,
+        transaction(callback: (transaction: typeof fakeDb) => Promise<void>): Promise<void> {
+          events.push('native-begin');
+          const result = callback(fakeDb);
+          events.push('native-commit');
+          return result;
+        },
+      };
+      const synchronousAdapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(synchronous),
+        drizzleTables: { user: USER_TABLE },
+      });
+      await synchronousAdapter.connect();
+
+      await expect(synchronousAdapter.beginTransaction()).rejects.toThrow(
+        'Configured Drizzle driver does not await transaction callbacks; synchronous transaction drivers are unsupported.',
+      );
+      expect(events).toEqual(['native-begin', 'native-commit']);
+    });
+
     it('validates drizzleTables at connect', async () => {
       const adapter = new DrizzleAdapter({
-        drizzleInstance: fakeDb,
+        drizzleInstance: createDrizzleDatabase(fakeDb),
         drizzleTables: { user: USER_TABLE },
       });
       await adapter.connect();
@@ -117,8 +169,9 @@ describe('DrizzleAdapter', () => {
         delete: fakeDb.delete,
         transaction: fakeDb.transaction,
       };
+      const database = createDrizzleDatabase(noExecute);
       const noExecuteAdapter = new DrizzleAdapter({
-        drizzleInstance: noExecute,
+        drizzleInstance: database,
         drizzleTables: { user: USER_TABLE },
       });
       await noExecuteAdapter.connect();
@@ -128,9 +181,9 @@ describe('DrizzleAdapter', () => {
         (entity) => noExecuteAdapter.createDataSource(entity),
         'drizzle',
       );
-      expect(getDrizzle<typeof noExecute>(service)).toBe(noExecute);
+      expect(getDrizzle(service, database)).toBe(noExecute);
       await service.transaction(async (uow) => {
-        expect(getDrizzle<typeof noExecute>(uow)).toBe(fakeDb);
+        expect(getDrizzle(uow, database)).toBe(fakeDb);
         expect(await uow.getRepository('user').findAll()).toEqual([]);
       });
       await expect(noExecuteAdapter.rawQuery('SELECT 1')).rejects.toThrow(
@@ -442,7 +495,7 @@ describe('DrizzleAdapter', () => {
   describe('transaction failure paths', () => {
     it('rejects beginTransaction when the driver cannot open a transaction', async () => {
       const failing = new DrizzleAdapter({
-        drizzleInstance: {
+        drizzleInstance: createDrizzleDatabase({
           select: () => ({ from: () => Promise.resolve([]) }),
           insert: () => ({ values: () => ({ execute: () => Promise.resolve([]) }) }),
           update: () => ({ set: () => ({ where: () => Promise.resolve([]) }) }),
@@ -451,7 +504,7 @@ describe('DrizzleAdapter', () => {
           execute: () => Promise.resolve({ rows: [] }),
           query: {},
           transaction: () => Promise.reject(new Error('driver down')),
-        },
+        }),
         drizzleTables: { user: USER_TABLE },
       });
       await failing.connect();
@@ -463,7 +516,7 @@ describe('DrizzleAdapter', () => {
     it('rethrows a non-sentinel error surfaced during rollback', async () => {
       const inner = createFakeDrizzleInstance();
       const wrapping = new DrizzleAdapter({
-        drizzleInstance: {
+        drizzleInstance: createDrizzleDatabase({
           select: inner.select.bind(inner),
           insert: inner.insert.bind(inner),
           update: inner.update.bind(inner),
@@ -479,7 +532,7 @@ describe('DrizzleAdapter', () => {
               throw new Error('tx aborted by driver');
             }
           },
-        },
+        }),
         drizzleTables: { user: USER_TABLE },
       });
       await wrapping.connect();

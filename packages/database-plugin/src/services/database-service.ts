@@ -81,7 +81,7 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /** Provide the configured native Drizzle instance through the internal protocol. */
-  [DRIZZLE_QUERY_HANDLE](): unknown {
+  [DRIZZLE_QUERY_HANDLE](): { readonly database: object; readonly query: unknown } {
     assertDrizzleAdapter(this._adapterType);
     return readDrizzleQueryHandle(this._adapter);
   }
