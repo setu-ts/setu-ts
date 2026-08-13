@@ -18,6 +18,8 @@ import {
   getDrizzleDatabase,
   getDrizzleTransaction,
 } from '../../src/index.ts';
+import { DRIZZLE_QUERY_HANDLE } from '../../src/query/drizzle-query.ts';
+import { isDrizzleDatabase, readDrizzleDatabase } from '../../src/query/drizzle-database.ts';
 import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
@@ -254,5 +256,66 @@ describe('typed Drizzle accessors', () => {
     expect(() => getDrizzleDatabase(service, secondDatabase)).toThrow(
       'Drizzle query access requires the configuration registered for this database scope.',
     );
+  });
+
+  // A scope that implements the internal symbol but answers with a handle this
+  // package never built is not a plugin scope. Accepting it would let an
+  // arbitrary object nominate any value as "the configured database", which is
+  // the whole reason the handle carries a registered identity rather than a
+  // plain object.
+  it('rejects a scope whose internal handle is not package-created', () => {
+    const database = createDrizzleDatabase(
+      createFakeDrizzleInstance(),
+      (configured, work) => configured.transaction(work),
+    );
+    const forgedHandles = [
+      // A structural look-alike identity that was never registered.
+      { database: { forged: true }, query: { kind: 'native' }, scope: 'outer' },
+      // A registered identity carrying a scope this package never emits.
+      { database, query: { kind: 'native' }, scope: 'sideways' },
+      // No handle at all.
+      null,
+    ];
+
+    for (const forged of forgedHandles) {
+      const scope = {
+        ...externalService(),
+        [DRIZZLE_QUERY_HANDLE]: () => forged,
+      } as unknown as IDatabaseService;
+
+      expect(() => getDrizzleDatabase(scope, database)).toThrow(
+        'Drizzle query access requires a database-plugin service or unit of work.',
+      );
+    }
+  });
+});
+
+describe('drizzle configuration registry', () => {
+  // `readDrizzleDatabase` and `isDrizzleDatabase` both accept functions as
+  // candidate keys, because a WeakMap does. A function is the one object type
+  // an application could plausibly hand over by mistake — a driver factory
+  // rather than the driver — so both paths need to reject rather than throw a
+  // bare TypeError.
+  it('rejects function and null candidates that were never registered', () => {
+    const unregisteredFunction = (): void => {};
+
+    expect(isDrizzleDatabase(unregisteredFunction)).toBe(false);
+    expect(isDrizzleDatabase(null)).toBe(false);
+    expect(() => readDrizzleDatabase(unregisteredFunction)).toThrow(
+      'DrizzleAdapter requires options.drizzleInstance to be created by createDrizzleDatabase().',
+    );
+    expect(() => readDrizzleDatabase(null)).toThrow(
+      'DrizzleAdapter requires options.drizzleInstance to be created by createDrizzleDatabase().',
+    );
+  });
+
+  it('recognises a registered configuration through the same predicate', () => {
+    const database = createDrizzleDatabase(
+      createFakeDrizzleInstance(),
+      (configured, work) => configured.transaction(work),
+    );
+
+    expect(isDrizzleDatabase(database)).toBe(true);
+    expect(readDrizzleDatabase(database).database).toBeDefined();
   });
 });

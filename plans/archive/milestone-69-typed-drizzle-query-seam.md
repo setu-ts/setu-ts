@@ -121,6 +121,15 @@ repository operations. The portable repository and adapter contracts remain unch
   behind the same internal symbol. `getDrizzle` is the only public reader and narrows structurally
   before invoking it. No `WeakMap`, module-global registry, public class member, or `common` field
   is added.
+- **Second-review correction:** the shipped design DOES add one module-level `WeakMap`
+  (`DRIZZLE_DATABASES` in `query/drizzle-database.ts`), because §3.1's correlated witness has to map
+  an opaque configuration object back to its database and transaction bridge, and that state cannot
+  live on the witness without making it forgeable by a structural literal. The original objection
+  was garbage lifetime and hidden mutable global state: a `WeakMap` keyed on the witness answers the
+  first (entries die with the configuration), and the map is written only by `createDrizzleDatabase`
+  and read only by this module, so it is not an ambient registry. The symbol protocol above is
+  unchanged — the `WeakMap` carries CONFIGURATION identity, while the symbol still carries the
+  per-scope native query object.
 - **Why:** This passes the exact callback-scoped object without exposing it through
   `IAdapterTransaction`, avoids mutable hidden global state and garbage-lifetime questions, and
   keeps the internal mechanism unnameable from the package barrel. The same provider route serves

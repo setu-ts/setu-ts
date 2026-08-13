@@ -66,7 +66,7 @@ export class DatabaseService implements IDatabaseService {
     private readonly _options?: DatabaseAdapterOptions,
     /** Optional logger for query logging. */
     private readonly _logger?: { debug(msg: string, meta?: Record<string, unknown>): void },
-    /** Monotonic clock injected from `ctx.runtime.hrtime()` by the plugin. */
+    /** Monotonic clock — injected from `ctx.runtime.hrtime()`. NEVER `Date.now()`. */
     private readonly _now: () => number = (): number => {
       // Fallback for tests that do not inject; uses the global monotonic clock.
       return typeof performance !== 'undefined' ? performance.now() : 0;

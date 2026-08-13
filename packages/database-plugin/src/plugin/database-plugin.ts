@@ -100,7 +100,7 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       // Optional logger resolution.
       const logger = resolveLogger(ctx);
 
-      // Monotonic clock supplied by the runtime capability.
+      // Monotonic clock from runtime (NEVER Date.now()).
       const now = (): number => ctx.runtime.hrtime();
 
       const service = new DatabaseService(
