@@ -138,6 +138,98 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
   }
 });
 
+describe('a scaffolded project configures itself from a dotenv file', () => {
+  it('emits an ignored dotenv file beside a tracked example', async () => {
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+
+    expect((await Deno.stat(`${project}/.env`)).isFile).toBe(true);
+    expect((await Deno.stat(`${project}/.env.example`)).isFile).toBe(true);
+    // The example is the committed one, so the ignore rule must name only the
+    // real file — an ignore of `.env*` would take the example with it.
+    const gitignore = await Deno.readTextFile(`${project}/.gitignore`);
+    expect(gitignore).toContain('.env\n');
+    expect(gitignore).not.toContain('.env.example');
+  });
+
+  it('boots with no dotenv file at all — the state of every fresh clone', async () => {
+    // The regression this exists for: the CLI emits `.env`, gitignores it, and
+    // wires `ConfigPlugin({ envFilePath: '.env' })`, which throws on a missing
+    // file. So the project ran only on the machine that generated it and died
+    // at `ConfigPlugin.register` on the first `git clone`, in CI, and inside a
+    // container built from the repository. Deleting the file here reproduces
+    // exactly that state; `envFileOptional` is what makes it boot.
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+    await Deno.remove(`${project}/.env`);
+
+    const result = await bootWithGeneratedPermissions(project, ['/health']);
+
+    expect(result.statuses['/health'], result.output).toBe(200);
+  });
+
+  it('reads values from the dotenv file it emitted', async () => {
+    // The other half: tolerating absence must not mean ignoring the file. This
+    // asserts the configured path is genuinely loaded, so a fix that silently
+    // stopped reading dotenv files would fail here rather than pass both ways.
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+    await Deno.writeTextFile(`${project}/.env`, 'SCAFFOLD_PROBE_VALUE=from-dotenv\n');
+    await Deno.writeTextFile(
+      `${project}/src/routes/index.ts`,
+      `import { CAPABILITIES } from '@setu-ts/common';\n` +
+        `import type { IConfig, IRouterApi } from '@setu-ts/common';\n\n` +
+        `export function registerGeneratedRoutes(router: IRouterApi): void {\n` +
+        `  router.get('/probe-config', (ctx) => {\n` +
+        `    const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);\n` +
+        `    return ctx.response.json({ value: config.get<string>('SCAFFOLD_PROBE_VALUE') });\n` +
+        `  });\n` +
+        `}\n`,
+    );
+
+    const result = await bootWithGeneratedPermissions(project, ['/probe-config']);
+
+    expect(result.statuses['/probe-config'], result.output).toBe(200);
+    expect(result.bodies['/probe-config']).toContain('from-dotenv');
+  });
+});
+
+describe('a scaffolded project answers errors as RFC 9457 Problem Details', () => {
+  it('serves the documented body and media type from a thrown error', async () => {
+    // S4's actual claim. Asserted through a booted app rather than by matching
+    // `errorHandler({ format: 'rfc9457' })` in the emitted source: the format
+    // argument reaching the middleware is the only thing that decides the wire
+    // shape, and a string match cannot see whether it did.
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+    await Deno.writeTextFile(
+      `${project}/src/routes/index.ts`,
+      `import { unauthorized } from '@setu-ts/exceptions';\n` +
+        `import type { IRouterApi } from '@setu-ts/common';\n\n` +
+        `export function registerGeneratedRoutes(router: IRouterApi): void {\n` +
+        `  router.get('/boom', () => {\n` +
+        `    throw unauthorized('Token expired');\n` +
+        `  });\n` +
+        `}\n`,
+    );
+
+    const result = await bootWithGeneratedPermissions(project, ['/boom']);
+
+    expect(result.statuses['/boom'], result.output).toBe(401);
+    const body = JSON.parse(result.bodies['/boom']) as Record<string, unknown>;
+    // Field by field, absences included: `message` is the pre-M56 default
+    // format's field and must NOT appear beside Problem Details members.
+    expect(body['type']).toBe('about:blank');
+    expect(body['title']).toBe('Unauthorized');
+    expect(body['status']).toBe(401);
+    expect(body['detail']).toBe('Token expired');
+    expect(body['message']).toBeUndefined();
+  });
+});
+
 describe('a scaffolded project can install the versions it was pinned to', () => {
   /**
    * Rewrites the emitted manifest's dependency-age setting.

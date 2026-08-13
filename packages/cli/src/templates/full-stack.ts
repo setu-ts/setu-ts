@@ -13,6 +13,7 @@
  */
 
 import type { AppFactoryRenderContext, TemplateDefinition } from './registry.ts';
+import { renderConfigOptions } from './env-file.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
@@ -69,7 +70,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
     : `\n    serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
   const config = runtime === 'cloudflare-workers'
     ? ''
-    : `, config: { envFilePath: '${context.envFilePath ?? '.env'}' }`;
+    : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
 
   return `(config) => ({
     reactRouter: {
@@ -132,6 +133,13 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
     envFilePath: '.env',
+    // `fullStackArgs` emits `config.getOrThrow<string>('SESSION_SECRET')`, so
+    // without this the template scaffolds a project that throws at startup.
+    envVariables: [{
+      name: 'SESSION_SECRET',
+      description: 'Signs and encrypts session cookies. Use a long random value in production.',
+      develop: 'dev-only-insecure-session-secret-change-me',
+    }],
     // The one template with a real frontend build, and the only one that should
     // therefore carry an npm manifest on a Deno or Workers target.
     npmBuildScript: 'react-router build',

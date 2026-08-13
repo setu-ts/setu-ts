@@ -285,8 +285,12 @@ describe('class-based template', () => {
   it('leaves every wiring without a seam argument-free', () => {
     // Three plugins now take a seam. Everything else must stay a bare call, or a
     // template has grown configuration nothing asked for.
+    //
+    // `config-plugin` is deliberately NOT in this set: its dotenv argument is
+    // template MANIFEST data rendered by `configModule`, so a literal on the
+    // wiring as well would be a second source of truth that `--env-file`
+    // silently overrides.
     const withSeams = new Set([
-      'config-plugin',
       'decorator-plugin',
       'health-plugin',
       'metrics-plugin',

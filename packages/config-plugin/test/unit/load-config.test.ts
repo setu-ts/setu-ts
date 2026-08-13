@@ -15,7 +15,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IConfig, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import type { IConfig, IFileSystem, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 
 import { loadConfig } from '../../src/services/load-config.ts';
 import { ConfigPlugin } from '../../src/plugin/config-plugin.ts';
@@ -203,5 +203,88 @@ describe('loadConfig | one implementation, two entry points', () => {
     const registered = await registerPlugin(runtime, { instance: supplied });
 
     expect(registered).toBe(supplied);
+  });
+});
+
+/**
+ * `envFileOptional` — the arrangement a scaffolded project ships with.
+ *
+ * The CLI emits a GITIGNORED dotenv file, so it exists on the machine that ran
+ * `setu new` and nowhere else: not in a fresh clone, not in CI, not in a
+ * container built from the repository. Without this option the project throws
+ * at `ConfigPlugin.register` in every one of those places, which is why the
+ * absent case below is the one that matters.
+ */
+describe('loadConfig — optional dotenv files', () => {
+  it('throws for an absent file by default, which is the released behaviour', async () => {
+    const runtime = createRuntime({ env: {}, fs: createFakeFileSystem({}) });
+
+    await expect(loadConfig(runtime, { envFilePath: '.env' })).rejects.toThrow(
+      "unable to read env file '.env'",
+    );
+  });
+
+  it('skips an absent file and still reads the environment when optional', async () => {
+    const runtime = createRuntime({
+      env: { MODE: 'production' },
+      fs: createFakeFileSystem({}),
+    });
+
+    const config = await loadConfig(runtime, { envFilePath: '.env', envFileOptional: true });
+
+    expect(config.get<string>('MODE')).toBe('production');
+  });
+
+  it('still throws when the file EXISTS but cannot be read', async () => {
+    // The distinction the option is narrow about: absence is expected, an
+    // unreadable file is a fault the developer needs told about. A `readFile`
+    // catch could not tell these apart, so the implementation probes `stat`.
+    const fs = createFakeFileSystem({ '.env': 'A=1' });
+    const unreadable: IFileSystem = {
+      ...fs,
+      readFile: () => Promise.reject(new Error('Is a directory')),
+    };
+
+    await expect(
+      loadConfig(createRuntime({ env: {}, fs: unreadable }), {
+        envFilePath: '.env',
+        envFileOptional: true,
+      }),
+    ).rejects.toThrow("unable to read env file '.env'");
+  });
+
+  it('loads the paths that exist from a list where others do not', async () => {
+    const runtime = createRuntime({
+      env: {},
+      fs: createFakeFileSystem({ '.env': 'FROM_BASE=yes\nSHARED=base' }),
+    });
+
+    const config = await loadConfig(runtime, {
+      envFilePath: ['.env.local', '.env'],
+      envFileOptional: true,
+    });
+
+    expect(config.get<string>('FROM_BASE')).toBe('yes');
+    expect(config.get<string>('SHARED')).toBe('base');
+  });
+
+  it('both entry points honour it identically', async () => {
+    // The two-entry-point rule: the plugin must not hardcode a default the
+    // standalone loader honours, or a scaffolded project and a hand-written one
+    // would disagree about whether a missing dotenv file is fatal.
+    const options: ConfigPluginOptions = { envFilePath: '.env', envFileOptional: true };
+    const env = { MODE: 'production' };
+
+    const standalone = await loadConfig(
+      createRuntime({ env, fs: createFakeFileSystem({}) }),
+      options,
+    );
+    const registered = await registerPlugin(
+      createRuntime({ env, fs: createFakeFileSystem({}) }),
+      options,
+    );
+
+    expect(registered.get<string>('MODE')).toBe(standalone.get<string>('MODE'));
+    expect(registered.get<string>('MODE')).toBe('production');
   });
 });

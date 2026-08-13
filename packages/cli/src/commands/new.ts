@@ -132,6 +132,10 @@ function planWorkspace(
     };
   }
 
+  if (args.flags['depends-on'] !== undefined) {
+    return { ok: false, message: dependsOnRefusal() };
+  }
+
   const basePort = readPortFlag(args.flags);
   if (!basePort.ok) return { ok: false, message: basePort.message };
 
@@ -226,6 +230,19 @@ function readTransport(
 }
 
 /**
+ * Names where `--depends-on` is actually read.
+ *
+ * Shared by the workspace-root and standalone refusals, so both name the one
+ * command that honours the flag rather than only rejecting it.
+ *
+ * @returns The refusal message
+ */
+function dependsOnRefusal(): string {
+  return `--depends-on applies to \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`: it names an ` +
+    `existing workspace member this service waits for, and only a workspace has members.`;
+}
+
+/**
  * Plans an ordinary project.
  *
  * @param name - The project directory name
@@ -250,6 +267,13 @@ function planProject(
       message: `--port applies to \`${PROGRAM_NAME} new <name> --workspace\`, which allocates ` +
         `member ports from it. A standalone project binds the port its \`main.ts\` names.`,
     };
+  }
+
+  // Same class again: a startup dependency names a sibling, and a standalone
+  // project has no siblings. Nothing reads the flag here, so accepting it would
+  // report success for a project with no ordering of any kind.
+  if (args.flags['depends-on'] !== undefined) {
+    return { ok: false, message: dependsOnRefusal() };
   }
 
   // Same class: a transport describes how the members of a workspace reach each

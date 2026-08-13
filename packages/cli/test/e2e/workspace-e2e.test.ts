@@ -113,6 +113,27 @@ describe('workspace scaffolding — end to end', () => {
     return ws;
   }
 
+  it('is formatted and lints clean, like a scaffolded project', async () => {
+    // M63 established this bar for `setu new <name>` and `scaffold-runs-e2e`
+    // gates it there — but only there, so a workspace could be, and was, emitted
+    // failing both while every gate stayed green. The offenders were CLI-owned
+    // files the developer never wrote: the generated `scripts/dev.ts` (two empty
+    // `catch` blocks, and lines past the width its own `fmt` config sets) and a
+    // root README paragraph hand-wrapped to the wrong column.
+    const ws = await twoMembers();
+
+    for (const argv of [['fmt', '--check'], ['lint']]) {
+      const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
+        args: argv,
+        cwd: ws,
+        stdout: 'piped',
+        stderr: 'piped',
+      }).output();
+      const decoder = new TextDecoder();
+      expect(code, `${argv.join(' ')}: ${decoder.decode(stdout)}${decoder.decode(stderr)}`).toBe(0);
+    }
+  });
+
   it('creates a root whose files exist on disk', async () => {
     expect(await run(['new', 'acme', '--workspace'])).toBe(0);
     for (const name of ['deno.json', WORKSPACE_MANIFEST, 'README.md', '.gitignore']) {

@@ -6,7 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`ConfigPluginOptions.envFileOptional`.** When `true`, a path in `envFilePath` that does not
+  exist is skipped instead of throwing. The default is `false`, so nothing about an existing
+  application changes. Only ABSENCE is tolerated — a file that exists and cannot be read still
+  throws, which the implementation establishes with a `stat` probe rather than by interpreting a
+  runtime-specific error code.
+
+- **Scaffolded projects generate their configuration.** `setu new` and `setu generate app` emit a
+  gitignored dotenv file beside a tracked `<path>.example` and wire
+  `ConfigPlugin({ envFilePath, envFileOptional: true })`; `--env-file <path>` chooses the path. A
+  template that requires a value names it in both files — `full-stack` emits `SESSION_SECRET`, with
+  a development value in the ignored file and an empty one in the committed example.
+
+- **`setu workspace ports --reallocate`** reassigns every member to a currently bindable port and
+  rewrites the manifest, discovery maps, Compose and Kubernetes artifacts together. Workspace
+  creation and member allocation now probe a port before claiming it.
+
+- **`setu generate app --depends-on <member>`**, repeatable, records startup prerequisites in
+  `setu.workspace.json`. The generated root `dev` runner starts prerequisites first and waits for
+  each one's `/ready` endpoint before starting its dependents, naming a cycle or a stalled
+  prerequisite and terminating started children on failure.
+
+- **`RestStarterOptions.serviceDiscovery`**, inherited by the microservice and full-stack tiers.
+  Supplied → one `ServiceDiscoveryPlugin` is registered; omitted → the plugin list is unchanged.
+  This is what lets a `full-stack` workspace member consume the discovery map the CLI already
+  generated for it, through the starter factory rather than a hand-written registration.
+
 ### Changed
+
+- **Scaffolded REST-derived templates now answer errors as RFC 9457 Problem Details.** The inline
+  `errorHandler()` the CLI emits passes `{ format: 'rfc9457' }`, matching what the starter factories
+  already did. `@setu-ts/exceptions` itself is untouched: `errorHandler()` still defaults to the
+  `'default'` format.
 
 - **The Prisma and Drizzle database adapters now execute their drivers, and both require the
   application to own the client.** Both shipped with paths that could not work against a real

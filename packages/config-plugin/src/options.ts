@@ -27,6 +27,24 @@ export interface ConfigPluginOptions {
   readonly envFilePath?: string | readonly string[];
 
   /**
+   * When `true`, a path in {@linkcode ConfigPluginOptions.envFilePath} that
+   * does not exist is skipped instead of throwing. Defaults to `false`, which
+   * is the behaviour released in 0.1.0.
+   *
+   * This exists for the layered-dotenv arrangement a scaffolded project uses: a
+   * gitignored `.env` beside a tracked `.env.example`. The file is present on
+   * the machine that generated it and absent on every fresh clone, in CI, and
+   * in a container built from the repository — so requiring it would make the
+   * project fail to start everywhere except its author's machine. A file that
+   * EXISTS but cannot be read still throws; only absence is tolerated.
+   *
+   * Ignored when {@linkcode ConfigPluginOptions.instance} is set.
+   *
+   * @since 0.1.0
+   */
+  readonly envFileOptional?: boolean;
+
+  /**
    * A structural schema (e.g., a Zod schema) for validating configuration at
    * startup. When provided, the schema's `parse()` is called once after
    * merging and expansion, and the parsed output is stored as the
