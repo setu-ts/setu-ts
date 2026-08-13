@@ -114,6 +114,9 @@ imperative begin/commit.
 | `DatabaseAdapterType`       | type      |
 | `DatabasePluginOptions`     | type      |
 | `DataSource`                | type      |
+| `FilterComparison`          | type      |
+| `FilterExpression`          | type      |
+| `FilterOperator`            | type      |
 | `OrderDirection`            | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

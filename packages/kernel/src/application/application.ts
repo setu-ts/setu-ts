@@ -103,7 +103,8 @@ export interface IKernelApplication extends IApplication {
 class Application implements IKernelApplication {
   readonly #registry = new ServiceRegistry();
   readonly #pipeline = new MiddlewarePipeline();
-  readonly #router = new Router();
+  #registeringPlugin: string | undefined;
+  readonly #router = new Router(() => this.#registeringPlugin);
   readonly #lifecycle = new LifecycleManager();
   readonly #plugins: IPlugin[] = [];
   readonly #envSpecs: {
@@ -165,11 +166,11 @@ class Application implements IKernelApplication {
     // touches ctx.runtime. Arrow functions below capture `this` lexically.
     const registry = this.#registry;
     const envSpecs = this.#envSpecs;
+    const registrationOwner = (): string | undefined => this.#registeringPlugin;
     // Name of the plugin whose `register()` is currently running — read by
     // `environment.validate` to attribute each env-var declaration. `undefined`
     // outside the registration loop (e.g. a `validate` call from a lifecycle
     // hook), which the fallback message covers.
-    let registeringPlugin: string | undefined;
     const base: Omit<IPluginContext, 'config' | 'logger' | 'metadata' | 'container' | 'runtime'> = {
       services: registry,
       middleware: this.#pipeline,
@@ -226,7 +227,7 @@ class Application implements IKernelApplication {
           // violation message names the plugin that asked for the variable. One
           // context object is shared by every plugin, so the declaring plugin is
           // read from the registration cursor rather than captured per context.
-          envSpecs.push({ name: registeringPlugin ?? 'the application', spec });
+          envSpecs.push({ name: registrationOwner() ?? 'the application', spec });
         },
       },
       options: {},
@@ -290,12 +291,15 @@ class Application implements IKernelApplication {
     //    hooks it just added — these run "during the owning plugin's
     //    registration" (after that plugin, before the next), distinct from
     //    the onInit hooks that run once all plugins have registered.
-    for (const plugin of ordered) {
-      registeringPlugin = plugin.name;
-      await plugin.register(ctx);
-      await this.#lifecycle.runRegister();
+    try {
+      for (const plugin of ordered) {
+        this.#registeringPlugin = plugin.name;
+        await plugin.register(ctx);
+        await this.#lifecycle.runRegister();
+      }
+    } finally {
+      this.#registeringPlugin = undefined;
     }
-    registeringPlugin = undefined;
 
     // 4. Validate collected env specs against runtime.env
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);

@@ -27,6 +27,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     limit: partial.limit ?? -1,
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
+    ...(partial.filter === undefined ? {} : { filter: partial.filter }),
   };
 }
 
@@ -198,6 +199,29 @@ describe('PrismaAdapter', () => {
     it('sends empty args when the query has no options', async () => {
       const rows = await ds.findAll(query());
       expect(rows.length).toBe(3);
+    });
+
+    it('translates a portable expression into Prisma where input', async () => {
+      await ds.findAll(
+        query({
+          where: { role: 'admin' },
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'name', operator: 'contains', value: 'Ali' },
+              { type: 'comparison', field: 'id', operator: 'in', value: ['u3'] },
+            ],
+          },
+        }),
+      );
+
+      const call = fakeClient.recordedCalls.find((entry) => entry.action === 'findMany');
+      expect(call?.args.where).toEqual({
+        AND: [
+          { role: 'admin' },
+          { OR: [{ name: { contains: 'Ali' } }, { id: { in: ['u3'] } }] },
+        ],
+      });
     });
 
     it('counts with a where filter', async () => {

@@ -39,6 +39,15 @@ export interface IRepository<Entity, Id = string> {
   findAll(options?: FindOptions): Promise<Entity[]>;
 
   /**
+   * Fetch the first entity matching the optional filter.
+   *
+   * @param options - Find options; at most one matching entity is returned
+   * @returns The first matching entity, or `null` when none matches
+   * @since 0.2.0
+   */
+  findOne(options?: FindOptions): Promise<Entity | null>;
+
+  /**
    * Insert a new entity.
    *
    * @param data - Partial entity (at minimum the required fields)
@@ -79,7 +88,7 @@ export interface IRepository<Entity, Id = string> {
   /**
    * Count entities with optional filtering.
    *
-   * @param options - Count options (where clause)
+   * @param options - Count options (equality and portable expression filters)
    * @returns Matching entity count
    * @since 0.1.0
    */

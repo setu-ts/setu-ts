@@ -8,10 +8,11 @@
  *
  * @module
  */
-import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,
+  matchesFilter,
   matchesWhere,
   type NormalizedQuery,
   projectFields,
@@ -188,6 +189,10 @@ export class MemoryAdapter implements IDatabaseAdapter {
         if (query.where && Object.keys(query.where).length > 0) {
           results = results.filter((row) => matchesWhere(row, query.where));
         }
+        if (query.filter !== undefined) {
+          const filter = query.filter;
+          results = results.filter((row) => matchesFilter(row, filter));
+        }
         results = applyOrderBy(results, query.orderBy);
         results = applyPagination(results, query.offset, query.limit);
         // `select` is applied HERE, like every other adapter: the DataSource is
@@ -241,10 +246,13 @@ export class MemoryAdapter implements IDatabaseAdapter {
         return Promise.resolve(true);
       },
 
-      count: (where) => {
+      count: (where, filter) => {
         let results = effectiveRecords();
         if (Object.keys(where).length > 0) {
           results = results.filter((row) => matchesWhere(row, where));
+        }
+        if (filter !== undefined) {
+          results = results.filter((row) => matchesFilter(row, filter));
         }
         return Promise.resolve(results.length);
       },
@@ -269,7 +277,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       create: (data) => this.insertEntity(entity, data),
       update: (id, data) => this.updateEntity(entity, id, data),
       delete: (id) => this.deleteEntity(entity, id),
-      count: (where) => this.countEntities(entity, where),
+      count: (where, filter) => this.countEntities(entity, where, filter),
     };
   }
 
@@ -306,6 +314,10 @@ export class MemoryAdapter implements IDatabaseAdapter {
     // Filter.
     if (query.where && Object.keys(query.where).length > 0) {
       results = results.filter((row) => matchesWhere(row, query.where));
+    }
+    if (query.filter !== undefined) {
+      const filter = query.filter;
+      results = results.filter((row) => matchesFilter(row, filter));
     }
 
     // Sort.
@@ -412,12 +424,17 @@ export class MemoryAdapter implements IDatabaseAdapter {
   countEntities(
     entity: string,
     where: Record<string, unknown>,
+    filter?: FilterExpression,
   ): Promise<number> {
     const store = this.getStore(entity);
-    if (Object.keys(where).length === 0) {
+    if (Object.keys(where).length === 0 && filter === undefined) {
       return Promise.resolve(store.records.length);
     }
-    return Promise.resolve(store.records.filter((row) => matchesWhere(row, where)).length);
+    return Promise.resolve(
+      store.records.filter((row) =>
+        matchesWhere(row, where) && (filter === undefined || matchesFilter(row, filter))
+      ).length,
+    );
   }
 
   /** @inheritdoc — raw query not supported on memory adapter. */

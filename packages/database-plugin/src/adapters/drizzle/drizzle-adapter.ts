@@ -8,7 +8,7 @@
  * @module
  */
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
-import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 
 // ---------------------------------------------------------------------------
@@ -97,6 +97,13 @@ class Deferred<T> {
 export type DrizzleOperators = {
   eq: (col: unknown, val: unknown) => unknown;
   and: (...exprs: unknown[]) => unknown;
+  or?: (...exprs: unknown[]) => unknown;
+  gt?: (col: unknown, val: unknown) => unknown;
+  gte?: (col: unknown, val: unknown) => unknown;
+  lt?: (col: unknown, val: unknown) => unknown;
+  lte?: (col: unknown, val: unknown) => unknown;
+  inArray?: (col: unknown, values: readonly unknown[]) => unknown;
+  like?: (col: unknown, value: string) => unknown;
   asc: (col: unknown) => unknown;
   desc: (col: unknown) => unknown;
   /**
@@ -141,6 +148,13 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       const operators: DrizzleOperators = {
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
         and: ns.and as (...exprs: unknown[]) => unknown,
+        or: ns.or as (...exprs: unknown[]) => unknown,
+        gt: ns.gt as (col: unknown, val: unknown) => unknown,
+        gte: ns.gte as (col: unknown, val: unknown) => unknown,
+        lt: ns.lt as (col: unknown, val: unknown) => unknown,
+        lte: ns.lte as (col: unknown, val: unknown) => unknown,
+        inArray: ns.inArray as (col: unknown, values: readonly unknown[]) => unknown,
+        like: ns.like as (col: unknown, value: string) => unknown,
         asc: ns.asc as (col: unknown) => unknown,
         desc: ns.desc as (col: unknown) => unknown,
         count: ns.count as () => unknown,
@@ -148,6 +162,13 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       if (
         typeof operators.eq !== 'function' ||
         typeof operators.and !== 'function' ||
+        typeof operators.or !== 'function' ||
+        typeof operators.gt !== 'function' ||
+        typeof operators.gte !== 'function' ||
+        typeof operators.lt !== 'function' ||
+        typeof operators.lte !== 'function' ||
+        typeof operators.inArray !== 'function' ||
+        typeof operators.like !== 'function' ||
         typeof operators.asc !== 'function' ||
         typeof operators.desc !== 'function' ||
         typeof operators.count !== 'function'
@@ -392,7 +413,7 @@ function createDrizzleDataSourceInner(
     async findAll(query) {
       const fields = selectedColumns(drizzleTable, entity, query.select);
       let builder = instance.select(fields).from(drizzleTable);
-      const predicate = predicateFor(drizzleTable, entity, query.where, operators);
+      const predicate = predicateFor(drizzleTable, entity, query.where, operators, query.filter);
       if (predicate !== undefined) {
         builder = builder.where(predicate);
       }
@@ -436,12 +457,12 @@ function createDrizzleDataSourceInner(
       return rows.length > 0;
     },
 
-    async count(where) {
+    async count(where, filter) {
       // `count(*)` is selected so the database returns one aggregate row. A
       // bare `select()` would stream every matching row back just to measure
       // its length, which is the in-memory evaluation this adapter avoids.
       let builder = instance.select({ [COUNT_ALIAS]: operators.count() }).from(drizzleTable);
-      const predicate = predicateFor(drizzleTable, entity, where, operators);
+      const predicate = predicateFor(drizzleTable, entity, where, operators, filter);
       if (predicate !== undefined) {
         builder = builder.where(predicate);
       }
@@ -474,13 +495,103 @@ function predicateFor(
   entity: string,
   where: Record<string, unknown>,
   operators: DrizzleOperators,
+  filter?: FilterExpression,
 ): unknown | undefined {
   const predicates = Object.entries(where).map(([field, value]) =>
     operators.eq(columnFor(table, entity, field), value)
   );
+  if (filter !== undefined) {
+    const filterPredicate = filterPredicateFor(table, entity, filter, operators);
+    if (filterPredicate !== undefined) {
+      predicates.push(filterPredicate);
+    }
+  }
   if (predicates.length === 0) return undefined;
   if (predicates.length === 1) return predicates[0];
   return operators.and(...predicates);
+}
+
+/** Translate the portable expression to Drizzle's native operator tree. */
+function filterPredicateFor(
+  table: DrizzleTable,
+  entity: string,
+  filter: FilterExpression,
+  operators: DrizzleOperators,
+): unknown | undefined {
+  const filterOperators = requireFilterOperators(operators);
+  if (isTautology(filter)) return undefined;
+  if (isContradiction(filter)) {
+    return filterOperators.inArray(columnFor(table, entity, 'id'), []);
+  }
+  if (filter.type !== 'comparison') {
+    const predicates = filter.filters
+      .map((item) => filterPredicateFor(table, entity, item, operators))
+    .filter((item): item is unknown => item !== undefined);
+    if (predicates.length === 0) {
+      return filterOperators.inArray(columnFor(table, entity, 'id'), []);
+    }
+    if (predicates.length === 1) return predicates[0];
+    return filter.type === 'and' ? operators.and(...predicates) : filterOperators.or(...predicates);
+  }
+
+  const column = columnFor(table, entity, filter.field);
+  switch (filter.operator) {
+    case 'eq':
+      return operators.eq(column, filter.value);
+    case 'contains':
+      return filterOperators.like(column, `%${filter.value}%`);
+    case 'gt':
+      return filterOperators.gt(column, filter.value);
+    case 'gte':
+      return filterOperators.gte(column, filter.value);
+    case 'lt':
+      return filterOperators.lt(column, filter.value);
+    case 'lte':
+      return filterOperators.lte(column, filter.value);
+    case 'in':
+      return filterOperators.inArray(column, filter.value);
+  }
+
+  throw new Error('Unsupported filter operator');
+}
+
+type FilterOperators = Required<
+  Pick<
+    DrizzleOperators,
+    'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'like'
+  >
+>;
+
+/** Ensure a directly-created source has the native operators its filter needs. */
+function requireFilterOperators(operators: DrizzleOperators): FilterOperators {
+  if (
+    typeof operators.or !== 'function' ||
+    typeof operators.gt !== 'function' ||
+    typeof operators.gte !== 'function' ||
+    typeof operators.lt !== 'function' ||
+    typeof operators.lte !== 'function' ||
+    typeof operators.inArray !== 'function' ||
+    typeof operators.like !== 'function'
+  ) {
+    throw new Error('Drizzle filter operators are unavailable');
+  }
+  return operators as DrizzleOperators & FilterOperators;
+}
+
+/** Whether an expression is true by identity alone, without reading a row. */
+function isTautology(filter: FilterExpression): boolean {
+  if (filter.type === 'comparison') return false;
+  return filter.type === 'and'
+    ? filter.filters.every(isTautology)
+    : filter.filters.some(isTautology);
+}
+
+/** Whether an expression is false by identity alone, without reading a row. */
+function isContradiction(filter: FilterExpression): boolean {
+  if (filter.type === 'comparison') return false;
+  return filter.type === 'and'
+    ? filter.filters.some(isContradiction)
+    : filter.filters.every(isContradiction);
 }
 
 function orderFor(

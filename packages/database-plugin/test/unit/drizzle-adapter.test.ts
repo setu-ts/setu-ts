@@ -27,6 +27,13 @@ import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 const OPERATORS: DrizzleOperators = {
   eq: (col, val) => ({ op: 'eq', col, val }),
   and: (...exprs) => ({ op: 'and', exprs }),
+  or: (...exprs) => ({ op: 'or', exprs }),
+  gt: (col, val) => ({ op: 'gt', col, val }),
+  gte: (col, val) => ({ op: 'gte', col, val }),
+  lt: (col, val) => ({ op: 'lt', col, val }),
+  lte: (col, val) => ({ op: 'lte', col, val }),
+  inArray: (col, values) => ({ op: 'inArray', col, values }),
+  like: (col, value) => ({ op: 'like', col, value }),
   asc: (col) => ({ op: 'asc', col }),
   desc: (col) => ({ op: 'desc', col }),
   count: () => ({ op: 'count' }),
@@ -43,6 +50,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     limit: partial.limit ?? -1,
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
+    ...(partial.filter === undefined ? {} : { filter: partial.filter }),
   };
 }
 
@@ -187,6 +195,36 @@ describe('DrizzleAdapter', () => {
     it('returns all rows when no options are given', async () => {
       const all = await ds.findAll(query());
       expect(all.length).toBe(3);
+    });
+
+    it('translates a portable expression into Drizzle operators', async () => {
+      await ds.findAll(
+        query({
+          where: { role: 'admin' },
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'name', operator: 'contains', value: 'Ali' },
+              { type: 'comparison', field: 'id', operator: 'in', value: ['u3'] },
+            ],
+          },
+        }),
+      );
+
+      const call = fakeDb.recordedCalls.filter((entry) => entry.action === 'where').at(-1);
+      expect(call?.args.expression).toEqual({
+        op: 'and',
+        exprs: [
+          { op: 'eq', col: USER_TABLE.role, val: 'admin' },
+          {
+            op: 'or',
+            exprs: [
+              { op: 'like', col: USER_TABLE.name, value: '%Ali%' },
+              { op: 'inArray', col: USER_TABLE.id, values: ['u3'] },
+            ],
+          },
+        ],
+      });
     });
 
     it('counts with and without a where filter', async () => {

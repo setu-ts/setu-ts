@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { NormalizedQuery, OrderDirection } from '@setu-ts/common';
+import type { FilterExpression, NormalizedQuery, OrderDirection } from '@setu-ts/common';
 import type { CountOptions, FindOptions } from './find-options.ts';
 
 /**
@@ -34,6 +34,7 @@ const UNLIMITED = -1;
 export function normalizeQuery(options?: FindOptions): NormalizedQuery {
   return {
     where: options?.where ?? {},
+    ...(options?.filter === undefined ? {} : { filter: options.filter }),
     orderBy: options?.orderBy ?? {},
     limit: options?.limit ?? UNLIMITED,
     offset: options?.offset ?? 0,
@@ -72,6 +73,42 @@ export function matchesWhere<Entity extends Record<string, unknown>>(
     }
   }
   return true;
+}
+
+/** Evaluates one portable filter expression against an in-memory entity. */
+export function matchesFilter<Entity extends Record<string, unknown>>(
+  entity: Entity,
+  filter: FilterExpression,
+): boolean {
+  if (filter.type !== 'comparison') {
+    return filter.type === 'and'
+      ? filter.filters.every((child) => matchesFilter(entity, child))
+      : filter.filters.some((child) => matchesFilter(entity, child));
+  }
+
+  const actual = entity[filter.field];
+  switch (filter.operator) {
+    case 'eq':
+      return actual === filter.value;
+    case 'contains':
+      return typeof actual === 'string' && typeof filter.value === 'string' &&
+        actual.includes(filter.value);
+    case 'gt':
+      return comparableGreaterThan(actual, filter.value);
+    case 'gte':
+      return actual === filter.value || comparableGreaterThan(actual, filter.value);
+    case 'lt':
+      return comparableGreaterThan(filter.value, actual);
+    case 'lte':
+      return actual === filter.value || comparableGreaterThan(filter.value, actual);
+    case 'in':
+      return filter.value.some((candidate) => actual === candidate);
+  }
+}
+
+function comparableGreaterThan(left: unknown, right: unknown): boolean {
+  return typeof left === 'number' && typeof right === 'number' && left > right ||
+    typeof left === 'string' && typeof right === 'string' && left > right;
 }
 
 /**

@@ -159,6 +159,32 @@ describe('Application integration', () => {
     await app.stop();
   });
 
+  it('attributes plugin routes to their registering plugin', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'owned-routes',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.router.get('/plugin-route', (c) => c.response.json({ ok: true }));
+          },
+        },
+      ],
+    });
+    app.router.get('/application-route', (c) => c.response.json({ ok: true }));
+
+    await app.start();
+
+    expect(app.router.listRoutes()).toEqual([
+      expect.objectContaining({ path: '/application-route' }),
+      expect.objectContaining({ path: '/plugin-route', owner: 'owned-routes' }),
+    ]);
+    expect(app.router.listRoutes()[0].owner).toBe(undefined);
+
+    await app.stop();
+  });
+
   it('should return 404 for unmatched routes', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
     await app.start();

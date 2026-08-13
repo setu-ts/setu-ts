@@ -10,6 +10,7 @@ import { BaseRepository, type DataSource } from '../../src/repositories/base-rep
 import {
   applyOrderBy,
   applyPagination,
+  matchesFilter,
   matchesWhere,
   projectFields,
 } from '../../src/query/query-builder.ts';
@@ -37,6 +38,10 @@ function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] }
       let result = [...records] as unknown as Record<string, unknown>[];
       if (Object.keys(query.where).length > 0) {
         result = result.filter((row) => matchesWhere(row, query.where));
+      }
+      if (query.filter !== undefined) {
+        const filter = query.filter;
+        result = result.filter((row) => matchesFilter(row, filter));
       }
       result = applyOrderBy(result, query.orderBy);
       result = applyPagination(result, query.offset, query.limit);
@@ -143,6 +148,27 @@ describe('BaseRepository', () => {
       expect(entities.length).toBe(1);
       expect(entities[0].name).toBe('Alice');
       expect('id' in entities[0]).toBe(false);
+    });
+  });
+
+  describe('findOne', () => {
+    it('returns the first matching entity through the adapter filter', async () => {
+      ds.records.push({ id: '1', name: 'Alice', active: true });
+      ds.records.push({ id: '2', name: 'Bob', active: true });
+
+      const entity = await repo.findOne({
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'ob' },
+      });
+
+      expect(entity?.id).toBe('2');
+    });
+
+    it('returns null when no entity matches', async () => {
+      expect(
+        await repo.findOne({
+          filter: { type: 'comparison', field: 'name', operator: 'eq', value: 'Nobody' },
+        }),
+      ).toBeNull();
     });
   });
 
