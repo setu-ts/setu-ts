@@ -83,6 +83,101 @@ describe('D1 through DatabasePlugin — the repository surface', () => {
     await app.stop();
   });
 
+  // Every operator the portable filter advertises, EXECUTED against real
+  // SQLite through the same repository an application holds. `d1-sql.test.ts`
+  // asserts the generated statement as a string, which cannot tell whether
+  // SQLite accepts it or whether the rows that come back are the right ones.
+  it('EXECUTES every advertised filter operator through the repository', async () => {
+    const { app, db } = await bootApp();
+    const users = db.getRepository<User>('User');
+    await users.create({ id: 'u1', name: 'ada', age: 36 });
+    await users.create({ id: 'u2', name: 'bob', age: 24 });
+    await users.create({ id: 'u3', name: '50%_off', age: 51 });
+
+    const ids = async (filter: Parameters<typeof users.findAll>[0]): Promise<string[]> =>
+      (await users.findAll({ ...filter, orderBy: { id: 'asc' } })).map((row) => row.id);
+
+    expect(
+      await ids({ filter: { type: 'comparison', field: 'name', operator: 'eq', value: 'ada' } }),
+    )
+      .toEqual(['u1']);
+    // `instr` is a literal substring match, so the `%` and `_` are data here,
+    // not wildcards — an unescaped LIKE would return every row.
+    expect(
+      await ids({
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: '%_off' },
+      }),
+    ).toEqual(['u3']);
+    expect(await ids({ filter: { type: 'comparison', field: 'age', operator: 'gt', value: 36 } }))
+      .toEqual(['u3']);
+    expect(await ids({ filter: { type: 'comparison', field: 'age', operator: 'gte', value: 36 } }))
+      .toEqual(['u1', 'u3']);
+    expect(await ids({ filter: { type: 'comparison', field: 'age', operator: 'lt', value: 36 } }))
+      .toEqual(['u2']);
+    expect(await ids({ filter: { type: 'comparison', field: 'age', operator: 'lte', value: 36 } }))
+      .toEqual(['u1', 'u2']);
+    expect(
+      await ids({
+        filter: { type: 'comparison', field: 'id', operator: 'in', value: ['u1', 'u3'] },
+      }),
+    ).toEqual(['u1', 'u3']);
+    expect(await ids({ filter: { type: 'comparison', field: 'id', operator: 'in', value: [] } }))
+      .toEqual([]);
+    expect(
+      await ids({
+        filter: {
+          type: 'and',
+          filters: [
+            { type: 'comparison', field: 'age', operator: 'gte', value: 36 },
+            {
+              type: 'or',
+              filters: [
+                { type: 'comparison', field: 'name', operator: 'eq', value: 'ada' },
+                { type: 'comparison', field: 'age', operator: 'gt', value: 50 },
+              ],
+            },
+          ],
+        },
+      }),
+    ).toEqual(['u1', 'u3']);
+
+    // The equality map and the expression are conjoined, not exclusive.
+    expect(
+      await ids({
+        where: { name: 'ada' },
+        filter: { type: 'comparison', field: 'age', operator: 'gt', value: 30 },
+      }),
+    ).toEqual(['u1']);
+    expect(
+      await users.count({
+        where: { name: 'ada' },
+        filter: { type: 'comparison', field: 'age', operator: 'gt', value: 30 },
+      }),
+    ).toBe(1);
+
+    await app.stop();
+  });
+
+  it('finds one row through findOne, and null when nothing matches', async () => {
+    const { app, db } = await bootApp();
+    const users = db.getRepository<User>('User');
+    await users.create({ id: 'u1', name: 'ada', age: 36 });
+    await users.create({ id: 'u2', name: 'bob', age: 51 });
+
+    const found = await users.findOne({
+      filter: { type: 'comparison', field: 'age', operator: 'gte', value: 40 },
+    });
+
+    expect(found).toMatchObject({ id: 'u2', name: 'bob' });
+    expect(
+      await users.findOne({
+        filter: { type: 'comparison', field: 'name', operator: 'eq', value: 'nobody' },
+      }),
+    ).toBeNull();
+
+    await app.stop();
+  });
+
   it('updates, counts, checks existence and deletes', async () => {
     const { app, db } = await bootApp();
     const users = db.getRepository<User>('User');
@@ -135,6 +230,25 @@ describe('D1 through DatabasePlugin — Unit of Work', () => {
     const users = db.getRepository<User>('User');
     expect(await users.count()).toBe(2);
 
+    await app.stop();
+  });
+
+  it('forwards an expression filter to a transaction-scoped count', async () => {
+    const { app, db } = await bootApp();
+    const users = db.getRepository<User>('User');
+    await users.create({ id: 'u1', name: 'ada', age: 36 });
+    await users.create({ id: 'u2', name: 'bob', age: 24 });
+
+    // Reads inside a D1 transaction see committed state (writes are deferred
+    // to one batch), so this counts the two rows above — the point is that the
+    // transaction source passes the filter through rather than dropping it.
+    const counted = await db.transaction((uow) =>
+      uow.getRepository<User>('User').count({
+        filter: { type: 'comparison', field: 'age', operator: 'gte', value: 30 },
+      })
+    );
+
+    expect(counted).toBe(1);
     await app.stop();
   });
 

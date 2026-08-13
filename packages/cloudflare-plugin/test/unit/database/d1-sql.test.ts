@@ -83,6 +83,93 @@ describe('buildSelect', () => {
     });
   });
 
+  it('combines equality filters with a nested portable expression', () => {
+    expect(
+      buildSelect(
+        TARGET,
+        query({
+          where: { active: true },
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'name', operator: 'contains', value: 'ada' },
+              { type: 'comparison', field: 'age', operator: 'gte', value: 21 },
+              { type: 'comparison', field: 'id', operator: 'in', value: ['u1', 'u2'] },
+            ],
+          },
+        }),
+      ),
+    ).toEqual({
+      sql:
+        'SELECT * FROM "users" WHERE "active" = ?1 AND (instr("name", ?2) > 0 OR "age" >= ?3 OR "id" IN (?4, ?5))',
+      params: [true, 'ada', 21, 'u1', 'u2'],
+    });
+  });
+
+  it('compares an expression equality against null with IS NULL', () => {
+    // `= ?` against NULL is never true in SQL, so an expression `eq` on null
+    // has to become `IS NULL` exactly as the equality map already does.
+    expect(
+      buildSelect(
+        TARGET,
+        query({
+          filter: { type: 'comparison', field: 'deletedAt', operator: 'eq', value: null },
+        }),
+      ),
+    ).toEqual({
+      sql: 'SELECT * FROM "users" WHERE "deletedAt" IS NULL',
+      params: [],
+    });
+  });
+
+  it('compiles an empty membership list to a match-nothing predicate', () => {
+    expect(
+      buildSelect(
+        TARGET,
+        query({ filter: { type: 'comparison', field: 'id', operator: 'in', value: [] } }),
+      ),
+    ).toEqual({ sql: 'SELECT * FROM "users" WHERE 0 = 1', params: [] });
+  });
+
+  it('compiles a null-only membership list to IS NULL', () => {
+    expect(
+      buildSelect(
+        TARGET,
+        query({
+          filter: { type: 'comparison', field: 'deletedAt', operator: 'in', value: [null] },
+        }),
+      ),
+    ).toEqual({ sql: 'SELECT * FROM "users" WHERE "deletedAt" IS NULL', params: [] });
+  });
+
+  it('compiles empty composition groups to their identity predicate', () => {
+    expect(buildSelect(TARGET, query({ filter: { type: 'and', filters: [] } })).sql).toBe(
+      'SELECT * FROM "users" WHERE 1 = 1',
+    );
+    expect(buildSelect(TARGET, query({ filter: { type: 'or', filters: [] } })).sql).toBe(
+      'SELECT * FROM "users" WHERE 0 = 1',
+    );
+  });
+
+  it('preserves null as a member of an in filter', () => {
+    expect(
+      buildSelect(
+        TARGET,
+        query({
+          filter: {
+            type: 'comparison',
+            field: 'deletedAt',
+            operator: 'in',
+            value: [null, '2026-01-01'],
+          },
+        }),
+      ),
+    ).toEqual({
+      sql: 'SELECT * FROM "users" WHERE ("deletedAt" IS NULL OR "deletedAt" IN (?1))',
+      params: ['2026-01-01'],
+    });
+  });
+
   it('orders by each field in the given direction', () => {
     expect(buildSelect(TARGET, query({ orderBy: { age: 'desc', name: 'asc' } })).sql).toBe(
       'SELECT * FROM "users" ORDER BY "age" DESC, "name" ASC',
@@ -229,6 +316,21 @@ describe('buildCount', () => {
     expect(buildCount(TARGET, { active: true })).toEqual({
       sql: 'SELECT COUNT(*) AS "count" FROM "users" WHERE "active" = ?1',
       params: [true],
+    });
+  });
+
+  it('counts through a portable expression', () => {
+    expect(
+      buildCount(TARGET, {}, {
+        type: 'and',
+        filters: [
+          { type: 'comparison', field: 'age', operator: 'gt', value: 18 },
+          { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+        ],
+      }),
+    ).toEqual({
+      sql: 'SELECT COUNT(*) AS "count" FROM "users" WHERE ("age" > ?1 AND "role" = ?2)',
+      params: [18, 'admin'],
     });
   });
 

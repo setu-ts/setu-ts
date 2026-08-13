@@ -27,6 +27,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     limit: partial.limit ?? -1,
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
+    ...(partial.filter === undefined ? {} : { filter: partial.filter }),
   };
 }
 
@@ -198,6 +199,95 @@ describe('PrismaAdapter', () => {
     it('sends empty args when the query has no options', async () => {
       const rows = await ds.findAll(query());
       expect(rows.length).toBe(3);
+    });
+
+    it('translates a portable expression into Prisma where input', async () => {
+      await ds.findAll(
+        query({
+          where: { role: 'admin' },
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'name', operator: 'contains', value: 'Ali' },
+              { type: 'comparison', field: 'id', operator: 'in', value: ['u3'] },
+            ],
+          },
+        }),
+      );
+
+      const call = fakeClient.recordedCalls.find((entry) => entry.action === 'findMany');
+      expect(call?.args.where).toEqual({
+        AND: [
+          { role: 'admin' },
+          { OR: [{ name: { contains: 'Ali' } }, { id: { in: ['u3'] } }] },
+        ],
+      });
+    });
+
+    it('translates every scalar comparison leaf into Prisma input', async () => {
+      const leaves = [
+        ['eq', { name: 'Alice' }],
+        ['gt', { name: { gt: 'Alice' } }],
+        ['gte', { name: { gte: 'Alice' } }],
+        ['lt', { name: { lt: 'Alice' } }],
+        ['lte', { name: { lte: 'Alice' } }],
+      ] as const;
+
+      for (const [operator, expected] of leaves) {
+        fakeClient.recordedCalls.length = 0;
+        await ds.findAll(
+          query({ filter: { type: 'comparison', field: 'name', operator, value: 'Alice' } }),
+        );
+        const call = fakeClient.recordedCalls.find((entry) => entry.action === 'findMany');
+        expect(call?.args.where).toEqual(expected);
+      }
+    });
+
+    it('translates a null-only membership list into an equality on null', async () => {
+      await ds.findAll(
+        query({
+          filter: { type: 'comparison', field: 'deletedAt', operator: 'in', value: [null] },
+        }),
+      );
+
+      const call = fakeClient.recordedCalls.find((entry) => entry.action === 'findMany');
+      expect(call?.args.where).toEqual({ deletedAt: null });
+    });
+
+    it('counts through a portable expression conjoined with equality', async () => {
+      fakeClient.recordedCalls.length = 0;
+      await ds.count({ role: 'admin' }, {
+        type: 'comparison',
+        field: 'name',
+        operator: 'contains',
+        value: 'Ali',
+      });
+
+      const call = fakeClient.recordedCalls.find((entry) => entry.action === 'count');
+      expect(call?.args.where).toEqual({
+        AND: [{ role: 'admin' }, { name: { contains: 'Ali' } }],
+      });
+    });
+
+    it('translates null membership into an explicit null branch', async () => {
+      await ds.findAll(
+        query({
+          filter: {
+            type: 'comparison',
+            field: 'deletedAt',
+            operator: 'in',
+            value: [null, '2026-01-01'],
+          },
+        }),
+      );
+
+      const call = fakeClient.recordedCalls.find((entry) => entry.action === 'findMany');
+      expect(call?.args.where).toEqual({
+        OR: [
+          { deletedAt: null },
+          { deletedAt: { in: ['2026-01-01'] } },
+        ],
+      });
     });
 
     it('counts with a where filter', async () => {

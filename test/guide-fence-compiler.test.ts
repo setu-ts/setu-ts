@@ -417,14 +417,14 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
   // real API errors (wrong option names, missing required fields), not
   // deliberate casts that widen the type.
 
-  it('B9: AuthPlugin missing required jwt.secret fails', async () => {
+  it('B9: AuthPlugin rejects an invalid JWT secret type', async () => {
     const file = `${SCRATCH_DIR}/b9-auth-missing.ts`;
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
     await Deno.writeTextFile(
       file,
       [
         "import { AuthPlugin } from '@setu-ts/auth-plugin';",
-        'AuthPlugin({ jwt: { algorithm: "HS256" } });',
+        'AuthPlugin({ jwt: { secret: 42 } });',
       ].join('\n'),
     );
     const { code } = await denoCheck(file);

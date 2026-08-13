@@ -159,6 +159,57 @@ describe('Application integration', () => {
     await app.stop();
   });
 
+  it('attributes plugin routes to their registering plugin', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'owned-routes',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.router.get('/plugin-route', (c) => c.response.json({ ok: true }));
+          },
+        },
+      ],
+    });
+    app.router.get('/application-route', (c) => c.response.json({ ok: true }));
+
+    await app.start();
+
+    expect(app.router.listRoutes()).toEqual([
+      expect.objectContaining({ path: '/application-route' }),
+      expect.objectContaining({ path: '/plugin-route', owner: 'owned-routes' }),
+    ]);
+    expect(app.router.listRoutes()[0].owner).toBe(undefined);
+
+    await app.stop();
+  });
+
+  it('clears plugin route ownership after a failed registration', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'conflicting-routes',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.router.get('/shared-route', (c) => c.response.json({ source: 'plugin' }));
+          },
+        },
+      ],
+    });
+    app.router.get('/shared-route', (c) => c.response.json({ source: 'application' }));
+
+    await expect(app.start()).rejects.toThrow("Route 'GET /shared-route' is already registered.");
+
+    app.router.get('/after-failure', (c) => c.response.json({ source: 'application' }));
+    expect(app.router.listRoutes()).toEqual([
+      expect.objectContaining({ path: '/shared-route' }),
+      expect.objectContaining({ path: '/after-failure' }),
+    ]);
+    expect(app.router.listRoutes().every((route) => route.owner === undefined)).toBe(true);
+  });
+
   it('should return 404 for unmatched routes', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
     await app.start();

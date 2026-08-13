@@ -202,6 +202,13 @@ app.register({
 await app.start({ port: 3000 });
 ```
 
+### Route Introspection
+
+`app.router.listRoutes()` returns `RouteInfo` entries. Each entry has an optional `owner`: it is the
+name of the plugin whose `register()` call created the route, and is absent for a route added
+directly through `app.router`. Registering the same method and path twice throws instead of silently
+replacing the first handler.
+
 ### Testing Without a Server
 
 ```typescript
@@ -947,6 +954,7 @@ interface IDatabaseService {
 interface IRepository<Entity> {
   findById(id: string): Promise<Entity | null>;
   findAll(options?: FindOptions): Promise<Entity[]>;
+  findOne(options?: FindOptions): Promise<Entity | null>;
   create(data: Partial<Entity>): Promise<Entity>;
   update(id: string, data: Partial<Entity>): Promise<Entity>;
   delete(id: string): Promise<boolean>;
@@ -954,6 +962,32 @@ interface IRepository<Entity> {
   count(options?: CountOptions): Promise<number>;
 }
 ```
+
+`FindOptions.filter` and `CountOptions.filter` accept a portable expression tree in addition to the
+existing equality-only `where` map. `where` and `filter` are conjoined, and every built-in adapter
+evaluates the same operators: `eq`, `contains`, `gt`, `gte`, `lt`, `lte`, and `in`, nested with
+`and` / `or`. `findOne()` applies the same options as `findAll()` and returns the first match or
+`null`.
+
+```typescript
+const users = await userRepo.findAll({
+  where: { active: true },
+  filter: {
+    type: 'or',
+    filters: [
+      { type: 'comparison', field: 'name', operator: 'contains', value: 'Ada' },
+      { type: 'comparison', field: 'age', operator: 'gte', value: 18 },
+    ],
+  },
+});
+```
+
+An `in` with an empty list matches nothing, and a list containing `null` matches rows whose column
+is null — SQL `IN` never matches `NULL` by itself, so the SQL adapters emit an explicit null branch.
+`contains` is a substring match whose `%` and `_` are always data rather than wildcards; its **case
+sensitivity is the database's**, not the framework's — Memory and D1 match case-sensitively, while a
+`LIKE`-based backend follows the column's collation (case-sensitive on PostgreSQL, case-insensitive
+on SQLite and most MySQL collations). Collation control is not part of this contract.
 
 ### Custom Adapters (external backends)
 
@@ -995,7 +1029,7 @@ interface IDataSource {
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>>;
   delete(id: string | number): Promise<boolean>;
-  count(where: Record<string, unknown>): Promise<number>;
+  count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number>;
 }
 ```
 
@@ -1004,20 +1038,20 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 
 ### Exports
 
-| Export                                                                                                  | Kind                              |
-| ------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `DatabasePlugin`                                                                                        | factory                           |
-| `DatabaseService`                                                                                       | class                             |
-| `BaseRepository`, `UnitOfWork`                                                                          | classes                           |
-| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                      | classes                           |
-| `PrismaRepository`, `DrizzleRepository`                                                                 | classes                           |
-| `createPrismaDataSource`, `createDrizzleDataSource`                                                     | functions                         |
-| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                        | interfaces                        |
-| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions` | types                             |
-| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                         | types                             |
-| `FindOptions`, `CountOptions`, `OrderDirection`                                                         | types                             |
-| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                             | re-exports from `common`          |
-| `DataSource`                                                                                            | deprecated alias of `IDataSource` |
+| Export                                                                                                    | Kind                              |
+| --------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `DatabasePlugin`                                                                                          | factory                           |
+| `DatabaseService`                                                                                         | class                             |
+| `BaseRepository`, `UnitOfWork`                                                                            | classes                           |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                        | classes                           |
+| `PrismaRepository`, `DrizzleRepository`                                                                   | classes                           |
+| `createPrismaDataSource`, `createDrizzleDataSource`                                                       | functions                         |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                          | interfaces                        |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`   | types                             |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                           | types                             |
+| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression` | types                             |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                               | re-exports from `common`          |
+| `DataSource`                                                                                              | deprecated alias of `IDataSource` |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.
@@ -1057,11 +1091,16 @@ hierarchy, and short-circuiting route guards. All cryptography (HS256/RS256 JWT,
 password hashing) runs through Web Crypto via `IRuntimeServices`, so the package has **zero npm
 dependencies**.
 
-Registers three services under existing capability tokens:
+Registers JWT and authentication services under existing capability tokens, plus authorization when
+RBAC is configured:
 
 - `IJwtService` under `CAPABILITIES.JWT` (`'jwt'`) — sign/verify/decode JWTs.
 - `IAuthService` under `CAPABILITIES.AUTH` (`'authentication'`) — passive strategy chain + login.
-- `IAuthorizationService` under `CAPABILITIES.AUTHORIZATION` (`'authorization'`) — RBAC checks.
+- `IAuthorizationService` under `CAPABILITIES.AUTHORIZATION` (`'authorization'`) — RBAC checks, only
+  when `rbac` is supplied.
+
+`rbac` is optional. A JWT-only registration provides `jwt` and `authentication`; it deliberately
+does not register an authorization service or advertise the authorization capability.
 
 > **Phasing (M16b, shipped):** **refresh tokens** and **rate limiting** shipped in M16b as
 > standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a

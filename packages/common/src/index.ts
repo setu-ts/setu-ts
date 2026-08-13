@@ -141,6 +141,9 @@ export type {
   RoleDefinition,
 } from './services/auth.ts';
 export type {
+  FilterComparison,
+  FilterExpression,
+  FilterOperator,
   IAdapterTransaction,
   IDatabaseAdapter,
   IDataSource,

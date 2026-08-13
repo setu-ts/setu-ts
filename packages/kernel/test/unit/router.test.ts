@@ -31,6 +31,53 @@ describe('Router', () => {
     expect(result).toBe(null);
   });
 
+  it('refuses a duplicate method and path without replacing the first route', () => {
+    const router = new Router();
+    const first = () => ({ __handlerResult: true } as never);
+    router.get('/users', first);
+
+    expect(() => router.get('/users', () => ({ __handlerResult: true } as never))).toThrow(
+      "Route 'GET /users' is already registered.",
+    );
+    expect(router.match('GET', '/users')?.definition.handler).toBe(first);
+  });
+
+  it('refuses a duplicate route registered through a group', () => {
+    const router = new Router();
+    const first = () => ({ __handlerResult: true } as never);
+    router.group('/api', (group) => group.get('/status', first));
+
+    expect(() => router.get('/api/status', () => ({ __handlerResult: true } as never))).toThrow(
+      "Route 'GET /api/status' is already registered.",
+    );
+    expect(router.listRoutes()).toHaveLength(1);
+    expect(router.match('GET', '/api/status')?.definition.handler).toBe(first);
+  });
+
+  it('allows the same path under different HTTP methods', () => {
+    const router = new Router();
+    router.get('/users', () => ({ __handlerResult: true } as never));
+    router.post('/users', () => ({ __handlerResult: true } as never));
+
+    expect(router.listRoutes().map((route) => route.method)).toEqual(['GET', 'POST']);
+  });
+
+  it('snapshots the registering plugin as the route owner', () => {
+    let owner: string | undefined = 'health-plugin';
+    const router = new Router(() => owner);
+    router.group('/internal', (group) => {
+      group.get('/health', () => ({ __handlerResult: true } as never));
+    });
+    owner = undefined;
+    router.get('/application', () => ({ __handlerResult: true } as never));
+
+    expect(router.listRoutes()).toEqual([
+      expect.objectContaining({ method: 'GET', path: '/internal/health', owner: 'health-plugin' }),
+      expect.objectContaining({ method: 'GET', path: '/application' }),
+    ]);
+    expect(router.listRoutes()[1].owner).toBe(undefined);
+  });
+
   it('should support all 7 verbs', () => {
     const router = new Router();
     router.get('/g', { handler: () => ({ __handlerResult: true } as never) });

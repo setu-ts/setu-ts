@@ -67,6 +67,50 @@ export interface IOrmAdapter {
 export type OrderDirection = 'asc' | 'desc';
 
 /**
+ * Operators supported by a portable repository filter comparison.
+ *
+ * @since 0.2.0
+ */
+export type FilterOperator = 'eq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | 'in';
+
+/**
+ * A comparison of one entity field against a scalar value or value list.
+ *
+ * @since 0.2.0
+ */
+export type FilterComparison = {
+  readonly type: 'comparison';
+  readonly field: string;
+  readonly operator: 'eq';
+  readonly value: unknown;
+} | {
+  readonly type: 'comparison';
+  readonly field: string;
+  readonly operator: 'contains';
+  readonly value: string;
+} | {
+  readonly type: 'comparison';
+  readonly field: string;
+  readonly operator: 'gt' | 'gte' | 'lt' | 'lte';
+  readonly value: string | number;
+} | {
+  readonly type: 'comparison';
+  readonly field: string;
+  readonly operator: 'in';
+  readonly value: readonly unknown[];
+};
+
+/**
+ * A portable filter tree evaluated by every repository backend.
+ *
+ * @since 0.2.0
+ */
+export type FilterExpression = FilterComparison | {
+  readonly type: 'and' | 'or';
+  readonly filters: readonly FilterExpression[];
+};
+
+/**
  * A repository query with every option resolved to a concrete value — the
  * shape a {@linkcode IDataSource} evaluates.
  *
@@ -78,6 +122,8 @@ export type OrderDirection = 'asc' | 'desc';
 export interface NormalizedQuery {
   /** Filter conditions, matched by equality. Empty means no filter. */
   readonly where: Record<string, unknown>;
+  /** Optional portable expression conjoined with {@linkcode where}. */
+  readonly filter?: FilterExpression;
   /** Field-to-direction sort specification. Empty means no ordering. */
   readonly orderBy: Record<string, OrderDirection>;
   /** Maximum results, or `-1` for unlimited. */
@@ -153,10 +199,11 @@ export interface IDataSource {
   /**
    * Count entities matching a filter.
    *
-   * @param where - Filter conditions, matched by equality; empty counts all
+   * @param where - Equality conditions; empty alone counts all rows
+   * @param filter - Optional portable expression conjoined with `where`
    * @returns The matching row count
    */
-  count(where: Record<string, unknown>): Promise<number>;
+  count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number>;
 }
 
 /**

@@ -284,6 +284,9 @@ package fits the plugin architecture.
 | `Constructor`                | type      |
 | `DecoratorHandler`           | type      |
 | `EventHandler`               | type      |
+| `FilterComparison`           | type      |
+| `FilterExpression`           | type      |
+| `FilterOperator`             | type      |
 | `GraphqlSubscriptionOutcome` | type      |
 | `GrpcServingStatus`          | type      |
 | `HardenedCall`               | type      |

@@ -73,6 +73,12 @@ export abstract class BaseRepository<Entity, Id = string> implements IRepository
     return results.map((row) => this.toEntity(row));
   }
 
+  /** Find the first entity that matches the supplied query options. */
+  async findOne(options?: FindOptions): Promise<Entity | null> {
+    const results = await this.findAll({ ...options, limit: 1 });
+    return results[0] ?? null;
+  }
+
   async create(data: Partial<Entity>): Promise<Entity> {
     const created = await this._dataSource.create(data as Partial<Record<string, unknown>>);
     return this.toEntity(created);
@@ -97,7 +103,7 @@ export abstract class BaseRepository<Entity, Id = string> implements IRepository
 
   async count(options?: CountOptions): Promise<number> {
     const where = normalizeCountOptions(options);
-    return this._dataSource.count(where);
+    return this._dataSource.count(where, options?.filter);
   }
 
   /** Cast the entity id to the type the adapter expects. */
