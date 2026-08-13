@@ -6,6 +6,12 @@
  */
 import type { ITransaction } from '@setu-ts/common';
 import type { IRepository, IUnitOfWork } from '../interfaces/index.ts';
+import type { DatabaseAdapterType } from '../interfaces/index.ts';
+import {
+  assertDrizzleAdapter,
+  DRIZZLE_QUERY_HANDLE,
+  readDrizzleQueryHandle,
+} from '../query/drizzle-query.ts';
 
 /**
  * Concrete Unit of Work that holds a transaction and delegates repository
@@ -22,11 +28,19 @@ export class UnitOfWork implements IUnitOfWork {
     private readonly _transaction: ITransaction,
     /** Factory that creates a repository for the given entity name. */
     private readonly _repoFactory: (entity: string) => IRepository<unknown>,
+    /** Adapter identity for package-created scopes; omitted by legacy direct callers. */
+    private readonly _adapterType?: DatabaseAdapterType,
   ) {}
 
   /** @inheritdoc */
   getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id> {
     return this._repoFactory(entity) as IRepository<Entity, Id>;
+  }
+
+  /** Provide the transaction-scoped native Drizzle object through the internal protocol. */
+  [DRIZZLE_QUERY_HANDLE](): unknown {
+    assertDrizzleAdapter(this._adapterType);
+    return readDrizzleQueryHandle(this._transaction);
   }
 
   /**

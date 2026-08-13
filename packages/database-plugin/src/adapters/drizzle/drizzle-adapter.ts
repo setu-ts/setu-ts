@@ -10,6 +10,10 @@
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
 import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
+import {
+  DRIZZLE_QUERY_HANDLE,
+  type DrizzleQueryHandleProvider,
+} from '../../query/drizzle-query.ts';
 
 // ---------------------------------------------------------------------------
 // Drizzle database type — lazily resolved at connect() time.
@@ -25,7 +29,7 @@ export type DrizzleInstance = {
   insert(table: DrizzleTable): DrizzleInsert;
   update(table: DrizzleTable): DrizzleUpdate;
   delete(table: DrizzleTable): DrizzleDelete;
-  execute(values: unknown): Promise<unknown>;
+  execute?(values: unknown): Promise<unknown>;
   query?: Record<string, unknown>;
   transaction<T>(cb: (tx: DrizzleInstance) => Promise<T>): Promise<T>;
 };
@@ -227,6 +231,14 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     return this._connected && this._db !== null;
   }
 
+  /** Provide the exact configured instance to the package's typed Drizzle accessor. */
+  [DRIZZLE_QUERY_HANDLE](): unknown {
+    if (!this._db) {
+      throw new Error('DrizzleAdapter is not connected — call connect() first');
+    }
+    return this._db;
+  }
+
   /**
    * @inheritdoc
    *
@@ -262,7 +274,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
 
     const rollbackSentinel = { code: 'ROLLBACK_SENTINEL' };
 
-    return {
+    const handle: IAdapterTransaction & DrizzleQueryHandleProvider = {
+      [DRIZZLE_QUERY_HANDLE](): unknown {
+        return tx;
+      },
+
       createDataSource(entity: string): DataSource {
         return createDrizzleDataSourceInner(tx, entity, tables, operators);
       },
@@ -283,6 +299,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         }
       },
     };
+    return handle;
   }
 
   /** @inheritdoc */
@@ -290,7 +307,13 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     if (!this.isReady()) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
-    const result = await this._db!.execute({ sql, params: params ?? [] });
+    const execute = this._db!.execute;
+    if (typeof execute !== 'function') {
+      throw new Error(
+        "Configured Drizzle instance does not support raw execute(); use Drizzle's typed query builder for this driver.",
+      );
+    }
+    const result = await execute.call(this._db, { sql, params: params ?? [] });
     return (result as { rows?: T[] }).rows ?? result as T[];
   }
 
@@ -351,7 +374,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     );
   }
 
-  /** Structural validation: injected instance must have select / transaction. */
+  /** Structural validation for builders and transaction access. Raw execute is guarded at use. */
   private validateInstance(instance: unknown): DrizzleInstance {
     const ns = instance as Record<string, unknown>;
     if (
@@ -359,12 +382,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       typeof ns.transaction !== 'function' ||
       typeof ns.insert !== 'function' ||
       typeof ns.update !== 'function' ||
-      typeof ns.delete !== 'function' ||
-      typeof ns.execute !== 'function'
+      typeof ns.delete !== 'function'
     ) {
       throw new Error(
         'Injected drizzleInstance does not look like a Drizzle instance ' +
-          '(missing select / insert / update / delete / execute / transaction).',
+          '(missing select / insert / update / delete / transaction).',
       );
     }
     return instance as DrizzleInstance;

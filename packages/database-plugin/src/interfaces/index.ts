@@ -160,9 +160,10 @@ export interface IDatabaseService {
   query<T>(sql: string, params?: unknown[]): Promise<T[]>;
 
   /**
-   * Run database migrations. The exact behavior depends on the adapter
-   * (Prisma runs `db push`, Drizzle runs schema sync, Memory is a no-op).
+   * Programmatic migrations are unsupported by the current adapters. Each ORM
+   * owns schema migration through its own CLI, so this method rejects.
    *
+   * @returns A rejected promise naming the unsupported operation
    * @since 0.1.0
    */
   migrate(): Promise<void>;
