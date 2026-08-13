@@ -22,6 +22,13 @@ import {
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
+import {
+  createDrizzleDatabase,
+  getDrizzleDatabase,
+  getDrizzleTransaction,
+} from '../../src/index.ts';
+import type { DrizzleDatabase } from '../../src/index.ts';
+import { DatabaseService } from '../../src/services/database-service.ts';
 
 /** Default operator builders matching the adapter's fallback `eq` shape. */
 const OPERATORS: DrizzleOperators = {
@@ -62,7 +69,10 @@ describe('DrizzleAdapter', () => {
   beforeEach(() => {
     fakeDb = createFakeDrizzleInstance();
     adapter = new DrizzleAdapter({
-      drizzleInstance: fakeDb,
+      drizzleInstance: createDrizzleDatabase(
+        fakeDb,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: { user: USER_TABLE, post: POST_TABLE },
     });
   });
@@ -98,13 +108,106 @@ describe('DrizzleAdapter', () => {
       await expect(noDbAdapter.connect()).rejects.toThrow('requires options.drizzleInstance');
     });
 
+    it('rejects an unwrapped synchronous callback driver before invoking its transaction', async () => {
+      let callbackInvoked = false;
+      const synchronous = {
+        select: fakeDb.select,
+        insert: fakeDb.insert,
+        update: fakeDb.update,
+        delete: fakeDb.delete,
+        transaction(callback: (transaction: typeof fakeDb) => unknown): unknown {
+          callbackInvoked = true;
+          return callback(fakeDb);
+        },
+      };
+      const synchronousAdapter = new DrizzleAdapter({
+        // Deliberate boundary cast models untyped JavaScript configuration;
+        // ordinary TypeScript is rejected by createDrizzleDatabase itself.
+        drizzleInstance: synchronous as unknown as DrizzleDatabase<object>,
+        drizzleTables: { user: USER_TABLE },
+      });
+
+      await expect(synchronousAdapter.connect()).rejects.toThrow(
+        'options.drizzleInstance to be created by createDrizzleDatabase()',
+      );
+      expect(callbackInvoked).toBe(false);
+    });
+
+    it('rejects an unconfigured adopting Promise wrapper before native work can start', async () => {
+      const events: string[] = [];
+      const synchronous = {
+        select: fakeDb.select,
+        insert: fakeDb.insert,
+        update: fakeDb.update,
+        delete: fakeDb.delete,
+        transaction(callback: (transaction: typeof fakeDb) => Promise<void>): Promise<void> {
+          events.push('native-begin');
+          const result = callback(fakeDb);
+          events.push('native-commit');
+          return result;
+        },
+      };
+      const synchronousAdapter = new DrizzleAdapter({
+        drizzleInstance: synchronous as unknown as DrizzleDatabase<object>,
+        drizzleTables: { user: USER_TABLE },
+      });
+
+      await expect(synchronousAdapter.connect()).rejects.toThrow(
+        'options.drizzleInstance to be created by createDrizzleDatabase()',
+      );
+      expect(events).toEqual([]);
+    });
+
     it('validates drizzleTables at connect', async () => {
       const adapter = new DrizzleAdapter({
-        drizzleInstance: fakeDb,
+        drizzleInstance: createDrizzleDatabase(
+          fakeDb,
+          (database, work) => database.transaction(work),
+        ),
         drizzleTables: { user: USER_TABLE },
       });
       await adapter.connect();
       expect(adapter.isReady()).toBe(true);
+    });
+
+    it('accepts builders without execute and refuses only raw queries', async () => {
+      const noExecute = {
+        select: fakeDb.select,
+        insert: fakeDb.insert,
+        update: fakeDb.update,
+        delete: fakeDb.delete,
+        transaction: fakeDb.transaction,
+      };
+      const database = createDrizzleDatabase(
+        noExecute,
+        (configured, work) => configured.transaction(work),
+      );
+      const noExecuteAdapter = new DrizzleAdapter({
+        drizzleInstance: database,
+        drizzleTables: { user: USER_TABLE },
+      });
+      await noExecuteAdapter.connect();
+
+      const service = new DatabaseService(
+        noExecuteAdapter,
+        (entity) => noExecuteAdapter.createDataSource(entity),
+        'drizzle',
+      );
+      expect(getDrizzleDatabase(service, database)).toBe(noExecute);
+      await service.transaction(async (uow) => {
+        expect(getDrizzleTransaction(uow, database)).toBe(fakeDb);
+        expect(await uow.getRepository('user').findAll()).toEqual([]);
+      });
+      await expect(noExecuteAdapter.rawQuery('SELECT 1')).rejects.toThrow(
+        "Configured Drizzle instance does not support raw execute(); use Drizzle's typed query builder for this driver.",
+      );
+    });
+
+    it('preserves raw execute parameters and row results', async () => {
+      await adapter.connect();
+      expect(await adapter.rawQuery('SELECT ?', [1])).toEqual([]);
+      const call = fakeDb.recordedCalls.find((entry) => entry.action === 'execute');
+      expect(call?.args.values).toEqual({ sql: 'SELECT ?', params: [1] });
     });
   });
 
@@ -403,17 +506,32 @@ describe('DrizzleAdapter', () => {
 
   describe('transaction failure paths', () => {
     it('rejects beginTransaction when the driver cannot open a transaction', async () => {
+      interface FailingDatabase {
+        select(): { from(): Promise<unknown[]> };
+        insert(): { values(): { execute(): Promise<unknown[]> } };
+        update(): { set(): { where(): Promise<unknown[]> } };
+        delete(): { where(): Promise<void> };
+        $count(): Promise<number>;
+        execute(): Promise<{ rows: unknown[] }>;
+        query: Record<string, unknown>;
+        transaction<T>(work: (transaction: FailingDatabase) => Promise<T>): Promise<T>;
+      }
+      const database: FailingDatabase = {
+        select: () => ({ from: () => Promise.resolve([]) }),
+        insert: () => ({ values: () => ({ execute: () => Promise.resolve([]) }) }),
+        update: () => ({ set: () => ({ where: () => Promise.resolve([]) }) }),
+        delete: () => ({ where: () => Promise.resolve() }),
+        $count: () => Promise.resolve(0),
+        execute: () => Promise.resolve({ rows: [] }),
+        query: {},
+        transaction: <T>(_work: (transaction: typeof database) => Promise<T>): Promise<T> =>
+          Promise.reject(new Error('driver down')),
+      };
       const failing = new DrizzleAdapter({
-        drizzleInstance: {
-          select: () => ({ from: () => Promise.resolve([]) }),
-          insert: () => ({ values: () => ({ execute: () => Promise.resolve([]) }) }),
-          update: () => ({ set: () => ({ where: () => Promise.resolve([]) }) }),
-          delete: () => ({ where: () => Promise.resolve() }),
-          $count: () => Promise.resolve(0),
-          execute: () => Promise.resolve({ rows: [] }),
-          query: {},
-          transaction: () => Promise.reject(new Error('driver down')),
-        },
+        drizzleInstance: createDrizzleDatabase(
+          database,
+          (configured, work) => configured.transaction(work),
+        ),
         drizzleTables: { user: USER_TABLE },
       });
       await failing.connect();
@@ -424,24 +542,28 @@ describe('DrizzleAdapter', () => {
 
     it('rethrows a non-sentinel error surfaced during rollback', async () => {
       const inner = createFakeDrizzleInstance();
-      const wrapping = new DrizzleAdapter({
-        drizzleInstance: {
-          select: inner.select.bind(inner),
-          insert: inner.insert.bind(inner),
-          update: inner.update.bind(inner),
-          delete: inner.delete.bind(inner),
-          $count: inner.$count.bind(inner),
-          execute: inner.execute.bind(inner),
-          query: inner.query,
-          transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
-            try {
-              return await cb(inner);
-            } catch {
-              // Simulate a driver that reports its own abort error, not our sentinel.
-              throw new Error('tx aborted by driver');
-            }
-          },
+      const database = {
+        select: inner.select.bind(inner),
+        insert: inner.insert.bind(inner),
+        update: inner.update.bind(inner),
+        delete: inner.delete.bind(inner),
+        $count: inner.$count.bind(inner),
+        execute: inner.execute.bind(inner),
+        query: inner.query,
+        transaction: async <T>(cb: (tx: unknown) => Promise<T>): Promise<T> => {
+          try {
+            return await cb(inner);
+          } catch {
+            // Simulate a driver that reports its own abort error, not our sentinel.
+            throw new Error('tx aborted by driver');
+          }
         },
+      };
+      const wrapping = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(
+          database,
+          (configured, work) => configured.transaction(work),
+        ),
         drizzleTables: { user: USER_TABLE },
       });
       await wrapping.connect();

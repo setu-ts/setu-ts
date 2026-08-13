@@ -18,6 +18,12 @@ import { BaseRepository, type DataSource } from '../repositories/base-repository
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
+import {
+  assertDrizzleAdapter,
+  DRIZZLE_QUERY_HANDLE,
+  type NativeDrizzleQueryHandle,
+  readDrizzleQueryHandle,
+} from '../query/drizzle-query.ts';
 
 // ---------------------------------------------------------------------------
 // Internal generic repository (was `MemoryRepository` — renamed because it
@@ -48,6 +54,7 @@ class InternalRepo<Entity, Id = string> extends BaseRepository<Entity, Id> {
 export class DatabaseService implements IDatabaseService {
   private _closed = false;
 
+  /** Creates a database service over one adapter and repository data-source factory. */
   constructor(
     /** The underlying database adapter (internal contract with scoped tx factory). */
     private readonly _adapter: IDatabaseAdapter,
@@ -66,13 +73,25 @@ export class DatabaseService implements IDatabaseService {
     },
   ) {}
 
-  /** @inheritdoc */
+  /** Returns a repository bound to the named entity on the outer database scope. */
   getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id> {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
     }
     const dataSource = this.wrapDataSource(entity, this._createDataSource(entity));
     return new InternalRepo<Entity, Id>(dataSource);
+  }
+
+  /** Provide the configured native Drizzle instance through the internal protocol. */
+  [DRIZZLE_QUERY_HANDLE](): NativeDrizzleQueryHandle {
+    assertDrizzleAdapter(this._adapterType);
+    const handle = readDrizzleQueryHandle(this._adapter);
+    if (handle.scope !== 'outer') {
+      throw new Error(
+        "Drizzle query access expected 'outer' scope but received 'transaction' scope.",
+      );
+    }
+    return handle;
   }
 
   /** @inheritdoc */
@@ -89,6 +108,7 @@ export class DatabaseService implements IDatabaseService {
           const scopedDs = txn.createDataSource(entity);
           return new InternalRepo<unknown>(this.wrapDataSource(entity, scopedDs));
         },
+        this._adapterType,
       );
       const result = await work(uow);
       await txn.commit();

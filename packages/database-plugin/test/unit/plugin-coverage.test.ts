@@ -10,6 +10,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
+import { createDrizzleDatabase } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';
 import type {
   ICliApi,
@@ -182,7 +183,10 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: fakeDb,
+          drizzleInstance: createDrizzleDatabase(
+            fakeDb,
+            (database, work) => database.transaction(work),
+          ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });
@@ -278,7 +282,10 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: fakeDb,
+          drizzleInstance: createDrizzleDatabase(
+            fakeDb,
+            (database, work) => database.transaction(work),
+          ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });
@@ -312,7 +319,10 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: fakeDb,
+          drizzleInstance: createDrizzleDatabase(
+            fakeDb,
+            (database, work) => database.transaction(work),
+          ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },
       });

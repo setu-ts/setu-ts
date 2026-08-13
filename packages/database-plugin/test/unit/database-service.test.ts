@@ -18,6 +18,16 @@ import { DatabaseService } from '../../src/services/database-service.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
+import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
+import {
+  createDrizzleDatabase,
+  getDrizzleDatabase,
+  getDrizzleTransaction,
+} from '../../src/index.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
 
 describe('DatabaseService', () => {
   let adapter: IDatabaseAdapter;
@@ -139,6 +149,34 @@ describe('DatabaseService', () => {
       await expect(
         service.transaction(async () => 'no'),
       ).rejects.toThrow();
+    });
+
+    it('uses one Drizzle transaction for repositories and native access', async () => {
+      const fakeDb = createFakeDrizzleInstance();
+      const database = createDrizzleDatabase(
+        fakeDb,
+        (database, work) => database.transaction(work),
+      );
+      const drizzleAdapter = new DrizzleAdapter({
+        drizzleInstance: database,
+        drizzleTables: { User: createFakeDrizzleTable('user') },
+      });
+      await drizzleAdapter.connect();
+      const drizzleService = new DatabaseService(
+        drizzleAdapter,
+        (entity) => drizzleAdapter.createDataSource(entity),
+        'drizzle',
+      );
+
+      expect(getDrizzleDatabase(drizzleService, database)).toBe(fakeDb);
+      await drizzleService.transaction(async (uow) => {
+        expect(getDrizzleTransaction(uow, database)).toBe(fakeDb);
+        await uow.getRepository('User').create({ id: 'u1', name: 'Ada' });
+      });
+      expect(await drizzleService.getRepository('User').findById('u1')).toEqual({
+        id: 'u1',
+        name: 'Ada',
+      });
     });
   });
 

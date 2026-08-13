@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Typed native Drizzle query access.** `getDrizzleDatabase(service, configured)` returns the exact
+  configured instance, and `getDrizzleTransaction(uow, configured)` returns a derived
+  `DrizzleTransaction<typeof drizzleDb>` — Drizzle's callback-scoped native transaction for an
+  `IUnitOfWork`. Both preserve the application's schema inference for joins and aggregations, which
+  the single-entity repository contract cannot express, and the transaction form shares one
+  commit/rollback boundary with repository writes. Both take the opaque configuration built by
+  `createDrizzleDatabase` (see Changed), so the result type is derived from the application's own
+  database rather than from an unchecked type argument. Promise-aware SQLite Proxy/libsql-shaped
+  instances without `execute()` now connect for repositories and typed builders; raw `query()` alone
+  rejects with a descriptive limitation. The exported `UnitOfWork` constructor accepts an optional
+  adapter-type third argument while preserving the released two-argument call shape.
+
 - **`ConfigPluginOptions.envFileOptional`.** When `true`, a path in `envFilePath` that does not
   exist is skipped instead of throwing. The default is `false`, so nothing about an existing
   application changes. Only ABSENCE is tolerated — a file that exists and cannot be read still
@@ -52,6 +64,30 @@ All notable changes to this project are documented here. The format follows
   capability. Supplying `rbac` is unchanged in every respect.
 
 ### Changed
+
+- **A Drizzle instance must now be wrapped in `createDrizzleDatabase()` before it is injected.**
+  `DatabaseAdapterOptions.drizzleInstance` changed from `unknown` to the opaque
+  `DrizzleDatabaseIdentity`, so an unwrapped instance is a **compile error**, and `connect()` also
+  rejects one at runtime naming the requirement. This is breaking for every existing
+  `type: 'drizzle'` configuration.
+
+  Migration — wrap the instance and pass a bridge that calls its own `transaction`:
+
+  ```typescript
+  DatabasePlugin({
+    type: 'drizzle',
+    options: {
+      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleTables: { User: users },
+    },
+  });
+  ```
+
+  The bridge is application-supplied rather than inferred because a driver whose `transaction`
+  callback is **synchronous** (better-sqlite3) commits before any awaited unit-of-work runs, so
+  accepting one would report atomicity the database never provided. Those drivers are refused by
+  `createDrizzleDatabase`'s types, which is why the requirement is a compile error rather than a
+  runtime surprise.
 
 - **The kernel refuses a duplicate route instead of silently replacing it.** Registering the same
   method and path twice — from a plugin, a group, or application code — now throws
@@ -110,7 +146,7 @@ All notable changes to this project are documented here. The format follows
   been persisted.
 
   Migration: pass a table registry beside the instance —
-  `DatabasePlugin({ type: 'drizzle', options: { drizzleInstance: db, drizzleTables: { User: users } } })`.
+  `DatabasePlugin({ type: 'drizzle', options: { drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)), drizzleTables: { User: users } } })`.
 
 - **Generated projects are functional by default, and decorators plus DI are one opt-in.**
   `--template rest` and `--template microservice` no longer register `DecoratorPlugin`, and

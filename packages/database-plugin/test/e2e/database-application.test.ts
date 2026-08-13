@@ -18,8 +18,13 @@ import type {
 
 import { createApplication } from '@setu-ts/kernel';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
+import { createDrizzleDatabase, getDrizzleDatabase } from '../../src/index.ts';
 import type { IDatabaseService, IUnitOfWork } from '../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
 
 /** User entity shape used across routes. */
 interface User {
@@ -159,6 +164,46 @@ function createDatabaseRoutesPlugin(): IPlugin {
 }
 
 describe('DatabasePlugin E2E — with real application', () => {
+  it('resolves typed Drizzle access through the public database capability', async () => {
+    const drizzleInstance = createFakeDrizzleInstance();
+    const database = createDrizzleDatabase(
+      drizzleInstance,
+      (database, work) => database.transaction(work),
+    );
+    const app = createApplication({
+      plugins: [
+        createTestRuntimePlugin(),
+        DatabasePlugin({
+          type: 'drizzle',
+          options: {
+            drizzleInstance: database,
+            drizzleTables: { User: createFakeDrizzleTable('user') },
+          },
+        }),
+      ],
+    });
+    await app.start();
+    const service = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    expect(getDrizzleDatabase(service, database)).toBe(drizzleInstance);
+    await app.stop();
+  });
+
+  it('names memory when typed Drizzle access uses the public database capability', async () => {
+    const app = createApplication({
+      plugins: [createTestRuntimePlugin(), DatabasePlugin({ type: 'memory' })],
+    });
+    await app.start();
+    const service = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    const database = createDrizzleDatabase(
+      createFakeDrizzleInstance(),
+      (database, work) => database.transaction(work),
+    );
+    expect(() => getDrizzleDatabase(service, database)).toThrow(
+      "Drizzle query access requires adapter 'drizzle'; configured adapter is 'memory'.",
+    );
+    await app.stop();
+  });
+
   it('creates a user via POST and reads it back via GET', async () => {
     const app = createApplication({
       plugins: [

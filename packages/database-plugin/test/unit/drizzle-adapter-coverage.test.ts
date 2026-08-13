@@ -21,6 +21,7 @@ import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { normalizeQuery } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
+import { createDrizzleDatabase } from '../../src/index.ts';
 
 describe('DrizzleAdapter — CRUD data-source coverage', () => {
   let fakeDb: ReturnType<typeof createFakeDrizzleInstance>;
@@ -30,7 +31,10 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
   beforeEach(() => {
     fakeDb = createFakeDrizzleInstance();
     adapter = new DrizzleAdapter({
-      drizzleInstance: fakeDb,
+      drizzleInstance: createDrizzleDatabase(
+        fakeDb,
+        (database, work) => database.transaction(work),
+      ),
       drizzleTables: tables,
     });
   });
@@ -170,9 +174,10 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
   describe('rawQuery', () => {
     it('delegates to db.execute', async () => {
       await adapter.connect();
-      await adapter.rawQuery('SELECT 1');
+      const result = await adapter.rawQuery('SELECT ?', [1]);
       const call = fakeDb.recordedCalls.find((c) => c.action === 'execute');
-      expect(call).toBeDefined();
+      expect(call?.args.values).toEqual({ sql: 'SELECT ?', params: [1] });
+      expect(result).toEqual([]);
     });
   });
 
@@ -207,7 +212,10 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
 
     it('validates drizzleTables entries', async () => {
       const badAdapter = new DrizzleAdapter({
-        drizzleInstance: fakeDb,
+        drizzleInstance: createDrizzleDatabase(
+          fakeDb,
+          (database, work) => database.transaction(work),
+        ),
         drizzleTables: { bad: null },
       });
       await expect(badAdapter.connect()).rejects.toThrow("table 'bad' must be a table definition");
@@ -216,27 +224,62 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
 
   describe('validateInstance rejection', () => {
     it('rejects instance missing select', async () => {
-      const bad = { transaction: () => {} };
-      const a = new DrizzleAdapter({ drizzleInstance: bad, drizzleTables: tables });
+      const bad = {
+        transaction: <T>(work: (transaction: object) => Promise<T>): Promise<T> => work({}),
+      };
+      const a = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(
+          bad,
+          (configured, work) => configured.transaction(work),
+        ),
+        drizzleTables: tables,
+      });
       await expect(a.connect()).rejects.toThrow('missing');
     });
 
     it('rejects instance missing transaction', async () => {
-      const bad = { select: () => {} };
-      const a = new DrizzleAdapter({ drizzleInstance: bad, drizzleTables: tables });
+      const bad = {
+        select: () => {},
+        transaction: <T>(work: (transaction: object) => Promise<T>): Promise<T> => work({}),
+      };
+      const a = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(
+          bad,
+          (configured, work) => configured.transaction(work),
+        ),
+        drizzleTables: tables,
+      });
       await expect(a.connect()).rejects.toThrow('missing');
     });
 
-    it('rejects instance missing execute', async () => {
-      const bad = {
+    it('accepts an instance missing execute and refuses only raw queries', async () => {
+      interface SqliteShaped {
+        select(): void;
+        insert(): void;
+        update(): void;
+        delete(): void;
+        transaction<T>(work: (transaction: SqliteShaped) => Promise<T>): Promise<T>;
+      }
+      const sqliteShaped: SqliteShaped = {
         select: () => {},
         insert: () => {},
         update: () => {},
         delete: () => {},
-        transaction: () => {},
+        transaction: async <T>(work: (transaction: typeof sqliteShaped) => Promise<T>) =>
+          await work(sqliteShaped),
       };
-      const a = new DrizzleAdapter({ drizzleInstance: bad, drizzleTables: tables });
-      await expect(a.connect()).rejects.toThrow('execute');
+      const a = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(
+          sqliteShaped,
+          (configured, work) => configured.transaction(work),
+        ),
+        drizzleTables: tables,
+      });
+      await a.connect();
+      expect(a.isReady()).toBe(true);
+      await expect(a.rawQuery('select 1')).rejects.toThrow(
+        "does not support raw execute(); use Drizzle's typed query builder",
+      );
     });
   });
 
@@ -331,8 +374,17 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
     it('rejects an omitted or empty drizzleTables registry before reporting ready', async () => {
       for (const drizzleTables of [undefined, {}] as const) {
         const options = drizzleTables === undefined
-          ? { drizzleInstance: fakeDb }
-          : { drizzleInstance: fakeDb, drizzleTables };
+          ? {
+            drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+              database.transaction(work)),
+          }
+          : {
+            drizzleInstance: createDrizzleDatabase(
+              fakeDb,
+              (database, work) => database.transaction(work),
+            ),
+            drizzleTables,
+          };
         const a = new DrizzleAdapter(options);
         await expect(a.connect()).rejects.toThrow('requires options.drizzleTables');
         expect(a.isReady()).toBe(false);

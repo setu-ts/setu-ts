@@ -7,6 +7,7 @@
  * @module
  */
 import type { IDatabaseAdapter } from '@setu-ts/common';
+import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
 
 // Re-export query option types so consumers don't need internal paths.
@@ -160,9 +161,10 @@ export interface IDatabaseService {
   query<T>(sql: string, params?: unknown[]): Promise<T[]>;
 
   /**
-   * Run database migrations. The exact behavior depends on the adapter
-   * (Prisma runs `db push`, Drizzle runs schema sync, Memory is a no-op).
+   * Programmatic migrations are unsupported by the current adapters. Each ORM
+   * owns schema migration through its own CLI, so this method rejects.
    *
+   * @returns A rejected promise naming the unsupported operation
    * @since 0.1.0
    */
   migrate(): Promise<void>;
@@ -332,11 +334,13 @@ export interface DatabaseAdapterOptions {
   readonly transactionTimeout?: number;
 
   /**
-   * Inject the application's configured Drizzle database instance. Required
-   * when `type: 'drizzle'`; this package loads query operators but cannot
-   * construct a dialect-specific driver.
+   * Inject the application's opaque configured Drizzle database, created by
+   * `createDrizzleDatabase(database, transactionBridge)`. Required when
+   * `type: 'drizzle'`; the explicit bridge positively guarantees Promise-aware
+   * native callback semantics instead of inferring them from a structural
+   * transaction method.
    *
    * @since 0.1.0
    */
-  readonly drizzleInstance?: unknown;
+  readonly drizzleInstance?: DrizzleDatabaseIdentity;
 }
