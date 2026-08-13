@@ -247,6 +247,32 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
     await Deno.remove(`${project}/deno.lock`).catch(() => {});
   }
 
+  /**
+   * Relaxes the scaffold's `@setu-ts/*` pins to the range floor.
+   *
+   * Both legs below are REAL registry installs — that is the point, since a
+   * workspace-repointed project never consults JSR and so can never exercise
+   * the age policy. But `setu new` pins a project to the CLI's OWN version,
+   * which during a release bump is not published yet, so the install fails on
+   * `Could not find version … that matches '^<next>'` before any age policy is
+   * consulted: the test would then block the very release that would publish
+   * the version it wants. `^0.1.0-alpha.1` resolves to the newest published
+   * release (measured: alpha.7 while alpha.8 was unpublished), so it needs no
+   * maintenance, and it changes nothing either leg proves — the emitted value
+   * is asserted separately above, and every published version is younger than
+   * the ten-year threshold that makes the refusal leg deterministic.
+   *
+   * @param project - The project directory
+   */
+  async function relaxFrameworkPins(project: string): Promise<void> {
+    const path = `${project}/deno.json`;
+    const source = await Deno.readTextFile(path);
+    await Deno.writeTextFile(
+      path,
+      source.replaceAll(/(@setu-ts\/[a-z-]+)@\^[^"]+/g, '$1@^0.1.0-alpha.1'),
+    );
+  }
+
   it('installs under a policy that would otherwise refuse every version', async () => {
     // D1 only bites while the pinned version is inside the age window, so the
     // obvious test is reproducible for one day per release and vacuous after.
@@ -265,6 +291,11 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
       minimumDependencyAge?: unknown;
     };
     expect(emitted.minimumDependencyAge).toBe(0);
+
+    // Read the emitted pins BEFORE relaxing them, so this leg still fails if
+    // `setu new` ever stops pinning the framework at all.
+    expect(await Deno.readTextFile(`${project}/deno.json`)).toContain('jsr:@setu-ts/kernel@^');
+    await relaxFrameworkPins(project);
 
     // 10 years in minutes. Without this leg the second one proves nothing: an
     // install that succeeds under a policy that was never going to refuse
