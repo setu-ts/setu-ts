@@ -113,7 +113,9 @@ export interface RestStarterOptions {
   database?: DatabasePluginOptions;
   /**
    * Optional arm: {@linkcode AuthPlugin}. Provided only when the caller supplies
-   * auth configuration (jwt + rbac); omitted → auth not registered.
+   * auth configuration; omitted → auth not registered. `rbac` is itself
+   * optional — supply `jwt` alone for a JWT-only application, which registers
+   * no authorization capability.
    */
   auth?: AuthPluginOptions;
   /**

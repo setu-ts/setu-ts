@@ -104,7 +104,13 @@ export type DrizzleOperators = {
   lte?: (col: unknown, val: unknown) => unknown;
   inArray?: (col: unknown, values: readonly unknown[]) => unknown;
   isNull?: (col: unknown) => unknown;
-  like?: (col: unknown, value: string) => unknown;
+  /**
+   * Drizzle's `sql` template tag. `contains` needs it because a bare
+   * `like(col, pattern)` cannot carry an `ESCAPE` clause, without which the
+   * `%` and `_` a caller searches for stay wildcards on SQLite (which has no
+   * default escape character) — a literal search then matches nothing.
+   */
+  sql?: (strings: TemplateStringsArray, ...values: unknown[]) => unknown;
   asc: (col: unknown) => unknown;
   desc: (col: unknown) => unknown;
   /**
@@ -156,7 +162,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         lte: ns.lte as (col: unknown, val: unknown) => unknown,
         inArray: ns.inArray as (col: unknown, values: readonly unknown[]) => unknown,
         isNull: ns.isNull as (col: unknown) => unknown,
-        like: ns.like as (col: unknown, value: string) => unknown,
+        sql: ns.sql as (strings: TemplateStringsArray, ...values: unknown[]) => unknown,
         asc: ns.asc as (col: unknown) => unknown,
         desc: ns.desc as (col: unknown) => unknown,
         count: ns.count as () => unknown,
@@ -171,7 +177,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         typeof operators.lte !== 'function' ||
         typeof operators.inArray !== 'function' ||
         typeof operators.isNull !== 'function' ||
-        typeof operators.like !== 'function' ||
+        typeof operators.sql !== 'function' ||
         typeof operators.asc !== 'function' ||
         typeof operators.desc !== 'function' ||
         typeof operators.count !== 'function'
@@ -542,7 +548,13 @@ function filterPredicateFor(
     case 'eq':
       return operators.eq(column, filter.value);
     case 'contains':
-      return filterOperators.like(column, `%${escapeLikePattern(filter.value)}%`);
+      // `ESCAPE '\'` is standard SQL and is required, not decorative: SQLite
+      // defines no default escape character, so without the clause the
+      // backslashes below are matched literally and a search for a value
+      // holding `%` or `_` returns nothing at all.
+      return filterOperators.sql`${column} like ${`%${
+        escapeLikePattern(filter.value)
+      }%`} escape '\\'`;
     case 'gt':
       return filterOperators.gt(column, filter.value);
     case 'gte':
@@ -561,11 +573,13 @@ function filterPredicateFor(
       return filterOperators.or(nullPredicate, filterOperators.inArray(column, nonNullValues));
     }
   }
-
-  throw new Error('Unsupported filter operator');
 }
 
-/** Escape SQL LIKE metacharacters so `contains` remains literal substring matching. */
+/**
+ * Escape SQL LIKE metacharacters so `contains` remains literal substring
+ * matching. Read together with the `ESCAPE '\'` clause emitted beside it —
+ * the escaping is inert without it.
+ */
 function escapeLikePattern(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
 }
@@ -573,7 +587,7 @@ function escapeLikePattern(value: string): string {
 type FilterOperators = Required<
   Pick<
     DrizzleOperators,
-    'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'isNull' | 'like'
+    'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'isNull' | 'sql'
   >
 >;
 
@@ -587,7 +601,7 @@ function requireFilterOperators(operators: DrizzleOperators): FilterOperators {
     typeof operators.lte !== 'function' ||
     typeof operators.inArray !== 'function' ||
     typeof operators.isNull !== 'function' ||
-    typeof operators.like !== 'function'
+    typeof operators.sql !== 'function'
   ) {
     throw new Error('Drizzle filter operators are unavailable');
   }

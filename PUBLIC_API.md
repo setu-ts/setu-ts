@@ -982,6 +982,13 @@ const users = await userRepo.findAll({
 });
 ```
 
+An `in` with an empty list matches nothing, and a list containing `null` matches rows whose column
+is null — SQL `IN` never matches `NULL` by itself, so the SQL adapters emit an explicit null branch.
+`contains` is a substring match whose `%` and `_` are always data rather than wildcards; its **case
+sensitivity is the database's**, not the framework's — Memory and D1 match case-sensitively, while a
+`LIKE`-based backend follows the column's collation (case-sensitive on PostgreSQL, case-insensitive
+on SQLite and most MySQL collations). Collation control is not part of this contract.
+
 ### Custom Adapters (external backends)
 
 `DatabasePluginOptions` is a union discriminated on `type`. The `'custom'` arm accepts any

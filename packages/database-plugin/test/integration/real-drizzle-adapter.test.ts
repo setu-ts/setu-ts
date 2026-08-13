@@ -11,7 +11,28 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
 import { pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
-import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
+import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
+import { sqliteTable, text as sqliteText } from 'npm:drizzle-orm@0.45.2/sqlite-core';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  or,
+  sql,
+} from 'npm:drizzle-orm@0.45.2';
+import { DatabaseSync } from 'node:sqlite';
+import {
+  createDrizzleDataSource,
+  DrizzleAdapter,
+} from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
 
 const users = pgTable('users', {
@@ -106,7 +127,70 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       },
     }));
 
-    expect(calls[0]?.sql).toContain('like $1');
+    expect(calls[0]?.sql).toContain("like $1 escape '\\'");
     expect(calls[0]?.params).toEqual(['%50\\%\\_off\\\\now%']);
+  });
+
+  it('matches a metacharacter search literally when executed on real SQLite', async () => {
+    // The dialect this proves against is the point. Postgres and MySQL treat a
+    // backslash as the default LIKE escape, so escaping the pattern happens to
+    // be enough there and this file's other cases cannot tell the difference.
+    // SQLite defines NO default escape character, so the search is literal
+    // only because of the emitted `ESCAPE '\'` clause — drop the clause and
+    // this returns zero rows.
+    //
+    // It runs through `createDrizzleDataSource` rather than `DrizzleAdapter`
+    // because the adapter's structural check requires `execute`, which the
+    // SQLite drivers do not expose; the data source is where the predicate is
+    // built, and it is public API in its own right.
+    const sqliteUsers = sqliteTable('users', {
+      id: sqliteText('id').primaryKey(),
+      name: sqliteText('name').notNull(),
+    });
+    const engine = new DatabaseSync(':memory:');
+    engine.exec('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT)');
+    engine.exec(
+      "INSERT INTO users VALUES ('u1','50%_off now'), ('u2','50XYoff now'), ('u3','ADA')",
+    );
+
+    const database = sqliteDrizzle((statement, params) => {
+      const rows = engine.prepare(statement).all(...(params as string[]));
+      return Promise.resolve({ rows: rows.map((row) => Object.values(row)) });
+    });
+    const source = createDrizzleDataSource(
+      // The SQLite drivers expose no `execute`, so this instance does not
+      // satisfy `DrizzleInstance` — which is exactly why `DrizzleAdapter`
+      // refuses one. The read path under test only uses `select`.
+      database as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'User',
+      { User: sqliteUsers },
+      // Drizzle's own operators take `SQLWrapper`, so they are not assignable
+      // to the adapter's structural `(col: unknown, …)` signatures — the
+      // adapter casts them the same way when it loads the namespace.
+      {
+        eq,
+        and,
+        or,
+        gt,
+        gte,
+        lt,
+        lte,
+        inArray,
+        isNull,
+        sql,
+        asc,
+        desc,
+        count,
+      } as unknown as Parameters<typeof createDrizzleDataSource>[3],
+    );
+
+    const found = await source.findAll(query({
+      select: ['id'],
+      filter: { type: 'comparison', field: 'name', operator: 'contains', value: '50%_off' },
+    }));
+
+    // `50XYoff now` is the negative control: it is exactly what an unescaped
+    // `%_` wildcard pattern would also return.
+    expect(found.map((row) => row.id)).toEqual(['u1']);
   });
 });

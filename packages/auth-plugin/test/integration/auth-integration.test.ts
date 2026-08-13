@@ -11,9 +11,11 @@ import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
 import { requireAuth, requireRole } from '../../src/guards/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
 import type {
   HandlerResult,
   IJwtService,
+  IPlugin,
   IPluginContext,
   IPrincipal,
   IRequest,
@@ -343,5 +345,106 @@ describe('Auth Plugin Integration', () => {
     await authMiddleware()(ctx, async () => {});
 
     expect(ctx.request.user).toBeUndefined();
+  });
+});
+
+/**
+ * JWT-only registration, driven through a REAL kernel application.
+ *
+ * The fake registry above returns `undefined` for an unregistered token, but
+ * the kernel's real `ServiceRegistry` throws — so the question "does an
+ * authorization guard fail loudly when RBAC was never configured?" can only be
+ * answered against the real thing. A guard that silently proceeded here would
+ * be granting access on an application that never defined a role.
+ */
+describe('AuthPlugin without RBAC — real application', () => {
+  const runtime = createFakeRuntime(1000000);
+
+  function runtimePlugin(): IPlugin {
+    return {
+      name: 'fake-runtime',
+      version: '1.0.0',
+      provides: [CAPABILITIES.RUNTIME],
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.RUNTIME, runtime);
+      },
+    };
+  }
+
+  function bootJwtOnlyApp(): ReturnType<typeof createApplication> {
+    return createApplication({
+      plugins: [
+        runtimePlugin(),
+        AuthPlugin({ jwt: { secret: 'jwt-only-secret' } }),
+        {
+          name: 'protected-routes',
+          version: '1.0.0',
+          dependencies: ['auth-plugin'],
+          register(ctx: IPluginContext) {
+            ctx.middleware.add(authMiddleware(), { name: 'auth', priority: 100 });
+            ctx.router.get('/me', {
+              middleware: [requireAuth()],
+              handler: (reqCtx: IRequestContext): HandlerResult =>
+                reqCtx.response.json({ sub: reqCtx.request.user?.id ?? null }),
+            });
+            ctx.router.get('/admin', {
+              middleware: [requireRole('admin')],
+              handler: (reqCtx: IRequestContext): HandlerResult =>
+                reqCtx.response.json({ ok: true }),
+            });
+          },
+        },
+      ],
+    });
+  }
+
+  it('registers jwt and authentication but not authorization', async () => {
+    const app = bootJwtOnlyApp();
+    await app.start();
+
+    expect(app.services.has(CAPABILITIES.JWT)).toBe(true);
+    expect(app.services.has(CAPABILITIES.AUTH)).toBe(true);
+    expect(app.services.has(CAPABILITIES.AUTHORIZATION)).toBe(false);
+
+    await app.stop();
+  });
+
+  it('authenticates a real request end to end with no RBAC configured', async () => {
+    const app = bootJwtOnlyApp();
+    await app.start();
+    const jwt = app.services.get<IJwtService>(CAPABILITIES.JWT);
+    const token = await jwt.sign({ sub: 'user123', roles: ['admin'] });
+
+    const authorized = await app.inject({
+      method: 'GET',
+      url: 'http://localhost/me',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(authorized.statusCode).toBe(200);
+    expect(authorized.json<{ sub: string }>().sub).toBe('user123');
+
+    const anonymous = await app.inject({ method: 'GET', url: 'http://localhost/me' });
+    expect(anonymous.statusCode).toBe(401);
+
+    await app.stop();
+  });
+
+  it('fails an authorization guard rather than granting access without RBAC', async () => {
+    const app = bootJwtOnlyApp();
+    await app.start();
+    const jwt = app.services.get<IJwtService>(CAPABILITIES.JWT);
+    const token = await jwt.sign({ sub: 'user123', roles: ['admin'] });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: 'http://localhost/admin',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    // Not 200: the token carries the 'admin' role, so a guard that resolved a
+    // permissive stand-in would have let this through.
+    expect(response.statusCode).toBe(500);
+
+    await app.stop();
   });
 });

@@ -34,7 +34,49 @@ All notable changes to this project are documented here. The format follows
   This is what lets a `full-stack` workspace member consume the discovery map the CLI already
   generated for it, through the starter factory rather than a hand-written registration.
 
+- **Portable repository filters and `findOne`.** `FindOptions` and `CountOptions` gain an optional
+  `filter` expression tree — comparison leaves (`eq`, `contains`, `gt`, `gte`, `lt`, `lte`, `in`)
+  composed with `and` / `or` — conjoined with the existing equality `where` map, which is unchanged.
+  Memory, Prisma, Drizzle and D1 each translate it natively rather than filtering in JavaScript, so
+  a search no longer has to drop to raw `query()`. `FilterExpression`, `FilterComparison` and
+  `FilterOperator` are exported from `@setu-ts/common` and re-exported from
+  `@setu-ts/database-plugin`. `IRepository.findOne(options?)` returns the first match or `null`
+  through the same one-source path as `findAll`.
+
+- **`RouteInfo.owner`.** `app.router.listRoutes()` now reports the name of the plugin whose
+  `register()` created each route, and leaves it absent for a route added directly by application
+  code — so middleware can derive the paths the plugins own instead of hand-listing them.
+
+- **`AuthPluginOptions.rbac` is optional.** A JWT-only application supplies `jwt` alone; AuthPlugin
+  then registers `jwt` and `authentication` and neither creates nor advertises the `authorization`
+  capability. Supplying `rbac` is unchanged in every respect.
+
 ### Changed
+
+- **The kernel refuses a duplicate route instead of silently replacing it.** Registering the same
+  method and path twice — from a plugin, a group, or application code — now throws
+  `Route '<METHOD> <path>' is already registered.` at registration time. Previously the second
+  registration overwrote the first in the router's entry map, so one of the two handlers became
+  permanently unreachable with no diagnostic: a `setu g route todos` in a project that already had a
+  `@Controller('/todos')` shadowed one of them at random depending on load order.
+
+  This is a breaking change for an application that registers duplicates today, and it surfaces at
+  `app.start()` rather than at the first request. Migration: remove the duplicate registration, or
+  give one of the two routes a distinct path. Distinct methods on one path, and distinct path
+  patterns, are unaffected.
+
+- **`IRepository` gains a required `findOne` member.** Classes extending `BaseRepository` inherit
+  the implementation and need no change. A class implementing `IRepository` directly — without
+  extending `BaseRepository` — must now implement `findOne`, which is a compile error until it does.
+  `IDataSource.count` gained an optional second `filter` parameter, which existing implementations
+  satisfy unchanged.
+
+- **`contains` now carries an explicit `ESCAPE` clause on the Drizzle adapter.** The predicate is
+  built with Drizzle's `sql` tag as `LIKE ? ESCAPE '\'` rather than a bare `like()`. Escaping the
+  pattern alone relies on the dialect's default escape character, which PostgreSQL and MySQL define
+  as a backslash but SQLite does not define at all — so on a SQLite-backed instance a search whose
+  value contained `%`, `_` or `\` would have matched nothing. `DrizzleOperators` (not exported from
+  the package barrel) accordingly requires `sql` in place of `like`.
 
 - **Scaffolded REST-derived templates now answer errors as RFC 9457 Problem Details.** The inline
   `errorHandler()` the CLI emits passes `{ format: 'rfc9457' }`, matching what the starter factories
