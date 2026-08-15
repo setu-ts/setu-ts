@@ -2470,7 +2470,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   real failure with a `TypeError` naming no peer.
 
   All changed `src` files ≥90% branch/function/line, every file added during review at 100%) —
-  complete (PR pending)
+  complete (PR #166)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`
