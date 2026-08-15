@@ -14,9 +14,9 @@
  */
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
-import { listSeamSpecs } from '../seams/registry.ts';
+import { hostSeamSpecs } from '../seams/registry.ts';
 import type { SeamSpec } from '../seams/seam-spec.ts';
-import { APP_CONTROLLERS_EXPORT } from '../seams/controllers.ts';
+import { APP_CONTROLLERS_EXPORT, REGISTER_ROUTES_EXPORT } from '../seams/http.ts';
 import { APP_SERVICES_EXPORT } from '../seams/services.ts';
 import { COMMAND_HANDLERS_EXPORT, QUERY_HANDLERS_EXPORT } from '../seams/cqrs.ts';
 import { EVENT_HANDLERS_EXPORT } from '../seams/events.ts';
@@ -24,7 +24,6 @@ import { GENERATED_MIDDLEWARE_EXPORT } from '../seams/middleware.ts';
 import { GENERATED_PLUGINS_EXPORT } from '../seams/plugins.ts';
 import { HEALTH_INDICATORS_EXPORT } from '../seams/health.ts';
 import { CUSTOM_METRICS_EXPORT } from '../seams/metrics.ts';
-import { REGISTER_ROUTES_EXPORT } from '../seams/routes.ts';
 import type { LocalImport, Wiring } from './registry.ts';
 
 /**
@@ -39,9 +38,7 @@ import type { LocalImport, Wiring } from './registry.ts';
  * @returns The consumable seams, in registry order
  */
 export function seamsFor(installed: ReadonlySet<string>): readonly SeamSpec[] {
-  return listSeamSpecs().filter(
-    (spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin),
-  );
+  return hostSeamSpecs(installed);
 }
 
 /**
@@ -90,7 +87,11 @@ export function seamLocalImports(seams: readonly SeamSpec[]): readonly LocalImpo
 export function seamSetupCalls(seams: readonly SeamSpec[]): readonly string[] {
   const schematics = new Set(seams.map((spec) => spec.schematic));
   const calls: string[] = [];
-  if (schematics.has('route')) {
+  // Either kind reaches the router through this one call: in a functional
+  // project a `.controller.ts` registers imperatively exactly as a `.routes.ts`
+  // does, so gating on `route` alone would leave a functional project's
+  // controllers wired by nothing.
+  if (schematics.has('route') || schematics.has('controller')) {
     calls.push(`${REGISTER_ROUTES_EXPORT}(app.router);`);
   }
   if (schematics.has('middleware')) {
@@ -184,7 +185,12 @@ export function decoratorSeamExtras(
 ): { readonly controllers: readonly string[]; readonly services: readonly string[] } {
   const schematics = new Set(seams.map((spec) => spec.schematic));
   return {
-    controllers: schematics.has('controller') ? [`...${APP_CONTROLLERS_EXPORT}`] : [],
+    // Gated on the EXPORT, not the schematic name: both modes generate
+    // controllers, but only the class-based barrel declares APP_CONTROLLERS —
+    // spreading it in a functional project would name a symbol that is not there.
+    controllers: seams.some((spec) => spec.exports.includes(APP_CONTROLLERS_EXPORT))
+      ? [`...${APP_CONTROLLERS_EXPORT}`]
+      : [],
     services: schematics.has('service') ? [`...${APP_SERVICES_EXPORT}`] : [],
   };
 }

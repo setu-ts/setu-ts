@@ -502,7 +502,7 @@ describe('runNewCommand', () => {
       expect(config).toContain('for (const generated of GENERATED_MIDDLEWARE) {');
       // The barrels those imports name are emitted at scaffold time, so the
       // config never imports a module the project does not have.
-      expect(h.fs.read('/work/bare/src/routes/index.ts')).toContain('registerGeneratedRoutes');
+      expect(h.fs.read('/work/bare/src/controllers/index.ts')).toContain('registerGeneratedRoutes');
       expect(h.fs.read('/work/bare/src/middleware/index.ts')).toContain('GENERATED_MIDDLEWARE');
       expect(h.fs.read('/work/bare/src/plugins/index.ts')).toContain('GENERATED_PLUGINS');
     });
@@ -527,7 +527,14 @@ describe('runNewCommand', () => {
       ) {
         expect(config).not.toContain(absent);
       }
-      expect(h.fs.has('/work/bare/src/controllers/index.ts')).toBe(false);
+      // The HTTP barrel IS emitted — `controller` is ungated since E8, so a
+      // bare project has one directory that answers requests. What it must not
+      // carry is the CLASS-shaped registration: no APP_CONTROLLERS above, and
+      // no import of `@setu-ts/decorator-plugin` anywhere.
+      expect(h.fs.has('/work/bare/src/controllers/index.ts')).toBe(true);
+      expect(h.fs.read('/work/bare/src/controllers/index.ts'))
+        .toContain('export function registerGeneratedRoutes');
+      expect(config).not.toContain('decorator-plugin');
       expect(h.fs.has('/work/bare/src/cqrs/index.ts')).toBe(false);
     });
 

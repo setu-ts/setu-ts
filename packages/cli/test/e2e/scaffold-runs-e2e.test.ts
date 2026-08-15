@@ -178,7 +178,7 @@ describe('a scaffolded project configures itself from a dotenv file', () => {
     await useWorkspacePackages(project);
     await Deno.writeTextFile(`${project}/.env`, 'SCAFFOLD_PROBE_VALUE=from-dotenv\n');
     await Deno.writeTextFile(
-      `${project}/src/routes/index.ts`,
+      `${project}/src/controllers/index.ts`,
       `import { CAPABILITIES } from '@setu-ts/common';\n` +
         `import type { IConfig, IRouterApi } from '@setu-ts/common';\n\n` +
         `export function registerGeneratedRoutes(router: IRouterApi): void {\n` +
@@ -206,7 +206,7 @@ describe('a scaffolded project answers errors as RFC 9457 Problem Details', () =
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
     await Deno.writeTextFile(
-      `${project}/src/routes/index.ts`,
+      `${project}/src/controllers/index.ts`,
       `import { unauthorized } from '@setu-ts/exceptions';\n` +
         `import type { IRouterApi } from '@setu-ts/common';\n\n` +
         `export function registerGeneratedRoutes(router: IRouterApi): void {\n` +

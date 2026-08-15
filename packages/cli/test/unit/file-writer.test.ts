@@ -193,9 +193,9 @@ describe('writeFiles', () => {
     await writeFiles(spy, [
       { path: 'src/services/a.ts', contents: 'A' },
       { path: 'src/services/b.ts', contents: 'B' },
-      { path: 'src/routes/c.ts', contents: 'C' },
+      { path: 'src/controllers/c.ts', contents: 'C' },
     ]);
-    expect(fs.mkdirs).toEqual(['src/services', 'src/routes']);
+    expect(fs.mkdirs).toEqual(['src/services', 'src/controllers']);
     expect(recursive).toBe(true);
   });
 

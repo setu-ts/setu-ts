@@ -27,15 +27,20 @@
  */
 
 import type { SeamSpec } from './seam-spec.ts';
-import { CONTROLLERS_SEAM } from './controllers.ts';
+import {
+  CONTROLLERS_SEAM,
+  FUNCTIONAL_CONTROLLERS_SEAM,
+  FUNCTIONAL_ROUTES_SEAM,
+  ROUTES_SEAM,
+} from './http.ts';
 import { COMMAND_HANDLER_SEAM, QUERY_HANDLER_SEAM } from './cqrs.ts';
 import { EVENTS_SEAM } from './events.ts';
 import { HEALTH_SEAM } from './health.ts';
 import { METRICS_SEAM } from './metrics.ts';
 import { MIDDLEWARE_SEAM } from './middleware.ts';
 import { PLUGINS_SEAM } from './plugins.ts';
-import { ROUTES_SEAM } from './routes.ts';
 import { FUNCTIONAL_SERVICES_SEAM, SERVICES_SEAM } from './services.ts';
+import type { GeneratorMode } from '../utils/generator-mode.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 
 /**
@@ -74,25 +79,69 @@ export function listSeamSpecs(): readonly SeamSpec[] {
 }
 
 /**
+ * Swaps the HTTP family into a generator mode's shape.
+ *
+ * Applied by BOTH accessors below, because both modes give `controller` and
+ * `route` a real registration site — `registerGeneratedRoutes(app.router)` —
+ * so the host scaffolds the barrel either way and only the shape differs.
+ *
+ * @param specs - The registry's specs
+ * @param mode - The target's generator mode
+ * @returns The specs, with the HTTP family in that mode's shape
+ */
+function withHttpShape(
+  specs: readonly SeamSpec[],
+  mode: GeneratorMode,
+): readonly SeamSpec[] {
+  if (mode === 'class-based') return specs;
+  const functional = new Map<string, SeamSpec>([
+    [FUNCTIONAL_CONTROLLERS_SEAM.schematic, FUNCTIONAL_CONTROLLERS_SEAM],
+    [FUNCTIONAL_ROUTES_SEAM.schematic, FUNCTIONAL_ROUTES_SEAM],
+  ]);
+  return specs.map((spec) => functional.get(spec.schematic) ?? spec);
+}
+
+/**
  * The seams to SCAN a target project with, for its generator mode.
  *
- * The registry describes the class-based shape of each family, because that is the
- * shape whose barrel a `setu.config.ts` imports. Scanning is different: it reads the
- * files a project actually holds, and one family — `service` — has two shapes.
- * `readArtifactNames` admits a file only when it exports every symbol the barrel will
- * import, so scanning a functional project with the class spec rejects every service
- * the CLI itself wrote and reports it as needing regeneration. It does not; the
- * regenerated file is identical.
- *
- * Selected here rather than inside the scanner so the registry stays the one place
- * that decides which spec describes a family.
+ * The registry describes the class-based shape of each family, because that is
+ * the shape whose barrel a `setu.config.ts` imports. Scanning is different: it
+ * reads the files a project actually holds, and two families have two shapes.
+ * `readArtifactNames` admits a file only when it exports every symbol the barrel
+ * will import, so scanning a functional project with a class spec rejects every
+ * artifact the CLI itself wrote and reports it as needing regeneration. It does
+ * not; the regenerated file is identical.
  *
  * @param installed - The `@setu-ts` packages detected in the target project
- * @returns Every family's seam, with the service family in the project's own shape
+ * @returns Every family's seam, in the project's own shape
  */
 export function scanSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
-  if (generatorMode(installed) === 'class-based') return listSeamSpecs();
-  return listSeamSpecs().map((spec) =>
+  const mode = generatorMode(installed);
+  const withHttp = withHttpShape(listSeamSpecs(), mode);
+  if (mode === 'class-based') return withHttp;
+  return withHttp.map((spec) =>
     spec.schematic === SERVICES_SEAM.schematic ? FUNCTIONAL_SERVICES_SEAM : spec
+  );
+}
+
+/**
+ * The seams a HOST scaffolds and wires, in its own generator mode.
+ *
+ * The `service` family is deliberately NOT swapped here, which is the one place
+ * this differs from {@linkcode scanSeamSpecs}. `FUNCTIONAL_SERVICES_SEAM` is a
+ * convenience re-export with no registration site — M65 states it is "selected
+ * explicitly, by generator mode, at the two places that need it: the schematic
+ * that renders it and the scan that admits its artifacts", and a host is
+ * neither. Swapping it in here would scaffold a barrel nothing imports.
+ *
+ * The gate then drops any seam whose backing plugin the host does not install,
+ * because emitting its barrel would put an unresolvable import in the config.
+ *
+ * @param installed - Bare `@setu-ts` package names the host registers
+ * @returns The consumable seams, in registry order
+ */
+export function hostSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
+  return withHttpShape(listSeamSpecs(), generatorMode(installed)).filter(
+    (spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin),
   );
 }

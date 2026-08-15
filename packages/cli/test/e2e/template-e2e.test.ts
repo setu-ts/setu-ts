@@ -92,9 +92,12 @@ const NON_COLLIDING_GROUPS: Readonly<Record<string, readonly string[]>> = {
  *
  * Counted separately from the generated files because they exist whether or not the group
  * under test writes into their directories: `src/modules/index.ts` plus one each for
- * controllers, services, routes, middleware, plugins, health and metrics.
+ * controllers, services, middleware, plugins, health and metrics.
+ *
+ * SEVEN since M70h/E8, not eight: `route` and `controller` share
+ * `src/controllers/index.ts`, so the separate `src/routes/index.ts` is gone.
  */
-const SCAFFOLDED_BARRELS = 8;
+const SCAFFOLDED_BARRELS = 7;
 
 describe('template scaffolding — end to end', () => {
   let root: string;
@@ -138,12 +141,20 @@ describe('template scaffolding — end to end', () => {
     });
   }
 
-  it('refuses a controller in a project without the decorator plugin', async () => {
-    // Regression: the schematic emits @Controller/@Get/@Post, so an ungated
-    // generate produced source whose own import could not resolve.
+  it('emits a resolvable controller in a project without the decorator plugin', async () => {
+    // The gate existed because the schematic emitted @Controller/@Get/@Post
+    // unconditionally, so an ungated generate produced source whose own import
+    // could not resolve. E8 replaced the gate with a SHAPE: the functional form
+    // imports `@setu-ts/common` alone, so the file compiles in a bare project
+    // and the refusal is no longer needed.
     await run(['new', 'bare']);
-    expect(await run(['g', 'controller', 'user', '--dir', `${root}/bare`])).toBe(1);
-    expect(err.join('\n')).toContain('@setu-ts/decorator-plugin');
+    expect(await run(['g', 'controller', 'user', '--dir', `${root}/bare`])).toBe(0);
+
+    const module = await Deno.readTextFile(`${root}/bare/src/controllers/user.controller.ts`);
+    // The IMPORT is the property under test, not the word: the JSDoc names the
+    // plugin deliberately, to tell the reader how to get the decorated form.
+    expect(module).not.toContain("from '@setu-ts/decorator-plugin'");
+    expect(module).toContain('registerUserRoutes');
   });
 
   it('allows a controller in a class-based project', async () => {

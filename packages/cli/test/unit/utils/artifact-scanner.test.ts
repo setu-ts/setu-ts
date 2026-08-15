@@ -217,7 +217,7 @@ describe('readArtifactNames', () => {
         '/some/deep/project',
         ROUTES,
       );
-      expect(scan.skipped[0]?.path).toBe('src/routes/user.routes.ts');
+      expect(scan.skipped[0]?.path).toBe('src/controllers/user.routes.ts');
     });
 
     it('accepts the named-re-export form as well as a declaration', async () => {

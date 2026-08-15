@@ -73,8 +73,8 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', 'user'])).toBe(0);
 
-    expect(h.fs.writes).toContain('/app/src/routes/user.routes.ts');
-    expect(h.fs.read('/app/src/routes/user.routes.ts')).toContain('status(201)');
+    expect(h.fs.writes).toContain('/app/src/controllers/user.routes.ts');
+    expect(h.fs.read('/app/src/controllers/user.routes.ts')).toContain('status(201)');
   });
 
   it('lists a previously generated module alongside the new one', async () => {

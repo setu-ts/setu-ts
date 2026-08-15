@@ -88,12 +88,12 @@ describe('setu end-to-end on a real filesystem', () => {
 
     expect(await run(['g', 'route', 'orders', '--dir', project])).toBe(0);
 
-    const barrel = await Deno.readTextFile(`${project}/src/routes/index.ts`);
+    const barrel = await Deno.readTextFile(`${project}/src/controllers/index.ts`);
     expect(barrel).toContain('registerOrdersRoutes(router);');
 
     // The scaffolded config already calls the barrel, so nothing further is needed.
     const config = await Deno.readTextFile(`${project}/setu.config.ts`);
-    expect(config).toContain("from './src/routes/index.ts'");
+    expect(config).toContain("from './src/controllers/index.ts'");
     expect(config).toContain('registerGeneratedRoutes(app.router);');
   });
 
@@ -158,10 +158,11 @@ describe('setu end-to-end on a real filesystem', () => {
     const found: string[] = [];
     for await (const entry of Deno.readDir(`${project}/src`)) found.push(entry.name);
     expect(found.sort()).toEqual([
+      // One HTTP directory since M70h/E8 — `controllers` holds both kinds.
+      'controllers',
       'jobs',
       'middleware',
       'plugins',
-      'routes',
       'services',
     ]);
   });

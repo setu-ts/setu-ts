@@ -5,7 +5,7 @@
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
-import { ROUTES_SEAM } from '../seams/routes.ts';
+import { FUNCTIONAL_ROUTES_SEAM, HTTP_SEAM_DIR } from '../seams/http.ts';
 import { seamNames } from '../seams/seam-spec.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import { MODULES_DIR } from '../utils/module-scanner.ts';
@@ -137,10 +137,14 @@ export function generateModule(
       { path: `${dir}/${names.kebab}.service.ts`, contents: functionalService(names) },
       { path: `${dir}/${names.kebab}.service.test.ts`, contents: functionalTest(names) },
       { path: `${dir}/index.ts`, contents: functionalIndex(names) },
-      { path: `src/routes/${names.kebab}.routes.ts`, contents: functionalRoutes(names) },
       {
-        path: ROUTES_SEAM.barrel,
-        contents: ROUTES_SEAM.renderBarrel({
+        path: `${HTTP_SEAM_DIR}/${names.kebab}.routes.ts`,
+        contents: functionalRoutes(names),
+      },
+      {
+        path: FUNCTIONAL_ROUTES_SEAM.barrel,
+        contents: FUNCTIONAL_ROUTES_SEAM.renderBarrel({
+          controller: seamNames(options.artifacts, 'controller'),
           route: seamNames(options.artifacts, 'route', names.kebab),
         }),
         managed: true,
