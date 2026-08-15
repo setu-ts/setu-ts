@@ -6926,14 +6926,22 @@ Ordered by the sequence they should be worked, not by severity alone.
   (X5-6). Plus the seam scanner adopting hand-written files into a CLI-owned barrel, which since
   M68's duplicate-route refusal now **stops the app booting** (X4-4/F2), and generated indicator
   names colliding with the 15 plugins claim (A1).
-- ⬜ **M70h — CLI scaffold** (`cli`, starters). The largest row count and the one that amortizes
-  best, because every row needs the same scaffold-boot gate: `--transport <broker>` leaves
-  `QueuePlugin()` on memory in the one template built for distributed work (X2-3), fresh scaffolds
-  fail their own `deno fmt --check` (X2-4) and their own `check:app` on a cold checkout (X5-4), a
-  `full-stack` project has no `build` task so the CLI's printed next step cannot work (X5-3),
-  `setu commands` cannot load a Workers config using any binding (X9-3), Workers projects have no
-  type-check path (X9-4), and running the CLI on release day still fails the dependency-age policy
-  (D1). Plus D2, D3, D5, D6, A2, A3, B1, E4, X5-2, X5-8, X9-1, X9-7, X9-9, X4-10, X2-7.
+- ✅ **M70h — CLI scaffold** (`cli`, `common`, `runtime`, starters) — PR pending. The largest row
+  count and the one that amortizes best, because every row needs the same scaffold-boot gate:
+  `--transport <broker>` leaves `QueuePlugin()` on memory in the one template built for distributed
+  work (X2-3), fresh scaffolds fail their own `deno fmt --check` (X2-4) and their own `check:app` on
+  a cold checkout (X5-4), a `full-stack` project has no `build` task so the CLI's printed next step
+  cannot work (X5-3), `setu commands` cannot load a Workers config using any binding (X9-3), Workers
+  projects have no type-check path (X9-4), and running the CLI on release day still fails the
+  dependency-age policy (D1). Plus D2, D3, D5, D6, A2, A3, B1, E4, X5-2, X5-8, X9-1, X9-7, X9-9,
+  X4-10, X2-7.
+
+  Three scope calls widened this row at plan time, each taken by the maintainer. **The package list
+  above was corrected from `(cli, starters)`:** B1's own register row names `cli`, `common` and
+  `runtime`, and closing it properly means a new optional `IRuntimeServices.onSignal?` seam in
+  `common` implemented across the runtime adapters — not just its two CLI-side halves. **E8 moved
+  here from M70n** (see that row). And **D3 was built rather than deferred**: `setu add <plugin>`
+  now exists, so every gate that named a package to install names a command that installs it.
 - ⬜ **M70i — gRPC and GraphQL viability** (`grpc-plugin`, `graphql-plugin`). The
   repair-versus-withdraw decision named above, plus the documented-API-does-not-exist rows both
   packages carry: every gRPC registration snippet in README and `PUBLIC_API.md` throws because it
@@ -6972,8 +6980,11 @@ Ordered by the sequence they should be worked, not by severity alone.
   re-reads the raw request, discarding validation transforms, defaults and coercions (E2). Closes
   with the mechanical documentation rows the other workstreams do not absorb (C1, C2, X3-1, X3-3,
   X3-4, X3-5, X3-6, X3-8, X3-9, X4-5, X4-7, X4-11, X5-5, X5-7, X5-9, X7-9, X8-8, X9-10, D8, X2-6).
-  **E8 (`routes/` and `controllers/` as parallel mechanisms) is maintainer-class** and is a decision
-  to take, not a defect to fix.
+  **E8 (`routes/` and `controllers/` as parallel mechanisms) moved to M70h** and shipped there. This
+  line previously called it maintainer-class — "a decision to take, not a defect to fix" — which was
+  stale: `smoke/X1-FINDINGS.md` records the maintainer having already classified it a defect, with
+  the breakage accepted and a fix agreed. It went to M70h because that milestone already rewrites
+  the seam registry for A2, X5-8 and E4, so a second pass would rework the same files.
 
 ### Release
 
@@ -7093,7 +7104,7 @@ branch during a version bump.
 | 70e       | ⬜     | default branches of injectable seams  |
 | 70f       | ⬜     | error format and error visibility     |
 | 70g       | ⬜     | routing collisions                    |
-| 70h       | ⬜     | cli scaffold batch                    |
+| 70h       | ✅     | cli scaffold batch                    |
 | 70i       | ⬜     | grpc and graphql viability            |
 | 70j       | ⬜     | database adapter correctness          |
 | 70k       | ⬜     | storage, queue, worker operability    |

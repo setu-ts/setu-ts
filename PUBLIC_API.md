@@ -5020,8 +5020,11 @@ Install it with an explicit binary name, because Deno's default inference would 
 package (`cli`):
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.8/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.1.0-alpha.8/main
 ```
+
+`--min-dep-age 0` because Deno refuses a dependency published within the last 24 hours, and the CLI
+pins projects to its own version — so on release day the install fails without it.
 
 ### Commands
 
@@ -5042,6 +5045,13 @@ setu generate app orders --template microservice
 setu generate app billing --template microservice
 setu generate app shipping --template microservice --depends-on orders --depends-on billing
 setu workspace ports --reallocate
+
+# Install a framework package into this project
+setu add auth                                  # short name
+setu add auth-plugin                           # bare package name
+setu add @setu-ts/auth-plugin                  # full specifier — all three are the same command
+setu add cache --dir ./services/orders
+setu add cache --dry-run                       # report the manifest edits, write nothing
 
 # Commands this application's plugins provide
 setu commands
@@ -5090,12 +5100,42 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--transport-url <url>`                         | `new --workspace`                          | Replaces the baked local fallback for the endpoint-shaped broker transports. A usage error for `http`, `grpc` and `memory`, which have no broker to address, and for `pubsub` and `service-bus`, whose connection value is a project id or a secret read from the environment — that refusal names the variable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--scope <scope>`                               | `generate library`                         | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `--name <member>`                               | `adopt`                                    | The member name the converted project takes. Defaults to the project directory name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `--scope <scope>`                               | `generate library`                         | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `--name <member>`                               | `adopt`                                    | The member name the converted project takes. Defaults to the project directory name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `--dir <path>`                                  | `new`, `generate`                          | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `--dry-run`                                     | `new`, `generate`                          | Prints `would create <path>` per file and performs zero writes and zero directory creations.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `--dir <path>`                                  | `new`, `generate`, `add`                   | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `--dry-run`                                     | `new`, `generate`, `add`                   | Prints `would create <path>` per file and performs zero writes and zero directory creations. On `add`, prints `would update <manifest>` instead, since it edits files rather than creating them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--help`, `-h`                                  | both                                       | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `--version`, `-v`                               | —                                          | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+### `setu add <plugin>`
+
+Adds a framework package to the project's manifest, pinned to the version of the CLI that added it —
+the same rule `setu new` follows, so a project's framework packages stay on one version instead of
+drifting per install.
+
+The name resolves three ways, all equivalent: a short name (`auth`), the bare package name
+(`auth-plugin`), or the full specifier (`@setu-ts/auth-plugin`). It is an explicit allow-list rather
+than "anything under `@setu-ts/`", because the range written is the CLI's OWN version, which is only
+correct for packages released as one version with it — so a typo is refused, naming what is
+accepted, rather than pinned to a version that does not exist.
+
+When a project carries both `deno.json` and `package.json` — a Workers or Node target does, one for
+its build and one for `setu generate`'s plugin gating — **both** are updated, so the gate and the
+build cannot disagree about what is installed. `deno.json` gets a `jsr:` specifier under `imports`;
+`package.json` gets the npm-compat `npm:@jsr/setu-ts__<name>` form under `dependencies`. Re-adding a
+package already present at the same version reports that and writes nothing.
+
+It writes the manifest and **reports** the install command rather than running it:
+
+```
+Next:
+  deno install --min-dep-age 0
+```
+
+That is deliberate. On the day of a release the pin is younger than Deno's 24-hour
+minimum-dependency-age policy, so the flags need to be visible rather than buried in a failing
+subprocess — and it keeps the command free of the `run` permission.
+
+Exit codes follow the table below: `0` on success, `1` when the directory holds no manifest or a
+manifest cannot be parsed, `2` for an unknown package name or a missing argument.
 
 ### Exit codes
 
