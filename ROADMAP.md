@@ -4499,6 +4499,91 @@ importing another plugin.
 
 ---
 
+## Milestone 45b: Worker Pool Metrics — `TaskPoolStats` as a Prometheus Signal ⬜ PLANNED
+
+**Objective:** Expose the pool state `TaskPoolStats` already carries — `workers`, `busy`, `queued`,
+`completed`, `failed`, per task module — as metrics an operator can scrape and alert on. M45 built
+the snapshot and wired it to the health indicator; nothing else reads it.
+
+> **Why this is worth a milestone row at all.** Grepping `packages/*/src` for the `WORKER_POOL`
+> token returns only `common` and the plugin itself, so no package resolves it and `stats()` feeds
+> exactly one consumer. Pool saturation — "is work queueing faster than it drains?" — is the
+> operational question a worker pool raises, and today it is answerable only by polling `/health`
+> and diffing counts by hand.
+
+### Package: `@setu-ts/worker-pool-plugin` (no new package)
+
+`WorkerPoolPlugin` resolves `CAPABILITIES.METRICS` **optionally** and, when present, registers
+gauges for `workers`/`busy`/`queued` and counters for `completed`/`failed`, labelled by task module.
+Absent `metrics-plugin`, nothing changes — the M47 precedent, where `websocket-plugin` and
+`sse-plugin` optionally resolve `REALTIME_BACKPLANE`. No `common` widening, no new capability token,
+one package's `src` touched.
+
+### The one open design decision: how the gauges are sampled
+
+`IMetricsService` (`common/src/services/metrics.ts:154`) offers get-or-create instruments and **no
+scrape-time callback** — there is no `onScrape`/`beforeCollect` hook to hang a snapshot on. So the
+sampling model has to be chosen rather than inherited, and the three candidates are not equal:
+
+- **Push from the pool on state change** (leading candidate) — `TaskPool` updates the instruments as
+  tasks enqueue, dispatch and settle. No timer, so nothing to leak in `onClose`, and it mirrors
+  `HttpCollector`, which is the package's own established shape: a push from the hot path, not a
+  pull at scrape time.
+- **Interval sampling `stats()`** — simplest to write and the one with a real wrong answer: a
+  `setInterval` that outlives `onClose` leaks a handle per application, and the M53
+  `RedisStreamsBroker` defect (a `TimerHandle` coerced to `NaN`, so `clearInterval` silently no-ops)
+  is the precedent for how that ships green.
+- **A collector seam on `IMetricsService`** — the general fix, and out of scope here: it is a
+  `common` widening serving one consumer, which is the shape this repo defers until a second
+  consumer exists.
+
+`completed`/`failed` are **cumulative** in `TaskPoolStats` while `ICounter` exposes `inc()`, so
+whichever model wins must not double-count — a snapshot fed straight into a counter is wrong.
+
+### Explicitly out of scope: in-worker trace propagation
+
+Telemetry and worker pool do not interact today — zero references either way — and closing that is
+**not** this milestone. Recorded here so it is not re-derived:
+
+- `WorkerTaskRequest` (`common/src/services/worker-pool.ts:143`) carries no trace-context field, and
+  the worker side has no service registry — `@setu-ts/runtime/worker` exports only
+  `defineWorkerTask`, so a task module cannot resolve an `ITelemetryService`.
+- A worker task is a **leaf** by design, so an in-worker span adds duration and pass/fail that a
+  host-side `withSpan` around `pool.run` already gives.
+- The case most worth tracing is the one where it breaks: `onTimeout` terminates the worker
+  (`pool/task-pool.ts:281`), so a batched span buffer dies with the thread.
+- The cheap path, if a task has phases worth breaking out: return timings in the task output and
+  stamp them as attributes on the host-side span. No envelope change, works today.
+
+### Prerequisite: the two open worker-pool defects
+
+The smoke programme has `worker-pool-plugin` at two open defects — a non-cloneable input killing the
+host process when queued rather than dispatched (X8-2), and `taskTimeoutMs: 0` leaking a pool slot
+permanently (X8-7). Both are correctness; this is observability. **Fix those first** — and note that
+X8-5 names this plugin's health indicator as the counter-example the other five packages should
+copy, so this pool is already the best-observed component in the repo.
+
+### Implementation Files
+
+- ⬜ `src/plugin/worker-pool-plugin.ts` — optional `CAPABILITIES.METRICS` resolution
+- ⬜ `src/pool/task-pool.ts` — instrument updates on the chosen sampling model
+- ⬜ barrel exports in `src/index.ts` if any option type is added
+
+### Test Files
+
+- ⬜ `test/unit/worker-pool-metrics.test.ts` — instruments registered and updated per task module
+- ⬜ `test/integration/metrics-absent.test.ts` — byte-identical behaviour with no `metrics-plugin`
+- ⬜ a real kernel app asserting the series appear in `GET /metrics` **before** anything samples
+
+### Doc Deliverables (to ship in this milestone's PR)
+
+- ⬜ **PUBLIC_API.md** — the metric names, labels and types in the Worker pool section.
+- ⬜ **ROADMAP.md** — this section and the Progress Tracking row `45b`.
+- ⬜ **CLAUDE.md** — Current status `45b` entry; Next milestone repointed.
+- ⬜ **README** — `packages/worker-pool-plugin/README.md` metrics table.
+
+---
+
 ## Milestone 46: WebSocket Plugin — Bidirectional Real-Time Across All Four Runtimes ✅ COMPLETE
 
 **Objective:** Give applications full-duplex, bidirectional real-time messaging, completing the
@@ -6797,6 +6882,7 @@ application's own instance type, since a seam that type-checks as `unknown` has 
 | 43        | ✅     | sse-plugin                            |
 | 44        | ✅     | react-router-plugin                   |
 | 45        | ✅     | worker-pool-plugin                    |
+| 45b       | ⬜     | worker-pool-plugin (metrics)          |
 | 46        | ✅     | websocket-plugin                      |
 | 47        | ✅     | alpha-3 limitations                   |
 | 48        | ✅     | session-plugin                        |
