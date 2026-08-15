@@ -338,6 +338,7 @@ interface IRequest {
   user?: IPrincipal; // populated by auth middleware
   tenant?: ITenant; // populated by multi-tenancy middleware
   signal?: AbortSignal; // fires on client disconnect
+  readonly raw?: Request; // The undisturbed web-standard Request, preserved for WebSocket upgrade and gRPC dispatch after the middleware pipeline.
 
   // Body readers (consume the body exactly once)
   json<T = unknown>(): Promise<T>;
