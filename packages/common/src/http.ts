@@ -63,6 +63,17 @@ export interface IRequest {
    */
   signal?: AbortSignal;
   /**
+   * The undisturbed web-standard `Request`, preserved for WebSocket upgrade
+   * and gRPC dispatch after the middleware pipeline.
+   *
+   * Populated by the HTTP adapter before the body is consumed by the
+   * framework mapping. Optional because injected or test requests may not
+   * carry one.
+   *
+   * @since 0.3.0
+   */
+  readonly raw?: Request;
+  /**
    * Reads and parses the body as JSON.
    *
    * @typeParam T - The expected body shape (validate before trusting)
@@ -231,6 +242,17 @@ export interface IRequestContext {
    * @since 0.2.0
    */
   readonly signal: AbortSignal;
+  /**
+   * The undisturbed web-standard `Request`, preserved for WebSocket upgrade
+   * and gRPC dispatch after the middleware pipeline.
+   *
+   * Threaded from {@linkcode IRequest.raw} by the kernel's request-context
+   * factory. Absent when the adapter did not provide one (injected or test
+   * requests).
+   *
+   * @since 0.3.0
+   */
+  readonly raw?: Request;
 }
 
 /**
@@ -381,6 +403,36 @@ export type SecurityRequirement = Readonly<Record<string, readonly string[]>>;
  * @since 0.2.0
  */
 export const SECURITY_METADATA: unique symbol = Symbol.for('setu.security.metadata');
+
+/**
+ * Key under which the kernel terminal handler records a WebSocket upgrade
+ * intent on {@linkcode IRequestContext.state}.
+ *
+ * Created with `Symbol.for`, not `Symbol()`, so two copies of this package in
+ * one process resolve the same key. The kernel writes it after the pipeline
+ * runs and route matching returns `null` but the upgrade router accepts; the
+ * HTTP adapter reads it after the framework handler returns to perform the
+ * handshake.
+ *
+ * The value is a {@linkcode WebSocketUpgradeIntent} carrying the sink and
+ * optional negotiated subprotocol.
+ *
+ * @since 0.3.0
+ */
+export const UPGRADE_INTENT: unique symbol = Symbol.for('setu.upgrade.intent');
+
+/**
+ * The WebSocket upgrade intent written to {@linkcode IRequestContext.state}
+ * under {@linkcode UPGRADE_INTENT} by the kernel terminal handler.
+ *
+ * @since 0.3.0
+ */
+export interface WebSocketUpgradeIntent {
+  /** The sink the adapter binds its native socket events into. */
+  readonly sink: import('./services/websocket.ts').WebSocketEventSink;
+  /** The negotiated subprotocol to echo back, when one was selected. */
+  readonly protocol?: string | undefined;
+}
 
 /**
  * What a middleware function enforces, for documentation generators.

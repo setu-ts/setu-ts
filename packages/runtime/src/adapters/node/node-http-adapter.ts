@@ -16,8 +16,10 @@ import type {
   IResponse,
   RpcFetchHandler,
   ServerHandle,
+  WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
+import { UPGRADE_INTENT } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -218,23 +220,45 @@ export class NodeHttpServerHandle {
   /**
    * Creates the web-standard fetch handler for @hono/node-server.
    *
-   * The RPC interceptor is consulted first; a returned Response short-circuits
-   * as RPC, while null falls through to the normal Hono pipeline.
+   * The framework handler (kernel pipeline) runs FIRST on every request.
+   * After it returns, the adapter checks for an upgrade intent written by
+   * the kernel terminal handler. WebSocket upgrades on Node arrive via the
+   * raw `upgrade` event (not the fetch path), but the upgrade listener also
+   * runs the framework handler first before handshaking.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
-      const rpcResult = await this.#rpcStore.consult(request);
-      if (rpcResult !== null) {
-        return rpcResult;
-      }
-
       const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
+
+      // Run the framework handler FIRST — middleware pipeline applies uniformly.
       const frameworkResponse = await this.#handler(frameworkRequest);
+
+      // Check for upgrade intent (for the rare case an upgrade reaches fetch).
+      const intent =
+        (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
+          UPGRADE_INTENT
+        ];
+      if (intent !== undefined) {
+        return this.#performUpgrade(request, intent);
+      }
+
       return mapSnapshotToWebResponse(frameworkResponse.snapshot());
     };
+  }
+
+  /**
+   * Performs the WebSocket handshake using the Node ws module.
+   */
+  #performUpgrade(_request: Request, intent: WebSocketUpgradeIntent): Response {
+    // On Node, upgrades normally arrive through the raw `upgrade` event,
+    // not the fetch path. If one does reach here, we cannot perform a
+    // real handshake (no native socket available), so refuse honestly.
+    intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported on fetch path' });
+    return new Response(null, { status: 501 });
   }
 }
 

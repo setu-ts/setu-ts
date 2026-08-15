@@ -16,8 +16,10 @@ import type {
   IResponse,
   RpcFetchHandler,
   ServerHandle,
+  WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
+import { UPGRADE_INTENT } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -70,57 +72,48 @@ export class CloudflareWorkersServerHandle {
   /**
    * Creates the web-standard fetch handler.
    *
-   * The upgrade is consulted first so the request body is never read before a
-   * handshake. Then the RPC interceptor is consulted; a returned Response
-   * short-circuits as RPC, while null falls through to the normal Hono pipeline.
-   * Finally the body is mapped via `mapWebRequestToFrameworkRequest`.
+   * The framework handler (kernel pipeline) runs FIRST on every request.
+   * After it returns, the adapter checks for an upgrade intent written by
+   * the kernel terminal handler and performs the WebSocket handshake.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
-      const upgraded = await this.#tryUpgrade(request);
-      if (upgraded !== null) {
-        return upgraded;
-      }
-
-      const rpcResult = await this.#rpcStore.consult(request);
-      if (rpcResult !== null) {
-        return rpcResult;
-      }
-
       const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
+
+      // Run the framework handler FIRST — middleware pipeline applies uniformly.
       const frameworkResponse = await this.#handler(frameworkRequest);
+
+      // Check for upgrade intent written by the kernel terminal handler.
+      const intent =
+        (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
+          UPGRADE_INTENT
+        ];
+      if (intent !== undefined) {
+        return this.#performUpgrade(request, intent);
+      }
+
       return mapSnapshotToWebResponse(frameworkResponse.snapshot());
     };
   }
 
   /**
-   * Performs the handshake when the router accepts. Returns `null` to fall
-   * through to normal HTTP handling.
+   * Performs the WebSocket handshake using the Cloudflare WebSocketPair.
    */
-  async #tryUpgrade(request: Request): Promise<Response | null> {
-    const decision = await this.#upgrades.consult(request);
-    if (decision === null) {
-      return null;
-    }
-    if (!decision.accept) {
-      return new Response(null, { status: decision.status });
-    }
-
+  #performUpgrade(_request: Request, intent: WebSocketUpgradeIntent): Response {
     try {
       // Resolved lazily so the Workers-global boundary cast is never evaluated
       // on a runtime that has no WebSocketPair.
       this.#wsHost ??= createDefaultCloudflareWebSocketHost();
 
       const { client, server } = this.#wsHost.createPair();
-      bindCloudflareSocketToSink(server, decision.sink);
-      return this.#wsHost.createUpgradeResponse(client, decision.protocol);
+      bindCloudflareSocketToSink(server, intent.sink);
+      return this.#wsHost.createUpgradeResponse(client, intent.protocol);
     } catch (cause) {
-      // The router already accepted, so release whatever the consumer reserved
-      // for this socket rather than leaving the sink dangling.
-      decision.sink.onClose({
+      intent.sink.onClose({
         code: ABNORMAL_CLOSURE,
         reason: cause instanceof Error ? cause.message : 'Handshake failed',
       });

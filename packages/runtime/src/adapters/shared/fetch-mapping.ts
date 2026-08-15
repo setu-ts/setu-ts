@@ -48,6 +48,9 @@ export async function mapWebRequestToFrameworkRequest(request: Request): Promise
     // Forward the native Request.signal so the producer can stop on client
     // disconnect (M42 streaming primitive).
     signal: request.signal,
+    // Preserve the undisturbed raw Request for WebSocket upgrade and gRPC
+    // dispatch after the middleware pipeline (M70a).
+    raw: request,
     // deno-lint-ignore require-await
     json: async <T = unknown>(): Promise<T> => {
       const text = decoder.decode(bodyBytes);
