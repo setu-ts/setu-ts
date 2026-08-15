@@ -6926,8 +6926,8 @@ Ordered by the sequence they should be worked, not by severity alone.
   (X5-6). Plus the seam scanner adopting hand-written files into a CLI-owned barrel, which since
   M68's duplicate-route refusal now **stops the app booting** (X4-4/F2), and generated indicator
   names colliding with the 15 plugins claim (A1).
-- ✅ **M70h — CLI scaffold** (`cli`, `common`, `runtime`) — PR pending. The largest row count and
-  the one that amortizes best, because every row needs the same scaffold-boot gate:
+- ✅ **M70h — CLI scaffold** (`cli`, `common`, `runtime`) — complete (PR #166). The largest row
+  count and the one that amortizes best, because every row needs the same scaffold-boot gate:
   `--transport <broker>` leaves `QueuePlugin()` on memory in the one template built for distributed
   work (X2-3), fresh scaffolds fail their own `deno fmt --check` (X2-4) and their own `check:app` on
   a cold checkout (X5-4), a `full-stack` project has no `build` task so the CLI's printed next step
