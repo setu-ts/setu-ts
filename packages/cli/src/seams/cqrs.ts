@@ -101,11 +101,17 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
   return assembleSeamBarrel(header, imports, [
     `/** Every generated command handler, for \`CqrsPlugin({ commandHandlers })\`. */\n` +
     `export const ${COMMAND_HANDLERS_EXPORT}: readonly CommandHandlerRegistration[] = [${
-      renderList(commandEntries)
+      renderList(
+        commandEntries,
+        `export const ${COMMAND_HANDLERS_EXPORT}: readonly CommandHandlerRegistration[] = [`.length,
+      )
     }];`,
     `/** Every generated query handler, for \`CqrsPlugin({ queryHandlers })\`. */\n` +
     `export const ${QUERY_HANDLERS_EXPORT}: readonly QueryHandlerRegistration[] = [${
-      renderList(queryEntries)
+      renderList(
+        queryEntries,
+        `export const ${QUERY_HANDLERS_EXPORT}: readonly QueryHandlerRegistration[] = [`.length,
+      )
     }];`,
   ]);
 }

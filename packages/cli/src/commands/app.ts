@@ -450,7 +450,17 @@ export async function runAppCommand(
     ...read.manifest,
     members: [
       ...read.manifest.members,
-      { name, port, ...(dependsOn.length === 0 ? {} : { dependsOn }) },
+      {
+        name,
+        port,
+        ...(dependsOn.length === 0 ? {} : { dependsOn }),
+        // Read from the FLAG rather than the resolved template, because the
+        // manifest is built before `planMember` resolves one — and every named
+        // template reaches HealthPlugin, so its mere presence is the answer. An
+        // unknown name is refused by `planMember` before anything is written, so
+        // a wrong value cannot reach disk (X2-7).
+        healthProbes: typeof args.flags['template'] === 'string',
+      },
     ],
   };
 

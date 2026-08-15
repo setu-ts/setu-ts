@@ -21,6 +21,7 @@ import { LIBS_GLOB } from './library.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import { workspaceDevRunner } from './dev-runner.ts';
 import type { TransportSpec } from './transport.ts';
+import { wrapProse } from '../utils/wrap-prose.ts';
 
 /**
  * The member pattern the root `deno.json` declares.
@@ -151,13 +152,15 @@ service still running holds its own port and is moved off it.
 Services talk over **${transport.name}** — ${transport.description}.${
     transport.connection === undefined ? '' : `
 
-Every member reads its connection value from \`${transport.connection.variable}\`,
-falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that
-is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs the local
-address, and the generated Compose stack overrides the variable with the broker's
-service name, because two containers do not share a loopback interface.${
-      transport.connection.note === undefined ? '' : `\n\n${transport.connection.note}`
-    }`
+${
+      wrapProse(
+        `Every member reads its connection value from \`${transport.connection.variable}\`, ` +
+          `falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that ` +
+          `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
+          `the local address, and the generated Compose stack overrides the variable with the ` +
+          `broker's service name, because two containers do not share a loopback interface.`,
+      )
+    }${transport.connection.note === undefined ? '' : `\n\n${transport.connection.note}`}`
   }${
     transport.compose === undefined ? '' : `
 

@@ -117,10 +117,20 @@ export function seamNames(
  * @param entries - Rendered entries
  * @returns The text between the brackets
  */
-export function renderList(entries: readonly string[]): string {
+/** The width generated projects are formatted at (`fmt.lineWidth`). */
+const LINE_WIDTH = 100;
+
+export function renderList(entries: readonly string[], prefixWidth = 24): string {
   if (entries.length === 0) return '';
   const inline = entries.join(', ');
-  if (inline.length <= 76) return inline;
+  // Measured against the line the entries actually land on, not against the
+  // entries alone. `prefixWidth` defaults to the width of a typical
+  // `export const X: readonly Constructor[] = [` declaration, which is what the
+  // previous fixed budget of 76 encoded implicitly — a family whose entries are
+  // OBJECTS rather than identifiers has a much longer declaration and has to
+  // pass its own (X2-4: the CQRS barrel rendered a 150-column line, so a
+  // generated project failed its own `deno fmt --check`).
+  if (prefixWidth + inline.length + 2 <= LINE_WIDTH) return inline;
   return `\n  ${entries.join(',\n  ')},\n`;
 }
 

@@ -117,9 +117,33 @@ describe('withWorkspaceMember — the transport overlay', () => {
     // An environment read with the local address as its FALLBACK, not a literal:
     // inside a container 127.0.0.1 is the container itself, so the Compose stack
     // has to be able to override it.
+    // Pre-wrapped one member per line, which is what `deno fmt` produces for a
+    // call this long — a fresh `--transport` scaffold used to fail its own
+    // formatter on it (X2-4).
     expect(messaging[0]?.args).toBe(
-      "{ broker: 'redis-streams', url: Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379' }",
+      "{\n        broker: 'redis-streams',\n" +
+        "        url: Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379',\n      }",
     );
+  });
+
+  it('rewrites the QUEUE wiring from the same connection value', () => {
+    // X2-3: `--transport rabbitmq` rewrote the broker and left `QueuePlugin()`
+    // on memory, so background jobs in the one template built for distributed
+    // work were process-local — lost on restart and invisible to a replica.
+    const member = withWorkspaceMember(hostOf('microservice'), transportSpec('redis'), 'orders');
+    const queue = member.plugins.filter((p) => p.pkg === 'queue-plugin');
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0]?.args).toContain("adapter: 'redis'");
+    expect(queue[0]?.args).toContain("Deno.env.get('REDIS_URL')");
+  });
+
+  it('leaves the queue wiring bare for a transport the queue cannot serve', () => {
+    const member = withWorkspaceMember(hostOf('microservice'), transportSpec('nats'), 'orders');
+    const queue = member.plugins.filter((p) => p.pkg === 'queue-plugin');
+
+    expect(queue).toHaveLength(1);
+    expect(queue[0]?.args).toBeUndefined();
   });
 
   it('uses the transport default endpoint when the workspace names none', () => {
