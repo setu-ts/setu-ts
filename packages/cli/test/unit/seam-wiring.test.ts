@@ -216,22 +216,40 @@ describe('seam hosts', () => {
     expect(barrels(getTemplate('microservice')!)).toContain('src/events/index.ts');
   });
 
-  it('gives full-stack no seam at all', () => {
-    // Its layering is `routes → features → services` and it composes through a starter
-    // factory, so it has no plugin array to spread into and no `src/` families.
+  it('gives full-stack the ungated seams, wired as STATEMENTS', () => {
+    // X5-8: it used to host none, so `setu generate route` — which the generated
+    // README tells the developer to run — wrote a module and a barrel that
+    // `setu.config.ts` imported neither of, and the route answered 404.
     const fullStack = getTemplate('full-stack')!;
-    expect(barrels(fullStack)).toEqual([]);
-    expect(fullStack.setupCalls).toBeUndefined();
-    expect(fullStack.pluginSpreads).toBeUndefined();
+    expect(barrels(fullStack)).toEqual([
+      'src/controllers/index.ts',
+      'src/middleware/index.ts',
+      'src/plugins/index.ts',
+    ]);
+    expect(fullStack.setupCalls ?? []).toContain('registerGeneratedRoutes(app.router);');
+  });
+
+  it('registers generated plugins through app.register, having no array to spread', () => {
+    // A starter builds the plugin list and no starter accepts extra plugins, so
+    // the spread mechanism is unavailable here. `IApplication.register` is the
+    // equivalent: the kernel resolves plugins at `start()`, and the generated
+    // factory deliberately does not start.
+    const fullStack = getTemplate('full-stack')!;
+    expect(fullStack.setupCalls ?? []).toContain(
+      'for (const generated of GENERATED_PLUGINS) app.register(generated);',
+    );
+    expect(fullStack.pluginSpreads ?? []).toEqual([]);
   });
 
   // Enforced across the registry rather than by a runtime check no user input could
   // reach, exactly as the `plugins`-vs-`appFactory` rule already is.
-  it('never pairs a starter factory with either new field', () => {
+  it('never spreads into a plugin array it does not have', () => {
     for (const template of listTemplates()) {
       if (template.appFactory === undefined) continue;
-      expect(template.setupCalls ?? []).toEqual([]);
+      // `setupCalls` are statements and compose with a starter factory; a
+      // `pluginSpreads` entry would name an array the generated config lacks.
       expect(template.pluginSpreads ?? []).toEqual([]);
+      expect(template.plugins).toEqual([]);
     }
   });
 });

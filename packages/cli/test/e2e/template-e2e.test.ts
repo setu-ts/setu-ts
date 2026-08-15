@@ -431,6 +431,101 @@ describe('template scaffolding — end to end', () => {
     expect(config).toContain("from './src/modules/index.ts'");
   });
 
+  // X5-2. TypeScript does NOT apply excess-property checking to an object
+  // literal returned from a contextually-typed callback, so the generated
+  // `(config) => ({ … })` accepted arms and options that do not exist: both
+  // type-checked, booted, and logged nothing. Probed against the real type
+  // before choosing the fix — with a RETURN TYPE annotation the same literal
+  // raises TS2561 naming the key and its nearest match; without it, nothing.
+  describe('the full-stack config resolver', () => {
+    it('emits the annotation that restores excess-property checking', async () => {
+      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      const config = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
+
+      expect(config).toContain('(config): FullStackStarterOptions => ({');
+      expect(config).toContain("type FullStackStarterOptions } from '@setu-ts/full-stack-starter'");
+    });
+
+    it('makes a misspelled arm a COMPILE error in the generated project', async () => {
+      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      const project = `${root}/shop`;
+      await useWorkspacePackages(project);
+
+      // The typo goes into the real generated file, in the real position, so
+      // this measures the shipped resolver rather than a hand-built stand-in.
+      const path = `${project}/setu.config.ts`;
+      const original = await Deno.readTextFile(path);
+      await Deno.writeTextFile(
+        path,
+        original.replace('    session: {', '    sessionn: { secret: 0 },\n    session: {'),
+      );
+
+      const { code, stderr } = await denoCheck(project, [path]);
+      expect(code).not.toBe(0);
+      expect(stderr).toContain('sessionn');
+
+      // Restored, so the mutation cannot leak into another assertion.
+      await Deno.writeTextFile(path, original);
+      const clean = await denoCheck(project, [path]);
+      expect(clean.code, clean.stderr).toBe(0);
+    });
+  });
+
+  // X5-8. The generated README tells the developer to run `setu generate
+  // service` / `route`, and doing so wrote into `src/` — a second service
+  // directory beside the template's own `app/services/`, wired by nothing and
+  // checked by NEITHER of the project's own check paths. The route answered 404.
+  describe('the full-stack seam host', () => {
+    it('type-checks a generated artifact through the project OWN check task', async () => {
+      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      const project = `${root}/shop`;
+      expect(await run(['g', 'route', 'widget', '--dir', project])).toBe(0);
+      await useWorkspacePackages(project);
+
+      // A deliberate type error in the generated artifact. Before X5-8 this was
+      // clean under `check:app` (which globbed `app/` only) AND under
+      // `deno check main.ts setu.config.ts` (which never reached `src/`).
+      const path = `${project}/src/controllers/widget.routes.ts`;
+      const original = await Deno.readTextFile(path);
+      await Deno.writeTextFile(
+        path,
+        original.replace(
+          'export function registerWidgetRoutes',
+          'const broken: number = "x";\nexport function registerWidgetRoutes',
+        ),
+      );
+
+      const checkTask = new Deno.Command(Deno.execPath(), {
+        args: ['task', 'check:app'],
+        cwd: project,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      const broken = await checkTask.output();
+      expect(broken.code).not.toBe(0);
+
+      await Deno.writeTextFile(path, original);
+      const clean = await new Deno.Command(Deno.execPath(), {
+        args: ['task', 'check:app'],
+        cwd: project,
+        stdout: 'piped',
+        stderr: 'piped',
+      }).output();
+      expect(clean.code, new TextDecoder().decode(clean.stderr)).toBe(0);
+    });
+
+    it('imports the seam barrels from the generated config', async () => {
+      expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+      const config = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
+
+      expect(config).toContain("from './src/controllers/index.ts'");
+      expect(config).toContain('registerGeneratedRoutes(app.router);');
+      // No plugin ARRAY exists on this path, so the plugin seam registers
+      // imperatively instead of spreading.
+      expect(config).toContain('app.register(generated)');
+    });
+  });
+
   it('emits parameter-level @Inject in the class-based controller', async () => {
     expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
     const controller = await Deno.readTextFile(

@@ -353,7 +353,7 @@ export async function ${CONFIG_EXPORT}(
         ...host.appFactoryContext,
       }) ?? ''
     });
-${middlewareLines}
+${middlewareLines}${setupLines}
   return app;
 }
 `;
@@ -723,6 +723,50 @@ function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<str
 }
 
 /**
+ * The task block a generated Deno manifest carries.
+ *
+ * A template with a frontend build gets `install` and `build` beside `start`,
+ * and `start` DEPENDS on `build` — which is the whole of X5-3. Before this the
+ * Deno target emitted the build command into `package.json` alone, whose script
+ * runner a Deno project never invokes, so `deno task start` failed with
+ * `Failed to load React Router server build … Module not found`. The generated
+ * README said `deno task start` and nothing else; there was no `build` task, no
+ * `install` task, and no mention anywhere of how the server build got produced.
+ *
+ * These are the four pieces `apps/full-stack/deno.json` — described in its own
+ * README as "the runnable counterpart to `setu new --template full-stack`" —
+ * has carried all along.
+ *
+ * @param runtime - The selected runtime target
+ * @param host - The resolved template host, for its extra tasks
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The `tasks` block, in a fixed order
+ */
+function denoTasks(
+  runtime: TargetRuntime,
+  host: ResolvedHost,
+  manifest?: TemplateManifest,
+): Record<string, string> {
+  const entry = runtime === 'deno' ? 'main.ts' : 'src/index.ts';
+  // Workers serves through a `fetch` export, so `deno run` binds nothing and
+  // exits 0 — Deno's own warning names `deno serve` as the fix (X9-7).
+  const start = runtime === 'cloudflare-workers'
+    ? `deno serve ${denoPermissions(manifest)} ${entry}`
+    : `deno run ${denoPermissions(manifest)} ${entry}`;
+
+  if (manifest?.npmBuild === undefined) {
+    return { start, ...host.extraTasks };
+  }
+
+  return {
+    install: 'deno install --allow-scripts',
+    build: `deno task install && ${manifest.npmBuild.denoCommand}`,
+    start: `deno task build && ${start}`,
+    ...host.extraTasks,
+  };
+}
+
+/**
  * The line width a generated project is formatted at.
  *
  * Matches the `fmt.lineWidth` the root manifest declares, so source this module
@@ -866,9 +910,7 @@ function npmScripts(
   manifest?: TemplateManifest,
 ): Record<string, string> {
   const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
-  return manifest?.npmBuildScript === undefined
-    ? { start }
-    : { build: manifest.npmBuildScript, start };
+  return manifest?.npmBuild === undefined ? { start } : { build: manifest.npmBuild.script, start };
 }
 
 /**
@@ -960,7 +1002,7 @@ function standaloneNpmFiles(
   // simply nothing to install. Deno is deliberately excluded: it resolves
   // through the import map, and a package.json switches it to node_modules.
   const onWorkers = runtime === 'cloudflare-workers';
-  if (manifest?.npmBuildScript === undefined && !onWorkers) return [];
+  if (manifest?.npmBuild === undefined && !onWorkers) return [];
 
   const dependencies = {
     ...(onWorkers ? npmDependencies(host, runtime) : {}),
@@ -974,7 +1016,7 @@ function standaloneNpmFiles(
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
-    ...(manifest?.npmBuildScript === undefined ? {} : { build: manifest.npmBuildScript }),
+    ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
     ...(onWorkers ? { dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
   };
 
@@ -1059,7 +1101,13 @@ ${PROGRAM_NAME} generate --help
   // produce is noise that invites copying it into projects that would need it.
   const gitignore = `${runtime === 'deno' ? '' : 'node_modules/\n'}coverage/\n${
     runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''
-  }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}`;
+  }${
+    // A frontend build's output is generated, so it is ignored like any other
+    // build artifact — the generated file used to list only `coverage/` and the
+    // env file, which left a minified bundle tracked (D2).
+    manifest?.npmBuild === undefined ? '' : `${manifest.npmBuild.outputDir}/\n`}${
+    manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`
+  }`;
 
   const files: GeneratedFile[] = [
     { path: 'README.md', contents: readme },
@@ -1067,7 +1115,6 @@ ${PROGRAM_NAME} generate --help
   ];
 
   if (runtime === 'deno' || runtime === 'cloudflare-workers') {
-    const entry = runtime === 'deno' ? 'main.ts' : 'src/index.ts';
     // A workspace member is the only caller that passes a port, and a member's
     // manifest must not carry the root-only settings below: the workspace root
     // already declares them for every member, and Deno refuses some of them
@@ -1079,11 +1126,20 @@ ${PROGRAM_NAME} generate --help
       contents: `${
         JSON.stringify(
           {
-            tasks: {
-              start: `deno run ${denoPermissions(manifest)} ${entry}`,
-              ...host.extraTasks,
-            },
-            ...(isWorkspaceMember ? {} : rootManifestSettings()),
+            tasks: denoTasks(runtime, host, manifest),
+            ...(isWorkspaceMember ? {} : rootManifestSettings(manifest?.npmBuild?.outputDir)),
+            // A `package.json` switches Deno to node_modules resolution, and the
+            // full-stack template is the one that emits one on a Deno target. A
+            // pristine scaffold then failed its OWN `check:app` on a cold
+            // checkout — `Could not resolve "@react-router/fs-routes", but found
+            // it in a package.json` — advising a task the project did not have
+            // (X5-4). `apps/full-stack` calls this setting load-bearing and sets
+            // it; the renderer never did.
+            //
+            // Refused in a workspace member, where the root declares it instead.
+            ...(!isWorkspaceMember && manifest?.npmBuild !== undefined
+              ? { nodeModulesDir: 'auto' }
+              : {}),
             // Declared by the template rather than fixed here: `deno check` reads
             // this file, and what it needs depends on what the template emits —
             // decorated classes need `experimentalDecorators`, JSX needs `jsx`.
