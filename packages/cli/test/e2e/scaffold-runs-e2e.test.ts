@@ -36,7 +36,12 @@ const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /** Templates that wire an HTTP surface and boot without an npm build. */
-const BOOTABLE = ['rest', 'microservice', 'class-based'] as const;
+// X5-3's fix and its gate are the same change: `full-stack` was excluded from
+// this list because it could not boot — it had no `build` task, so `deno task
+// start` died on a missing server build. The one template that could not boot
+// was the one the boot gate skipped. It now emits `install`/`build` and `start`
+// depends on `build`, so it belongs here.
+const BOOTABLE = ['rest', 'microservice', 'class-based', 'full-stack'] as const;
 
 /** Every host a scaffold can produce, including the no-template one. */
 const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
@@ -118,6 +123,20 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       expect(await run(['new', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
+
+      // `full-stack` builds its React Router server before it can serve, and
+      // `start` depends on `build` — which is exactly what X5-3 added. Running
+      // the task here rather than letting `start` do it keeps the boot's own
+      // timeout measuring the boot.
+      if (template === 'full-stack') {
+        const built = await new Deno.Command(Deno.execPath(), {
+          args: ['task', 'build'],
+          cwd: project,
+          stdout: 'piped',
+          stderr: 'piped',
+        }).output();
+        expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
+      }
 
       const result = await bootWithGeneratedPermissions(project, [
         '/health',

@@ -195,7 +195,7 @@ function planMember(
   // A template with a frontend build needs `node_modules`, which only the root
   // may enable. Measured: a real `react-router build` and an SSR 200 both work
   // inside a member once the root declares it.
-  if (choice.template?.manifest?.npmBuildScript !== undefined) {
+  if (choice.template?.manifest?.npmBuild !== undefined) {
     // …but the transport must be able to reach it first. A starter-composed
     // template owns its whole plugin set, so a transport that appends a plugin
     // or rewrites `MessagingPlugin`'s arguments would have its contribution

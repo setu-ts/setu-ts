@@ -135,6 +135,26 @@ export function seamPluginSpreads(seams: readonly SeamSpec[]): readonly string[]
 }
 
 /**
+ * The plugin seam's registration for a host that has no plugin ARRAY to spread
+ * into.
+ *
+ * A starter-composed host builds the plugin list itself, and no starter accepts
+ * extra plugins — so `full-stack` could not consume this seam through
+ * {@linkcode seamPluginSpreads}. `IApplication.register` is the equivalent and
+ * is public: the kernel resolves plugins at `start()`, and the generated factory
+ * deliberately does not start, so a plugin registered here is picked up exactly
+ * as a spread one would be.
+ *
+ * @param seams - The host's consumable seams
+ * @returns The statements, empty when the host has no plugin seam
+ */
+export function seamPluginRegistrations(seams: readonly SeamSpec[]): readonly string[] {
+  return seams.some((spec) => spec.schematic === 'plugin')
+    ? [`for (const generated of ${GENERATED_PLUGINS_EXPORT}) app.register(generated);`]
+    : [];
+}
+
+/**
  * Rewrites a wiring list so each plugin whose options carry a seam receives it.
  *
  * Takes the list rather than mutating a shared constant so every template applies it to

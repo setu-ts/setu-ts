@@ -34,7 +34,7 @@ const TEST_DEPENDENCY_VERSIONS = {
  * form matches how those targets already reach `@setu-ts/*`.
  *
  * Declaring `npmDevDependencies` does NOT give a Deno project a `package.json`:
- * {@linkcode TemplateManifest.npmBuildScript} is what marks a template with a
+ * {@linkcode TemplateManifest.npmBuild} is what marks a template with a
  * real frontend npm toolchain, precisely so a non-frontend template can declare
  * a dev dependency without switching Deno to node_modules resolution.
  */

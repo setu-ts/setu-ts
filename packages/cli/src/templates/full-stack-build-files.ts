@@ -193,14 +193,20 @@ export const FULL_STACK_DENO_COMPILER_OPTIONS: Readonly<Record<string, unknown>>
 };
 
 /**
- * The task that type-checks the emitted `app/` tree.
+ * The task that type-checks the emitted `app/` tree and the generated seams.
  *
  * `deno check main.ts` reaches only what the entry statically imports, and the
  * route modules are loaded through the compiled server build — so without this
  * task nothing type-checks them at all. A glob rather than a file list, because
  * `app/routes.ts` resolves routes through `flatRoutes()` at build time and
  * statically imports none of them.
+ *
+ * `src/**` joined it in M70h. This template is a seam host now (X5-8), and
+ * before that a generated artifact here was checked by NOTHING: `check:app`
+ * globbed `app/` only, and `deno check main.ts setu.config.ts` never reached
+ * `src/` because nothing imported it. A deliberate type error in a generated
+ * service was clean under both.
  */
 export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
-  'check:app': 'deno check app/**/*.ts app/**/*.tsx',
+  'check:app': 'deno check app/**/*.ts app/**/*.tsx src/**/*.ts',
 };

@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';
 import type { TargetRuntime } from '../../../src/constants.ts';
+import { getTemplate } from '../../../src/templates/registry.ts';
 
 /**
  * Reads one planned file's contents.
@@ -196,5 +197,59 @@ describe('the entry shutdown handler', () => {
     const entry = entryFor('cloudflare-workers');
     expect(entry).not.toContain('SIGTERM');
     expect(entry).not.toContain('app.stop()');
+  });
+});
+
+// X5-3 / X5-4 / D2. A scaffolded `full-stack` project could not be started by
+// following its own README: the Deno target emitted the build command into
+// `package.json`, whose script runner a Deno project never invokes, so there was
+// no `build` task at all and `deno task start` died on a missing server build.
+describe('a template with a frontend build, on a Deno target', () => {
+  const host = resolveHost(getTemplate('full-stack')!, 'deno');
+  const manifestOf = (runtime: TargetRuntime): Record<string, never> =>
+    JSON.parse(contentsOf([...projectFiles('shop', runtime, host)], 'deno.json'));
+
+  it('emits install and build tasks, with start depending on build', () => {
+    const tasks = (manifestOf('deno') as unknown as {
+      tasks: Record<string, string>;
+    }).tasks;
+
+    expect(tasks['install']).toBe('deno install --allow-scripts');
+    expect(tasks['build']).toContain('deno task install &&');
+    expect(tasks['build']).toContain('npm:@react-router/dev build');
+    // The dependency is the point: `deno task start` on a fresh clone has to
+    // produce the server build before importing it.
+    expect(tasks['start']?.startsWith('deno task build && ')).toBe(true);
+  });
+
+  it('sets nodeModulesDir so a COLD checkout type-checks', () => {
+    // This template is the one that emits a `package.json` on a Deno target,
+    // which switches Deno to node_modules resolution. `apps/full-stack` calls
+    // the setting load-bearing; the renderer never emitted it.
+    expect(manifestOf('deno')).toMatchObject({ nodeModulesDir: 'auto' });
+  });
+
+  it('excludes the build output from fmt and lint, and ignores it', () => {
+    const manifest = manifestOf('deno') as unknown as {
+      fmt: { exclude?: readonly string[] };
+      lint: { exclude?: readonly string[] };
+    };
+    expect(manifest.fmt.exclude).toEqual(['build']);
+    expect(manifest.lint.exclude).toEqual(['build']);
+    expect(contentsOf([...projectFiles('shop', 'deno', host)], '.gitignore')).toContain('build/\n');
+  });
+
+  it('leaves a template WITHOUT a frontend build untouched', () => {
+    // The three settings above ride one signal, so a REST project must gain
+    // none of them — a `package.json` in a Deno project is the trap M58 hit.
+    const rest = resolveHost(getTemplate('rest')!, 'deno');
+    const manifest = JSON.parse(
+      contentsOf([...projectFiles('svc', 'deno', rest)], 'deno.json'),
+    ) as { tasks: Record<string, string>; nodeModulesDir?: string; lint?: unknown };
+
+    expect(manifest.tasks['build']).toBeUndefined();
+    expect(manifest.tasks['install']).toBeUndefined();
+    expect(manifest.nodeModulesDir).toBeUndefined();
+    expect(manifest.lint).toBeUndefined();
   });
 });

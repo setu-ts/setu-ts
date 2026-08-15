@@ -301,12 +301,14 @@ describe('full-stack template | manifest contributions', () => {
     expect(deno?.['experimentalDecorators']).toBeUndefined();
   });
 
-  it('emits a task that type-checks the app tree', () => {
+  it('emits a task that type-checks the app tree AND the generated seams', () => {
     // `deno check main.ts` reaches only what the entry statically imports, and
     // the route modules load through the compiled server build — so without this
-    // task nothing type-checks them at all.
+    // task nothing type-checks them at all. `src/**` joined it with X5-8: a
+    // generated artifact there was previously checked by neither of the
+    // project's own check paths.
     expect(FULL_STACK_TEMPLATE.extraTasks?.['check:app']).toBe(
-      'deno check app/**/*.ts app/**/*.tsx',
+      'deno check app/**/*.ts app/**/*.tsx src/**/*.ts',
     );
   });
 

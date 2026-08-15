@@ -64,7 +64,7 @@ describe('every host declares what the generated module test imports', () => {
   it('gives no non-frontend host an npm build script', () => {
     for (const [name, host] of HOSTS) {
       if (name === 'full-stack') continue;
-      expect(host.manifest?.npmBuildScript).toBeUndefined();
+      expect(host.manifest?.npmBuild).toBeUndefined();
     }
   });
 
@@ -75,6 +75,6 @@ describe('every host declares what the generated module test imports', () => {
     // The `~/` alias every emitted app module imports through.
     expect(fullStack?.denoImports?.['~/']).toBe('./app/');
     expect(fullStack?.npmDevDependencies?.['vite']).toBeDefined();
-    expect(fullStack?.npmBuildScript).toBe('react-router build');
+    expect(fullStack?.npmBuild?.script).toBe('react-router build');
   });
 });
