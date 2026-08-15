@@ -1,13 +1,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
+import { UPGRADE_INTENT } from '@setu-ts/common';
 import {
   bindDenoSocketToSink,
   type DenoWebSocketLike,
 } from '../../src/adapters/deno/deno-ws-upgrader.ts';
 import { DenoHttpAdapter, type DenoServeHost } from '../../src/adapters/deno/deno-http-adapter.ts';
 
-/** A Deno-shaped socket exposing the `on*` handler properties. */
 function fakeSocket(): DenoWebSocketLike & { sent: (string | Uint8Array)[] } {
   const sent: (string | Uint8Array)[] = [];
   return {
@@ -24,7 +24,6 @@ function fakeSocket(): DenoWebSocketLike & { sent: (string | Uint8Array)[] } {
   };
 }
 
-/** Records every sink callback. */
 function recordingSink(): WebSocketEventSink & { events: string[] } {
   const events: string[] = [];
   return {
@@ -52,13 +51,11 @@ describe('bindDenoSocketToSink', () => {
   it('drives every sink callback from the socket handlers', () => {
     const socket = fakeSocket();
     const sink = recordingSink();
-
     bindDenoSocketToSink(socket, sink);
     socket.onopen?.({});
     socket.onmessage?.({ data: 'hello' });
     socket.onerror?.(new Error('socket died'));
     socket.onclose?.({ code: 1000, reason: 'bye' });
-
     expect(sink.events).toEqual([
       'open:open',
       'message:hello',
@@ -78,9 +75,7 @@ describe('bindDenoSocketToSink', () => {
       onClose: () => {},
       onError: () => {},
     });
-
     socket.onmessage?.({ data: new Uint8Array([1, 2]).buffer });
-
     expect(received[0]).toBeInstanceOf(Uint8Array);
     expect(Array.from(received[0] as Uint8Array)).toEqual([1, 2]);
   });
@@ -89,9 +84,7 @@ describe('bindDenoSocketToSink', () => {
     const socket = fakeSocket();
     const sink = recordingSink();
     bindDenoSocketToSink(socket, sink);
-
     socket.onerror?.({ type: 'error' });
-
     expect(sink.events).toEqual(['error:WebSocket transport error']);
   });
 
@@ -103,15 +96,12 @@ describe('bindDenoSocketToSink', () => {
       onClose: () => {},
       onError: () => {},
     });
-
     socket.onopen?.({});
-
     expect(socket.sent).toEqual(['from sink']);
   });
 });
 
-describe('DenoHttpAdapter WebSocket upgrade', () => {
-  /** Builds an adapter over a host whose upgrade is fully faked. */
+describe('DenoHttpAdapter WebSocket upgrade (post-M70a)', () => {
   function build(options?: { omitUpgrade?: boolean; upgradeThrows?: unknown }) {
     const socket = fakeSocket();
     const response = new Response(null, { status: 101 });
@@ -122,15 +112,10 @@ describe('DenoHttpAdapter WebSocket upgrade', () => {
       serve: () => ({ shutdown: () => Promise.resolve() }),
       ...(options?.omitUpgrade === true ? {} : {
         upgradeWebSocket: (request: Request, opts?: { protocol?: string }) => {
-          if (options?.upgradeThrows !== undefined) {
-            // Deno throws on a malformed handshake (e.g. no Sec-WebSocket-Key).
-            throw options.upgradeThrows;
-          }
+          if (options?.upgradeThrows !== undefined) throw options.upgradeThrows;
           upgradeCalls.push({
             request,
-            ...(opts?.protocol !== undefined && {
-              protocol: opts.protocol,
-            }),
+            ...(opts?.protocol !== undefined && { protocol: opts.protocol }),
           });
           return { socket, response };
         },
@@ -138,8 +123,112 @@ describe('DenoHttpAdapter WebSocket upgrade', () => {
     };
 
     const adapter = new DenoHttpAdapter(host);
+
+    return {
+      adapter,
+      socket,
+      response,
+      upgradeCalls,
+      calls: () => frameworkHandlerCalls,
+      incrementCalls: () => frameworkHandlerCalls++,
+    };
+  }
+
+  it('completes the handshake when framework handler writes UPGRADE_INTENT', async () => {
+    const { adapter, response, upgradeCalls, incrementCalls } = build();
+    const sink = recordingSink();
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
+
+    const result = await adapter.fetch(upgradeRequest());
+    expect(result).toBe(response);
+    expect(upgradeCalls).toHaveLength(1);
+  });
+
+  it('framework handler runs before the handshake (pipeline first)', async () => {
+    const { adapter, calls, incrementCalls } = build();
+    const sink = recordingSink();
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
+
+    await adapter.fetch(upgradeRequest());
+    expect(calls()).toBe(1);
+  });
+
+  it('binds the accepted socket to the sink', async () => {
+    const { adapter, socket, incrementCalls } = build();
+    const sink = recordingSink();
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
+
+    await adapter.fetch(upgradeRequest());
+    socket.onopen?.({});
+    socket.onmessage?.({ data: 'ping' });
+    expect(sink.events).toEqual(['open:open', 'message:ping']);
+  });
+
+  it('forwards a negotiated subprotocol to the runtime', async () => {
+    const { adapter, upgradeCalls, incrementCalls } = build();
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink: recordingSink(), protocol: 'chat' };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
+
+    await adapter.fetch(upgradeRequest());
+    expect(upgradeCalls[0]?.protocol).toBe('chat');
+  });
+
+  it('falls through to HTTP when no UPGRADE_INTENT written', async () => {
+    const { adapter, incrementCalls } = build();
+
     adapter.setHandler((_request: IRequest): Promise<IResponse> => {
-      frameworkHandlerCalls++;
+      incrementCalls();
       return Promise.resolve({
         snapshot: () => ({
           streaming: false as const,
@@ -150,129 +239,97 @@ describe('DenoHttpAdapter WebSocket upgrade', () => {
       } as unknown as IResponse);
     });
 
-    return { adapter, socket, response, upgradeCalls, calls: () => frameworkHandlerCalls };
-  }
-
-  it('completes the handshake and returns the runtime response', async () => {
-    const { adapter, response, upgradeCalls } = build();
-    const sink = recordingSink();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
-
     const result = await adapter.fetch(upgradeRequest());
-
-    expect(result).toBe(response);
-    expect(upgradeCalls).toHaveLength(1);
-  });
-
-  it('never maps the request to a framework request for an accepted upgrade', async () => {
-    // This is the correctness requirement, not an optimization: the shared
-    // mapping reads the body, and Deno refuses to upgrade a disturbed request.
-    const { adapter, calls } = build();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink: recordingSink() }));
-
-    await adapter.fetch(upgradeRequest());
-
-    expect(calls()).toBe(0);
-  });
-
-  it('binds the accepted socket to the sink', async () => {
-    const { adapter, socket } = build();
-    const sink = recordingSink();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
-
-    await adapter.fetch(upgradeRequest());
-    socket.onopen?.({});
-    socket.onmessage?.({ data: 'ping' });
-
-    expect(sink.events).toEqual(['open:open', 'message:ping']);
-  });
-
-  it('forwards a negotiated subprotocol to the runtime', async () => {
-    const { adapter, upgradeCalls } = build();
-    adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink(), protocol: 'chat' })
-    );
-
-    await adapter.fetch(upgradeRequest());
-
-    expect(upgradeCalls[0]?.protocol).toBe('chat');
-  });
-
-  it('answers a rejection with the decision status', async () => {
-    const { adapter, calls } = build();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: false, status: 503 }));
-
-    const result = await adapter.fetch(upgradeRequest());
-
-    expect(result.status).toBe(503);
-    expect(calls()).toBe(0);
-  });
-
-  it('falls through to the HTTP pipeline when the router returns null', async () => {
-    const { adapter, calls } = build();
-    adapter.setUpgradeRouter(() => Promise.resolve(null));
-
-    const result = await adapter.fetch(upgradeRequest());
-
     expect(result.status).toBe(200);
-    expect(calls()).toBe(1);
+    expect(await result.text()).toBe('http');
   });
 
-  it('leaves ordinary requests entirely alone', async () => {
-    const { adapter, calls, upgradeCalls } = build();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink: recordingSink() }));
-
-    const result = await adapter.fetch(new Request('http://localhost/ws'));
-
-    expect(result.status).toBe(200);
-    expect(calls()).toBe(1);
-    expect(upgradeCalls).toHaveLength(0);
-  });
-
-  it('answers 501 when the injected host cannot handshake, and releases the sink', async () => {
-    const { adapter } = build({ omitUpgrade: true });
+  it('answers 501 when the injected host cannot handshake', async () => {
+    const { adapter, incrementCalls } = build({ omitUpgrade: true });
     const sink = recordingSink();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
 
     const result = await adapter.fetch(upgradeRequest());
-
     expect(result.status).toBe(501);
-    // The router already accepted, so the consumer must learn the socket is
-    // over — otherwise a reserved connection slot leaks forever.
     expect(sink.events).toEqual(['close:1006:Upgrade unsupported']);
   });
 
   it('releases the sink when the runtime handshake throws', async () => {
-    const { adapter, calls } = build({ upgradeThrows: new Error('bad handshake') });
+    const { adapter, calls, incrementCalls } = build({ upgradeThrows: new Error('bad handshake') });
     const sink = recordingSink();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
 
     const result = await adapter.fetch(upgradeRequest());
-
-    // A malformed handshake must not be able to leak slots: without this, a
-    // burst of bad upgrades would starve maxConnections permanently.
     expect(result.status).toBe(400);
     expect(sink.events).toEqual(['close:1006:bad handshake']);
-    expect(calls()).toBe(0);
+    expect(calls()).toBe(1);
   });
 
   it('reports a generic reason when the handshake throws a non-Error', async () => {
-    const { adapter } = build({ upgradeThrows: 'not an error object' });
+    const { adapter, incrementCalls } = build({ upgradeThrows: 'not an error object' });
     const sink = recordingSink();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
 
     const result = await adapter.fetch(upgradeRequest());
-
     expect(result.status).toBe(400);
     expect(sink.events).toEqual(['close:1006:Handshake failed']);
   });
 
-  it('serves plain HTTP unchanged when no router was ever installed', async () => {
-    const { adapter, calls } = build();
+  it('serves plain HTTP unchanged when no intent written', async () => {
+    const { adapter, incrementCalls } = build();
+
+    adapter.setHandler((_request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 200,
+          headers: new Headers(),
+          body: 'http',
+        }),
+      } as unknown as IResponse);
+    });
 
     const result = await adapter.fetch(upgradeRequest());
-
     expect(result.status).toBe(200);
-    expect(calls()).toBe(1);
   });
 });

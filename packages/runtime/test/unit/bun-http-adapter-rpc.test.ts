@@ -18,11 +18,16 @@ function createFakeHost(): { host: BunServeHost } {
 }
 
 // ---------------------------------------------------------------------------
-// RPC interceptor integration tests
+// RPC interceptor — post-M70a behavior
+//
+// After M70a, the adapter fetch handler no longer consults #rpcStore.
+// The framework handler (kernel pipeline) runs FIRST, and gRPC dispatch
+// happens inside the kernel terminal handler. setRpcHandler is deprecated
+// but still accepted for backward compatibility.
 // ---------------------------------------------------------------------------
 
-describe('bun-http-adapter | RPC interceptor', () => {
-  it('RPC handler short-circuits before body mapping', async () => {
+describe('bun-http-adapter | RPC interceptor (post-M70a)', () => {
+  it('setRpcHandler stores the handler but fetch does not consult it', async () => {
     const { host } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
@@ -33,7 +38,12 @@ describe('bun-http-adapter | RPC interceptor', () => {
 
     adapter.setHandler(async (_request: any) => {
       return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
       } as any;
     });
 
@@ -41,10 +51,10 @@ describe('bun-http-adapter | RPC interceptor', () => {
     const response = await adapter.fetch(request);
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('grpc response');
+    expect(await response.text()).toBe('framework');
   });
 
-  it('RPC handler returning null falls through to framework handler', async () => {
+  it('setRpcHandler with null-returning handler still lets framework handler run', async () => {
     const { host } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
@@ -55,7 +65,12 @@ describe('bun-http-adapter | RPC interceptor', () => {
 
     adapter.setHandler(async (_request: any) => {
       return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
       } as any;
     });
 
@@ -63,10 +78,10 @@ describe('bun-http-adapter | RPC interceptor', () => {
     const response = await adapter.fetch(request);
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('hono');
+    expect(await response.text()).toBe('framework');
   });
 
-  it('RPC throwing handler returns 500 error', async () => {
+  it('setRpcHandler with throwing handler does not affect fetch path', async () => {
     const { host } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
@@ -77,24 +92,12 @@ describe('bun-http-adapter | RPC interceptor', () => {
 
     adapter.setHandler(async (_request: any) => {
       return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
-      } as any;
-    });
-
-    const request = new Request('http://localhost/');
-    const response = await adapter.fetch(request);
-
-    expect(response.status).toBe(500);
-    expect(await response.text()).toContain('Internal server error');
-  });
-
-  it('no RPC handler falls through to framework handler', async () => {
-    const { host } = createFakeHost();
-    const adapter = new BunHttpAdapter(host);
-
-    adapter.setHandler(async (_request: any) => {
-      return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
       } as any;
     });
 
@@ -102,22 +105,52 @@ describe('bun-http-adapter | RPC interceptor', () => {
     const response = await adapter.fetch(request);
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('hono');
+    expect(await response.text()).toBe('framework');
+  });
+
+  it('no RPC handler: framework handler runs', async () => {
+    const { host } = createFakeHost();
+    const adapter = new BunHttpAdapter(host);
+
+    adapter.setHandler(async (_request: any) => {
+      return {
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
+      } as any;
+    });
+
+    const request = new Request('http://localhost/');
+    const response = await adapter.fetch(request);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('framework');
   });
 });
 
 // ---------------------------------------------------------------------------
-// The serve callback shares createFetchHandler with fetch(), so it must not
-// consult the interceptor a second time of its own.
+// The serve callback — post-M70a
+//
+// After M70a, the Bun serve callback no longer consults the RPC interceptor.
+// It runs the framework handler (kernel pipeline) first, and gRPC dispatch
+// happens inside the kernel terminal handler.
 // ---------------------------------------------------------------------------
 
-describe('bun-http-adapter | RPC interceptor on the serve callback', () => {
+describe('bun-http-adapter | serve callback (post-M70a)', () => {
   /** Builds a handle whose framework handler answers a fixed body. */
   function createHandle() {
     const handle = new BunHttpServerHandle();
     handle.setHandler(async (_request: any) => {
       return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
       } as any;
     });
     return handle;
@@ -126,54 +159,33 @@ describe('bun-http-adapter | RPC interceptor on the serve callback', () => {
   /** Bun's server stand-in for a request that is not a WebSocket upgrade. */
   const fakeServer = { upgrade: () => false } as any;
 
-  it('consults the interceptor exactly once per request', async () => {
+  it('serve callback runs the framework handler (no RPC consult)', async () => {
     const handle = createHandle();
-    let consults = 0;
+
+    // setRpcHandler is accepted but the serve callback does not consult it
     handle.setRpcHandler((_request: Request) => {
-      consults++;
-      return Promise.resolve(null);
+      return Promise.resolve(new Response('grpc response'));
     });
-
-    await handle.createServeCallback()(new Request('http://localhost/users'), fakeServer);
-
-    // Two consults would dispatch every request through the RPC handler twice.
-    expect(consults).toBe(1);
-  });
-
-  it('lets a body-inspecting handler fall through when it clones, per the contract', async () => {
-    // RpcFetchHandler requires a handler returning `null` to leave the body
-    // unread; inspecting means reading `request.clone()`. That only holds if
-    // the request is consulted once — a second consult would hand the SAME
-    // request to the handler again, and the clone taken there would come from
-    // an already-used body, throwing and being swallowed as a 500.
-    const handle = createHandle();
-    const bodies: string[] = [];
-    handle.setRpcHandler(async (request: Request) => {
-      bodies.push(await request.clone().text());
-      return null;
-    });
-
-    const response = await handle.createServeCallback()(
-      new Request('http://localhost/users', { method: 'POST', body: 'payload' }),
-      fakeServer,
-    );
-
-    expect(bodies).toEqual(['payload']);
-    // Fall-through reached the framework handler with the body still readable.
-    expect(response?.status).toBe(200);
-    expect(await response!.text()).toBe('hono');
-  });
-
-  it('still short-circuits an RPC request through the serve callback', async () => {
-    const handle = createHandle();
-    handle.setRpcHandler(() => Promise.resolve(new Response('grpc response')));
 
     const response = await handle.createServeCallback()(
       new Request('http://localhost/grpc/pkg.Svc/Method', { method: 'POST' }),
       fakeServer,
     );
 
+    // Framework handler response wins — RPC is handled in the kernel, not adapter
     expect(response?.status).toBe(200);
-    expect(await response!.text()).toBe('grpc response');
+    expect(await response!.text()).toBe('framework');
+  });
+
+  it('serve callback lets the framework handler read the body', async () => {
+    const handle = createHandle();
+
+    const response = await handle.createServeCallback()(
+      new Request('http://localhost/users', { method: 'POST', body: 'payload' }),
+      fakeServer,
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response!.text()).toBe('framework');
   });
 });

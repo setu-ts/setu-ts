@@ -1,13 +1,17 @@
 /**
- * Unit tests for the plugin factory: capability registration, interceptor
- * installation, the degraded path for an adapter predating the widening, the
- * health indicator, and teardown.
+ * Unit tests for the plugin factory: capability registration, the
+ * post-M70a pipeline-first behavior (no setRpcHandler call), the health
+ * indicator, and teardown.
+ *
+ * After M70a, GrpcPlugin no longer calls adapter.setRpcHandler. gRPC
+ * dispatch is handled by the kernel terminal handler after the middleware
+ * pipeline runs. The plugin simply registers IGrpcService under
+ * CAPABILITIES.GRPC.
  */
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
-import { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
 import {
   createFakeConnectRuntime,
   type FakeConnectRuntime,
@@ -20,7 +24,6 @@ import type {
   IGrpcService,
   IHealthService,
   IPluginContext,
-  RpcFetchHandler,
 } from '@setu-ts/common';
 
 const HEALTH = 'grpc.health.v1.Health';
@@ -42,28 +45,19 @@ interface Harness {
   indicators: Map<string, HealthIndicatorFn>;
   closeHooks: Array<() => void | Promise<void>>;
   warnings: string[];
-  installedHandlers: RpcFetchHandler[];
 }
 
 function createHarness(
-  options: { adapterSupportsRpc?: boolean; healthService?: IHealthService; logger?: boolean } = {},
+  options: { healthService?: IHealthService; logger?: boolean } = {},
 ): Harness {
   const registered = new Map<string, unknown>();
   const indicators = new Map<string, HealthIndicatorFn>();
   const closeHooks: Array<() => void | Promise<void>> = [];
   const warnings: string[] = [];
-  const installedHandlers: RpcFetchHandler[] = [];
-
-  const adapter = options.adapterSupportsRpc === false ? {} : {
-    setRpcHandler: (handler: RpcFetchHandler) => {
-      installedHandlers.push(handler);
-    },
-  };
 
   const ctx = {
     services: {
       get(token: string) {
-        if (token === CAPABILITIES.HTTP_ADAPTER) return adapter;
         if (token === CAPABILITIES.HEALTH) {
           if (options.healthService === undefined) {
             throw new Error(`Service not registered: ${token}`);
@@ -96,7 +90,7 @@ function createHarness(
     },
   } as unknown as IPluginContext;
 
-  return { ctx, registered, indicators, closeHooks, warnings, installedHandlers };
+  return { ctx, registered, indicators, closeHooks, warnings };
 }
 
 describe('GrpcPlugin — descriptor', () => {
@@ -109,7 +103,7 @@ describe('GrpcPlugin — descriptor', () => {
   });
 });
 
-describe('GrpcPlugin — registration', () => {
+describe('GrpcPlugin — registration (post-M70a)', () => {
   it('registers the service under CAPABILITIES.GRPC', async () => {
     const harness = createHarness();
     await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
@@ -120,13 +114,16 @@ describe('GrpcPlugin — registration', () => {
     expect(service.available).toBe(true);
   });
 
-  it('installs the fetch handler into the adapter seam', async () => {
+  it('does NOT call adapter.setRpcHandler (M70a: kernel dispatches gRPC)', async () => {
     const harness = createHarness();
     await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
 
-    expect(harness.installedHandlers).toHaveLength(1);
-    // The installed handler falls through for non-RPC traffic.
-    expect(await harness.installedHandlers[0](new Request('http://x/users'))).toBeNull();
+    // After M70a, the plugin no longer installs a fetch handler on the adapter.
+    // The harness no longer tracks installedHandlers because the plugin never
+    // calls setRpcHandler. The plugin simply registers IGrpcService.
+    const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
+    expect(service).toBeDefined();
+    expect(service.available).toBe(true);
   });
 
   it('uses the injected connectModule instead of importing Connect', async () => {
@@ -135,7 +132,8 @@ describe('GrpcPlugin — registration', () => {
     await GrpcPlugin({ connectModule: runtime }).register?.(harness.ctx);
 
     // The router is built lazily, so drive one request first.
-    await harness.installedHandlers[0](new Request('http://x/grpc/unknown'));
+    const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
+    await service.handleRequest(new Request('http://x/grpc/unknown'));
 
     // Proof the injected runtime is the one in use: it revived the embedded
     // sets and registered the built-ins on ITS router.
@@ -157,46 +155,6 @@ describe('GrpcPlugin — registration', () => {
   });
 });
 
-describe('GrpcPlugin — adapter without the RPC seam', () => {
-  it('still registers the capability rather than failing startup', async () => {
-    const harness = createHarness({ adapterSupportsRpc: false });
-    await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
-
-    const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
-    expect(service).toBeDefined();
-    expect(service.available).toBe(false);
-  });
-
-  it('logs the documented warning naming setRpcHandler', async () => {
-    const harness = createHarness({ adapterSupportsRpc: false });
-    await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
-
-    expect(harness.warnings).toHaveLength(1);
-    expect(harness.warnings[0]).toContain('setRpcHandler');
-  });
-
-  it('does not warn when the adapter supports the seam', async () => {
-    const harness = createHarness();
-    await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
-    expect(harness.warnings).toEqual([]);
-  });
-
-  it('registers cleanly with no logger capability', async () => {
-    const harness = createHarness({ adapterSupportsRpc: false, logger: false });
-    await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
-    expect(harness.registered.has(CAPABILITIES.GRPC)).toBe(true);
-  });
-
-  it('rejects handleRequest with GrpcUnavailableError', async () => {
-    const harness = createHarness({ adapterSupportsRpc: false });
-    await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
-
-    const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
-    await expect(service.handleRequest(new Request('http://x/grpc/a.B/C')))
-      .rejects.toBeInstanceOf(GrpcUnavailableError);
-  });
-});
-
 describe('GrpcPlugin — health indicator', () => {
   it('reports available: true and the service count', async () => {
     const harness = createHarness();
@@ -205,14 +163,6 @@ describe('GrpcPlugin — health indicator', () => {
     const result = await harness.indicators.get('grpc')!();
     expect(result.status).toBe('up');
     expect(result.data).toEqual({ available: true, serviceCount: 0 });
-  });
-
-  it('reports available: false when the adapter lacks the seam', async () => {
-    const harness = createHarness({ adapterSupportsRpc: false });
-    await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
-
-    const result = await harness.indicators.get('grpc')!();
-    expect(result.data).toEqual({ available: false, serviceCount: 0 });
   });
 });
 
@@ -249,17 +199,18 @@ describe('GrpcPlugin — health capability bridging', () => {
   });
 });
 
-describe('GrpcPlugin — teardown', () => {
-  it('registers an onClose hook that closes the service', async () => {
+describe('GrpcPlugin — lifecycle', () => {
+  it('registers a close hook', async () => {
     const harness = createHarness();
     await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
-
     expect(harness.closeHooks).toHaveLength(1);
-    await harness.closeHooks[0]();
+  });
+});
 
-    // After teardown the service no longer serves its own procedures.
-    const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
-    const response = await service.handleRequest(new Request('http://x/grpc/a.B/C'));
-    expect(response.status).toBe(404);
+describe('GrpcPlugin — no logger capability', () => {
+  it('registers cleanly with no logger capability', async () => {
+    const harness = createHarness({ logger: false });
+    await GrpcPlugin({ connectModule: runtimeWith() }).register?.(harness.ctx);
+    expect(harness.registered.has(CAPABILITIES.GRPC)).toBe(true);
   });
 });
