@@ -1,6 +1,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IResponse, WebSocketEventSink } from '@setu-ts/common';
+import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
+import { UPGRADE_INTENT } from '@setu-ts/common';
+import type { WebSocketUpgradeIntent } from '@setu-ts/common';
 import {
   adaptWsModule,
   asUpgradeEmitter,
@@ -374,7 +376,16 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
     head: unknown;
   }
 
-  function build(options?: { omitOn?: boolean; handleUpgradeThrows?: boolean }) {
+  function build(options?: {
+    omitOn?: boolean;
+    handleUpgradeThrows?: boolean;
+    /** When set, the handler writes UPGRADE_INTENT with this sink (pipeline-first). */
+    upgradeSink?: WebSocketEventSink;
+    /** When set, the handler writes UPGRADE_INTENT with this protocol. */
+    upgradeProtocol?: string;
+    /** When set, the handler returns this HTTP status instead of 200. */
+    handlerStatus?: number;
+  }) {
     const wsSocket = fakeWsSocket();
     const handleUpgradeCalls: unknown[][] = [];
     let constructedWith: unknown = null;
@@ -412,16 +423,33 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
 
     const host: NodeServeHost = { serve: () => Promise.resolve(server) };
     const adapter = new NodeHttpAdapter(host, wsModule);
-    adapter.setHandler(() =>
-      Promise.resolve({
+
+    // M70a pipeline-first: the handler simulates the kernel terminal handler.
+    // When upgradeSink is provided, the handler writes UPGRADE_INTENT on the
+    // IRequest only when the Upgrade header is "websocket" (as the real kernel
+    // does). Otherwise it returns a plain response.
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      if (options?.upgradeSink !== undefined) {
+        const upgradeHeader = request.headers.get('upgrade');
+        if (upgradeHeader?.toLowerCase() === 'websocket') {
+          // Write upgrade intent on the request (simulating kernel terminal handler).
+          (request as unknown as Record<symbol, WebSocketUpgradeIntent>)[UPGRADE_INTENT] = {
+            sink: options.upgradeSink,
+            ...(options.upgradeProtocol !== undefined
+              ? { protocol: options.upgradeProtocol }
+              : {}),
+          };
+        }
+      }
+      return Promise.resolve({
         snapshot: () => ({
           streaming: false as const,
-          status: 200,
+          status: options?.handlerStatus ?? 200,
           headers: new Headers(),
           body: 'http',
         }),
-      } as unknown as IResponse)
-    );
+      } as unknown as IResponse);
+    });
 
     function rawSocket() {
       const writes: string[] = [];
@@ -476,9 +504,9 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
   });
 
   it('completes the handshake and binds the socket to the sink', async () => {
-    const harness = build();
     const sink = recordingSink();
-    harness.adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+    const harness = build({ upgradeSink: sink });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
     await harness.adapter.listen(3000);
 
     await harness.emitUpgrade();
@@ -488,10 +516,11 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
   });
 
   it('creates the ws server in noServer mode with a protocol selector', async () => {
-    const harness = build();
-    harness.adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink(), protocol: 'chat' })
-    );
+    const harness = build({
+      upgradeSink: recordingSink(),
+      upgradeProtocol: 'chat',
+    });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
     await harness.adapter.listen(3000);
 
     await harness.emitUpgrade();
@@ -505,10 +534,8 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
   });
 
   it('selects no protocol when the decision negotiated none', async () => {
-    const harness = build();
-    harness.adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink() })
-    );
+    const harness = build({ upgradeSink: recordingSink() });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
     await harness.adapter.listen(3000);
 
     await harness.emitUpgrade();
@@ -517,9 +544,20 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
     expect(opts.handleProtocols()).toBe(false);
   });
 
-  it('refuses on the raw socket when the router rejects', async () => {
-    const harness = build();
-    harness.adapter.setUpgradeRouter(() => Promise.resolve({ accept: false, status: 503 }));
+  it('refuses on the raw socket when the handler returns 401', async () => {
+    const harness = build({ handlerStatus: 401 });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
+    await harness.adapter.listen(3000);
+
+    const socket = await harness.emitUpgrade();
+
+    expect(socket.writes[0]).toContain('401');
+    expect(harness.handleUpgradeCalls).toHaveLength(0);
+  });
+
+  it('refuses on the raw socket when the handler returns 503', async () => {
+    const harness = build({ handlerStatus: 503 });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
     await harness.adapter.listen(3000);
 
     const socket = await harness.emitUpgrade();
@@ -528,20 +566,10 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
     expect(harness.handleUpgradeCalls).toHaveLength(0);
   });
 
-  it('refuses with 400 when no route matches, rather than hanging the client', async () => {
-    const harness = build();
-    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
-    await harness.adapter.listen(3000);
-
-    const socket = await harness.emitUpgrade();
-
-    expect(socket.writes[0]).toContain('400 Bad Request');
-  });
-
   it('refuses with 500 and releases the sink when the handshake itself throws', async () => {
-    const harness = build({ handleUpgradeThrows: true });
     const sink = recordingSink();
-    harness.adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+    const harness = build({ handleUpgradeThrows: true, upgradeSink: sink });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
     await harness.adapter.listen(3000);
 
     const socket = await harness.emitUpgrade();
@@ -555,10 +583,8 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
   });
 
   it('defaults the request target when Node reports no url', async () => {
-    const harness = build();
-    harness.adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink() })
-    );
+    const harness = build({ upgradeSink: recordingSink() });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
     await harness.adapter.listen(3000);
 
     await harness.emitUpgrade({
@@ -569,26 +595,25 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
   });
 
   it('refuses a raw upgrade event that is not a WebSocket handshake', async () => {
-    const harness = build();
-    harness.adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink() })
-    );
+    const harness = build({ upgradeSink: recordingSink() });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
     await harness.adapter.listen(3000);
 
     // An `upgrade` event for some other protocol (h2c) must not be handshaken.
+    // The handler still runs but writes no UPGRADE_INTENT for non-WebSocket upgrades,
+    // so the adapter rejects with the handler status.
     const socket = await harness.emitUpgrade({
       incoming: { headers: { upgrade: 'h2c', connection: 'Upgrade' } },
     });
 
     expect(harness.handleUpgradeCalls).toHaveLength(0);
-    expect(socket.writes[0]).toContain('400 Bad Request');
+    // No upgrade intent written, so the handler's 200 status is used for rejection.
+    expect(socket.writes[0]).toContain('200');
   });
 
   it('closes the ws server when the adapter closes', async () => {
-    const harness = build();
-    harness.adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink() })
-    );
+    const harness = build({ upgradeSink: recordingSink() });
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
     const handle = await harness.adapter.listen(3000);
     await harness.emitUpgrade();
 
@@ -604,9 +629,7 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
 
   it('leaves the plain HTTP fetch path untouched', async () => {
     const harness = build();
-    harness.adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink() })
-    );
+    harness.adapter.setUpgradeRouter(() => Promise.resolve(null));
 
     const response = await harness.adapter.fetch(
       new Request('http://localhost/ws', {

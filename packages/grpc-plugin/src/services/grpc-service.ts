@@ -98,9 +98,8 @@ export class GrpcService implements IGrpcService {
   /**
    * Handles an RPC request directly, bypassing the adapter seam.
    *
-   * @throws {GrpcUnavailableError} When the adapter does not implement
-   *   `setRpcHandler` — a misconfiguration surfaces on use as well as at
-   *   startup.
+   * Returns a 404 response when the request does not match any registered
+   * service path.
    */
   handleRequest(request: Request): Promise<Response> {
     return Promise.resolve(this.#dispatch(request)).then(
