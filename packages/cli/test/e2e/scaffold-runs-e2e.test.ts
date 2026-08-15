@@ -43,13 +43,28 @@ const fs: IFileSystem = runtime.fs!;
 // depends on `build`, so it belongs here.
 const BOOTABLE = ['rest', 'microservice', 'class-based', 'full-stack'] as const;
 
-/** Every host a scaffold can produce, including the no-template one. */
+/**
+ * Every host a scaffold can produce, including the no-template one.
+ *
+ * The Workers arms are here because this gate only ever scaffolded the DEFAULT
+ * runtime, so nothing checked a `--runtime cloudflare-workers` project at all —
+ * and one shipped failing its own `deno fmt --check` on two files, which is
+ * exactly the defect class X2-4 reported for `--transport`. A target the gate
+ * does not scaffold is a target with no gate.
+ */
 const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
   ['no-template', []],
   ['rest', ['--template', 'rest']],
   ['microservice', ['--template', 'microservice']],
   ['class-based', ['--template', 'class-based']],
   ['full-stack', ['--template', 'full-stack']],
+  ['rest on workers', ['--template', 'rest', '--runtime', 'cloudflare-workers']],
+  // The one that failed: its Cloudflare wiring is the longest emitted plugin
+  // call, and it emits a Durable Object class of its own.
+  [
+    'microservice on workers',
+    ['--template', 'microservice', '--runtime', 'cloudflare-workers'],
+  ],
 ];
 
 let root = '';

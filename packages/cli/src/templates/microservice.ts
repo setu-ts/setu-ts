@@ -73,10 +73,7 @@ const REPLY_INBOX_MODULE = `/**
  * plain class that takes \`(ctx, env)\`, which is the older and still-supported
  * form. Extend the base class instead if you want \`this.env\`.
  */
-import type {
-  IDurableObjectState,
-  IDurableObjectWebSocket,
-} from '@setu-ts/cloudflare-plugin';
+import type { IDurableObjectState, IDurableObjectWebSocket } from '@setu-ts/cloudflare-plugin';
 import { ReplyInboxObjectCore } from '@setu-ts/cloudflare-plugin';
 
 export class ReplyInboxObject {
@@ -122,8 +119,23 @@ const WORKERS_SWAP = {
     {
       pkg: 'cloudflare-plugin',
       symbol: 'CloudflarePlugin',
-      workersArgs: "{ env, messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } }, " +
-        "queue: { binding: 'JOBS' } }",
+      // `waitUntil` is spread conditionally because the parameter is optional:
+      // `setu commands` loads this module with no arguments, and passing
+      // `undefined` under `exactOptionalPropertyTypes` is a type error.
+      //
+      // Without it every post-response task is silently DROPPED (X9-1) —
+      // `resolveWaitUntil` calls `host?.(reported)`, so with no host the promise
+      // is never handed to the platform and the isolate is free to be torn down
+      // at response time. No error, no log, `/health` still reporting `up`.
+      // Pre-wrapped exactly as `deno fmt` would produce it: the single-line
+      // form is ~150 chars against the emitted `lineWidth: 100`, so a fresh
+      // scaffold failed its own `deno fmt --check` (X2-4's class).
+      workersArgs: '{\n' +
+        '        env,\n' +
+        '        ...(waitUntil ? { waitUntil } : {}),\n' +
+        "        messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },\n" +
+        "        queue: { binding: 'JOBS' },\n" +
+        '      }',
     },
   ],
   workerExports: [

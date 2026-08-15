@@ -151,3 +151,68 @@ describe('loadApp', () => {
     }
   });
 });
+
+// X9-3. `setu commands` builds the application to discover plugin verbs, and a
+// Workers factory takes the platform `env`. The scaffolded `{}` default survived
+// only while nothing READ a binding — but every documented binding-backed
+// composition constructs eagerly in the plugin list, so the moment a project
+// followed the D1 or session docs, `setu commands` and every plugin verb stopped
+// working with an error the developer could not act on.
+describe('loadApp — discovery-time platform bindings', () => {
+  const app = createFakeApp();
+
+  /** Every binding guard `cloudflare-plugin` ships is a `hasMethods` check. */
+  const GUARD_METHODS: readonly (readonly string[])[] = [
+    ['get', 'put', 'delete', 'list'], // isKvNamespace
+    ['head', 'get', 'put', 'delete'], // isR2Bucket
+    ['prepare', 'batch'], // isD1Database
+    ['send', 'sendBatch'], // isQueueProducer
+    ['idFromName', 'get'], // isDurableObjectNamespace
+  ];
+
+  it('hands the factory an env whose bindings satisfy every guard', async () => {
+    let seen: Readonly<Record<string, unknown>> | undefined;
+    await loadApp('/app', undefined, () =>
+      Promise.resolve({
+        createApp: (env: Readonly<Record<string, unknown>>) => {
+          seen = env;
+          return app;
+        },
+      }));
+
+    expect(seen).toBeDefined();
+    for (const methods of GUARD_METHODS) {
+      const binding = seen?.['ANY_BINDING_NAME'] as Record<string, unknown>;
+      for (const method of methods) {
+        expect(typeof binding[method]).toBe('function');
+      }
+    }
+  });
+
+  it('throws if a binding is CALLED, rather than faking I/O', async () => {
+    // Discovery must not silently perform I/O against a stub. No discovery path
+    // invokes a binding; one that did would be a bug worth hearing about.
+    await expect(
+      loadApp('/app', undefined, () =>
+        Promise.resolve({
+          createApp: (env: Readonly<Record<string, unknown>>) => {
+            (env['DB'] as { prepare: () => unknown }).prepare();
+            return app;
+          },
+        })),
+    ).rejects.toThrow('CALLED during command discovery');
+  });
+
+  it('frames a construction failure as unavailable commands, not a binding error', async () => {
+    // The old message was correct and useless: the binding was absent because
+    // the CLI passed no env, not because wrangler.toml was wrong.
+    await expect(
+      loadApp('/app', undefined, () =>
+        Promise.resolve({
+          createApp: () => {
+            throw new Error('D1Adapter needs a D1 binding');
+          },
+        })),
+    ).rejects.toThrow('Plugin commands are unavailable in this project');
+  });
+});
