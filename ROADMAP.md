@@ -6926,8 +6926,8 @@ Ordered by the sequence they should be worked, not by severity alone.
   (X5-6). Plus the seam scanner adopting hand-written files into a CLI-owned barrel, which since
   M68's duplicate-route refusal now **stops the app booting** (X4-4/F2), and generated indicator
   names colliding with the 15 plugins claim (A1).
-- ✅ **M70h — CLI scaffold** (`cli`, `common`, `runtime`, starters) — PR pending. The largest row
-  count and the one that amortizes best, because every row needs the same scaffold-boot gate:
+- ✅ **M70h — CLI scaffold** (`cli`, `common`, `runtime`) — PR pending. The largest row count and
+  the one that amortizes best, because every row needs the same scaffold-boot gate:
   `--transport <broker>` leaves `QueuePlugin()` on memory in the one template built for distributed
   work (X2-3), fresh scaffolds fail their own `deno fmt --check` (X2-4) and their own `check:app` on
   a cold checkout (X5-4), a `full-stack` project has no `build` task so the CLI's printed next step
@@ -6939,9 +6939,11 @@ Ordered by the sequence they should be worked, not by severity alone.
   Three scope calls widened this row at plan time, each taken by the maintainer. **The package list
   above was corrected from `(cli, starters)`:** B1's own register row names `cli`, `common` and
   `runtime`, and closing it properly means a new optional `IRuntimeServices.onSignal?` seam in
-  `common` implemented across the runtime adapters — not just its two CLI-side halves. **E8 moved
-  here from M70n** (see that row). And **D3 was built rather than deferred**: `setu add <plugin>`
-  now exists, so every gate that named a package to install names a command that installs it.
+  `common` implemented across the runtime adapters — not just its two CLI-side halves. `starters`
+  was dropped from that list rather than kept: review checked, and no starter file changes on this
+  branch. **E8 moved here from M70n** (see that row). And **D3 was built rather than deferred**:
+  `setu add <plugin>` now exists, so every gate that named a package to install names a command that
+  installs it.
 - ⬜ **M70i — gRPC and GraphQL viability** (`grpc-plugin`, `graphql-plugin`). The
   repair-versus-withdraw decision named above, plus the documented-API-does-not-exist rows both
   packages carry: every gRPC registration snippet in README and `PUBLIC_API.md` throws because it
