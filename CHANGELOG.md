@@ -25,10 +25,18 @@ All notable changes to this project are documented here. The format follows
   — no `Deno.addSignalListener`, no `Deno.exit`, no `process.on`, no `Deno.build.os` check — so
   moving a project between runtimes no longer means rewriting its entry point.
 - `setu generate migration` now emits a managed `src/migrations/index.ts` listing every migration in
-  filename order and a project-local `src/migrations/run.ts` that applies them, plus a `db:migrate`
-  task. The migration it wrote was previously an orphan that nothing imported and nothing could run.
+  filename order and a project-local `src/migrations/run.ts` that applies them, run with
+  `deno run -A src/migrations/run.ts` (add `--down` to reverse). The migration it wrote was
+  previously an orphan that nothing imported and nothing could run.
 - Every template emits a `test` task, so the `*.service.test.ts` that `setu generate module` writes
-  is reachable at all.
+  is reachable at all — and on each target it emits a harness that target can actually execute.
+  `@std/testing/bdd` reaches `Deno.test` internally, so the test it used to emit everywhere died on
+  Bun with `ReferenceError: Deno is not defined` before a single assertion ran. Bun and Node now get
+  `bun:test` and `node:test`, which are built in, so those two targets also stop declaring
+  `@std/testing`/`@std/expect` — two dependencies that could only fail there.
+- `setu generate` detects the target runtime from the project's own manifests instead of assuming
+  Deno whenever `--runtime` is absent, which nobody passes. `setu new svc --runtime bun` records the
+  choice once and every later `generate` now honours it.
 
 ### Changed
 

@@ -23,6 +23,7 @@ import type { PortProbe } from '../workspace/port-probe.ts';
 import { runLibraryCommand } from './library.ts';
 import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
+import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import {
   findExisting,
   type GeneratedFile,
@@ -166,7 +167,11 @@ export async function runGenerateCommand(
     );
     return EXIT_USAGE;
   }
-  const runtime: TargetRuntime = runtimeFlag ?? 'deno';
+  // Detected from the project rather than defaulted, because the project already
+  // knows: `setu new svc --runtime bun` records the choice once and nobody
+  // repeats it on every `generate`. An explicit flag still wins, so a custom
+  // schematic can be driven for another target deliberately.
+  const runtime: TargetRuntime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
 
   let schematic: Schematic;
   let name: string | undefined;

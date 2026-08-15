@@ -962,7 +962,15 @@ function npmScripts(
   manifest?: TemplateManifest,
 ): Record<string, string> {
   const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
-  return manifest?.npmBuild === undefined ? { start } : { build: manifest.npmBuild.script, start };
+  // A3 applies to every target, not just the Deno ones: `setu generate module`
+  // emits a `*.service.test.ts` here too, and before this nothing could run it.
+  // Each runtime's own runner, matching the harness the schematic emits — `bun
+  // test` for `bun:test`, and `node --test` under the same loader `start` uses,
+  // since the generated test is TypeScript.
+  const test = runtime === 'bun' ? 'bun test' : `${NODE_RUNNER} --test`;
+  return manifest?.npmBuild === undefined
+    ? { start, test }
+    : { build: manifest.npmBuild.script, start, test };
 }
 
 /**

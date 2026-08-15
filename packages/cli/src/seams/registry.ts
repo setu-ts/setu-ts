@@ -26,8 +26,11 @@
  *   That stays exactly true after D5, and the distinction is worth stating
  *   because the schematic now emits a barrel and a runner of its own. Those are
  *   **project-local**: `src/migrations/run.ts` is the generated project's file,
- *   run by its own `db:migrate` task, and no `setu.config.ts` imports it and no
- *   plugin option consumes it. A framework seam is a registration site the
+ *   run directly (`deno run -A src/migrations/run.ts`), and no `setu.config.ts`
+ *   imports it and no plugin option consumes it. It is deliberately NOT wired to
+ *   a `db:migrate` task: a task every scaffold advertises would fail with a
+ *   module-not-found in the great majority of projects, which never generate a
+ *   migration at all. A framework seam is a registration site the
  *   framework reads; this is a script the developer runs. Making `migration` a
  *   `SeamSpec` would put a barrel into `setu.config.ts` that nothing reads.
  *

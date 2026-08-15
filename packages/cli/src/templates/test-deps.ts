@@ -28,10 +28,14 @@ const TEST_DEPENDENCY_VERSIONS = {
 /**
  * Manifest additions that make the module schematic's emitted test runnable.
  *
- * Both forms are needed because the two target families resolve differently:
- * `deno.json` `imports` for Deno and Cloudflare Workers, and npm aliases for
- * Node and Bun, which get a `package.json` and no `deno.json` at all. The alias
- * form matches how those targets already reach `@setu-ts/*`.
+ * **Deno targets only.** Node and Bun deliberately declare neither, because
+ * neither can use them: `@std/testing/bdd` reaches `Deno.test` inside its own
+ * `_test_suite.js`, so a generated test importing it dies with
+ * `ReferenceError: Deno is not defined` before any assertion runs — established
+ * by running it on Bun, not by reading it. Those targets emit `bun:test` and
+ * `node:test` instead, which are built in and need no dependency at all
+ * (`schematics/test-harness.ts`). Declaring the npm aliases here shipped two
+ * packages that could only fail.
  *
  * Declaring `npmDevDependencies` does NOT give a Deno project a `package.json`:
  * {@linkcode TemplateManifest.npmBuild} is what marks a template with a
@@ -41,10 +45,5 @@ const TEST_DEPENDENCY_VERSIONS = {
 export const TEST_DEPENDENCY_MANIFEST: TemplateManifest = {
   denoImports: Object.fromEntries(
     Object.entries(TEST_DEPENDENCY_VERSIONS).map(([pkg, v]) => [pkg, `jsr:${pkg}@^${v}`]),
-  ),
-  npmDevDependencies: Object.fromEntries(
-    Object.entries(TEST_DEPENDENCY_VERSIONS).map((
-      [pkg, v],
-    ) => [pkg, `npm:@jsr/${pkg.slice(1).replace('/', '__')}@^${v}`]),
   ),
 };

@@ -720,17 +720,23 @@ describe('runNewCommand', () => {
 
   for (const runtime of ['node', 'bun']) {
     describe(`--runtime ${runtime} — npm scripts`, () => {
-      it('declares the module test dependencies without a frontend build script', async () => {
-        // The `rest` template declares @std/* so the module schematic's emitted
-        // test can run. That must NOT be read as "this template has a frontend
-        // npm build" — a REST project with `npm run build` invoking a tool it
+      it('runs the generated test with the runtime own runner, and no frontend build', async () => {
+        // These targets declare NO `@std/*`: that harness reaches `Deno.test`
+        // internally, so a generated test importing it cannot execute here at
+        // all. `bun:test` and `node:test` are built in — verified by running
+        // them (`1 pass` / `pass 1`) against real scaffolds.
+        //
+        // And a `test` script must not be read as "this template has a frontend
+        // npm build": a REST project with `npm run build` invoking a tool it
         // does not depend on is a broken script the developer did not ask for.
         const h = harness();
 
         await h.run(['app', '--runtime', runtime, '--template', 'rest']);
 
         const pkg = JSON.parse(h.fs.read('/work/app/package.json'));
-        expect(pkg.devDependencies['@std/expect']).toBe('npm:@jsr/std__expect@^1.0.20');
+        expect(pkg.devDependencies?.['@std/expect']).toBeUndefined();
+        expect(pkg.devDependencies?.['@std/testing']).toBeUndefined();
+        expect(pkg.scripts.test).toBe(runtime === 'bun' ? 'bun test' : 'tsx --test');
         expect(pkg.scripts.build).toBeUndefined();
         expect(pkg.scripts.start).toBeDefined();
       });
