@@ -17,9 +17,9 @@ function makeRequest(raw?: Request): IRequest {
     path: '/test',
     headers: new Headers(),
     ...(raw !== undefined ? { raw } : {}),
-    json: async <T = unknown>() => ({}) as Promise<T>,
-    text: async () => '',
-    bytes: async () => new Uint8Array(),
+    json: <T = unknown>() => Promise.resolve({}) as Promise<T>,
+    text: () => Promise.resolve(''),
+    bytes: () => Promise.resolve(new Uint8Array()),
   };
 }
 

@@ -26,7 +26,7 @@ function runtimePlugin(): IPlugin {
 describe('Pipeline runs for upgrade requests (M70a)', () => {
   it('a short-circuiting guard prevents upgrade intent being set', async () => {
     let middlewareRan = false;
-    const guardMiddleware: MiddlewareFunction = async (ctx) => {
+    const guardMiddleware: MiddlewareFunction = (ctx) => {
       middlewareRan = true;
       // Short-circuit with 401 — no upgrade should happen
       ctx.response.status(401).json({ error: 'Unauthorized' });
