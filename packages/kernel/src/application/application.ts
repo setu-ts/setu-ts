@@ -562,13 +562,11 @@ class Application implements IKernelApplication {
           // No route matched — try WebSocket upgrade, then gRPC, then 404.
           // The pipeline already ran (middleware applied), so auth, metrics,
           // security headers and the shutdown drain all apply uniformly.
-          const upgradeResult = await this.#tryUpgrade(ctx);
-          if (upgradeResult !== null) {
+          if (await this.#tryUpgrade(ctx)) {
             return;
           }
 
-          const grpcResult = await this.#tryGrpc(ctx);
-          if (grpcResult !== null) {
+          if (await this.#tryGrpc(ctx)) {
             return;
           }
 

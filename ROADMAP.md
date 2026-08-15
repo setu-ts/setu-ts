@@ -6873,7 +6873,7 @@ all merge before the release branch is cut.
 
 Ordered by the sequence they should be worked, not by severity alone.
 
-- ⬜ **M70a — Pipeline bypass** (`runtime`, `kernel`, `websocket-plugin`, `grpc-plugin`,
+- ✅ **M70a — Pipeline bypass** (`runtime`, `kernel`, `websocket-plugin`, `grpc-plugin`,
   `graphql-plugin`). **Security.** `setUpgradeRouter`/`setRpcHandler` are consulted in the HTTP
   adapter **before** the kernel pipeline, so no middleware applies: an unauthenticated WebSocket
   writes through a guarded endpoint (X6-1) and an unauthenticated gRPC client reads and writes
@@ -7086,7 +7086,7 @@ branch during a version bump.
 | 68        | ✅     | common + kernel (contract gaps)       |
 | 69        | ✅     | database-plugin (drizzle query seam)  |
 | 70        | ⬜     | alpha-9 defect closeout (umbrella)    |
-| 70a       | ⬜     | pipeline bypass (security)            |
+| 70a       | ✅     | pipeline bypass (security)            |
 | 70b       | ⬜     | tenant isolation, data exposure (sec) |
 | 70c       | ⬜     | health-signal sweep (6 packages)      |
 | 70d       | ⬜     | no-argument registration seams        |
