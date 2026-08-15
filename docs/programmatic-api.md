@@ -474,6 +474,8 @@ ctx.decorators.register('MyDecorator', async (metadata, target) => {
 ### IRuntimeServices
 
 ```typescript
+type RuntimeSignal = 'SIGTERM' | 'SIGINT';
+
 interface IRuntimeServices {
   platform(): RuntimePlatform;
   version(): string;
@@ -492,8 +494,15 @@ interface IRuntimeServices {
   readonly fs?: IFileSystem;
   readonly workers?: IWorkerHost;
   readonly dns?: IDnsResolver;
+  onSignal?(signal: RuntimeSignal, handler: () => void): void;
 }
 ```
+
+`onSignal` registers a graceful-shutdown handler, so application code never needs a runtime's own
+signal API. It is **optional in two directions**, and both matter: Cloudflare Workers omits it
+because an isolate is evicted rather than signalled, and the Deno adapter omits it **on Windows**,
+where registering for `SIGTERM` throws. Call it as `runtime.onSignal?.(...)` — a present key means
+"this runtime can register one", never "this platform raises signals".
 
 ### Runtime Platform
 

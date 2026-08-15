@@ -21,7 +21,7 @@ const PROJECT: Readonly<Record<string, string>> = {
     `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`,
   '/work/svc/README.md': '# svc\n',
   '/work/svc/.gitignore': 'coverage/\n',
-  '/work/svc/src/routes/index.ts': 'export const routes = [];\n',
+  '/work/svc/src/controllers/index.ts': 'export const routes = [];\n',
   '/work/svc/src/plugins/index.ts': 'export const GENERATED_PLUGINS = [];\n',
   // Repository-level files. A workspace has ONE lockfile and ONE history, both at
   // the top, so a conversion that moved these would break the checkout.
@@ -46,7 +46,7 @@ const NODE_PROJECT: Readonly<Record<string, string>> = {
   '/work/svc/main.ts': `import { createApp } from './setu.config.ts';\n` +
     `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`,
   '/work/svc/README.md': '# svc\n',
-  '/work/svc/src/routes/index.ts': 'export const routes = [];\n',
+  '/work/svc/src/controllers/index.ts': 'export const routes = [];\n',
   '/work/svc/package-lock.json': '{}\n',
 };
 
@@ -95,7 +95,7 @@ describe('planAdoption', () => {
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     const froms = plan.files.map((f) => f.from);
-    expect(froms).toContain('src/routes/index.ts');
+    expect(froms).toContain('src/controllers/index.ts');
     expect(froms).toContain('src/plugins/index.ts');
     // Every move lands under the member root.
     for (const file of plan.files) expect(file.to.startsWith('apps/svc/')).toBe(true);
@@ -240,7 +240,7 @@ describe('runAdoptCommand', () => {
     expect(await h.run(['--port', '4000'])).toBe(0);
 
     expect(h.fs.read('/work/svc/apps/svc/setu.config.ts')).toContain('createApp');
-    expect(h.fs.read('/work/svc/apps/svc/src/routes/index.ts')).toContain('routes');
+    expect(h.fs.read('/work/svc/apps/svc/src/controllers/index.ts')).toContain('routes');
     expect(h.fs.has(`/work/svc/${WORKSPACE_MANIFEST}`)).toBe(true);
     expect(h.fs.has(`/work/svc/${DOCKERFILE}`)).toBe(true);
     expect(h.fs.has(`/work/svc/${COMPOSE_FILE}`)).toBe(true);

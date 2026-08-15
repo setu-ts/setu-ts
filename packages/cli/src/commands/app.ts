@@ -195,7 +195,7 @@ function planMember(
   // A template with a frontend build needs `node_modules`, which only the root
   // may enable. Measured: a real `react-router build` and an SSR 200 both work
   // inside a member once the root declares it.
-  if (choice.template?.manifest?.npmBuildScript !== undefined) {
+  if (choice.template?.manifest?.npmBuild !== undefined) {
     // …but the transport must be able to reach it first. A starter-composed
     // template owns its whole plugin set, so a transport that appends a plugin
     // or rewrites `MessagingPlugin`'s arguments would have its contribution
@@ -450,7 +450,17 @@ export async function runAppCommand(
     ...read.manifest,
     members: [
       ...read.manifest.members,
-      { name, port, ...(dependsOn.length === 0 ? {} : { dependsOn }) },
+      {
+        name,
+        port,
+        ...(dependsOn.length === 0 ? {} : { dependsOn }),
+        // Read from the FLAG rather than the resolved template, because the
+        // manifest is built before `planMember` resolves one — and every named
+        // template reaches HealthPlugin, so its mere presence is the answer. An
+        // unknown name is refused by `planMember` before anything is written, so
+        // a wrong value cannot reach disk (X2-7).
+        healthProbes: typeof args.flags['template'] === 'string',
+      },
     ],
   };
 

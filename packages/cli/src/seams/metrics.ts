@@ -17,7 +17,7 @@
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
-  renderList,
+  renderExportedArray,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -73,9 +73,7 @@ function renderMetricsBarrel(artifacts: SeamArtifacts): string {
 
   return assembleSeamBarrel(header, imports, [
     `/** Every generated metric definition, for \`MetricsPlugin({ customMetrics })\`. */\n` +
-    `export const ${CUSTOM_METRICS_EXPORT}: readonly NamedMetricConfig[] = [${
-      renderList(entries)
-    }];`,
+    renderExportedArray(CUSTOM_METRICS_EXPORT, 'NamedMetricConfig', entries),
   ]);
 }
 

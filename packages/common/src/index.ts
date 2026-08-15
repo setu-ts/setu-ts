@@ -64,6 +64,7 @@ export type {
   IRuntimeServices,
   IWorkerHandle,
   IWorkerHost,
+  RuntimeSignal,
   ServerHandle,
   SrvRecord,
   StatResult,

@@ -35,19 +35,23 @@ import type {
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
-import { rootManifestSettings } from './root-settings.ts';
+import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 
 /** Semver range the scaffolded project pins framework packages to. */
 const RANGE = `^${VERSION}`;
 
 /**
- * Where the entry module gets the port it binds, when it is not a literal.
+ * Where the entry module gets the port it binds, when it does not read `PORT`.
  *
- * A standalone project binds `3000`, which is what every scaffolded project did
- * before workspaces existed. A workspace member binds a port allocated by the
- * CLI, and that port has to be the SAME datum its siblings dial — so the entry
- * imports it from the generated discovery module rather than carrying a literal
- * that could drift from the map.
+ * A standalone project reads `PORT` from the environment, defaulting to `3000`,
+ * set by whatever starts the process (X4-10). NOT from the emitted `.env`:
+ * `ConfigPlugin({ envFilePath })` loads that into its own store, never into
+ * `runtime.env`, and this expression is evaluated before any plugin registers.
+ * Bun happens to auto-load `.env` into `process.env`; Deno and Node do not, so
+ * the portable answer is the process environment. A workspace member does
+ * NOT: its port is allocated by the CLI and has to be the SAME datum its
+ * siblings dial, so the entry imports it from the generated discovery module
+ * rather than taking an environment override that could drift from the map.
  */
 export interface EntryPort {
   /** The identifier the entry imports, e.g. `SERVICE_PORT`. */
@@ -353,7 +357,7 @@ export async function ${CONFIG_EXPORT}(
         ...host.appFactoryContext,
       }) ?? ''
     });
-${middlewareLines}
+${middlewareLines}${setupLines}
   return app;
 }
 `;
@@ -371,9 +375,24 @@ ${middlewareLines}
     ...pluginSpreads.map((spread) => `      ${spread},`),
   ].join('\n');
 
-  const factoryParam = onWorkers ? 'env: Readonly<Record<string, unknown>> = {}' : '';
+  const wantsWaitUntil = onWorkers && consumesWaitUntil(plugins);
+  // Wrapped one-per-line when there are two, which is what `deno fmt` produces
+  // for a signature past the emitted line width — a generated project has to
+  // pass its OWN `deno fmt --check` (M63/D6).
+  const factoryParam = !onWorkers
+    ? ''
+    : wantsWaitUntil
+    ? '\n  env: Readonly<Record<string, unknown>> = {},' +
+      '\n  waitUntil?: (promise: Promise<unknown>) => void,\n'
+    : 'env: Readonly<Record<string, unknown>> = {}';
   const envDoc = onWorkers
-    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler`
+    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler${
+      wantsWaitUntil
+        ? `\n * @param waitUntil - The platform's post-response sink, from \`src/index.ts\`.` +
+          `\n * Only the Worker ENTRY can import it: \`setu\` loads this module under Deno,` +
+          `\n * which cannot resolve \`cloudflare:workers\` at all.`
+        : ''
+    }`
     : '';
 
   return `${imports}
@@ -401,14 +420,30 @@ ${middlewareLines}${setupLines}
 }
 
 /**
+ * Whether any wiring's Workers arguments consume the post-response sink.
+ *
+ * Read off the RENDERED argument string rather than a flag beside it, so the
+ * parameter is emitted exactly when something references it — a flag could say
+ * yes while the args said nothing, leaving the generated project with an unused
+ * parameter, or say no while the args named it, leaving it undeclared.
+ *
+ * @param plugins - The host's resolved wirings
+ * @returns Whether the factory must accept a `waitUntil` argument
+ */
+function consumesWaitUntil(plugins: readonly Wiring[]): boolean {
+  return plugins.some((wiring) => wiring.workersArgs?.includes('waitUntil') === true);
+}
+
+/**
  * The application entry shared by the Deno, Node, and Bun targets.
  *
  * All three bind a socket through `app.start({ port })`, which delegates to the
  * runtime's Hono serve adapter (M23). The plugin list lives in
  * {@linkcode configModule}, not here.
  *
- * @param runtime - The selected runtime target, which decides how the shutdown
- * signal is caught
+ * @param runtime - The selected runtime target. It no longer decides how the
+ * shutdown signal is caught — all three socket targets emit one identical body —
+ * and is threaded on only so `shutdownBlock` can assert the Workers case away
  * @param port - Where the bound port comes from, when it is not the literal
  * default. A workspace member imports it, so the port it binds and the port its
  * siblings dial are one datum rather than two that can drift.
@@ -416,10 +451,30 @@ ${middlewareLines}${setupLines}
  */
 function serveEntry(runtime: TargetRuntime, port?: EntryPort): string {
   const portImport = port === undefined ? '' : `import { ${port.symbol} } from '${port.from}';\n`;
-  const portExpression = port === undefined ? '3000' : port.symbol;
+  // A workspace member binds the port the CLI allocated it, imported from the
+  // generated discovery module so the port it binds and the port its siblings
+  // dial stay ONE datum (M62). A standalone project has no such map and used to
+  // carry the literal `3000`, so the port could not be set without editing the
+  // source (X4-10). It now reads `PORT` from the PROCESS environment, through
+  // `IRuntimeServices` rather than `Deno.env`/`process.env`, so the entry stays
+  // portable across all three socket runtimes.
+  //
+  // Deliberately not the emitted `.env`: `ConfigPlugin({ envFilePath })` loads
+  // that into its own store, and this expression is evaluated before any plugin
+  // registers — so a `PORT=` line there would be read by `config.get('PORT')`
+  // and not by this.
+  const portExpression = port === undefined ? "Number(runtime.env.PORT ?? '3000')" : port.symbol;
 
   return `import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger } from '@setu-ts/common';
 ${portImport}
+// Built before the application, because the port is needed at start() and
+// plugins do not register until then. Safe to hold alongside the application's
+// own instance: runtime services are a stateless facade over platform globals.
+const runtime = createRuntimeServices();
+
 const app = await ${CONFIG_EXPORT}();
 
 await app.start({ port: ${portExpression} });
@@ -439,12 +494,14 @@ ${shutdownBlock(runtime)}`;
  * disconnect). `terminationGracePeriodSeconds` and `stop_grace_period` are
  * decorative without it.
  *
- * The framework deliberately does not install this itself: a signal handler
- * needs a runtime API, so a framework-level seam would be an `IRuntimeServices`
- * widening (recorded as out of scope in M39, which found the same defect in this
- * repository's own examples and fixed it the same way). Emitting it here is what
- * makes the documented pattern the default rather than something a reader has to
- * find in a deployment guide.
+ * The framework still does not install this itself, though the seam it needs now
+ * exists: M39 recorded an `IRuntimeServices` widening as out of scope, and this
+ * milestone shipped it as `onSignal?` — which is exactly what the emitted body
+ * calls. What is deliberate is that the KERNEL does not register the handler;
+ * `app.start({ gracefulShutdown: true })` is the option that would, and it is
+ * deferred to M40. Emitting the block here is what makes the documented pattern
+ * the default rather than something a reader has to find in a deployment
+ * guide.
  *
  * `SIGINT` is caught beside `SIGTERM` so a local `Ctrl+C` exercises the exact
  * path the container runtime will take.
@@ -457,44 +514,45 @@ function shutdownBlock(runtime: TargetRuntime): string {
   // entry), and has no process to signal: an isolate is evicted, not stopped.
   if (runtime === 'cloudflare-workers') return '';
 
-  const preamble = `
+  // ONE body for Deno, Node and Bun — byte-identical. Before M70h this
+  // rendered two different bodies reaching for `Deno.addSignalListener` /
+  // `Deno.exit` / `Deno.build.os` and `process.on` / `process.exit`, which put
+  // runtime APIs in application code (AI_GUIDELINES §4.2) and meant moving a
+  // project between runtimes required rewriting its entry point by hand.
+  //
+  // All four touches now go through capabilities that already exist:
+  //   - the signal listener  → `IRuntimeServices.onSignal` (M70h)
+  //   - the OS guard         → gone; the Deno adapter omits `onSignal` on
+  //                            Windows, where `addSignalListener` throws
+  //   - `Deno.exit`/`process.exit` → `IRuntimeServices.exit`
+  //   - `console.error`      → the resolved `ILogger`
+  //
+  // `onSignal` is called optionally because it is genuinely absent on Windows
+  // and on Workers; `?.` is the honest read, not defensive noise.
+  return `
 // Graceful shutdown. Without this the process dies from the signal itself and
 // \`app.stop()\` never runs, so in-flight requests are cut, the service never
 // deregisters from discovery, and no database or broker disconnects.
-`;
+//
+// Portable across every runtime: no \`Deno\`, no \`process\`, no OS check. On
+// Windows \`onSignal\` is absent and this registers nothing, which is correct —
+// Windows has no SIGTERM to catch.
+//
+// The logger is resolved only if one is registered: a project scaffolded
+// without LoggerPlugin still shuts down cleanly, it just reports nothing.
+const logger = app.services.has(CAPABILITIES.LOGGER)
+  ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
+  : undefined;
 
-  if (runtime === 'deno') {
-    // Guarded: \`Deno.addSignalListener('SIGTERM')\` THROWS on Windows, which
-    // would turn a portability detail into a crash at startup.
-    return `${preamble}if (Deno.build.os !== 'windows') {
-  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    Deno.addSignalListener(signal, () => {
-      // The .catch is not optional: a rejecting onShutdown hook makes stop()
-      // reject, and an unhandled rejection replaces the reason with a trace.
-      void app.stop()
-        .then(() => Deno.exit(0))
-        .catch((error: unknown) => {
-          console.error('Graceful shutdown failed:', error);
-          Deno.exit(1);
-        });
-    });
-  }
-}
-`;
-  }
-
-  // Node and Bun share one block: Bun implements the Node `process` API, and
-  // registering a listener is a no-op on a platform that never raises the
-  // signal rather than a throw — so this needs no OS guard.
-  return `${preamble}for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-  process.on(signal, () => {
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
     // The .catch is not optional: a rejecting onShutdown hook makes stop()
     // reject, and an unhandled rejection replaces the reason with a trace.
     void app.stop()
-      .then(() => process.exit(0))
+      .then(() => runtime.exit(0))
       .catch((error: unknown) => {
-        console.error('Graceful shutdown failed:', error);
-        process.exit(1);
+        logger?.error('Graceful shutdown failed', { error });
+        runtime.exit(1);
       });
   });
 }
@@ -572,6 +630,7 @@ ${cases}
 function workersEntry(
   workerExports: readonly WorkerExport[],
   entryReExports: readonly string[],
+  wantsWaitUntil: boolean,
 ): string {
   // `env` is threaded in on BOTH paths. On Workers the environment is not
   // process-wide — bindings and variables arrive as the `env` argument below —
@@ -579,9 +638,16 @@ function workersEntry(
   // nothing, and a plugin-list app would register a RuntimePlugin whose
   // `runtime.env` is empty. Either failure is permanent, because `booted`
   // memoises the rejection.
+  // THE import lives here and nowhere else. `setu commands` loads
+  // `setu.config.ts` under Deno to discover plugin-contributed verbs, and Deno
+  // cannot resolve `cloudflare:workers` at all — putting it there, which is what
+  // the plugin README's only usage example shows, breaks the CLI outright with
+  // `Unsupported scheme "cloudflare"`. This entry module is never loaded by
+  // `setu`, so it is the one place the specifier is safe.
+  const waitUntilImport = wantsWaitUntil ? "import { waitUntil } from 'cloudflare:workers';\n" : '';
   const bootSignature =
     'async function boot(env: Record<string, unknown>): Promise<IApplication> {';
-  const bootCall = `${CONFIG_EXPORT}(env)`;
+  const bootCall = `${CONFIG_EXPORT}(env${wantsWaitUntil ? ', waitUntil' : ''})`;
   const bootedInit = 'booted ??= boot(env);';
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
@@ -612,7 +678,7 @@ ${renderRoutes(entry)}
 
   return `import type { IApplication } from '@setu-ts/common';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
-${exportImports === '' ? '' : `${exportImports}\n`}
+${waitUntilImport}${exportImports === '' ? '' : `${exportImports}\n`}
 let booted: Promise<IApplication> | undefined;
 
 /**
@@ -647,12 +713,22 @@ ${reExportBlock}`;
  * @param host - The resolved template host
  * @returns Bare package names, deduplicated
  */
-function frameworkPackages(host: ResolvedHost): readonly string[] {
+function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly string[] {
   // `common` is unconditional: the config module imports IApplication whichever
   // way it builds the app. `kernel` is not — a starter factory returns the
   // application, so `createApplication` is never imported on that path and
   // declaring the dependency would be a package the project never references.
   const packages = new Set<string>(['common']);
+  // Every socket target's `main.ts` imports `createRuntimeServices` to read the
+  // port and register its shutdown signals (M70h/B1). It is declared here
+  // rather than left to the plugin scan because a starter-composed host
+  // (`full-stack`) has an EMPTY plugin list — its RuntimePlugin comes from the
+  // starter — so the scan alone would leave `main.ts` importing a package the
+  // project never declared. Workers renders a `fetch` export instead and needs
+  // no entry of its own.
+  if (runtime !== 'cloudflare-workers') {
+    packages.add('runtime');
+  }
   if (host.appFactory === undefined) {
     packages.add('kernel');
   } else {
@@ -671,9 +747,9 @@ function frameworkPackages(host: ResolvedHost): readonly string[] {
  * @param host - The resolved template host
  * @returns Specifier → `jsr:` URL
  */
-function jsrImports(host: ResolvedHost): Record<string, string> {
+function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const imports: Record<string, string> = {};
-  for (const pkg of frameworkPackages(host)) {
+  for (const pkg of frameworkPackages(host, runtime)) {
     imports[`@setu-ts/${pkg}`] = `jsr:@setu-ts/${pkg}@${RANGE}`;
   }
   // Template aliases last: an alias like `~/` is not a framework package and
@@ -688,12 +764,69 @@ function jsrImports(host: ResolvedHost): Record<string, string> {
  * @param host - The resolved template host
  * @returns Specifier → `npm:@jsr/…` range
  */
-function npmDependencies(host: ResolvedHost): Record<string, string> {
+function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const deps: Record<string, string> = {};
-  for (const pkg of frameworkPackages(host)) {
+  for (const pkg of frameworkPackages(host, runtime)) {
     deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
   }
   return { ...deps, ...host.manifest?.npmDependencies };
+}
+
+/**
+ * The task block a generated Deno manifest carries.
+ *
+ * A template with a frontend build gets `install` and `build` beside `start`,
+ * and `start` DEPENDS on `build` — which is the whole of X5-3. Before this the
+ * Deno target emitted the build command into `package.json` alone, whose script
+ * runner a Deno project never invokes, so `deno task start` failed with
+ * `Failed to load React Router server build … Module not found`. The generated
+ * README said `deno task start` and nothing else; there was no `build` task, no
+ * `install` task, and no mention anywhere of how the server build got produced.
+ *
+ * These are the four pieces `apps/full-stack/deno.json` — described in its own
+ * README as "the runnable counterpart to `setu new --template full-stack`" —
+ * has carried all along.
+ *
+ * @param runtime - The selected runtime target
+ * @param host - The resolved template host, for its extra tasks
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The `tasks` block, in a fixed order
+ */
+function denoTasks(
+  runtime: TargetRuntime,
+  host: ResolvedHost,
+  manifest?: TemplateManifest,
+): Record<string, string> {
+  const entry = runtime === 'deno' ? 'main.ts' : 'src/index.ts';
+  // Workers serves through a `fetch` export, so `deno run` binds nothing and
+  // exits 0 — Deno's own warning names `deno serve` as the fix (X9-7).
+  const start = runtime === 'cloudflare-workers'
+    ? `deno serve ${denoPermissions(manifest)} ${entry}`
+    : `deno run ${denoPermissions(manifest)} ${entry}`;
+
+  // A3: every template emits a `test` task now. `setu generate module` writes a
+  // `*.service.test.ts`, and NO template declared a task that runs it — so the
+  // generated test sat beside the generated service, unreachable from
+  // `deno check main.ts setu.config.ts`, and both stayed broken through a full
+  // green run of every gate a developer had.
+  const test = { test: 'deno test -A' };
+
+  if (manifest?.npmBuild === undefined) {
+    return { start, ...test, ...host.extraTasks };
+  }
+
+  return {
+    // `--min-dep-age 0` for the same reason the root manifest carries
+    // `minimumDependencyAge`: this project is pinned to the CLI's own version,
+    // which on release day is younger than Deno's 24-hour policy allows (D1).
+    // The manifest setting covers a bare `deno install`; this task passes its
+    // own flags, so it needs the flag too.
+    install: 'deno install --allow-scripts --min-dep-age 0',
+    build: `deno task install && ${manifest.npmBuild.denoCommand}`,
+    start: `deno task build && ${start}`,
+    ...test,
+    ...host.extraTasks,
+  };
 }
 
 /**
@@ -702,7 +835,8 @@ function npmDependencies(host: ResolvedHost): Record<string, string> {
  * Matches the `fmt.lineWidth` the root manifest declares, so source this module
  * emits already satisfies the formatter that project ships with.
  */
-const LINE_WIDTH = 100;
+// The budget the generated `fmt` config sets; see `root-settings.ts`.
+const LINE_WIDTH = GENERATED_LINE_WIDTH;
 
 /**
  * Renders one import statement, wrapped when it would overflow.
@@ -840,9 +974,15 @@ function npmScripts(
   manifest?: TemplateManifest,
 ): Record<string, string> {
   const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
-  return manifest?.npmBuildScript === undefined
-    ? { start }
-    : { build: manifest.npmBuildScript, start };
+  // A3 applies to every target, not just the Deno ones: `setu generate module`
+  // emits a `*.service.test.ts` here too, and before this nothing could run it.
+  // Each runtime's own runner, matching the harness the schematic emits — `bun
+  // test` for `bun:test`, and `node --test` under the same loader `start` uses,
+  // since the generated test is TypeScript.
+  const test = runtime === 'bun' ? 'bun test' : `${NODE_RUNNER} --test`;
+  return manifest?.npmBuild === undefined
+    ? { start, test }
+    : { build: manifest.npmBuild.script, start, test };
 }
 
 /**
@@ -889,7 +1029,19 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   // depending on `@types/node` — so the entry's listener type-checks without the
   // project claiming to be a Node one.
   if (runtime === 'bun') return { '@types/bun': '^1.2.0' };
-  if (runtime === 'cloudflare-workers') return { wrangler: '^4.0.0' };
+  // X9-4: a Workers project had NO type-checker. `wrangler` bundles with
+  // esbuild, which strips types without checking them, and `deno check` resolves
+  // `cloudflare:workers` to an untyped module — so `DurableObject` becomes `any`
+  // and the README's own Durable Object snippet fails with TS2339/TS4112 under
+  // the only checker present. `tsc` reads the `tsconfig.json` the scaffold
+  // already emitted and nothing consumed.
+  if (runtime === 'cloudflare-workers') {
+    return {
+      wrangler: '^4.0.0',
+      typescript: '^5.7.0',
+      '@cloudflare/workers-types': '^4.20250109.0',
+    };
+  }
   return {};
 }
 
@@ -934,10 +1086,10 @@ function standaloneNpmFiles(
   // simply nothing to install. Deno is deliberately excluded: it resolves
   // through the import map, and a package.json switches it to node_modules.
   const onWorkers = runtime === 'cloudflare-workers';
-  if (manifest?.npmBuildScript === undefined && !onWorkers) return [];
+  if (manifest?.npmBuild === undefined && !onWorkers) return [];
 
   const dependencies = {
-    ...(onWorkers ? npmDependencies(host) : {}),
+    ...(onWorkers ? npmDependencies(host, runtime) : {}),
     ...manifest?.npmDependencies,
   };
   const devDependencies = {
@@ -948,8 +1100,8 @@ function standaloneNpmFiles(
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
-    ...(manifest?.npmBuildScript === undefined ? {} : { build: manifest.npmBuildScript }),
-    ...(onWorkers ? { dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
+    ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
+    ...(onWorkers ? { check: 'tsc --noEmit', dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
   };
 
   return [
@@ -1033,7 +1185,13 @@ ${PROGRAM_NAME} generate --help
   // produce is noise that invites copying it into projects that would need it.
   const gitignore = `${runtime === 'deno' ? '' : 'node_modules/\n'}coverage/\n${
     runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''
-  }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}`;
+  }${
+    // A frontend build's output is generated, so it is ignored like any other
+    // build artifact — the generated file used to list only `coverage/` and the
+    // env file, which left a minified bundle tracked (D2).
+    manifest?.npmBuild === undefined ? '' : `${manifest.npmBuild.outputDir}/\n`}${
+    manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`
+  }`;
 
   const files: GeneratedFile[] = [
     { path: 'README.md', contents: readme },
@@ -1041,7 +1199,6 @@ ${PROGRAM_NAME} generate --help
   ];
 
   if (runtime === 'deno' || runtime === 'cloudflare-workers') {
-    const entry = runtime === 'deno' ? 'main.ts' : 'src/index.ts';
     // A workspace member is the only caller that passes a port, and a member's
     // manifest must not carry the root-only settings below: the workspace root
     // already declares them for every member, and Deno refuses some of them
@@ -1053,16 +1210,25 @@ ${PROGRAM_NAME} generate --help
       contents: `${
         JSON.stringify(
           {
-            tasks: {
-              start: `deno run ${denoPermissions(manifest)} ${entry}`,
-              ...host.extraTasks,
-            },
-            ...(isWorkspaceMember ? {} : rootManifestSettings()),
+            tasks: denoTasks(runtime, host, manifest),
+            ...(isWorkspaceMember ? {} : rootManifestSettings(manifest?.npmBuild?.outputDir)),
+            // A `package.json` switches Deno to node_modules resolution, and the
+            // full-stack template is the one that emits one on a Deno target. A
+            // pristine scaffold then failed its OWN `check:app` on a cold
+            // checkout — `Could not resolve "@react-router/fs-routes", but found
+            // it in a package.json` — advising a task the project did not have
+            // (X5-4). `apps/full-stack` calls this setting load-bearing and sets
+            // it; the renderer never did.
+            //
+            // Refused in a workspace member, where the root declares it instead.
+            ...(!isWorkspaceMember && manifest?.npmBuild !== undefined
+              ? { nodeModulesDir: 'auto' }
+              : {}),
             // Declared by the template rather than fixed here: `deno check` reads
             // this file, and what it needs depends on what the template emits —
             // decorated classes need `experimentalDecorators`, JSX needs `jsx`.
             ...(compilerOptions === undefined ? {} : { compilerOptions }),
-            imports: jsrImports(host),
+            imports: jsrImports(host, runtime),
           },
           null,
           2,
@@ -1086,7 +1252,7 @@ ${PROGRAM_NAME} generate --help
             version: '0.1.0',
             type: 'module',
             scripts: npmScripts(runtime, manifest),
-            dependencies: npmDependencies(host),
+            dependencies: npmDependencies(host, runtime),
             // Runtime-level first, so a template that pins its own copy of the
             // same package wins — the template knows what its build needs.
             //
@@ -1133,7 +1299,11 @@ ${PROGRAM_NAME} generate --help
   if (runtime === 'cloudflare-workers') {
     files.push({
       path: 'src/index.ts',
-      contents: workersEntry(host.workerExports, host.entryReExports),
+      contents: workersEntry(
+        host.workerExports,
+        host.entryReExports,
+        consumesWaitUntil(host.plugins),
+      ),
     });
     files.push({
       path: 'wrangler.toml',
@@ -1148,16 +1318,58 @@ compatibility_flags = ["nodejs_compat"]
 
 # Platform bindings reach the application through the \`env\` argument of the
 # \`fetch\` handler, which \`src/index.ts\` threads into \`${CONFIG_EXPORT}()\`.
-# Register \`CloudflarePlugin\` from @setu-ts/cloudflare-plugin to serve
-# the cache and storage capabilities from KV and R2.
+# Register \`CloudflarePlugin\` from @setu-ts/cloudflare-plugin to serve the
+# cache, storage, database, queue, messaging and realtime capabilities from the
+# bindings below. Add a package with \`${PROGRAM_NAME} add cloudflare\`.
 #
+# The binding types most projects reach for are listed. Uncomment what you use — a
+# binding declared here but absent from the plugin's options is inert, and one
+# the plugin names but wrangler does not declare fails at startup with an error
+# naming the binding and the ones that ARE present.
+#
+# KV — CloudflarePlugin({ cache: { binding: 'CACHE_KV' } })
 # [[kv_namespaces]]
 # binding = "CACHE_KV"
 # id = "<your-kv-namespace-id>"
 #
+# R2 — CloudflarePlugin({ storage: { binding: 'UPLOADS' } })
 # [[r2_buckets]]
 # binding = "UPLOADS"
 # bucket_name = "<your-bucket-name>"
+#
+# D1 — new D1Adapter(env.DB) handed to DatabasePlugin({ type: 'custom' })
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "<your-database-name>"
+# database_id = "<your-database-id>"
+#
+# Queues, PRODUCER — CloudflarePlugin({ queue: { binding: 'JOBS' } })
+# [[queues.producers]]
+# binding = "JOBS"
+# queue = "<your-queue-name>"
+#
+# Queues, CONSUMER — drives the \`queue\` export in src/index.ts.
+# \`max_batch_timeout = 0\` is REQUIRED for brokered request/reply: the default
+# of 5s alone exhausts the 5000ms default request budget.
+# [[queues.consumers]]
+# queue = "<your-queue-name>"
+# max_batch_timeout = 0
+#
+# Durable Objects — the realtime backplane and the distributed lock. The class
+# must be EXPORTED from your own src/index.ts; the plugin ships the core it
+# delegates to, not the class itself.
+# [[durable_objects.bindings]]
+# name = "REPLY_INBOX"
+# class_name = "RealtimeBackplaneObject"
+#
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["RealtimeBackplaneObject"]
+#
+# Cron Triggers — drives the \`scheduled\` export. SchedulerPlugin cannot honour
+# runtime schedule() calls on Workers, so the schedule lives here.
+# [triggers]
+# crons = ["0 * * * *"]
 ${host.wranglerToml}`,
     });
   } else {

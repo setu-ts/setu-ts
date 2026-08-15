@@ -35,6 +35,7 @@ import type { GeneratedFile } from '../utils/file-writer.ts';
 import { memberEnvironment } from './compose.ts';
 import type { WorkspaceManifest } from './manifest.ts';
 import type { TransportSpec } from './transport.ts';
+import { wrapProse } from '../utils/wrap-prose.ts';
 
 /** Where the generated Kubernetes objects live, relative to the workspace root. */
 export const K8S_DIR = 'k8s';
@@ -61,7 +62,48 @@ function memberObjects(
   port: number,
   siblings: readonly WorkspaceManifest['members'][number][],
   transport: TransportSpec,
+  healthProbes: boolean,
 ): string {
+  // X2-7: every generated Deployment used a TCP probe and a comment telling the
+  // developer to switch to `httpGet` "once" the member registers HealthPlugin —
+  // a decision the generator already holds the answer to, because the template
+  // is an argument to `setu generate app` and the manifest is rendered per
+  // member. An HTTP probe is the better signal: it waits for the plugins rather
+  // than for the socket, so a member whose registration throws stops being
+  // routed instead of being reported ready.
+  //
+  // A template-LESS member keeps the TCP probe with the comment, because it
+  // genuinely serves neither path — pointing a probe at a 404 would make it
+  // permanently unready.
+  const probeBlock = healthProbes
+    ? `          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10`
+    : `          # A TCP probe, not an HTTP one: this member was generated with no
+          # --template, so it registers no HealthPlugin and serves neither
+          # \`/live\` nor \`/ready\`. Register the plugin and switch to
+          # \`httpGet: { path: /ready, port: http }\` — it is the better signal,
+          # because it waits for the plugins rather than for the socket.
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10`;
+
   const env = memberEnvironment(siblings, transport);
   const envBlock = Object.keys(env).length === 0 ? '' : `
           env:
@@ -120,20 +162,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ['ALL']${envBlock}
-          # A TCP probe, not an HTTP one: \`/live\` and \`/ready\` exist only when this
-          # member registers HealthPlugin, which depends on its template. Switch to
-          # \`httpGet: { path: /ready, port: http }\` once it does — it is the better
-          # signal, because it waits for the plugins rather than for the socket.
-          readinessProbe:
-            tcpSocket:
-              port: http
-            initialDelaySeconds: 2
-            periodSeconds: 5
-          livenessProbe:
-            tcpSocket:
-              port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
+${probeBlock}
           resources:
             requests:
               cpu: 50m
@@ -198,6 +227,7 @@ export function workspaceK8sFiles(
       member.port,
       members.filter((other) => other.name !== member.name),
       transport,
+      member.healthProbes === true,
     )
   );
 
@@ -217,14 +247,26 @@ What this does NOT include, deliberately:
 
 - **An Ingress.** Which controller, which host, and which TLS issuer are cluster decisions, and a
   guessed Ingress is one that silently routes nothing.
-- **The transport's backing service.** ${
-    transport.compose === undefined
-      ? 'This workspace needs none.'
-      : `A ${transport.name} for a cluster is a managed service or a StatefulSet with storage, ` +
-        `not the single container the Compose stack runs for development.`
+${
+    wrapProse(
+      `- **The transport's backing service.** ${
+        transport.compose === undefined
+          ? 'This workspace needs none.'
+          : `A ${transport.name} for a cluster is a managed service or a StatefulSet with ` +
+            `storage, not the single container the Compose stack runs for development.`
+      }`,
+      '  ',
+    )
   }
-- **HTTP probes.** The probes are \`tcpSocket\`, because \`/live\` and \`/ready\` exist only when a member
-  registers HealthPlugin. Switch them once it does.
+${
+    wrapProse(
+      '- **HTTP probes** for a template-less member. A member generated WITH a template ' +
+        'serves `/live` and `/ready`, so its probes are `httpGet`; one generated without ' +
+        'registers no HealthPlugin and keeps a `tcpSocket` probe, because pointing a probe at a ' +
+        '404 would make it permanently unready.',
+      '  ',
+    )
+  }
 - **A discovery backend.** These objects make each member reachable by its Service name, which is
   what the generated map's \`<MEMBER>_HOST\` variables are set to here. For anything beyond a fixed
   list, use the plugin's \`kubernetes\` provider — it needs the RBAC documented in this repository's

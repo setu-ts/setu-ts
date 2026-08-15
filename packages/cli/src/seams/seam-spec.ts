@@ -17,6 +17,7 @@
 
 import type { DerivedNames } from '../utils/names.ts';
 import { deriveNames } from '../utils/names.ts';
+import { GENERATED_LINE_WIDTH } from '../templates/root-settings.ts';
 
 /**
  * The artifact names already present in a project, keyed by schematic name.
@@ -117,11 +118,63 @@ export function seamNames(
  * @param entries - Rendered entries
  * @returns The text between the brackets
  */
-export function renderList(entries: readonly string[]): string {
-  if (entries.length === 0) return '';
+/**
+ * Renders one import statement, wrapping when it would exceed the width.
+ *
+ * The same budget the declarations answer to, and for the same reason: a family
+ * whose artifact exports two or three symbols emits an import line that
+ * `deno fmt` rewraps, so a scaffolded project fails its own `deno fmt --check`
+ * on a barrel the CLI wrote. Measured before this: 103–112 columns in the CQRS,
+ * events and middleware barrels once three artifacts existed.
+ *
+ * The wrapped shape is the one `deno fmt` itself produces, so formatting the
+ * result is a no-op rather than a rewrite.
+ *
+ * @param symbols - The names to import
+ * @param module - The module specifier, already relative
+ * @returns The import statement
+ */
+function renderImport(symbols: readonly string[], module: string): string {
+  const inline = `import { ${symbols.join(', ')} } from '${module}';`;
+  if (inline.length <= GENERATED_LINE_WIDTH) return inline;
+  return `import {\n  ${symbols.join(',\n  ')},\n} from '${module}';`;
+}
+
+/**
+ * Renders an exported readonly-array declaration, wrapping when it runs long.
+ *
+ * Takes the NAME and the ELEMENT TYPE rather than a pre-measured prefix width,
+ * because the width is then derived from the very text this returns and a caller
+ * cannot get it wrong. The previous shape took a `prefixWidth` number defaulting
+ * to 24, which every caller had to remember to override with its own
+ * declaration's length — six of the eight did not, and the CQRS barrel that did
+ * wrote the declaration out a second time just to call `.length` on it.
+ *
+ * That default is the X2-4 defect in miniature. Measured: three generated
+ * plugins rendered
+ * `export const GENERATED_PLUGINS: readonly IPlugin[] = [OrderArchivePlugin(), …];`
+ * at **123 columns**, and the scaffolded project failed its own
+ * `deno fmt --check` on a file the CLI had just written.
+ *
+ * @param name - The exported constant's name
+ * @param elementType - The array's element type, without the `[]`
+ * @param entries - The rendered entries, already in source form
+ * @returns The complete declaration, ending in `;`
+ */
+export function renderExportedArray(
+  name: string,
+  elementType: string,
+  entries: readonly string[],
+): string {
+  const prefix = `export const ${name}: readonly ${elementType}[] = [`;
   const inline = entries.join(', ');
-  if (inline.length <= 76) return inline;
-  return `\n  ${entries.join(',\n  ')},\n`;
+
+  // `+ 2` for the closing `];`. Measured against the line the entries actually
+  // land on, which is the whole point of deriving the prefix here.
+  if (entries.length === 0 || prefix.length + inline.length + 2 <= GENERATED_LINE_WIDTH) {
+    return `${prefix}${inline}];`;
+  }
+  return `${prefix}\n  ${entries.join(',\n  ')},\n];`;
 }
 
 /**
@@ -174,7 +227,7 @@ export function renderSeamImports(
 ): string {
   if (names.length === 0) return '';
   return names
-    .map((name) => `import { ${symbols(deriveNames(name)).join(', ')} } from '${module(name)}';`)
+    .map((name) => renderImport(symbols(deriveNames(name)), module(name)))
     .join('\n');
 }
 

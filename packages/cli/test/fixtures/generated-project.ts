@@ -191,10 +191,16 @@ export interface SignalOutcome {
  * measures startup rather than shutdown, and would pass whether or not a handler
  * is installed.
  *
+ * The port is supplied through the environment rather than by rewriting the
+ * generated source. Before M70h the entry carried a literal `3000` and this
+ * fixture patched it, which meant the boot gate exercised a file the CLI had
+ * not actually emitted. `PORT` is now the documented way in (X4-10), so the
+ * fixture uses it and the booted entry is byte-for-byte what a developer gets.
+ *
  * @param project - The project directory, already repointed at the workspace
  * @param signal - The signal to send once it is serving
  * @returns How the process ended
- * @throws {Error} If the entry has no literal port to rebind, or never serves
+ * @throws {Error} If the project never serves
  */
 export async function bootAndSignal(
   project: string,
@@ -202,14 +208,11 @@ export async function bootAndSignal(
 ): Promise<SignalOutcome> {
   const port = unusedPort();
   const entry = `${project}/main.ts`;
-  const source = await Deno.readTextFile(entry);
-  const patched = source.replace(/port: \d+/, `port: ${port}`);
-  if (patched === source) throw new Error(`No literal port to rebind in ${entry}.`);
-  await Deno.writeTextFile(entry, patched);
 
   const child = new Deno.Command(Deno.execPath(), {
     args: ['run', '-A', '--node-modules-dir=none', '--config', `${project}/deno.json`, entry],
     cwd: project,
+    env: { PORT: String(port) },
     stdout: 'piped',
     stderr: 'piped',
   }).spawn();
@@ -332,12 +335,13 @@ export async function bootWithGeneratedPermissions(
   const flags = start.replace(/^deno run\s+/, '').replace(/\s+\S+\.ts$/, '').split(/\s+/)
     .filter((flag) => flag.startsWith('--'));
 
+  // The port arrives through the environment, exactly as the generated project
+  // documents (X4-10) — NOT by rewriting the entry, which would mean this gate
+  // boots a file the CLI never emitted. It also proves `--allow-env` is in the
+  // generated permission set: without it this boot fails with NotCapable
+  // rather than silently binding a default.
   const port = unusedPort();
   const entry = `${project}/main.ts`;
-  const source = await Deno.readTextFile(entry);
-  const patched = source.replace(/port: \d+/, `port: ${port}`);
-  if (patched === source) throw new Error(`No literal port to rebind in ${entry}.`);
-  await Deno.writeTextFile(entry, patched);
 
   const child = new Deno.Command(Deno.execPath(), {
     args: [
@@ -349,6 +353,7 @@ export async function bootWithGeneratedPermissions(
       entry,
     ],
     cwd: project,
+    env: { PORT: String(port) },
     stdout: 'piped',
     stderr: 'piped',
   }).spawn();

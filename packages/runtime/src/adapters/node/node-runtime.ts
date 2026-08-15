@@ -10,7 +10,13 @@
  * @module
  */
 
-import type { IDnsResolver, IFileSystem, IRuntimeServices, IWorkerHost } from '@setu-ts/common';
+import type {
+  IDnsResolver,
+  IFileSystem,
+  IRuntimeServices,
+  IWorkerHost,
+  RuntimeSignal,
+} from '@setu-ts/common';
 import { hostname as osHostname } from 'node:os';
 import * as nodeFs from 'node:fs/promises';
 // `createReadStream` lives in `node:fs`, NOT `node:fs/promises` — the promises
@@ -58,11 +64,12 @@ export interface StatsLike {
 export interface NodeModules {
   /** File-system operations (compatible with `node:fs/promises`). */
   fs: NodeFsOperations;
-  /** Process object (version, env, exit). */
+  /** Process object (version, env, exit, signal listening). */
   proc: {
     version: string;
     env: Record<string, string | undefined>;
     exit: (code?: number) => never;
+    on: (event: RuntimeSignal, listener: () => void) => void;
   };
   /** Hostname function (from `node:os`). */
   hostname: () => string;
@@ -85,6 +92,8 @@ export interface NodeHost {
   env: Record<string, string | undefined>;
   /** Exit the process. */
   exit: (code?: number) => never;
+  /** Registers a process-termination signal listener. */
+  onSignal: (signal: RuntimeSignal, handler: () => void) => void;
   /** Read file as bytes. */
   readFile: (path: string) => Promise<Uint8Array>;
   /** Resolve a path to its canonical absolute form, following symlinks. */
@@ -139,6 +148,7 @@ export function buildNodeHost(
     hostname: mods.hostname(),
     env: mods.proc.env,
     exit: (code?: number) => mods.proc.exit(code),
+    onSignal: (signal: RuntimeSignal, handler: () => void) => mods.proc.on(signal, handler),
     readFile: (path: string) => mods.fs.readFile(path) as Promise<Uint8Array>,
     realPath: (path: string) => mods.fs.realpath(path),
     writeFile: (path: string, data: Uint8Array) => mods.fs.writeFile(path, data) as Promise<void>,
@@ -214,6 +224,7 @@ export function createNodeRuntimeServices(
     hostname: () => host.hostname,
     env: host.env as Readonly<Record<string, string | undefined>>,
     exit: (code?: number) => host.exit(code),
+    onSignal: (signal: RuntimeSignal, handler: () => void) => host.onSignal(signal, handler),
     fs: fsImpl,
     workers,
     dns,

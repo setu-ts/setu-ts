@@ -23,19 +23,35 @@
  *   anywhere in this repository calls `ctx.cli.register`, so `setu db:migrate` does
  *   not exist; there is no site to wire into.
  *
+ *   That stays exactly true after D5, and the distinction is worth stating
+ *   because the schematic now emits a barrel and a runner of its own. Those are
+ *   **project-local**: `src/migrations/run.ts` is the generated project's file,
+ *   run directly (`deno run -A src/migrations/run.ts`), and no `setu.config.ts`
+ *   imports it and no plugin option consumes it. It is deliberately NOT wired to
+ *   a `db:migrate` task: a task every scaffold advertises would fail with a
+ *   module-not-found in the great majority of projects, which never generate a
+ *   migration at all. A framework seam is a registration site the
+ *   framework reads; this is a script the developer runs. Making `migration` a
+ *   `SeamSpec` would put a barrel into `setu.config.ts` that nothing reads.
+ *
  * @module
  */
 
 import type { SeamSpec } from './seam-spec.ts';
-import { CONTROLLERS_SEAM } from './controllers.ts';
+import {
+  CONTROLLERS_SEAM,
+  FUNCTIONAL_CONTROLLERS_SEAM,
+  FUNCTIONAL_ROUTES_SEAM,
+  ROUTES_SEAM,
+} from './http.ts';
 import { COMMAND_HANDLER_SEAM, QUERY_HANDLER_SEAM } from './cqrs.ts';
 import { EVENTS_SEAM } from './events.ts';
-import { HEALTH_SEAM } from './health.ts';
+import { FUNCTIONAL_HEALTH_SEAM, HEALTH_SEAM } from './health.ts';
 import { METRICS_SEAM } from './metrics.ts';
 import { MIDDLEWARE_SEAM } from './middleware.ts';
 import { PLUGINS_SEAM } from './plugins.ts';
-import { ROUTES_SEAM } from './routes.ts';
 import { FUNCTIONAL_SERVICES_SEAM, SERVICES_SEAM } from './services.ts';
+import type { GeneratorMode } from '../utils/generator-mode.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 
 /**
@@ -74,25 +90,74 @@ export function listSeamSpecs(): readonly SeamSpec[] {
 }
 
 /**
+ * Swaps every family that a HOST scaffolds into a generator mode's shape.
+ *
+ * Applied by both accessors below, because each of these families has a real
+ * registration site in BOTH modes — `registerGeneratedRoutes(app.router)` for
+ * the HTTP pair, `HealthPlugin({ indicators })` for health — so the host
+ * scaffolds the barrel either way and only the artifact shape differs.
+ *
+ * @param specs - The registry's specs
+ * @param mode - The target's generator mode
+ * @returns The specs, with each family in that mode's shape
+ */
+function withHostShapes(
+  specs: readonly SeamSpec[],
+  mode: GeneratorMode,
+): readonly SeamSpec[] {
+  if (mode === 'class-based') return specs;
+  const functional = new Map<string, SeamSpec>([
+    [FUNCTIONAL_CONTROLLERS_SEAM.schematic, FUNCTIONAL_CONTROLLERS_SEAM],
+    [FUNCTIONAL_ROUTES_SEAM.schematic, FUNCTIONAL_ROUTES_SEAM],
+    // `health-indicator` is here rather than in the scan-only set because its
+    // barrel IS imported by `setu.config.ts` — the shape has to be right at
+    // scaffold time, not only when an artifact is admitted (A2).
+    [FUNCTIONAL_HEALTH_SEAM.schematic, FUNCTIONAL_HEALTH_SEAM],
+  ]);
+  return specs.map((spec) => functional.get(spec.schematic) ?? spec);
+}
+
+/**
  * The seams to SCAN a target project with, for its generator mode.
  *
- * The registry describes the class-based shape of each family, because that is the
- * shape whose barrel a `setu.config.ts` imports. Scanning is different: it reads the
- * files a project actually holds, and one family — `service` — has two shapes.
- * `readArtifactNames` admits a file only when it exports every symbol the barrel will
- * import, so scanning a functional project with the class spec rejects every service
- * the CLI itself wrote and reports it as needing regeneration. It does not; the
- * regenerated file is identical.
- *
- * Selected here rather than inside the scanner so the registry stays the one place
- * that decides which spec describes a family.
+ * The registry describes the class-based shape of each family, because that is
+ * the shape whose barrel a `setu.config.ts` imports. Scanning is different: it
+ * reads the files a project actually holds, and two families have two shapes.
+ * `readArtifactNames` admits a file only when it exports every symbol the barrel
+ * will import, so scanning a functional project with a class spec rejects every
+ * artifact the CLI itself wrote and reports it as needing regeneration. It does
+ * not; the regenerated file is identical.
  *
  * @param installed - The `@setu-ts` packages detected in the target project
- * @returns Every family's seam, with the service family in the project's own shape
+ * @returns Every family's seam, in the project's own shape
  */
 export function scanSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
-  if (generatorMode(installed) === 'class-based') return listSeamSpecs();
-  return listSeamSpecs().map((spec) =>
+  const mode = generatorMode(installed);
+  const withHost = withHostShapes(listSeamSpecs(), mode);
+  if (mode === 'class-based') return withHost;
+  return withHost.map((spec) =>
     spec.schematic === SERVICES_SEAM.schematic ? FUNCTIONAL_SERVICES_SEAM : spec
+  );
+}
+
+/**
+ * The seams a HOST scaffolds and wires, in its own generator mode.
+ *
+ * The `service` family is deliberately NOT swapped here, which is the one place
+ * this differs from {@linkcode scanSeamSpecs}. `FUNCTIONAL_SERVICES_SEAM` is a
+ * convenience re-export with no registration site — M65 states it is "selected
+ * explicitly, by generator mode, at the two places that need it: the schematic
+ * that renders it and the scan that admits its artifacts", and a host is
+ * neither. Swapping it in here would scaffold a barrel nothing imports.
+ *
+ * The gate then drops any seam whose backing plugin the host does not install,
+ * because emitting its barrel would put an unresolvable import in the config.
+ *
+ * @param installed - Bare `@setu-ts` package names the host registers
+ * @returns The consumable seams, in registry order
+ */
+export function hostSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
+  return withHostShapes(listSeamSpecs(), generatorMode(installed)).filter(
+    (spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin),
   );
 }

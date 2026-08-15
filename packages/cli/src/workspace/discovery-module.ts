@@ -126,12 +126,18 @@ export function renderDiscoveryModule(
 // The CLI owns this file and rewrites it whenever a workspace member is added,
 // so edits here are lost — add them with the CLI.
 //
-// \`${CONFIG_MODULE}\` consumes it as:
+// \`main.ts\` always consumes ${SERVICE_PORT_EXPORT}. ${SERVICE_ENDPOINTS_EXPORT} is
+// consumed by \`${CONFIG_MODULE}\` only when this member's template registers
+// \`ServiceDiscoveryPlugin\` — the microservice and full-stack templates do; the
+// rest and class-based ones deliberately do not, because a service that is
+// REACHABLE and one that RESOLVES its siblings are different properties, and an
+// unused import is worse than an absent one. Where it is consumed:
 //
 //   import { ${SERVICE_ENDPOINTS_EXPORT} } from '${DISCOVERY_SPECIFIER}';
 //   ServiceDiscoveryPlugin({ provider: 'static', services: ${SERVICE_ENDPOINTS_EXPORT} })
 //
-// \`main.ts\` consumes it as:
+// Otherwise the map is exported for this member to use directly — the endpoints
+// are correct either way.
 //
 //   import { ${SERVICE_PORT_EXPORT} } from '${DISCOVERY_SPECIFIER}';
 //   await app.start({ port: ${SERVICE_PORT_EXPORT} });

@@ -219,10 +219,12 @@ describe('a three-service workspace — end to end', () => {
     const manifest = JSON.parse(await Deno.readTextFile(`${ws}/${WORKSPACE_MANIFEST}`)) as {
       members: { name: string; port: number }[];
     };
+    // `healthProbes: true` — all three are generated with a template, so the
+    // Kubernetes renderer gives them httpGet probes rather than tcpSocket (X2-7).
     expect(manifest.members).toEqual([
-      { name: 'orders', port: base },
-      { name: 'billing', port: base + 1 },
-      { name: 'shipping', port: base + 2 },
+      { name: 'orders', port: base, healthProbes: true },
+      { name: 'billing', port: base + 1, healthProbes: true },
+      { name: 'shipping', port: base + 2, healthProbes: true },
     ]);
 
     // The full mesh: 3 members × 2 peers. A map that was appended to rather than
@@ -277,6 +279,26 @@ describe('a three-service workspace — end to end', () => {
     );
 
     try {
+      // Wait for both peers to BIND before probing. They were spawned and probed
+      // immediately, so under load the orders service fetched a port nothing was
+      // listening on yet and the assertion reported an empty body — a race in
+      // the test, not in the generated code. Observed intermittently in the full
+      // suite and never in isolation, which is the signature.
+      for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
+        const url = `http://127.0.0.1:${base + index + 1}/`;
+        let ready = false;
+        for (let attempt = 0; attempt < 100 && !ready; attempt++) {
+          try {
+            const response = await fetch(url);
+            await response.body?.cancel();
+            ready = true;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+        expect(ready, `${peer} never bound ${url}`).toBe(true);
+      }
+
       const result = await bootAndProbe(`${ws}/apps/orders`, MESH_PROBE) as Record<
         string,
         { url: string; status: number; body: string }
@@ -289,7 +311,16 @@ describe('a three-service workspace — end to end', () => {
       expect(result['self']).toEqual([]);
     } finally {
       for (const server of servers) {
-        server.kill();
+        // Guarded: a peer that failed to bind has ALREADY exited, and killing an
+        // exited child throws `TypeError: Child process has already terminated`
+        // out of the `finally` — replacing the assertion failure that would have
+        // said which peer never came up. Under full-suite load this test binds
+        // real sockets against a busy machine, so that path is reachable.
+        try {
+          server.kill();
+        } catch {
+          // Already gone; its status and streams still need draining below.
+        }
         await server.status;
         await server.stdout.cancel();
         await server.stderr.cancel();
@@ -393,7 +424,7 @@ describe('a three-service workspace — end to end', () => {
         expect((await Deno.stat(`${dir}/${file}`)).isFile).toBe(true);
       }
       // Functional members have only the seams their composition can consume.
-      for (const seam of ['routes', 'middleware', 'plugins']) {
+      for (const seam of ['controllers', 'middleware', 'plugins']) {
         expect((await Deno.stat(`${dir}/src/${seam}/index.ts`)).isFile).toBe(true);
       }
       expect((await Deno.stat(`${dir}/${DISCOVERY_MODULE}`)).isFile).toBe(true);

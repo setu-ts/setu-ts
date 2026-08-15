@@ -50,6 +50,8 @@ function makeHost(
     exit: () => {
       throw new Error('exit');
     },
+    build: { os: 'linux' },
+    addSignalListener: () => {},
     readFile: () => Promise.resolve(data),
     realPath: (path: string) => Promise.resolve(path),
     writeFile: () => Promise.resolve(),

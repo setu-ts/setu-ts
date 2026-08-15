@@ -6,6 +6,94 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`setu add <plugin>`** — installs a framework package into the current project, pinned to the
+  version of the CLI that added it, and updates `deno.json` and `package.json` when a project
+  carries both. Accepts a short name, the bare package name, or the full specifier (`setu add auth`,
+  `setu add auth-plugin`, `setu add @setu-ts/auth-plugin`). It writes the manifest and reports
+  `deno install --min-dep-age 0` rather than running it — on release day the pin is younger than
+  Deno's dependency-age policy, so the flags need to be visible. Both places that used to say
+  "install `@setu-ts/auth-plugin`" now name this command.
+- **`IRuntimeServices.onSignal?(signal, handler)`** and the `RuntimeSignal` type in
+  `@setu-ts/common`, implemented by the Node, Deno and Bun runtime adapters. Optional on the
+  established `fs?` / `workers?` / `dns?` precedent: it is **omitted** on Cloudflare Workers (an
+  isolate is evicted, never signalled) and on Deno for Windows (`addSignalListener('SIGTERM')`
+  throws there), so a caller reads it with `?.` and gets a correct no-op rather than a crash.
+- A generated project's `main.ts` now installs a graceful-shutdown handler through that seam, and
+  **one body serves Deno, Node and Bun byte-identically**. It reaches no runtime-specific API at all
+  — no `Deno.addSignalListener`, no `Deno.exit`, no `process.on`, no `Deno.build.os` check — so
+  moving a project between runtimes no longer means rewriting its entry point.
+- `setu generate migration` now emits a managed `src/migrations/index.ts` listing every migration in
+  filename order and a project-local `src/migrations/run.ts` that applies them, run with
+  `deno run -A src/migrations/run.ts` (add `--down` to reverse). The migration it wrote was
+  previously an orphan that nothing imported and nothing could run.
+- Every template emits a `test` task, so the `*.service.test.ts` that `setu generate module` writes
+  is reachable at all — and on each target it emits a harness that target can actually execute.
+  `@std/testing/bdd` reaches `Deno.test` internally, so the test it used to emit everywhere died on
+  Bun with `ReferenceError: Deno is not defined` before a single assertion ran. Bun and Node now get
+  `bun:test` and `node:test`, which are built in, so those two targets also stop declaring
+  `@std/testing`/`@std/expect` — two dependencies that could only fail there.
+- `setu generate` detects the target runtime from the project's own manifests instead of assuming
+  Deno whenever `--runtime` is absent, which nobody passes. `setu new svc --runtime bun` records the
+  choice once and every later `generate` now honours it.
+
+### Changed
+
+- **Breaking (generated layout): `src/routes/` is merged into `src/controllers/`.** A scaffolded
+  project had two directories for HTTP endpoints, wired by two mechanisms, and `setu generate route`
+  and `setu generate controller` each owned one — so "where does an endpoint go?" had two answers
+  and the seam scanner could adopt a hand-written file from the other. There is now one directory
+  and one barrel carrying both shapes.
+
+  To migrate an existing project: move everything under `src/routes/` into `src/controllers/`,
+  delete `src/routes/`, update the import in `setu.config.ts` from `./src/routes/index.ts` to
+  `./src/controllers/index.ts`, and run any `setu generate` to regenerate the barrel. An un-migrated
+  project degrades loudly rather than silently — the scanner reports each file it skipped and why.
+
+- **Breaking (generated output): `setu generate module`'s barrel re-exports the service module
+  rather than the stub symbol.** It emitted `export { listWidget } from './widget.service.ts'`, so
+  replacing the generated stub — the obvious next step — broke the barrel with `TS2305`, and the
+  barrel is not reachable from `deno check main.ts setu.config.ts`, so it stayed broken through a
+  full green run of every gate. It is now `export * from …`. The generated test and route module
+  still import the function by name, which is correct — they exercise and serve it. Existing
+  projects need no change; regenerating replaces the named re-export.
+
+- **Breaking (runtime host seams): `DenoHost`, `NodeHost`, `BunHost`, `NodeModules` and `BunModules`
+  gained required members.** These are public type exports whose own JSDoc advertises injection as
+  the supported way to test an adapter, so a consumer holding a hand-written fake now fails
+  `deno check`: `DenoHost` needs `build: { os: string }` and `addSignalListener`, `NodeHost` and
+  `BunHost` need `onSignal`, and both `*Modules.proc` need `on`. Add those members to the fake — the
+  three fixtures in this repository needed exactly that. `IRuntimeServices.onSignal` itself is
+  optional and source-compatible; only the injectable host seams are affected.
+
+- **Breaking (generated output): a generated health indicator's shape now follows the project's
+  generator mode.** A class-based project keeps today's class; every other project — which since M65
+  includes `rest` and `microservice` — gets `export const <name>Indicator: IHealthIndicator`. An
+  indicator generated before this therefore no longer matches what its barrel imports: it is dropped
+  from the barrel, **its health check stops running**, and `setu generate` reports the file by name.
+  Rename its export to the one reported, or delete it and regenerate. (The report used to say
+  "regenerate it", which could not be followed — the file is not CLI-owned, so the overwrite check
+  refused. It now names both routes out.)
+
+- The documented install lines and the generated `install` task pass `--min-dep-age 0`, matching the
+  `minimumDependencyAge` the scaffolded manifest already set.
+- A generated `full-stack` project can be started by following its own README: it emits
+  `install`/`build` tasks and `start` depends on `build`, and it declares `nodeModulesDir` so
+  `check:app` resolves on a cold checkout.
+- The generated full-stack config resolver carries a return-type annotation, which restores
+  excess-property checking. TypeScript does not apply it to an object literal returned from a
+  contextually-typed callback, so a misspelled starter arm previously type-checked, booted, and
+  reported nothing.
+- Cloudflare Workers projects: `deno task start` serves instead of binding nothing and exiting `0`,
+  post-response `waitUntil` work is no longer dropped, and the emitted `wrangler.toml` documents all
+  the binding types most projects reach for.
+- A `--transport rabbitmq` workspace passes its own `deno fmt --check`. Generated Markdown prose and
+  plugin arguments are wrapped programmatically rather than hand-wrapped around whichever value the
+  author happened to interpolate.
+- Kubernetes probes generated for a workspace member select `httpGet` only when that member's
+  template actually serves a health endpoint, and `tcpSocket` otherwise.
+
 ## [0.1.0-alpha.8] — 2026-08-14
 
 **A release about what the generator actually produces, and what the database adapters actually
