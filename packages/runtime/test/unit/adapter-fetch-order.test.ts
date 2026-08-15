@@ -5,7 +5,8 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRequest, IResponse } from '@setu-ts/common';
+import { UPGRADE_INTENT } from '@setu-ts/common';
+import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
 import { DenoHttpAdapter, type DenoServeHost } from '../../src/adapters/deno/deno-http-adapter.ts';
 
 function createDenoFakeHost(): DenoServeHost {
@@ -23,9 +24,14 @@ describe('Adapter fetch handler ordering (M70a)', () => {
     adapter.setHandler((request: IRequest): Promise<IResponse> => {
       order.push('framework-handler');
       // Simulate kernel writing UPGRADE_INTENT
-      (request as unknown as Record<symbol, { sink: any }>)['setu-ts.upgrade-intent' as any] = {
-        sink: { onOpen: () => {}, onMessage: () => {}, onClose: () => {}, onError: () => {} },
+      const sink: WebSocketEventSink = {
+        onOpen: () => {},
+        onMessage: () => {},
+        onClose: () => {},
+        onError: () => {},
       };
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
       return Promise.resolve({
         snapshot: () => ({
           streaming: false as const,

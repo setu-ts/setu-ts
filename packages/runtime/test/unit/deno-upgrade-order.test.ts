@@ -118,9 +118,9 @@ describe('DenoHttpAdapter upgrade order (M70a)', () => {
 
   it('router is stored but not consulted in fetch path', async () => {
     const routerConsulted = { value: false };
-    const router: WebSocketUpgradeRouter = async () => {
+    const router: WebSocketUpgradeRouter = () => {
       routerConsulted.value = true;
-      return null;
+      return Promise.resolve(null);
     };
 
     let frameworkHandlerCalls = 0;
