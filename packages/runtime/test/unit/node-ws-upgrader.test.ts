@@ -435,9 +435,7 @@ describe('NodeHttpAdapter WebSocket upgrade', () => {
           // Write upgrade intent on the request (simulating kernel terminal handler).
           (request as unknown as Record<symbol, WebSocketUpgradeIntent>)[UPGRADE_INTENT] = {
             sink: options.upgradeSink,
-            ...(options.upgradeProtocol !== undefined
-              ? { protocol: options.upgradeProtocol }
-              : {}),
+            ...(options.upgradeProtocol !== undefined ? { protocol: options.upgradeProtocol } : {}),
           };
         }
       }
