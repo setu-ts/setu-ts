@@ -256,10 +256,14 @@ describe('runGenerateCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    it('marks a gated schematic unavailable in --help when its plugin is absent', async () => {
+    it('marks a gated schematic unavailable in --help, naming the command that fixes it', async () => {
+      // D3: this used to say "install @setu-ts/auth-plugin" and offer no
+      // command to do it, so unlocking a gated schematic meant hand-editing
+      // `deno.json`. Every gate the CLI shipped pointed at a step it would not
+      // take.
       const h = harness();
       await h.run(['--help']);
-      expect(h.out.text()).toContain('guard  (unavailable — install @setu-ts/auth-plugin)');
+      expect(h.out.text()).toContain('guard  (unavailable — run `setu add auth`)');
     });
 
     it('lists a gated schematic plainly once its plugin is installed', async () => {
@@ -476,7 +480,13 @@ describe('runGenerateCommand', () => {
   it('uses the injected clock for the migration filename', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin') });
     expect(await h.run(['migration', 'add-orders'])).toBe(0);
-    expect(h.fs.writes).toEqual(['/app/src/migrations/20260728123045-add-orders.ts']);
+    // The runner and its barrel ride along since D5 — the migration used to be
+    // an orphan that nothing imported and nothing could run.
+    expect(h.fs.writes).toEqual([
+      '/app/src/migrations/20260728123045-add-orders.ts',
+      '/app/src/migrations/index.ts',
+      '/app/src/migrations/run.ts',
+    ]);
   });
 });
 

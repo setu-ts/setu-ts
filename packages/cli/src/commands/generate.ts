@@ -42,6 +42,7 @@ import { readModuleNames } from '../utils/module-scanner.ts';
 import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
+import { readMigrationNames } from '../utils/migration-scanner.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -82,7 +83,10 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
     } else if (installed.has(requiresPlugin)) {
       log(`  ${name}`);
     } else {
-      log(`  ${name}  (unavailable — install @setu-ts/${requiresPlugin})`);
+      log(
+        `  ${name}  (unavailable — run \`${PROGRAM_NAME} add ` +
+          `${requiresPlugin.replace(/-plugin$/, '')}\`)`,
+      );
     }
   }
   log(`  ${CUSTOM_SCHEMATIC} <schematic-name>  (from .setu-ts/schematics/)`);
@@ -198,7 +202,10 @@ export async function runGenerateCommand(
         `The "${schematicName}" schematic requires @setu-ts/${metadata.requiresPlugin}, ` +
           `which is not installed in ${dir}.`,
       );
-      deps.error(`Install it, then run this command again.`);
+      deps.error(
+        `Run \`${PROGRAM_NAME} add ${metadata.requiresPlugin.replace(/-plugin$/, '')}\`, ` +
+          `then this command again.`,
+      );
       // Naming the alternative is the whole point of the refusal for the two
       // decorated schematics: decorators are OPTIONAL in this framework, and a
       // refusal that only says "install the decorator plugin" reads as though
@@ -230,6 +237,9 @@ export async function runGenerateCommand(
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
   const modules = await readModuleNames(deps.fs, dir);
+  // Same reasoning as `modules`: the migration runner lists every migration in
+  // order, and a schematic performs no I/O.
+  const migrations = await readMigrationNames(deps.fs, dir);
   // Same reasoning, for the ten families that regenerate a seam barrel. One `readdir`
   // per family against paths that usually do not exist; a custom schematic reads it
   // too, so it cannot be gated on a built-in name.
@@ -273,6 +283,7 @@ export async function runGenerateCommand(
     plugins: installed,
     now: deps.now,
     modules,
+    migrations,
     artifacts: scan.artifacts,
   };
 
