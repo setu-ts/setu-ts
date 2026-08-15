@@ -496,6 +496,28 @@ Deno one and reaches no runtime API (unit), and `buildNodeHost()` with no inject
 `onSignal` to the real `node:process.on`, asserted by listener count (`signal-real.test.ts`) — the
 M55 dead-default guard. Delivery of the signal itself is Node's contract, not this package's.
 
+**Post-implementation review — ten defects the gates passed, recorded here because three of them
+falsify claims this plan made.**
+
+- §3.1 said E8's risk was covered because "the scanner already reports what it skips, so an
+  un-migrated project degrades loudly". It does not: the scanner reads `src/controllers/`, so a file
+  in `src/routes/` is never scanned and never reported. Closed with an explicit legacy-layout
+  notice; the CHANGELOG sentence was corrected too.
+- The same section treated a same-name `route`/`controller` pair as guarded by M60. It was not —
+  that guard returned early without `decorator-plugin`, a premise M65 and this milestone had each
+  invalidated — and the pair produced a `TS2300` barrel. The HTTP-path group is now checked in every
+  generator mode.
+- X2-4 was described as fixed "as a class rather than an instance". It reached 2 of 8 call sites,
+  because the renderer took a guessed width each caller had to override. Measured at 123 columns on
+  a real scaffold. The renderer now derives its own prefix, and the gate generates three artifacts
+  of every family instead of one of the one family that was fixed.
+
+Also found: the generated test could not execute on Bun or Node at all (`@std/testing/bdd` reaches
+`Deno.test`); `generate` assumed Deno whenever `--runtime` was absent; a pre-A2 health indicator is
+silently unregistered and was told to "regenerate", which the overwrite check refuses; the host
+seams gained REQUIRED members without a breaking-change entry; `SchematicAlternative` became
+unreachable; and `db:migrate` was documented three times and emitted nowhere.
+
 ## 7. Verification gates
 
 ```bash

@@ -2418,10 +2418,58 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   template now emits a `test` task, without which that generated test was reachable by nothing.
 
   **Two breaking changes to already-published generated output**, both with CHANGELOG migration
-  text: the `src/routes/` → `src/controllers/` move (directory move + barrel regeneration; an
-  un-migrated project degrades loudly, since the scanner reports each file it skipped and why), and
-  the module barrel's re-export shape. All changed `src` files ≥90% branch/function/line;
-  `wrap-prose.ts` was found at 90.9% with no margin and taken to 100% with its own unit suite) —
+  text: the `src/routes/` → `src/controllers/` move and the module barrel's re-export shape.
+
+  **A verification-and-review pass then found ten more defects, every one past all four gates, both
+  publish gates and the per-file bar — and the three worst were found by USING the CLI rather than
+  by reading it.** (1) In a functional project `g route widget` then `g controller widget` reported
+  success twice and left a barrel importing `registerWidgetRoutes` from two files: `TS2300`, so the
+  generated project did not compile. M60's guard existed but returned early without
+  `decorator-plugin`, on a premise that M65's ungating of `module` and this milestone's ungating of
+  `controller` had each already falsified — and a test **asserted the old behaviour**, comment and
+  all. (2) A project predating the `src/routes/` merge is invisible to every check in the command:
+  the scanner reads the NEW directory, so the old one is never scanned, never skipped and never
+  reported, while `setu.config.ts` still imports the old barrel — `g route billing` printed
+  `created` and left the route unreachable. The CHANGELOG claim that such a project "degrades
+  loudly" was **my own, and false**; it now reports the migration. (3) The milestone's headline X2-4
+  fix reached **2 of 8 call sites**: `renderList` took a guessed `prefixWidth` defaulting to 24, and
+  the one caller that overrode it wrote its own declaration out a second time to call `.length` on
+  it. Measured — three generated plugins produced a **123-column** line and three families produced
+  103–112-column imports, so a project failed its own `deno fmt --check` on files the CLI had just
+  written. It now derives the prefix from the name and type it already has, imports wrap too, a
+  duplicate copy is deleted and one owned constant replaces four copies of `100`. The gate that
+  missed it generated exactly ONE artifact of the one family that was fixed; it now generates three
+  of every family.
+
+  (4) **The generated test could not run off Deno at all** — `@std/testing/bdd` reaches `Deno.test`
+  inside its own `_test_suite.js`, so on Bun it died with `ReferenceError: Deno is not defined`
+  before a single assertion, and Node and Bun had no `test` script while the CHANGELOG claimed every
+  template did. Each target now emits a harness it can execute (`bun:test`, `node:test`), verified
+  by running them (`1 pass` / `pass 1`), and those two stop declaring `@std/*` — dependencies that
+  could only fail there. That also exposed that `generate` **assumed Deno** whenever `--runtime` was
+  absent, which nobody passes; it now detects the target from the project's own manifests. (5) A
+  health indicator generated before A2 is dropped from its barrel and **its check stops running**,
+  and the report said "Regenerate it" — which the overwrite check then refuses, the M65 loop
+  exactly. Both real routes out are now named, and this plus the host-seam widening
+  (`DenoHost`/`NodeHost`/ `BunHost` gained REQUIRED members, breaking any injected fake) are
+  recorded as breaking changes; neither was. (6) `SchematicAlternative` lost its last producer when
+  `controller` was ungated, leaving a branch unreachable by any input — deleted with it (M59's
+  precedent).
+
+  Five stale claims were corrected against the code rather than reworded around: `db:migrate` was
+  documented in three places and emitted nowhere; the migration runner was `managed` while telling
+  the developer it was theirs to extend; `export *` fixes the barrel and NOT the generated test,
+  which names the function it exercises and should; `.env` cannot supply `PORT`, since
+  `ConfigPlugin` loads it into its own store and the entry is evaluated before any plugin registers;
+  and the ROADMAP package list named `starters`, which this branch never touches. Weak tests were
+  replaced rather than left: the `add` harness reimplemented `parseArgs` and turned every flag into
+  boolean `true`, so `--dir` was never exercised and reading the wrong flag name would have passed
+  all twelve; a gate list was hardcoded and already stale; a refusal assertion was satisfied by the
+  echoed name; and Bun's `onSignal` delegation was asserted by nothing. A mesh e2e also probed two
+  peers without waiting for them to bind, and killed an already-exited child — which replaced the
+  real failure with a `TypeError` naming no peer.
+
+  All changed `src` files ≥90% branch/function/line, every file added during review at 100%) —
   complete (PR pending)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
