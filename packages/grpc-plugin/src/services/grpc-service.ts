@@ -12,11 +12,9 @@ import type {
   GrpcServiceDefinition,
   IGrpcService,
   IHealthService,
-  IHttpAdapter,
   RpcFetchHandler,
   ServiceImpl,
 } from '@setu-ts/common';
-import { GrpcUnavailableError } from '../errors/grpc-errors.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import { dispatchRequest, normalizeBasePath } from '../transports/rpc-dispatcher.ts';
@@ -28,8 +26,6 @@ export interface GrpcServiceOptions {
   readonly connectRuntime: ConnectRuntime;
   readonly embeddedDescriptors: EmbeddedDescriptors;
   readonly options: GrpcPluginOptions;
-  /** The resolved HTTP adapter; RPC is unavailable when it has no `setRpcHandler`. */
-  readonly adapter: IHttpAdapter | undefined;
   readonly healthService: IHealthService | undefined;
 }
 
@@ -59,8 +55,12 @@ export class GrpcService implements IGrpcService {
    */
   #servedPaths: ReadonlySet<string> = new Set();
 
-  /** Whether the HTTP adapter supports the RPC interceptor seam. */
-  readonly available: boolean;
+  /**
+   * Whether gRPC dispatch is available. Always `true` since the kernel now
+   * resolves `IGrpcService` from the service registry and dispatches after
+   * the middleware pipeline (M70a). The previous adapter-based seam is retired.
+   */
+  readonly available = true;
 
   constructor(init: GrpcServiceOptions) {
     this.#connectRuntime = init.connectRuntime;
@@ -68,7 +68,6 @@ export class GrpcService implements IGrpcService {
     this.#options = init.options;
     this.#healthService = init.healthService;
     this.#basePath = normalizeBasePath(init.options.basePath ?? '/grpc');
-    this.available = typeof init.adapter?.setRpcHandler === 'function';
 
     for (const entry of init.options.services ?? []) {
       this.addService(
@@ -104,9 +103,6 @@ export class GrpcService implements IGrpcService {
    *   startup.
    */
   handleRequest(request: Request): Promise<Response> {
-    if (!this.available) {
-      return Promise.reject(new GrpcUnavailableError());
-    }
     return Promise.resolve(this.#dispatch(request)).then(
       (response) => response ?? new Response('Not Found', { status: 404 }),
     );

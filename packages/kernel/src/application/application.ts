@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, UPGRADE_INTENT } from '@setu-ts/common';
 import type {
   CliCommandHandler,
   DecoratorHandler,
@@ -22,9 +22,12 @@ import type {
   IPluginContext,
   IRouterApi,
   IRuntimeServices,
+  IWebSocketService,
   MetricConfig,
   StartOptions,
+  WebSocketUpgradeIntent,
 } from '@setu-ts/common';
+import type { IGrpcService } from '@setu-ts/common';
 import type { IRequest } from '@setu-ts/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
@@ -556,6 +559,19 @@ class Application implements IKernelApplication {
         const routeResult = this.#router.match(request.method, url.pathname);
 
         if (routeResult === null) {
+          // No route matched — try WebSocket upgrade, then gRPC, then 404.
+          // The pipeline already ran (middleware applied), so auth, metrics,
+          // security headers and the shutdown drain all apply uniformly.
+          const upgradeResult = await this.#tryUpgrade(ctx);
+          if (upgradeResult !== null) {
+            return;
+          }
+
+          const grpcResult = await this.#tryGrpc(ctx);
+          if (grpcResult !== null) {
+            return;
+          }
+
           ctx.response.status(404).json({ error: 'Not Found' });
           return;
         }
@@ -603,6 +619,127 @@ class Application implements IKernelApplication {
     } finally {
       this.#inFlight--;
     }
+  }
+
+  /**
+   * Tries a WebSocket upgrade when no route matched and the request carries
+   * a raw Request. Consults the IWebSocketService's routeUpgrade router; if
+   * accepted, records the upgrade intent on ctx.state for the adapter to
+   * perform the handshake after the framework handler returns.
+   *
+   * @returns `true` when the upgrade intent was recorded (handler should return)
+   */
+  async #tryUpgrade(
+    ctx: import('@setu-ts/common').IRequestContext,
+  ): Promise<boolean> {
+    const raw = ctx.raw;
+    if (raw === undefined) {
+      return false;
+    }
+
+    // Check if this is a WebSocket upgrade request
+    const upgradeHeader = raw.headers.get('upgrade');
+    if (upgradeHeader === null || upgradeHeader.trim().toLowerCase() !== 'websocket') {
+      return false;
+    }
+    const connectionHeader = raw.headers.get('connection');
+    if (connectionHeader === null || !connectionHeader.toLowerCase().includes('upgrade')) {
+      return false;
+    }
+
+    // Resolve IWebSocketService optionally — absent the capability, nothing changes
+    let wsService: IWebSocketService | undefined;
+    try {
+      wsService = this.#registry.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+    } catch {
+      return false;
+    }
+
+    // Refuse upgrade if the request carries a body (RFC 6455 §4.1 forbids it)
+    const contentLength = raw.headers.get('content-length');
+    if (contentLength !== null && Number(contentLength) > 0) {
+      ctx.response.status(400).json({ error: 'Bad Request' });
+      return true;
+    }
+
+    // Consult the WebSocket service's upgrade router
+    if (wsService.routeUpgrade === undefined) {
+      return false;
+    }
+
+    const decision = await wsService.routeUpgrade(raw);
+    if (decision === null) {
+      return false;
+    }
+
+    if (!decision.accept) {
+      ctx.response.status(decision.status).json({ error: 'Upgrade rejected' });
+      return true;
+    }
+
+    // Write the upgrade intent on the IRequest so the adapter can read it
+    // after the handler returns. The adapter creates the IRequest and
+    // attaches a slot keyed by UPGRADE_INTENT.
+    const intent: WebSocketUpgradeIntent = {
+      sink: decision.sink,
+      protocol: decision.protocol,
+    };
+    (ctx.request as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[UPGRADE_INTENT] =
+      intent;
+    return true;
+  }
+
+  /**
+   * Tries gRPC dispatch when no route matched and the request carries a raw
+   * Request. Resolves IGrpcService from the registry and calls handleRequest
+   * with a reconstructed web Request (the original body is already consumed by
+   * the framework mapping).
+   *
+   * @returns `true` when gRPC dispatched a response (handler should return)
+   */
+  async #tryGrpc(
+    ctx: import('@setu-ts/common').IRequestContext,
+  ): Promise<boolean> {
+    // Resolve IGrpcService optionally — absent the capability, nothing changes
+    let grpcService: IGrpcService | undefined;
+    try {
+      grpcService = this.#registry.get<IGrpcService>(CAPABILITIES.GRPC);
+    } catch {
+      return false;
+    }
+
+    if (!grpcService.available) {
+      return false;
+    }
+
+    // Reconstruct a web Request from the mapped IRequest. The original body
+    // is already consumed by mapWebRequestToFrameworkRequest, so we rebuild
+    // from the buffered bytes on the IRequest.
+    const bodyBytes = await ctx.request.bytes();
+    const grpcRequest = new Request(ctx.request.url, {
+      method: ctx.request.method,
+      headers: ctx.request.headers,
+      // Uint8Array is a valid BodyInit but the compiler's exactOptionalPropertyTypes
+      // treats the union too strictly; cast through unknown to satisfy the checker.
+      body: (bodyBytes.length > 0 ? bodyBytes : null) as unknown as BodyInit | null,
+    });
+
+    const response = await grpcService.handleRequest(grpcRequest);
+
+    // Map the gRPC Response to the framework response
+    const snapshot = await response.arrayBuffer();
+    const headers = new Headers();
+    for (const [key, value] of response.headers.entries()) {
+      headers.append(key, value);
+    }
+
+    const builder = ctx.response as ResponseBuilder;
+    builder.status(response.status);
+    for (const [key, value] of headers.entries()) {
+      builder.header(key, value);
+    }
+    builder.send(new Uint8Array(snapshot));
+    return true;
   }
 
   /**

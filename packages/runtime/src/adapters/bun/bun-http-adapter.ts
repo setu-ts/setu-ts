@@ -16,8 +16,10 @@ import type {
   IResponse,
   RpcFetchHandler,
   ServerHandle,
+  WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
+import { UPGRADE_INTENT } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -146,75 +148,102 @@ export class BunHttpServerHandle {
    * Creates the plain HTTP fetch handler — the entry point used by
    * `IHttpAdapter.fetch`, which always answers with a `Response`.
    *
-   * The RPC interceptor is consulted first; a returned Response short-circuits
-   * as RPC, while null falls through to the normal Hono pipeline.
+   * The framework handler (kernel pipeline) runs FIRST. After it returns,
+   * the adapter checks for an upgrade intent.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
-      // First check RPC interceptor — a Response short-circuits as RPC, null falls through
-      const rpcResult = await this.#rpcStore.consult(request);
-      if (rpcResult !== null) {
-        return rpcResult;
-      }
-
       const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
+
+      // Run the framework handler FIRST — middleware pipeline applies uniformly.
       const frameworkResponse = await this.#handler(frameworkRequest);
+
+      // Check for upgrade intent written by the kernel terminal handler.
+      const intent =
+        (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
+          UPGRADE_INTENT
+        ];
+      if (intent !== undefined) {
+        return this.#performUpgrade(request, intent);
+      }
+
       return mapSnapshotToWebResponse(frameworkResponse.snapshot());
     };
   }
 
   /**
-   * Creates the callback handed to `Bun.serve`. It differs from
-   * {@linkcode BunHttpServerHandle.createFetchHandler} in exactly one way: it
-   * may resolve `undefined`, which is how Bun is told a request was upgraded
-   * to a WebSocket and needs no response. WebSocket upgrades are therefore
-   * only available through `listen()`, not through `IHttpAdapter.fetch`.
+   * Creates the callback handed to `Bun.serve`. The Bun serve callback
+   * invokes the framework handler FIRST (running the full middleware pipeline),
+   * then checks for an upgrade intent before calling `server.upgrade()`.
+   * This ensures auth, metrics, security headers and the shutdown drain
+   * all apply to WebSocket upgrades.
    *
-   * The RPC interceptor is deliberately NOT consulted here: `httpHandler`
-   * already consults it, and doing so twice would dispatch every request
-   * through the RPC handler twice. A handler that inspects the body before
-   * returning `null` would then see an already-disturbed body on the second
-   * call, throw, and be converted to a `500` — turning an ordinary non-RPC
-   * POST into a server error.
+   * May resolve `undefined` to tell Bun the socket was taken over.
    */
   createServeCallback(): (
     request: Request,
     server: BunServer,
   ) => Promise<Response | undefined> {
-    const httpHandler = this.createFetchHandler();
     return async (request: Request, server: BunServer): Promise<Response | undefined> => {
-      // First check WebSocket upgrades (short-circuits if upgraded)
-      const upgradeDecision = await this.#upgrades.consult(request);
-      if (upgradeDecision !== null) {
-        if (!upgradeDecision.accept) {
-          return new Response(null, { status: upgradeDecision.status });
-        }
-        if (server.upgrade === undefined) {
-          upgradeDecision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
-          return new Response(null, { status: 501 });
-        }
+      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
 
-        const headers = new Headers();
-        if (upgradeDecision.protocol !== undefined) {
-          headers.set('sec-websocket-protocol', upgradeDecision.protocol);
-        }
-        const upgraded = server.upgrade(request, { data: { sink: upgradeDecision.sink }, headers });
-        if (upgraded) {
-          // `undefined` tells Bun the socket was taken over.
-          return undefined;
-        }
-        // Bun refused after the router accepted, so release whatever the
-        // consumer reserved for this socket before answering.
-        upgradeDecision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Handshake refused' });
-        return new Response(null, { status: 400 });
+      if (!this.#handler) {
+        return new Response('Handler not set', { status: 500 });
       }
 
-      // RPC is consulted inside httpHandler — see the note above.
-      return await httpHandler(request);
+      // Run the framework handler FIRST — middleware pipeline applies uniformly.
+      const frameworkResponse = await this.#handler(frameworkRequest);
+
+      // Check for upgrade intent written by the kernel terminal handler.
+      const intent =
+        (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
+          UPGRADE_INTENT
+        ];
+      if (intent !== undefined) {
+        return this.#performBunUpgrade(request, server, intent);
+      }
+
+      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
     };
+  }
+
+  /**
+   * Performs a WebSocket upgrade on the Bun platform.
+   */
+  #performUpgrade(_request: Request, intent: WebSocketUpgradeIntent): Response {
+    // Plain fetch path has no BunServer, so cannot upgrade.
+    intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
+    return new Response(null, { status: 501 });
+  }
+
+  /**
+   * Performs a WebSocket upgrade inside the Bun.serve callback, which has
+   * access to the BunServer for `server.upgrade()`.
+   */
+  #performBunUpgrade(
+    request: Request,
+    server: BunServer,
+    intent: WebSocketUpgradeIntent,
+  ): Response | undefined {
+    if (server.upgrade === undefined) {
+      intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
+      return new Response(null, { status: 501 });
+    }
+
+    const headers = new Headers();
+    if (intent.protocol !== undefined) {
+      headers.set('sec-websocket-protocol', intent.protocol);
+    }
+    const upgraded = server.upgrade(request, { data: { sink: intent.sink }, headers });
+    if (upgraded) {
+      return undefined;
+    }
+    intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Handshake refused' });
+    return new Response(null, { status: 400 });
   }
 }
 

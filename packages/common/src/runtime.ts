@@ -405,9 +405,10 @@ export interface IHttpAdapter {
    */
   close(handle: ServerHandle): Promise<void>;
   /**
-   * Installs a WebSocket upgrade router, consulted for every inbound upgrade
-   * request *before* the request is mapped to an {@linkcode IRequest} and
-   * enters the middleware pipeline.
+   * Installs a WebSocket upgrade router. The adapter stores the router for
+   * later use by the kernel: the middleware pipeline runs first on every
+   * inbound request, and the handshake is performed only when the pipeline
+   * does not short-circuit and route matching returns no match.
    *
    * Optional: absent on adapters that cannot perform a WebSocket handshake.
    * Callers MUST degrade gracefully when it is not provided — see the
@@ -425,18 +426,16 @@ export interface IHttpAdapter {
    */
   setUpgradeRouter?(router: WebSocketUpgradeRouter): void;
   /**
-   * Installs a gRPC/Connect fetch handler, consulted for every inbound request
-   * *before* the request is mapped to an {@linkcode IRequest} and enters the
-   * middleware pipeline. A handler returning a {@linkcode Response} short-circuits
-   * the request as RPC; returning {@linkcode null} falls through to normal Hono
-   * handling.
+   * Installs a gRPC/Connect fetch handler.
    *
-   * Optional: absent on adapters predating this widening. Callers must check for
-   * existence before use (see the {@linkcode IGrpcService} implementation in the
-   * grpc-plugin). Because the member is optional, adapters written before this
-   * seam existed remain valid implementations.
+   * @deprecated This method is no longer called by the kernel. gRPC dispatch
+   * now occurs inside the kernel terminal handler, after the middleware
+   * pipeline runs. The kernel resolves {@linkcode IGrpcService} from the
+   * service registry and calls `handleRequest` directly. This setter is
+   * retained for backward compatibility but is a no-op in current adapters.
+   * It will be removed in the next major release.
    *
-   * @param handler - The RPC fetch handler
+   * @param handler - The RPC fetch handler (retained for compatibility)
    * @since 0.3.0
    */
   setRpcHandler?(handler: RpcFetchHandler): void;

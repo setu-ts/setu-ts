@@ -380,6 +380,16 @@ export interface IWebSocketService {
    * @returns The room
    */
   room(name: string): WebSocketRoom;
+  /**
+   * Consults the internal upgrade router for an inbound request. Used by the
+   * kernel terminal handler to decide whether to upgrade after the middleware
+   * pipeline runs.
+   *
+   * @param request - The native, undisturbed upgrade request
+   * @returns The decision, or `null` to fall through
+   * @since 0.3.0
+   */
+  routeUpgrade?(request: Request): Promise<WebSocketUpgradeDecision | null>;
   /** Whether the underlying HTTP adapter can perform WebSocket upgrades. */
   readonly available: boolean;
   /** Current number of open connections across all routes. */
