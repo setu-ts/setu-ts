@@ -2356,6 +2356,73 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   that case through the public two-argument constructor. All three now have tests naming the failure
   they guard, taking `drizzle-query.ts`, `drizzle-database.ts` and `unit-of-work.ts` to 100%
   branch/function/line — complete (PR #162)
+- **Milestone 70h** (`packages/cli` + `packages/common` + `packages/runtime` + starters — the CLI
+  scaffold batch of the alpha.8 smoke programme: **23 register rows** closed on one branch, because
+  they share one shape — **a generated file sits outside every check path the generated project
+  actually runs.** A `full-stack` project could not be started by following its own README, a
+  pristine one failed its own `check:app` on a cold checkout, a `--transport rabbitmq` workspace
+  failed its own `deno fmt --check` before anything was edited, and a Workers project's
+  `deno task start` bound nothing and exited `0`.
+
+  **Three scope calls widened the ROADMAP's stated `(cli, starters)` boundary, each the maintainer's
+  at plan time.** **B1** is closed completely rather than in its two CLI-side halves: `common` gains
+  an optional `IRuntimeServices.onSignal?(signal, handler)` + `RuntimeSignal`, implemented by the
+  Node/Deno/Bun adapters on the `fs?`/`workers?`/`dns?` precedent. It is the one member absent for
+  **two unrelated reasons** — Workers has no signal to receive (an isolate is evicted), and the Deno
+  adapter omits it on **Windows**, where registering `SIGTERM` THROWS rather than no-opping — so the
+  key's presence means "this runtime can register a handler", never "this platform raises signals";
+  a no-op was rejected because it would let a caller conclude a shutdown handler runs when it never
+  would. The payoff is that the generated `main.ts` now emits **ONE body, byte-identical across
+  Deno, Node and Bun**, reaching no runtime API at all — no `Deno.addSignalListener`, no
+  `Deno.exit`, no `process.on`, no `Deno.build.os` guard — where it previously rendered three bodies
+  fixed at `setu new` time, so moving a project between runtimes meant rewriting its entry by hand.
+  **E8** was reassigned here from M70n (the ROADMAP still called it "a decision to take, not a
+  defect to fix" while `smoke/X1-FINDINGS.md` records the maintainer having already classified it a
+  defect with breakage accepted): `src/routes/` folds into `src/controllers/`, so one directory and
+  one barrel carry both generator shapes. That is not a new mechanism — `FUNCTIONAL_SERVICES_SEAM` /
+  `SERVICES_SEAM` already share a `dir` and a `barrel`, and `SeamSpec.renderBarrel` takes the full
+  `SeamArtifacts` record rather than one name list, which is exactly what lets ONE barrel read two
+  kinds. **D3** was built rather than deferred: `setu add <plugin>` exists, so the two sites that
+  told a developer to "install `@setu-ts/auth-plugin`" now name a command that does it.
+
+  **Two of the plan's own negative controls did not hold as written, and measuring them is what
+  showed it — both are recorded in the plan as corrections rather than quietly dropped.** The plan
+  claimed the literal-`Deno.exit` body would fail "the shutdown e2e on Node"; it passes, because
+  **no e2e in this repository boots a Node project at all**, and none can until `runtime` publishes
+  with `onSignal` — a `--runtime node` project resolves `@setu-ts/runtime` from the published npm
+  mirror and npm has no import-map equivalent for `useWorkspacePackages` to repoint. The control
+  fails **6 unit steps** instead (byte-identity across targets, and
+  `reaches no runtime-specific
+  API` for each of deno/node/bun), which is the honest site, since
+  what B1 changes is the emitted source rather than the Deno run of it. And the plan asserted the
+  boot gate "asserts membership too" — it did not: removing a template from `BOOTABLE` made its
+  build-and-boot assertions VANISH rather than fail, a one-word edit leaving the whole gate green
+  while covering strictly less. That assertion now exists (the M37c `ALLOW_SKIP` precedent).
+  Dropping `full-stack` happens to trip `deno check` (the `as const` narrows an equality into an
+  impossible comparison), but dropping `microservice` type-checks **cleanly** — so the runtime
+  assertion is the one that discriminates, and both were observed. The other four controls each
+  failed and were reverted: the inline config callback (4 steps, 49 passing), the transport wrapping
+  (`rabbitmq` fmt gate fails while `http` passes — verified both halves), `nodeModulesDir` (cold
+  `check:app` fails resolving `@react-router/fs-routes`, passes with it), and `ROUTES_SEAM` pointed
+  back at `src/routes` (9 tests).
+
+  Also: `g migration` emitted a file nothing imported and nothing could run, so every project
+  hand-wrote the same runner — it now emits a managed barrel in filename order plus a project-local
+  `src/migrations/run.ts` and a `db:migrate` task. That is deliberately **not** a `SeamSpec`, and
+  `seams/registry.ts` now says why: a framework seam is a registration site the framework reads,
+  while this is a script the developer runs, and making it a seam would put a barrel into
+  `setu.config.ts` that nothing consumes. `g module`'s barrel star-re-exports its service instead of
+  naming the stub symbol — naming it meant that replacing the stub, the obvious next step, broke the
+  barrel AND the generated test with `TS2305`, and neither file is reachable from
+  `deno check main.ts setu.config.ts`, so both stayed broken through a full green run. Every
+  template now emits a `test` task, without which that generated test was reachable by nothing.
+
+  **Two breaking changes to already-published generated output**, both with CHANGELOG migration
+  text: the `src/routes/` → `src/controllers/` move (directory move + barrel regeneration; an
+  un-migrated project degrades loudly, since the scanner reports each file it skipped and why), and
+  the module barrel's re-export shape. All changed `src` files ≥90% branch/function/line;
+  `wrap-prose.ts` was found at 90.9% with no margin and taken to 100% with its own unit suite) —
+  complete (PR pending)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`

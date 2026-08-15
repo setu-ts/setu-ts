@@ -23,6 +23,14 @@
  *   anywhere in this repository calls `ctx.cli.register`, so `setu db:migrate` does
  *   not exist; there is no site to wire into.
  *
+ *   That stays exactly true after D5, and the distinction is worth stating
+ *   because the schematic now emits a barrel and a runner of its own. Those are
+ *   **project-local**: `src/migrations/run.ts` is the generated project's file,
+ *   run by its own `db:migrate` task, and no `setu.config.ts` imports it and no
+ *   plugin option consumes it. A framework seam is a registration site the
+ *   framework reads; this is a script the developer runs. Making `migration` a
+ *   `SeamSpec` would put a barrel into `setu.config.ts` that nothing reads.
+ *
  * @module
  */
 
