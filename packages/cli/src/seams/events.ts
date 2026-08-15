@@ -13,7 +13,7 @@
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
-  renderList,
+  renderExportedArray,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -57,9 +57,7 @@ function renderEventsBarrel(artifacts: SeamArtifacts): string {
 
   return assembleSeamBarrel(header, imports, [
     `/** Every generated event handler, for \`EventsPlugin({ handlers })\`. */\n` +
-    `export const ${EVENT_HANDLERS_EXPORT}: readonly EventHandlerRegistration[] = [${
-      renderList(entries)
-    }];`,
+    renderExportedArray(EVENT_HANDLERS_EXPORT, 'EventHandlerRegistration', entries),
   ]);
 }
 

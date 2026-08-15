@@ -477,6 +477,39 @@ describe('runGenerateCommand', () => {
     expect(err.text()).toContain('Failed to write: EROFS');
   });
 
+  // E8's migration path, found by review. A project predating the merge is
+  // invisible to every other check in this command: the artifact scan reads
+  // `src/controllers/`, so a file under `src/routes/` is never scanned, never
+  // skipped, and never reported — while `setu.config.ts` still imports the old
+  // barrel, because that file is the developer's and the CLI does not rewrite it.
+  // Measured against a real scaffold before the fix: two `created` lines, exit 0,
+  // and a new barrel nothing imports.
+  it('reports a pre-E8 src/routes directory, naming the migration', async () => {
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST(),
+      '/app/src/routes/index.ts': 'export {};',
+      '/app/src/routes/orders.routes.ts': 'export {};',
+    });
+
+    expect(await h.run(['route', 'billing'])).toBe(0);
+
+    const reported = h.err.text();
+    expect(reported).toContain('src/routes/');
+    expect(reported).toContain('orders.routes.ts');
+    expect(reported).toContain('unreachable');
+    // It reports and does not refuse: the developer needs the generator to work
+    // inside the project they are migrating.
+    expect(h.fs.writes).toContain('/app/src/controllers/billing.routes.ts');
+  });
+
+  it('stays silent in a project that has no legacy directory', async () => {
+    // The notice must not fire on every generate in every healthy project.
+    const h = harness({ '/app/deno.json': DENO_MANIFEST() });
+
+    expect(await h.run(['route', 'billing'])).toBe(0);
+    expect(h.err.text()).not.toContain('still holds');
+  });
+
   it('uses the injected clock for the migration filename', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin') });
     expect(await h.run(['migration', 'add-orders'])).toBe(0);

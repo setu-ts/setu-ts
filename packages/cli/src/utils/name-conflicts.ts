@@ -15,6 +15,13 @@
  *   router keys its entry map on `${method} ${path}`, so a duplicate OVERWRITES rather
  *   than throwing: one of the two artifacts is silently unreachable.
  *
+ *   Since E8 this group has a second, LOUDER failure, in the mode the check used to skip
+ *   entirely. `src/routes/` merged into `src/controllers/`, so a functional `route` and a
+ *   functional `controller` share one directory and one barrel while both exporting
+ *   `register<Pascal>Routes` — the barrel imports that name from two files and the
+ *   generated project does not compile (`TS2300`, twice). Measured against a real
+ *   scaffold: both commands reported success.
+ *
  * Refusing beats warning for both. A silent 500 and a silently-dropped route are worse
  * than a command that will not run, and the fix is always the same — pick a different
  * name — so there is nothing the developer loses by being told now.
@@ -32,6 +39,20 @@ interface ConflictGroup {
   readonly resource: (kebab: string) => string;
   /** What goes wrong if both are generated anyway. */
   readonly consequence: string;
+  /**
+   * Whether this collision only exists in a decorator project.
+   *
+   * Per-group rather than per-call, and that distinction is the fix for a real
+   * defect: the check used to return early for any project without
+   * `decorator-plugin`, on the reasoning that a functional `module` shares a
+   * FILENAME with a same-named `route` and the ordinary overwrite refusal
+   * catches it. That was true while `route` wrote to `src/routes/` and
+   * `controller` was gated — and E8 ended both. A functional `route` and a
+   * functional `controller` now land in ONE directory under different
+   * filenames while exporting the SAME `register<Pascal>Routes` symbol into
+   * ONE barrel, so nothing caught them.
+   */
+  readonly requiresDecorators: boolean;
 }
 
 /**
@@ -45,7 +66,13 @@ const CONFLICT_GROUPS: readonly ConflictGroup[] = [
     schematics: ['route', 'controller', 'module'],
     resource: (kebab) => `the HTTP path /${kebab}`,
     consequence:
-      'the kernel keys routes by method and path, so one of the two would be silently unreachable',
+      'they mount the same path, and in a functional project they also export the same ' +
+      'symbol into one barrel — so the project would not compile, and if it did, one of ' +
+      'the two routes would be silently unreachable',
+    // Every generator mode. In a decorator project the two register the same
+    // `METHOD path`; in a functional one the merged `src/controllers/` barrel
+    // imports `register<Pascal>Routes` from both files, which is TS2300.
+    requiresDecorators: false,
   },
   {
     schematics: ['service', 'module'],
@@ -53,6 +80,9 @@ const CONFLICT_GROUPS: readonly ConflictGroup[] = [
     consequence:
       'the decorator plugin registers the first class under a token and skips the rest, ' +
       'so the wrong service would be injected',
+    // Genuinely decorator-only: the token exists because `@Injectable` declares
+    // it, and a functional service is a plain function registered under nothing.
+    requiresDecorators: true,
   },
 ];
 
@@ -69,14 +99,16 @@ export interface NameConflict {
 /**
  * Reports an existing artifact the requested one would collide with.
  *
- * Only fires when the collision is REAL. The DI-token group depends on
- * `decorator-plugin`; functional modules instead share a route filename with a
- * same-named route, and the ordinary overwrite check refuses that exact path.
- * Checking the decorator composition here keeps class-only collision advice off
- * functional projects.
+ * Only fires when the collision is REAL, which is decided PER GROUP rather than
+ * once for the whole call. The DI-token group depends on `decorator-plugin`,
+ * because a functional service is a plain function registered under no token.
+ * The HTTP-path group does not: it fires in every generator mode.
  *
  * A schematic never conflicts with ITSELF: a second `setu g route widget` is the
  * ordinary overwrite refusal, which reports the file rather than a name clash.
+ * That refusal is also what still catches a functional `module` against a
+ * same-named `route` — they share the filename `<name>.routes.ts`, so the
+ * command never reaches this check.
  *
  * @param schematic - The schematic about to run
  * @param kebab - The artifact's kebab-case name
@@ -92,9 +124,10 @@ export function findNameConflict(
   artifacts: SeamArtifacts,
   modules: readonly string[],
 ): NameConflict | undefined {
-  if (!plugins.has('decorator-plugin')) return undefined;
+  const decorated = plugins.has('decorator-plugin');
 
   for (const group of CONFLICT_GROUPS) {
+    if (group.requiresDecorators && !decorated) continue;
     if (!group.schematics.includes(schematic)) continue;
     for (const other of group.schematics) {
       if (other === schematic) continue;

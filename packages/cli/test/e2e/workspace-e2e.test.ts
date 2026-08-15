@@ -170,6 +170,64 @@ describe('workspace scaffolding — end to end', () => {
     expect(linted.code, linted.output).toBe(0);
   });
 
+  // The gate the one above could not be. It generated exactly ONE artifact, of the
+  // one family that had been fixed — and a barrel only overflows once it lists
+  // enough names, so a single-artifact check can never see the defect it exists
+  // for. Measured with three artifacts per family: the plugins barrel rendered a
+  // 123-column declaration and the CQRS, events and middleware barrels rendered
+  // 103-112-column IMPORT lines, so a project failed its own `deno fmt --check`
+  // on three files the CLI had just written. X2-4 exactly, in the milestone that
+  // claimed to have removed it as a class.
+  //
+  // Three is the smallest count that overflows a typical declaration, and every
+  // family is swept because the width was a per-caller guess: six of the eight
+  // call sites never overrode the default.
+  it('stays formatted after generating THREE artifacts of every family', async () => {
+    expect(await run(['new', 'shop', '--template', 'microservice'])).toBe(0);
+    const project = `${root}/shop`;
+
+    const families = [
+      'plugin',
+      'service',
+      'metric',
+      'health-indicator',
+      'command-handler',
+      'query-handler',
+      'event-handler',
+      'middleware',
+      'route',
+    ] as const;
+
+    // Names long enough to be ordinary rather than adversarial — the defect does
+    // not need a hostile name, only a real one.
+    for (const name of ['payment-gateway', 'user-directory', 'order-archive']) {
+      for (const family of families) {
+        expect(await run(['g', family, name, '--dir', project]), `${family} ${name}`).toBe(0);
+      }
+    }
+
+    const formatted = await new Deno.Command(Deno.execPath(), {
+      args: ['fmt', '--check'],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    const decoder = new TextDecoder();
+    expect(
+      formatted.code,
+      `${decoder.decode(formatted.stdout)}${decoder.decode(formatted.stderr)}`,
+    ).toBe(0);
+
+    // Belt and braces on the property itself, so a future `fmt` default that
+    // tolerated a long line could not silently retire this check.
+    for (const family of ['plugins', 'services', 'metrics', 'health', 'cqrs', 'events']) {
+      const barrel = await Deno.readTextFile(`${project}/src/${family}/index.ts`).catch(() => '');
+      for (const line of barrel.split('\n')) {
+        expect(line.length, `${family}/index.ts: ${line}`).toBeLessThanOrEqual(100);
+      }
+    }
+  });
+
   it('creates a root whose files exist on disk', async () => {
     expect(await run(['new', 'acme', '--workspace'])).toBe(0);
     for (const name of ['deno.json', WORKSPACE_MANIFEST, 'README.md', '.gitignore']) {

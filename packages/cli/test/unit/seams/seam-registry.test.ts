@@ -15,7 +15,7 @@ import { deriveNames } from '../../../src/utils/names.ts';
 import {
   assembleSeamBarrel,
   exportsSymbol,
-  renderList,
+  renderExportedArray,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -141,11 +141,53 @@ describe('seam rendering helpers', () => {
     expect(seamNames(undefined, 'route')).toEqual([]);
   });
 
-  it('renders an inline list until it would run long, then breaks it', () => {
-    expect(renderList([])).toBe('');
-    expect(renderList(['A', 'B'])).toBe('A, B');
+  it('renders an inline declaration until it would run long, then breaks it', () => {
+    expect(renderExportedArray('X', 'Constructor', []))
+      .toBe('export const X: readonly Constructor[] = [];');
+    expect(renderExportedArray('X', 'Constructor', ['A', 'B']))
+      .toBe('export const X: readonly Constructor[] = [A, B];');
+
     const long = ['A'.repeat(40), 'B'.repeat(40)];
-    expect(renderList(long)).toContain('\n  ');
+    expect(renderExportedArray('X', 'Constructor', long)).toContain('\n  ');
+  });
+
+  // The defect this shape exists to prevent. The renderer used to take a
+  // `prefixWidth` NUMBER defaulting to 24, so every caller had to remember to
+  // pass its own declaration's length and six of eight did not — measured, three
+  // generated plugins produced a 123-column line and the project failed its own
+  // `deno fmt --check`. Deriving the prefix from the name and type it is already
+  // given makes that unrepresentable.
+  it('measures the real declaration, not a guess, when deciding to wrap', () => {
+    // Chosen so the two declarations land on OPPOSITE sides of the budget:
+    // 105 columns for the long name, 83 for the short one. A fixed prefix width
+    // cannot tell them apart, which is the whole point.
+    const entries = ['OrderArchive()', 'PaymentGateway()', 'UserDirectory()'];
+
+    // Same entries, two declarations of very different width: the long one must
+    // wrap and the short one must not, which a fixed budget cannot express.
+    const wide = renderExportedArray('GENERATED_PLUGINS', 'IPlugin', entries);
+    const narrow = renderExportedArray('P', 'X', entries);
+
+    expect(wide).toContain('\n  ');
+    expect(narrow).not.toContain('\n  ');
+    for (const line of wide.split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(100);
+    }
+  });
+
+  // The other half of the same budget: an artifact exporting two or three
+  // symbols emitted a 103-112-column import line, which `deno fmt` rewraps.
+  it('wraps a long import statement the way deno fmt would', () => {
+    const wrapped = renderSeamImports(
+      ['payment-gateway'],
+      (n) => [`${n.camel}Handler`, `${n.camel}Registration`, `${n.camel}Descriptor`],
+      (k) => `./${k}.command-handler.ts`,
+    );
+
+    for (const line of wrapped.split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(100);
+    }
+    expect(wrapped).toContain('import {\n');
   });
 
   it('renders no imports for an empty family', () => {

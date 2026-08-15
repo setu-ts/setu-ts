@@ -42,7 +42,7 @@
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
-  renderList,
+  renderExportedArray,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -153,9 +153,11 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
       ...(classBased
         ? [
           `/** Every generated controller class, for \`DecoratorPlugin({ controllers })\`. */\n` +
-          `export const ${APP_CONTROLLERS_EXPORT}: readonly Constructor[] = [${
-            renderList(controllers.map((name) => controllerClassSymbol(deriveNames(name))))
-          }];`,
+          renderExportedArray(
+            APP_CONTROLLERS_EXPORT,
+            'Constructor',
+            controllers.map((name) => controllerClassSymbol(deriveNames(name))),
+          ),
         ]
         : []),
       `/**\n` +

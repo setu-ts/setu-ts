@@ -15,13 +15,21 @@
 /**
  * The formatting a generated project inherits.
  *
+ * `GENERATED_LINE_WIDTH` is exported because it is not only a setting — it is the
+ * budget every emitter must render within. Three modules had their own
+ * `const LINE_WIDTH = 100` beside this one, which is the same value written four
+ * times: change it here and a barrel renderer would keep wrapping at the old
+ * width and the project would fail its own `deno fmt --check`.
+ *
  * These are the framework repo's own `fmt` settings. Emitting them is not a
  * style preference — the CLI writes single-quoted TypeScript while Deno's
  * default is double, so a project scaffolded without this fails
  * `deno fmt --check` on the files the CLI itself just wrote.
  */
+export const GENERATED_LINE_WIDTH = 100;
+
 const FMT_SETTINGS = {
-  lineWidth: 100,
+  lineWidth: GENERATED_LINE_WIDTH,
   indentWidth: 2,
   singleQuote: true,
   semiColons: true,

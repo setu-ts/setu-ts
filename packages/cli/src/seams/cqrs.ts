@@ -18,7 +18,7 @@
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
-  renderList,
+  renderExportedArray,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -100,19 +100,9 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
 
   return assembleSeamBarrel(header, imports, [
     `/** Every generated command handler, for \`CqrsPlugin({ commandHandlers })\`. */\n` +
-    `export const ${COMMAND_HANDLERS_EXPORT}: readonly CommandHandlerRegistration[] = [${
-      renderList(
-        commandEntries,
-        `export const ${COMMAND_HANDLERS_EXPORT}: readonly CommandHandlerRegistration[] = [`.length,
-      )
-    }];`,
+    renderExportedArray(COMMAND_HANDLERS_EXPORT, 'CommandHandlerRegistration', commandEntries),
     `/** Every generated query handler, for \`CqrsPlugin({ queryHandlers })\`. */\n` +
-    `export const ${QUERY_HANDLERS_EXPORT}: readonly QueryHandlerRegistration[] = [${
-      renderList(
-        queryEntries,
-        `export const ${QUERY_HANDLERS_EXPORT}: readonly QueryHandlerRegistration[] = [`.length,
-      )
-    }];`,
+    renderExportedArray(QUERY_HANDLERS_EXPORT, 'QueryHandlerRegistration', queryEntries),
   ]);
 }
 
