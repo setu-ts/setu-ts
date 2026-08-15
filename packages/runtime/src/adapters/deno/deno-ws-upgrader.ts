@@ -3,10 +3,10 @@
  * `Deno.upgradeWebSocket` and binds the resulting socket to a
  * {@linkcode WebSocketEventSink}.
  *
- * The upgrade runs on the fetch path *before* `mapWebRequestToFrameworkRequest`,
- * which is a correctness requirement rather than an optimization: that mapping
- * pre-reads the body via `arrayBuffer()`, and Deno documents that upgrading
- * fails once the request body has been disturbed.
+ * After M70a, the upgrade runs on the fetch path *after* the kernel middleware
+ * pipeline. The stored raw Request (threaded through {@linkcode IRequest.raw})
+ * is undisturbed, so `Deno.upgradeWebSocket` succeeds even though the framework
+ * mapping pre-reads the body via `arrayBuffer()` on the framework copy.
  *
  * @module
  * @since 0.2.0

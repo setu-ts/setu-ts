@@ -24,7 +24,6 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
-import { RpcInterceptorStore } from '../shared/rpc-interceptor-store.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { BunSocketData, BunWebSocketHandlers } from './bun-ws-upgrader.ts';
@@ -107,7 +106,6 @@ export class BunHttpServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: BunServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
-  readonly #rpcStore = new RpcInterceptorStore();
 
   /**
    * Stores the handler set by `setHandler`.
@@ -124,10 +122,12 @@ export class BunHttpServerHandle {
   }
 
   /**
-   * Stores the gRPC/Connect fetch handler set by `setRpcHandler`.
+   * @deprecated gRPC dispatch now runs through the kernel pipeline.
+   * This method is retained for backward compatibility but no longer stores
+   * or consults an RPC handler.
    */
-  setRpcHandler(handler: RpcFetchHandler): void {
-    this.#rpcStore.set(handler);
+  setRpcHandler(_handler: RpcFetchHandler): void {
+    // No-op — the handler is no longer used (M70a).
   }
 
   /**

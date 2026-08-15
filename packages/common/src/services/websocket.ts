@@ -134,12 +134,13 @@ export type WebSocketUpgradeDecision =
   };
 
 /**
- * Consulted by an HTTP adapter for every inbound WebSocket upgrade request,
- * before the request reaches the ordinary middleware pipeline.
+ * Consulted by an HTTP adapter for every inbound WebSocket upgrade request.
  *
- * Returning `null` means "this is not a WebSocket route" and the adapter falls
- * through to normal HTTP handling, so registering a router never changes the
- * behavior of non-WebSocket traffic.
+ * After M70a, the upgrade router is called through the kernel middleware
+ * pipeline (via {@linkcode UPGRADE_INTENT}), not before it. Returning `null`
+ * means "this is not a WebSocket route" and the adapter falls through to
+ * normal HTTP handling, so registering a router never changes the behavior
+ * of non-WebSocket traffic.
  *
  * @param request - The native, undisturbed upgrade request
  * @returns The decision, or `null` to fall through to the HTTP pipeline
