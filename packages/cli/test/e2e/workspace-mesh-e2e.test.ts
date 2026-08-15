@@ -279,6 +279,26 @@ describe('a three-service workspace — end to end', () => {
     );
 
     try {
+      // Wait for both peers to BIND before probing. They were spawned and probed
+      // immediately, so under load the orders service fetched a port nothing was
+      // listening on yet and the assertion reported an empty body — a race in
+      // the test, not in the generated code. Observed intermittently in the full
+      // suite and never in isolation, which is the signature.
+      for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
+        const url = `http://127.0.0.1:${base + index + 1}/`;
+        let ready = false;
+        for (let attempt = 0; attempt < 100 && !ready; attempt++) {
+          try {
+            const response = await fetch(url);
+            await response.body?.cancel();
+            ready = true;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+        expect(ready, `${peer} never bound ${url}`).toBe(true);
+      }
+
       const result = await bootAndProbe(`${ws}/apps/orders`, MESH_PROBE) as Record<
         string,
         { url: string; status: number; body: string }
