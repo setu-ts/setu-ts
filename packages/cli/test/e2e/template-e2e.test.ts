@@ -195,8 +195,8 @@ describe('template scaffolding — end to end', () => {
     const sources = [
       `${project}/main.ts`,
       `${project}/setu.config.ts`,
-      `${project}/src/greeting-service.ts`,
-      `${project}/src/greeting-controller.ts`,
+      `${project}/src/services/greeting.service.ts`,
+      `${project}/src/controllers/greeting.controller.ts`,
     ];
     for (const source of sources) {
       expect((await Deno.stat(source)).isFile).toBe(true);
@@ -417,21 +417,25 @@ describe('template scaffolding — end to end', () => {
     // the plugin array once all three sources are named.
     expect(config).toContain(
       'DecoratorPlugin({\n' +
-        '        controllers: [GreetingController, ...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
-        '        services: [GreetingService, ...APP_SERVICES, ...MODULE_SERVICES],\n' +
+        '        controllers: [...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
+        '        services: [...APP_SERVICES, ...MODULE_SERVICES],\n' +
         '      }),',
     );
     // DiPlugin is what puts @Injectable classes on the container path.
     expect(config).toContain('DiPlugin()');
     // The local imports that bring the args identifiers into scope.
-    expect(config).toContain("from './src/greeting-controller.ts'");
-    expect(config).toContain("from './src/greeting-service.ts'");
+    // E4: the showcase reaches the config through the seam barrels now, not by
+    // explicit path — which is the signal a developer copies when adding theirs.
+    expect(config).toContain("from './src/controllers/index.ts'");
+    expect(config).toContain("from './src/services/index.ts'");
     expect(config).toContain("from './src/modules/index.ts'");
   });
 
   it('emits parameter-level @Inject in the class-based controller', async () => {
     expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
-    const controller = await Deno.readTextFile(`${root}/svc/src/greeting-controller.ts`);
+    const controller = await Deno.readTextFile(
+      `${root}/svc/src/controllers/greeting.controller.ts`,
+    );
     // The showcase is the parameter position, not the deprecated class-level list.
     expect(controller).toContain("@Inject('greeting-service')");
     expect(controller).not.toContain("@Inject('greeting-service')\n@Controller");
@@ -583,14 +587,17 @@ describe('setu generate module, end to end', () => {
 
     const config = await Deno.readTextFile(`${project}/setu.config.ts`);
     // The seam must not have displaced the template's own example classes.
-    expect(config).toContain('GreetingController');
+    // E4: the showcase reaches the config through APP_CONTROLLERS rather than
+    // by name, so the assertion is that BOTH registration paths are present —
+    // the standalone barrel (which carries the showcase) and the module barrel.
+    expect(config).toContain('...APP_CONTROLLERS');
     expect(config).toContain('...MODULE_CONTROLLERS');
 
     const sources = [
       `${project}/main.ts`,
       `${project}/setu.config.ts`,
-      `${project}/src/greeting-controller.ts`,
-      `${project}/src/greeting-service.ts`,
+      `${project}/src/controllers/greeting.controller.ts`,
+      `${project}/src/services/greeting.service.ts`,
       ...(await moduleSources(project)),
     ];
     await useWorkspacePackages(project);

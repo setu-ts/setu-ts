@@ -269,15 +269,16 @@ describe('class-based template', () => {
   });
 
   it('carries the decorator class lists as rendered args', () => {
-    // Order is load-bearing: the example classes come first, then the standalone
-    // controller and service barrels, then the module barrel — so `setu g controller`
-    // and `setu g module` both ADD to this registration rather than displacing the
-    // template's own showcase classes.
+    // The showcase classes are no longer named individually: E4 moved them into
+    // the seam directories, so `APP_CONTROLLERS`/`APP_SERVICES` already carry
+    // them and a second literal entry would register each one twice. Order is
+    // still load-bearing — the standalone barrels come before the module one, so
+    // `setu g controller` and `setu g module` both ADD to this registration.
     const decorator = CLASS_BASED_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
     expect(decorator?.args).toBe(
       '{\n' +
-        '        controllers: [GreetingController, ...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
-        '        services: [GreetingService, ...APP_SERVICES, ...MODULE_SERVICES],\n' +
+        '        controllers: [...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
+        '        services: [...APP_SERVICES, ...MODULE_SERVICES],\n' +
         '      }',
     );
   });
@@ -319,8 +320,31 @@ describe('class-based template', () => {
 
   it('imports every identifier its args string names', () => {
     const imported = (CLASS_BASED_TEMPLATE.localImports ?? []).flatMap((l) => l.symbols);
-    expect(imported).toContain('GreetingController');
-    expect(imported).toContain('GreetingService');
+    expect(imported).toContain('APP_CONTROLLERS');
+    expect(imported).toContain('APP_SERVICES');
+    expect(imported).toContain('MODULE_CONTROLLERS');
+    expect(imported).toContain('MODULE_SERVICES');
+  });
+
+  it('reaches the showcase through the seam barrels, not an explicit path', () => {
+    // E4: the config used to import the two classes by path, which is the
+    // signal a developer copies — and it pointed at `src/` root rather than the
+    // directories `setu generate` writes to.
+    const froms = (CLASS_BASED_TEMPLATE.localImports ?? []).map((l) => l.from);
+    expect(froms).not.toContain('./src/greeting-service.ts');
+    expect(froms).not.toContain('./src/greeting-controller.ts');
+    expect(froms).toContain('./src/services/index.ts');
+    expect(froms).toContain('./src/controllers/index.ts');
+  });
+
+  it('seeds the showcase into the SCAFFOLDED barrels, before anything is generated', () => {
+    // Without the seed the showcase would sit in a seam directory registered by
+    // nothing until the first `setu generate` regenerated the barrel around it.
+    const files = CLASS_BASED_TEMPLATE.files ?? [];
+    const controllers = files.find((f) => f.path === 'src/controllers/index.ts');
+    const services = files.find((f) => f.path === 'src/services/index.ts');
+    expect(controllers?.contents).toContain('GreetingController');
+    expect(services?.contents).toContain('GreetingService');
   });
 
   it('emits a source file for each locally imported module', () => {
@@ -332,8 +356,9 @@ describe('class-based template', () => {
 
   it('emits the controller, the service, and every seam barrel it can consume', () => {
     expect((CLASS_BASED_TEMPLATE.files ?? []).map((f) => f.path)).toEqual([
-      'src/greeting-service.ts',
-      'src/greeting-controller.ts',
+      // In the seam directories, under the seam naming convention (E4).
+      'src/services/greeting.service.ts',
+      'src/controllers/greeting.controller.ts',
       'src/modules/index.ts',
       // ONE HTTP barrel, shared by the controller and route kinds since E8.
       'src/controllers/index.ts',
