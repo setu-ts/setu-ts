@@ -51,6 +51,12 @@ export function createCloudflareRuntimeServices(
 ): IRuntimeServices {
   const { vars } = splitWorkerEnv(options?.env ?? {});
 
+  // `fs`, `workers`, `dns` and `onSignal` are all deliberately ABSENT here.
+  // For `onSignal` specifically: a Worker isolate is evicted, never signalled,
+  // so there is no signal to register for and no process to shut down
+  // gracefully. Supplying a no-op instead would be worse than omitting it — a
+  // caller checking `runtime.onSignal !== undefined` would conclude its
+  // shutdown handler will run, and it never would.
   return mergeRuntimeServices({
     platform: () => 'cloudflare-workers',
     version: () => '',

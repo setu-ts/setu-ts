@@ -283,7 +283,10 @@ interface IRuntimeServices {
   fs?: IFileSystem;
   workers?: IWorkerHost;
   dns?: IDnsResolver;
+  onSignal?(signal: RuntimeSignal, handler: () => void): void;
 }
+
+type RuntimeSignal = 'SIGTERM' | 'SIGINT';
 ```
 
 `IFileSystem` provides `readFile`/`writeFile`/`stat`/`readdir`/`mkdir`/`rm`, plus an **optional**
@@ -317,11 +320,23 @@ that resolves names internally and exposes no lookup surface. Callers must degra
 it is not present; the `ServiceDiscoveryPlugin`'s `'dns'` provider throws a typed
 `DiscoveryUnavailableError` during `register()`, naming the alternatives.
 
-| Member    | Node | Deno | Bun | Workers |
-| --------- | ---- | ---- | --- | ------- |
-| `fs`      | ✅   | ✅   | ✅  | ❌      |
-| `workers` | ✅   | ✅   | ✅  | ❌      |
-| `dns`     | ✅   | ✅   | ✅  | ❌      |
+| Member     | Node | Deno           | Bun | Workers |
+| ---------- | ---- | -------------- | --- | ------- |
+| `fs`       | ✅   | ✅             | ✅  | ❌      |
+| `workers`  | ✅   | ✅             | ✅  | ❌      |
+| `dns`      | ✅   | ✅             | ✅  | ❌      |
+| `onSignal` | ✅   | ✅ (not Win32) | ✅  | ❌      |
+
+`onSignal` registers a process-termination handler so an application can run `app.stop()` — its
+shutdown hooks, discovery deregistration, and broker disconnects — before the process dies. Handlers
+are additive and are never removed: a process that received a termination signal is ending.
+
+It is the one member absent for **two unrelated reasons**, and a caller must treat both the same way
+(`runtime.onSignal?.(...)`). Cloudflare Workers omits it because an isolate is evicted rather than
+signalled, so there is nothing to register for. The **Deno** adapter omits it on **Windows**, where
+registering for `SIGTERM` throws rather than no-opping — so the presence of the key means "this
+runtime can register a handler", never "this platform raises signals". A no-op was rejected
+deliberately: it would let a caller conclude its shutdown handler runs when it never would.
 
 ```typescript
 interface IDnsResolver {

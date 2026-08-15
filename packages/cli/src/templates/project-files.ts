@@ -41,13 +41,13 @@ import { rootManifestSettings } from './root-settings.ts';
 const RANGE = `^${VERSION}`;
 
 /**
- * Where the entry module gets the port it binds, when it is not a literal.
+ * Where the entry module gets the port it binds, when it does not read `PORT`.
  *
- * A standalone project binds `3000`, which is what every scaffolded project did
- * before workspaces existed. A workspace member binds a port allocated by the
- * CLI, and that port has to be the SAME datum its siblings dial — so the entry
- * imports it from the generated discovery module rather than carrying a literal
- * that could drift from the map.
+ * A standalone project reads `PORT` from the environment, defaulting to `3000`,
+ * so the `.env` the CLI emits can supply it (X4-10). A workspace member does
+ * NOT: its port is allocated by the CLI and has to be the SAME datum its
+ * siblings dial, so the entry imports it from the generated discovery module
+ * rather than taking an environment override that could drift from the map.
  */
 export interface EntryPort {
   /** The identifier the entry imports, e.g. `SERVICE_PORT`. */
@@ -416,10 +416,25 @@ ${middlewareLines}${setupLines}
  */
 function serveEntry(runtime: TargetRuntime, port?: EntryPort): string {
   const portImport = port === undefined ? '' : `import { ${port.symbol} } from '${port.from}';\n`;
-  const portExpression = port === undefined ? '3000' : port.symbol;
+  // A workspace member binds the port the CLI allocated it, imported from the
+  // generated discovery module so the port it binds and the port its siblings
+  // dial stay ONE datum (M62). A standalone project has no such map, and used
+  // to carry the literal `3000` — which made the `.env` the CLI itself emits
+  // unable to supply the one value the entry needs (X4-10). It now reads
+  // `PORT`, through `IRuntimeServices` rather than `Deno.env`/`process.env`,
+  // so the entry stays portable across all three socket runtimes.
+  const portExpression = port === undefined ? "Number(runtime.env.PORT ?? '3000')" : port.symbol;
 
   return `import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger } from '@setu-ts/common';
 ${portImport}
+// Built before the application, because the port is needed at start() and
+// plugins do not register until then. Safe to hold alongside the application's
+// own instance: runtime services are a stateless facade over platform globals.
+const runtime = createRuntimeServices();
+
 const app = await ${CONFIG_EXPORT}();
 
 await app.start({ port: ${portExpression} });
@@ -457,44 +472,45 @@ function shutdownBlock(runtime: TargetRuntime): string {
   // entry), and has no process to signal: an isolate is evicted, not stopped.
   if (runtime === 'cloudflare-workers') return '';
 
-  const preamble = `
+  // ONE body for Deno, Node and Bun — byte-identical. Before M70h this
+  // rendered two different bodies reaching for `Deno.addSignalListener` /
+  // `Deno.exit` / `Deno.build.os` and `process.on` / `process.exit`, which put
+  // runtime APIs in application code (AI_GUIDELINES §4.2) and meant moving a
+  // project between runtimes required rewriting its entry point by hand.
+  //
+  // All four touches now go through capabilities that already exist:
+  //   - the signal listener  → `IRuntimeServices.onSignal` (M70h)
+  //   - the OS guard         → gone; the Deno adapter omits `onSignal` on
+  //                            Windows, where `addSignalListener` throws
+  //   - `Deno.exit`/`process.exit` → `IRuntimeServices.exit`
+  //   - `console.error`      → the resolved `ILogger`
+  //
+  // `onSignal` is called optionally because it is genuinely absent on Windows
+  // and on Workers; `?.` is the honest read, not defensive noise.
+  return `
 // Graceful shutdown. Without this the process dies from the signal itself and
 // \`app.stop()\` never runs, so in-flight requests are cut, the service never
 // deregisters from discovery, and no database or broker disconnects.
-`;
+//
+// Portable across every runtime: no \`Deno\`, no \`process\`, no OS check. On
+// Windows \`onSignal\` is absent and this registers nothing, which is correct —
+// Windows has no SIGTERM to catch.
+//
+// The logger is resolved only if one is registered: a project scaffolded
+// without LoggerPlugin still shuts down cleanly, it just reports nothing.
+const logger = app.services.has(CAPABILITIES.LOGGER)
+  ? app.services.get<ILogger>(CAPABILITIES.LOGGER)
+  : undefined;
 
-  if (runtime === 'deno') {
-    // Guarded: \`Deno.addSignalListener('SIGTERM')\` THROWS on Windows, which
-    // would turn a portability detail into a crash at startup.
-    return `${preamble}if (Deno.build.os !== 'windows') {
-  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    Deno.addSignalListener(signal, () => {
-      // The .catch is not optional: a rejecting onShutdown hook makes stop()
-      // reject, and an unhandled rejection replaces the reason with a trace.
-      void app.stop()
-        .then(() => Deno.exit(0))
-        .catch((error: unknown) => {
-          console.error('Graceful shutdown failed:', error);
-          Deno.exit(1);
-        });
-    });
-  }
-}
-`;
-  }
-
-  // Node and Bun share one block: Bun implements the Node `process` API, and
-  // registering a listener is a no-op on a platform that never raises the
-  // signal rather than a throw — so this needs no OS guard.
-  return `${preamble}for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-  process.on(signal, () => {
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
     // The .catch is not optional: a rejecting onShutdown hook makes stop()
     // reject, and an unhandled rejection replaces the reason with a trace.
     void app.stop()
-      .then(() => process.exit(0))
+      .then(() => runtime.exit(0))
       .catch((error: unknown) => {
-        console.error('Graceful shutdown failed:', error);
-        process.exit(1);
+        logger?.error('Graceful shutdown failed', { error });
+        runtime.exit(1);
       });
   });
 }
@@ -647,12 +663,22 @@ ${reExportBlock}`;
  * @param host - The resolved template host
  * @returns Bare package names, deduplicated
  */
-function frameworkPackages(host: ResolvedHost): readonly string[] {
+function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly string[] {
   // `common` is unconditional: the config module imports IApplication whichever
   // way it builds the app. `kernel` is not — a starter factory returns the
   // application, so `createApplication` is never imported on that path and
   // declaring the dependency would be a package the project never references.
   const packages = new Set<string>(['common']);
+  // Every socket target's `main.ts` imports `createRuntimeServices` to read the
+  // port and register its shutdown signals (M70h/B1). It is declared here
+  // rather than left to the plugin scan because a starter-composed host
+  // (`full-stack`) has an EMPTY plugin list — its RuntimePlugin comes from the
+  // starter — so the scan alone would leave `main.ts` importing a package the
+  // project never declared. Workers renders a `fetch` export instead and needs
+  // no entry of its own.
+  if (runtime !== 'cloudflare-workers') {
+    packages.add('runtime');
+  }
   if (host.appFactory === undefined) {
     packages.add('kernel');
   } else {
@@ -671,9 +697,9 @@ function frameworkPackages(host: ResolvedHost): readonly string[] {
  * @param host - The resolved template host
  * @returns Specifier → `jsr:` URL
  */
-function jsrImports(host: ResolvedHost): Record<string, string> {
+function jsrImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const imports: Record<string, string> = {};
-  for (const pkg of frameworkPackages(host)) {
+  for (const pkg of frameworkPackages(host, runtime)) {
     imports[`@setu-ts/${pkg}`] = `jsr:@setu-ts/${pkg}@${RANGE}`;
   }
   // Template aliases last: an alias like `~/` is not a framework package and
@@ -688,9 +714,9 @@ function jsrImports(host: ResolvedHost): Record<string, string> {
  * @param host - The resolved template host
  * @returns Specifier → `npm:@jsr/…` range
  */
-function npmDependencies(host: ResolvedHost): Record<string, string> {
+function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const deps: Record<string, string> = {};
-  for (const pkg of frameworkPackages(host)) {
+  for (const pkg of frameworkPackages(host, runtime)) {
     deps[`@setu-ts/${pkg}`] = `npm:@jsr/setu-ts__${pkg}@${RANGE}`;
   }
   return { ...deps, ...host.manifest?.npmDependencies };
@@ -937,7 +963,7 @@ function standaloneNpmFiles(
   if (manifest?.npmBuildScript === undefined && !onWorkers) return [];
 
   const dependencies = {
-    ...(onWorkers ? npmDependencies(host) : {}),
+    ...(onWorkers ? npmDependencies(host, runtime) : {}),
     ...manifest?.npmDependencies,
   };
   const devDependencies = {
@@ -1062,7 +1088,7 @@ ${PROGRAM_NAME} generate --help
             // this file, and what it needs depends on what the template emits —
             // decorated classes need `experimentalDecorators`, JSX needs `jsx`.
             ...(compilerOptions === undefined ? {} : { compilerOptions }),
-            imports: jsrImports(host),
+            imports: jsrImports(host, runtime),
           },
           null,
           2,
@@ -1086,7 +1112,7 @@ ${PROGRAM_NAME} generate --help
             version: '0.1.0',
             type: 'module',
             scripts: npmScripts(runtime, manifest),
-            dependencies: npmDependencies(host),
+            dependencies: npmDependencies(host, runtime),
             // Runtime-level first, so a template that pins its own copy of the
             // same package wins — the template knows what its build needs.
             //
