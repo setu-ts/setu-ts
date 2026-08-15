@@ -471,8 +471,30 @@ inline config callback (§3.6 e2e fails, everything else passes); drop `nodeModu
 (`--transport
 rabbitmq` fmt gate fails while `http` passes); remove `full-stack` from `BOOTABLE`
 (the build/boot assertions vanish rather than fail — so the gate asserts membership too); replace
-`onSignal` with the literal `Deno.exit` body (shutdown e2e fails on Node); point `ROUTES_SEAM` back
-at `src/routes` (the shared-barrel assertions fail).
+`onSignal` with the literal `Deno.exit` body; point `ROUTES_SEAM` back at `src/routes` (the
+shared-barrel assertions fail).
+
+**Correction — the `onSignal` control's stated failure site was wrong, and measuring it is what
+showed that.** This plan claimed the literal-`Deno.exit` body would make "the shutdown e2e fail on
+Node". It does not, and cannot: `shutdown-e2e.test.ts` scaffolds a default (Deno) project,
+`BOOTABLE` in `scaffold-runs-e2e.test.ts` lists only templates, and **no e2e in this repository
+boots a Node project at all** — so the literal Deno body passes that gate cleanly. Measured: with
+the regression in place the shutdown e2e reported `ok | 1 passed (2 steps) | 0 failed`.
+
+The control still discriminates, at the level that can see it: `project-files.test.ts` fails **6
+steps** — the byte-identical-across-targets assertion and the `reaches no runtime-specific API` arm
+for each of deno/node/bun. That is the honest site, because what B1 changes is the emitted source,
+not the Deno run of it.
+
+A real Node boot was investigated and is **structurally unavailable this milestone**, which is
+recorded rather than left as a to-do: a `--runtime node` project resolves `@setu-ts/runtime` from
+the published npm mirror (`npm:@jsr/setu-ts__runtime@^0.1.0-alpha.8`), that published version
+predates `onSignal`, and npm has no import-map equivalent for `useWorkspacePackages` to repoint at
+this workspace — so such a boot would fail for a reason unrelated to the code under test until the
+runtime package publishes. What IS proven for Node without it: the entry is byte-identical to the
+Deno one and reaches no runtime API (unit), and `buildNodeHost()` with no injection routes
+`onSignal` to the real `node:process.on`, asserted by listener count (`signal-real.test.ts`) — the
+M55 dead-default guard. Delivery of the signal itself is Node's contract, not this package's.
 
 ## 7. Verification gates
 

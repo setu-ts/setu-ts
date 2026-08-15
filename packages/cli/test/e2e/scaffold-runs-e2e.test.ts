@@ -133,6 +133,17 @@ describe('a scaffolded project is formatted and lints clean', () => {
 });
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
+  // Membership is asserted, not just iterated. Removing a template from
+  // `BOOTABLE` makes its build-and-boot assertions VANISH rather than fail, so
+  // the whole gate stays green while covering strictly less — a one-word edit
+  // that hides exactly the defect X5-3 was. `full-stack` is named because it is
+  // the template that was excluded for years precisely because it could not
+  // boot; this is the M37c `ALLOW_SKIP` precedent, where the exemption for the
+  // one app that mattered would likewise have left CI green.
+  it('never quietly drops a template from the boot list', () => {
+    expect([...BOOTABLE]).toEqual(['rest', 'microservice', 'class-based', 'full-stack']);
+  });
+
   for (const template of BOOTABLE) {
     it(`holds for --template ${template}`, async () => {
       expect(await run(['new', 'shop', '--template', template])).toBe(0);
