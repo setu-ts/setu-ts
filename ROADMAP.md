@@ -6821,8 +6821,15 @@ application's own instance type, since a seam that type-checks as `unknown` has 
 **Objective:** Close the defects the alpha.8 smoke programme found, and ship them as one
 `v0.1.0-alpha.9`. The programme drove the **published** packages through twelve exercises (X1–X12)
 and produced **118 verified defects — 38 High, 52 Medium, 28 Low — none of them closed**. The
-register is [`smoke/DEFECTS.md`](smoke/DEFECTS.md), which stays the authority for the full row set
-and the per-row reproduction; this section is the work breakdown.
+register is `smoke/DEFECTS.md`, which stays the authority for the full row set and the per-row
+reproduction; this section is the work breakdown.
+
+> **The register is NOT in this repository.** `smoke/` is excluded locally (`.git/info/exclude`, so
+> not even shared through `.gitignore`), which means the rows, reproductions and mechanisms behind
+> every ID below live in one working tree and nowhere else. This section is deliberately written to
+> carry the defect that matters in each workstream inline, so it stands alone — but a reader
+> following an ID to the register will not find it, and losing that clone loses the evidence.
+> Committing the register, or exporting it into `docs/`, is an open maintainer decision.
 
 > **Why a closeout milestone rather than per-defect `fix/…` branches.** M47 is the precedent — "the
 > three `CHANGELOG` known limitations that were real capability gaps", taken out of order because
@@ -6857,8 +6864,8 @@ all merge before the release branch is cut.
   on Node or Bun, and native gRPC-binary works on no runtime it can run on. M70i decides
   repair-versus-withdraw explicitly rather than inheriting it.
 - **X1's functional build no longer exists**, so `[functional]` and `[both]` rows cannot be
-  re-verified against a live tree; [`smoke/EXERCISES.md`](smoke/EXERCISES.md) X1 is the rebuild
-  recipe. Any workstream depending on those rows rebuilds first.
+  re-verified against a live tree; `smoke/EXERCISES.md` X1 is the rebuild recipe. Any workstream
+  depending on those rows rebuilds first.
 - **No GitHub issues** — the register is the tracker, by decision. A PR closing rows cites their IDs
   and updates the register's Status column in the same change.
 
