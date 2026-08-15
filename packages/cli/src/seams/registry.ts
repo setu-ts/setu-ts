@@ -35,7 +35,7 @@ import {
 } from './http.ts';
 import { COMMAND_HANDLER_SEAM, QUERY_HANDLER_SEAM } from './cqrs.ts';
 import { EVENTS_SEAM } from './events.ts';
-import { HEALTH_SEAM } from './health.ts';
+import { FUNCTIONAL_HEALTH_SEAM, HEALTH_SEAM } from './health.ts';
 import { METRICS_SEAM } from './metrics.ts';
 import { MIDDLEWARE_SEAM } from './middleware.ts';
 import { PLUGINS_SEAM } from './plugins.ts';
@@ -79,17 +79,18 @@ export function listSeamSpecs(): readonly SeamSpec[] {
 }
 
 /**
- * Swaps the HTTP family into a generator mode's shape.
+ * Swaps every family that a HOST scaffolds into a generator mode's shape.
  *
- * Applied by BOTH accessors below, because both modes give `controller` and
- * `route` a real registration site — `registerGeneratedRoutes(app.router)` —
- * so the host scaffolds the barrel either way and only the shape differs.
+ * Applied by both accessors below, because each of these families has a real
+ * registration site in BOTH modes — `registerGeneratedRoutes(app.router)` for
+ * the HTTP pair, `HealthPlugin({ indicators })` for health — so the host
+ * scaffolds the barrel either way and only the artifact shape differs.
  *
  * @param specs - The registry's specs
  * @param mode - The target's generator mode
- * @returns The specs, with the HTTP family in that mode's shape
+ * @returns The specs, with each family in that mode's shape
  */
-function withHttpShape(
+function withHostShapes(
   specs: readonly SeamSpec[],
   mode: GeneratorMode,
 ): readonly SeamSpec[] {
@@ -97,6 +98,10 @@ function withHttpShape(
   const functional = new Map<string, SeamSpec>([
     [FUNCTIONAL_CONTROLLERS_SEAM.schematic, FUNCTIONAL_CONTROLLERS_SEAM],
     [FUNCTIONAL_ROUTES_SEAM.schematic, FUNCTIONAL_ROUTES_SEAM],
+    // `health-indicator` is here rather than in the scan-only set because its
+    // barrel IS imported by `setu.config.ts` — the shape has to be right at
+    // scaffold time, not only when an artifact is admitted (A2).
+    [FUNCTIONAL_HEALTH_SEAM.schematic, FUNCTIONAL_HEALTH_SEAM],
   ]);
   return specs.map((spec) => functional.get(spec.schematic) ?? spec);
 }
@@ -117,9 +122,9 @@ function withHttpShape(
  */
 export function scanSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
   const mode = generatorMode(installed);
-  const withHttp = withHttpShape(listSeamSpecs(), mode);
-  if (mode === 'class-based') return withHttp;
-  return withHttp.map((spec) =>
+  const withHost = withHostShapes(listSeamSpecs(), mode);
+  if (mode === 'class-based') return withHost;
+  return withHost.map((spec) =>
     spec.schematic === SERVICES_SEAM.schematic ? FUNCTIONAL_SERVICES_SEAM : spec
   );
 }
@@ -141,7 +146,7 @@ export function scanSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec
  * @returns The consumable seams, in registry order
  */
 export function hostSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
-  return withHttpShape(listSeamSpecs(), generatorMode(installed)).filter(
+  return withHostShapes(listSeamSpecs(), generatorMode(installed)).filter(
     (spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin),
   );
 }

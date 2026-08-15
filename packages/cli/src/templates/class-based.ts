@@ -34,9 +34,13 @@ const DECORATOR_WIRING: Wiring = { pkg: 'decorator-plugin', symbol: 'DecoratorPl
 
 const CLASS_BASED_SEAMS = seamsFor(new Set([...REST_PLUGINS, DECORATOR_WIRING].map((p) => p.pkg)));
 
-/** Where the emitted example classes live in the scaffolded project. */
-const SERVICE_PATH = './src/greeting-service.ts';
-const CONTROLLER_PATH = './src/greeting-controller.ts';
+/**
+ * The name the showcase artifacts are generated under.
+ *
+ * Seeded into the scaffolded seam barrels so the example is registered the same
+ * way a generated artifact is — see {@linkcode CLASS_BASED_FILES}.
+ */
+const SHOWCASE = 'greeting';
 
 /**
  * The example service: an `@Injectable` with a capability token, so the
@@ -64,7 +68,7 @@ export class GreetingService {
  */
 const CONTROLLER_SOURCE =
   `import { Controller, Get, Inject, Param } from '@setu-ts/decorator-plugin';
-import { GreetingService } from './greeting-service.ts';
+import { GreetingService } from '../services/greeting.service.ts';
 
 /**
  * A decorated controller.
@@ -97,16 +101,24 @@ export class GreetingController {
  * DI pair. Its seams include the class-oriented controller and service barrels.
  */
 export const CLASS_BASED_FILES: readonly GeneratedFile[] = [
-  { path: 'src/greeting-service.ts', contents: SERVICE_SOURCE },
-  { path: 'src/greeting-controller.ts', contents: CONTROLLER_SOURCE },
+  // In the SEAM directories, under the seam naming convention (E4). They used to
+  // sit at `src/` root while `setu generate service`/`controller` wrote to
+  // `src/services/` and `src/controllers/`, so a developer following the
+  // scaffold's own example put their next service in the wrong place.
+  { path: `src/services/${SHOWCASE}.service.ts`, contents: SERVICE_SOURCE },
+  { path: `src/controllers/${SHOWCASE}.controller.ts`, contents: CONTROLLER_SOURCE },
   ...MODULE_SEAM_FILES,
-  ...seamFiles(CLASS_BASED_SEAMS),
+  // Seeded, so the scaffolded barrels already list the showcase. It is then
+  // registered through exactly the mechanism a generated artifact uses, and the
+  // scanner keeps it on every later regeneration because it exports the symbols
+  // the barrel imports.
+  ...seamFiles(CLASS_BASED_SEAMS, { controller: [SHOWCASE], service: [SHOWCASE] }),
 ];
 
 /** The classes `setu.config.ts` must import to pass them to `DecoratorPlugin`. */
 export const CLASS_BASED_LOCAL_IMPORTS: readonly LocalImport[] = [
-  { symbols: ['GreetingService'], from: SERVICE_PATH },
-  { symbols: ['GreetingController'], from: CONTROLLER_PATH },
+  // No explicit-path showcase imports: the seam barrels carry both classes now,
+  // so `setu.config.ts` names each barrel once and nothing else.
   MODULE_SEAM_LOCAL_IMPORT,
   ...seamLocalImports(CLASS_BASED_SEAMS),
 ];
@@ -129,11 +141,12 @@ export const CLASS_BASED_LOCAL_IMPORTS: readonly LocalImport[] = [
 export const CLASS_BASED_PLUGINS: readonly Wiring[] = withPluginOptionSeams(
   withModuleSeam(
     [...REST_PLUGINS, DECORATOR_WIRING],
-    // The showcase classes come first, then the seam barrels, then the module barrel —
-    // so `setu g controller` and `setu g module` both ADD to this registration rather
-    // than displacing the template's own example.
-    ['GreetingController', ...decoratorSeamExtras(CLASS_BASED_SEAMS).controllers],
-    ['GreetingService', ...decoratorSeamExtras(CLASS_BASED_SEAMS).services],
+    // The seam barrels carry the showcase too, since E4 moved it into their
+    // directories — so `setu g controller` and `setu g module` ADD to this
+    // registration rather than displacing the template's own example, and the
+    // showcase no longer needs a second registration path of its own.
+    decoratorSeamExtras(CLASS_BASED_SEAMS).controllers,
+    decoratorSeamExtras(CLASS_BASED_SEAMS).services,
   ),
   CLASS_BASED_SEAMS,
 ).concat([DI_WIRING]);

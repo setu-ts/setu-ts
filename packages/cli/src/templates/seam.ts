@@ -15,7 +15,7 @@
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
-import type { SeamSpec } from '../seams/seam-spec.ts';
+import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
 import { APP_CONTROLLERS_EXPORT, REGISTER_ROUTES_EXPORT } from '../seams/http.ts';
 import { APP_SERVICES_EXPORT } from '../seams/services.ts';
 import { COMMAND_HANDLERS_EXPORT, QUERY_HANDLERS_EXPORT } from '../seams/cqrs.ts';
@@ -47,17 +47,26 @@ export function seamsFor(installed: ReadonlySet<string>): readonly SeamSpec[] {
  * Rendered by the same functions `setu generate` uses, so the scaffolded file and every
  * regeneration of it can never drift apart in shape.
  *
+ * A host that ships example artifacts of its own seeds them, so the SCAFFOLDED
+ * barrel already lists them. Without that the class-based showcase would sit in
+ * a seam directory registered by nothing until the first `setu generate`
+ * regenerated the barrel around it (E4).
+ *
  * @param seams - The host's consumable seams
+ * @param seeded - Artifact names the host itself emits, by schematic name
  * @returns One file per seam, deduplicated by path
  */
-export function seamFiles(seams: readonly SeamSpec[]): readonly GeneratedFile[] {
+export function seamFiles(
+  seams: readonly SeamSpec[],
+  seeded: SeamArtifacts = {},
+): readonly GeneratedFile[] {
   const byPath = new Map<string, GeneratedFile>();
   for (const spec of seams) {
     // Deduplicated because two schematics can share one barrel: `command-handler` and
     // `query-handler` both render `src/cqrs/index.ts`, and emitting it twice would trip
     // the duplicate-path guard in `commands/new.ts`.
     if (byPath.has(spec.barrel)) continue;
-    byPath.set(spec.barrel, { path: spec.barrel, contents: spec.renderBarrel({}) });
+    byPath.set(spec.barrel, { path: spec.barrel, contents: spec.renderBarrel(seeded) });
   }
   return [...byPath.values()];
 }
