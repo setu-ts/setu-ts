@@ -156,6 +156,25 @@ export interface TransportSpec {
    */
   readonly messagingArgs?: (connection: string) => string;
   /**
+   * The `QueuePlugin` argument literal this transport needs, rendered as source.
+   * Omitted → the template's bare `QueuePlugin()` is left alone.
+   *
+   * Present only for the transports the QUEUE supports, which is a smaller set
+   * than the brokers: `QueueAdapterType` is
+   * `'memory' | 'redis' | 'rabbitmq' | 'sqs'`, so NATS, Kafka, Pub/Sub and
+   * Service Bus have no queue arm and keep the in-memory default.
+   *
+   * X2-3: `--transport rabbitmq` correctly rewrote `MessagingPlugin` and then
+   * left `QueuePlugin()` on memory — so in the one template built for
+   * distributed work, background jobs were process-local: lost on restart,
+   * invisible to a second replica, and unaffected by the broker the workspace
+   * was explicitly pointed at. Everything needed was already known to the CLI.
+   *
+   * @param connection - Source for the connection value
+   * @returns The argument list, without the enclosing parentheses
+   */
+  readonly queueArgs?: (connection: string) => string;
+  /**
    * Where the connection value comes from. Omitted → the transport has none
    * (`http`, `grpc`, `memory`).
    */
@@ -259,6 +278,7 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     description: 'Redis Streams broker shared by every member',
     plugins: [],
     messagingArgs: (connection) => `{ broker: 'redis-streams', url: ${connection} }`,
+    queueArgs: (connection) => `{ adapter: 'redis', url: ${connection} }`,
     connection: {
       variable: 'REDIS_URL',
       localDefault: 'redis://127.0.0.1:6379',
@@ -287,6 +307,7 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     description: 'RabbitMQ broker shared by every member',
     plugins: [],
     messagingArgs: (connection) => `{ broker: 'rabbitmq', url: ${connection} }`,
+    queueArgs: (connection) => `{ adapter: 'rabbitmq', url: ${connection} }`,
     connection: {
       variable: 'RABBITMQ_URL',
       localDefault: 'amqp://127.0.0.1:5672',
