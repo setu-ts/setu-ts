@@ -15,6 +15,7 @@ function createFakeBunHost(overrides: Partial<BunHost> = {}): BunHost {
     exit: (code?: number) => {
       throw new Error(`Bun.exit(${code ?? 0})`);
     },
+    onSignal: () => {},
     readFile: (path: string) => files.get(path) ?? null,
     realPath: (path: string) => (files.has(path) || dirs.has(path) ? path : null),
     writeFile: (path: string, data: Uint8Array) => {
@@ -299,6 +300,7 @@ describe('buildBunHost — the default host', () => {
         exit: () => {
           throw new Error('exit');
         },
+        on: () => {},
       },
       hostname: () => 'fake-host',
       bunGlobal: undefined,
@@ -344,6 +346,7 @@ describe('buildBunHost — the default host', () => {
         exit: () => {
           throw new Error('exit');
         },
+        on: () => {},
       },
       hostname: () => 'fake-host',
       bunGlobal: undefined,
@@ -379,6 +382,7 @@ describe('buildBunHost — the default host', () => {
         exit: () => {
           throw new Error('exit');
         },
+        on: () => {},
       },
       hostname: () => 'fake-host',
       // On Bun this is `globalThis.Bun`; its version wins over process.versions.
@@ -410,6 +414,7 @@ describe('buildBunHost — the default host', () => {
         exit: () => {
           throw new Error('exit');
         },
+        on: () => {},
       },
       hostname: () => 'fake-host',
       bunGlobal: undefined,
@@ -474,7 +479,7 @@ describe('buildBunHost createReadStream wiring', () => {
         mkdirSync: () => undefined,
         rmSync: () => {},
       },
-      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never },
+      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never, on: () => {} },
       hostname: () => 'h',
       bunGlobal: { version: '1.1.0' },
     };
@@ -503,7 +508,7 @@ describe('buildBunHost createReadStream wiring', () => {
           throw new Error('ENOENT');
         },
       },
-      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never },
+      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never, on: () => {} },
       hostname: () => 'h',
       bunGlobal: { version: '1.1.0' },
     };

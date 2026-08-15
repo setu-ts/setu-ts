@@ -9,7 +9,13 @@
  * @module
  */
 
-import type { IDnsResolver, IFileSystem, IRuntimeServices, IWorkerHost } from '@setu-ts/common';
+import type {
+  IDnsResolver,
+  IFileSystem,
+  IRuntimeServices,
+  IWorkerHost,
+  RuntimeSignal,
+} from '@setu-ts/common';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
 import { createWebWorkerHost } from '../shared/web-worker-host.ts';
 import { createDenoDnsResolver } from './deno-dns-resolver.ts';
@@ -28,6 +34,18 @@ export interface DenoHost {
   env: { toObject(): Record<string, string> };
   /** Exit the process. */
   exit(code?: number): never;
+  /**
+   * Build metadata. Read for `os` alone, to decide whether signal listening is
+   * available — see {@linkcode createDenoRuntimeServices}.
+   */
+  build: { os: string };
+  /**
+   * Registers a signal listener.
+   *
+   * **Throws on Windows**, which is why the adapter guards on
+   * {@linkcode DenoHost.build} rather than calling this unconditionally.
+   */
+  addSignalListener(signal: RuntimeSignal, handler: () => void): void;
   /** Read file as bytes. */
   readFile(path: string): Promise<Uint8Array>;
   /** Resolve a path to its canonical absolute form, following symlinks. */
@@ -185,6 +203,18 @@ export function createDenoRuntimeServices(
     },
   };
 
+  // Windows has no POSIX signals, and `Deno.addSignalListener('SIGTERM')`
+  // THROWS there rather than no-opping. The member is therefore omitted
+  // entirely on Windows — the same shape as `dns` on Workers — so a caller
+  // reading `runtime.onSignal?.(…)` degrades instead of crashing at startup.
+  // Callers must not read the presence of this key as "signals are supported":
+  // read it as "this runtime can register one".
+  const signals = host.build.os === 'windows' ? {} : {
+    onSignal: (signal: RuntimeSignal, handler: () => void): void => {
+      host.addSignalListener(signal, handler);
+    },
+  };
+
   return mergeRuntimeServices({
     platform: () => 'deno',
     version: () => host.version.deno,
@@ -194,5 +224,6 @@ export function createDenoRuntimeServices(
     fs,
     workers,
     dns,
+    ...signals,
   });
 }

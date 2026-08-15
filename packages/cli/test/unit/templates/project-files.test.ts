@@ -51,18 +51,25 @@ describe('the entry port', () => {
     'deno',
   );
 
-  // The startup half is asserted byte-for-byte because a standalone project's
-  // entry must not change shape when a member's does. The shutdown half follows
-  // it and is asserted separately below.
-  it('binds a literal 3000 with no port import', () => {
+  // A standalone project used to carry the literal `3000` (X4-10), so the `.env`
+  // the CLI itself emits could not supply the one value the entry needs — and
+  // the first boot on a machine already using 3000 died with `AddrInUse`. It now
+  // reads PORT, defaulting to 3000 so a project with no `.env` is unchanged.
+  it('reads PORT from the environment, defaulting to 3000', () => {
     const main = contentsOf([...projectFiles('svc', 'deno', host)], 'main.ts');
-    expect(main.startsWith(
-      `import { createApp } from './setu.config.ts';\n` +
-        `\n` +
-        `const app = await createApp();\n` +
-        `\n` +
-        `await app.start({ port: 3000 });\n`,
-    )).toBe(true);
+    expect(main).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') });");
+  });
+
+  // The read goes through IRuntimeServices, never `Deno.env`/`process.env`:
+  // otherwise fixing X4-10 would have reintroduced B1's per-runtime entry on the
+  // very line that fixes it.
+  it('reads the port portably, with no runtime-specific env API', () => {
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      const main = contentsOf([...projectFiles('svc', runtime, host)], 'main.ts');
+      expect(main).toContain('const runtime = createRuntimeServices();');
+      expect(main).not.toContain('Deno.env');
+      expect(main).not.toContain('process.env');
+    }
   });
 
   // A workspace member binds a CLI-allocated port, and that port has to be the
@@ -78,6 +85,9 @@ describe('the entry port', () => {
     );
     expect(main).toContain(`import { SERVICE_PORT } from './src/discovery/services.ts';`);
     expect(main).toContain('await app.start({ port: SERVICE_PORT });');
+    // A member binds the port the CLI allocated it, so it must NOT fall back to
+    // the environment: the map and the binding have to stay one datum (M62).
+    expect(main).not.toContain('runtime.env.PORT');
     expect(main).not.toContain('3000');
   });
 
@@ -115,35 +125,57 @@ describe('the entry shutdown handler', () => {
     );
   }
 
-  // Deno throws on `addSignalListener('SIGTERM')` under Windows, so the guard is
-  // load-bearing rather than defensive: without it a scaffolded project would
-  // crash at startup there.
-  it('catches both signals through Deno.addSignalListener, guarded for Windows', () => {
-    const main = entryFor('deno');
-    expect(main).toContain(`if (Deno.build.os !== 'windows') {`);
-    expect(main).toContain(`for (const signal of ['SIGTERM', 'SIGINT'] as const) {`);
-    expect(main).toContain('Deno.addSignalListener(signal, () => {');
-    expect(main).toContain('void app.stop()');
-    expect(main).toContain('Deno.exit(0)');
-    // A rejecting onShutdown hook makes stop() reject; without the catch the
-    // process reports an unhandled rejection instead of the reason.
-    expect(main).toContain('Graceful shutdown failed:');
-    expect(main).toContain('Deno.exit(1)');
+  // B1: the entry used to render THREE different bodies fixed at `setu new`
+  // time, so moving a project between runtimes meant rewriting the file by
+  // hand. All three socket targets now emit the same body, through capabilities
+  // that already existed.
+  it('emits ONE portable body, byte-identical across all three socket targets', () => {
+    const deno = entryFor('deno');
+    const node = entryFor('node');
+    const bun = entryFor('bun');
+
+    expect(node).toBe(deno);
+    expect(bun).toBe(deno);
   });
 
-  for (const runtime of ['node', 'bun'] as const) {
-    it(`catches both signals through process.on on ${runtime}`, () => {
+  for (const runtime of ['deno', 'node', 'bun'] as const) {
+    it(`catches both signals through IRuntimeServices.onSignal on ${runtime}`, () => {
       const main = entryFor(runtime);
       expect(main).toContain(`for (const signal of ['SIGTERM', 'SIGINT'] as const) {`);
-      expect(main).toContain('process.on(signal, () => {');
+      expect(main).toContain('runtime.onSignal?.(signal, () => {');
       expect(main).toContain('void app.stop()');
-      expect(main).toContain('process.exit(0)');
-      expect(main).toContain('process.exit(1)');
-      // No OS guard on this path: `process.on` for a signal the platform never
-      // raises is a no-op rather than a throw.
-      expect(main).not.toContain('Deno.build.os');
+      expect(main).toContain('runtime.exit(0)');
+      // A rejecting onShutdown hook makes stop() reject; without the catch the
+      // process reports an unhandled rejection instead of the reason.
+      expect(main).toContain('Graceful shutdown failed');
+      expect(main).toContain('runtime.exit(1)');
     });
 
+    // The four touches B1 named, each now absent. `Deno.build.os` in
+    // particular: the Windows guard did not move to another branch here, it
+    // moved INTO the Deno runtime adapter, which omits `onSignal` entirely on
+    // Windows — so the generated project needs no OS check at all.
+    it(`reaches no runtime-specific API on ${runtime}`, () => {
+      const main = entryFor(runtime);
+      expect(main).not.toContain('Deno.build.os');
+      expect(main).not.toContain('Deno.addSignalListener');
+      expect(main).not.toContain('Deno.exit');
+      expect(main).not.toContain('process.on(');
+      expect(main).not.toContain('process.exit');
+      expect(main).not.toContain('console.error');
+    });
+
+    // Shutdown failures used to bypass structured logging entirely. The logger
+    // is resolved optionally, so a project scaffolded without LoggerPlugin
+    // still shuts down cleanly.
+    it(`reports a failed shutdown through the logger on ${runtime}`, () => {
+      const main = entryFor(runtime);
+      expect(main).toContain('app.services.has(CAPABILITIES.LOGGER)');
+      expect(main).toContain("logger?.error('Graceful shutdown failed', { error });");
+    });
+  }
+
+  for (const runtime of ['node', 'bun'] as const) {
     // `process` is not ambient in TypeScript. Emitting the listener without the
     // declarations makes a generated project's own `tsc` report an undeclared
     // name — the project runs (tsx and Bun both strip types), so nothing but a

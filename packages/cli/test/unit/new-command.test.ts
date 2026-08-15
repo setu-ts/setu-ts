@@ -234,7 +234,7 @@ describe('runNewCommand', () => {
       await h.run(['app']);
       const main = h.fs.read('/work/app/main.ts');
       expect(main).toContain("import { createApp } from './setu.config.ts'");
-      expect(main).toContain('app.start({ port: 3000 })');
+      expect(main).toContain("app.start({ port: Number(runtime.env.PORT ?? '3000') })");
       expect(main).not.toContain('RuntimePlugin');
       expect(main).not.toContain('createApplication');
     });
@@ -682,7 +682,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'deno']);
       const main = h.fs.read('/work/app/main.ts');
-      expect(main).toContain('await app.start({ port: 3000 })');
+      expect(main).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') })");
       // The plugin list lives in setu.config.ts, not here.
       expect(main).toContain("from './setu.config.ts'");
       expect(h.fs.read('/work/app/setu.config.ts')).toContain('RuntimePlugin()');
@@ -763,7 +763,9 @@ describe('runNewCommand', () => {
       it('emits the serve entry and no deno.json', async () => {
         const h = harness();
         await h.run(['app', '--runtime', runtime]);
-        expect(h.fs.read('/work/app/main.ts')).toContain('app.start({ port: 3000 })');
+        expect(h.fs.read('/work/app/main.ts')).toContain(
+          "app.start({ port: Number(runtime.env.PORT ?? '3000') })",
+        );
         expect(h.fs.has('/work/app/deno.json')).toBe(false);
       });
 
