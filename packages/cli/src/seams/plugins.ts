@@ -17,7 +17,7 @@
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
-  renderList,
+  renderExportedArray,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -65,7 +65,7 @@ function renderPluginsBarrel(artifacts: SeamArtifacts): string {
     ` * plugin's file to stop registering it — this barrel is regenerated from the\n` +
     ` * directory, so removing the entry here alone would not survive.\n` +
     ` */\n` +
-    `export const ${GENERATED_PLUGINS_EXPORT}: readonly IPlugin[] = [${renderList(entries)}];`,
+    renderExportedArray(GENERATED_PLUGINS_EXPORT, 'IPlugin', entries),
   ]);
 }
 

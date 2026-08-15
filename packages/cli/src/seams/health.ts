@@ -25,7 +25,7 @@
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
-  renderList,
+  renderExportedArray,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -89,9 +89,7 @@ function renderHealthBarrel(classBased: boolean): (artifacts: SeamArtifacts) => 
 
     return assembleSeamBarrel(header, imports, [
       `/** Every generated health indicator, for \`HealthPlugin({ indicators })\`. */\n` +
-      `export const ${HEALTH_INDICATORS_EXPORT}: readonly IHealthIndicator[] = [${
-        renderList(entries)
-      }];`,
+      renderExportedArray(HEALTH_INDICATORS_EXPORT, 'IHealthIndicator', entries),
     ]);
   };
 }

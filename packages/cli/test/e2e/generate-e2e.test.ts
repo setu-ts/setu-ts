@@ -172,6 +172,48 @@ describe('setu end-to-end on a real filesystem', () => {
     expect((await Deno.stat(`${project}/src/guards/admin.guard.ts`)).isFile).toBe(true);
   });
 
+  // E8's own risk, found by review rather than by a gate. Merging `src/routes/`
+  // into `src/controllers/` put two families in ONE directory under ONE barrel,
+  // and in a FUNCTIONAL project both emit `register<Pascal>Routes` — so
+  // `g route widget` then `g controller widget` each reported success and left a
+  // barrel importing that symbol from two files. Measured: `TS2300 Duplicate
+  // identifier`, twice, so the generated project did not compile.
+  //
+  // The guard existed (M60) but returned early for any project without
+  // `decorator-plugin`, on a premise E8 and M65 had both invalidated.
+  it('refuses a controller whose HTTP path a route already claims, functionally', async () => {
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+
+    // The default composition: no decorator-plugin, which is exactly the case the
+    // guard used to skip.
+    const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
+      imports: Record<string, string>;
+    };
+    expect(Object.keys(manifest.imports)).not.toContain('@setu-ts/decorator-plugin');
+
+    expect(await run(['g', 'route', 'widget', '--dir', project])).toBe(0);
+    expect(await run(['g', 'controller', 'widget', '--dir', project])).toBe(1);
+
+    // Refused BEFORE writing: the colliding file must not exist.
+    await expect(Deno.stat(`${project}/src/controllers/widget.controller.ts`)).rejects.toThrow();
+
+    // A distinct name is still generated, so the guard did not over-refuse.
+    expect(await run(['g', 'controller', 'gadget', '--dir', project])).toBe(0);
+
+    // And the barrel the two would have broken still type-checks for real. This is
+    // the assertion the unit test cannot make: TS2300 is a property of the emitted
+    // file, not of the guard's return value.
+    await useWorkspacePackages(project);
+    const checked = await new Deno.Command(Deno.execPath(), {
+      args: ['check', `${project}/src/controllers/index.ts`],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    expect(checked.code, new TextDecoder().decode(checked.stderr)).toBe(0);
+  });
+
   // D5. The one schematic gated on `database-plugin` produced a file nothing
   // imported and nothing could run, so every project that used it hand-wrote the
   // same runner. Type-checking it is not enough — the point is that it RUNS.

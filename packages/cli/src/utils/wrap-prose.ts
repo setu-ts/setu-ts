@@ -15,8 +15,7 @@
  * @module
  */
 
-/** The width generated projects are formatted at (`fmt.lineWidth`). */
-const LINE_WIDTH = 100;
+import { GENERATED_LINE_WIDTH as LINE_WIDTH } from '../templates/root-settings.ts';
 
 /**
  * Re-wraps a paragraph to the generated project's line width.

@@ -35,7 +35,7 @@ import type {
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
-import { rootManifestSettings } from './root-settings.ts';
+import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 
 /** Semver range the scaffolded project pins framework packages to. */
 const RANGE = `^${VERSION}`;
@@ -823,7 +823,8 @@ function denoTasks(
  * Matches the `fmt.lineWidth` the root manifest declares, so source this module
  * emits already satisfies the formatter that project ships with.
  */
-const LINE_WIDTH = 100;
+// The budget the generated `fmt` config sets; see `root-settings.ts`.
+const LINE_WIDTH = GENERATED_LINE_WIDTH;
 
 /**
  * Renders one import statement, wrapped when it would overflow.

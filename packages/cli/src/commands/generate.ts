@@ -43,6 +43,7 @@ import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
+import { legacyLayoutNotice, readLegacyHttpFiles } from '../utils/legacy-layout.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -256,6 +257,16 @@ export async function runGenerateCommand(
         `so it cannot be listed in the generated barrel.`,
     );
     deps.error(`  Regenerate it to bring it up to date.`);
+  }
+
+  // E8 merged `src/routes/` into `src/controllers/`, and a project that predates the
+  // merge is invisible to every other check here: the scan above reads the NEW
+  // directory, so a file in the old one is never scanned and never skipped, and
+  // `setu.config.ts` still imports the old barrel because it is the developer's file.
+  // Without this the generator reports `created` and leaves the artifact unreachable —
+  // the M60 defect class, reintroduced for upgrading projects by the fix for it.
+  for (const line of legacyLayoutNotice(await readLegacyHttpFiles(deps.fs, dir))) {
+    deps.error(line);
   }
 
   // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
