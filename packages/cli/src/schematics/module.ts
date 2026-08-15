@@ -8,6 +8,8 @@ import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.t
 import { FUNCTIONAL_ROUTES_SEAM, HTTP_SEAM_DIR } from '../seams/http.ts';
 import { seamNames } from '../seams/seam-spec.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
+import { renderEquals, testHarnessFor } from './test-harness.ts';
+import type { TargetRuntime } from '../constants.ts';
 import { MODULES_DIR } from '../utils/module-scanner.ts';
 import { renderModuleBarrel } from './module-barrel.ts';
 
@@ -38,15 +40,16 @@ export function register${names.pascal}Routes(router: IRouterApi): void {
 `;
 }
 
-function functionalTest(names: DerivedNames): string {
-  return `import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+function functionalTest(names: DerivedNames, runtime: TargetRuntime): string {
+  // The harness is per runtime because `@std/testing/bdd` reaches `Deno.test`
+  // internally, so this file could not execute at all on a node or bun target.
+  return `${testHarnessFor(runtime).imports}
 
 import { list${names.pascal} } from './${names.kebab}.service.ts';
 
 describe('list${names.pascal}', () => {
   it('starts with no records', () => {
-    expect(list${names.pascal}()).toEqual([]);
+    ${renderEquals(runtime, `list${names.pascal}()`, '[]')}
   });
 });
 `;
@@ -106,15 +109,14 @@ export class ${names.pascal}Controller {
 `;
 }
 
-function classTest(names: DerivedNames): string {
-  return `import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+function classTest(names: DerivedNames, runtime: TargetRuntime): string {
+  return `${testHarnessFor(runtime).imports}
 
 import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 describe('${names.pascal}Service', () => {
   it('starts with no records', () => {
-    expect(new ${names.pascal}Service().list()).toEqual([]);
+    ${renderEquals(runtime, `new ${names.pascal}Service().list()`, '[]')}
   });
 });
 `;
@@ -141,7 +143,10 @@ export function generateModule(
   if (generatorMode(options.plugins) === 'functional') {
     return [
       { path: `${dir}/${names.kebab}.service.ts`, contents: functionalService(names) },
-      { path: `${dir}/${names.kebab}.service.test.ts`, contents: functionalTest(names) },
+      {
+        path: `${dir}/${names.kebab}.service.test.ts`,
+        contents: functionalTest(names, options.runtime),
+      },
       { path: `${dir}/index.ts`, contents: functionalIndex(names) },
       {
         path: `${HTTP_SEAM_DIR}/${names.kebab}.routes.ts`,
@@ -161,7 +166,7 @@ export function generateModule(
   return [
     { path: `${dir}/${names.kebab}.service.ts`, contents: classService(names) },
     { path: `${dir}/${names.kebab}.controller.ts`, contents: classController(names) },
-    { path: `${dir}/${names.kebab}.service.test.ts`, contents: classTest(names) },
+    { path: `${dir}/${names.kebab}.service.test.ts`, contents: classTest(names, options.runtime) },
     { path: `${dir}/index.ts`, contents: classIndex(names) },
     {
       path: `${MODULES_DIR}/index.ts`,
