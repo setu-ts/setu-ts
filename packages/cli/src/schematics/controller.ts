@@ -1,41 +1,50 @@
 /**
- * Controller schematic — a decorator-based controller class.
+ * Controller schematic — the mode-default shape for an HTTP resource.
+ *
+ * Ungated since M70h. It used to require `decorator-plugin` and refuse in a bare
+ * project, pointing the developer at `g route` in another directory; with both
+ * kinds sharing `src/controllers/` there is no other directory to point at, so
+ * the schematic branches on generator mode the way `service` already does.
  *
  * @module
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
-import { APP_CONTROLLERS_EXPORT, CONTROLLERS_SEAM } from '../seams/controllers.ts';
+import {
+  APP_CONTROLLERS_EXPORT,
+  CONTROLLERS_SEAM,
+  FUNCTIONAL_CONTROLLERS_SEAM,
+  HTTP_SEAM_DIR,
+} from '../seams/http.ts';
 import { seamNames } from '../seams/seam-spec.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
+import { renderHttpModule } from './http-module.ts';
 
 /**
- * Generates a controller class and regenerates the seam barrel that registers it.
+ * Renders the decorated controller class.
  *
  * @param names - Naming forms derived from the user's input
- * @param options - Supplies the controllers already present, for the barrel
- * @returns The controller at `src/controllers/<kebab>.controller.ts`, plus the managed
- *   `src/controllers/index.ts` barrel
+ * @returns The module contents
  */
-export function generateController(
-  names: DerivedNames,
-  options: SchematicOptions,
-): readonly GeneratedFile[] {
-  const contents = `import { Body, Controller, Ctx, Get, Post } from '@setu-ts/decorator-plugin';
+function renderControllerClass(names: DerivedNames): string {
+  return `import { Body, Controller, Ctx, Get, Post } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
 /**
  * HTTP controller for the ${names.kebab} resource.
  *
  * Registered through the \`${APP_CONTROLLERS_EXPORT}\` barrel in
- * \`src/controllers/index.ts\`, which \`setu.config.ts\` passes to \`DecoratorPlugin\` —
+ * \`${HTTP_SEAM_DIR}/index.ts\`, which \`setu.config.ts\` passes to \`DecoratorPlugin\` —
  * so this class needs no further wiring.
  *
  * A decorated handler receives ONLY its decorated parameters: the plugin builds
  * the argument list from parameter metadata alone and never passes the request
- * context positionally, so a \`ctx\` parameter would arrive \`undefined\`. Return a
- * plain value and the plugin serializes it as JSON. Reach for
- * \`app.router.get(...)\` (see \`setu generate route\`) when a handler needs the
- * context itself — to set a status code or stream a response.
+ * context positionally, so a bare \`ctx\` parameter would arrive \`undefined\`.
+ * Return a plain value and the plugin serializes it as JSON, or take \`@Ctx()\`
+ * when the handler needs the context itself — to set a status code or stream.
+ *
+ * A resource this shape cannot express — a wildcard, a proxy, a route table
+ * built in a loop — belongs in a \`.routes.ts\` module in this same directory.
  */
 @Controller('/${names.kebab}')
 export class ${names.pascal}Controller {
@@ -53,6 +62,7 @@ export class ${names.pascal}Controller {
    * Creates a ${names.kebab} record.
    *
    * @param body - The parsed request body
+   * @param ctx - The live request context, for the 201
    * @returns The created record, serialized as JSON
    */
   @Post('/')
@@ -61,15 +71,40 @@ export class ${names.pascal}Controller {
   }
 }
 `;
+}
+
+/**
+ * Generates a controller and regenerates the shared HTTP barrel.
+ *
+ * The barrel carries both kinds, so it is rendered from BOTH artifact lists —
+ * regenerating it after adding a controller must not drop the route modules
+ * beside it.
+ *
+ * @param names - Naming forms derived from the user's input
+ * @param options - Supplies the artifacts already present, for the barrel
+ * @returns The controller at `src/controllers/<kebab>.controller.ts`, plus the
+ *   managed `src/controllers/index.ts` barrel
+ */
+export function generateController(
+  names: DerivedNames,
+  options: SchematicOptions,
+): readonly GeneratedFile[] {
+  const classBased = generatorMode(options.plugins) === 'class-based';
+  const seam = classBased ? CONTROLLERS_SEAM : FUNCTIONAL_CONTROLLERS_SEAM;
+
   return [
-    { path: `src/controllers/${names.kebab}.controller.ts`, contents },
     {
-      path: CONTROLLERS_SEAM.barrel,
-      // Union rather than append: regenerating over an existing controller must list it
-      // exactly once, so the barrel is idempotent even though the command refuses on
-      // the controller's own file.
-      contents: CONTROLLERS_SEAM.renderBarrel({
+      path: `${HTTP_SEAM_DIR}/${names.kebab}.controller.ts`,
+      contents: classBased ? renderControllerClass(names) : renderHttpModule(names, 'controller'),
+    },
+    {
+      path: seam.barrel,
+      // Union rather than append: regenerating over an existing controller must
+      // list it exactly once, so the barrel is idempotent even though the
+      // command refuses on the controller's own file.
+      contents: seam.renderBarrel({
         controller: seamNames(options.artifacts, 'controller', names.kebab),
+        route: seamNames(options.artifacts, 'route'),
       }),
       managed: true,
     },

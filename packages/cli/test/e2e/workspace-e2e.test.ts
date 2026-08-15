@@ -409,7 +409,7 @@ describe('workspace scaffolding — end to end', () => {
     const ws = await twoMembers();
     expect(await run(['g', 'module', 'invoice', '--dir', `${ws}/apps/billing`])).toBe(0);
     expect(
-      (await Deno.stat(`${ws}/apps/billing/src/routes/invoice.routes.ts`)).isFile,
+      (await Deno.stat(`${ws}/apps/billing/src/controllers/invoice.routes.ts`)).isFile,
     ).toBe(true);
   });
 

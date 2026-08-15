@@ -393,7 +393,7 @@ describe('a three-service workspace — end to end', () => {
         expect((await Deno.stat(`${dir}/${file}`)).isFile).toBe(true);
       }
       // Functional members have only the seams their composition can consume.
-      for (const seam of ['routes', 'middleware', 'plugins']) {
+      for (const seam of ['controllers', 'middleware', 'plugins']) {
         expect((await Deno.stat(`${dir}/src/${seam}/index.ts`)).isFile).toBe(true);
       }
       expect((await Deno.stat(`${dir}/${DISCOVERY_MODULE}`)).isFile).toBe(true);

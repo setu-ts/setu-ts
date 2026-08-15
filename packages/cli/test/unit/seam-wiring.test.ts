@@ -7,7 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { getTemplate, listTemplates } from '../../src/templates/registry.ts';
+import { getTemplate, listTemplates, packagesOf } from '../../src/templates/registry.ts';
 import type { TemplateDefinition } from '../../src/templates/registry.ts';
 import {
   decoratorSeamExtras,
@@ -44,9 +44,9 @@ describe('the no-template host', () => {
   // plugin, which is what makes the host possible without a fourth template.
   it('carries exactly the three barrels that need no plugin', () => {
     expect((MINIMAL_HOST.files ?? []).map((f) => f.path).sort()).toEqual([
+      'src/controllers/index.ts',
       'src/middleware/index.ts',
       'src/plugins/index.ts',
-      'src/routes/index.ts',
     ]);
   });
 
@@ -62,7 +62,9 @@ describe('seam selection', () => {
   it('omits a seam whose backing plugin the host does not install', () => {
     // Emitting it would put an unresolvable import in the generated config.
     const bare = seamsFor(new Set()).map((s) => s.schematic).sort();
-    expect(bare).toEqual(['middleware', 'plugin', 'route']);
+    // `controller` is ungated since M70h/E8 and appears here in its functional
+    // shape, sharing the `route` barrel rather than adding one.
+    expect(bare).toEqual(['controller', 'middleware', 'plugin', 'route']);
   });
 
   it('selects every seam for a host installing every backing plugin', () => {
@@ -181,11 +183,28 @@ describe('seam hosts', () => {
   }
 
   it('keeps functional hosts decorator-free while class-based hosts class seams', () => {
-    expect(barrels(getTemplate('rest')!)).not.toContain('src/controllers/index.ts');
+    // Both modes now scaffold the HTTP barrel — E8 gave `controller` a
+    // functional shape, so the directory exists either way. What still
+    // separates them is the SERVICE barrel, which has a registration site only
+    // when a decorator plugin is present.
+    expect(barrels(getTemplate('rest')!)).toContain('src/controllers/index.ts');
     expect(barrels(getTemplate('rest')!)).not.toContain('src/services/index.ts');
     expect(barrels(getTemplate('class-based')!)).toContain('src/controllers/index.ts');
     expect(barrels(getTemplate('class-based')!)).toContain('src/services/index.ts');
     expect(barrels(getTemplate('microservice')!)).toContain('src/cqrs/index.ts');
+  });
+
+  it('gives each mode its OWN HTTP shape, not merely the same barrel path', () => {
+    const shapeOf = (name: 'rest' | 'class-based'): readonly string[] =>
+      seamsFor(new Set(packagesOf(getTemplate(name)!.plugins, getTemplate(name)!.middleware)))
+        .filter((spec) => spec.barrel === 'src/controllers/index.ts')
+        .flatMap((spec) => spec.exports);
+
+    // The class-based barrel declares the controller array; the functional one
+    // must not, or `setu.config.ts` would spread a symbol nothing exports.
+    expect(shapeOf('class-based')).toContain('APP_CONTROLLERS');
+    expect(shapeOf('rest')).not.toContain('APP_CONTROLLERS');
+    expect(shapeOf('rest')).toContain('registerGeneratedRoutes');
   });
 
   it('gives the cqrs and events seams to microservice alone', () => {

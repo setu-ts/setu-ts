@@ -335,9 +335,9 @@ describe('class-based template', () => {
       'src/greeting-service.ts',
       'src/greeting-controller.ts',
       'src/modules/index.ts',
+      // ONE HTTP barrel, shared by the controller and route kinds since E8.
       'src/controllers/index.ts',
       'src/services/index.ts',
-      'src/routes/index.ts',
       'src/middleware/index.ts',
       'src/plugins/index.ts',
       'src/health/index.ts',

@@ -38,9 +38,13 @@ describe('controller schematic', () => {
     expect(file.contents.endsWith('\n')).toBe(true);
   });
 
-  it('is gated on decorator-plugin', () => {
-    // The emitted class uses @Controller/@Get/@Post.
-    expect(gateOf('controller')).toBe('decorator-plugin');
+  it('is UNGATED, and shaped by the project instead', () => {
+    // E8: the gate existed because the emitted class imports
+    // `@setu-ts/decorator-plugin`. With both HTTP kinds sharing one directory
+    // there is no second directory to redirect to, so the schematic branches on
+    // generator mode — like `service` — and a bare project gets a function
+    // whose imports resolve.
+    expect(gateOf('controller')).toBeUndefined();
   });
 
   it('derives identical output from any casing of the same name', () => {

@@ -169,33 +169,45 @@ describe('runGenerateCommand', () => {
   // decorators. Refusing `g controller` with only "install the decorator
   // plugin" told a developer the opposite — that decorators are the way to get
   // an HTTP handler — when `g route` is ungated, wired, and right there.
-  describe('the decorator-free alternative in a gate refusal', () => {
-    for (const schematic of ['controller'] as const) {
-      it(`names \`generate route\` when ${schematic} is refused`, async () => {
-        const h = harness();
-        expect(await h.run([schematic, 'widget'])).toBe(1);
-        const text = h.err.text();
+  describe('generating HTTP artifacts without decorators', () => {
+    // M61 gated `controller` and redirected to `g route` in a second directory.
+    // E8 merged the two directories, so there is nowhere to redirect TO — the
+    // schematic is ungated and emits the functional shape instead, exactly as
+    // `service` already did.
+    it('emits a functional controller rather than refusing', async () => {
+      const h = harness();
+      expect(await h.run(['controller', 'widget'])).toBe(0);
 
-        // The gate itself is unchanged: still refused, still exit 1, still names
-        // the package. Removing the gate would emit source whose own import
-        // cannot resolve (the M34b defect).
-        expect(text).toContain('@setu-ts/decorator-plugin');
-        expect(text).toContain('setu generate route widget');
-        expect(text).toContain('needs no decorators');
-        expect(h.fs.writes).toEqual([]);
-      });
-    }
+      const module = h.fs.read('/app/src/controllers/widget.controller.ts');
+      expect(module).toContain('export function registerWidgetRoutes(router: IRouterApi)');
+      // The whole reason the gate existed: an ungated CLASS would emit an import
+      // the project cannot resolve (the M34b defect). The functional shape
+      // imports only `@setu-ts/common`.
+      expect(module).not.toContain('@setu-ts/decorator-plugin');
+      expect(module).not.toContain('@Controller');
+    });
+
+    it('names no alternative, because there is no second directory', async () => {
+      const h = harness();
+      await h.run(['controller', 'UserProfile']);
+      expect(h.err.text()).not.toContain('setu generate route');
+      expect(h.err.text()).not.toContain('Or run');
+    });
+
+    it('wires the functional controller through the shared HTTP barrel', async () => {
+      const h = harness();
+      await h.run(['controller', 'widget']);
+      const barrel = h.fs.read('/app/src/controllers/index.ts');
+      expect(barrel).toContain('registerWidgetRoutes(router);');
+      // No APP_CONTROLLERS in a functional project: the class array would name a
+      // symbol none of these modules export.
+      expect(barrel).not.toContain('APP_CONTROLLERS');
+    });
 
     it('allows a functional module when decorators are absent', async () => {
       const h = harness();
       expect(await h.run(['module', 'widget'])).toBe(0);
-      expect(h.fs.read('/app/src/routes/widget.routes.ts')).toContain('registerWidgetRoutes');
-    });
-
-    it('suggests the name the user actually typed', async () => {
-      const h = harness();
-      await h.run(['controller', 'UserProfile']);
-      expect(h.err.text()).toContain('setu generate route UserProfile');
+      expect(h.fs.read('/app/src/controllers/widget.routes.ts')).toContain('registerWidgetRoutes');
     });
 
     // A schematic with no honest alternative must print nothing extra —
@@ -208,10 +220,15 @@ describe('runGenerateCommand', () => {
       expect(text).not.toContain('Or run');
     });
 
-    it('says nothing about alternatives once the plugin is installed', async () => {
+    it('emits the decorated class once the plugin is installed', async () => {
       const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
       expect(await h.run(['controller', 'widget'])).toBe(0);
       expect(h.err.text()).not.toContain('Or run');
+
+      const module = h.fs.read('/app/src/controllers/widget.controller.ts');
+      expect(module).toContain('@Controller');
+      expect(module).toContain('export class WidgetController');
+      expect(h.fs.read('/app/src/controllers/index.ts')).toContain('APP_CONTROLLERS');
     });
   });
 
@@ -437,7 +454,7 @@ describe('runGenerateCommand', () => {
     it('accepts a reserved word, which schematics always affix', async () => {
       const h = harness();
       expect(await h.run(['route', 'class'])).toBe(0);
-      expect(h.fs.read('/app/src/routes/class.routes.ts'))
+      expect(h.fs.read('/app/src/controllers/class.routes.ts'))
         .toContain('export function registerClassRoutes');
     });
   });

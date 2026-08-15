@@ -136,18 +136,6 @@ export interface SchematicMetadata {
 }
 
 /**
- * The decorator-free way to serve HTTP, suggested by both decorated schematics.
- *
- * `route` is ungated and wired: it emits `register<X>Routes(router)` and the
- * `src/routes/index.ts` barrel that `createApp()` already calls, on every host
- * including the no-template one.
- */
-const ROUTE_ALTERNATIVE: SchematicAlternative = {
-  schematic: 'route',
-  why: 'it registers handlers on the router API, so it needs no decorators',
-};
-
-/**
  * The built-in schematics, keyed by the name `setu generate` accepts.
  *
  * A `Map` rather than an object literal so that a lookup of an inherited
@@ -159,13 +147,11 @@ const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, Schemat
   // Mode-aware: the functional default emits routes and functions, while the
   // class-based composition emits the decorated controller/service aggregate.
   ['module', { factory: generateModule }],
-  // Gated: the emitted class uses @Controller/@Get/@Post, so a project without
-  // the decorator plugin gets source that cannot resolve its own import.
-  ['controller', {
-    factory: generateController,
-    requiresPlugin: 'decorator-plugin',
-    alternative: ROUTE_ALTERNATIVE,
-  }],
+  // UNGATED since M70h, and mode-aware like `service`. It used to require
+  // `decorator-plugin` and redirect to `g route` in a second directory; with
+  // both kinds sharing `src/controllers/` there is nowhere to redirect TO, and
+  // the functional shape resolves its own imports in a bare project.
+  ['controller', { factory: generateController }],
   ['service', { factory: generateService }],
   ['route', { factory: generateRoute }],
   ['middleware', { factory: generateMiddleware }],
