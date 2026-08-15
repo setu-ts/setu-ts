@@ -371,9 +371,24 @@ ${middlewareLines}${setupLines}
     ...pluginSpreads.map((spread) => `      ${spread},`),
   ].join('\n');
 
-  const factoryParam = onWorkers ? 'env: Readonly<Record<string, unknown>> = {}' : '';
+  const wantsWaitUntil = onWorkers && consumesWaitUntil(plugins);
+  // Wrapped one-per-line when there are two, which is what `deno fmt` produces
+  // for a signature past the emitted line width — a generated project has to
+  // pass its OWN `deno fmt --check` (M63/D6).
+  const factoryParam = !onWorkers
+    ? ''
+    : wantsWaitUntil
+    ? '\n  env: Readonly<Record<string, unknown>> = {},' +
+      '\n  waitUntil?: (promise: Promise<unknown>) => void,\n'
+    : 'env: Readonly<Record<string, unknown>> = {}';
   const envDoc = onWorkers
-    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler`
+    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler${
+      wantsWaitUntil
+        ? `\n * @param waitUntil - The platform's post-response sink, from \`src/index.ts\`.` +
+          `\n * Only the Worker ENTRY can import it: \`setu\` loads this module under Deno,` +
+          `\n * which cannot resolve \`cloudflare:workers\` at all.`
+        : ''
+    }`
     : '';
 
   return `${imports}
@@ -398,6 +413,21 @@ ${middlewareLines}${setupLines}
   return app;
 }
 `;
+}
+
+/**
+ * Whether any wiring's Workers arguments consume the post-response sink.
+ *
+ * Read off the RENDERED argument string rather than a flag beside it, so the
+ * parameter is emitted exactly when something references it — a flag could say
+ * yes while the args said nothing, leaving the generated project with an unused
+ * parameter, or say no while the args named it, leaving it undeclared.
+ *
+ * @param plugins - The host's resolved wirings
+ * @returns Whether the factory must accept a `waitUntil` argument
+ */
+function consumesWaitUntil(plugins: readonly Wiring[]): boolean {
+  return plugins.some((wiring) => wiring.workersArgs?.includes('waitUntil') === true);
 }
 
 /**
@@ -588,6 +618,7 @@ ${cases}
 function workersEntry(
   workerExports: readonly WorkerExport[],
   entryReExports: readonly string[],
+  wantsWaitUntil: boolean,
 ): string {
   // `env` is threaded in on BOTH paths. On Workers the environment is not
   // process-wide — bindings and variables arrive as the `env` argument below —
@@ -595,9 +626,16 @@ function workersEntry(
   // nothing, and a plugin-list app would register a RuntimePlugin whose
   // `runtime.env` is empty. Either failure is permanent, because `booted`
   // memoises the rejection.
+  // THE import lives here and nowhere else. `setu commands` loads
+  // `setu.config.ts` under Deno to discover plugin-contributed verbs, and Deno
+  // cannot resolve `cloudflare:workers` at all — putting it there, which is what
+  // the plugin README's only usage example shows, breaks the CLI outright with
+  // `Unsupported scheme "cloudflare"`. This entry module is never loaded by
+  // `setu`, so it is the one place the specifier is safe.
+  const waitUntilImport = wantsWaitUntil ? "import { waitUntil } from 'cloudflare:workers';\n" : '';
   const bootSignature =
     'async function boot(env: Record<string, unknown>): Promise<IApplication> {';
-  const bootCall = `${CONFIG_EXPORT}(env)`;
+  const bootCall = `${CONFIG_EXPORT}(env${wantsWaitUntil ? ', waitUntil' : ''})`;
   const bootedInit = 'booted ??= boot(env);';
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
@@ -628,7 +666,7 @@ ${renderRoutes(entry)}
 
   return `import type { IApplication } from '@setu-ts/common';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
-${exportImports === '' ? '' : `${exportImports}\n`}
+${waitUntilImport}${exportImports === '' ? '' : `${exportImports}\n`}
 let booted: Promise<IApplication> | undefined;
 
 /**
@@ -957,7 +995,19 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   // depending on `@types/node` — so the entry's listener type-checks without the
   // project claiming to be a Node one.
   if (runtime === 'bun') return { '@types/bun': '^1.2.0' };
-  if (runtime === 'cloudflare-workers') return { wrangler: '^4.0.0' };
+  // X9-4: a Workers project had NO type-checker. `wrangler` bundles with
+  // esbuild, which strips types without checking them, and `deno check` resolves
+  // `cloudflare:workers` to an untyped module — so `DurableObject` becomes `any`
+  // and the README's own Durable Object snippet fails with TS2339/TS4112 under
+  // the only checker present. `tsc` reads the `tsconfig.json` the scaffold
+  // already emitted and nothing consumed.
+  if (runtime === 'cloudflare-workers') {
+    return {
+      wrangler: '^4.0.0',
+      typescript: '^5.7.0',
+      '@cloudflare/workers-types': '^4.20250109.0',
+    };
+  }
   return {};
 }
 
@@ -1017,7 +1067,7 @@ function standaloneNpmFiles(
   };
   const scripts = {
     ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
-    ...(onWorkers ? { dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
+    ...(onWorkers ? { check: 'tsc --noEmit', dev: 'wrangler dev', deploy: 'wrangler deploy' } : {}),
   };
 
   return [
@@ -1215,7 +1265,11 @@ ${PROGRAM_NAME} generate --help
   if (runtime === 'cloudflare-workers') {
     files.push({
       path: 'src/index.ts',
-      contents: workersEntry(host.workerExports, host.entryReExports),
+      contents: workersEntry(
+        host.workerExports,
+        host.entryReExports,
+        consumesWaitUntil(host.plugins),
+      ),
     });
     files.push({
       path: 'wrangler.toml',
@@ -1230,16 +1284,58 @@ compatibility_flags = ["nodejs_compat"]
 
 # Platform bindings reach the application through the \`env\` argument of the
 # \`fetch\` handler, which \`src/index.ts\` threads into \`${CONFIG_EXPORT}()\`.
-# Register \`CloudflarePlugin\` from @setu-ts/cloudflare-plugin to serve
-# the cache and storage capabilities from KV and R2.
+# Register \`CloudflarePlugin\` from @setu-ts/cloudflare-plugin to serve the
+# cache, storage, database, queue, messaging and realtime capabilities from the
+# bindings below. Add a package with \`${PROGRAM_NAME} add cloudflare\`.
 #
+# Every binding type the plugin reads is listed. Uncomment what you use — a
+# binding declared here but absent from the plugin's options is inert, and one
+# the plugin names but wrangler does not declare fails at startup with an error
+# naming the binding and the ones that ARE present.
+#
+# KV — CloudflarePlugin({ cache: { binding: 'CACHE_KV' } })
 # [[kv_namespaces]]
 # binding = "CACHE_KV"
 # id = "<your-kv-namespace-id>"
 #
+# R2 — CloudflarePlugin({ storage: { binding: 'UPLOADS' } })
 # [[r2_buckets]]
 # binding = "UPLOADS"
 # bucket_name = "<your-bucket-name>"
+#
+# D1 — new D1Adapter(env.DB) handed to DatabasePlugin({ type: 'custom' })
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "<your-database-name>"
+# database_id = "<your-database-id>"
+#
+# Queues, PRODUCER — CloudflarePlugin({ queue: { binding: 'JOBS' } })
+# [[queues.producers]]
+# binding = "JOBS"
+# queue = "<your-queue-name>"
+#
+# Queues, CONSUMER — drives the \`queue\` export in src/index.ts.
+# \`max_batch_timeout = 0\` is REQUIRED for brokered request/reply: the default
+# of 5s alone exhausts the 5000ms default request budget.
+# [[queues.consumers]]
+# queue = "<your-queue-name>"
+# max_batch_timeout = 0
+#
+# Durable Objects — the realtime backplane and the distributed lock. The class
+# must be EXPORTED from your own src/index.ts; the plugin ships the core it
+# delegates to, not the class itself.
+# [[durable_objects.bindings]]
+# name = "REPLY_INBOX"
+# class_name = "RealtimeBackplaneObject"
+#
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["RealtimeBackplaneObject"]
+#
+# Cron Triggers — drives the \`scheduled\` export. SchedulerPlugin cannot honour
+# runtime schedule() calls on Workers, so the schedule lives here.
+# [triggers]
+# crons = ["0 * * * *"]
 ${host.wranglerToml}`,
     });
   } else {

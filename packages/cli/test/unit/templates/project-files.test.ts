@@ -253,3 +253,89 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(manifest.lint).toBeUndefined();
   });
 });
+
+// Group C. Every one of these is a generated file sitting outside a path the
+// project itself runs — the shape the whole workstream shares.
+describe('the Cloudflare Workers target', () => {
+  const micro = resolveHost(getTemplate('microservice')!, 'cloudflare-workers');
+  const rest = resolveHost(getTemplate('rest')!, 'cloudflare-workers');
+  const filesOf = (host: ReturnType<typeof resolveHost>) => [
+    ...projectFiles('edge', 'cloudflare-workers', host),
+  ];
+
+  it('imports waitUntil in the ENTRY and threads it into the factory (X9-1)', () => {
+    const entry = contentsOf(filesOf(micro), 'src/index.ts');
+
+    expect(entry).toContain("import { waitUntil } from 'cloudflare:workers';");
+    expect(entry).toContain('createApp(env, waitUntil)');
+  });
+
+  it('keeps the platform specifier OUT of setu.config.ts', () => {
+    // `setu commands` loads that module under Deno, which cannot resolve
+    // `cloudflare:workers` at all — putting the import there, which is what the
+    // plugin README's only usage example shows, breaks the CLI outright.
+    const config = contentsOf(filesOf(micro), 'setu.config.ts');
+
+    // The IMPORT is the property, not the word: the JSDoc names the specifier
+    // deliberately, to say why the parameter arrives from the entry.
+    expect(config).not.toContain("from 'cloudflare:workers'");
+    expect(config).toContain('waitUntil?: (promise: Promise<unknown>) => void');
+    expect(config).toContain('...(waitUntil ? { waitUntil } : {})');
+  });
+
+  it('emits no waitUntil parameter for a host that consumes none', () => {
+    // Otherwise a REST project on Workers gains an unused parameter, which its
+    // own type-check rejects.
+    const config = contentsOf(filesOf(rest), 'setu.config.ts');
+    const entry = contentsOf(filesOf(rest), 'src/index.ts');
+
+    expect(config).not.toContain('waitUntil');
+    expect(entry).not.toContain('cloudflare:workers');
+  });
+
+  it('starts with deno serve, which actually binds (X9-7)', () => {
+    // `deno run` on a `fetch` default export binds nothing and exits 0, so a CI
+    // step and a developer's first instinct both read as success.
+    const manifest = JSON.parse(contentsOf(filesOf(rest), 'deno.json')) as {
+      tasks: Record<string, string>;
+    };
+    expect(manifest.tasks['start']?.startsWith('deno serve ')).toBe(true);
+  });
+
+  it('ships a type-check path, which the target had none of (X9-4)', () => {
+    const pkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+
+    // `wrangler` bundles with esbuild, which strips types without checking them,
+    // and `deno check` types `cloudflare:workers` as `any` — so the README's own
+    // Durable Object snippet failed under the only checker present.
+    expect(pkg.scripts['check']).toBe('tsc --noEmit');
+    expect(pkg.devDependencies['typescript']).toBeDefined();
+    expect(pkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
+  });
+
+  it('documents every binding type the plugin reads (X9-9)', () => {
+    const toml = contentsOf(filesOf(rest), 'wrangler.toml');
+
+    // Two of seven before this: a developer standing up the platform surface
+    // had to hand-edit three files against three separate README sections.
+    for (
+      const stanza of [
+        '[[kv_namespaces]]',
+        '[[r2_buckets]]',
+        '[[d1_databases]]',
+        '[[queues.producers]]',
+        '[[queues.consumers]]',
+        '[[durable_objects.bindings]]',
+        '[triggers]',
+      ]
+    ) {
+      expect(toml).toContain(stanza);
+    }
+    // The two facts a reader cannot infer from the stanza alone.
+    expect(toml).toContain('max_batch_timeout = 0');
+    expect(toml).toContain('EXPORTED from your own src/index.ts');
+  });
+});
