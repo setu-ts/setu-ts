@@ -214,7 +214,9 @@ describe('a template with a frontend build, on a Deno target', () => {
       tasks: Record<string, string>;
     }).tasks;
 
-    expect(tasks['install']).toBe('deno install --allow-scripts');
+    // `--min-dep-age 0` for D1: the project is pinned to the CLI's own version,
+    // which on release day is younger than Deno's 24-hour policy allows.
+    expect(tasks['install']).toBe('deno install --allow-scripts --min-dep-age 0');
     expect(tasks['build']).toContain('deno task install &&');
     expect(tasks['build']).toContain('npm:@react-router/dev build');
     // The dependency is the point: `deno task start` on a fresh clone has to
@@ -249,6 +251,9 @@ describe('a template with a frontend build, on a Deno target', () => {
 
     expect(manifest.tasks['build']).toBeUndefined();
     expect(manifest.tasks['install']).toBeUndefined();
+    // But it DOES get a `test` task: `setu generate module` emits a
+    // `*.service.test.ts` into every host, and no template ran it (A3).
+    expect(manifest.tasks['test']).toBe('deno test -A');
     expect(manifest.nodeModulesDir).toBeUndefined();
     expect(manifest.lint).toBeUndefined();
   });

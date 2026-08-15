@@ -83,6 +83,13 @@ export interface SchematicOptions {
    * @since 0.1.0
    */
   readonly artifacts?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The migrations already present, oldest first.
+   *
+   * Optional on the M58 `modules` precedent — a required field would break a
+   * custom schematic's own test with no deprecation path.
+   */
+  readonly migrations?: readonly string[];
 }
 
 /**

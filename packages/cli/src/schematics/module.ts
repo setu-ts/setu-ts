@@ -53,7 +53,13 @@ describe('list${names.pascal}', () => {
 }
 
 function functionalIndex(names: DerivedNames): string {
-  return `export { list${names.pascal} } from './${names.kebab}.service.ts';
+  // A star re-export, not a named one (A3). Naming the stub symbol meant that
+  // replacing it — the obvious next step after generating a module — broke the
+  // barrel AND the generated test with
+  // `TS2305: Module … has no exported member 'listX'`, and neither file is
+  // reachable from `deno check main.ts setu.config.ts`, so both stayed broken
+  // through a full green run of every gate the developer had.
+  return `export * from './${names.kebab}.service.ts';
 `;
 }
 

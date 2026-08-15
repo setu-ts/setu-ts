@@ -12,6 +12,7 @@ import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import { CUSTOM_SCHEMATIC_DIR } from '../../src/schematics/custom.ts';
+import { useWorkspacePackages } from '../fixtures/generated-project.ts';
 
 const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -144,6 +145,81 @@ describe('setu end-to-end on a real filesystem', () => {
 
     expect(await run(['g', 'custom', 'readme', 'order-item'])).toBe(0);
     expect(await Deno.readTextFile(`${root}/docs/order-item.md`)).toBe('# OrderItem\n');
+  });
+
+  // D3. The gate the CLI shipped pointed at a step it would not take: `setu
+  // generate --help` said "install @setu-ts/auth-plugin" and offered no command,
+  // so unlocking a gated schematic meant hand-editing `deno.json`. This is the
+  // whole round trip on a REAL filesystem — refused, added, accepted.
+  it('unlocks a gated schematic through setu add', async () => {
+    expect(await run(['new', 'svc'])).toBe(0);
+    const project = `${root}/svc`;
+
+    // Refused first, so the test cannot pass because the gate was never there.
+    expect(await run(['g', 'guard', 'admin', '--dir', project])).toBe(1);
+    expect(err.join('\n')).toContain('add auth');
+
+    expect(await run(['add', 'auth', '--dir', project])).toBe(0);
+
+    const manifest = JSON.parse(
+      await Deno.readTextFile(`${project}/deno.json`),
+    ) as { imports: Record<string, string> };
+    expect(manifest.imports['@setu-ts/auth-plugin']).toContain('jsr:@setu-ts/auth-plugin@');
+
+    // And now the same command succeeds — which is only possible because
+    // `detectPlugins` reads the manifest `add` just wrote.
+    expect(await run(['g', 'guard', 'admin', '--dir', project])).toBe(0);
+    expect((await Deno.stat(`${project}/src/guards/admin.guard.ts`)).isFile).toBe(true);
+  });
+
+  // D5. The one schematic gated on `database-plugin` produced a file nothing
+  // imported and nothing could run, so every project that used it hand-wrote the
+  // same runner. Type-checking it is not enough — the point is that it RUNS.
+  it('generates a migration runner that actually applies migrations', async () => {
+    expect(await run(['new', 'svc'])).toBe(0);
+    const project = `${root}/svc`;
+    expect(await run(['add', 'database', '--dir', project])).toBe(0);
+    expect(await run(['g', 'migration', 'add-users', '--dir', project])).toBe(0);
+    expect(await run(['g', 'migration', 'add-orders', '--dir', project])).toBe(0);
+
+    await useWorkspacePackages(project);
+
+    const applied = await new Deno.Command(Deno.execPath(), {
+      args: [
+        'run',
+        '-A',
+        '--node-modules-dir=none',
+        '--config',
+        `${project}/deno.json`,
+        `${project}/src/migrations/run.ts`,
+      ],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+
+    const out = new TextDecoder().decode(applied.stdout);
+    expect(applied.code, new TextDecoder().decode(applied.stderr)).toBe(0);
+    // Both migrations ran, oldest first — filename order IS application order.
+    expect(out).toContain('up ');
+    expect(out.match(/^up /gm)?.length).toBe(2);
+
+    const reversed = await new Deno.Command(Deno.execPath(), {
+      args: [
+        'run',
+        '-A',
+        '--node-modules-dir=none',
+        '--config',
+        `${project}/deno.json`,
+        `${project}/src/migrations/run.ts`,
+        '--down',
+      ],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    expect(reversed.code).toBe(0);
+    expect(new TextDecoder().decode(reversed.stdout).match(/^down /gm)?.length).toBe(2);
   });
 
   it('generates every ungated schematic into one project', async () => {

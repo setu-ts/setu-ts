@@ -212,7 +212,7 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.8/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.1.0-alpha.8/main
 
 setu new my-app
 cd my-app && setu generate service billing
