@@ -49,8 +49,19 @@ describe('seam registry', () => {
     }
   });
 
-  it('leaves the unwired schematics emitting one file and no managed barrel', () => {
+  it('leaves the unwired schematics out of the seam registry', () => {
+    // None of the three has a FRAMEWORK registration site, which is what this
+    // registry describes. `migration` emits a project-local runner and barrel of
+    // its own since D5 — that is not a seam: nothing in `setu.config.ts` imports
+    // it, and no plugin option consumes it.
+    const wired = new Set(listSeamSpecs().map((spec) => spec.schematic));
     for (const schematic of UNWIRED) {
+      expect(wired.has(schematic)).toBe(false);
+    }
+  });
+
+  it('keeps guard and job emitting a single unmanaged file', () => {
+    for (const schematic of ['guard', 'job'] as const) {
       const files = getSchematic(schematic)!.factory(deriveNames('order-item'), {
         runtime: 'deno',
         plugins: new Set(['decorator-plugin']),

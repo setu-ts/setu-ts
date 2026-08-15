@@ -91,9 +91,14 @@ describe('generateModule', () => {
       expect(source).not.toContain('Deno.test');
     });
 
-    it('re-exports the function from the per-module barrel', () => {
-      expect(fileAt(files, 'src/modules/user-profile/index.ts'))
-        .toContain('export { listUserProfile }');
+    it('re-exports the module SURFACE, not the stub symbol, from the barrel', () => {
+      // A3: naming the stub meant that replacing it — the obvious next step —
+      // broke the barrel and the generated test with TS2305, and neither file is
+      // reachable from `deno check main.ts setu.config.ts`, so both stayed
+      // broken through a full green run of every gate.
+      const barrel = fileAt(files, 'src/modules/user-profile/index.ts');
+      expect(barrel).toContain("export * from './user-profile.service.ts';");
+      expect(barrel).not.toContain('listUserProfile');
     });
   });
 

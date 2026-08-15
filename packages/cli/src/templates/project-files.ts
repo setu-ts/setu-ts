@@ -792,14 +792,27 @@ function denoTasks(
     ? `deno serve ${denoPermissions(manifest)} ${entry}`
     : `deno run ${denoPermissions(manifest)} ${entry}`;
 
+  // A3: every template emits a `test` task now. `setu generate module` writes a
+  // `*.service.test.ts`, and NO template declared a task that runs it — so the
+  // generated test sat beside the generated service, unreachable from
+  // `deno check main.ts setu.config.ts`, and both stayed broken through a full
+  // green run of every gate a developer had.
+  const test = { test: 'deno test -A' };
+
   if (manifest?.npmBuild === undefined) {
-    return { start, ...host.extraTasks };
+    return { start, ...test, ...host.extraTasks };
   }
 
   return {
-    install: 'deno install --allow-scripts',
+    // `--min-dep-age 0` for the same reason the root manifest carries
+    // `minimumDependencyAge`: this project is pinned to the CLI's own version,
+    // which on release day is younger than Deno's 24-hour policy allows (D1).
+    // The manifest setting covers a bare `deno install`; this task passes its
+    // own flags, so it needs the flag too.
+    install: 'deno install --allow-scripts --min-dep-age 0',
     build: `deno task install && ${manifest.npmBuild.denoCommand}`,
     start: `deno task build && ${start}`,
+    ...test,
     ...host.extraTasks,
   };
 }
