@@ -37,8 +37,16 @@ const PLANS_DIR = 'plans';
 /** Files that live at plans/ root but are not themselves plans to lint. */
 const NON_PLAN = /^(?:TEMPLATE|README)\.md$/;
 
-/** The only file names permitted at plans/ root. Anything else is scratch. */
-const CANONICAL_ROOT = /^(?:milestone-\d+-[a-z0-9.-]+|TEMPLATE|README)\.md$/;
+/**
+ * The only file names permitted at plans/ root. Anything else is scratch.
+ *
+ * The milestone number carries an optional letter suffix, because a lettered
+ * sub-milestone (`14b`, `52c`, `70a`) is this repo's established unit for an
+ * addition to a shipped package — see the ROADMAP Progress Tracking table. A
+ * digits-only pattern rejected every one of them, so no sub-milestone plan
+ * could ever lint clean.
+ */
+const CANONICAL_ROOT = /^(?:milestone-\d+[a-z]?-[a-z0-9.-]+|TEMPLATE|README)\.md$/;
 
 /** Every plan must contain a heading matching each of these. */
 const REQUIRED_SECTIONS: readonly { readonly label: string; readonly match: RegExp }[] = [
