@@ -13,7 +13,7 @@ describe('UPGRADE_INTENT symbol (M70a)', () => {
   it('is a Symbol.for (two copies of common agree)', () => {
     // Symbol.for creates a global symbol — two copies of @setu-ts/common in
     // the same process must resolve to the same symbol.
-    const other = Symbol.for('setu-ts.upgrade-intent');
+    const other = Symbol.for('setu.upgrade.intent');
     expect(UPGRADE_INTENT).toBe(other);
   });
 

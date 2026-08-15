@@ -81,7 +81,7 @@ describe('NodeHttpAdapter upgrade order (M70a)', () => {
     const routerConsulted = { value: false };
     const router: WebSocketUpgradeRouter = () => {
       routerConsulted.value = true;
-      return null;
+      return Promise.resolve(null);
     };
 
     const host: NodeServeHost = {

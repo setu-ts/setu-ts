@@ -7,7 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMiddleware, IPlugin, IPluginContext } from '@setu-ts/common';
+import type { IPlugin, IPluginContext, MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '../../src/application/application.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
@@ -26,18 +26,15 @@ function runtimePlugin(): IPlugin {
 describe('Pipeline runs for upgrade requests (M70a)', () => {
   it('a short-circuiting guard prevents upgrade intent being set', async () => {
     let middlewareRan = false;
-    const guardMiddleware: IMiddleware = {
-      name: 'auth-guard',
-      execute: async (ctx, next) => {
-        middlewareRan = true;
-        // Short-circuit with 401 — no upgrade should happen
-        ctx.response.status(401).json({ error: 'Unauthorized' });
-        // Intentionally NOT calling next()
-      },
+    const guardMiddleware: MiddlewareFunction = async (ctx) => {
+      middlewareRan = true;
+      // Short-circuit with 401 — no upgrade should happen
+      ctx.response.status(401).json({ error: 'Unauthorized' });
+      // Intentionally NOT calling next()
     };
 
     const app = createApplication({ plugins: [runtimePlugin()] });
-    app.middleware.add(middlewareMiddleware);
+    app.middleware.add(guardMiddleware);
 
     await app.start();
 
@@ -57,13 +54,10 @@ describe('Pipeline runs for upgrade requests (M70a)', () => {
 
   it('middleware executes before the terminal handler', async () => {
     const order: string[] = [];
-    const trackingMiddleware: IMiddleware = {
-      name: 'order-tracker',
-      execute: async (_ctx, next) => {
-        order.push('middleware-before');
-        await next();
-        order.push('middleware-after');
-      },
+    const trackingMiddleware: MiddlewareFunction = async (_ctx, next) => {
+      order.push('middleware-before');
+      await next();
+      order.push('middleware-after');
     };
 
     const app = createApplication({ plugins: [runtimePlugin()] });

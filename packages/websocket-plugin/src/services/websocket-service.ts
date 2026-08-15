@@ -223,6 +223,16 @@ export class WebSocketService implements IWebSocketService {
     this.#heartbeat.start();
   }
 
+  /**
+   * The upgrade router that the kernel terminal handler consults via
+   * `IWebSocketService.routeUpgrade`.
+   *
+   * @since 0.3.0
+   */
+  routeUpgrade(request: Request): Promise<WebSocketUpgradeDecision | null> {
+    return Promise.resolve(this.#route(request));
+  }
+
   room(name: string): WebSocketRoom {
     return this.#rooms.get(name);
   }

@@ -5,9 +5,10 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IRequest, IRuntimeServices } from '@setu-ts/common';
+import type { IRequest } from '@setu-ts/common';
 import { createRequestContext } from '../../src/context/request-context.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { ServiceRegistry } from '../../src/registry/service-registry.ts';
 
 function makeRequest(raw?: Request): IRequest {
   return {
@@ -15,9 +16,8 @@ function makeRequest(raw?: Request): IRequest {
     url: 'http://localhost/test',
     path: '/test',
     headers: new Headers(),
-    signal: undefined,
-    raw,
-    json: async () => ({}),
+    ...(raw !== undefined ? { raw } : {}),
+    json: async <T = unknown>() => ({}) as Promise<T>,
     text: async () => '',
     bytes: async () => new Uint8Array(),
   };
@@ -31,10 +31,7 @@ describe('createRequestContext — raw Request threading (M70a)', () => {
     const request = makeRequest(raw);
     const runtime = createFakeRuntime().runtime;
 
-    const handle = createRequestContext(request, {
-      createChild: () => ({}) as any,
-      get: () => runtime as any,
-    }, runtime);
+    const handle = createRequestContext(request, new ServiceRegistry(), runtime);
     expect(handle.ctx.raw).toBe(raw);
   });
 
@@ -43,22 +40,16 @@ describe('createRequestContext — raw Request threading (M70a)', () => {
     const request = makeRequest(raw);
     const runtime = createFakeRuntime().runtime;
 
-    const handle = createRequestContext(request, {
-      createChild: () => ({}) as any,
-      get: () => runtime as any,
-    }, runtime);
+    const handle = createRequestContext(request, new ServiceRegistry(), runtime);
     expect(handle.ctx.raw).toBe(raw);
-    expect(handle.ctx.raw?.url).toBe('http://localhost/test/');
+    expect(handle.ctx.raw?.url).toBe('http://localhost/test');
   });
 
   it('ctx.raw is absent when the adapter omits IRequest.raw', () => {
     const request = makeRequest(undefined);
     const runtime = createFakeRuntime().runtime;
 
-    const handle = createRequestContext(request, {
-      createChild: () => ({}) as any,
-      get: () => runtime as any,
-    }, runtime);
+    const handle = createRequestContext(request, new ServiceRegistry(), runtime);
     expect(handle.ctx.raw).toBeUndefined();
   });
 
@@ -74,10 +65,7 @@ describe('createRequestContext — raw Request threading (M70a)', () => {
     const request = makeRequest(raw);
     const runtime = createFakeRuntime().runtime;
 
-    const handle = createRequestContext(request, {
-      createChild: () => ({}) as any,
-      get: () => runtime as any,
-    }, runtime);
+    const handle = createRequestContext(request, new ServiceRegistry(), runtime);
     expect(handle.ctx.raw?.headers.get('upgrade')).toBe('websocket');
     expect(handle.ctx.raw?.headers.get('connection')).toBe('Upgrade');
     expect(handle.ctx.raw?.headers.get('sec-websocket-key')).toBe('dGhlIHNhbXBsZSBub25jZQ==');
@@ -88,10 +76,7 @@ describe('createRequestContext — raw Request threading (M70a)', () => {
     const request = makeRequest(raw);
     const runtime = createFakeRuntime().runtime;
 
-    const handle = createRequestContext(request, {
-      createChild: () => ({}) as any,
-      get: () => runtime as any,
-    }, runtime);
+    const handle = createRequestContext(request, new ServiceRegistry(), runtime);
     // The raw request body has not been consumed — the framework mapping
     // reads the body separately, but the raw Request is preserved as-is.
     expect(handle.ctx.raw).toBe(raw);
