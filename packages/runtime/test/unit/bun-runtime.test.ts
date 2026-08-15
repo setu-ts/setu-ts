@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 
 import { buildBunHost, createBunRuntimeServices } from '../../src/adapters/bun/bun-runtime.ts';
 import type { BunHost, BunModules } from '../../src/adapters/bun/bun-runtime.ts';
+import type { RuntimeSignal } from '@setu-ts/common';
 
 function createFakeBunHost(overrides: Partial<BunHost> = {}): BunHost {
   const files = new Map<string, Uint8Array>();
@@ -15,6 +16,7 @@ function createFakeBunHost(overrides: Partial<BunHost> = {}): BunHost {
     exit: (code?: number) => {
       throw new Error(`Bun.exit(${code ?? 0})`);
     },
+    onSignal: () => {},
     readFile: (path: string) => files.get(path) ?? null,
     realPath: (path: string) => (files.has(path) || dirs.has(path) ? path : null),
     writeFile: (path: string, data: Uint8Array) => {
@@ -299,6 +301,7 @@ describe('buildBunHost — the default host', () => {
         exit: () => {
           throw new Error('exit');
         },
+        on: () => {},
       },
       hostname: () => 'fake-host',
       bunGlobal: undefined,
@@ -344,6 +347,7 @@ describe('buildBunHost — the default host', () => {
         exit: () => {
           throw new Error('exit');
         },
+        on: () => {},
       },
       hostname: () => 'fake-host',
       bunGlobal: undefined,
@@ -379,6 +383,7 @@ describe('buildBunHost — the default host', () => {
         exit: () => {
           throw new Error('exit');
         },
+        on: () => {},
       },
       hostname: () => 'fake-host',
       // On Bun this is `globalThis.Bun`; its version wins over process.versions.
@@ -410,6 +415,7 @@ describe('buildBunHost — the default host', () => {
         exit: () => {
           throw new Error('exit');
         },
+        on: () => {},
       },
       hostname: () => 'fake-host',
       bunGlobal: undefined,
@@ -474,7 +480,7 @@ describe('buildBunHost createReadStream wiring', () => {
         mkdirSync: () => undefined,
         rmSync: () => {},
       },
-      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never },
+      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never, on: () => {} },
       hostname: () => 'h',
       bunGlobal: { version: '1.1.0' },
     };
@@ -503,11 +509,48 @@ describe('buildBunHost createReadStream wiring', () => {
           throw new Error('ENOENT');
         },
       },
-      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never },
+      proc: { version: 'v1', versions: {}, env: {}, exit: (() => {}) as never, on: () => {} },
       hostname: () => 'h',
       bunGlobal: { version: '1.1.0' },
     };
 
     expect(buildBunHost(mods).createReadStream!('/tmp/x')).toBe(null);
+  });
+  // V6: Bun was the one adapter whose `onSignal` delegation nothing asserted.
+  // Deno and Node each had this test; here the fixture supplied `onSignal: () =>
+  // {}` and no assertion ever invoked it, so replacing the delegate in
+  // `bun-runtime.ts` with an empty body failed nothing and that line carried 0%
+  // function coverage.
+  it('exposes onSignal on the services, wired to the host', () => {
+    const seen: string[] = [];
+    const services = createBunRuntimeServices(
+      createFakeBunHost({
+        onSignal: (signal: RuntimeSignal) => {
+          seen.push(signal);
+        },
+      }),
+    );
+
+    services.onSignal?.('SIGTERM', () => {});
+
+    expect(seen).toEqual(['SIGTERM']);
+  });
+
+  it('passes the handler itself through, not a wrapper that drops it', () => {
+    // The delegation could forward the signal and swallow the callback, which
+    // would leave a generated project registering a handler that never runs.
+    let received: (() => void) | undefined;
+    const services = createBunRuntimeServices(
+      createFakeBunHost({
+        onSignal: (_signal: RuntimeSignal, handler: () => void) => {
+          received = handler;
+        },
+      }),
+    );
+
+    const handler = () => {};
+    services.onSignal?.('SIGINT', handler);
+
+    expect(received).toBe(handler);
   });
 });

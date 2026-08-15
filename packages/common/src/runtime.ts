@@ -27,6 +27,19 @@ export type TimerHandle = unknown;
 export type ServerHandle = unknown;
 
 /**
+ * A process-termination signal an application can shut down gracefully on.
+ *
+ * Deliberately narrow. These two are the signals an orchestrator actually
+ * sends — Kubernetes and `docker stop` send `SIGTERM`, a terminal sends
+ * `SIGINT` — and they are the only two every non-edge runtime this framework
+ * targets can register for. Widening the union would promise handling for
+ * signals that are unavailable, unmaskable, or platform-specific.
+ *
+ * @since 0.3.0
+ */
+export type RuntimeSignal = 'SIGTERM' | 'SIGINT';
+
+/**
  * File metadata returned by {@linkcode IFileSystem.stat}.
  *
  * @since 0.1.0
@@ -360,6 +373,38 @@ export interface IRuntimeServices {
    * @since 0.2.0
    */
   readonly dns?: IDnsResolver;
+
+  /**
+   * Registers a handler for a process-termination signal, so an application
+   * can run `app.stop()` before the process dies.
+   *
+   * Without this, an application catching `SIGTERM` has to reach for
+   * `Deno.addSignalListener` or `process.on` directly — a runtime API in
+   * application code, which is what AI_GUIDELINES §4.2 exists to prevent, and
+   * which forces a different entry point per target.
+   *
+   * **Absent on two platforms, for two different reasons.** Cloudflare Workers
+   * omits the key entirely: an isolate is evicted, never signalled, so there is
+   * nothing to register for. The Deno adapter omits it **on Windows**, where
+   * `Deno.addSignalListener('SIGTERM')` throws — so a caller must treat this as
+   * optional (`runtime.onSignal?.(…)`) rather than assuming a non-edge runtime
+   * always provides it.
+   *
+   * Handlers are additive: registering twice for one signal runs both, in
+   * registration order. The framework never removes them — a process that has
+   * received a termination signal is ending.
+   *
+   * @param signal - The signal to listen for
+   * @param handler - Invoked when the signal arrives; must not throw
+   * @example
+   * ```typescript
+   * runtime.onSignal?.('SIGTERM', () => {
+   *   void app.stop().then(() => runtime.exit(0));
+   * });
+   * ```
+   * @since 0.3.0
+   */
+  onSignal?(signal: RuntimeSignal, handler: () => void): void;
 }
 
 /**

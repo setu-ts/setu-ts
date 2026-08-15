@@ -180,6 +180,10 @@ out['eventSubscriptions'] =
  */
 const MINIMAL_ARTIFACTS: readonly (readonly [schematic: string, name: string])[] = [
   ['route', 'widget-route'],
+  // Ungated since M70h/E8. Before it, `g controller` REFUSED in this project and
+  // redirected to `g route` in a second directory; now it emits the functional
+  // shape into the same `src/controllers/` and is wired by the same barrel.
+  ['controller', 'gadget-ctl'],
   ['middleware', 'widget'],
   ['plugin', 'widget'],
 ];
@@ -195,6 +199,9 @@ const out: Record<string, unknown> = {};
 const r = await app.fetch(new Request('http://x/widget-route/'));
 out['route'] = { status: r.status, body: await r.text() };
 out['middlewareHeader'] = r.headers.get('x-widget');
+
+const c = await app.fetch(new Request('http://x/gadget-ctl/'));
+out['controller'] = { status: c.status, body: await c.text() };
 out['pluginToken'] = services.get<{ describe(): string }>('widget').describe();
 
 console.log('__PROBE_RESULT__' + JSON.stringify(out));
@@ -241,6 +248,10 @@ describe('generated artifacts are wired — end to end', () => {
 
     // The generated route module was reached through `registerGeneratedRoutes(app.router)`.
     expect(result['route']).toEqual({ status: 200, body: '{"items":[]}' });
+    // E8's headline: a DECORATOR-FREE project can generate a controller, and it
+    // serves. The same barrel call registers it, because in this mode a
+    // `.controller.ts` registers imperatively exactly as a `.routes.ts` does.
+    expect(result['controller']).toEqual({ status: 200, body: '{"items":[]}' });
     // The generated middleware was added at its own declared priority, and ran.
     expect(result['middlewareHeader']).toBe('true');
     // The generated plugin was spread into `createApplication({ plugins })`.

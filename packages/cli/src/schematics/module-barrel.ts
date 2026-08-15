@@ -12,6 +12,7 @@
  */
 
 import { deriveNames } from '../utils/names.ts';
+import { renderExportedArray } from '../seams/seam-spec.ts';
 
 /** Barrel export naming every generated module's controller class. */
 export const CONTROLLERS_EXPORT = 'MODULE_CONTROLLERS';
@@ -56,23 +57,9 @@ export function renderModuleBarrel(moduleNames: readonly string[]): string {
 import type { Constructor } from '@setu-ts/common';
 ${imports === '' ? '' : `\n${imports}\n`}
 /** Every generated module's controller, for \`DecoratorPlugin({ controllers })\`. */
-export const ${CONTROLLERS_EXPORT}: readonly Constructor[] = [${renderList(controllers)}];
+${renderExportedArray(CONTROLLERS_EXPORT, 'Constructor', controllers)}
 
 /** Every generated module's service, for \`DecoratorPlugin({ services })\`. */
-export const ${SERVICES_EXPORT}: readonly Constructor[] = [${renderList(services)}];
+${renderExportedArray(SERVICES_EXPORT, 'Constructor', services)}
 `;
-}
-
-/**
- * Renders an array literal's contents, breaking onto indented lines once the
- * single-line form would run long.
- *
- * @param entries - Identifier names
- * @returns The text between the brackets
- */
-function renderList(entries: readonly string[]): string {
-  if (entries.length === 0) return '';
-  const inline = entries.join(', ');
-  if (inline.length <= 76) return inline;
-  return `\n  ${entries.join(',\n  ')},\n`;
 }

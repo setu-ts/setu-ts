@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { buildNodeHost, createNodeRuntimeServices } from '../../src/adapters/node/node-runtime.ts';
+import type { RuntimeSignal } from '@setu-ts/common';
 import type {
   NodeFsOperations,
   NodeHost,
@@ -77,6 +78,7 @@ function createFakeNodeModules(
     exit: (code?: number) => {
       throw new Error(`exit(${code ?? 0})`);
     },
+    on: () => {},
   };
 
   const fakeHostname = () => 'fake-hostname';
@@ -201,6 +203,7 @@ function createFakeNodeHost(overrides: Partial<NodeHost> = {}): NodeHost {
     exit: (code?: number) => {
       throw new Error(`process.exit(${code ?? 0})`);
     },
+    onSignal: () => {},
     readFile: (path: string) => {
       const data = files.get(path);
       if (data === undefined) {
@@ -498,5 +501,48 @@ describe('buildNodeHost createReadStream wiring', () => {
     const result = buildNodeHost(mods).createReadStream!('/tmp/delegated');
     expect(seen).toBe('/tmp/delegated');
     expect(result).toEqual({ marker: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onSignal (B1 / M70h)
+// ---------------------------------------------------------------------------
+
+describe('node-runtime | onSignal', () => {
+  it('buildNodeHost routes onSignal to process.on', () => {
+    const seen: string[] = [];
+    const host = buildNodeHost(
+      createFakeNodeModules({
+        proc: {
+          version: 'v18.19.0',
+          env: {},
+          exit: (() => {
+            throw new Error('exit');
+          }) as never,
+          on: (event: RuntimeSignal) => {
+            seen.push(event);
+          },
+        },
+      }),
+    );
+
+    host.onSignal('SIGTERM', () => {});
+
+    expect(seen).toEqual(['SIGTERM']);
+  });
+
+  it('exposes onSignal on the services, wired to the host', () => {
+    const seen: string[] = [];
+    const services = createNodeRuntimeServices(
+      createFakeNodeHost({
+        onSignal: (signal: RuntimeSignal) => {
+          seen.push(signal);
+        },
+      }),
+    );
+
+    services.onSignal?.('SIGINT', () => {});
+
+    expect(seen).toEqual(['SIGINT']);
   });
 });

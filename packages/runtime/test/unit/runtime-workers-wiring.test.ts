@@ -40,6 +40,8 @@ const fakeDenoHost: DenoHost = {
   exit: () => {
     throw new Error('exit');
   },
+  build: { os: 'linux' },
+  addSignalListener: () => {},
   readFile: () => Promise.resolve(new Uint8Array()),
   realPath: (path: string) => Promise.resolve(path),
   writeFile: () => Promise.resolve(),
@@ -59,6 +61,7 @@ const fakeBunHost: BunHost = {
   exit: () => {
     throw new Error('exit');
   },
+  onSignal: () => {},
   readFile: () => new Uint8Array(),
   realPath: (path: string) => path,
   writeFile: () => undefined,
@@ -75,6 +78,7 @@ const fakeNodeHost: NodeHost = {
   exit: () => {
     throw new Error('exit');
   },
+  onSignal: () => {},
   readFile: () => Promise.resolve(new Uint8Array()),
   realPath: (path: string) => Promise.resolve(path),
   writeFile: () => Promise.resolve(),

@@ -10,8 +10,8 @@ describe('route schematic', () => {
 
   it('emits the route module plus its seam barrel', () => {
     expect(files.map((f) => f.path)).toEqual([
-      'src/routes/order-item.routes.ts',
-      'src/routes/index.ts',
+      'src/controllers/order-item.routes.ts',
+      'src/controllers/index.ts',
     ]);
   });
 
@@ -37,8 +37,8 @@ describe('route schematic', () => {
     );
   });
 
-  it('emits it at src/routes/order-item.routes.ts', () => {
-    expect(file.path).toBe('src/routes/order-item.routes.ts');
+  it('emits it at src/controllers/order-item.routes.ts', () => {
+    expect(file.path).toBe('src/controllers/order-item.routes.ts');
   });
 
   it('produces non-empty contents ending in a newline', () => {

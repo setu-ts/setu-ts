@@ -96,18 +96,74 @@ describe('findNameConflict', () => {
       ).toBeUndefined();
     });
 
-    // Without `decorator-plugin` neither collision can exist: the service emits no
-    // token at all, and `controller` and `module` are refused by their own gates. Firing
-    // here would refuse a command in a project where the artifacts are inert.
-    it('allows everything in a project without decorator-plugin', () => {
+    // The injection-token group is genuinely decorator-only: a functional service is a
+    // plain function registered under no token, so there is nothing to collide over.
+    it('allows a service/module token clash in a project without decorator-plugin', () => {
       expect(
         findNameConflict('service', 'widget', new Set(), {}, ['widget']),
       ).toBeUndefined();
+    });
+  });
+
+  // This whole block is a regression suite. The guard used to return early for ANY
+  // project without `decorator-plugin`, and a test here asserted that — with a comment
+  // claiming `controller` and `module` were "refused by their own gates". M65 ungated
+  // `module`, this milestone ungated `controller`, and E8 merged `src/routes/` into
+  // `src/controllers/`, so by the time the guard ran the premise was false three times
+  // over. Measured against a real scaffold: `g route widget` then `g controller widget`
+  // both reported success and left a barrel with
+  // `import { registerWidgetRoutes } from './widget.controller.ts';` beside
+  // `import { registerWidgetRoutes } from './widget.routes.ts';` — TS2300, twice, so the
+  // generated project did not compile.
+  describe('the HTTP path group in a FUNCTIONAL project', () => {
+    /** A functional project: no decorator-plugin, so only the path group applies. */
+    const FUNCTIONAL: ReadonlySet<string> = new Set(['runtime']);
+
+    it('refuses a controller whose name a route already mounts', () => {
+      const conflict = findNameConflict('controller', 'widget', FUNCTIONAL, {
+        route: ['widget'],
+      }, []);
+
+      expect(conflict?.schematic).toBe('route');
+      expect(conflict?.resource).toBe('the HTTP path /widget');
+      // The functional failure is louder than the decorator one and the refusal says so:
+      // both files export `registerWidgetRoutes` into one barrel.
+      expect(conflict?.consequence).toContain('would not compile');
+    });
+
+    it('refuses a route whose name a controller already mounts', () => {
+      // Symmetric, so the order the developer generates in cannot leave a pair unguarded.
       expect(
-        findNameConflict('route', 'widget', new Set(), { controller: ['widget'] }, []),
+        findNameConflict('route', 'widget', FUNCTIONAL, { controller: ['widget'] }, [])
+          ?.schematic,
+      ).toBe('controller');
+    });
+
+    it('refuses a controller whose name a domain module already mounts', () => {
+      // `module` is ungated since M65, and its functional arm emits a route module into
+      // the same merged directory.
+      expect(
+        findNameConflict('controller', 'widget', FUNCTIONAL, {}, ['widget'])?.schematic,
+      ).toBe('module');
+    });
+
+    it('still allows a distinct name', () => {
+      // The fix must not over-refuse: widening the group to every mode would be worse
+      // than the defect if it blocked ordinary generation.
+      expect(
+        findNameConflict('controller', 'gadget', FUNCTIONAL, { route: ['widget'] }, []),
       ).toBeUndefined();
     });
 
+    it('still allows a service beside a same-named route', () => {
+      // Different families entirely — the path group does not list `service`.
+      expect(
+        findNameConflict('service', 'widget', FUNCTIONAL, { route: ['widget'] }, []),
+      ).toBeUndefined();
+    });
+  });
+
+  describe('what it must NOT refuse (continued)', () => {
     it('allows a family whose scan reported nothing', () => {
       expect(findNameConflict('route', 'widget', WITH_DECORATORS, {}, [])).toBeUndefined();
     });

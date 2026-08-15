@@ -36,15 +36,35 @@ const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 /** Templates that wire an HTTP surface and boot without an npm build. */
-const BOOTABLE = ['rest', 'microservice', 'class-based'] as const;
+// X5-3's fix and its gate are the same change: `full-stack` was excluded from
+// this list because it could not boot — it had no `build` task, so `deno task
+// start` died on a missing server build. The one template that could not boot
+// was the one the boot gate skipped. It now emits `install`/`build` and `start`
+// depends on `build`, so it belongs here.
+const BOOTABLE = ['rest', 'microservice', 'class-based', 'full-stack'] as const;
 
-/** Every host a scaffold can produce, including the no-template one. */
+/**
+ * Every host a scaffold can produce, including the no-template one.
+ *
+ * The Workers arms are here because this gate only ever scaffolded the DEFAULT
+ * runtime, so nothing checked a `--runtime cloudflare-workers` project at all —
+ * and one shipped failing its own `deno fmt --check` on two files, which is
+ * exactly the defect class X2-4 reported for `--transport`. A target the gate
+ * does not scaffold is a target with no gate.
+ */
 const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
   ['no-template', []],
   ['rest', ['--template', 'rest']],
   ['microservice', ['--template', 'microservice']],
   ['class-based', ['--template', 'class-based']],
   ['full-stack', ['--template', 'full-stack']],
+  ['rest on workers', ['--template', 'rest', '--runtime', 'cloudflare-workers']],
+  // The one that failed: its Cloudflare wiring is the longest emitted plugin
+  // call, and it emits a Durable Object class of its own.
+  [
+    'microservice on workers',
+    ['--template', 'microservice', '--runtime', 'cloudflare-workers'],
+  ],
 ];
 
 let root = '';
@@ -113,11 +133,36 @@ describe('a scaffolded project is formatted and lints clean', () => {
 });
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
+  // Membership is asserted, not just iterated. Removing a template from
+  // `BOOTABLE` makes its build-and-boot assertions VANISH rather than fail, so
+  // the whole gate stays green while covering strictly less — a one-word edit
+  // that hides exactly the defect X5-3 was. `full-stack` is named because it is
+  // the template that was excluded for years precisely because it could not
+  // boot; this is the M37c `ALLOW_SKIP` precedent, where the exemption for the
+  // one app that mattered would likewise have left CI green.
+  it('never quietly drops a template from the boot list', () => {
+    expect([...BOOTABLE]).toEqual(['rest', 'microservice', 'class-based', 'full-stack']);
+  });
+
   for (const template of BOOTABLE) {
     it(`holds for --template ${template}`, async () => {
       expect(await run(['new', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
       await useWorkspacePackages(project);
+
+      // `full-stack` builds its React Router server before it can serve, and
+      // `start` depends on `build` — which is exactly what X5-3 added. Running
+      // the task here rather than letting `start` do it keeps the boot's own
+      // timeout measuring the boot.
+      if (template === 'full-stack') {
+        const built = await new Deno.Command(Deno.execPath(), {
+          args: ['task', 'build'],
+          cwd: project,
+          stdout: 'piped',
+          stderr: 'piped',
+        }).output();
+        expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
+      }
 
       const result = await bootWithGeneratedPermissions(project, [
         '/health',
@@ -178,7 +223,7 @@ describe('a scaffolded project configures itself from a dotenv file', () => {
     await useWorkspacePackages(project);
     await Deno.writeTextFile(`${project}/.env`, 'SCAFFOLD_PROBE_VALUE=from-dotenv\n');
     await Deno.writeTextFile(
-      `${project}/src/routes/index.ts`,
+      `${project}/src/controllers/index.ts`,
       `import { CAPABILITIES } from '@setu-ts/common';\n` +
         `import type { IConfig, IRouterApi } from '@setu-ts/common';\n\n` +
         `export function registerGeneratedRoutes(router: IRouterApi): void {\n` +
@@ -206,7 +251,7 @@ describe('a scaffolded project answers errors as RFC 9457 Problem Details', () =
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
     await Deno.writeTextFile(
-      `${project}/src/routes/index.ts`,
+      `${project}/src/controllers/index.ts`,
       `import { unauthorized } from '@setu-ts/exceptions';\n` +
         `import type { IRouterApi } from '@setu-ts/common';\n\n` +
         `export function registerGeneratedRoutes(router: IRouterApi): void {\n` +

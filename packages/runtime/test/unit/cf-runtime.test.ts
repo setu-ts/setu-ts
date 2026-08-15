@@ -189,3 +189,18 @@ describe('cf-runtime | omitted optional services', () => {
     expect('workers' in services).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// onSignal (B1 / M70h)
+// ---------------------------------------------------------------------------
+
+describe('cf-runtime | onSignal', () => {
+  it('omits onSignal entirely — an isolate is evicted, never signalled', () => {
+    const services = createCloudflareRuntimeServices();
+
+    // Asserted as an ABSENT KEY rather than a falsy value: a no-op would let a
+    // caller conclude its shutdown handler runs on Workers, and it never does.
+    expect(services.onSignal).toBeUndefined();
+    expect('onSignal' in services).toBe(false);
+  });
+});

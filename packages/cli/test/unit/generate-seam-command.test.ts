@@ -207,7 +207,13 @@ describe('setu generate, with seams', () => {
       const reported = h.err.lines.join('\n');
       expect(reported).toContain('src/middleware/audit-log.middleware.ts');
       expect(reported).toContain('AUDIT_LOG_MIDDLEWARE_PRIORITY');
-      expect(reported).toContain('Regenerate it');
+      // The advice must be one the developer can actually follow. It used to say
+      // "Regenerate it", and regenerating is REFUSED — the artifact is not
+      // CLI-owned, so the overwrite check stops it, and the developer was told
+      // to run a command that then declines. Both real routes out are named.
+      expect(reported).toContain('Rename its export');
+      expect(reported).toContain('delete the file');
+      expect(reported).not.toContain('Regenerate it to bring it up to date');
     });
 
     it('still exits 0, because the generate itself succeeded', async () => {

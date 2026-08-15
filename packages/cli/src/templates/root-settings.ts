@@ -15,13 +15,21 @@
 /**
  * The formatting a generated project inherits.
  *
+ * `GENERATED_LINE_WIDTH` is exported because it is not only a setting — it is the
+ * budget every emitter must render within. Three modules had their own
+ * `const LINE_WIDTH = 100` beside this one, which is the same value written four
+ * times: change it here and a barrel renderer would keep wrapping at the old
+ * width and the project would fail its own `deno fmt --check`.
+ *
  * These are the framework repo's own `fmt` settings. Emitting them is not a
  * style preference — the CLI writes single-quoted TypeScript while Deno's
  * default is double, so a project scaffolded without this fails
  * `deno fmt --check` on the files the CLI itself just wrote.
  */
+export const GENERATED_LINE_WIDTH = 100;
+
 const FMT_SETTINGS = {
-  lineWidth: 100,
+  lineWidth: GENERATED_LINE_WIDTH,
   indentWidth: 2,
   singleQuote: true,
   semiColons: true,
@@ -41,13 +49,24 @@ const MIN_DEP_AGE_NOTE =
 /**
  * Builds the settings block a generated root manifest carries.
  *
+ * @param buildOutputDir - Where a frontend build writes, when the template has
+ * one. Excluded from `fmt` and `lint`: both walk the project tree, and a
+ * minified bundle is neither formattable nor lintable — `deno fmt` reformatting
+ * one is what D2 reported.
  * @returns The keys to merge into the emitted `deno.json`, in a fixed order so
  * the generated file is byte-identical across runs
  */
-export function rootManifestSettings(): Readonly<Record<string, unknown>> {
+export function rootManifestSettings(
+  buildOutputDir?: string,
+): Readonly<Record<string, unknown>> {
+  const exclude = buildOutputDir === undefined ? {} : {
+    fmt: { ...FMT_SETTINGS, exclude: [buildOutputDir] },
+    lint: { exclude: [buildOutputDir] },
+  };
   return {
     '//minimumDependencyAge': MIN_DEP_AGE_NOTE,
     minimumDependencyAge: 0,
     fmt: FMT_SETTINGS,
+    ...exclude,
   };
 }

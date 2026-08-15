@@ -147,3 +147,54 @@ describe('workspaceK8sFiles', () => {
     expect(yaml.indexOf('# billing')).toBeLessThan(yaml.indexOf('# orders'));
   });
 });
+
+// X2-7. Every generated Deployment used a TCP probe plus a comment telling the
+// developer to switch to `httpGet` "once" the member registers HealthPlugin — a
+// decision the generator already holds the answer to, since the template is an
+// argument to `setu generate app` and the manifest is rendered per member.
+describe('probe selection', () => {
+  /** Renders the deployment for one member. */
+  const render = (member: { name: string; port: number; healthProbes?: boolean }): string => {
+    const files = workspaceK8sFiles(
+      {
+        version: 1,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'http',
+        members: [member],
+      },
+      transportSpec('http'),
+    );
+    return files.find((file) => file.path.endsWith('members.yaml'))?.contents ?? '';
+  };
+
+  /** The probe kind a rendered Deployment declares, read structurally. */
+  const probeKinds = (yaml: string): readonly string[] =>
+    [...yaml.matchAll(/(readiness|liveness)Probe:\n\s+(\w+):/g)].map((match) => match[2] ?? '');
+
+  it('uses HTTP probes for a member generated WITH a template', () => {
+    const yaml = render({ name: 'orders', port: 3000, healthProbes: true });
+
+    expect(probeKinds(yaml)).toEqual(['httpGet', 'httpGet']);
+    expect(yaml).toContain('path: /ready');
+    expect(yaml).toContain('path: /live');
+  });
+
+  it('keeps the TCP probe for a template-less member, which serves neither path', () => {
+    // Pointing a probe at a 404 would make the member permanently unready, so
+    // this arm is a real requirement rather than caution.
+    const yaml = render({ name: 'orders', port: 3000, healthProbes: false });
+
+    expect(probeKinds(yaml)).toEqual(['tcpSocket', 'tcpSocket']);
+  });
+
+  it('treats an ABSENT record as unknown, not as yes', () => {
+    // A workspace created before M70h carries no such field. Falling back to the
+    // TCP probe keeps those manifests working rather than pointing a probe at a
+    // path the member may not serve.
+    expect(probeKinds(render({ name: 'orders', port: 3000 }))).toEqual([
+      'tcpSocket',
+      'tcpSocket',
+    ]);
+  });
+});
