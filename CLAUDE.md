@@ -2356,13 +2356,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   that case through the public two-argument constructor. All three now have tests naming the failure
   they guard, taking `drizzle-query.ts`, `drizzle-database.ts` and `unit-of-work.ts` to 100%
   branch/function/line — complete (PR #162)
-- **Milestone 70h** (`packages/cli` + `packages/common` + `packages/runtime` + starters — the CLI
-  scaffold batch of the alpha.8 smoke programme: **23 register rows** closed on one branch, because
-  they share one shape — **a generated file sits outside every check path the generated project
-  actually runs.** A `full-stack` project could not be started by following its own README, a
-  pristine one failed its own `check:app` on a cold checkout, a `--transport rabbitmq` workspace
-  failed its own `deno fmt --check` before anything was edited, and a Workers project's
-  `deno task start` bound nothing and exited `0`.
+- **Milestone 70h** (`packages/cli` + `packages/common` + `packages/runtime` — the CLI scaffold
+  batch of the alpha.8 smoke programme: **23 register rows** closed on one branch, because they
+  share one shape — **a generated file sits outside every check path the generated project actually
+  runs.** A `full-stack` project could not be started by following its own README, a pristine one
+  failed its own `check:app` on a cold checkout, a `--transport rabbitmq` workspace failed its own
+  `deno fmt --check` before anything was edited, and a Workers project's `deno task start` bound
+  nothing and exited `0`.
 
   **Three scope calls widened the ROADMAP's stated `(cli, starters)` boundary, each the maintainer's
   at plan time.** **B1** is closed completely rather than in its two CLI-side halves: `common` gains

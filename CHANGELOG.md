@@ -53,10 +53,28 @@ All notable changes to this project are documented here. The format follows
 
 - **Breaking (generated output): `setu generate module`'s barrel re-exports the service module
   rather than the stub symbol.** It emitted `export { listWidget } from './widget.service.ts'`, so
-  replacing the generated stub — the obvious next step — broke the barrel and the generated test
-  with `TS2305`, and neither file is reachable from `deno check main.ts setu.config.ts`, so both
-  stayed broken through a full green run of every gate. It is now `export * from …`. Existing
+  replacing the generated stub — the obvious next step — broke the barrel with `TS2305`, and the
+  barrel is not reachable from `deno check main.ts setu.config.ts`, so it stayed broken through a
+  full green run of every gate. It is now `export * from …`. The generated test and route module
+  still import the function by name, which is correct — they exercise and serve it. Existing
   projects need no change; regenerating replaces the named re-export.
+
+- **Breaking (runtime host seams): `DenoHost`, `NodeHost`, `BunHost`, `NodeModules` and `BunModules`
+  gained required members.** These are public type exports whose own JSDoc advertises injection as
+  the supported way to test an adapter, so a consumer holding a hand-written fake now fails
+  `deno check`: `DenoHost` needs `build: { os: string }` and `addSignalListener`, `NodeHost` and
+  `BunHost` need `onSignal`, and both `*Modules.proc` need `on`. Add those members to the fake — the
+  three fixtures in this repository needed exactly that. `IRuntimeServices.onSignal` itself is
+  optional and source-compatible; only the injectable host seams are affected.
+
+- **Breaking (generated output): a generated health indicator's shape now follows the project's
+  generator mode.** A class-based project keeps today's class; every other project — which since M65
+  includes `rest` and `microservice` — gets `export const <name>Indicator: IHealthIndicator`. An
+  indicator generated before this therefore no longer matches what its barrel imports: it is dropped
+  from the barrel, **its health check stops running**, and `setu generate` reports the file by name.
+  Rename its export to the one reported, or delete it and regenerate. (The report used to say
+  "regenerate it", which could not be followed — the file is not CLI-owned, so the overwrite check
+  refused. It now names both routes out.)
 
 - The documented install lines and the generated `install` task pass `--min-dep-age 0`, matching the
   `minimumDependencyAge` the scaffolded manifest already set.
@@ -69,7 +87,7 @@ All notable changes to this project are documented here. The format follows
   reported nothing.
 - Cloudflare Workers projects: `deno task start` serves instead of binding nothing and exiting `0`,
   post-response `waitUntil` work is no longer dropped, and the emitted `wrangler.toml` documents all
-  seven binding types.
+  the binding types most projects reach for.
 - A `--transport rabbitmq` workspace passes its own `deno fmt --check`. Generated Markdown prose and
   plugin arguments are wrapped programmatically rather than hand-wrapped around whichever value the
   author happened to interpolate.

@@ -44,7 +44,11 @@ const RANGE = `^${VERSION}`;
  * Where the entry module gets the port it binds, when it does not read `PORT`.
  *
  * A standalone project reads `PORT` from the environment, defaulting to `3000`,
- * so the `.env` the CLI emits can supply it (X4-10). A workspace member does
+ * set by whatever starts the process (X4-10). NOT from the emitted `.env`:
+ * `ConfigPlugin({ envFilePath })` loads that into its own store, never into
+ * `runtime.env`, and this expression is evaluated before any plugin registers.
+ * Bun happens to auto-load `.env` into `process.env`; Deno and Node do not, so
+ * the portable answer is the process environment. A workspace member does
  * NOT: its port is allocated by the CLI and has to be the SAME datum its
  * siblings dial, so the entry imports it from the generated discovery module
  * rather than taking an environment override that could drift from the map.
@@ -437,8 +441,9 @@ function consumesWaitUntil(plugins: readonly Wiring[]): boolean {
  * runtime's Hono serve adapter (M23). The plugin list lives in
  * {@linkcode configModule}, not here.
  *
- * @param runtime - The selected runtime target, which decides how the shutdown
- * signal is caught
+ * @param runtime - The selected runtime target. It no longer decides how the
+ * shutdown signal is caught — all three socket targets emit one identical body —
+ * and is threaded on only so `shutdownBlock` can assert the Workers case away
  * @param port - Where the bound port comes from, when it is not the literal
  * default. A workspace member imports it, so the port it binds and the port its
  * siblings dial are one datum rather than two that can drift.
@@ -448,11 +453,16 @@ function serveEntry(runtime: TargetRuntime, port?: EntryPort): string {
   const portImport = port === undefined ? '' : `import { ${port.symbol} } from '${port.from}';\n`;
   // A workspace member binds the port the CLI allocated it, imported from the
   // generated discovery module so the port it binds and the port its siblings
-  // dial stay ONE datum (M62). A standalone project has no such map, and used
-  // to carry the literal `3000` — which made the `.env` the CLI itself emits
-  // unable to supply the one value the entry needs (X4-10). It now reads
-  // `PORT`, through `IRuntimeServices` rather than `Deno.env`/`process.env`,
-  // so the entry stays portable across all three socket runtimes.
+  // dial stay ONE datum (M62). A standalone project has no such map and used to
+  // carry the literal `3000`, so the port could not be set without editing the
+  // source (X4-10). It now reads `PORT` from the PROCESS environment, through
+  // `IRuntimeServices` rather than `Deno.env`/`process.env`, so the entry stays
+  // portable across all three socket runtimes.
+  //
+  // Deliberately not the emitted `.env`: `ConfigPlugin({ envFilePath })` loads
+  // that into its own store, and this expression is evaluated before any plugin
+  // registers — so a `PORT=` line there would be read by `config.get('PORT')`
+  // and not by this.
   const portExpression = port === undefined ? "Number(runtime.env.PORT ?? '3000')" : port.symbol;
 
   return `import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
@@ -484,12 +494,14 @@ ${shutdownBlock(runtime)}`;
  * disconnect). `terminationGracePeriodSeconds` and `stop_grace_period` are
  * decorative without it.
  *
- * The framework deliberately does not install this itself: a signal handler
- * needs a runtime API, so a framework-level seam would be an `IRuntimeServices`
- * widening (recorded as out of scope in M39, which found the same defect in this
- * repository's own examples and fixed it the same way). Emitting it here is what
- * makes the documented pattern the default rather than something a reader has to
- * find in a deployment guide.
+ * The framework still does not install this itself, though the seam it needs now
+ * exists: M39 recorded an `IRuntimeServices` widening as out of scope, and this
+ * milestone shipped it as `onSignal?` — which is exactly what the emitted body
+ * calls. What is deliberate is that the KERNEL does not register the handler;
+ * `app.start({ gracefulShutdown: true })` is the option that would, and it is
+ * deferred to M40. Emitting the block here is what makes the documented pattern
+ * the default rather than something a reader has to find in a deployment
+ * guide.
  *
  * `SIGINT` is caught beside `SIGTERM` so a local `Ctrl+C` exercises the exact
  * path the container runtime will take.
@@ -1310,7 +1322,7 @@ compatibility_flags = ["nodejs_compat"]
 # cache, storage, database, queue, messaging and realtime capabilities from the
 # bindings below. Add a package with \`${PROGRAM_NAME} add cloudflare\`.
 #
-# Every binding type the plugin reads is listed. Uncomment what you use — a
+# The binding types most projects reach for are listed. Uncomment what you use — a
 # binding declared here but absent from the plugin's options is inert, and one
 # the plugin names but wrangler does not declare fails at startup with an error
 # naming the binding and the ones that ARE present.

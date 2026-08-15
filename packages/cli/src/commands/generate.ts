@@ -212,17 +212,13 @@ export async function runGenerateCommand(
         `Run \`${PROGRAM_NAME} add ${metadata.requiresPlugin.replace(/-plugin$/, '')}\`, ` +
           `then this command again.`,
       );
-      // Naming the alternative is the whole point of the refusal for the two
-      // decorated schematics: decorators are OPTIONAL in this framework, and a
-      // refusal that only says "install the decorator plugin" reads as though
-      // they are required to serve HTTP. Schematics with no honest alternative
-      // print the two lines above and nothing more.
-      if (metadata.alternative !== undefined) {
-        deps.error(
-          `Or run \`${PROGRAM_NAME} generate ${metadata.alternative.schematic} ${name}\` — ` +
-            `${metadata.alternative.why}.`,
-        );
-      }
+      // M61 added a third line here naming a decorator-free alternative, because
+      // `controller` and `module` were gated and refusing them with only
+      // "install the decorator plugin" read as though decorators were required
+      // to serve HTTP. Both are ungated now — `module` since M65, `controller`
+      // in this milestone — so no gated schematic has an alternative to name and
+      // the mechanism went with the last producer (M59's precedent: an
+      // unreachable branch is deleted, not left for coverage to excuse).
       return EXIT_ERROR;
     }
 
@@ -259,9 +255,18 @@ export async function runGenerateCommand(
   for (const skip of scan.skipped) {
     deps.error(
       `Skipped ${skip.path}: it does not export ${skip.missing.join(', ')}, ` +
-        `so it cannot be listed in the generated barrel.`,
+        `so it cannot be listed in the generated barrel and nothing registers it.`,
     );
-    deps.error(`  Regenerate it to bring it up to date.`);
+    // "Regenerate it" was the advice, and it could not be followed: the artifact
+    // is not `managed`, so `setu generate` refuses to overwrite it and the
+    // developer is told to run a command that then refuses — the M65 loop, found
+    // by review after A2 made `health-indicator` mode-aware. An alpha.8 project
+    // generated its indicator as a class; a functional project now expects a
+    // value, so the file is dropped and its health check stops running.
+    deps.error(
+      `  Rename its export to ${skip.missing.join(', ')}, ` +
+        `or delete the file and run this schematic again.`,
+    );
   }
 
   // E8 merged `src/routes/` into `src/controllers/`, and a project that predates the

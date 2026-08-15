@@ -15,6 +15,8 @@ import {
   withDependency,
 } from '../../../src/commands/add.ts';
 import { VERSION } from '../../../src/constants.ts';
+import { parseArgs } from '../../../src/args.ts';
+import { listSchematics } from '../../../src/schematics/registry.ts';
 
 /** Builds a command harness over a fake filesystem. */
 function harness(files: Readonly<Record<string, string>> = {}) {
@@ -26,14 +28,13 @@ function harness(files: Readonly<Record<string, string>> = {}) {
     out,
     err,
     read: (path: string) => fs.read(path),
+    // Parsed by the REAL `parseArgs`, not by a local reimplementation. The
+    // hand-rolled one turned every flag into boolean `true`, so `--dir <path>` —
+    // which `VALUE_FLAGS` resolves to a STRING — was never exercised, and
+    // reading the wrong flag name would have passed all twelve tests.
     run: (argv: readonly string[]) =>
       runAddCommand(
-        {
-          positionals: argv.filter((entry) => !entry.startsWith('--')),
-          flags: Object.fromEntries(
-            argv.filter((entry) => entry.startsWith('--')).map((entry) => [entry.slice(2), true]),
-          ),
-        },
+        parseArgs(argv),
         { fs, cwd: '/app', log: (m) => out.push(m), error: (m) => err.push(m) },
       ),
   };
@@ -70,19 +71,19 @@ describe('resolveAddablePackage', () => {
   });
 
   it('covers every gate a schematic can declare', () => {
-    // Otherwise `setu generate` would name a command that then refuses.
-    for (
-      const gate of [
-        'auth',
-        'health',
-        'metrics',
-        'cqrs',
-        'events',
-        'database',
-        'decorator',
-      ]
-    ) {
-      expect(addableNames()).toContain(gate);
+    // DERIVED from the registry, not a hand-written list. The list version had
+    // already gone stale — it still named `decorator`, which stopped being a
+    // gate on this branch — and it could not have noticed a NEWLY gated
+    // schematic whose plugin is missing here, which is the failure it exists to
+    // prevent: `setu generate` would name a command that then refuses.
+    const gates = listSchematics()
+      .map(({ requiresPlugin }) => requiresPlugin)
+      .filter((plugin): plugin is string => plugin !== undefined);
+
+    expect(gates.length, 'no gated schematics — this check would be vacuous')
+      .toBeGreaterThan(0);
+    for (const plugin of gates) {
+      expect(resolveAddablePackage(plugin), plugin).toBe(plugin);
     }
   });
 });
@@ -179,8 +180,30 @@ describe('runAddCommand', () => {
     expect(await h.run(['authh'])).toBe(2);
 
     expect(h.err.join('\n')).toContain('not a Setu-TS package');
-    expect(h.err.join('\n')).toContain('auth');
+    // The listing, specifically. Asserting `'auth'` was vacuous: the refusal
+    // echoes the rejected name, and `"authh"` contains it — so deleting the
+    // Available line entirely left this test green.
+    expect(h.err.join('\n')).toContain(`Available: ${addableNames().join(', ')}`);
     expect(h.read('/app/deno.json')).toBe(DENO_MANIFEST);
+  });
+
+  it('honours --dir, resolving a relative path against the working directory', async () => {
+    // The harness used to reduce every flag to boolean `true`, so this path was
+    // never taken and `stringFlag(args.flags, 'dir')` could have named any key
+    // at all. Driven through the real parser, both spellings must work.
+    const h = harness({ '/app/services/orders/deno.json': DENO_MANIFEST });
+
+    expect(await h.run(['auth', '--dir', 'services/orders'])).toBe(0);
+    expect(JSON.parse(h.read('/app/services/orders/deno.json')).imports['@setu-ts/auth-plugin'])
+      .toBeDefined();
+  });
+
+  it('accepts --dir=<path> as well as --dir <path>', async () => {
+    const h = harness({ '/app/services/orders/deno.json': DENO_MANIFEST });
+
+    expect(await h.run(['auth', '--dir=services/orders'])).toBe(0);
+    expect(JSON.parse(h.read('/app/services/orders/deno.json')).imports['@setu-ts/auth-plugin'])
+      .toBeDefined();
   });
 
   it('refuses a directory that is not a project', async () => {

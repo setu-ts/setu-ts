@@ -291,7 +291,16 @@ describe('a three-service workspace — end to end', () => {
       expect(result['self']).toEqual([]);
     } finally {
       for (const server of servers) {
-        server.kill();
+        // Guarded: a peer that failed to bind has ALREADY exited, and killing an
+        // exited child throws `TypeError: Child process has already terminated`
+        // out of the `finally` — replacing the assertion failure that would have
+        // said which peer never came up. Under full-suite load this test binds
+        // real sockets against a busy machine, so that path is reachable.
+        try {
+          server.kill();
+        } catch {
+          // Already gone; its status and streams still need draining below.
+        }
         await server.status;
         await server.stdout.cancel();
         await server.stderr.cancel();

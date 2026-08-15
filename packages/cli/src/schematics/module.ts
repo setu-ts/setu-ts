@@ -58,10 +58,15 @@ describe('list${names.pascal}', () => {
 function functionalIndex(names: DerivedNames): string {
   // A star re-export, not a named one (A3). Naming the stub symbol meant that
   // replacing it — the obvious next step after generating a module — broke the
-  // barrel AND the generated test with
-  // `TS2305: Module … has no exported member 'listX'`, and neither file is
-  // reachable from `deno check main.ts setu.config.ts`, so both stayed broken
-  // through a full green run of every gate the developer had.
+  // barrel with `TS2305: Module … has no exported member 'listX'`, and the
+  // barrel is not reachable from `deno check main.ts setu.config.ts`, so it
+  // stayed broken through a full green run of every gate the developer had.
+  //
+  // The scope is exactly the barrel, and review corrected an earlier claim that
+  // this also fixed the generated test: the test and the route module import
+  // `list${'$'}{Pascal}` BY NAME and should, since one exercises that function and
+  // the other serves it. Renaming the stub means editing the two files that use
+  // it, which is ordinary. A re-export list naming a symbol is not.
   return `export * from './${names.kebab}.service.ts';
 `;
 }

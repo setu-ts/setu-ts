@@ -106,20 +106,6 @@ export type Schematic = (
 ) => readonly GeneratedFile[];
 
 /**
- * Another schematic to reach for when a gated one is refused.
- *
- * Declared beside the gate it qualifies rather than built inside
- * `commands/generate.ts`, so schematic knowledge lives in this one registry and
- * a rename cannot leave a refusal pointing at a command that no longer exists.
- */
-export interface SchematicAlternative {
-  /** The schematic name to suggest, e.g. `route`. */
-  readonly schematic: string;
-  /** One clause explaining what the alternative gives up and what it keeps. */
-  readonly why: string;
-}
-
-/**
  * A registry entry: the schematic plus the plugin it requires, if any.
  */
 export interface SchematicMetadata {
@@ -127,19 +113,6 @@ export interface SchematicMetadata {
   readonly factory: Schematic;
   /** The `@setu-ts` package that must be installed, when gated. */
   readonly requiresPlugin?: string;
-  /**
-   * A decorator-free (or otherwise ungated) schematic to suggest when this one
-   * is refused.
-   *
-   * AI_GUIDELINES' "5 Optional Rules" promise that "everything has a
-   * programmatic API — no feature requires decorators or reflection", and for
-   * an HTTP handler that API is `setu generate route`. Refusing `controller`
-   * with only "install the decorator plugin" told a developer to adopt
-   * decorators to get a route, which is the opposite of the promise. Present
-   * only where a genuine alternative exists: `guard`, `metric` and the rest
-   * have none, and inventing one would be worse than silence.
-   */
-  readonly alternative?: SchematicAlternative;
 }
 
 /**
