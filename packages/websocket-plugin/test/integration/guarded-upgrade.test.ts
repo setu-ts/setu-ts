@@ -40,7 +40,14 @@ function FakeAuthPlugin(): IPlugin {
 }
 
 function upgradeRequest(url = 'http://localhost/ws'): Request {
-  return new Request(url, { headers: { upgrade: 'websocket', connection: 'Upgrade' } });
+  return new Request(url, {
+    headers: {
+      upgrade: 'websocket',
+      connection: 'Upgrade',
+      'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      'sec-websocket-version': '13',
+    },
+  });
 }
 
 describe('Guarded WebSocket upgrade (X6-1 regression, M70a)', () => {
@@ -84,6 +91,8 @@ describe('Guarded WebSocket upgrade (X6-1 regression, M70a)', () => {
         headers: {
           upgrade: 'websocket',
           connection: 'Upgrade',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'sec-websocket-version': '13',
           Authorization: 'Bearer test-token',
         },
       }),
