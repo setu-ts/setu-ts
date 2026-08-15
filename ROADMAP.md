@@ -6729,6 +6729,177 @@ transaction, with a rollback proving the join and the repository writes shared o
 fake can demonstrate that. Plus a compile-time assertion that the returned builder carries the
 application's own instance type, since a seam that type-checks as `unknown` has delivered nothing.
 
+---
+
+## Milestone 70: Alpha-9 Defect Closeout ⬜ PLANNED
+
+**Objective:** Close the defects the alpha.8 smoke programme found, and ship them as one
+`v0.1.0-alpha.9`. The programme drove the **published** packages through twelve exercises (X1–X12)
+and produced **118 verified defects — 38 High, 52 Medium, 28 Low — none of them closed**. The
+register is [`smoke/DEFECTS.md`](smoke/DEFECTS.md), which stays the authority for the full row set
+and the per-row reproduction; this section is the work breakdown.
+
+> **Why a closeout milestone rather than per-defect `fix/…` branches.** M47 is the precedent — "the
+> three `CHANGELOG` known limitations that were real capability gaps", taken out of order because
+> they gated the alpha.3 release, delivered as one milestone. The same shape applies here at larger
+> scale: these defects gate alpha.9, and 118 individual branches would multiply the release overhead
+> by 118 while making the cross-cutting fixes impossible to see.
+
+> **Everything ships in ONE release.** No incremental alpha between now and alpha.9 — maintainer's
+> call. The security workstreams are sequenced FIRST so their fixes sit on `main` early, which
+> preserves the option of cutting a release ahead of the tail if the tail drags, without planning
+> for one.
+
+### Grouping: the register's cross-cutting patterns, not the run order
+
+The register's "Cross-cutting patterns" section is the highest-leverage axis and is what these
+workstreams follow — it identifies places where **one fix closes many rows**, which a per-run or
+per-package split would hide. Three of its four patterns become workstreams outright (M70c, M70d,
+M70e), and each names a fix shape rather than an open question.
+
+Each workstream is one branch, one PR, and writes its own `plans/milestone-70<letter>-<desc>.md` at
+start — enumerating its full row set from the register at that time, since ranking may move. They
+all merge before the release branch is cut.
+
+### Scope realities to plan around
+
+- **Several fixes are `common` widenings**, so alpha.9 carries multiple breaking changes: the audit
+  read surface (X4-7), storage object metadata (X8-6), the no-argument registration seams (D4),
+  resolver typing (X6-4). Each needs its own CHANGELOG entry with migration text — not one lumped
+  release note.
+- **`packages/grpc-plugin` may not be salvageable within this milestone.** X7-2, X7-3 and X7-4
+  together say the default `basePath` is unreachable by any native client, the package cannot load
+  on Node or Bun, and native gRPC-binary works on no runtime it can run on. M70i decides
+  repair-versus-withdraw explicitly rather than inheriting it.
+- **X1's functional build no longer exists**, so `[functional]` and `[both]` rows cannot be
+  re-verified against a live tree; [`smoke/EXERCISES.md`](smoke/EXERCISES.md) X1 is the rebuild
+  recipe. Any workstream depending on those rows rebuilds first.
+- **No GitHub issues** — the register is the tracker, by decision. A PR closing rows cites their IDs
+  and updates the register's Status column in the same change.
+
+### Workstreams
+
+Ordered by the sequence they should be worked, not by severity alone.
+
+- ⬜ **M70a — Pipeline bypass** (`runtime`, `kernel`, `websocket-plugin`, `grpc-plugin`,
+  `graphql-plugin`). **Security.** `setUpgradeRouter`/`setRpcHandler` are consulted in the HTTP
+  adapter **before** the kernel pipeline, so no middleware applies: an unauthenticated WebSocket
+  writes through a guarded endpoint (X6-1) and an unauthenticated gRPC client reads and writes
+  through one (X7-6), with metrics and security headers absent on both. X7-7 is the same seam seen
+  from shutdown — RPC serves `200` through the whole drain while ordinary paths answer `503`. One
+  architectural fix; the three consumers of that seam are why it goes first.
+- ⬜ **M70b — Tenant isolation and data exposure** (`cache-plugin`, `multi-tenancy-plugin`,
+  `session-plugin`, `database-plugin`, `exceptions`). **Security.** A tenant is served another
+  tenant's cached response body, because `cacheMiddleware` keys on `method:url` and the
+  `cache: { prefix: true }` isolation the tenancy plugin advertises is a string **no package reads**
+  (X4-1); an `acme` session authenticates a write into `globex` (X4-3); every 500 returns the
+  failing SQL and its **bound parameter values** to the client, through the `errorHandler` every
+  template emits (X12-3); and Prisma's `contains` treats `%` as a wildcard, so a search returns
+  every row (X12-1). Plus X4-2 (a required-tenant app fails its own k8s probes) and X4-6.
+- ⬜ **M70c — Health signals that describe lifecycle, not reachability** (`messaging-plugin`,
+  `realtime-backplane-plugin`, `storage-plugin`, `mail-plugin`, `queue-plugin`,
+  `service-discovery-plugin`, `grpc-plugin`). **Six packages answer `up` with their backends
+  stopped** and `/ready` stays `200` (X2-1, X3-2, X8-5, X10-3), so a dead dependency triggers no
+  restart, no alert and no rolling-deploy gate. The register scopes this as a **sweep**, supplies
+  the shape to audit against (`ISessionStore.isHealthy?()`), and names the counter-example to build
+  from — `worker-pool`'s indicator, the only one of the six reporting live state. Also X7-8 (the two
+  health faces of one app disagree) and X3-7.
+- ⬜ **M70d — Seams that construct with no arguments** (`cli`, `common`, `health-plugin`,
+  `cqrs-plugin`, `events-plugin`, `di-plugin`). The register's **"single most repeated defect"**: a
+  CLI-owned barrel builds an artifact with `new X()` and the contract hands it no context, so
+  generated health indicators and command/query/event handlers can reach nothing, and every affected
+  exercise invented the same module-level-holder workaround (D4, X2-2, E3, E5). The register states
+  the fix: **a factory arm on the registration types, which is non-breaking and closes all of
+  them**.
+- ⬜ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`).
+  Every one of these packages offers a seam so tests can inject a fake, and because every test
+  injects, the `?? <the real thing>` fallback is the one line no suite runs. `@setu-ts/sdk` cannot
+  complete a single request in a browser (X11-1) and `grpc-plugin`'s lazy `npm:` import goes through
+  a constant map JSR's npm-compat rewrite cannot reach, which also leaves M24b's
+  auto-instrumentation enabled on no runtime (X7-3). Same family as this repo's most-repeated root
+  cause, one level up. General fix: **construct the default and drive it once**, as `runtime`'s
+  `read-stream-real.test.ts` already does for `IFileSystem`.
+- ⬜ **M70f — Error format and error visibility** (`storage-plugin`, `kernel`, `exceptions`,
+  `multi-tenancy-plugin`, `session-plugin`, `grpc-plugin`, `logger-plugin`, `notification-plugin`).
+  Errors either bypass the configured RFC 9457 format or vanish entirely: `createUploadMiddleware`
+  reports every downstream failure as a malformed body (X8-1), the kernel's own 404 and fallback 500
+  answer `{error}` JSON and log **nothing even with `LoggerPlugin` registered** (X9-6, X11-2),
+  short-circuiting middleware emits `{error, message}` (X4-8/C3), a gRPC handler error is logged
+  nowhere (X7-5), and a raw `Error` in log metadata serializes to `{}` (X2-5, X8-12).
+- ⬜ **M70g — Routing collisions** (`kernel`, `react-router-plugin`, `openapi-plugin`,
+  `static-plugin`, `cli`). The kernel's static-segment tie-break covers `:param` but not `/*`, so
+  against a wildcard **registration order alone decides** — which silently removes `/openapi.json`
+  and `/docs` from every full-stack app with no user error (X5-1/F1, F1), while `StaticPlugin` at
+  the root instead collides loudly with an error naming neither the owning plugin nor an alternative
+  (X5-6). Plus the seam scanner adopting hand-written files into a CLI-owned barrel, which since
+  M68's duplicate-route refusal now **stops the app booting** (X4-4/F2), and generated indicator
+  names colliding with the 15 plugins claim (A1).
+- ⬜ **M70h — CLI scaffold** (`cli`, starters). The largest row count and the one that amortizes
+  best, because every row needs the same scaffold-boot gate: `--transport <broker>` leaves
+  `QueuePlugin()` on memory in the one template built for distributed work (X2-3), fresh scaffolds
+  fail their own `deno fmt --check` (X2-4) and their own `check:app` on a cold checkout (X5-4), a
+  `full-stack` project has no `build` task so the CLI's printed next step cannot work (X5-3),
+  `setu commands` cannot load a Workers config using any binding (X9-3), Workers projects have no
+  type-check path (X9-4), and running the CLI on release day still fails the dependency-age policy
+  (D1). Plus D2, D3, D5, D6, A2, A3, B1, E4, X5-2, X5-8, X9-1, X9-7, X9-9, X4-10, X2-7.
+- ⬜ **M70i — gRPC and GraphQL viability** (`grpc-plugin`, `graphql-plugin`). The
+  repair-versus-withdraw decision named above, plus the documented-API-does-not-exist rows both
+  packages carry: every gRPC registration snippet in README and `PUBLIC_API.md` throws because it
+  resolves the capability before `app.start()` (X7-1), and `graphql-plugin`'s only documented
+  registration API uses a `new Application()` / `app.use()` the kernel does not export (X6-2). Also
+  X7-2, X7-4, X6-3 (the code-first arm does not type-check against the real `graphql` package),
+  X6-4, X6-5, X6-6, X6-7.
+- ⬜ **M70j — Database adapter correctness** (`database-plugin`). `IDatabaseService.query()` is
+  inoperative on the Drizzle adapter — it calls `execute({ sql, params })`, a shape no Drizzle
+  driver accepts (X12-2) — and the **default** Memory adapter silently accepts what both real
+  backends reject: a duplicate unique value, a string into an Int column, an unknown `select` column
+  (X12-5), which makes it a test double that lies in the M55/M53 sense. Plus X4-9, X12-4, X12-6, D7.
+- ⬜ **M70k — Storage, queue and worker operability** (`storage-plugin`, `queue-plugin`,
+  `worker-pool-plugin`). Upload `maxSize` does not bound what is buffered, so a 1 KB limit
+  multipart-parses a 40 MB body first (X8-3); a non-cloneable task input **kills the host process**
+  when queued rather than dispatched (X8-2); `taskTimeoutMs: 0` leaks a pool slot permanently
+  (X8-7); a job exhausting its retries is invisible through every surface (X8-4); `IStorage.put`
+  takes no metadata, so every object is `application/octet-stream` (X8-6); and the `local` provider
+  cannot work in a scaffolded project at all (X8-9). Plus X8-8, X8-10, X8-11. **Blocks M45b**, whose
+  section names X8-2 and X8-7 as its prerequisites.
+- ⬜ **M70l — Deployment and operations** (`cli`, `scheduler-plugin`, `messaging-plugin`,
+  `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the CLI-generated stack crash-loops
+  two of three services (X10-1); a scheduled job runs once per replica and `distributedLock` does
+  not stop it, because the lock is released ~0.5 ms after the handler while replica timers sit 0.70
+  s apart, so they never contend (X10-2); generated manifests carry no `prometheus.io/*` annotations
+  so a vanilla Prometheus discovers **zero** targets (X10-6); and `/metrics` counts its own scrapes
+  and the health probes with no exclusion option (X10-7). Plus X10-4, X10-5, X9-2, X9-5, X9-8.
+- ⬜ **M70m — SDK and OpenAPI** (`sdk`, `openapi-plugin`, `validation-plugin`). A route carrying
+  `validateBody(schema)` contributes nothing to the document, so the generated client for the API's
+  only write took **no argument** and 400'd against the live server (X11-5), and the generated
+  client cannot be published to JSR at all because `createApi` has an inferred return type — a slow
+  type, in a file whose own header claims JSR-readiness (X11-4). Plus X11-3, X11-6, X11-7, X11-8,
+  X11-9.
+- ⬜ **M70n — Decorators, DI and docs sweep** (`decorator-plugin`, `validation-plugin`, docs).
+  `@ValidateBody(schema)` does not validate anything — it only feeds OpenAPI (E1) — and `@Body()`
+  re-reads the raw request, discarding validation transforms, defaults and coercions (E2). Closes
+  with the mechanical documentation rows the other workstreams do not absorb (C1, C2, X3-1, X3-3,
+  X3-4, X3-5, X3-6, X3-8, X3-9, X4-5, X4-7, X4-11, X5-5, X5-7, X5-9, X7-9, X8-8, X9-10, D8, X2-6).
+  **E8 (`routes/` and `controllers/` as parallel mechanisms) is maintainer-class** and is a decision
+  to take, not a defect to fix.
+
+### Release
+
+`v0.1.0-alpha.9` ships after every workstream merges. The release itself follows
+[`docs/releasing.md`](docs/releasing.md) and is NOT part of this milestone's branches — note the two
+traps that runbook records (`packages/sdk` writes its `jsr:` specifier inline in four `src` files;
+the cross-package pin count is 12 manifests) and the scaffold-install gate that blocks every release
+branch during a version bump.
+
+### Doc Deliverables (per workstream PR)
+
+- ⬜ **`smoke/DEFECTS.md`** — Status column updated for every row the PR closes.
+- ⬜ **CHANGELOG.md** — an entry per behaviour change, with migration text for each breaking one.
+- ⬜ **ROADMAP.md** — the workstream's `⬜` flipped to `✅` with its PR number.
+- ⬜ **PUBLIC_API.md** — for any contract, option or export the workstream changes.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                               |
@@ -6821,3 +6992,18 @@ application's own instance type, since a seam that type-checks as `unknown` has 
 | 67        | ✅     | cli + starters (scaffold defaults)    |
 | 68        | ✅     | common + kernel (contract gaps)       |
 | 69        | ✅     | database-plugin (drizzle query seam)  |
+| 70        | ⬜     | alpha-9 defect closeout (umbrella)    |
+| 70a       | ⬜     | pipeline bypass (security)            |
+| 70b       | ⬜     | tenant isolation, data exposure (sec) |
+| 70c       | ⬜     | health-signal sweep (6 packages)      |
+| 70d       | ⬜     | no-argument registration seams        |
+| 70e       | ⬜     | default branches of injectable seams  |
+| 70f       | ⬜     | error format and error visibility     |
+| 70g       | ⬜     | routing collisions                    |
+| 70h       | ⬜     | cli scaffold batch                    |
+| 70i       | ⬜     | grpc and graphql viability            |
+| 70j       | ⬜     | database adapter correctness          |
+| 70k       | ⬜     | storage, queue, worker operability    |
+| 70l       | ⬜     | deployment and operations             |
+| 70m       | ⬜     | sdk and openapi                       |
+| 70n       | ⬜     | decorators, di, docs sweep            |
