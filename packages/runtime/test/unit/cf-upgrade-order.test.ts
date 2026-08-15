@@ -20,7 +20,6 @@ import type {
 import { UPGRADE_INTENT } from '@setu-ts/common';
 import { CloudflareWorkersHttpAdapter } from '../../src/adapters/workers/cf-http-adapter.ts';
 import type {
-  CloudflareClientSocket,
   CloudflareServerSocket,
   CloudflareWebSocketHost,
 } from '../../src/adapters/workers/cf-ws-upgrader.ts';
@@ -35,23 +34,15 @@ function fakeServerSocket(): CloudflareServerSocket {
     accept: () => {},
     send: () => {},
     close: () => {},
-    binaryType: 'arraybuffer' as const,
-    bufferedAmount: 0,
-    protocol: '',
-    extensions: '',
-    onOpen: null,
-    onMessage: null,
-    onClose: null,
-    onError: null,
+    addEventListener: () => {},
   };
 }
 
-function fakeClientSocket(): CloudflareClientSocket {
+function fakeClientSocket() {
   return {
     readyState: 1,
     send: () => {},
     close: () => {},
-    binaryType: 'arraybuffer' as const,
     bufferedAmount: 0,
     protocol: '',
     extensions: '',
@@ -130,7 +121,7 @@ describe('CloudflareWorkersHttpAdapter upgrade order (M70a)', () => {
     const routerConsulted = { value: false };
     const router: WebSocketUpgradeRouter = () => {
       routerConsulted.value = true;
-      return null;
+      return Promise.resolve(null);
     };
 
     let frameworkHandlerCalls = 0;

@@ -101,7 +101,7 @@ describe('Guarded WebSocket upgrade (X6-1 regression, M70a)', () => {
     });
     // Add a middleware that rejects based on path
     app.middleware.add((c, next) => {
-      if (c.path === '/ws/admin') {
+      if (c.request.path === '/ws/admin') {
         return c.response.status(403).json({ error: 'Forbidden' });
       }
       return next();

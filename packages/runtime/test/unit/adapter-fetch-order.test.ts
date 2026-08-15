@@ -6,7 +6,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IRequest, IResponse } from '@setu-ts/common';
-import { UPGRADE_INTENT } from '@setu-ts/common';
 import { DenoHttpAdapter, type DenoServeHost } from '../../src/adapters/deno/deno-http-adapter.ts';
 
 function createDenoFakeHost(): DenoServeHost {

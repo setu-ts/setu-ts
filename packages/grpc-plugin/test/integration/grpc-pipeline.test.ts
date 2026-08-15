@@ -7,7 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMiddleware, IPlugin, IPluginContext } from '@setu-ts/common';
+import type { MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
@@ -16,12 +16,9 @@ import type { IGrpcService } from '@setu-ts/common';
 describe('gRPC through kernel pipeline (M70a)', () => {
   it('middleware applies to gRPC requests', async () => {
     let middlewareRan = false;
-    const trackingMiddleware: IMiddleware = {
-      name: 'grpc-tracker',
-      execute: async (_ctx, next) => {
-        middlewareRan = true;
-        await next();
-      },
+    const trackingMiddleware: MiddlewareFunction = async (_ctx, next) => {
+      middlewareRan = true;
+      await next();
     };
 
     const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
@@ -48,16 +45,13 @@ describe('gRPC through kernel pipeline (M70a)', () => {
   });
 
   it('auth middleware can reject unauthenticated gRPC', async () => {
-    const authMiddleware: IMiddleware = {
-      name: 'auth-guard',
-      execute: async (ctx, next) => {
-        const auth = ctx.request.headers.get('authorization');
-        if (auth === null || auth === '') {
-          ctx.response.status(401).json({ error: 'Unauthorized' });
-          return; // Short-circuit
-        }
-        await next();
-      },
+    const authMiddleware: MiddlewareFunction = async (ctx, next) => {
+      const auth = ctx.request.headers.get('authorization');
+      if (auth === null || auth === '') {
+        ctx.response.status(401).json({ error: 'Unauthorized' });
+        return; // Short-circuit
+      }
+      await next();
     };
 
     const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
