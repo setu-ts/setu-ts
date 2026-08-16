@@ -4,10 +4,13 @@
  * A project scaffolded with no template registers the runtime plugin alone —
  * no decorators, no DI container. That is the shape AI_GUIDELINES' "5 Optional
  * Rules" describe when they say the framework must work without either, and
- * `setu generate route` is the only HTTP handler it can generate.
+ * `setu generate route` and `setu generate controller` both emit an HTTP handler
+ * it can generate — `controller` is ungated since M70h and emits the functional
+ * shape here, so neither requires decorators.
  *
  * Before this module that route landed UNWIRED: the schematic wrote
  * `src/routes/<name>.routes.ts` and a `src/routes/index.ts` barrel exporting
+ * (both since merged into `src/controllers/` by E8)
  * `registerGeneratedRoutes`, while the generated `setu.config.ts` never called
  * it. The decorator-free path therefore needed a hand edit that the three
  * decorated templates did not — which is the promise being false in exactly
@@ -15,8 +18,11 @@
  *
  * The seams come from {@linkcode seamsFor}, not from a list here, so this host
  * can never carry a seam whose plugin it does not register. With the runtime
- * plugin alone that selects `route`, `middleware` and `plugin` — the three that
- * declare no `requiresPlugin` — and none of them is inert.
+ * plugin alone that selects `route`, `controller`, `middleware` and `plugin`,
+ * and none of them is inert. `controller` is there by the generator-mode swap in
+ * `seams/registry.ts` rather than by declaring no `requiresPlugin` — the
+ * class-based spec still declares one — which is why this list is derived rather
+ * than written out.
  *
  * @module
  */

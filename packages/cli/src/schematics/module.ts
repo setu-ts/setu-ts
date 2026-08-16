@@ -5,9 +5,11 @@
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
-import { ROUTES_SEAM } from '../seams/routes.ts';
+import { FUNCTIONAL_ROUTES_SEAM, HTTP_SEAM_DIR } from '../seams/http.ts';
 import { seamNames } from '../seams/seam-spec.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
+import { renderEquals, testHarnessFor } from './test-harness.ts';
+import type { TargetRuntime } from '../constants.ts';
 import { MODULES_DIR } from '../utils/module-scanner.ts';
 import { renderModuleBarrel } from './module-barrel.ts';
 
@@ -38,22 +40,34 @@ export function register${names.pascal}Routes(router: IRouterApi): void {
 `;
 }
 
-function functionalTest(names: DerivedNames): string {
-  return `import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+function functionalTest(names: DerivedNames, runtime: TargetRuntime): string {
+  // The harness is per runtime because `@std/testing/bdd` reaches `Deno.test`
+  // internally, so this file could not execute at all on a node or bun target.
+  return `${testHarnessFor(runtime).imports}
 
 import { list${names.pascal} } from './${names.kebab}.service.ts';
 
 describe('list${names.pascal}', () => {
   it('starts with no records', () => {
-    expect(list${names.pascal}()).toEqual([]);
+    ${renderEquals(runtime, `list${names.pascal}()`, '[]')}
   });
 });
 `;
 }
 
 function functionalIndex(names: DerivedNames): string {
-  return `export { list${names.pascal} } from './${names.kebab}.service.ts';
+  // A star re-export, not a named one (A3). Naming the stub symbol meant that
+  // replacing it — the obvious next step after generating a module — broke the
+  // barrel with `TS2305: Module … has no exported member 'listX'`, and the
+  // barrel is not reachable from `deno check main.ts setu.config.ts`, so it
+  // stayed broken through a full green run of every gate the developer had.
+  //
+  // The scope is exactly the barrel, and review corrected an earlier claim that
+  // this also fixed the generated test: the test and the route module import
+  // `list${'$'}{Pascal}` BY NAME and should, since one exercises that function and
+  // the other serves it. Renaming the stub means editing the two files that use
+  // it, which is ordinary. A re-export list naming a symbol is not.
+  return `export * from './${names.kebab}.service.ts';
 `;
 }
 
@@ -100,15 +114,14 @@ export class ${names.pascal}Controller {
 `;
 }
 
-function classTest(names: DerivedNames): string {
-  return `import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+function classTest(names: DerivedNames, runtime: TargetRuntime): string {
+  return `${testHarnessFor(runtime).imports}
 
 import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 describe('${names.pascal}Service', () => {
   it('starts with no records', () => {
-    expect(new ${names.pascal}Service().list()).toEqual([]);
+    ${renderEquals(runtime, `new ${names.pascal}Service().list()`, '[]')}
   });
 });
 `;
@@ -135,12 +148,19 @@ export function generateModule(
   if (generatorMode(options.plugins) === 'functional') {
     return [
       { path: `${dir}/${names.kebab}.service.ts`, contents: functionalService(names) },
-      { path: `${dir}/${names.kebab}.service.test.ts`, contents: functionalTest(names) },
-      { path: `${dir}/index.ts`, contents: functionalIndex(names) },
-      { path: `src/routes/${names.kebab}.routes.ts`, contents: functionalRoutes(names) },
       {
-        path: ROUTES_SEAM.barrel,
-        contents: ROUTES_SEAM.renderBarrel({
+        path: `${dir}/${names.kebab}.service.test.ts`,
+        contents: functionalTest(names, options.runtime),
+      },
+      { path: `${dir}/index.ts`, contents: functionalIndex(names) },
+      {
+        path: `${HTTP_SEAM_DIR}/${names.kebab}.routes.ts`,
+        contents: functionalRoutes(names),
+      },
+      {
+        path: FUNCTIONAL_ROUTES_SEAM.barrel,
+        contents: FUNCTIONAL_ROUTES_SEAM.renderBarrel({
+          controller: seamNames(options.artifacts, 'controller'),
           route: seamNames(options.artifacts, 'route', names.kebab),
         }),
         managed: true,
@@ -151,7 +171,7 @@ export function generateModule(
   return [
     { path: `${dir}/${names.kebab}.service.ts`, contents: classService(names) },
     { path: `${dir}/${names.kebab}.controller.ts`, contents: classController(names) },
-    { path: `${dir}/${names.kebab}.service.test.ts`, contents: classTest(names) },
+    { path: `${dir}/${names.kebab}.service.test.ts`, contents: classTest(names, options.runtime) },
     { path: `${dir}/index.ts`, contents: classIndex(names) },
     {
       path: `${MODULES_DIR}/index.ts`,

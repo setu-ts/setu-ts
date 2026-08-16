@@ -12,7 +12,14 @@
  * @module
  */
 
-import type { AppFactoryRenderContext, TemplateDefinition } from './registry.ts';
+import type { AppFactoryRenderContext, LocalImport, TemplateDefinition } from './registry.ts';
+import {
+  seamFiles,
+  seamLocalImports,
+  seamPluginRegistrations,
+  seamSetupCalls,
+  seamsFor,
+} from './seam.ts';
 import { renderConfigOptions } from './env-file.ts';
 import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
@@ -72,7 +79,16 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
     ? ''
     : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
 
-  return `(config) => ({
+  // The RETURN TYPE annotation is X5-2's whole fix, and it is load-bearing
+  // rather than decorative. TypeScript does NOT apply excess-property checking
+  // to an object literal returned from a contextually-typed callback, so
+  // `(config) => ({ … })` accepted a misspelled arm and an option that does not
+  // exist — both type-checked, booted, and logged nothing, while a NESTED
+  // mistake (`drizzleInstance` one level too high) became a startup crash whose
+  // error named the adapter rather than the option. Probed against the real
+  // type: with the annotation the same literal raises TS2561 naming the key and
+  // its nearest match; without it, nothing at all.
+  return `(config): FullStackStarterOptions => ({
     reactRouter: {
       // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
       // and a relative specifier there would resolve against the PLUGIN's
@@ -98,6 +114,36 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
 }
 
 /**
+ * The app-local modules the generated `setu.config.ts` imports.
+ *
+ * Named rather than inline because the seam barrels are appended to it — two
+ * `localImports` keys in one object literal would leave the later one silently
+ * winning.
+ */
+const FULL_STACK_LOCAL_IMPORTS: readonly LocalImport[] = [
+  {
+    symbols: ['csrfContext', 'loggerContext', 'secretsContext', 'sessionContext'],
+    from: './app/lib/context-keys.server.ts',
+  },
+];
+
+/**
+ * The seams a full-stack project hosts.
+ *
+ * X5-8: the generated README tells the developer to run `setu generate service`,
+ * and doing so wrote into `src/` — a second service directory beside the
+ * template's own `app/services/`, imported by nothing and type-checked by
+ * neither of the project's check paths. `setu generate route` behaved the same
+ * way and answered 404, while its barrel blamed an "old scaffold" for a line the
+ * current template never emitted.
+ *
+ * The gated families are absent because this host installs no plugin of its own
+ * — `seamsFor` filters them — so what remains is exactly the set a
+ * starter-composed project can consume.
+ */
+const FULL_STACK_SEAMS = seamsFor(new Set<string>());
+
+/**
  * The `full-stack` template definition.
  *
  * Registers no plugins of its own: `appFactory` supplies the whole set, and
@@ -114,13 +160,11 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     symbol: 'createFullStackAppFromConfig',
     args: fullStackArgs,
   },
-  localImports: [
-    {
-      symbols: ['csrfContext', 'loggerContext', 'secretsContext', 'sessionContext'],
-      from: './app/lib/context-keys.server.ts',
-    },
-  ],
   packageImports: [
+    // The annotation that restores excess-property checking on the resolver
+    // (X5-2). A type-only import, so it costs the generated project nothing at
+    // runtime.
+    { pkg: 'full-stack-starter', symbols: ['type FullStackStarterOptions'] },
     // The load-context bridge in the generated setu.config.ts.
     { pkg: 'session-plugin', symbols: ['getCsrfToken', 'getSession'] },
     // The capability tokens and service types the bridge resolves.
@@ -129,7 +173,18 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     // manifest must carry it even though setu.config.ts names no symbol.
     { pkg: 'react-router-plugin' },
   ],
-  files: [...FULL_STACK_APP_FILES, ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES)],
+  files: [
+    ...FULL_STACK_APP_FILES,
+    ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES),
+    ...seamFiles(FULL_STACK_SEAMS),
+  ],
+  localImports: [...FULL_STACK_LOCAL_IMPORTS, ...seamLocalImports(FULL_STACK_SEAMS)],
+  // Statements rather than plugin-array entries: this host composes through a
+  // starter, so `plugins` must stay empty and there is nothing to spread into.
+  setupCalls: [
+    ...seamSetupCalls(FULL_STACK_SEAMS),
+    ...seamPluginRegistrations(FULL_STACK_SEAMS),
+  ],
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
     envFilePath: '.env',
@@ -142,7 +197,13 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     }],
     // The one template with a real frontend build, and the only one that should
     // therefore carry an npm manifest on a Deno or Workers target.
-    npmBuildScript: 'react-router build',
+    npmBuild: {
+      script: 'react-router build',
+      // The npm specifier, not the bin shim: a Deno task resolves the package,
+      // while `package.json` resolves the shim from `node_modules`.
+      denoCommand: 'deno run -A npm:@react-router/dev build',
+      outputDir: 'build',
+    },
     npmDependencies: FULL_STACK_NPM_DEPENDENCIES,
     // The test packages are merged in because `setu generate module` is ungated
     // since M65: this template can emit a `*.service.test.ts` too, and a host

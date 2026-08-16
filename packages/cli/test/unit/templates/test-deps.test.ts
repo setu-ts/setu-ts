@@ -23,6 +23,8 @@ import { TEMPLATES } from '../../../src/constants.ts';
 import { getTemplate, type TemplateHost } from '../../../src/templates/registry.ts';
 import { MINIMAL_HOST } from '../../../src/templates/minimal.ts';
 import { TEST_DEPENDENCY_MANIFEST } from '../../../src/templates/test-deps.ts';
+import { testHarnessFor } from '../../../src/schematics/test-harness.ts';
+import { TARGET_RUNTIMES } from '../../../src/constants.ts';
 
 /** Every host a scaffolded project can be built from, named for the failure message. */
 const HOSTS: readonly (readonly [name: string, host: TemplateHost])[] = [
@@ -49,13 +51,28 @@ describe('every host declares what the generated module test imports', () => {
       }
     });
 
-    // Node and Bun get a package.json and no deno.json at all.
-    it(`declares them as npm aliases — ${name}`, () => {
+    // Node and Bun deliberately declare NEITHER, and asserting their absence is
+    // the point rather than an omission. `@std/testing/bdd` reaches `Deno.test`
+    // inside its own `_test_suite.js`, so a generated test importing it dies on
+    // Bun with `ReferenceError: Deno is not defined` before any assertion runs —
+    // observed, not inferred. Those targets emit `bun:test`/`node:test`, which
+    // are built in, so declaring these two shipped dependencies that could only
+    // fail.
+    it(`declares no unusable npm alias for them — ${name}`, () => {
       for (const pkg of packages) {
-        expect(host.manifest?.npmDevDependencies?.[pkg]).toBeDefined();
+        expect(host.manifest?.npmDevDependencies?.[pkg]).toBeUndefined();
       }
     });
   }
+
+  // The property the removal above rests on: every runtime gets a harness it can
+  // actually execute, and only the Deno-family ones need these packages.
+  it('pairs the declared dependency with the runtimes that can use it', () => {
+    for (const runtime of TARGET_RUNTIMES) {
+      const harness = testHarnessFor(runtime);
+      expect(harness.imports.includes('@std/'), runtime).toBe(harness.needsStdDeps);
+    }
+  });
 
   // Declaring an npm dev dependency must NOT be what gives a Deno project a
   // package.json — `npmBuildScript` is that marker. Conflating the two is what
@@ -64,7 +81,7 @@ describe('every host declares what the generated module test imports', () => {
   it('gives no non-frontend host an npm build script', () => {
     for (const [name, host] of HOSTS) {
       if (name === 'full-stack') continue;
-      expect(host.manifest?.npmBuildScript).toBeUndefined();
+      expect(host.manifest?.npmBuild).toBeUndefined();
     }
   });
 
@@ -75,6 +92,6 @@ describe('every host declares what the generated module test imports', () => {
     // The `~/` alias every emitted app module imports through.
     expect(fullStack?.denoImports?.['~/']).toBe('./app/');
     expect(fullStack?.npmDevDependencies?.['vite']).toBeDefined();
-    expect(fullStack?.npmBuildScript).toBe('react-router build');
+    expect(fullStack?.npmBuild?.script).toBe('react-router build');
   });
 });

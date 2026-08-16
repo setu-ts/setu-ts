@@ -326,7 +326,7 @@ describe('runAppCommand', () => {
       };
       expect(manifest.members).toEqual([
         { name: 'orders', port: 3000 },
-        { name: 'billing', port: 4444 },
+        { name: 'billing', port: 4444, healthProbes: false },
       ]);
       // The chosen port has to reach BOTH sides of the one datum: what this
       // member binds, and what its sibling dials.
@@ -362,7 +362,11 @@ describe('runAppCommand', () => {
       const manifest = JSON.parse(next.fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
         members: { name: string; port: number }[];
       };
-      expect(manifest.members.at(-1)).toEqual({ name: 'shipping', port: 4445 });
+      expect(manifest.members.at(-1)).toEqual({
+        name: 'shipping',
+        port: 4445,
+        healthProbes: false,
+      });
     });
 
     it('skips ports another local process already holds', async () => {
@@ -541,7 +545,10 @@ describe('runAppCommand', () => {
         runtime: 'deno',
         basePort: 3000,
         transport: 'http',
-        members: [{ name: 'orders', port: 3000 }],
+        // `healthProbes` records whether this member serves /live and /ready,
+        // which the Kubernetes renderer has no other way to know (X2-7). False
+        // here: no `--template`, so no HealthPlugin.
+        members: [{ name: 'orders', port: 3000, healthProbes: false }],
       });
     });
 
@@ -587,6 +594,7 @@ describe('runAppCommand', () => {
         name: 'shipping',
         port: 3002,
         dependsOn: ['orders', 'billing'],
+        healthProbes: false,
       });
     });
 

@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 
 import { createDenoRuntimeServices } from '../../src/adapters/deno/deno-runtime.ts';
 import type { DenoHost } from '../../src/adapters/deno/deno-runtime.ts';
+import type { RuntimeSignal } from '@setu-ts/common';
 
 function createFakeDenoHost(overrides: Partial<DenoHost> = {}): DenoHost {
   const files = new Map<string, Uint8Array>();
@@ -17,6 +18,8 @@ function createFakeDenoHost(overrides: Partial<DenoHost> = {}): DenoHost {
     exit: (code?: number) => {
       throw new Error(`exit called with code ${code ?? 0}`);
     },
+    build: { os: 'linux' },
+    addSignalListener: () => {},
     resolveDns: (_query: string, _recordType: 'SRV' | 'A' | 'AAAA') => Promise.resolve([]),
     open: () => Promise.resolve({} as Deno.FsFile),
     readFile: (path: string) => {
@@ -231,6 +234,8 @@ describe('createDenoRuntimeServices — mtime null branch', () => {
       exit: () => {
         throw new Error('exit');
       },
+      build: { os: 'linux' },
+      addSignalListener: () => {},
       readFile: () => Promise.resolve(new Uint8Array()),
       realPath: (path: string) => Promise.resolve(path),
       writeFile: () => Promise.resolve(),
@@ -282,5 +287,62 @@ describe('createDenoRuntimeServices — mtime null branch', () => {
       expect(services.version()).toBe(Deno.version.deno);
       expect(typeof services.hostname()).toBe('string');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onSignal (B1 / M70h)
+// ---------------------------------------------------------------------------
+
+describe('createDenoRuntimeServices | onSignal', () => {
+  it('registers the handler through the host', () => {
+    const seen: string[] = [];
+    const services = createDenoRuntimeServices(
+      createFakeDenoHost({
+        addSignalListener: (signal: RuntimeSignal) => {
+          seen.push(signal);
+        },
+      }),
+    );
+
+    services.onSignal?.('SIGTERM', () => {});
+    services.onSignal?.('SIGINT', () => {});
+
+    expect(seen).toEqual(['SIGTERM', 'SIGINT']);
+  });
+
+  it('passes the handler itself through, not a wrapper that drops it', () => {
+    let captured: (() => void) | undefined;
+    const services = createDenoRuntimeServices(
+      createFakeDenoHost({
+        addSignalListener: (_signal: RuntimeSignal, handler: () => void) => {
+          captured = handler;
+        },
+      }),
+    );
+
+    let ran = false;
+    services.onSignal?.('SIGTERM', () => {
+      ran = true;
+    });
+    captured?.();
+
+    expect(ran).toBe(true);
+  });
+
+  it('OMITS onSignal on Windows, because Deno.addSignalListener throws there', () => {
+    const services = createDenoRuntimeServices(
+      createFakeDenoHost({
+        build: { os: 'windows' },
+        addSignalListener: () => {
+          throw new Error('Windows only supports ctrl-c (SIGINT)');
+        },
+      }),
+    );
+
+    // Absent, not a no-op: a caller checking for the key must be able to tell
+    // that no shutdown handler will ever run here.
+    expect(services.onSignal).toBeUndefined();
+    expect('onSignal' in services).toBe(false);
   });
 });

@@ -10,7 +10,7 @@ them.
 ## Install
 
 ```bash
-deno install -g -A -n setu jsr:@setu-ts/cli@^0.1.0-alpha.8/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.1.0-alpha.8/main
 ```
 
 Install it with an explicit binary name (`-n setu`): Deno's default inference would name the
@@ -122,22 +122,22 @@ Any casing of the name produces identical output: `setu g controller user-profil
 Eleven of the fourteen schematics land in a barrel the generated `setu.config.ts` already imports,
 so a generated artifact reaches its registration site with **no edit to a file you own**:
 
-| Schematic          | Requires           | Emits into         | Reaches                                           |
-| ------------------ | ------------------ | ------------------ | ------------------------------------------------- |
-| `module`           | `decorator-plugin` | `src/modules/`     | `DecoratorPlugin({ controllers, services })`      |
-| `controller`       | `decorator-plugin` | `src/controllers/` | `DecoratorPlugin({ controllers })`                |
-| `service`          | —                  | `src/services/`    | `DecoratorPlugin({ services })`, when installed   |
-| `route`            | —                  | `src/routes/`      | A `register…Routes(router)` call in `createApp()` |
-| `middleware`       | —                  | `src/middleware/`  | The global middleware pipeline                    |
-| `plugin`           | —                  | `src/plugins/`     | The `plugins: [...]` array                        |
-| `health-indicator` | `health-plugin`    | `src/health/`      | `HealthPlugin({ indicators })` → `GET /health`    |
-| `metric`           | `metrics-plugin`   | `src/metrics/`     | `MetricsPlugin({ customMetrics })` → `/metrics`   |
-| `command-handler`  | `cqrs-plugin`      | `src/cqrs/`        | `CqrsPlugin({ commandHandlers })`                 |
-| `query-handler`    | `cqrs-plugin`      | `src/cqrs/`        | `CqrsPlugin({ queryHandlers })`                   |
-| `event-handler`    | `events-plugin`    | `src/events/`      | `EventsPlugin({ handlers })`                      |
-| `guard`            | `auth-plugin`      | `src/guards/`      | Nothing — attach it per route                     |
-| `job`              | —                  | `src/jobs/`        | Nothing — transport-agnostic by design            |
-| `migration`        | `database-plugin`  | `src/migrations/`  | Nothing — no framework code reads migrations      |
+| Schematic          | Requires           | Emits into         | Reaches                                                                              |
+| ------------------ | ------------------ | ------------------ | ------------------------------------------------------------------------------------ |
+| `module`           | `decorator-plugin` | `src/modules/`     | `DecoratorPlugin({ controllers, services })`                                         |
+| `controller`       | —                  | `src/controllers/` | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call |
+| `service`          | —                  | `src/services/`    | `DecoratorPlugin({ services })`, when installed                                      |
+| `route`            | —                  | `src/controllers/` | A `register…Routes(router)` call in `createApp()`                                    |
+| `middleware`       | —                  | `src/middleware/`  | The global middleware pipeline                                                       |
+| `plugin`           | —                  | `src/plugins/`     | The `plugins: [...]` array                                                           |
+| `health-indicator` | `health-plugin`    | `src/health/`      | `HealthPlugin({ indicators })` → `GET /health`                                       |
+| `metric`           | `metrics-plugin`   | `src/metrics/`     | `MetricsPlugin({ customMetrics })` → `/metrics`                                      |
+| `command-handler`  | `cqrs-plugin`      | `src/cqrs/`        | `CqrsPlugin({ commandHandlers })`                                                    |
+| `query-handler`    | `cqrs-plugin`      | `src/cqrs/`        | `CqrsPlugin({ queryHandlers })`                                                      |
+| `event-handler`    | `events-plugin`    | `src/events/`      | `EventsPlugin({ handlers })`                                                         |
+| `guard`            | `auth-plugin`      | `src/guards/`      | Nothing — attach it per route                                                        |
+| `job`              | —                  | `src/jobs/`        | Nothing — transport-agnostic by design                                               |
+| `migration`        | `database-plugin`  | `src/migrations/`  | Nothing — no framework code reads migrations                                         |
 
 The last three are unwired deliberately, not by omission. A `guard` answers `401` when
 `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and `/` —
@@ -196,7 +196,7 @@ src/modules/orders/
 ├── index.ts                      # the module's own barrel
 ├── orders.service.ts             # export function listOrders()
 └── orders.service.test.ts        # describe/it + expect
-src/routes/
+src/controllers/
 ├── index.ts                      # managed: registerGeneratedRoutes(app.router)
 └── orders.routes.ts              # registerOrdersRoutes — GET / and POST / (201)
 ```

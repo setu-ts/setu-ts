@@ -23,6 +23,7 @@ import type { PortProbe } from '../workspace/port-probe.ts';
 import { runLibraryCommand } from './library.ts';
 import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
+import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import {
   findExisting,
   type GeneratedFile,
@@ -42,6 +43,8 @@ import { readModuleNames } from '../utils/module-scanner.ts';
 import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
+import { readMigrationNames } from '../utils/migration-scanner.ts';
+import { legacyLayoutNotice, readLegacyHttpFiles } from '../utils/legacy-layout.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -82,7 +85,10 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
     } else if (installed.has(requiresPlugin)) {
       log(`  ${name}`);
     } else {
-      log(`  ${name}  (unavailable — install @setu-ts/${requiresPlugin})`);
+      log(
+        `  ${name}  (unavailable — run \`${PROGRAM_NAME} add ` +
+          `${requiresPlugin.replace(/-plugin$/, '')}\`)`,
+      );
     }
   }
   log(`  ${CUSTOM_SCHEMATIC} <schematic-name>  (from .setu-ts/schematics/)`);
@@ -161,7 +167,11 @@ export async function runGenerateCommand(
     );
     return EXIT_USAGE;
   }
-  const runtime: TargetRuntime = runtimeFlag ?? 'deno';
+  // Detected from the project rather than defaulted, because the project already
+  // knows: `setu new svc --runtime bun` records the choice once and nobody
+  // repeats it on every `generate`. An explicit flag still wins, so a custom
+  // schematic can be driven for another target deliberately.
+  const runtime: TargetRuntime = runtimeFlag ?? await detectTargetRuntime(deps.fs, dir);
 
   let schematic: Schematic;
   let name: string | undefined;
@@ -198,18 +208,17 @@ export async function runGenerateCommand(
         `The "${schematicName}" schematic requires @setu-ts/${metadata.requiresPlugin}, ` +
           `which is not installed in ${dir}.`,
       );
-      deps.error(`Install it, then run this command again.`);
-      // Naming the alternative is the whole point of the refusal for the two
-      // decorated schematics: decorators are OPTIONAL in this framework, and a
-      // refusal that only says "install the decorator plugin" reads as though
-      // they are required to serve HTTP. Schematics with no honest alternative
-      // print the two lines above and nothing more.
-      if (metadata.alternative !== undefined) {
-        deps.error(
-          `Or run \`${PROGRAM_NAME} generate ${metadata.alternative.schematic} ${name}\` — ` +
-            `${metadata.alternative.why}.`,
-        );
-      }
+      deps.error(
+        `Run \`${PROGRAM_NAME} add ${metadata.requiresPlugin.replace(/-plugin$/, '')}\`, ` +
+          `then this command again.`,
+      );
+      // M61 added a third line here naming a decorator-free alternative, because
+      // `controller` and `module` were gated and refusing them with only
+      // "install the decorator plugin" read as though decorators were required
+      // to serve HTTP. Both are ungated now — `module` since M65, `controller`
+      // in this milestone — so no gated schematic has an alternative to name and
+      // the mechanism went with the last producer (M59's precedent: an
+      // unreachable branch is deleted, not left for coverage to excuse).
       return EXIT_ERROR;
     }
 
@@ -230,6 +239,9 @@ export async function runGenerateCommand(
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
   const modules = await readModuleNames(deps.fs, dir);
+  // Same reasoning as `modules`: the migration runner lists every migration in
+  // order, and a schematic performs no I/O.
+  const migrations = await readMigrationNames(deps.fs, dir);
   // Same reasoning, for the ten families that regenerate a seam barrel. One `readdir`
   // per family against paths that usually do not exist; a custom schematic reads it
   // too, so it cannot be gated on a built-in name.
@@ -243,9 +255,28 @@ export async function runGenerateCommand(
   for (const skip of scan.skipped) {
     deps.error(
       `Skipped ${skip.path}: it does not export ${skip.missing.join(', ')}, ` +
-        `so it cannot be listed in the generated barrel.`,
+        `so it cannot be listed in the generated barrel and nothing registers it.`,
     );
-    deps.error(`  Regenerate it to bring it up to date.`);
+    // "Regenerate it" was the advice, and it could not be followed: the artifact
+    // is not `managed`, so `setu generate` refuses to overwrite it and the
+    // developer is told to run a command that then refuses — the M65 loop, found
+    // by review after A2 made `health-indicator` mode-aware. An alpha.8 project
+    // generated its indicator as a class; a functional project now expects a
+    // value, so the file is dropped and its health check stops running.
+    deps.error(
+      `  Rename its export to ${skip.missing.join(', ')}, ` +
+        `or delete the file and run this schematic again.`,
+    );
+  }
+
+  // E8 merged `src/routes/` into `src/controllers/`, and a project that predates the
+  // merge is invisible to every other check here: the scan above reads the NEW
+  // directory, so a file in the old one is never scanned and never skipped, and
+  // `setu.config.ts` still imports the old barrel because it is the developer's file.
+  // Without this the generator reports `created` and leaves the artifact unreachable —
+  // the M60 defect class, reintroduced for upgrading projects by the fix for it.
+  for (const line of legacyLayoutNotice(await readLegacyHttpFiles(deps.fs, dir))) {
+    deps.error(line);
   }
 
   // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
@@ -273,6 +304,7 @@ export async function runGenerateCommand(
     plugins: installed,
     now: deps.now,
     modules,
+    migrations,
     artifacts: scan.artifacts,
   };
 

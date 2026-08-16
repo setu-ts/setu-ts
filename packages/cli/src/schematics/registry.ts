@@ -83,6 +83,13 @@ export interface SchematicOptions {
    * @since 0.1.0
    */
   readonly artifacts?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The migrations already present, oldest first.
+   *
+   * Optional on the M58 `modules` precedent — a required field would break a
+   * custom schematic's own test with no deprecation path.
+   */
+  readonly migrations?: readonly string[];
 }
 
 /**
@@ -99,20 +106,6 @@ export type Schematic = (
 ) => readonly GeneratedFile[];
 
 /**
- * Another schematic to reach for when a gated one is refused.
- *
- * Declared beside the gate it qualifies rather than built inside
- * `commands/generate.ts`, so schematic knowledge lives in this one registry and
- * a rename cannot leave a refusal pointing at a command that no longer exists.
- */
-export interface SchematicAlternative {
-  /** The schematic name to suggest, e.g. `route`. */
-  readonly schematic: string;
-  /** One clause explaining what the alternative gives up and what it keeps. */
-  readonly why: string;
-}
-
-/**
  * A registry entry: the schematic plus the plugin it requires, if any.
  */
 export interface SchematicMetadata {
@@ -120,32 +113,7 @@ export interface SchematicMetadata {
   readonly factory: Schematic;
   /** The `@setu-ts` package that must be installed, when gated. */
   readonly requiresPlugin?: string;
-  /**
-   * A decorator-free (or otherwise ungated) schematic to suggest when this one
-   * is refused.
-   *
-   * AI_GUIDELINES' "5 Optional Rules" promise that "everything has a
-   * programmatic API — no feature requires decorators or reflection", and for
-   * an HTTP handler that API is `setu generate route`. Refusing `controller`
-   * with only "install the decorator plugin" told a developer to adopt
-   * decorators to get a route, which is the opposite of the promise. Present
-   * only where a genuine alternative exists: `guard`, `metric` and the rest
-   * have none, and inventing one would be worse than silence.
-   */
-  readonly alternative?: SchematicAlternative;
 }
-
-/**
- * The decorator-free way to serve HTTP, suggested by both decorated schematics.
- *
- * `route` is ungated and wired: it emits `register<X>Routes(router)` and the
- * `src/routes/index.ts` barrel that `createApp()` already calls, on every host
- * including the no-template one.
- */
-const ROUTE_ALTERNATIVE: SchematicAlternative = {
-  schematic: 'route',
-  why: 'it registers handlers on the router API, so it needs no decorators',
-};
 
 /**
  * The built-in schematics, keyed by the name `setu generate` accepts.
@@ -159,13 +127,11 @@ const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, Schemat
   // Mode-aware: the functional default emits routes and functions, while the
   // class-based composition emits the decorated controller/service aggregate.
   ['module', { factory: generateModule }],
-  // Gated: the emitted class uses @Controller/@Get/@Post, so a project without
-  // the decorator plugin gets source that cannot resolve its own import.
-  ['controller', {
-    factory: generateController,
-    requiresPlugin: 'decorator-plugin',
-    alternative: ROUTE_ALTERNATIVE,
-  }],
+  // UNGATED since M70h, and mode-aware like `service`. It used to require
+  // `decorator-plugin` and redirect to `g route` in a second directory; with
+  // both kinds sharing `src/controllers/` there is nowhere to redirect TO, and
+  // the functional shape resolves its own imports in a bare project.
+  ['controller', { factory: generateController }],
   ['service', { factory: generateService }],
   ['route', { factory: generateRoute }],
   ['middleware', { factory: generateMiddleware }],

@@ -34,7 +34,7 @@ npm install jsr:@setu-ts/kernel jsr:@setu-ts/runtime jsr:@setu-ts/common
 
 ```bash
 # Install the Setu CLI
-deno install -A -f jsr:@setu-ts/cli@^0.1.0-alpha.8/main
+deno install -A -f --min-dep-age 0 jsr:@setu-ts/cli@^0.1.0-alpha.8/main
 
 # Create a new REST application
 setu new my-app --runtime deno

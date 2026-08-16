@@ -14,9 +14,9 @@
  */
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
-import { listSeamSpecs } from '../seams/registry.ts';
-import type { SeamSpec } from '../seams/seam-spec.ts';
-import { APP_CONTROLLERS_EXPORT } from '../seams/controllers.ts';
+import { hostSeamSpecs } from '../seams/registry.ts';
+import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
+import { APP_CONTROLLERS_EXPORT, REGISTER_ROUTES_EXPORT } from '../seams/http.ts';
 import { APP_SERVICES_EXPORT } from '../seams/services.ts';
 import { COMMAND_HANDLERS_EXPORT, QUERY_HANDLERS_EXPORT } from '../seams/cqrs.ts';
 import { EVENT_HANDLERS_EXPORT } from '../seams/events.ts';
@@ -24,7 +24,6 @@ import { GENERATED_MIDDLEWARE_EXPORT } from '../seams/middleware.ts';
 import { GENERATED_PLUGINS_EXPORT } from '../seams/plugins.ts';
 import { HEALTH_INDICATORS_EXPORT } from '../seams/health.ts';
 import { CUSTOM_METRICS_EXPORT } from '../seams/metrics.ts';
-import { REGISTER_ROUTES_EXPORT } from '../seams/routes.ts';
 import type { LocalImport, Wiring } from './registry.ts';
 
 /**
@@ -39,9 +38,7 @@ import type { LocalImport, Wiring } from './registry.ts';
  * @returns The consumable seams, in registry order
  */
 export function seamsFor(installed: ReadonlySet<string>): readonly SeamSpec[] {
-  return listSeamSpecs().filter(
-    (spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin),
-  );
+  return hostSeamSpecs(installed);
 }
 
 /**
@@ -50,17 +47,26 @@ export function seamsFor(installed: ReadonlySet<string>): readonly SeamSpec[] {
  * Rendered by the same functions `setu generate` uses, so the scaffolded file and every
  * regeneration of it can never drift apart in shape.
  *
+ * A host that ships example artifacts of its own seeds them, so the SCAFFOLDED
+ * barrel already lists them. Without that the class-based showcase would sit in
+ * a seam directory registered by nothing until the first `setu generate`
+ * regenerated the barrel around it (E4).
+ *
  * @param seams - The host's consumable seams
+ * @param seeded - Artifact names the host itself emits, by schematic name
  * @returns One file per seam, deduplicated by path
  */
-export function seamFiles(seams: readonly SeamSpec[]): readonly GeneratedFile[] {
+export function seamFiles(
+  seams: readonly SeamSpec[],
+  seeded: SeamArtifacts = {},
+): readonly GeneratedFile[] {
   const byPath = new Map<string, GeneratedFile>();
   for (const spec of seams) {
     // Deduplicated because two schematics can share one barrel: `command-handler` and
     // `query-handler` both render `src/cqrs/index.ts`, and emitting it twice would trip
     // the duplicate-path guard in `commands/new.ts`.
     if (byPath.has(spec.barrel)) continue;
-    byPath.set(spec.barrel, { path: spec.barrel, contents: spec.renderBarrel({}) });
+    byPath.set(spec.barrel, { path: spec.barrel, contents: spec.renderBarrel(seeded) });
   }
   return [...byPath.values()];
 }
@@ -90,7 +96,11 @@ export function seamLocalImports(seams: readonly SeamSpec[]): readonly LocalImpo
 export function seamSetupCalls(seams: readonly SeamSpec[]): readonly string[] {
   const schematics = new Set(seams.map((spec) => spec.schematic));
   const calls: string[] = [];
-  if (schematics.has('route')) {
+  // Either kind reaches the router through this one call: in a functional
+  // project a `.controller.ts` registers imperatively exactly as a `.routes.ts`
+  // does, so gating on `route` alone would leave a functional project's
+  // controllers wired by nothing.
+  if (schematics.has('route') || schematics.has('controller')) {
     calls.push(`${REGISTER_ROUTES_EXPORT}(app.router);`);
   }
   if (schematics.has('middleware')) {
@@ -121,6 +131,26 @@ export function seamSetupCalls(seams: readonly SeamSpec[]): readonly string[] {
 export function seamPluginSpreads(seams: readonly SeamSpec[]): readonly string[] {
   return seams.some((spec) => spec.schematic === 'plugin')
     ? [`...${GENERATED_PLUGINS_EXPORT}`]
+    : [];
+}
+
+/**
+ * The plugin seam's registration for a host that has no plugin ARRAY to spread
+ * into.
+ *
+ * A starter-composed host builds the plugin list itself, and no starter accepts
+ * extra plugins — so `full-stack` could not consume this seam through
+ * {@linkcode seamPluginSpreads}. `IApplication.register` is the equivalent and
+ * is public: the kernel resolves plugins at `start()`, and the generated factory
+ * deliberately does not start, so a plugin registered here is picked up exactly
+ * as a spread one would be.
+ *
+ * @param seams - The host's consumable seams
+ * @returns The statements, empty when the host has no plugin seam
+ */
+export function seamPluginRegistrations(seams: readonly SeamSpec[]): readonly string[] {
+  return seams.some((spec) => spec.schematic === 'plugin')
+    ? [`for (const generated of ${GENERATED_PLUGINS_EXPORT}) app.register(generated);`]
     : [];
 }
 
@@ -184,7 +214,12 @@ export function decoratorSeamExtras(
 ): { readonly controllers: readonly string[]; readonly services: readonly string[] } {
   const schematics = new Set(seams.map((spec) => spec.schematic));
   return {
-    controllers: schematics.has('controller') ? [`...${APP_CONTROLLERS_EXPORT}`] : [],
+    // Gated on the EXPORT, not the schematic name: both modes generate
+    // controllers, but only the class-based barrel declares APP_CONTROLLERS —
+    // spreading it in a functional project would name a symbol that is not there.
+    controllers: seams.some((spec) => spec.exports.includes(APP_CONTROLLERS_EXPORT))
+      ? [`...${APP_CONTROLLERS_EXPORT}`]
+      : [],
     services: schematics.has('service') ? [`...${APP_SERVICES_EXPORT}`] : [],
   };
 }

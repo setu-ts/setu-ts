@@ -184,23 +184,46 @@ export interface TemplateManifest {
   /** npm packages the build or tests need, merged into `devDependencies`. */
   readonly npmDevDependencies?: Readonly<Record<string, string>>;
   /**
-   * The build command for a template with a real frontend npm toolchain, emitted
-   * as the generated `package.json`'s `build` script.
+   * The frontend build for a template with a real npm toolchain.
    *
    * Present ONLY for such a template, and it is what marks one — a Deno or
    * Workers target emits a standalone `package.json` + `tsconfig.json` only when
    * this is set.
    *
    * Declared explicitly rather than inferred from
-   * {@linkcode TemplateManifest.npmDevDependencies}, which is what the two sites
-   * below used to do. That proxy held only while exactly one template declared
-   * npm packages at all: the moment a non-frontend template needed a dev
-   * dependency for another reason — `@std/testing` and `@std/expect`, so the
-   * module schematic's emitted test can run — it started emitting a
-   * `react-router build` script into REST projects and, worse, a `package.json`
-   * into Deno ones, which switches Deno to node_modules resolution.
+   * {@linkcode TemplateManifest.npmDevDependencies}, which is what two sites
+   * used to do. That proxy held only while exactly one template declared npm
+   * packages at all: the moment a non-frontend template needed a dev dependency
+   * for another reason — `@std/testing` and `@std/expect`, so the module
+   * schematic's emitted test can run — it started emitting a `react-router
+   * build` script into REST projects and, worse, a `package.json` into Deno
+   * ones, which switches Deno to node_modules resolution.
+   *
+   * All three members travel together deliberately. A bare script string was
+   * enough while only `package.json` read it, and that is exactly why a
+   * scaffolded `full-stack` project could not be started by following its own
+   * README (X5-3): the Deno target emitted the script into a manifest whose
+   * runner the project never invokes, so there was no `build` task at all.
    */
-  readonly npmBuildScript?: string;
+  readonly npmBuild?: {
+    /** The generated `package.json`'s `build` script. */
+    readonly script: string;
+    /**
+     * The equivalent Deno task body.
+     *
+     * Not derivable from {@linkcode script}: that names a bin shim resolved
+     * from `node_modules`, while Deno needs the npm specifier that provides it.
+     */
+    readonly denoCommand: string;
+    /**
+     * Where the build writes.
+     *
+     * Excluded from `fmt` and `lint`, and gitignored (D2) — `deno fmt` will
+     * otherwise reformat a minified bundle, and the generated `.gitignore`
+     * listed only `coverage/` and the env file.
+     */
+    readonly outputDir: string;
+  };
   /**
    * `compilerOptions` merged into `tsconfig.json`, which the npm toolchain reads.
    *

@@ -16,7 +16,13 @@
  * @module
  */
 
-import type { IDnsResolver, IFileSystem, IRuntimeServices, IWorkerHost } from '@setu-ts/common';
+import type {
+  IDnsResolver,
+  IFileSystem,
+  IRuntimeServices,
+  IWorkerHost,
+  RuntimeSignal,
+} from '@setu-ts/common';
 import {
   createReadStream,
   mkdirSync,
@@ -46,6 +52,13 @@ export interface BunHost {
   env: { [key: string]: string | undefined };
   /** Exit the process. */
   exit: (code?: number) => never;
+  /**
+   * Registers a process-termination signal listener.
+   *
+   * Sourced from `node:process`, not the `Bun` global — see this module's own
+   * header for why the global cannot be trusted to carry these members.
+   */
+  onSignal: (signal: RuntimeSignal, handler: () => void) => void;
   /** Read file as bytes. */
   readFile: (path: string) => Uint8Array | null;
   /** Resolve a path to its canonical absolute form (null when it cannot be resolved). */
@@ -180,6 +193,7 @@ export function createBunRuntimeServices(
     hostname: () => host.hostname,
     env: host.env as Readonly<Record<string, string | undefined>>,
     exit: (code?: number) => host.exit(code),
+    onSignal: (signal: RuntimeSignal, handler: () => void) => host.onSignal(signal, handler),
     fs,
     workers,
     dns,
@@ -211,12 +225,13 @@ export interface BunModules {
       options?: { start?: number; end?: number },
     ) => NodeJS.ReadableStream | null;
   };
-  /** Process object (version, env, exit). */
+  /** Process object (version, env, exit, signal listening). */
   proc: {
     version: string;
     versions: Record<string, string | undefined>;
     env: Record<string, string | undefined>;
     exit: (code?: number) => never;
+    on: (event: RuntimeSignal, listener: () => void) => void;
   };
   /** Hostname function (from `node:os`). */
   hostname: () => string;
@@ -262,6 +277,7 @@ export function buildBunHost(
     hostname: mods.hostname(),
     env: mods.proc.env,
     exit: (code?: number) => mods.proc.exit(code),
+    onSignal: (signal: RuntimeSignal, handler: () => void) => mods.proc.on(signal, handler),
     readFile: (path: string) => {
       try {
         return mods.fs.readFileSync(path);

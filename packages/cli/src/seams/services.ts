@@ -21,7 +21,7 @@
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
-  renderList,
+  renderExportedArray,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -88,7 +88,7 @@ function renderServicesBarrel(artifacts: SeamArtifacts): string {
     ` * generated before this seam existed has no decorator, so it registers under its\n` +
     ` * class name instead — regenerate it to get the token.\n` +
     ` */\n` +
-    `export const ${APP_SERVICES_EXPORT}: readonly Constructor[] = [${renderList(entries)}];`,
+    renderExportedArray(APP_SERVICES_EXPORT, 'Constructor', entries),
   ]);
 }
 
