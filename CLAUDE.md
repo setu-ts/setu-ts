@@ -2588,7 +2588,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `tenantId` from `ctx.request.tenant?.id`. The package list was corrected at implementation time to
   add `feature-flags-plugin` and `common` (the X4-6 row the body assigned but the original list
   omitted, mirroring the M70h correction). X12-3 closes without a `cli` change: the fix is a safe
-  default, so every already-scaffolded project picks it up by upgrading the package. — complete
+  default, so every already-scaffolded project picks it up by upgrading the package. — complete (PR
+  #168)
 - **Next milestone** — **M70c** (health signals that describe lifecycle, not reachability). Six
   packages answer `up` with their backends stopped and `/ready` stays `200` (X2-1, X3-2, X8-5,
   X10-3), so a dead dependency triggers no restart, no alert, and no rolling-deploy gate; the
