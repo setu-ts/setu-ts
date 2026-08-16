@@ -21,6 +21,16 @@ export interface FlagDefinition {
   readonly percentage?: number;
   /** Optional user allowlist — overrides `enabled: false`. */
   readonly users?: readonly string[];
+  /**
+   * Optional tenant restriction. When present and non-empty, the flag is
+   * `false` for any context whose `tenantId` is not in this list — including a
+   * context with no tenant — and this restriction is evaluated ahead of every
+   * other rule (it is not an allowlist: it cannot be overridden by `users`).
+   * When absent, evaluation is unchanged.
+   *
+   * @since 0.2.0
+   */
+  readonly tenants?: readonly string[];
 }
 
 // ── Flag provider port ─────────────────────────────────────────────────────

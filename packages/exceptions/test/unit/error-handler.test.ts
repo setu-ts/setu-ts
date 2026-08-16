@@ -84,7 +84,7 @@ describe('errorHandler middleware', () => {
   });
 
   describe('unknown error wrapping', () => {
-    it('wraps a generic Error as 500', async () => {
+    it('wraps a generic Error as 500 (masked by default)', async () => {
       const { ctx, responseSnapshot } = createFakeContext();
       const mw = errorHandler();
 
@@ -92,7 +92,9 @@ describe('errorHandler middleware', () => {
 
       expect(responseSnapshot().status).toBe(500);
       const body = parseBody(responseSnapshot().body);
-      expect(body.message).toBe('Unexpected database failure');
+      // maskInternalErrors defaults to true: the raw message is replaced by
+      // the status title so a driver-shaped 500 leaks nothing.
+      expect(body.message).toBe('Internal Server Error');
       expect(body.statusCode).toBe(500);
     });
 
@@ -105,6 +107,122 @@ describe('errorHandler middleware', () => {
       expect(responseSnapshot().status).toBe(500);
       const body = parseBody(responseSnapshot().body);
       expect(body.statusCode).toBe(500);
+    });
+  });
+
+  describe('maskInternalErrors (X12-3)', () => {
+    // A driver-shaped error carrying SQL and bound parameter values — the
+    // register's X12-3 reproduction.
+    const driverError = () =>
+      new Error(
+        `PrismaClientKnownRequestError: Failed to load the query \n` +
+          `SQL: SELECT * FROM "User" WHERE "email" = 'alice@example.com' AND "role" = 'admin'`,
+      );
+
+    it('masks a driver-shaped 500: body carries neither the SQL nor the values', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler();
+
+      await mw(ctx, nextThrows(driverError()));
+
+      expect(responseSnapshot().status).toBe(500);
+      const body = parseBody(responseSnapshot().body);
+      expect(body.message).toBe('Internal Server Error');
+      expect(body.message).not.toContain('SELECT');
+      expect(body.message).not.toContain('alice@example.com');
+      expect(body.message).not.toContain('admin');
+    });
+
+    it('omits the stack for a masked error, so the mask is not defeated', async () => {
+      // A stack begins `<name>: <message>`, so attaching the unmasked error's
+      // stack would put the SQL and the bound values straight back into the
+      // body that was just masked. Masking wins; the stack is in the log.
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ includeStackTrace: true });
+
+      await mw(ctx, nextThrows(driverError()));
+
+      const raw = responseSnapshot().body;
+      const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as Uint8Array);
+      expect(text).not.toContain('alice@example.com');
+      expect(text).not.toContain('SELECT');
+      expect(parseBody(raw).stack).toBeUndefined();
+    });
+
+    it('still includes the stack when masking is off', async () => {
+      // The option keeps working where it is safe to: with masking disabled the
+      // caller has already opted into the message, so the stack adds nothing new.
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ includeStackTrace: true, maskInternalErrors: false });
+
+      await mw(ctx, nextThrows(driverError()));
+
+      expect(typeof parseBody(responseSnapshot().body).stack).toBe('string');
+    });
+
+    it('still logs the unmasked error (SQL + values) when a logger is present', async () => {
+      const logger = new FakeLogger();
+      const services = new Map([[CAPABILITIES.LOGGER, logger]]);
+      const { ctx } = createFakeContext({ services });
+      const mw = errorHandler();
+
+      await mw(ctx, nextThrows(driverError()));
+
+      expect(logger.calls).toHaveLength(1);
+      expect(logger.calls[0].level).toBe('error');
+      expect(logger.calls[0].message).toContain('SELECT');
+      expect(logger.calls[0].message).toContain('alice@example.com');
+    });
+
+    it('never masks a deliberately thrown HttpError 500', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler();
+
+      await mw(ctx, nextThrows(internalServerError('Payment gateway timed out')));
+
+      expect(responseSnapshot().status).toBe(500);
+      const body = parseBody(responseSnapshot().body);
+      // A message the developer chose for the client passes through verbatim.
+      expect(body.message).toBe('Payment gateway timed out');
+    });
+
+    it('never masks a 4xx HttpError', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler();
+
+      await mw(ctx, nextThrows(notFound('User 42 not found')));
+
+      const body = parseBody(responseSnapshot().body);
+      expect(body.message).toBe('User 42 not found');
+    });
+
+    it('restores the raw message when maskInternalErrors is false', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ maskInternalErrors: false });
+
+      await mw(ctx, nextThrows(driverError()));
+
+      const body = parseBody(responseSnapshot().body);
+      expect(body.message).toContain('SELECT');
+      expect(body.message).toContain('alice@example.com');
+    });
+
+    // Two entry points, one behavior: the masking must hold under both the
+    // default format and the RFC 9457 format, with the non-default masking
+    // setting off, so a split between the two formatters cannot hide.
+    it('masks under BOTH the default and rfc9457 formats', async () => {
+      for (const format of ['default' as const, 'rfc9457' as const]) {
+        const { ctx, responseSnapshot } = createFakeContext();
+        const mw = errorHandler({ format });
+
+        await mw(ctx, nextThrows(driverError()));
+
+        const body = parseBody(responseSnapshot().body);
+        const detail = (body.message ?? body.detail) as string;
+        expect(detail).toBe('Internal Server Error');
+        expect(detail).not.toContain('SELECT');
+        expect(detail).not.toContain('alice@example.com');
+      }
     });
   });
 

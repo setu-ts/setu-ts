@@ -118,7 +118,7 @@ export function SessionPlugin(options: SessionPluginOptions = {}): IPlugin {
 
       ctx.services.register<ISessionService>(CAPABILITIES.SESSION, service);
 
-      ctx.middleware.add(sessionMiddleware(service), {
+      ctx.middleware.add(sessionMiddleware(service, config.tenantBinding), {
         priority: MIDDLEWARE_PRIORITY.SESSION,
       });
 

@@ -6883,14 +6883,19 @@ Ordered by the sequence they should be worked, not by severity alone.
   now runs the pipeline before any upgrade or RPC dispatch, and that dispatch runs **before** route
   matching so an application catch-all cannot shadow it. `graphql-plugin` was listed here and is
   **not** in scope — its own WS transport is M70i's, which owns GraphQL viability.
-- ⬜ **M70b — Tenant isolation and data exposure** (`cache-plugin`, `multi-tenancy-plugin`,
-  `session-plugin`, `database-plugin`, `exceptions`). **Security.** A tenant is served another
-  tenant's cached response body, because `cacheMiddleware` keys on `method:url` and the
-  `cache: { prefix: true }` isolation the tenancy plugin advertises is a string **no package reads**
-  (X4-1); an `acme` session authenticates a write into `globex` (X4-3); every 500 returns the
-  failing SQL and its **bound parameter values** to the client, through the `errorHandler` every
-  template emits (X12-3); and Prisma's `contains` treats `%` as a wildcard, so a search returns
-  every row (X12-1). Plus X4-2 (a required-tenant app fails its own k8s probes) and X4-6.
+- ✅ **M70b — Tenant isolation and data exposure** (`cache-plugin`, `multi-tenancy-plugin`,
+  `session-plugin`, `database-plugin`, `exceptions`, `feature-flags-plugin`, `common`).
+  **Security.** A tenant is served another tenant's cached response body, because `cacheMiddleware`
+  keys on `method:url` and the `cache: { prefix: true }` isolation the tenancy plugin advertises is
+  a string **no package reads** (X4-1); an `acme` session authenticates a write into `globex`
+  (X4-3); every 500 returns the failing SQL and its **bound parameter values** to the client,
+  through the `errorHandler` every template emits (X12-3); and Prisma's `contains` treats `%` as a
+  wildcard, so a search returns every row (X12-1). Plus X4-2 (a required-tenant app fails its own
+  k8s probes) and X4-6 (feature flags have no tenant dimension). **Complete.** The package list was
+  corrected at implementation time to add `feature-flags-plugin` and `common`, whose X4-6 row the
+  body assigned but the original list omitted (mirroring the M70h correction). X12-3 closes without
+  a `cli` change: the fix is a safe default on `ErrorHandlerOptions.maskInternalErrors`, so every
+  already-scaffolded project picks it up by upgrading the package.
 - ⬜ **M70c — Health signals that describe lifecycle, not reachability** (`messaging-plugin`,
   `realtime-backplane-plugin`, `storage-plugin`, `mail-plugin`, `queue-plugin`,
   `service-discovery-plugin`, `grpc-plugin`). **Six packages answer `up` with their backends
@@ -7103,7 +7108,7 @@ branch during a version bump.
 | 69        | ✅     | database-plugin (drizzle query seam)  |
 | 70        | ⬜     | alpha-9 defect closeout (umbrella)    |
 | 70a       | ✅     | pipeline bypass (security)            |
-| 70b       | ⬜     | tenant isolation, data exposure (sec) |
+| 70b       | ✅     | tenant isolation, data exposure (sec) |
 | 70c       | ⬜     | health-signal sweep (6 packages)      |
 | 70d       | ⬜     | no-argument registration seams        |
 | 70e       | ⬜     | default branches of injectable seams  |

@@ -211,6 +211,89 @@ describe('createFlagGuard', () => {
     expect(receivedContext).toEqual({ userId: 'override' });
   });
 
+  it('tenantId derived from ctx.request.tenant.id alongside userId', async () => {
+    let receivedContext: FlagContext | undefined;
+    const flags: IFeatureFlags = {
+      isEnabled: (_flag: string, context?: FlagContext): boolean => {
+        receivedContext = context;
+        return true;
+      },
+    };
+    const ctx = {
+      services: { get: <T>(_token: string): T => flags as T },
+      request: { user: { id: 'user1' }, tenant: { id: 'acme' } },
+      response: { redirect: (): void => {}, status: (): void => {}, text: (): void => {} },
+    } as unknown as IRequestContext;
+
+    const guard = createFlagGuard('beta');
+    await guard(ctx, (): Promise<void> => Promise.resolve());
+
+    expect(receivedContext).toEqual({ userId: 'user1', tenantId: 'acme' });
+  });
+
+  it('tenantId derived when there is no user (field omitted otherwise)', async () => {
+    let receivedContext: FlagContext | undefined;
+    const flags: IFeatureFlags = {
+      isEnabled: (_flag: string, context?: FlagContext): boolean => {
+        receivedContext = context;
+        return true;
+      },
+    };
+    const ctx = {
+      services: { get: <T>(_token: string): T => flags as T },
+      request: { tenant: { id: 'globex' } },
+      response: { redirect: (): void => {}, status: (): void => {}, text: (): void => {} },
+    } as unknown as IRequestContext;
+
+    const guard = createFlagGuard('beta');
+    await guard(ctx, (): Promise<void> => Promise.resolve());
+
+    // No user → userId omitted (never `undefined`); tenantId present.
+    expect(receivedContext).toEqual({ tenantId: 'globex' });
+    expect('userId' in (receivedContext ?? {})).toBe(false);
+  });
+
+  it('tenantId omitted when no tenant resolves (never undefined)', async () => {
+    let receivedContext: FlagContext | undefined;
+    const flags: IFeatureFlags = {
+      isEnabled: (_flag: string, context?: FlagContext): boolean => {
+        receivedContext = context;
+        return true;
+      },
+    };
+    const ctx = {
+      services: { get: <T>(_token: string): T => flags as T },
+      request: { user: { id: 'user1' }, tenant: undefined },
+      response: { redirect: (): void => {}, status: (): void => {}, text: (): void => {} },
+    } as unknown as IRequestContext;
+
+    const guard = createFlagGuard('beta');
+    await guard(ctx, (): Promise<void> => Promise.resolve());
+
+    expect(receivedContext).toEqual({ userId: 'user1' });
+    expect('tenantId' in (receivedContext ?? {})).toBe(false);
+  });
+
+  it('explicit options.context still wins over the derived tenantId', async () => {
+    let receivedContext: FlagContext | undefined;
+    const flags: IFeatureFlags = {
+      isEnabled: (_flag: string, context?: FlagContext): boolean => {
+        receivedContext = context;
+        return true;
+      },
+    };
+    const ctx = {
+      services: { get: <T>(_token: string): T => flags as T },
+      request: { user: { id: 'user1' }, tenant: { id: 'acme' } },
+      response: { redirect: (): void => {}, status: (): void => {}, text: (): void => {} },
+    } as unknown as IRequestContext;
+
+    const guard = createFlagGuard('beta', { context: { tenantId: 'explicit' } });
+    await guard(ctx, (): Promise<void> => Promise.resolve());
+
+    expect(receivedContext).toEqual({ tenantId: 'explicit' });
+  });
+
   it('unregistered capability ⇒ error propagates, next() NOT called', async () => {
     const capture = buildCtx(true, { id: 'user1' }, false);
     const guard = createFlagGuard('beta');

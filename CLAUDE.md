@@ -2561,23 +2561,40 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   catch-all still serves every other path; a root-mounted gRPC service leaves ordinary routes alone
   while still serving its own procedures; and the drain answers `503` on both protocols. Six
   negative controls were each observed failing and reverted) — complete (PR #167)
-- **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
-  that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
-  before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`
-  is a required option and the app owns the instance — what it cannot do is run one inside
-  `IDatabaseService.transaction()`, since `beginTransaction` closes over Drizzle's `tx` and exposes
-  it nowhere, `UnitOfWork` narrows the handle to `ITransaction`, and `IUnitOfWork` declares only
-  `getRepository`. A portable join was rejected with cause: Prisma has no arbitrary-join API, only
-  declared-relation traversal. Then — **M40** (final polish and release). M60–M62 came from a
-  measured audit after M58: a project with all fourteen schematics generated type-checked clean
-  while its entry points imported exactly ONE generated path, so thirteen of fourteen generated
-  artifacts were unreachable — that, not breadth, was the distance from NestJS. **All three are now
-  closed**: M60 wired eleven of the thirteen, M61 made decorators and DI independent choices, and
-  M62 added monorepos, so the CLI parity work is done. M59 came from an external DX review; note
-  what that review got wrong, since the ROADMAP section says so and a reader should not re-raise it:
-  it claimed the framework has no decorators (M9/M36b ship them) and that Workers queues are still
-  blocked (M52b shipped them). Its suggested HTTP-polling adapters were rejected with cause — a
-  Worker has no ambient loop to poll from.
+- **Milestone 70b** (`cache-plugin` + `multi-tenancy-plugin` + `session-plugin` +
+  `database-plugin` + `exceptions` + `feature-flags-plugin` + `common` — tenant isolation and data
+  exposure). **Security.** Five rows in one branch, all with the same shape: a capability that was
+  supposed to respect the tenant did not. X4-1 — `cacheMiddleware` keyed on `method:url` alone, so a
+  tenant was served another tenant's cached body; the key now composes a length-prefixed tenant
+  segment around the default **or** a custom `key`, and a `vary` option joins caller-supplied
+  segments after it. X4-3 — a session minted under tenant A was presented under tenant B and wrote
+  through; the session now seals the resolved tenant id into a reserved key on commit and the
+  middleware short-circuits with `403` on a mismatch before the handler runs (`tenantBinding`,
+  default `true`, inert without a tenancy plugin). X12-3 — every unhandled 500 returned the failing
+  SQL and its bound parameters to the client; `ErrorHandlerOptions.maskInternalErrors` (default
+  `true`) now masks a non-`HttpError` with status ≥ 500 to a generic detail after the logger has
+  received the real one, and `false` restores the previous body verbatim. X12-1 — Prisma's
+  `contains` treated `%`/`_` as `LIKE` wildcards, so a search for `50% off` returned every row; the
+  value is now escaped on the connectors whose `LIKE` defaults its escape character to backslash,
+  and refused with a named `UnsupportedFilterOperatorError` on SQLite (where the escape is not
+  expressible) or when the connector cannot be determined, naming the new `provider` option. The
+  `escapeLikePattern` helper moved to a shared `query/like-escape.ts` so Drizzle and Prisma cannot
+  drift, and a `filter-conformance.test.ts` runs one query through every adapter and asserts they
+  agree or refuse. X4-2 — `required: true` broke the k8s probes, because they carry no tenant
+  header; `MultiTenancyPluginOptions.exclude` (default the six operational probe paths) skips the
+  middleware body for a matching path, and `[]` restores the old behaviour. X4-6 — feature flags had
+  no tenant dimension; `FlagContext.tenantId` (in `common`) and `FlagDefinition.tenants` (in the
+  plugin) add a tenant _restriction_ ahead of every other rule, and `createFlagGuard` derives
+  `tenantId` from `ctx.request.tenant?.id`. The package list was corrected at implementation time to
+  add `feature-flags-plugin` and `common` (the X4-6 row the body assigned but the original list
+  omitted, mirroring the M70h correction). X12-3 closes without a `cli` change: the fix is a safe
+  default, so every already-scaffolded project picks it up by upgrading the package. — complete (PR
+  #168)
+- **Next milestone** — **M70c** (health signals that describe lifecycle, not reachability). Six
+  packages answer `up` with their backends stopped and `/ready` stays `200` (X2-1, X3-2, X8-5,
+  X10-3), so a dead dependency triggers no restart, no alert, and no rolling-deploy gate; the
+  register scopes it as a sweep against the `ISessionStore.isHealthy?()` shape and names
+  `worker-pool`'s indicator as the counter-example to build from.
 
 ## Verification (run before declaring any work done)
 

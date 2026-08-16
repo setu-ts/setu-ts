@@ -199,7 +199,9 @@ function createDelegate(
 // Forward-declared type to avoid self-referential implicit 'any' on `const client = { ... }`
 type FakePrismaClient = ReturnType<typeof createFakePrismaClient>;
 
-export function createFakePrismaClient(): {
+export function createFakePrismaClient(
+  options: { activeProvider?: string } = {},
+): {
   $connect: () => Promise<void>;
   $disconnect: () => Promise<void>;
   $transaction: <T>(
@@ -209,6 +211,14 @@ export function createFakePrismaClient(): {
   $queryRawUnsafe: <T>(sql: string, ...params: unknown[]) => Promise<T[]>;
   connected: boolean;
   disconnected: boolean;
+  // The active connector, mirroring the real client's underscore-private
+  // `_activeProvider` field that the adapter's structural detection reads.
+  // Defaults to `'postgresql'` (an escaping connector) so a `contains` filter
+  // translates rather than refuses. To model a client whose provider cannot be
+  // detected, build a bare object literal WITHOUT this field: `activeProvider`
+  // cannot be passed as `undefined` (that is a compile error under
+  // `exactOptionalPropertyTypes`) and would fall back to the default anyway.
+  _activeProvider: string;
   // Recorded calls for test assertions
   recordedCalls: RecordedCall[];
   // Model delegates — accessed by lowercase name (e.g. `client.user`)
@@ -221,6 +231,7 @@ export function createFakePrismaClient(): {
   let connected = false;
   let disconnected = false;
   const recordedCalls: RecordedCall[] = [];
+  const activeProvider = options.activeProvider ?? 'postgresql';
   const stores: Record<string, Store> = {
     user: { records: new Map(), idCounter: 0 },
     post: { records: new Map(), idCounter: 0 },
@@ -228,6 +239,7 @@ export function createFakePrismaClient(): {
   };
 
   const client = {
+    _activeProvider: activeProvider,
     get connected() {
       return connected;
     },

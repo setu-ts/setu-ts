@@ -45,12 +45,22 @@ export function createFlagGuard(
     // Resolve the flag service per-request (decouples factory from registry)
     const flags = ctx.services.get<IFeatureFlags>(CAPABILITIES.FEATURE_FLAGS);
 
-    // Build evaluation context: explicit override > user.id > omit userId
+    // Build evaluation context: explicit override > derive userId/tenantId >
+    // omit. Each field is set only when present (never `undefined`, per
+    // `exactOptionalPropertyTypes`), so a request with no tenant still
+    // evaluates a tenant-scoped flag as `false` rather than passing one through.
     let context: FlagContext | undefined;
     if (options?.context !== undefined) {
       context = options.context;
-    } else if (ctx.request.user?.id !== undefined) {
-      context = { userId: ctx.request.user.id };
+    } else {
+      const userId = ctx.request.user?.id;
+      const tenantId = ctx.request.tenant?.id;
+      if (userId !== undefined || tenantId !== undefined) {
+        context = {
+          ...(userId !== undefined ? { userId } : {}),
+          ...(tenantId !== undefined ? { tenantId } : {}),
+        };
+      }
     }
 
     const on = flags.isEnabled(flag, context);

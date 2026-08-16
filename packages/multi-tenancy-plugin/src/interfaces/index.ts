@@ -120,6 +120,18 @@ export interface MultiTenancyPluginOptions {
   rejectionStatus?: number;
   /** Priority passed to `ctx.middleware.add` (default `40`). */
   middlewarePriority?: number;
+  /**
+   * Paths that skip tenant resolution entirely — no resolver runs, no tenant
+   * is stamped, and a `required` deployment does not reject them. Matched
+   * against `ctx.request.path` by exact string equality or `RegExp.test`.
+   *
+   * Default when omitted: the operational probes the framework's own plugins
+   * serve — `['/live', '/ready', '/health', '/metrics', '/openapi.json',
+   * '/docs']`. A matching path goes straight to `next()`. Pass `[]` to restore
+   * the previous behaviour (no path is exempt) for an application whose own
+   * routes sit on those paths.
+   */
+  exclude?: readonly (string | RegExp)[];
 }
 
 // ---------------------------------------------------------------------------

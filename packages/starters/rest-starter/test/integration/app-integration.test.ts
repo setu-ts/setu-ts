@@ -40,7 +40,9 @@ describe('rest-starter / integration', () => {
     expect(body.type).toBe('about:blank');
     expect(body.title).toBe('Internal Server Error');
     expect(body.status).toBe(500);
-    expect(body.detail).toBe('test route error');
+    // maskInternalErrors defaults to true: a non-HttpError 500 is masked to the
+    // status title, so the body carries neither the raw message nor its cause.
+    expect(body.detail).toBe('Internal Server Error');
     // Problem Details MUST NOT carry a "message" field
     expect(Object.keys(body).includes('message')).toBe(false);
   });
@@ -63,7 +65,8 @@ describe('rest-starter / integration', () => {
 
     expect(response.statusCode).toBe(500);
     const body = JSON.parse(response.body!);
-    expect(body.detail).toBe('test middleware error');
+    // Masked by the default maskInternalErrors (see the route-handler test above).
+    expect(body.detail).toBe('Internal Server Error');
     // Must not have a "message" field per RFC 9457
     expect(Object.keys(body).includes('message')).toBe(false);
   });

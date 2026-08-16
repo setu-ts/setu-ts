@@ -160,5 +160,49 @@ describe('flag-evaluator', () => {
       });
       expect(resultNoAttrs).toBe(resultWithAttrs);
     });
+
+    // X4-6 — the tenant restriction is a restriction, not a second allowlist.
+    describe('tenants (X4-6)', () => {
+      it('absent tenants is byte-identical to the committed precedence', () => {
+        const def: FlagDefinition = { enabled: false, users: ['user1'] };
+        // Without a `tenants` field the user allowlist still overrides.
+        expect(evaluateFlag('flag', def, { userId: 'user1', tenantId: 'acme' })).toBe(true);
+        expect(evaluateFlag('flag', def, { userId: 'user2', tenantId: 'acme' })).toBe(false);
+        expect(evaluateFlag('flag', def, undefined)).toBe(false);
+      });
+
+      it('a non-matching tenant is false even with the user allowlisted and enabled: true', () => {
+        const def: FlagDefinition = { enabled: true, users: ['user1'], tenants: ['acme'] };
+        expect(evaluateFlag('flag', def, { userId: 'user1', tenantId: 'globex' })).toBe(false);
+      });
+
+      it('a matching tenant falls through to the committed precedence', () => {
+        const def: FlagDefinition = { enabled: true, tenants: ['acme'] };
+        expect(evaluateFlag('flag', def, { tenantId: 'acme' })).toBe(true);
+        // A matching tenant still honours enabled: false (unless allowlisted).
+        const off: FlagDefinition = { enabled: false, tenants: ['acme'] };
+        expect(evaluateFlag('flag', off, { tenantId: 'acme' })).toBe(false);
+      });
+
+      it('a matching tenant falls through to percentage targeting', () => {
+        const def: FlagDefinition = { enabled: true, percentage: 100, tenants: ['acme'] };
+        expect(evaluateFlag('flag', def, { userId: 'user1', tenantId: 'acme' })).toBe(true);
+      });
+
+      it('no tenantId against a scoped flag is false', () => {
+        const def: FlagDefinition = { enabled: true, users: ['user1'], tenants: ['acme'] };
+        // A user in the allowlist but no tenant resolved → the restriction holds.
+        expect(evaluateFlag('flag', def, { userId: 'user1' })).toBe(false);
+        expect(evaluateFlag('flag', def, undefined)).toBe(false);
+      });
+
+      it('the restriction is ahead of the user allowlist (not an allowlist)', () => {
+        // user1 is allowlisted AND in the tenant list → true (both satisfied).
+        const def: FlagDefinition = { enabled: false, users: ['user1'], tenants: ['acme'] };
+        expect(evaluateFlag('flag', def, { userId: 'user1', tenantId: 'acme' })).toBe(true);
+        // user1 is allowlisted but the tenant does not match → false (restriction wins).
+        expect(evaluateFlag('flag', def, { userId: 'user1', tenantId: 'globex' })).toBe(false);
+      });
+    });
   });
 });
