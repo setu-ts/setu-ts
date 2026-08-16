@@ -28,9 +28,21 @@ const ESCAPING_PROVIDERS: ReadonlySet<string> = new Set([
   'cockroachdb',
 ]);
 
+/**
+ * Connectors whose `contains` is not `LIKE`-based, so the value is already a
+ * literal substring and escaping it would be actively wrong.
+ *
+ * MongoDB is the case: Prisma compiles `contains` to a `$regex` match, in which
+ * `%` and `_` carry no special meaning at all. Escaping them to `\%` / `\_`
+ * would search for a backslash that is not in the data — the same class of
+ * wrong answer escaping produces on SQLite, reached from the other direction.
+ */
+const PASSTHROUGH_PROVIDERS: ReadonlySet<string> = new Set(['mongodb']);
+
 /** Every connector the adapter recognises, for structural detection. */
 const PROVIDERS: ReadonlySet<string> = new Set<string>([
   ...ESCAPING_PROVIDERS,
+  ...PASSTHROUGH_PROVIDERS,
   'sqlite',
 ]);
 
@@ -496,6 +508,9 @@ function prismaFilter(
  *   `cockroachdb`): escape `\`, `%` and `_` so the value is a literal
  *   substring. Their `LIKE` defaults the escape character to backslash, so the
  *   escaping is effective without an `ESCAPE` clause.
+ * - Passthrough connectors (`mongodb`): return the value unchanged. `contains`
+ *   compiles to a `$regex` match there, so `%` and `_` are already literal and
+ *   escaping them would search for a backslash the data does not contain.
  * - `sqlite`: **refuse**. Prisma emits no `ESCAPE` clause and SQLite defines
  *   no default escape character, so a literal `contains` is not expressible
  *   through Prisma's filter API there. Returning wrong rows quietly is the
@@ -534,6 +549,11 @@ function prismaContainsValue(
         "determined. Pass `provider` (e.g. `provider: 'postgresql'`) in the database adapter " +
         "options so the adapter knows how to translate 'contains'.",
     );
+  }
+  // Not `LIKE`-based: the value is already a literal substring, so escaping it
+  // would be the wrong answer rather than a safer one.
+  if (PASSTHROUGH_PROVIDERS.has(provider)) {
+    return value;
   }
   // Every remaining recognised connector defaults its LIKE escape character to
   // backslash, so the escaping is effective.

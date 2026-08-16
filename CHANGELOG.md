@@ -21,6 +21,30 @@ All notable changes to this project are documented here. The format follows
   `ctx.response`; the pipeline still runs, so a guard can refuse, and a refused upgrade is an
   ordinary HTTP response carrying everything.
 
+- **A tenant is no longer served another tenant's cached response** (M70b, X4-1). `cacheMiddleware`
+  keyed on `method:url` alone, and the `cache: { prefix: true }` isolation the multi-tenancy plugin
+  advertised was a string **no package read** — so with one route cached, whichever tenant missed
+  first populated the entry and every other tenant was served its body, with `X-Cache: HIT`. The key
+  now composes a length-prefixed tenant segment, read from the committed `ctx.request.tenant`,
+  around the default **and** any custom `key` function. An application with no tenancy resolves no
+  tenant and keeps byte-identical keys.
+- **A session is now bound to the tenant it was minted under** (M70b, X4-3). Tenancy resolves at
+  priority 40 and the session loads at 260, and neither consulted the other, so an `acme` session
+  authenticated a **write into `globex`** — CSRF token included, because that token lives in the
+  session that crossed with it. The resolved tenant is now sealed into the session on commit and a
+  mismatch is refused with `403` before the handler runs (`SessionPlugin({ tenantBinding })`,
+  default `true`). Inert without tenancy: nothing is sealed, so nothing is compared.
+- **An unhandled error no longer returns the failing SQL and its bound parameter values to the
+  client** (M70b, X12-3). `errorHandler` — the middleware every CLI template emits — copied a raw
+  error's `message` into the response, so an ordinary unique-constraint violation disclosed the
+  schema, the table, every column, and every bound value to any caller who could reach the route.
+  `maskInternalErrors` (new, default `true`) replaces that message with the status title; the logger
+  still receives the real error first. See **Changed** for the compatibility note.
+- **Feature flags can be scoped to tenants** (M70b, X4-6). `FlagContext.tenantId` and
+  `FlagDefinition.tenants` add a tenant restriction evaluated ahead of every other rule, so a user
+  allowlist cannot cross a tenant boundary. `createFlagGuard` derives `tenantId` from
+  `ctx.request.tenant`. Absent `tenants`, evaluation is unchanged.
+
 ### Added
 
 - **`setu add <plugin>`** — installs a framework package into the current project, pinned to the
@@ -64,9 +88,51 @@ All notable changes to this project are documented here. The format follows
   implementors keep compiling. `claims` is the path guard that keeps an ordinary `404` intact.
 - `inject()` now populates `IRequest.raw`, so an injected request can exercise the upgrade and gRPC
   paths instead of silently falling through to the `404`.
+- **`CacheMiddlewareOptions.vary`** — a per-request discriminator whose values are length-prefixed
+  into the cache key after the tenant segment, for any dimension beyond the tenant.
+- **`MultiTenancyPluginOptions.exclude`** — paths that skip tenant resolution entirely, defaulting
+  to the operational probes the framework's own plugins serve (`/live`, `/ready`, `/health`,
+  `/metrics`, `/openapi.json`, `/docs`). Pass `[]` to exempt nothing. See **Changed**.
+- **`SessionPluginOptions.tenantBinding`** (default `true`) — seals the resolved tenant into the
+  session and refuses a mismatch with `403`.
+- **`ErrorHandlerOptions.maskInternalErrors`** (default `true`) — see **Security** and **Changed**.
+- **`FlagContext.tenantId`** (in `@setu-ts/common`) and **`FlagDefinition.tenants`** — both
+  optional, so every existing caller, implementor, and flag definition is source-compatible.
+- **`DatabaseAdapterOptions.provider`**, the exported **`PrismaSqlProvider`** type, and
+  **`UnsupportedFilterOperatorError`** — see **Changed** for the `contains` behaviour they govern.
 
 ### Changed
 
+- **Breaking (behaviour): an unhandled non-`HttpError` 500 no longer carries its own message.**
+  `maskInternalErrors` defaults to `true`, so the body's `detail`/`message` becomes the status
+  title. **Migration:** nothing, if you were reading the message for diagnostics — it is still
+  logged, in full, with its cause chain, exactly as before. Set `maskInternalErrors: false` to
+  restore the previous body verbatim. A deliberately thrown `HttpError` (a message the developer
+  chose for the caller) and every 4xx are never masked. Where a `maskInternalErrors: true` error
+  would previously have carried a `stack` under `includeStackTrace: true`, it no longer does — a
+  stack begins with the message that was just masked, so masking wins over that option.
+- **Breaking (behaviour): `contains` on the Prisma adapter is now connector-aware, and is refused on
+  SQLite.** Prisma emits a bare `LIKE` with no `ESCAPE` clause, so the value was matched as a
+  **pattern**: a search for `%` returned every row in the table and a search for `50% off` matched
+  rows that do not contain it. The value is now escaped on `postgresql`/`postgres`, `mysql`,
+  `sqlserver` and `cockroachdb` (whose `LIKE` defaults its escape character to backslash), passed
+  through unchanged on `mongodb` (whose `contains` is a `$regex` match, where `%` and `_` are
+  already literal), and **refused** on `sqlite` with `UnsupportedFilterOperatorError`, because no
+  escaping is expressible there through Prisma's filter API. **Migration:** a Prisma + SQLite
+  application using `contains` must switch to a raw query or the Drizzle/Memory adapter — it was
+  returning wrong rows before, silently. If the adapter cannot detect your connector it throws the
+  same error naming the new `provider` option; pass `provider: '<connector>'` in the adapter
+  options.
+- **Breaking (cache keys): a tenant-aware application's cache keys change shape**, because the
+  tenant segment is now part of them. The effect is a one-time cold cache on upgrade, not a
+  correctness problem — expect a miss spike rather than investigating one. Keys in an application
+  that resolves no tenant are byte-identical to before.
+- **`MultiTenancyPlugin({ required: true })` no longer rejects the operational probes.** It answered
+  `400` on `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json` and `/docs`, which carry no
+  tenant header — so a required-tenant deployment never passed the readiness probe in the Kubernetes
+  manifests the CLI itself generates. Those six paths are now exempt by default. **Migration:** if
+  your application serves its own business routes on any of those paths and wants them tenant-gated,
+  pass an explicit `exclude` list (or `[]` to exempt nothing).
 - **Breaking (generated layout): `src/routes/` is merged into `src/controllers/`.** A scaffolded
   project had two directories for HTTP endpoints, wired by two mechanisms, and `setu generate route`
   and `setu generate controller` each owned one — so "where does an endpoint go?" had two answers

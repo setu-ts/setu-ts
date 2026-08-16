@@ -133,6 +133,33 @@ describe('errorHandler middleware', () => {
       expect(body.message).not.toContain('admin');
     });
 
+    it('omits the stack for a masked error, so the mask is not defeated', async () => {
+      // A stack begins `<name>: <message>`, so attaching the unmasked error's
+      // stack would put the SQL and the bound values straight back into the
+      // body that was just masked. Masking wins; the stack is in the log.
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ includeStackTrace: true });
+
+      await mw(ctx, nextThrows(driverError()));
+
+      const raw = responseSnapshot().body;
+      const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw as Uint8Array);
+      expect(text).not.toContain('alice@example.com');
+      expect(text).not.toContain('SELECT');
+      expect(parseBody(raw).stack).toBeUndefined();
+    });
+
+    it('still includes the stack when masking is off', async () => {
+      // The option keeps working where it is safe to: with masking disabled the
+      // caller has already opted into the message, so the stack adds nothing new.
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({ includeStackTrace: true, maskInternalErrors: false });
+
+      await mw(ctx, nextThrows(driverError()));
+
+      expect(typeof parseBody(responseSnapshot().body).stack).toBe('string');
+    });
+
     it('still logs the unmasked error (SQL + values) when a logger is present', async () => {
       const logger = new FakeLogger();
       const services = new Map([[CAPABILITIES.LOGGER, logger]]);

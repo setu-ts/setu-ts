@@ -177,10 +177,18 @@ async function runDenoOnce(
     }
   }, DENO_RUN_TIMEOUT_MS);
 
-  const status = await child.status;
+  // Drain both pipes CONCURRENTLY with the status wait, never after it. A pipe
+  // holds ~64 KB; past that the child blocks on write until someone reads, so
+  // awaiting `status` first deadlocks on any subprocess with more output than
+  // that. It would then be SIGKILLed at the timeout and — because the timeout
+  // marker reads as a network condition — retried to exhaustion, turning a
+  // merely chatty command into a multi-minute spurious failure.
+  const [status, stdout, stderr] = await Promise.all([
+    child.status,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
   clearTimeout(timer);
-  const stdout = await new Response(child.stdout).text();
-  const stderr = await new Response(child.stderr).text();
 
   if (timedOut) {
     return {

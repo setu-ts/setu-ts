@@ -19,6 +19,7 @@ import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
+import type { PrismaSqlProvider } from '../../src/interfaces/index.ts';
 
 /** Build a NormalizedQuery from partial options with concrete defaults. */
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
@@ -379,9 +380,9 @@ describe('PrismaAdapter', () => {
     async function translatedWhere(
       client: ReturnType<typeof createFakePrismaClient>,
       value: string,
-      options?: {
-        provider?: 'postgresql' | 'postgres' | 'mysql' | 'sqlserver' | 'cockroachdb' | 'sqlite';
-      },
+      // The exported union, not a hand-copied one: a local duplicate silently
+      // stopped expressing `mongodb` when the real type gained it.
+      options?: { provider?: PrismaSqlProvider },
     ): Promise<Record<string, unknown>> {
       const adapter = new PrismaAdapter({
         prismaClient: client,
@@ -410,6 +411,24 @@ describe('PrismaAdapter', () => {
         const where = await translatedWhere(client, 'a_b');
         expect(where).toEqual({ name: { contains: 'a\\_b' } });
       }
+    });
+
+    it('passes the value through unescaped on mongodb', async () => {
+      // MongoDB's `contains` compiles to a `$regex` match, where `%` and `_`
+      // are already literal — escaping them would search for a backslash the
+      // data does not contain. Detected structurally, with no explicit option.
+      const client = createFakePrismaClient({ activeProvider: 'mongodb' });
+      const where = await translatedWhere(client, '50% off_now');
+      expect(where).toEqual({ name: { contains: '50% off_now' } });
+    });
+
+    it('accepts mongodb as an explicit provider', async () => {
+      // The error for an undetermined connector tells the caller to pass
+      // `provider`; that advice has to be followable for every connector the
+      // adapter can meet, mongodb included.
+      const client = createFakePrismaClient({ activeProvider: 'sqlite' });
+      const where = await translatedWhere(client, 'a%b', { provider: 'mongodb' });
+      expect(where).toEqual({ name: { contains: 'a%b' } });
     });
 
     it('refuses on sqlite with a named error', async () => {

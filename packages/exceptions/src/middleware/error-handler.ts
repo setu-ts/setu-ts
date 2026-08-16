@@ -52,8 +52,13 @@ export interface ErrorHandlerOptions {
    *
    * Note the stack is the _secondary_ disclosure: the primary one is the
    * error **message**, which for a failed query carries the SQL and its bound
-   * parameter values. Masking that is `maskInternalErrors`' job; this option
-   * only governs the stack trace of an error that is already being shown.
+   * parameter values. Masking that is `maskInternalErrors`' job.
+   *
+   * The two compose safely, and masking wins: an error masked by
+   * {@linkcode ErrorHandlerOptions.maskInternalErrors} carries **no** stack in
+   * the body even when this option is `true`, because a stack begins with the
+   * very message that was masked. Set `maskInternalErrors: false` to see the
+   * stack of an internal error.
    */
   readonly includeStackTrace?: boolean;
   /**
@@ -152,7 +157,9 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // A deliberately thrown HttpError is never masked, and a 4xx is left
       // alone — only a non-HttpError with status >= 500 is rewritten.
       let responseError = error;
+      let masked = false;
       if (maskInternalErrors && !isHttpError && error.statusCode >= 500) {
+        masked = true;
         // Preserve the log's cause chain without leaking the message. `cause`
         // is `unknown` on `Error`; only an `Error` value is a valid
         // `HttpError` cause, so narrow rather than cast.
@@ -166,7 +173,13 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       }
 
       const body = formatter(responseError, ctx);
-      if (includeStackTrace && error.stack !== undefined) {
+      // Masking wins over `includeStackTrace`. A stack's first line is
+      // `<name>: <message>`, so attaching the unmasked error's stack would put
+      // the SQL and its bound parameter values straight back into the body that
+      // was just masked — defeating the mask through the one option documented
+      // as unsafe in production. A masked error therefore carries no stack at
+      // all; the unmasked one is in the log, where `logErrors` already sent it.
+      if (includeStackTrace && !masked && error.stack !== undefined) {
         body.stack = error.stack;
       }
 
