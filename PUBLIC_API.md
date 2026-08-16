@@ -1901,14 +1901,17 @@ Cloudflare Workers. The plugin never creates a server and never touches a runtim
 
 Since M70a **the middleware pipeline runs before the handshake**. The adapter stores the router; the
 kernel terminal handler consults `IWebSocketService.routeUpgrade` after the pipeline has run without
-short-circuiting, and brands the request with an upgrade intent the adapter acts on. A guard that
-answers `401` therefore refuses the upgrade, metrics and security headers apply, and a draining
-application answers `503` — none of which happened before, which was the security defect M70a
-closed. Upgrade **detection** (the RFC 6455 header check) lives in the service's own router, inside
-its error-reporting wrapper, because `WsRouteTable` matches on path alone and a routing failure has
-no other place to be logged. A non-conformant upgrade carrying a body is refused `400` by the kernel
-before any handshake is attempted, so the behaviour is one thing on all four adapters instead of a
-runtime-specific failure inside the upgrade call.
+short-circuiting — and **before** route matching, so an application catch-all such as the SSR one
+`ReactRouterPlugin` mounts cannot shadow the upgrade. A guard that answers `401` therefore refuses
+the upgrade, metrics apply, and a draining application answers `503` — none of which happened
+before, which was the security defect M70a closed. On an **accepted** upgrade the adapter answers
+with the runtime's own `101`, which does not carry response headers a middleware set on
+`ctx.response` (security headers, `Set-Cookie`); a refused upgrade is an ordinary HTTP response and
+carries them all. Upgrade **detection** (the RFC 6455 header check) lives in the service's own
+router, inside its error-reporting wrapper, because `WsRouteTable` matches on path alone and a
+routing failure has no other place to be logged. A non-conformant upgrade carrying a body is refused
+`400` by the kernel before any handshake is attempted, so the behaviour is one thing on all four
+adapters instead of a runtime-specific failure inside the upgrade call.
 
 ### Registration
 
@@ -8145,10 +8148,10 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
   `application/json` and `application/proto`. A non-prefixed path returns `null` and falls through
   to the Hono pipeline unchanged.
 - **The middleware pipeline runs first.** Since M70a the kernel dispatches gRPC from its terminal
-  handler, after the pipeline and after route matching returns no match — so auth, metrics, security
-  headers and the shutdown drain apply to RPC exactly as to ordinary routes, and a draining
-  application answers `503`. `GrpcPlugin` no longer calls `adapter.setRpcHandler`, which is
-  deprecated and consulted by nothing.
+  handler, after the pipeline and **before** route matching — so auth, metrics, security headers and
+  the shutdown drain apply to RPC exactly as to ordinary routes, a draining application answers
+  `503`, and an application catch-all cannot shadow a claimed path. `GrpcPlugin` no longer calls
+  `adapter.setRpcHandler`, which is deprecated and consulted by nothing.
 - **`IGrpcService.claims(request)` is what keeps ordinary 404s intact.** `handleRequest` returns
   `Promise<Response>` and never `null`, so it answers `404` both for a path outside `basePath` and
   for a claimed path with no such procedure — the two are indistinguishable once dispatched. The
@@ -8156,7 +8159,9 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
   plugin would change every unmatched route in the application from the kernel's
   `{"error":"Not Found"}` (`application/json`) to gRPC's `Not Found` (`text/plain`). `claims` is
   optional on the contract for source compatibility, and the kernel treats an implementor that lacks
-  it as claiming nothing.
+  it as claiming nothing. A **root** `basePath` normalizes to `''`, which contains every path, so
+  there `claims` reports only registered procedures rather than the whole application — otherwise a
+  root-mounted service consulted before route matching would 404 every ordinary route.
 - **`IGrpcService.available` is now always `true`.** It used to report whether the resolved HTTP
   adapter implemented `setRpcHandler`; dispatch no longer depends on any adapter capability.
 - The request handed to `handleRequest` is **reconstructed** from the mapped `IRequest` (method,

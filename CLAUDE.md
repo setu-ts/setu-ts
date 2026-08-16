@@ -2409,11 +2409,43 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   and `runtime` re-exports it, deleting the duplicate rather than creating one — the kernel's
   hand-rolled copy had used a **substring** match on `Connection`, which claims `no-upgrade`.
 
+  **Code review then found the defect that would have hurt the most users, and it was one of
+  placement rather than logic.** Both helpers were consulted only inside `if (routeResult === null)`
+  — so protocol dispatch lost to ANY matching route, and `react-router-plugin` mounts a catch-all on
+  all seven verbs for SSR. Measured on a real app with `/*` registered: a WebSocket client was
+  answered `200 {"ssr":true}` and so was a gRPC client. That breaks exactly the two compositions the
+  framework advertises, full-stack SSR plus realtime and microservice plus gRPC, and it is narrower
+  but still real without a catch-all — a plain `app.router.get('/ws')` shadowed `ws.route('/ws')`.
+  Pre-M70a the adapter consulted both BEFORE routing, so this was a regression the milestone
+  introduced. Dispatch now runs before route matching and still inside the pipeline, which keeps the
+  security property and restores the precedence: a protocol switch is not an HTTP route, and a path
+  inside the gRPC `basePath` belongs to gRPC (M49). That move needed one companion change or it
+  would have traded the bug for a worse one — `basePath: '/'` normalizes to `''`, which CONTAINS
+  every path, so a prefix-only `claims()` consulted before routing would have `404`ed the whole
+  application; at the root it now reports only registered procedures, mirroring the asymmetry
+  `dispatchRequest` already documents. The two capability lookups also moved from try/catch around
+  `get` to `has`, since they now run per request rather than per 404.
+
+  Two smaller review findings: a third-party upgrade router's throw was discarded although the
+  kernel has a logger eight lines away (the pre-M70a rationale — "the adapter holds no logger" — no
+  longer applies), now reported through the same channel as a suppressed hook error; and an
+  **accepted** upgrade is answered by the runtime's own `101`, which carries none of the response
+  headers a middleware wrote on `ctx.response` — measured: `x-security` and `Set-Cookie` present on
+  a 404, both absent on the 101. That is a real limit rather than a bug (the socket is taken over
+  before there is a response to decorate), but three doc sites claimed security headers "apply" to
+  upgrades, so all three are scoped to say the pipeline RUNS — which is what lets a guard refuse —
+  and a refused upgrade carries everything. Writing the shadowing test also caught a
+  contract-violating double of my own: the fake `IWebSocketService` accepted a plain GET that a real
+  one declines, which would have made the control pass for the wrong reason; it now applies the same
+  RFC 6455 detection the real service does.
+
   Verified past the gates: a **real socket** on Deno completes a `hello`/`echo:ping` round trip and
   an unauthenticated one is refused with the guard observed running; the 404 body and content-type
   are byte-identical with and without `GrpcPlugin`; an upgrade with a body is `400` both with and
-  without `content-length`; and the drain answers `503` on both protocols. Four negative controls
-  were each observed failing and reverted) — complete (PR pending)
+  without `content-length`; a WebSocket and a gRPC call both survive an SSR catch-all while that
+  catch-all still serves every other path; a root-mounted gRPC service leaves ordinary routes alone
+  while still serving its own procedures; and the drain answers `503` on both protocols. Six
+  negative controls were each observed failing and reverted) — complete (PR pending)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`

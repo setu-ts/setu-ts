@@ -15,7 +15,11 @@ All notable changes to this project are documented here. The format follows
   write through one, metrics and security headers were absent on both, and RPC kept answering `200`
   through a shutdown drain while ordinary paths answered `503`. Every inbound request now runs the
   pipeline first; the handshake or RPC dispatch happens only in the kernel's terminal handler, after
-  the pipeline declines to short-circuit. No application change is required.
+  the pipeline declines to short-circuit, and **before** route matching so an application catch-all
+  cannot shadow either. No application change is required. Note that an **accepted** upgrade is
+  answered by the runtime's own `101`, which does not carry response headers a middleware wrote on
+  `ctx.response`; the pipeline still runs, so a guard can refuse, and a refused upgrade is an
+  ordinary HTTP response carrying everything.
 
 ### Added
 

@@ -6,8 +6,9 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, isWebSocketUpgradeRequest } from '@setu-ts/common';
 import type {
+  ILogger,
   IPlugin,
   IPluginContext,
   IWebSocketService,
@@ -53,12 +54,20 @@ function sinkProbe(): SinkProbe {
  * A minimal `IWebSocketService` stand-in. Only the members the kernel terminal
  * handler reads are implemented; the rest throw, so a test that starts
  * depending on them fails loudly rather than reading a silent default.
+ *
+ * The supplied router is wrapped in the SAME RFC 6455 detection a real
+ * `IWebSocketService` applies (`WebSocketService.#route` calls it first), so
+ * this double cannot accept a plain GET that the real service would decline —
+ * which would make a shadowing test pass for the wrong reason.
  */
 function wsPlugin(
   routeUpgrade: (request: Request) => Promise<WebSocketUpgradeDecision | null>,
 ): IPlugin {
+  const detecting = (request: Request): Promise<WebSocketUpgradeDecision | null> =>
+    isWebSocketUpgradeRequest(request.headers) ? routeUpgrade(request) : Promise.resolve(null);
+
   const service = {
-    routeUpgrade,
+    routeUpgrade: detecting,
     available: true,
     connectionCount: 0,
     route: () => {
@@ -236,11 +245,127 @@ describe('Pipeline runs for upgrade requests (M70a)', () => {
     });
     await app.start();
 
-    const result = await app.inject({ method: 'GET', url: 'http://localhost/nope' });
+    // A genuine upgrade request, on a path the router does not own.
+    const result = await app.inject({
+      method: 'GET',
+      url: 'http://localhost/nope',
+      headers: UPGRADE_HEADERS,
+    });
 
     expect(result.statusCode).toBe(404);
     expect(result.body).toBe('{"error":"Not Found"}');
     expect(consulted).toBe(1);
+
+    await app.stop();
+  });
+
+  it('upgrades under a catch-all route rather than letting SSR shadow it', async () => {
+    // `react-router-plugin` mounts a catch-all on all seven verbs for SSR, and
+    // `static-plugin`'s SPA fallback and any hand-written 404 route do the
+    // same. Deciding the upgrade only when NOTHING matched let all of them
+    // shadow it: a WebSocket client was answered with an HTML page. A protocol
+    // switch outranks an HTTP route, so dispatch runs before route matching.
+    const probe = sinkProbe();
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        wsPlugin((request) =>
+          Promise.resolve(
+            new URL(request.url).pathname === '/ws' ? { accept: true, sink: probe.sink } : null,
+          )
+        ),
+      ],
+    });
+    app.router.get('/*', (ctx) => ctx.response.json({ ssr: true }));
+    await app.start();
+
+    const upgraded = await app.inject({
+      method: 'GET',
+      url: 'http://localhost/ws',
+      headers: UPGRADE_HEADERS,
+    });
+    // The catch-all did NOT answer. `inject()` performs no handshake, so what
+    // this pins is that the SSR handler never ran.
+    expect(upgraded.body).not.toContain('ssr');
+
+    // The control: the same catch-all still serves everything else.
+    const ordinary = await app.inject({ method: 'GET', url: 'http://localhost/page' });
+    expect(ordinary.statusCode).toBe(200);
+    expect(ordinary.json<{ ssr: boolean }>().ssr).toBe(true);
+
+    await app.stop();
+  });
+
+  it('does not let an HTTP route on the same path shadow the upgrade', async () => {
+    const probe = sinkProbe();
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        wsPlugin(() => Promise.resolve({ accept: true, sink: probe.sink })),
+      ],
+    });
+    app.router.get('/ws', (ctx) => ctx.response.json({ http: true }));
+    await app.start();
+
+    const upgraded = await app.inject({
+      method: 'GET',
+      url: 'http://localhost/ws',
+      headers: UPGRADE_HEADERS,
+    });
+    expect(upgraded.body).not.toContain('http');
+
+    // The control: a plain GET on that same path still reaches the HTTP route,
+    // so the upgrade path has not simply swallowed it.
+    const plain = await app.inject({ method: 'GET', url: 'http://localhost/ws' });
+    expect(plain.json<{ http: boolean }>().http).toBe(true);
+
+    await app.stop();
+  });
+
+  it('reports an upgrade-router failure through the registered logger', async () => {
+    // The framework's own service logs at the source; this covers a
+    // third-party `IWebSocketService` that does not. The adapter-side backstop
+    // this replaces discarded the cause because it had no logger — the kernel
+    // has one, so silence here would be a choice.
+    const errors: { message: string; meta: unknown }[] = [];
+    const loggerPlugin: IPlugin = {
+      name: 'fake-logger',
+      version: '1.0.0',
+      provides: [CAPABILITIES.LOGGER],
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.LOGGER, {
+          debug: () => {},
+          info: () => {},
+          warn: () => {},
+          error: (message: string, meta?: unknown) => errors.push({ message, meta }),
+          child: () => {
+            throw new Error('not used');
+          },
+        } as unknown as ILogger);
+      },
+    };
+
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        loggerPlugin,
+        wsPlugin(() => {
+          throw new Error('route selection blew up');
+        }),
+      ],
+    });
+    await app.start();
+
+    const result = await app.inject({
+      method: 'GET',
+      url: 'http://localhost/ws',
+      headers: UPGRADE_HEADERS,
+    });
+
+    expect(result.statusCode).toBe(500);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toBe('WebSocket upgrade router threw and was refused');
+    expect((errors[0]?.meta as { error: string }).error).toBe('route selection blew up');
 
     await app.stop();
   });
