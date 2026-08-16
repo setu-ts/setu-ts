@@ -63,6 +63,17 @@ export interface IRequest {
    */
   signal?: AbortSignal;
   /**
+   * The undisturbed web-standard `Request`, preserved for WebSocket upgrade
+   * and gRPC dispatch after the middleware pipeline.
+   *
+   * Populated by the HTTP adapter before the body is consumed by the
+   * framework mapping. Optional because injected or test requests may not
+   * carry one.
+   *
+   * @since 0.3.0
+   */
+  readonly raw?: Request;
+  /**
    * Reads and parses the body as JSON.
    *
    * @typeParam T - The expected body shape (validate before trusting)
@@ -231,6 +242,17 @@ export interface IRequestContext {
    * @since 0.2.0
    */
   readonly signal: AbortSignal;
+  /**
+   * The undisturbed web-standard `Request`, preserved for WebSocket upgrade
+   * and gRPC dispatch after the middleware pipeline.
+   *
+   * Threaded from {@linkcode IRequest.raw} by the kernel's request-context
+   * factory. Absent when the adapter did not provide one (injected or test
+   * requests).
+   *
+   * @since 0.3.0
+   */
+  readonly raw?: Request;
 }
 
 /**
@@ -381,6 +403,117 @@ export type SecurityRequirement = Readonly<Record<string, readonly string[]>>;
  * @since 0.2.0
  */
 export const SECURITY_METADATA: unique symbol = Symbol.for('setu.security.metadata');
+
+/**
+ * Key under which the kernel terminal handler brands an {@linkcode IRequest}
+ * with a WebSocket upgrade intent.
+ *
+ * Created with `Symbol.for`, not `Symbol()`, so two copies of this package in
+ * one process resolve the same key — the {@linkcode SECURITY_METADATA}
+ * precedent.
+ *
+ * The `IRequest` is the channel rather than `IRequestContext.state`, and that
+ * is a correctness requirement rather than a preference: the HTTP adapter
+ * holds the `IRequest` it built and hands to the framework handler, and never
+ * sees the `IRequestContext` — the kernel creates the context internally and
+ * discards it when the handler returns. There is no path by which a value
+ * written to `ctx.state` could reach the adapter that must perform the
+ * handshake.
+ *
+ * Prefer {@linkcode setUpgradeIntent} and {@linkcode upgradeIntentOf} over
+ * touching this directly; the symbol is exported so a custom adapter outside
+ * `@setu-ts/runtime` can read the brand.
+ *
+ * @since 0.3.0
+ */
+export const UPGRADE_INTENT: unique symbol = Symbol.for('setu.upgrade.intent');
+
+/**
+ * The WebSocket upgrade intent the kernel terminal handler brands onto an
+ * {@linkcode IRequest} under {@linkcode UPGRADE_INTENT}, for the HTTP adapter
+ * to act on once the middleware pipeline has run without short-circuiting.
+ *
+ * @since 0.3.0
+ */
+export interface WebSocketUpgradeIntent {
+  /** The sink the adapter binds its native socket events into. */
+  readonly sink: import('./services/websocket.ts').WebSocketEventSink;
+  /** The negotiated subprotocol to echo back, when one was selected. */
+  readonly protocol?: string | undefined;
+}
+
+/** The private brand shape carried on an {@linkcode IRequest}. */
+type UpgradeBranded = { [UPGRADE_INTENT]?: WebSocketUpgradeIntent };
+
+/**
+ * Brands a request with a WebSocket upgrade intent for the HTTP adapter to
+ * act on after the framework handler returns.
+ *
+ * Called by the kernel terminal handler once the pipeline has run without
+ * short-circuiting and the upgrade router has accepted.
+ *
+ * @param request - The framework request the adapter built
+ * @param intent - The sink and negotiated subprotocol
+ * @since 0.3.0
+ */
+export function setUpgradeIntent(request: IRequest, intent: WebSocketUpgradeIntent): void {
+  (request as IRequest & UpgradeBranded)[UPGRADE_INTENT] = intent;
+}
+
+/**
+ * Reads the WebSocket upgrade intent an adapter should act on, or `undefined`
+ * when the pipeline did not ask for an upgrade.
+ *
+ * @param request - The framework request the adapter passed to the handler
+ * @returns The intent, or `undefined` when none was recorded
+ * @since 0.3.0
+ */
+export function upgradeIntentOf(request: IRequest): WebSocketUpgradeIntent | undefined {
+  return (request as IRequest & UpgradeBranded)[UPGRADE_INTENT];
+}
+
+/**
+ * Reports whether a set of request headers describes an RFC 6455 WebSocket
+ * upgrade.
+ *
+ * Both conditions are required, per RFC 6455 §4.2.1: `Upgrade` must equal
+ * `websocket` (case-insensitively), and `Connection` must contain the
+ * `upgrade` token. `Connection` is a comma-separated list — proxies routinely
+ * send `keep-alive, Upgrade` — so it is matched token-wise rather than by
+ * substring, which would also match a header value such as `no-upgrade`.
+ *
+ * Lives here rather than in `@setu-ts/runtime` because the kernel decides
+ * whether a request is an upgrade (after the pipeline runs) while the adapters
+ * still need the identical rule, and the kernel does not depend on the runtime
+ * package. A pure predicate is exactly what `common` is for (AI_GUIDELINES
+ * §2.1); `@setu-ts/runtime` re-exports this one rather than keeping a second
+ * copy (§11.1).
+ *
+ * @param headers - The request headers
+ * @returns `true` when the request asks for a WebSocket upgrade
+ * @example
+ * ```typescript
+ * if (isWebSocketUpgradeRequest(request.headers)) {
+ *   // consult the upgrade router
+ * }
+ * ```
+ * @since 0.3.0
+ */
+export function isWebSocketUpgradeRequest(headers: Headers): boolean {
+  const upgrade = headers.get('upgrade');
+  if (upgrade === null || upgrade.trim().toLowerCase() !== 'websocket') {
+    return false;
+  }
+
+  const connection = headers.get('connection');
+  if (connection === null) {
+    return false;
+  }
+
+  return connection
+    .split(',')
+    .some((token) => token.trim().toLowerCase() === 'upgrade');
+}
 
 /**
  * What a middleware function enforces, for documentation generators.

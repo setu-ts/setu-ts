@@ -134,12 +134,13 @@ export type WebSocketUpgradeDecision =
   };
 
 /**
- * Consulted by an HTTP adapter for every inbound WebSocket upgrade request,
- * before the request reaches the ordinary middleware pipeline.
+ * Consulted by an HTTP adapter for every inbound WebSocket upgrade request.
  *
- * Returning `null` means "this is not a WebSocket route" and the adapter falls
- * through to normal HTTP handling, so registering a router never changes the
- * behavior of non-WebSocket traffic.
+ * After M70a, the upgrade router is called through the kernel middleware
+ * pipeline (via {@linkcode UPGRADE_INTENT}), not before it. Returning `null`
+ * means "this is not a WebSocket route" and the adapter falls through to
+ * normal HTTP handling, so registering a router never changes the behavior
+ * of non-WebSocket traffic.
  *
  * @param request - The native, undisturbed upgrade request
  * @returns The decision, or `null` to fall through to the HTTP pipeline
@@ -380,6 +381,16 @@ export interface IWebSocketService {
    * @returns The room
    */
   room(name: string): WebSocketRoom;
+  /**
+   * Consults the internal upgrade router for an inbound request. Used by the
+   * kernel terminal handler to decide whether to upgrade after the middleware
+   * pipeline runs.
+   *
+   * @param request - The native, undisturbed upgrade request
+   * @returns The decision, or `null` to fall through
+   * @since 0.3.0
+   */
+  routeUpgrade?(request: Request): Promise<WebSocketUpgradeDecision | null>;
   /** Whether the underlying HTTP adapter can perform WebSocket upgrades. */
   readonly available: boolean;
   /** Current number of open connections across all routes. */

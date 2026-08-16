@@ -10,80 +10,27 @@ const sink: WebSocketEventSink = {
   onError: () => {},
 };
 
-function upgradeRequest(url = 'http://localhost/ws'): Request {
-  return new Request(url, { headers: { upgrade: 'websocket', connection: 'Upgrade' } });
-}
-
 describe('UpgradeRouterStore', () => {
   it('starts with no router installed', () => {
     expect(new UpgradeRouterStore().hasRouter).toBe(false);
   });
 
-  it('falls through when no router is installed', async () => {
-    const store = new UpgradeRouterStore();
-
-    expect(await store.consult(upgradeRequest())).toBeNull();
-  });
-
-  it('returns the router decision for an upgrade request', async () => {
+  it('reports a router once one is installed', () => {
     const store = new UpgradeRouterStore();
     store.set(() => Promise.resolve({ accept: true, sink }));
 
-    const decision = await store.consult(upgradeRequest());
-
-    expect(decision).toEqual({ accept: true, sink });
+    // `hasRouter` is the only thing an adapter still reads: Node attaches its
+    // raw `upgrade` listener only when a router exists, so a plain HTTP
+    // application never loads `ws`. The routing decision itself moved to the
+    // kernel in M70a, after the middleware pipeline.
     expect(store.hasRouter).toBe(true);
   });
 
-  it('returns a rejection unchanged', async () => {
-    const store = new UpgradeRouterStore();
-    store.set(() => Promise.resolve({ accept: false, status: 503 }));
-
-    expect(await store.consult(upgradeRequest())).toEqual({ accept: false, status: 503 });
-  });
-
-  it('never consults the router for a non-upgrade request', async () => {
-    const store = new UpgradeRouterStore();
-    let calls = 0;
-    store.set(() => {
-      calls++;
-      return Promise.resolve({ accept: true, sink });
-    });
-
-    const decision = await store.consult(new Request('http://localhost/ws'));
-
-    expect(decision).toBeNull();
-    expect(calls).toBe(0);
-  });
-
-  it('passes a router null through as a fall-through', async () => {
-    const store = new UpgradeRouterStore();
-    store.set(() => Promise.resolve(null));
-
-    expect(await store.consult(upgradeRequest())).toBeNull();
-  });
-
-  it('converts a throwing router into a 500 refusal rather than crashing the serve loop', async () => {
-    const store = new UpgradeRouterStore();
-    store.set(() => {
-      throw new Error('route selection blew up');
-    });
-
-    expect(await store.consult(upgradeRequest())).toEqual({ accept: false, status: 500 });
-  });
-
-  it('converts a rejecting router into a 500 refusal', async () => {
-    const store = new UpgradeRouterStore();
-    store.set(() => Promise.reject(new Error('async failure')));
-
-    expect(await store.consult(upgradeRequest())).toEqual({ accept: false, status: 500 });
-  });
-
-  it('replaces a previously installed router', async () => {
+  it('replaces a previously installed router', () => {
     const store = new UpgradeRouterStore();
     store.set(() => Promise.resolve({ accept: false, status: 400 }));
     store.set(() => Promise.resolve({ accept: false, status: 503 }));
 
-    expect(await store.consult(upgradeRequest())).toEqual({ accept: false, status: 503 });
+    expect(store.hasRouter).toBe(true);
   });
 });

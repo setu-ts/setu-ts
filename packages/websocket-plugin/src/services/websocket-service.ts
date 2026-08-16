@@ -27,7 +27,7 @@ import type {
   WebSocketRouteOptions,
   WebSocketUpgradeDecision,
 } from '@setu-ts/common';
-import { decodeFrameData, encodeFrameData } from '@setu-ts/common';
+import { decodeFrameData, encodeFrameData, isWebSocketUpgradeRequest } from '@setu-ts/common';
 import { WebSocketConnection } from '../connection/websocket-connection.ts';
 import { RoomRegistry } from '../rooms/room-registry.ts';
 import type { WsRoute } from '../routing/ws-route-table.ts';
@@ -223,6 +223,24 @@ export class WebSocketService implements IWebSocketService {
     this.#heartbeat.start();
   }
 
+  /**
+   * The upgrade router the kernel terminal handler consults after the
+   * middleware pipeline has run without short-circuiting.
+   *
+   * Delegates to {@linkcode WebSocketService.createUpgradeRouter}, which is
+   * the reporting wrapper: a routing failure is written to the logger here, at
+   * its source, before it becomes a refusal. Calling `#route` directly would
+   * make this the one entry point whose failures are invisible — the kernel
+   * has no logger to write them to.
+   *
+   * @param request - The native, undisturbed upgrade request
+   * @returns The decision, or `null` when this is not a WebSocket route
+   * @since 0.3.0
+   */
+  routeUpgrade(request: Request): Promise<WebSocketUpgradeDecision | null> {
+    return this.createUpgradeRouter()(request);
+  }
+
   room(name: string): WebSocketRoom {
     return this.#rooms.get(name);
   }
@@ -302,6 +320,17 @@ export class WebSocketService implements IWebSocketService {
    * @returns The decision, or `null` when this is not a WebSocket route
    */
   #route(request: Request): WebSocketUpgradeDecision | null {
+    // Upgrade detection lives here rather than in the caller. Before M70a the
+    // adapter's `UpgradeRouterStore` filtered non-upgrade requests out before
+    // consulting, and `WsRouteTable.match` keys on PATH ALONE — so without this
+    // an ordinary GET on a WebSocket path would be upgraded. Putting it inside
+    // `#route` also puts it inside `createUpgradeRouter`'s reporting wrapper,
+    // so a header read that throws is logged rather than escaping into the
+    // kernel's generic 500 with nothing written anywhere.
+    if (!isWebSocketUpgradeRequest(request.headers)) {
+      return null;
+    }
+
     const match = this.#routes.match(request);
     if (match === null) {
       return null;

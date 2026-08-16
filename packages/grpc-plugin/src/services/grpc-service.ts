@@ -12,14 +12,16 @@ import type {
   GrpcServiceDefinition,
   IGrpcService,
   IHealthService,
-  IHttpAdapter,
   RpcFetchHandler,
   ServiceImpl,
 } from '@setu-ts/common';
-import { GrpcUnavailableError } from '../errors/grpc-errors.ts';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
-import { dispatchRequest, normalizeBasePath } from '../transports/rpc-dispatcher.ts';
+import {
+  dispatchRequest,
+  isWithinBasePath,
+  normalizeBasePath,
+} from '../transports/rpc-dispatcher.ts';
 import { buildConnectRouter, type ServiceEntry } from '../transports/connect-router-builder.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
@@ -28,8 +30,6 @@ export interface GrpcServiceOptions {
   readonly connectRuntime: ConnectRuntime;
   readonly embeddedDescriptors: EmbeddedDescriptors;
   readonly options: GrpcPluginOptions;
-  /** The resolved HTTP adapter; RPC is unavailable when it has no `setRpcHandler`. */
-  readonly adapter: IHttpAdapter | undefined;
   readonly healthService: IHealthService | undefined;
 }
 
@@ -59,8 +59,12 @@ export class GrpcService implements IGrpcService {
    */
   #servedPaths: ReadonlySet<string> = new Set();
 
-  /** Whether the HTTP adapter supports the RPC interceptor seam. */
-  readonly available: boolean;
+  /**
+   * Whether gRPC dispatch is available. Always `true` since the kernel now
+   * resolves `IGrpcService` from the service registry and dispatches after
+   * the middleware pipeline (M70a). The previous adapter-based seam is retired.
+   */
+  readonly available = true;
 
   constructor(init: GrpcServiceOptions) {
     this.#connectRuntime = init.connectRuntime;
@@ -68,7 +72,6 @@ export class GrpcService implements IGrpcService {
     this.#options = init.options;
     this.#healthService = init.healthService;
     this.#basePath = normalizeBasePath(init.options.basePath ?? '/grpc');
-    this.available = typeof init.adapter?.setRpcHandler === 'function';
 
     for (const entry of init.options.services ?? []) {
       this.addService(
@@ -97,25 +100,70 @@ export class GrpcService implements IGrpcService {
   }
 
   /**
-   * Handles an RPC request directly, bypassing the adapter seam.
+   * Whether this service claims the request's path — that is, whether the path
+   * lies inside the configured `basePath`.
    *
-   * @throws {GrpcUnavailableError} When the adapter does not implement
-   *   `setRpcHandler` — a misconfiguration surfaces on use as well as at
-   *   startup.
+   * The kernel calls this before {@linkcode GrpcService.handleRequest}, which
+   * answers `404` for a claimed path with no matching procedure and therefore
+   * cannot itself be used to tell "not mine" from "mine, but unknown". Without
+   * this guard every unmatched route in the application would be answered by
+   * gRPC's plain-text `404` instead of the kernel's JSON one.
+   *
+   * A **root** `basePath` is the exception, and it is load-bearing: `''`
+   * contains every path, so a prefix test would claim the entire application.
+   * The kernel consults `claims` before route matching, so that would 404 every
+   * ordinary route. At the root this therefore claims only paths it can
+   * actually serve, mirroring the asymmetry `dispatchRequest` already
+   * documents — "not a known procedure" and "an ordinary application route"
+   * are indistinguishable there, so both fall through.
+   *
+   * Inside a non-root base path the prefix IS the claim, so an unknown
+   * procedure under `/grpc` answers gRPC's `404` rather than falling through to
+   * the application — the M49 behaviour.
+   *
+   * @param request - The native fetch request
+   * @returns `true` when this service will serve the request
+   * @since 0.3.0
+   */
+  claims(request: Request): boolean {
+    const path = new URL(request.url).pathname;
+    if (!isWithinBasePath(path, this.#basePath)) {
+      return false;
+    }
+    if (this.#basePath !== '') {
+      return true;
+    }
+    // Mounted at the root. After `close()` the router is gone and only the
+    // paths this server actually served may still be claimed — for their 503.
+    if (this.#closed) {
+      return this.#servedPaths.has(path);
+    }
+    return this.#buildDispatchMap().has(path);
+  }
+
+  /**
+   * Handles an RPC request directly.
+   *
+   * Returns a 404 response when the request does not match any registered
+   * service path. Callers routing traffic should consult
+   * {@linkcode GrpcService.claims} first.
    */
   handleRequest(request: Request): Promise<Response> {
-    if (!this.available) {
-      return Promise.reject(new GrpcUnavailableError());
-    }
     return Promise.resolve(this.#dispatch(request)).then(
       (response) => response ?? new Response('Not Found', { status: 404 }),
     );
   }
 
   /**
-   * The handler installed into `IHttpAdapter.setRpcHandler`. Returns `null` for
-   * any request outside `basePath`, so ordinary traffic falls through to Hono
-   * untouched.
+   * The handler that used to be installed into `IHttpAdapter.setRpcHandler`.
+   * Returns `null` for any request outside `basePath`.
+   *
+   * @deprecated Since M70a the kernel dispatches gRPC itself, after the
+   * middleware pipeline, so nothing installs this handler — the pre-pipeline
+   * interceptor was the security defect that change closed. Use
+   * {@linkcode GrpcService.claims} together with
+   * {@linkcode GrpcService.handleRequest} instead. Retained because
+   * {@linkcode GrpcService} is published surface (AI_GUIDELINES §9.2).
    */
   createFetchHandler(): RpcFetchHandler {
     return (request: Request): Promise<Response | null> => Promise.resolve(this.#dispatch(request));
@@ -137,6 +185,25 @@ export class GrpcService implements IGrpcService {
     this.#dispatchMap = null;
   }
 
+  /**
+   * The lazily-built router, shared by {@linkcode GrpcService.claims} and
+   * `#dispatch` so the two can never disagree about which paths are served.
+   * Built on demand because `addService` may be called after `register()`, and
+   * cached until the next `addService` invalidates it.
+   */
+  #buildDispatchMap(): Map<string, (request: Request) => Promise<Response>> {
+    this.#dispatchMap ??= buildConnectRouter({
+      connectRuntime: this.#connectRuntime,
+      basePath: this.#basePath,
+      reflection: this.#options.reflection ?? true,
+      health: this.#options.health ?? true,
+      services: this.#services,
+      embeddedDescriptors: this.#embeddedDescriptors,
+      healthService: this.#healthService,
+    }).dispatchMap;
+    return this.#dispatchMap;
+  }
+
   /** Resolves a request against the dispatch map, building the router on demand. */
   #dispatch(request: Request): Response | Promise<Response | null> | null {
     if (this.#closed) {
@@ -147,17 +214,6 @@ export class GrpcService implements IGrpcService {
         ? new Response('Service Unavailable', { status: 503 })
         : null;
     }
-    if (this.#dispatchMap === null) {
-      this.#dispatchMap = buildConnectRouter({
-        connectRuntime: this.#connectRuntime,
-        basePath: this.#basePath,
-        reflection: this.#options.reflection ?? true,
-        health: this.#options.health ?? true,
-        services: this.#services,
-        embeddedDescriptors: this.#embeddedDescriptors,
-        healthService: this.#healthService,
-      }).dispatchMap;
-    }
-    return dispatchRequest(request, this.#dispatchMap, this.#basePath);
+    return dispatchRequest(request, this.#buildDispatchMap(), this.#basePath);
   }
 }

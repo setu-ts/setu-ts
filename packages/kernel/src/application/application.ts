@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, setUpgradeIntent } from '@setu-ts/common';
 import type {
   CliCommandHandler,
   DecoratorHandler,
@@ -20,12 +20,16 @@ import type {
   IMiddlewareApi,
   IPlugin,
   IPluginContext,
+  IRequest,
+  IRequestContext,
   IRouterApi,
   IRuntimeServices,
+  IWebSocketService,
   MetricConfig,
   StartOptions,
+  WebSocketUpgradeDecision,
 } from '@setu-ts/common';
-import type { IRequest } from '@setu-ts/common';
+import type { IGrpcService } from '@setu-ts/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
 import { executeChain } from '../pipeline/execute-chain.ts';
@@ -452,6 +456,28 @@ class Application implements IKernelApplication {
     // createRequestContext so its URL-parse failure is surfaced as a 400.
     const fullUrl = request.url.startsWith('/') ? `http://localhost${request.url}` : request.url;
 
+    // An HTTP adapter attaches the undisturbed web `Request` as `IRequest.raw`,
+    // and the terminal handler reads it to decide a WebSocket upgrade or gRPC
+    // dispatch. Omitting it here would make `inject()` structurally unable to
+    // reach either path — the request would silently fall through to the 404
+    // and a test could never tell the difference.
+    //
+    // Built defensively: a malformed URL must still reach
+    // `createRequestContext`, whose parse failure is surfaced as a 400, rather
+    // than throwing out of `inject()` here.
+    let raw: Request | undefined;
+    try {
+      raw = new Request(fullUrl, {
+        method: request.method,
+        headers,
+        ...(bodyStr !== undefined && request.method !== 'GET' && request.method !== 'HEAD'
+          ? { body: bodyStr }
+          : {}),
+      });
+    } catch {
+      raw = undefined;
+    }
+
     const syntheticRequest: IRequest = {
       method: request.method as IRequest['method'],
       url: fullUrl,
@@ -459,6 +485,7 @@ class Application implements IKernelApplication {
         return new URL(fullUrl).pathname;
       },
       headers,
+      ...(raw !== undefined ? { raw } : {}),
       json<T>(): Promise<T> {
         return Promise.resolve(JSON.parse(bodyStr ?? '{}'));
       },
@@ -552,6 +579,29 @@ class Application implements IKernelApplication {
       // applies the kernel's own deterministic tie-break for equal-specificity
       // routes (§3.6 of the M22 plan).
       await this.#pipeline.execute(ctx, async () => {
+        // Protocol dispatch runs BEFORE route matching, and after the pipeline.
+        //
+        // "After the pipeline" is the M70a security property: auth, metrics and
+        // the shutdown drain apply to an upgrade and to an RPC exactly as they
+        // do to a `GET /users`.
+        //
+        // "Before route matching" is precedence, and it is not optional. A
+        // WebSocket upgrade is a protocol switch rather than an HTTP route, and
+        // a path inside the gRPC `basePath` belongs to gRPC (M49). Deciding
+        // these only when nothing matched lets ANY catch-all shadow both — and
+        // `react-router-plugin` mounts exactly that, on all seven verbs, for
+        // SSR: a full-stack application would answer a WebSocket client with an
+        // HTML page and a gRPC client with the same. Both helpers decline
+        // cheaply when their capability is absent or does not claim the
+        // request, so ordinary traffic reaches the router unchanged.
+        if (await this.#tryUpgrade(ctx)) {
+          return;
+        }
+
+        if (await this.#tryGrpc(ctx)) {
+          return;
+        }
+
         const url = new URL(request.url);
         const routeResult = this.#router.match(request.method, url.pathname);
 
@@ -606,6 +656,161 @@ class Application implements IKernelApplication {
   }
 
   /**
+   * Tries a WebSocket upgrade when no route matched and the request carries a
+   * raw `Request`. Consults the `IWebSocketService`'s upgrade router; when it
+   * accepts, brands the `IRequest` with the intent so the HTTP adapter can
+   * perform the handshake after the framework handler returns.
+   *
+   * The brand goes on the `IRequest`, not `ctx.state`, because the adapter
+   * holds the former and never sees the context — see {@linkcode
+   * UPGRADE_INTENT}.
+   *
+   * @param ctx - The live request context
+   * @returns `true` when this handler answered (intent recorded, or refused)
+   */
+  async #tryUpgrade(ctx: IRequestContext): Promise<boolean> {
+    const raw = ctx.raw;
+    // A custom adapter may omit `raw`; treat that as "no upgrade" and fall
+    // through to the 404 rather than throwing.
+    if (raw === undefined) {
+      return false;
+    }
+
+    // Resolved optionally — absent the capability, nothing changes. Probed with
+    // `has` rather than a try/catch around `get`, because this now runs on
+    // EVERY request rather than only on an unmatched one, and throw-driven
+    // control flow on the hot path is what AI_GUIDELINES §14 exists to stop.
+    if (!this.#registry.has(CAPABILITIES.WEBSOCKET)) {
+      return false;
+    }
+    const wsService = this.#registry.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+
+    if (wsService.routeUpgrade === undefined) {
+      return false;
+    }
+
+    // Upgrade detection is the ROUTER's job, not the kernel's — it returns
+    // `null` for anything that is not an upgrade on a route it owns. Doing the
+    // header check here as well would duplicate the rule (§11.1) and, worse,
+    // would move a throwing header read outside the service's own reporting
+    // wrapper, so a routing failure would be logged nowhere.
+    //
+    // This backstop is for a third-party service that does not report: before
+    // M70a the adapter-side `UpgradeRouterStore` caught here, and letting a
+    // routing bug escape into the generic 500 would lose the distinction
+    // between "routing failed" and "the handler threw".
+    let decision: WebSocketUpgradeDecision | null;
+    try {
+      decision = await wsService.routeUpgrade(raw);
+    } catch (cause) {
+      // Reported, not swallowed. The pre-M70a backstop in the adapter's
+      // `UpgradeRouterStore` discarded the cause because the adapter holds no
+      // logger; the kernel does, so silence here would be a choice rather than
+      // a constraint.
+      this.#reportUpgradeRouterFailure(cause);
+      ctx.response.status(500).json({ error: 'Internal Server Error' });
+      return true;
+    }
+
+    if (decision === null) {
+      return false;
+    }
+
+    if (!decision.accept) {
+      ctx.response.status(decision.status).json({ error: 'Upgrade rejected' });
+      return true;
+    }
+
+    // RFC 6455 §4.1 forbids a body on the handshake, and the framework mapping
+    // has already disturbed it via `arrayBuffer()`. Refusing here makes the
+    // behaviour one thing on all four adapters rather than a runtime-specific
+    // failure inside the upgrade call. Read from the MAPPED body rather than
+    // `content-length`, which is absent both on an in-process `Request` and on
+    // any chunked upload.
+    if ((await ctx.request.bytes()).length > 0) {
+      // The router already accepted, so it may be holding a reserved
+      // connection slot for this socket. RFC 6455 close code 1006 (abnormal
+      // closure) is the honest signal that no connection was ever established.
+      decision.sink.onClose({ code: 1006, reason: 'Upgrade request carried a body' });
+      ctx.response.status(400).json({ error: 'Bad Request' });
+      return true;
+    }
+
+    setUpgradeIntent(ctx.request, {
+      sink: decision.sink,
+      ...(decision.protocol !== undefined ? { protocol: decision.protocol } : {}),
+    });
+    return true;
+  }
+
+  /**
+   * Tries gRPC dispatch when no route matched. Resolves `IGrpcService` from
+   * the registry, asks whether it claims the path, and dispatches with a
+   * reconstructed web `Request`.
+   *
+   * @param ctx - The live request context
+   * @returns `true` when gRPC answered (handler should return)
+   */
+  async #tryGrpc(ctx: IRequestContext): Promise<boolean> {
+    const raw = ctx.raw;
+    if (raw === undefined) {
+      return false;
+    }
+
+    // Resolved optionally — absent the capability, nothing changes. `has`
+    // rather than a try/catch around `get`, for the reason given in
+    // `#tryUpgrade`.
+    if (!this.#registry.has(CAPABILITIES.GRPC)) {
+      return false;
+    }
+    const grpcService = this.#registry.get<IGrpcService>(CAPABILITIES.GRPC);
+
+    if (!grpcService.available) {
+      return false;
+    }
+
+    // Prefix guard, BEFORE dispatch. `handleRequest` returns `Promise<Response>`
+    // and never `null`, so without this every unmatched route in the
+    // application would be answered by gRPC's plain-text 404 instead of the
+    // kernel's own JSON one. An implementor that predates `claims` claims
+    // nothing, which is the safe default.
+    if (grpcService.claims === undefined || !grpcService.claims(raw)) {
+      return false;
+    }
+
+    // Reconstruct a web Request from the mapped IRequest: the original body is
+    // already consumed by `mapWebRequestToFrameworkRequest`. Cloning before the
+    // mapping would tax every request in the application to serve the gRPC
+    // minority. Trailers do not survive the round trip — M49 records that
+    // native gRPC-binary trailers work on no runtime this plugin runs on.
+    const bodyBytes = await ctx.request.bytes();
+    const grpcRequest = new Request(ctx.request.url, {
+      method: ctx.request.method,
+      headers: ctx.request.headers,
+      // A `Uint8Array` is a valid `BodyInit`, but its backing `ArrayBufferLike`
+      // is not narrowed to `ArrayBuffer` under this compiler configuration.
+      ...(bodyBytes.length > 0 ? { body: bodyBytes as unknown as BodyInit } : {}),
+    });
+
+    const response = await grpcService.handleRequest(grpcRequest);
+
+    // Map the gRPC Response to the framework response
+    const snapshot = await response.arrayBuffer();
+    const headers = new Headers();
+    for (const [key, value] of response.headers.entries()) {
+      headers.append(key, value);
+    }
+
+    const builder = ctx.response as ResponseBuilder;
+    builder.status(response.status);
+    for (const [key, value] of headers.entries()) {
+      builder.header(key, value);
+    }
+    builder.send(new Uint8Array(snapshot));
+    return true;
+  }
+
+  /**
    * Builds a bare `400 Bad Request` response for a client error detected
    * before request processing begins (a malformed request URL or a
    * malformed percent-escape in the path). Kept as a helper so both
@@ -616,6 +821,33 @@ class Application implements IKernelApplication {
     const builder = new ResponseBuilder();
     builder.status(400).json({ error: 'Bad Request' });
     return builder;
+  }
+
+  /**
+   * Surfaces an exception thrown by an `IWebSocketService`'s upgrade router.
+   *
+   * The framework's own service reports its failures at their source, where it
+   * has route context to add; this covers a third-party service that does not.
+   * Guarded exactly like {@linkcode Application.#reportSuppressedHookError}: a
+   * missing or itself-broken logger must not turn a refused upgrade into a
+   * crashed request.
+   *
+   * @param cause - Whatever the router threw
+   */
+  #reportUpgradeRouterFailure(cause: unknown): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      const err = cause instanceof Error ? cause : new Error(String(cause));
+      logger.error('WebSocket upgrade router threw and was refused', {
+        error: err.message,
+        stack: err.stack,
+      });
+    } catch {
+      // No safe channel remains — see #reportSuppressedHookError.
+    }
   }
 
   /**

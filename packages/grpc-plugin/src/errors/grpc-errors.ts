@@ -44,6 +44,12 @@ export class GrpcDescriptorError extends Error {
  * (i.e., `IHttpAdapter.setRpcHandler?` is not available) and an attempt
  * is made to handle a request directly through {@linkcode GrpcService.handleRequest}.
  *
+ * @deprecated Since M70a nothing throws this. gRPC dispatch no longer depends
+ * on any adapter capability: the kernel resolves `IGrpcService` from the
+ * service registry and dispatches after the middleware pipeline, so
+ * `handleRequest` is always serviceable and `IGrpcService.available` is
+ * unconditionally `true`. Retained because the class is published surface
+ * (AI_GUIDELINES §9.2); it will be removed in the next major release.
  * @since 0.3.0
  */
 export class GrpcUnavailableError extends Error {

@@ -1,6 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
+import { UPGRADE_INTENT } from '@setu-ts/common';
 import {
   bindCloudflareSocketToSink,
   buildUpgradeResponseInit,
@@ -10,7 +11,6 @@ import {
 } from '../../src/adapters/workers/cf-ws-upgrader.ts';
 import { CloudflareWorkersHttpAdapter } from '../../src/adapters/workers/cf-http-adapter.ts';
 
-/** A Workers-shaped socket driven by addEventListener after accept(). */
 function fakeServerSocket(): CloudflareServerSocket & {
   accepted: boolean;
   emit(type: string, event: unknown): void;
@@ -65,10 +65,7 @@ describe('bindCloudflareSocketToSink', () => {
   it('accepts the socket and signals open immediately', () => {
     const socket = fakeServerSocket();
     const sink = recordingSink();
-
     bindCloudflareSocketToSink(socket, sink);
-
-    // Workers emits no open event for the server half, so onOpen fires here.
     expect(socket.accepted).toBe(true);
     expect(sink.events).toEqual(['open:open']);
   });
@@ -77,11 +74,9 @@ describe('bindCloudflareSocketToSink', () => {
     const socket = fakeServerSocket();
     const sink = recordingSink();
     bindCloudflareSocketToSink(socket, sink);
-
     socket.emit('message', { data: 'hello' });
     socket.emit('error', new Error('bad frame'));
     socket.emit('close', { code: 1000, reason: 'bye' });
-
     expect(sink.events).toEqual([
       'open:open',
       'message:hello',
@@ -94,9 +89,7 @@ describe('bindCloudflareSocketToSink', () => {
     const socket = fakeServerSocket();
     const sink = recordingSink();
     bindCloudflareSocketToSink(socket, sink);
-
     socket.emit('close', {});
-
     expect(sink.events).toContain('close:1006:');
   });
 });
@@ -104,34 +97,25 @@ describe('bindCloudflareSocketToSink', () => {
 describe('createDefaultCloudflareWebSocketHost', () => {
   it('throws a clear error when WebSocketPair is absent from the runtime', () => {
     const host = createDefaultCloudflareWebSocketHost();
-
     expect(() => host.createPair()).toThrow('WebSocketPair is not available');
   });
 
   it('builds a 101 response', () => {
     const host = createDefaultCloudflareWebSocketHost();
-
     expect(host.createUpgradeResponse({ id: 'client-half' }).status).toBe(101);
   });
 
   it('echoes a negotiated subprotocol on the response', () => {
     const host = createDefaultCloudflareWebSocketHost();
-
     const response = host.createUpgradeResponse({}, 'chat');
-
     expect(response.headers.get('sec-websocket-protocol')).toBe('chat');
   });
 });
 
 describe('buildUpgradeResponseInit', () => {
-  // Asserted on the init object rather than on a constructed Response: the
-  // Workers-only `webSocket` member is dropped by every other runtime's
-  // Response constructor, so a round-trip would prove nothing here.
   it('hands the client half back under the Workers webSocket member', () => {
     const client = { id: 'client-half' };
-
     const init = buildUpgradeResponseInit(client);
-
     expect(init.status).toBe(101);
     expect(init.webSocket).toBe(client);
     expect(init.headers.get('sec-websocket-protocol')).toBeNull();
@@ -152,7 +136,6 @@ describe('createDefaultCloudflareWebSocketHost createPair', () => {
     };
     try {
       const pair = createDefaultCloudflareWebSocketHost().createPair();
-
       expect(pair.server).toBe(socket);
       expect(pair.client).toEqual({ id: 'client' });
     } finally {
@@ -173,7 +156,7 @@ describe('createDefaultCloudflareWebSocketHost createPair', () => {
   });
 });
 
-describe('CloudflareWorkersHttpAdapter WebSocket upgrade', () => {
+describe('CloudflareWorkersHttpAdapter WebSocket upgrade (post-M70a)', () => {
   function build() {
     const socket = fakeServerSocket();
     const responses: Response[] = [];
@@ -192,8 +175,68 @@ describe('CloudflareWorkersHttpAdapter WebSocket upgrade', () => {
     };
 
     const adapter = new CloudflareWorkersHttpAdapter(host);
+
+    return {
+      adapter,
+      socket,
+      responses,
+      calls: () => frameworkHandlerCalls,
+      incrementCalls: () => frameworkHandlerCalls++,
+    };
+  }
+
+  it('answers upgrade when framework handler writes UPGRADE_INTENT', async () => {
+    const { adapter, socket, calls, incrementCalls } = build();
+    const sink = recordingSink();
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
+
+    const response = await adapter.fetch(upgradeRequest());
+    expect(response.status).toBe(101);
+    expect(socket.accepted).toBe(true);
+    expect(sink.events).toEqual(['open:open']);
+    expect(calls()).toBe(1);
+  });
+
+  it('echoes the negotiated subprotocol', async () => {
+    const { adapter, incrementCalls } = build();
+    const sink = recordingSink();
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      incrementCalls();
+      const intent = { sink, protocol: 'json' };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
+
+    const response = await adapter.fetch(upgradeRequest());
+    expect(response.headers.get('sec-websocket-protocol')).toBe('json');
+  });
+
+  it('falls through to HTTP when no UPGRADE_INTENT', async () => {
+    const { adapter, incrementCalls } = build();
+
     adapter.setHandler((_request: IRequest): Promise<IResponse> => {
-      frameworkHandlerCalls++;
+      incrementCalls();
       return Promise.resolve({
         snapshot: () => ({
           streaming: false as const,
@@ -204,51 +247,9 @@ describe('CloudflareWorkersHttpAdapter WebSocket upgrade', () => {
       } as unknown as IResponse);
     });
 
-    return { adapter, socket, responses, calls: () => frameworkHandlerCalls };
-  }
-
-  it('answers an accepted upgrade with a 101 and accepts the server socket', async () => {
-    const { adapter, socket, calls } = build();
-    const sink = recordingSink();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
-
     const response = await adapter.fetch(upgradeRequest());
-
-    expect(response.status).toBe(101);
-    expect(socket.accepted).toBe(true);
-    expect(sink.events).toEqual(['open:open']);
-    expect(calls()).toBe(0);
-  });
-
-  it('echoes the negotiated subprotocol', async () => {
-    const { adapter } = build();
-    adapter.setUpgradeRouter(() =>
-      Promise.resolve({ accept: true, sink: recordingSink(), protocol: 'json' })
-    );
-
-    const response = await adapter.fetch(upgradeRequest());
-
-    expect(response.headers.get('sec-websocket-protocol')).toBe('json');
-  });
-
-  it('answers a rejection with the decision status', async () => {
-    const { adapter, calls } = build();
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: false, status: 400 }));
-
-    const response = await adapter.fetch(upgradeRequest());
-
-    expect(response.status).toBe(400);
-    expect(calls()).toBe(0);
-  });
-
-  it('falls through to the HTTP pipeline when the router returns null', async () => {
-    const { adapter, calls } = build();
-    adapter.setUpgradeRouter(() => Promise.resolve(null));
-
-    const response = await adapter.fetch(upgradeRequest());
-
     expect(response.status).toBe(200);
-    expect(calls()).toBe(1);
+    expect(await response.text()).toBe('http');
   });
 
   it('releases the sink when the pair cannot be created', async () => {
@@ -260,25 +261,34 @@ describe('CloudflareWorkersHttpAdapter WebSocket upgrade', () => {
       createUpgradeResponse: () => new Response(null, { status: 101 }),
     };
     const adapter = new CloudflareWorkersHttpAdapter(failingHost);
-    adapter.setUpgradeRouter(() => Promise.resolve({ accept: true, sink }));
+    let frameworkCalls = 0;
+
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      frameworkCalls++;
+      const intent = { sink };
+      (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
+      return Promise.resolve({
+        snapshot: () => ({
+          streaming: false as const,
+          status: 101,
+          headers: new Headers(),
+          body: null,
+        }),
+      } as unknown as IResponse);
+    });
 
     const response = await adapter.fetch(upgradeRequest());
-
-    // Without this the consumer's reserved slot would leak on every failed
-    // handshake, starving maxConnections.
     expect(response.status).toBe(500);
     expect(sink.events).toEqual(['close:1006:WebSocketPair is not available']);
   });
 
   it('still refuses listen, since Workers has no socket model', () => {
     const { adapter } = build();
-
     expect(() => adapter.listen(3000)).toThrow('no listen(port) model');
   });
 
   it('closes as a no-op', async () => {
     const { adapter } = build();
-
     await expect(adapter.close({})).resolves.toBeUndefined();
   });
 });

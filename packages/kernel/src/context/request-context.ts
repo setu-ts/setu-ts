@@ -73,6 +73,7 @@ export function createRequestContext(
   // have a live signal they can call .addEventListener('abort', …) on.
   const signal = request.signal ?? neverAbortingSignal();
 
+  const raw = request.raw;
   const ctx: IRequestContext = {
     id: runtime.uuid(),
     request,
@@ -85,6 +86,7 @@ export function createRequestContext(
     state: new Map(),
     startTime: runtime.hrtime(),
     signal,
+    ...(raw !== undefined ? { raw } : {}),
   };
 
   return {
