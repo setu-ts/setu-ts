@@ -171,8 +171,21 @@ the adapters emit an explicit null branch).
 
 **`contains` is a substring match, and its case sensitivity belongs to the database.** The Memory
 adapter and D1 match case-sensitively; a `LIKE`-based backend follows the column's collation, which
-is case-sensitive on PostgreSQL and case-insensitive on SQLite and most MySQL collations. `%` and
-`_` in the searched value are always data, never wildcards.
+is case-sensitive on PostgreSQL and case-insensitive on SQLite and most MySQL collations.
+
+**`%` and `_` in the searched value are data, never wildcards — and on the Prisma adapter the
+connector decides how that is achieved.** Memory (`includes`), Drizzle (`LIKE … ESCAPE '\'`) and D1
+(`instr`) honour it unconditionally. Prisma emits a bare `LIKE` with no `ESCAPE` clause, so the
+effective escape character is the connector's own default:
+
+| Prisma connector                                               | `contains` behaviour                                                                                                                                                                                                                                   |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `postgresql` / `postgres`, `mysql`, `sqlserver`, `cockroachdb` | Value escaped and matched literally — their `LIKE` defaults its escape character to backslash.                                                                                                                                                         |
+| `mongodb`                                                      | Value passed through unchanged — `contains` compiles to a `$regex` match, where `%` and `_` are already literal.                                                                                                                                       |
+| `sqlite`                                                       | **Refused** with `UnsupportedFilterOperatorError` — Prisma emits no `ESCAPE` clause and SQLite defines no default escape character, so a literal match is not expressible through Prisma's filter API. Use a raw query, or the Memory/Drizzle adapter. |
+
+When the connector cannot be determined the same error is thrown naming the `provider` option; pass
+`provider` (e.g. `provider: 'postgresql'`) in the adapter options to name it explicitly.
 
 ## Transactions
 

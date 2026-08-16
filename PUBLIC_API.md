@@ -875,11 +875,13 @@ requires an application-created `options.prismaClient`; it never imports or cons
 `DatabaseAdapterOptions.url` remains source-compatible but is deprecated for Prisma configuration.
 `DatabaseAdapterOptions.provider` (type `PrismaSqlProvider`) names the SQL connector the injected
 client is bound to. Only the `contains` filter is connector-sensitive: it is escaped on
-PostgreSQL/MySQL/SQL Server/CockroachDB and refused on SQLite (see the `contains` note above). When
-omitted, the adapter reads the client's active provider structurally at `connect()` time; if it
-cannot be determined, a `contains` filter throws `UnsupportedFilterOperatorError` naming this
-option, so pass it explicitly in that case. Drizzle requires both `options.drizzleInstance` and
-`options.drizzleTables`. The instance is a opaque `DrizzleDatabase<T>` configuration created by
+PostgreSQL/MySQL/SQL Server/CockroachDB, passed through unchanged on MongoDB (whose `contains`
+compiles to a `$regex` match, where `%` and `_` are already literal so escaping them would be
+wrong), and refused on SQLite (see the `contains` note above). When omitted, the adapter reads the
+client's active provider structurally at `connect()` time; if it cannot be determined, a `contains`
+filter throws `UnsupportedFilterOperatorError` naming this option, so pass it explicitly in that
+case. Drizzle requires both `options.drizzleInstance` and `options.drizzleTables`. The instance is a
+opaque `DrizzleDatabase<T>` configuration created by
 `createDrizzleDatabase(database, transactionBridge)`; the registry's tables must carry an `id`
 column and the adapter translates every repository field to a real Drizzle column. Drizzle `create`,
 `update`, and `delete` require a driver with `RETURNING` support so their results are actual driver
@@ -7568,7 +7570,9 @@ Contract notes:
   'development'` —
   never read `process.env` directly. The stack trace is secondary to the message, which is what
   carries the failing statement and its bound parameters; `maskInternalErrors` (default `true`) is
-  what guards that message, not `includeStackTrace`.
+  what guards that message, not `includeStackTrace`. **Masking wins over this option**: a masked
+  error carries no `stack` in the body even when this is `true`, because a stack begins with the
+  very message that was masked. Set `maskInternalErrors: false` to see an internal error's stack.
 - **Short-circuit**: when `next()` throws, `errorHandler` produces a response (`HandlerResult`)
   without re-invoking `next()`.
 

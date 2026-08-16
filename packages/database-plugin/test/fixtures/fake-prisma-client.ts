@@ -213,10 +213,12 @@ export function createFakePrismaClient(
   disconnected: boolean;
   // The active connector, mirroring the real client's underscore-private
   // `_activeProvider` field that the adapter's structural detection reads.
-  // Defaults to `'postgresql'` (an escaping connector) so a `contains`
-  // filter translates rather than refuses; pass `undefined` to model a
-  // client whose provider cannot be detected.
-  _activeProvider: string | undefined;
+  // Defaults to `'postgresql'` (an escaping connector) so a `contains` filter
+  // translates rather than refuses. To model a client whose provider cannot be
+  // detected, build a bare object literal WITHOUT this field: `activeProvider`
+  // cannot be passed as `undefined` (that is a compile error under
+  // `exactOptionalPropertyTypes`) and would fall back to the default anyway.
+  _activeProvider: string;
   // Recorded calls for test assertions
   recordedCalls: RecordedCall[];
   // Model delegates — accessed by lowercase name (e.g. `client.user`)
