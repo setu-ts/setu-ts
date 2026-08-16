@@ -2560,7 +2560,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   without `content-length`; a WebSocket and a gRPC call both survive an SSR catch-all while that
   catch-all still serves every other path; a root-mounted gRPC service leaves ordinary routes alone
   while still serving its own procedures; and the drain answers `503` on both protocols. Six
-  negative controls were each observed failing and reverted) — complete (PR pending)
+  negative controls were each observed failing and reverted) — complete (PR #167)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`
