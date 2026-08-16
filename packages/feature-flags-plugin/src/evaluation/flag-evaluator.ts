@@ -54,10 +54,13 @@ export function bucket(flag: string, userId: string): number {
  *
  * Precedence:
  * 1. `def === undefined` → `false`
- * 2. `users` allowlist contains `context?.userId` → `true` (overrides `enabled: false`)
- * 3. `enabled === false` → `false`
- * 4. `percentage` present → deterministic bucket check
- * 5. otherwise → `true`
+ * 2. `tenants` present and `context?.tenantId` not in it → `false` (a
+ *    restriction, ahead of every other rule: a non-matching tenant is `false`
+ *    even with the user allowlisted and `enabled: true`)
+ * 3. `users` allowlist contains `context?.userId` → `true` (overrides `enabled: false`)
+ * 4. `enabled === false` → `false`
+ * 5. `percentage` present → deterministic bucket check
+ * 6. otherwise → `true`
  *
  * @param flag - Flag name.
  * @param def - Flag definition (may be `undefined`).
@@ -71,6 +74,18 @@ export function evaluateFlag(
 ): boolean {
   // Unknown flag → false (committed contract)
   if (def === undefined) {
+    return false;
+  }
+
+  // Tenant restriction — ahead of every other rule. A flag scoped to certain
+  // tenants is `false` for any context whose tenant is not in the list,
+  // including a context with no tenant at all. When `tenants` is absent the
+  // rule is inert and evaluation continues through the committed precedence.
+  if (
+    def.tenants !== undefined &&
+    def.tenants.length > 0 &&
+    (context?.tenantId === undefined || !def.tenants.includes(context.tenantId))
+  ) {
     return false;
   }
 

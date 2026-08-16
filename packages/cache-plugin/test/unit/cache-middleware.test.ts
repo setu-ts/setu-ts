@@ -7,6 +7,7 @@ import type {
   ICacheStore,
   IRequestContext,
   IServiceRegistry,
+  ITenant,
 } from '@setu-ts/common';
 
 import { cacheMiddleware } from '../../src/middleware/cache-middleware.ts';
@@ -47,6 +48,7 @@ describe('cacheMiddleware', () => {
   function createContext(store: ICacheStore, opts?: {
     method?: string;
     url?: string;
+    tenant?: ITenant;
   }): {
     ctx: IRequestContext;
     nextCalled: boolean[];
@@ -77,6 +79,7 @@ describe('cacheMiddleware', () => {
         url: opts?.url ?? 'http://localhost/test',
         path: '/test',
         headers: new Headers(),
+        ...(opts?.tenant !== undefined ? { tenant: opts.tenant } : {}),
         json: async <T = unknown>() => ({} as T),
         text: async () => '',
         bytes: async () => new Uint8Array(0),
@@ -424,6 +427,104 @@ describe('cacheMiddleware', () => {
 
       const getCall = altStore.calls.find((c) => c.method === 'get');
       expect(getCall).toBeDefined();
+    });
+  });
+
+  describe('tenant keying (X4-1)', () => {
+    it('keys the default key per tenant', async () => {
+      const { store, calls } = createFakeStore();
+      const { ctx } = createContext(store, { tenant: { id: 'acme' } });
+
+      const mw = cacheMiddleware();
+      await mw(ctx, async () => {});
+
+      const getCall = calls.find((c) => c.method === 'get');
+      expect(getCall?.args[0]).toBe('t:4:acme|GET:http://localhost/test');
+    });
+
+    it('applies the tenant segment around a custom key function too', async () => {
+      const { store, calls } = createFakeStore();
+      const { ctx } = createContext(store, { tenant: { id: 'acme' } });
+
+      const mw = cacheMiddleware({ key: (c) => `custom:${c.request.path}` });
+      await mw(ctx, async () => {});
+
+      const getCall = calls.find((c) => c.method === 'get');
+      expect(getCall?.args[0]).toBe('t:4:acme|custom:/test');
+    });
+
+    it('stores one entry per tenant for the same route', async () => {
+      const { store, calls } = createFakeStore();
+
+      const acme = createContext(store, { tenant: { id: 'acme' } });
+      await cacheMiddleware()(acme.ctx, async () => {
+        acme.ctx.response.status(200);
+      });
+
+      const globex = createContext(store, { tenant: { id: 'globex' } });
+      await cacheMiddleware()(globex.ctx, async () => {
+        globex.ctx.response.status(200);
+      });
+
+      const setKeys = calls.filter((c) => c.method === 'set').map((c) => c.args[0]);
+      expect(setKeys).toHaveLength(2);
+      expect(setKeys[0]).toBe('t:4:acme|GET:http://localhost/test');
+      expect(setKeys[1]).toBe('t:6:globex|GET:http://localhost/test');
+    });
+
+    it('serves each tenant its own cached body (HIT per tenant)', async () => {
+      const { store, calls } = createFakeStore();
+      await store.set('t:4:acme|GET:http://localhost/test', {
+        status: 200,
+        headers: [['content-type', 'application/json']],
+        body: '{"tenant":"acme"}',
+      });
+
+      const acme = createContext(store, { tenant: { id: 'acme' } });
+      await cacheMiddleware()(acme.ctx, async () => {
+        acme.nextCalled.push(true);
+      });
+      expect(acme.nextCalled.length).toBe(0);
+      expect(acme.responseBody()).toBe('{"tenant":"acme"}');
+      expect(acme.responseHeaders.get('x-cache')).toBe('HIT');
+
+      // globex has no entry under its own key — a MISS, not acme's body.
+      const globex = createContext(store, { tenant: { id: 'globex' } });
+      await cacheMiddleware()(globex.ctx, async () => {
+        globex.nextCalled.push(true);
+        globex.ctx.response.status(200);
+        globex.ctx.response.text('{"tenant":"globex"}');
+      });
+      expect(globex.nextCalled.length).toBe(1);
+      expect(globex.responseHeaders.get('x-cache')).toBe('MISS');
+
+      const globexGets = calls.filter(
+        (c) => c.method === 'get' && c.args[0] === 't:6:globex|GET:http://localhost/test',
+      );
+      expect(globexGets.length).toBe(1);
+    });
+
+    it('appends vary values after the tenant segment', async () => {
+      const { store, calls } = createFakeStore();
+      const { ctx } = createContext(store, { tenant: { id: 'acme' } });
+
+      const mw = cacheMiddleware({
+        vary: (c) => [c.request.headers.get('accept-language') ?? 'en'],
+      });
+      await mw(ctx, async () => {});
+
+      const getCall = calls.find((c) => c.method === 'get');
+      expect(getCall?.args[0]).toBe('t:4:acme|v:2:en|GET:http://localhost/test');
+    });
+
+    it('keeps byte-identical keys when no tenant is resolved', async () => {
+      const { store, calls } = createFakeStore();
+      const { ctx } = createContext(store);
+
+      await cacheMiddleware()(ctx, async () => {});
+
+      const getCall = calls.find((c) => c.method === 'get');
+      expect(getCall?.args[0]).toBe('GET:http://localhost/test');
     });
   });
 

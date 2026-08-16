@@ -14,6 +14,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
+import { UnsupportedFilterOperatorError } from '../../src/errors.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
@@ -370,6 +371,122 @@ describe('PrismaAdapter', () => {
       await wrapping.connect();
       const txn = await wrapping.beginTransaction();
       await expect(txn.rollback()).rejects.toThrow('tx aborted by driver');
+    });
+  });
+
+  describe('contains — connector-aware translation (X12-1)', () => {
+    /** Run a `contains` filter and return the `where` the delegate received. */
+    async function translatedWhere(
+      client: ReturnType<typeof createFakePrismaClient>,
+      value: string,
+      options?: {
+        provider?: 'postgresql' | 'postgres' | 'mysql' | 'sqlserver' | 'cockroachdb' | 'sqlite';
+      },
+    ): Promise<Record<string, unknown>> {
+      const adapter = new PrismaAdapter({
+        prismaClient: client,
+        ...(options?.provider !== undefined ? { provider: options.provider } : {}),
+      });
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.findAll(
+        query({
+          filter: { type: 'comparison', field: 'name', operator: 'contains', value },
+        }),
+      );
+      const call = client.recordedCalls.find((c) => c.action === 'findMany');
+      return call?.args.where as Record<string, unknown>;
+    }
+
+    it('escapes % and _ on an escaping connector (postgresql)', async () => {
+      const client = createFakePrismaClient();
+      const where = await translatedWhere(client, '50% off');
+      expect(where).toEqual({ name: { contains: '50\\% off' } });
+    });
+
+    it('escapes on every escaping connector', async () => {
+      for (const provider of ['postgres', 'mysql', 'sqlserver', 'cockroachdb']) {
+        const client = createFakePrismaClient({ activeProvider: provider });
+        const where = await translatedWhere(client, 'a_b');
+        expect(where).toEqual({ name: { contains: 'a\\_b' } });
+      }
+    });
+
+    it('refuses on sqlite with a named error', async () => {
+      const adapter = new PrismaAdapter({
+        prismaClient: createFakePrismaClient({ activeProvider: 'sqlite' }),
+      });
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      // Translation is synchronous, so the refusal throws from findAll rather
+      // than rejecting.
+      expect(() =>
+        ds.findAll(
+          query({
+            filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'x' },
+          }),
+        )
+      ).toThrow(UnsupportedFilterOperatorError);
+    });
+
+    it('refuses when the connector cannot be determined, naming the provider option', async () => {
+      // A client with no `_activeProvider` field at all — structural detection
+      // finds nothing, so the adapter refuses and names the `provider` option.
+      const bare = {
+        $connect: () => Promise.resolve(),
+        $disconnect: () => Promise.resolve(),
+        $transaction: <T>(fn: (tx: unknown) => Promise<T>) => fn(bare),
+        $queryRawUnsafe: () => Promise.resolve([]),
+        user: {
+          findUnique: () => Promise.resolve(null),
+          findMany: () => Promise.resolve([]),
+          create: (a: { data: Record<string, unknown> }) => Promise.resolve(a.data),
+          update: () => Promise.reject(new Error('nope')),
+          delete: () => Promise.reject(new Error('nope')),
+          count: () => Promise.resolve(0),
+        },
+      };
+      const adapter = new PrismaAdapter({ prismaClient: bare });
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      expect(() =>
+        ds.findAll(
+          query({
+            filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'x' },
+          }),
+        )
+      ).toThrow(/provider/);
+    });
+
+    it('lets an explicit provider option beat structural detection', async () => {
+      // The client says sqlite, but the application says postgresql — the
+      // explicit option wins, so the filter escapes rather than refuses.
+      const client = createFakePrismaClient({ activeProvider: 'sqlite' });
+      const where = await translatedWhere(client, '50% off', { provider: 'postgresql' });
+      expect(where).toEqual({ name: { contains: '50\\% off' } });
+    });
+
+    it('detects the connector structurally from the client', async () => {
+      // No explicit provider: the adapter reads `_activeProvider` from the
+      // client. A sqlite client refuses; the error names the connector.
+      const adapter = new PrismaAdapter({
+        prismaClient: createFakePrismaClient({ activeProvider: 'sqlite' }),
+      });
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      let caught: unknown;
+      try {
+        await ds.findAll(
+          query({
+            filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'x' },
+          }),
+        );
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UnsupportedFilterOperatorError);
+      expect((caught as UnsupportedFilterOperatorError).connector).toBe('sqlite');
+      expect((caught as UnsupportedFilterOperatorError).operator).toBe('contains');
     });
   });
 });

@@ -37,7 +37,8 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     // RFC 9457 §4.2: a status-only problem is identified by about:blank
     expect(response.body).toContain('"type":"about:blank"');
     expect(response.body).toContain('"status":500');
-    expect(response.body).toContain('"detail":"route error"');
+    // maskInternalErrors defaults to true: the raw message is masked to the status title.
+    expect(response.body).toContain('"detail":"Internal Server Error"');
     expect(response.body).not.toContain('"message":');
   });
 
@@ -59,7 +60,8 @@ describe('full-stack-starter / integration (load-bearing)', () => {
     // RFC 9457 §4.2: a status-only problem is identified by about:blank
     expect(response.body).toContain('"type":"about:blank"');
     expect(response.body).toContain('"status":500');
-    expect(response.body).toContain('"detail":"middleware error"');
+    // Masked by the default maskInternalErrors (see the route-handler test above).
+    expect(response.body).toContain('"detail":"Internal Server Error"');
     expect(response.body).not.toContain('"message":');
   });
 
