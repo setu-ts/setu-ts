@@ -1790,10 +1790,21 @@ calling `next()` short-circuits the pipeline.
 
 **The pipeline runs for ALL inbound traffic, not only ordinary HTTP routes.** WebSocket upgrades and
 gRPC/Connect requests go through the same chain before anything protocol-specific happens, so auth,
-metrics, security headers and the shutdown drain apply to them exactly as they do to a `GET /users`.
-The handshake or RPC dispatch happens only in the kernel's terminal handler, after the pipeline has
-run without short-circuiting — a guard that answers `401` therefore refuses the upgrade, and a
-draining application answers `503` on every protocol.
+metrics and the shutdown drain apply to them exactly as they do to a `GET /users`. The handshake or
+RPC dispatch happens only in the kernel's terminal handler, after the pipeline has run without
+short-circuiting — a guard that answers `401` therefore refuses the upgrade, and a draining
+application answers `503` on every protocol.
+
+Protocol dispatch runs **before** route matching, not after. A WebSocket upgrade is a protocol
+switch rather than an HTTP route, and a path inside the gRPC `basePath` belongs to gRPC — so an
+application catch-all (the one `ReactRouterPlugin` mounts for SSR, a SPA fallback, a hand-written
+404 route) cannot shadow either.
+
+One caveat, because it is easy to assume otherwise: on an **accepted** upgrade the adapter answers
+with the runtime's own `101`, so response headers a middleware wrote on `ctx.response` — security
+headers, `Set-Cookie` — are not carried onto the handshake response. The pipeline still _runs_,
+which is what lets a guard refuse; it just has no response to decorate once the socket is taken
+over. A refused upgrade is an ordinary HTTP response and carries everything.
 
 This was not always so. Until M70a the HTTP adapter consulted `setUpgradeRouter` and `setRpcHandler`
 _before_ mapping the request, so no middleware applied to either: an unauthenticated WebSocket wrote

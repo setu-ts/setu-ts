@@ -142,6 +142,66 @@ describe('gRPC through kernel pipeline (M70a)', () => {
     await app.stop();
   });
 
+  it('dispatches under a catch-all route rather than letting SSR shadow it', async () => {
+    // `react-router-plugin` mounts a catch-all on all seven verbs for SSR.
+    // While gRPC was dispatched only when NOTHING matched, a full-stack
+    // application answered every gRPC client with an HTML page. Protocol
+    // dispatch runs before route matching.
+    const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
+    app.router.get('/*', (ctx) => ctx.response.json({ ssr: true }));
+    app.router.post('/*', (ctx) => ctx.response.json({ ssr: true }));
+    await app.start({ port: 0 });
+
+    const rpc = await app.fetch(
+      new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ service: '' }),
+      }),
+    );
+    expect(rpc.status).toBe(200);
+    expect(await rpc.text()).not.toContain('ssr');
+
+    // The control: the catch-all still serves everything outside `basePath`.
+    const page = await app.fetch(new Request('http://localhost/page'));
+    expect(await page.text()).toBe('{"ssr":true}');
+
+    await app.stop();
+  });
+
+  it('a root basePath claims only paths it can actually serve', async () => {
+    // `basePath: '/'` normalizes to `''`, which CONTAINS every path. Since the
+    // kernel consults `claims()` before route matching, a prefix test would
+    // hand gRPC the whole application and 404 every ordinary route. At the root
+    // the service claims only registered procedures — mirroring the asymmetry
+    // `dispatchRequest` already documents.
+    const app = createApplication({
+      plugins: [RuntimePlugin(), GrpcPlugin({ basePath: '/' })],
+    });
+    app.router.get('/orders', (ctx) => ctx.response.json({ orders: [] }));
+    await app.start({ port: 0 });
+
+    const ordinary = await app.fetch(new Request('http://localhost/orders'));
+    expect(ordinary.status).toBe(200);
+    expect(await ordinary.text()).toBe('{"orders":[]}');
+
+    const unmatched = await app.fetch(new Request('http://localhost/nope'));
+    expect(unmatched.status).toBe(404);
+    expect(await unmatched.text()).toBe('{"error":"Not Found"}');
+
+    // The control: a real procedure at the root IS still served.
+    const rpc = await app.fetch(
+      new Request('http://localhost/grpc.health.v1.Health/Check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ service: '' }),
+      }),
+    );
+    expect(rpc.status).toBe(200);
+
+    await app.stop();
+  });
+
   it('returns 503 during drain (X7-7)', async () => {
     const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
 

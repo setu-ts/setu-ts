@@ -109,16 +109,36 @@ export class GrpcService implements IGrpcService {
    * this guard every unmatched route in the application would be answered by
    * gRPC's plain-text `404` instead of the kernel's JSON one.
    *
-   * A root `basePath` claims every path by construction; that is the
-   * documented meaning of mounting at the root, and `#dispatch` still falls
-   * through to `null` — hence a `404` — for an unknown procedure there.
+   * A **root** `basePath` is the exception, and it is load-bearing: `''`
+   * contains every path, so a prefix test would claim the entire application.
+   * The kernel consults `claims` before route matching, so that would 404 every
+   * ordinary route. At the root this therefore claims only paths it can
+   * actually serve, mirroring the asymmetry `dispatchRequest` already
+   * documents — "not a known procedure" and "an ordinary application route"
+   * are indistinguishable there, so both fall through.
+   *
+   * Inside a non-root base path the prefix IS the claim, so an unknown
+   * procedure under `/grpc` answers gRPC's `404` rather than falling through to
+   * the application — the M49 behaviour.
    *
    * @param request - The native fetch request
-   * @returns `true` when the path lies inside `basePath`
+   * @returns `true` when this service will serve the request
    * @since 0.3.0
    */
   claims(request: Request): boolean {
-    return isWithinBasePath(new URL(request.url).pathname, this.#basePath);
+    const path = new URL(request.url).pathname;
+    if (!isWithinBasePath(path, this.#basePath)) {
+      return false;
+    }
+    if (this.#basePath !== '') {
+      return true;
+    }
+    // Mounted at the root. After `close()` the router is gone and only the
+    // paths this server actually served may still be claimed — for their 503.
+    if (this.#closed) {
+      return this.#servedPaths.has(path);
+    }
+    return this.#buildDispatchMap().has(path);
   }
 
   /**
@@ -165,6 +185,25 @@ export class GrpcService implements IGrpcService {
     this.#dispatchMap = null;
   }
 
+  /**
+   * The lazily-built router, shared by {@linkcode GrpcService.claims} and
+   * `#dispatch` so the two can never disagree about which paths are served.
+   * Built on demand because `addService` may be called after `register()`, and
+   * cached until the next `addService` invalidates it.
+   */
+  #buildDispatchMap(): Map<string, (request: Request) => Promise<Response>> {
+    this.#dispatchMap ??= buildConnectRouter({
+      connectRuntime: this.#connectRuntime,
+      basePath: this.#basePath,
+      reflection: this.#options.reflection ?? true,
+      health: this.#options.health ?? true,
+      services: this.#services,
+      embeddedDescriptors: this.#embeddedDescriptors,
+      healthService: this.#healthService,
+    }).dispatchMap;
+    return this.#dispatchMap;
+  }
+
   /** Resolves a request against the dispatch map, building the router on demand. */
   #dispatch(request: Request): Response | Promise<Response | null> | null {
     if (this.#closed) {
@@ -175,17 +214,6 @@ export class GrpcService implements IGrpcService {
         ? new Response('Service Unavailable', { status: 503 })
         : null;
     }
-    if (this.#dispatchMap === null) {
-      this.#dispatchMap = buildConnectRouter({
-        connectRuntime: this.#connectRuntime,
-        basePath: this.#basePath,
-        reflection: this.#options.reflection ?? true,
-        health: this.#options.health ?? true,
-        services: this.#services,
-        embeddedDescriptors: this.#embeddedDescriptors,
-        healthService: this.#healthService,
-      }).dispatchMap;
-    }
-    return dispatchRequest(request, this.#dispatchMap, this.#basePath);
+    return dispatchRequest(request, this.#buildDispatchMap(), this.#basePath);
   }
 }

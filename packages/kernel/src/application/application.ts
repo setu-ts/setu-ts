@@ -579,21 +579,33 @@ class Application implements IKernelApplication {
       // applies the kernel's own deterministic tie-break for equal-specificity
       // routes (§3.6 of the M22 plan).
       await this.#pipeline.execute(ctx, async () => {
+        // Protocol dispatch runs BEFORE route matching, and after the pipeline.
+        //
+        // "After the pipeline" is the M70a security property: auth, metrics and
+        // the shutdown drain apply to an upgrade and to an RPC exactly as they
+        // do to a `GET /users`.
+        //
+        // "Before route matching" is precedence, and it is not optional. A
+        // WebSocket upgrade is a protocol switch rather than an HTTP route, and
+        // a path inside the gRPC `basePath` belongs to gRPC (M49). Deciding
+        // these only when nothing matched lets ANY catch-all shadow both — and
+        // `react-router-plugin` mounts exactly that, on all seven verbs, for
+        // SSR: a full-stack application would answer a WebSocket client with an
+        // HTML page and a gRPC client with the same. Both helpers decline
+        // cheaply when their capability is absent or does not claim the
+        // request, so ordinary traffic reaches the router unchanged.
+        if (await this.#tryUpgrade(ctx)) {
+          return;
+        }
+
+        if (await this.#tryGrpc(ctx)) {
+          return;
+        }
+
         const url = new URL(request.url);
         const routeResult = this.#router.match(request.method, url.pathname);
 
         if (routeResult === null) {
-          // No route matched — try WebSocket upgrade, then gRPC, then 404.
-          // The pipeline already ran (middleware applied), so auth, metrics,
-          // security headers and the shutdown drain all apply uniformly.
-          if (await this.#tryUpgrade(ctx)) {
-            return;
-          }
-
-          if (await this.#tryGrpc(ctx)) {
-            return;
-          }
-
           ctx.response.status(404).json({ error: 'Not Found' });
           return;
         }
@@ -664,13 +676,14 @@ class Application implements IKernelApplication {
       return false;
     }
 
-    // Resolved optionally — absent the capability, nothing changes.
-    let wsService: IWebSocketService;
-    try {
-      wsService = this.#registry.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
-    } catch {
+    // Resolved optionally — absent the capability, nothing changes. Probed with
+    // `has` rather than a try/catch around `get`, because this now runs on
+    // EVERY request rather than only on an unmatched one, and throw-driven
+    // control flow on the hot path is what AI_GUIDELINES §14 exists to stop.
+    if (!this.#registry.has(CAPABILITIES.WEBSOCKET)) {
       return false;
     }
+    const wsService = this.#registry.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
 
     if (wsService.routeUpgrade === undefined) {
       return false;
@@ -689,7 +702,12 @@ class Application implements IKernelApplication {
     let decision: WebSocketUpgradeDecision | null;
     try {
       decision = await wsService.routeUpgrade(raw);
-    } catch {
+    } catch (cause) {
+      // Reported, not swallowed. The pre-M70a backstop in the adapter's
+      // `UpgradeRouterStore` discarded the cause because the adapter holds no
+      // logger; the kernel does, so silence here would be a choice rather than
+      // a constraint.
+      this.#reportUpgradeRouterFailure(cause);
       ctx.response.status(500).json({ error: 'Internal Server Error' });
       return true;
     }
@@ -739,13 +757,13 @@ class Application implements IKernelApplication {
       return false;
     }
 
-    // Resolved optionally — absent the capability, nothing changes.
-    let grpcService: IGrpcService;
-    try {
-      grpcService = this.#registry.get<IGrpcService>(CAPABILITIES.GRPC);
-    } catch {
+    // Resolved optionally — absent the capability, nothing changes. `has`
+    // rather than a try/catch around `get`, for the reason given in
+    // `#tryUpgrade`.
+    if (!this.#registry.has(CAPABILITIES.GRPC)) {
       return false;
     }
+    const grpcService = this.#registry.get<IGrpcService>(CAPABILITIES.GRPC);
 
     if (!grpcService.available) {
       return false;
@@ -803,6 +821,33 @@ class Application implements IKernelApplication {
     const builder = new ResponseBuilder();
     builder.status(400).json({ error: 'Bad Request' });
     return builder;
+  }
+
+  /**
+   * Surfaces an exception thrown by an `IWebSocketService`'s upgrade router.
+   *
+   * The framework's own service reports its failures at their source, where it
+   * has route context to add; this covers a third-party service that does not.
+   * Guarded exactly like {@linkcode Application.#reportSuppressedHookError}: a
+   * missing or itself-broken logger must not turn a refused upgrade into a
+   * crashed request.
+   *
+   * @param cause - Whatever the router threw
+   */
+  #reportUpgradeRouterFailure(cause: unknown): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      const err = cause instanceof Error ? cause : new Error(String(cause));
+      logger.error('WebSocket upgrade router threw and was refused', {
+        error: err.message,
+        stack: err.stack,
+      });
+    } catch {
+      // No safe channel remains — see #reportSuppressedHookError.
+    }
   }
 
   /**

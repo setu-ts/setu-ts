@@ -196,4 +196,19 @@ describe('GrpcService — shutdown', () => {
     );
     expect(response.status).toBe(503);
   });
+
+  it('a closed root-mounted service claims only what it served', async () => {
+    // At the root `claims()` cannot fall back on the prefix — `''` contains
+    // every path — so after close it must consult the served-path set. Claiming
+    // the whole application here would 503 every ordinary route during the
+    // drain, which is the failure `#dispatch` already guards against.
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime, options: { basePath: '/' } });
+    service.addService(echoDefinition);
+    await service.handleRequest(new Request('http://x/example.Echo/Echo', { method: 'POST' }));
+    service.close();
+
+    expect(service.claims(new Request('http://x/example.Echo/Echo'))).toBe(true);
+    expect(service.claims(new Request('http://x/users'))).toBe(false);
+  });
 });
