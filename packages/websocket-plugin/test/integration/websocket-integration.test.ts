@@ -91,12 +91,59 @@ describe('WebSocketPlugin integration', () => {
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     ws.route('/ws', {});
 
-    // No Upgrade header, so the router is never consulted and the request
-    // falls through to the HTTP pipeline, which has no such route.
+    // No Upgrade header, so the router declines and the request falls through
+    // to the HTTP pipeline, which has no such route. `WsRouteTable.match` keys
+    // on PATH ALONE, so without the RFC 6455 header check in
+    // `WebSocketService.#route` this plain GET would be upgraded.
     const response = await app.fetch(new Request('http://localhost/ws'));
 
     expect(response.status).toBe(404);
     expect(ws.connectionCount).toBe(0);
+    await app.stop();
+  });
+
+  it('does not treat "no-upgrade" in Connection as an upgrade token', async () => {
+    // A substring match on the `Connection` header would claim this request.
+    // RFC 6455 §4.2.1 asks for the `upgrade` TOKEN, so the shared predicate
+    // splits on commas and compares whole tokens.
+    const app = createApplication({ plugins: [RuntimePlugin(), WebSocketPlugin()] });
+    await app.start();
+
+    const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+    ws.route('/ws', {});
+
+    const response = await app.fetch(
+      new Request('http://localhost/ws', {
+        headers: { upgrade: 'websocket', connection: 'no-upgrade' },
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(ws.connectionCount).toBe(0);
+    await app.stop();
+  });
+
+  it('upgrades when Connection carries the token among others, as proxies send', async () => {
+    // The control for the two tests above: `keep-alive, Upgrade` is what a
+    // proxy actually forwards, and it MUST still upgrade.
+    const app = createApplication({ plugins: [RuntimePlugin(), WebSocketPlugin()] });
+    await app.start();
+
+    const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+    ws.route('/ws', {});
+
+    const response = await app.fetch(
+      new Request('http://localhost/ws', {
+        headers: {
+          upgrade: 'websocket',
+          connection: 'keep-alive, Upgrade',
+          'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'sec-websocket-version': '13',
+        },
+      }),
+    );
+
+    expect(response.status).toBe(101);
     await app.stop();
   });
 

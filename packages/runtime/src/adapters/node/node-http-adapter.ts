@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { UPGRADE_INTENT } from '@setu-ts/common';
+import { upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -191,10 +191,7 @@ export class NodeHttpServerHandle {
 
     // Check for UPGRADE_INTENT written by the kernel terminal handler on the
     // IRequest.
-    const intent =
-      (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
-        UPGRADE_INTENT
-      ];
+    const intent = upgradeIntentOf(frameworkRequest);
 
     if (intent === undefined) {
       // No upgrade intent — the handler returned a normal response (e.g. 401
@@ -263,10 +260,7 @@ export class NodeHttpServerHandle {
       const frameworkResponse = await this.#handler(frameworkRequest);
 
       // Check for upgrade intent (for the rare case an upgrade reaches fetch).
-      const intent =
-        (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
-          UPGRADE_INTENT
-        ];
+      const intent = upgradeIntentOf(frameworkRequest);
       if (intent !== undefined) {
         return this.#performUpgrade(request, intent);
       }

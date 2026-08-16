@@ -1788,6 +1788,19 @@ The middleware pipeline is a chain of functions that execute in order. Each midd
 request context and a `next()` function. Calling `next()` passes control to the next middleware. Not
 calling `next()` short-circuits the pipeline.
 
+**The pipeline runs for ALL inbound traffic, not only ordinary HTTP routes.** WebSocket upgrades and
+gRPC/Connect requests go through the same chain before anything protocol-specific happens, so auth,
+metrics, security headers and the shutdown drain apply to them exactly as they do to a `GET /users`.
+The handshake or RPC dispatch happens only in the kernel's terminal handler, after the pipeline has
+run without short-circuiting — a guard that answers `401` therefore refuses the upgrade, and a
+draining application answers `503` on every protocol.
+
+This was not always so. Until M70a the HTTP adapter consulted `setUpgradeRouter` and `setRpcHandler`
+_before_ mapping the request, so no middleware applied to either: an unauthenticated WebSocket wrote
+through a guarded endpoint and an unauthenticated gRPC client read and wrote through one. The
+adapter now stores the router and acts only on an upgrade intent the kernel records after the
+pipeline; `setRpcHandler` is deprecated and consulted by nothing.
+
 ### Ordering
 
 Middleware is ordered by priority (lower numbers execute first). **The pipeline is an onion**:

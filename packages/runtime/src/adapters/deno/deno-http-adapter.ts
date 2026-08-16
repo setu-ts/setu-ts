@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { UPGRADE_INTENT } from '@setu-ts/common';
+import { upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -180,10 +180,7 @@ export class DenoHttpServerHandle {
       // After the handler returns, check if the kernel requested an upgrade.
       // The kernel writes WebSocketUpgradeIntent on the IRequest keyed by
       // UPGRADE_INTENT so the adapter can read it here.
-      const intent =
-        (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
-          UPGRADE_INTENT
-        ];
+      const intent = upgradeIntentOf(frameworkRequest);
       if (intent !== undefined) {
         return this.#performUpgrade(request, intent);
       }
