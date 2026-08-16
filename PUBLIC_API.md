@@ -1693,6 +1693,17 @@ app.router.get('/users/:id', {
 });
 ```
 
+#### Options
+
+| Option              | Type                         | Default              | Behavior                                                                                                                                                                                                                                  |
+| ------------------- | ---------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttlSeconds`        | `number`                     | store default        | Per-route TTL override in seconds; when omitted the store's `defaultTtl` applies                                                                                                                                                          |
+| `key`               | `(ctx) => string`            | `${method}:${url}`   | Custom cache key generator. The tenant discriminator segment is composed around this key too, so a tenant-aware application stores one entry per tenant even when a custom key is supplied                                                |
+| `vary`              | `(ctx) => readonly string[]` | —                    | Per-request discriminator values appended to the key after the tenant segment. Each returned string is length-prefixed and joined in order, so two requests differing in any value never share an entry; omitted leaves the key unchanged |
+| `bypass`            | `(ctx) => boolean`           | —                    | When `true`, skip caching entirely for this request and pass through to the handler                                                                                                                                                       |
+| `store`             | `string`                     | `CAPABILITIES.CACHE` | Capability token for the cache store to use                                                                                                                                                                                               |
+| `cacheableStatuses` | `number[]`                   | `[200]`              | HTTP status codes eligible for caching                                                                                                                                                                                                    |
+
 ### ICacheStore Interface
 
 ```typescript
@@ -2224,6 +2235,7 @@ app.router.post('/login', (ctx) => {
 | `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                                                                                                                                                          |
 | `csrf.headerName`    | `string`                               | —                          | Accepted alternative source; REQUIRED for `multipart/form-data`                                                                                                                                        |
 | `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                                                                                                                                                         |
+| `tenantBinding`      | `boolean`                              | `true`                     | Seals the resolved tenant id into the session on commit; replaying it under a different tenant is refused with `403` before the handler. Inert when either side has no tenant; `false` disables both   |
 
 ### Exports
 
@@ -4343,7 +4355,7 @@ app.router.get('/beta', {
 | `FlagProvider`                 | interface        | Port implemented by all providers, and by the `'custom'` arm's instance       |
 | `FlagProviderStatus`           | interface        | Health status shape (`{ healthy, detail? }`)                                  |
 | `FlagProviderType`             | type             | `'config' \| 'memory' \| 'database' \| 'launchdarkly' \| 'custom'`            |
-| `FlagDefinition`               | interface        | `{ enabled, percentage?, users? }`                                            |
+| `FlagDefinition`               | interface        | `{ enabled, percentage?, users?, tenants? }`                                  |
 | `IFlagStore`                   | interface        | Structural facade for `DatabaseProvider`                                      |
 | `FeatureFlagsPluginOptions`    | type             | Discriminated union of the four provider option shapes                        |
 | `ConfigProviderOptions`        | interface        | The `'config'` arm — requires `options.flags`                                 |
@@ -4358,6 +4370,14 @@ app.router.get('/beta', {
 ### Notes
 
 - `IFeatureFlags.isEnabled` is **synchronous**; providers refresh their state out of band.
+- **Tenant restriction.** `FlagDefinition.tenants` is a restriction, not an allowlist: when present
+  and non-empty, the flag is `false` for any context whose `tenantId` is not in the list — including
+  a context with no tenant — and it is evaluated **ahead of every other rule**, so it cannot be
+  overridden by `users` or `enabled: true`. When absent, evaluation is unchanged.
+  `FlagContext.tenantId` is optional, so existing callers and implementors are source-compatible; a
+  context without a `tenantId` only matters against a flag that scopes itself. `createFlagGuard`
+  derives `tenantId` from `ctx.request.tenant?.id` (omitting it when absent) unless
+  `options.context` is supplied.
 - The allowlist (`users`) **overrides** `enabled: false` — `{ enabled: false, users: ['user1'] }`
   evaluates to `true` for `userId: 'user1'`.
 - Percentage rollout uses deterministic FNV-1a 32-bit bucketing over `` `${flag}:${userId}` ``.

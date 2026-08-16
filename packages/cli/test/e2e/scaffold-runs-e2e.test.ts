@@ -104,14 +104,124 @@ async function denoRun(
   project: string,
   args: readonly string[],
 ): Promise<{ code: number; output: string }> {
-  const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
+  return await runDenoOnce(project, args);
+}
+
+/**
+ * The longest a single `deno` subprocess may run before it is killed and the
+ * attempt counted as a transient failure. Generous on purpose: a cold
+ * `deno install` that downloads the whole framework graph can take minutes on a
+ * contended runner, and a premature timeout would turn a slow-but-valid install
+ * into a spurious failure.
+ */
+const DENO_RUN_TIMEOUT_MS = 300_000;
+
+/** How many times a transient `deno install` failure is retried. */
+const DENO_INSTALL_ATTEMPTS = 3;
+
+/** The pause between retry attempts, so a momentary registry blip can clear. */
+const DENO_INSTALL_RETRY_DELAY_MS = 2_000;
+
+/**
+ * A `deno install` failure that is a transient network condition rather than a
+ * deterministic one: the registry connection is dropped or reset mid-download,
+ * or the request times out. These are the failures the full-suite parallel load
+ * produces. Every other failure — a version the registry does not publish, a
+ * `minimum dependency age` refusal, a lock or resolution error — is
+ * deterministic and must NOT be retried, because retrying it would mask a real
+ * defect and burn the whole attempt budget.
+ */
+function isTransientInstallFailure(output: string): boolean {
+  const haystack = output.toLowerCase();
+  const markers = [
+    'network error',
+    'error sending request',
+    'error trying to connect',
+    'connection reset',
+    'connection refused',
+    'timed out',
+    'tls error',
+    'temporarily unavailable',
+  ];
+  return markers.some((m) => haystack.includes(m));
+}
+
+/**
+ * Runs one `deno` subprocess, killing it if it exceeds
+ * {@linkcode DENO_RUN_TIMEOUT_MS} so a blackholed network can never hang the
+ * whole suite. A timed-out attempt reports a non-zero code with a marker in its
+ * output, so the caller can treat it as a transient failure.
+ *
+ * @param project - The project directory
+ * @param args - The subcommand and its flags
+ * @returns Its exit code and combined output
+ */
+async function runDenoOnce(
+  project: string,
+  args: readonly string[],
+): Promise<{ code: number; output: string }> {
+  const child = new Deno.Command(Deno.execPath(), {
     args: [...args],
     cwd: project,
     stdout: 'piped',
     stderr: 'piped',
-  }).output();
-  const decoder = new TextDecoder();
-  return { code, output: `${decoder.decode(stdout)}${decoder.decode(stderr)}` };
+  }).spawn();
+
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // The child may already have exited; the status read below still resolves.
+    }
+  }, DENO_RUN_TIMEOUT_MS);
+
+  const status = await child.status;
+  clearTimeout(timer);
+  const stdout = await new Response(child.stdout).text();
+  const stderr = await new Response(child.stderr).text();
+
+  if (timedOut) {
+    return {
+      code: 1,
+      output: `deno subprocess timed out after ${DENO_RUN_TIMEOUT_MS}ms:\n${stdout}${stderr}`,
+    };
+  }
+  return { code: status.code ?? 1, output: `${stdout}${stderr}` };
+}
+
+/**
+ * Runs one Deno subcommand inside a project, retrying transient network
+ * failures.
+ *
+ * `deno install` is the only subprocess this gate runs that performs real
+ * registry I/O, and it runs while the rest of the suite is spawning dozens of
+ * other `deno` processes in parallel. Under that load a single install can lose
+ * its connection to the registry mid-download and exit non-zero, even though
+ * the same install succeeds on its own or on a quieter run — the flake this
+ * helper absorbs. Only a failure that looks like a transient network condition
+ * is retried; a deterministic failure (a missing version, a dependency-age
+ * refusal, a resolution error) is returned on its first attempt so the test
+ * still fails on a real defect.
+ *
+ * @param project - The project directory
+ * @param args - The subcommand and its flags
+ * @returns Its exit code and combined output
+ */
+async function denoRunRetry(
+  project: string,
+  args: readonly string[],
+): Promise<{ code: number; output: string }> {
+  let result = await runDenoOnce(project, args);
+  for (let attempt = 1; attempt < DENO_INSTALL_ATTEMPTS; attempt++) {
+    if (result.code === 0 || !isTransientInstallFailure(result.output)) {
+      return result;
+    }
+    await new Promise((resolve) => setTimeout(resolve, DENO_INSTALL_RETRY_DELAY_MS));
+    result = await runDenoOnce(project, args);
+  }
+  return result;
 }
 
 describe('a scaffolded project is formatted and lints clean', () => {
@@ -346,13 +456,22 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
     // install that succeeds under a policy that was never going to refuse
     // anything is not evidence that the emitted key does the work.
     await setDependencyAge(project, 5_256_000);
-    const refused = await denoRun(project, ['install']);
+    // The refusal is deterministic, but reaching it requires registry I/O to
+    // resolve the versions first, so a transient blip under parallel load can
+    // fail the install with a network error instead of the age message. The
+    // retrying runner absorbs only that transient class and returns the
+    // deterministic refusal (or a success, which would expose a real defect)
+    // on its first attempt.
+    const refused = await denoRunRetry(project, ['install']);
     expect(refused.code, refused.output).toBe(1);
     expect(refused.output).toContain('minimum dependency age');
 
-    // What the CLI actually emits.
+    // What the CLI actually emits. This install is expected to SUCCEED, so it
+    // goes through the retrying runner: a transient registry blip under the
+    // full suite's parallel load must not fail the step, while a real refusal
+    // (which is deterministic) is still returned on its first attempt.
     await setDependencyAge(project, 0);
-    const allowed = await denoRun(project, ['install']);
+    const allowed = await denoRunRetry(project, ['install']);
     expect(allowed.code, allowed.output).toBe(0);
     expect(allowed.output).not.toContain('minimum dependency age');
   });
@@ -374,8 +493,10 @@ describe('a scaffolded full-stack project type-checks its own routes', () => {
     // `deno install` after the repoint and before the check, and that ordering
     // is load-bearing: the app tree imports `@react-router/fs-routes` from npm,
     // so a check before the install fails on module resolution rather than on
-    // anything the template emitted.
-    const installed = await denoRun(project, ['install', '--allow-scripts']);
+    // anything the template emitted. Retrying, because this install is expected
+    // to succeed and a transient registry blip under parallel load must not fail
+    // the step.
+    const installed = await denoRunRetry(project, ['install', '--allow-scripts']);
     expect(installed.code, installed.output).toBe(0);
 
     // The assertion D3 failed, with 79 `TS2686 'React' refers to a UMD global`
