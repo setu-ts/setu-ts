@@ -2356,6 +2356,64 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   that case through the public two-argument constructor. All three now have tests naming the failure
   they guard, taking `drizzle-query.ts`, `drizzle-database.ts` and `unit-of-work.ts` to 100%
   branch/function/line — complete (PR #162)
+- **Milestone 70a** (`common` + `kernel` + `runtime` + `grpc-plugin` + `websocket-plugin` — the
+  pipeline bypass, first of the M70 alpha-8 defect closeout. `setUpgradeRouter`/`setRpcHandler` were
+  consulted **inside the HTTP adapter, before** the request was mapped and entered the kernel
+  pipeline, so **no middleware applied to a WebSocket upgrade or a gRPC request at all**: X6-1 an
+  unauthenticated WebSocket writing through a guarded endpoint, X7-6 an unauthenticated gRPC client
+  reading and writing through one, metrics and security headers absent on both, and X7-7 RPC serving
+  `200` through the whole shutdown drain while ordinary paths answered `503`. Every inbound request
+  now runs the pipeline FIRST; the handshake or RPC dispatch happens only in the kernel terminal
+  handler, after the pipeline declines to short-circuit — so X7-7 falls out for free, since
+  `#stopping` is checked at the top of `#handleRequest`.
+
+  Four flagged `common` widenings, all optional so no implementor breaks: `IRequest.raw?` /
+  `IRequestContext.raw?` carry the **undisturbed** web `Request` (the M42 `signal?` / M44 `fs?`
+  precedent), `IWebSocketService.routeUpgrade?`, and `IGrpcService.claims?`. The intent travels on
+  the `IRequest`, branded under a `Symbol.for` key with `setUpgradeIntent`/`upgradeIntentOf` (the
+  M57 `SECURITY_METADATA` precedent) — **the plan's §3.2 choice of `ctx.state` is unimplementable
+  and the plan is corrected rather than left standing**: the adapter holds the `IRequest` and never
+  sees the `IRequestContext`, which the kernel builds and discards internally, so nothing written to
+  `ctx.state` could ever reach the adapter that must perform the handshake. The mechanism is
+  per-adapter because the upgrade does not arrive on one path: Deno and Workers already have it on
+  the fetch path, Bun's lives in the `Bun.serve` callback, and Node's never reaches fetch at all —
+  it arrives on the raw `upgrade` event, which now runs the framework handler before handshaking.
+
+  **The first implementation shipped four defects that every gate passed, and the two worst are the
+  ones its own plan had named.** `#tryGrpc` had **no `basePath` guard**, and since
+  `IGrpcService.handleRequest` is typed `Promise<Response>` and never returns `null`, it claimed
+  EVERY unmatched route — so merely registering `GrpcPlugin` changed the whole application's 404
+  from the kernel's `{"error":"Not Found"}` (`application/json`) to gRPC's `Not Found`
+  (`text/plain`). That is verbatim the plan's §6 negative control ("remove the `basePath` guard and
+  an ordinary 404 route must start reaching gRPC"), so it was evidently never run; the guard is now
+  `IGrpcService.claims`, which exists because "outside my base path" and "mine, but no such
+  procedure" are indistinguishable once both have collapsed into a 404. §3.6 was **not implemented**
+  either — an upgrade carrying a body was answered `101`, because the check read `content-length`,
+  which is absent both on an in-process `Request` and on any chunked upload; it now reads the
+  **mapped** body, and `upgrade-with-body.test.ts` no longer carries a test titled "is refused 400"
+  that asserted `200`. Third, **the suite was red**: moving detection into the kernel put a throwing
+  header read outside `WebSocketService`'s reporting wrapper, so an upgrade-router failure was
+  logged nowhere — detection now lives in the router's own `#route`, which is both where
+  `WsRouteTable` (path-only) needs it and inside the wrapper, and the kernel keeps a try/catch
+  backstop for a third-party service that does not report. Fourth, the docs gate was red on the
+  `common` README exports table.
+
+  **`inject()` could not reach either new path**, because it built a synthetic `IRequest` with no
+  `raw` — so every kernel-level upgrade test passed vacuously by falling through to the 404. It now
+  populates `raw`, guarded so a malformed URL still surfaces as the 400 `createRequestContext`
+  produces. Dead surface from the retired seam is deprecated rather than removed (§9.2):
+  `setRpcHandler?`, `RpcInterceptorStore`, `GrpcUnavailableError`, `GrpcService.createFetchHandler`,
+  and `IGrpcService.available`, now unconditionally `true`. `UpgradeRouterStore.consult` IS deleted
+  — internal, not barrel-exported — leaving `set`/`hasRouter`, which is all Node's listener gate
+  needs. `isWebSocketUpgradeRequest` was promoted to `common` (the kernel cannot import `runtime`)
+  and `runtime` re-exports it, deleting the duplicate rather than creating one — the kernel's
+  hand-rolled copy had used a **substring** match on `Connection`, which claims `no-upgrade`.
+
+  Verified past the gates: a **real socket** on Deno completes a `hello`/`echo:ping` round trip and
+  an unauthenticated one is refused with the guard observed running; the 404 body and content-type
+  are byte-identical with and without `GrpcPlugin`; an upgrade with a body is `400` both with and
+  without `content-length`; and the drain answers `503` on both protocols. Four negative controls
+  were each observed failing and reverted) — complete (PR pending)
 - **Next milestone** — **M40** (final polish and release). M69 closed the typed Drizzle query gap
   that the single-entity `IDataSource` cannot express and M68 deferred. Note the shape of the gap
   before re-deriving it: an application can ALREADY write a Drizzle join, because `drizzleInstance`

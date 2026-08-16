@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { UPGRADE_INTENT } from '@setu-ts/common';
+import { upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -163,10 +163,7 @@ export class BunHttpServerHandle {
       const frameworkResponse = await this.#handler(frameworkRequest);
 
       // Check for upgrade intent written by the kernel terminal handler.
-      const intent =
-        (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
-          UPGRADE_INTENT
-        ];
+      const intent = upgradeIntentOf(frameworkRequest);
       if (intent !== undefined) {
         return this.#performUpgrade(request, intent);
       }
@@ -199,10 +196,7 @@ export class BunHttpServerHandle {
       const frameworkResponse = await this.#handler(frameworkRequest);
 
       // Check for upgrade intent written by the kernel terminal handler.
-      const intent =
-        (frameworkRequest as unknown as Record<symbol, WebSocketUpgradeIntent | undefined>)[
-          UPGRADE_INTENT
-        ];
+      const intent = upgradeIntentOf(frameworkRequest);
       if (intent !== undefined) {
         return this.#performBunUpgrade(request, server, intent);
       }

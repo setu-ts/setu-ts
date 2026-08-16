@@ -1,7 +1,12 @@
 # Milestone 70a — Pipeline bypass fix (`common`, `kernel`, `runtime`, `grpc-plugin`)
 
-> **Status:** Planning. Branch: `feat/m70a-pipeline-bypass`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete. Branch: `feat/m70a-pipeline-bypass`. `main` is protected — all work
+> (implementation + fixes) stayed on this one branch until it merged via a single PR.
+>
+> **Two decisions below were superseded during implementation and are corrected in place, with the
+> original reasoning kept so the error is not reintroduced: §3.2 (the `ctx.state` channel, which is
+> unreachable from an adapter) and §3.6's implementation route (`content-length`, which is absent on
+> the cases that matter). §3.4 gained the `IGrpcService.claims` member the prefix guard needs.**
 
 ## 0. Objective & scope
 
@@ -101,6 +106,16 @@ reintroduced.
   system is typed as potentially carrying an open socket. `ctx.state` is already the documented
   channel for per-request data between pipeline stages (the M48 session precedent), costs **no
   `common` widening beyond the symbol**, and keeps the socket out of the response contract.
+- **CORRECTED during implementation: `ctx.state` does not work either, for the same class of reason
+  the first draft's `IRequestContext.raw` did not.** The adapter holds the `IRequest` it built and
+  handed to the framework handler; it **never sees the `IRequestContext`**, which the kernel creates
+  internally and discards when the handler returns. There is no path by which a value written to
+  `ctx.state` reaches the adapter that must perform the handshake. The intent is therefore branded
+  onto the **`IRequest`** under the `UPGRADE_INTENT` symbol, through exported
+  `setUpgradeIntent`/`upgradeIntentOf` accessors — the M57 `SECURITY_METADATA` precedent, which
+  keeps the cast in one place instead of at seven call sites. Everything §3.2 wanted still holds:
+  the socket stays out of `IResponse`, and the only `common` widening is the symbol plus its two
+  accessors.
 - **Test home:** `packages/kernel/test/unit/upgrade-intent.test.ts`.
 
 ### 3.3 WebSocket: three adapter shapes, not one
@@ -133,6 +148,16 @@ reintroduced.
   null-returning type is `RpcFetchHandler`, which is the adapter-side seam being retired here. M49
   established that detection is prefix-only anyway, because Connect's unary content types include
   `application/json` and sniffing would hijack ordinary routes.
+- **CORRECTED during implementation: naming the rule was not enough — the prefix guard needs a
+  member on the contract, and the first implementation shipped without one.** Because
+  `handleRequest` never returns `null`, a path outside `basePath` and a claimed path with no such
+  procedure both arrive as a `404`, so the kernel cannot recover the distinction after dispatching.
+  Without a guard it claimed EVERY unmatched route, changing the whole application's 404 from the
+  kernel's `{"error":"Not Found"}` (`application/json`) to gRPC's `Not Found` (`text/plain`) — which
+  is exactly the negative control §6 already required, and it was not run. `IGrpcService` therefore
+  gains an **optional** `claims?(request): boolean`, implemented over the existing segment-aware
+  `isWithinBasePath`. Optional for source compatibility; the kernel treats an implementor that lacks
+  it as claiming nothing, because silently claiming everything is the more damaging default.
 - **X7-7 falls out for free:** `#stopping` is checked at the top of `#handleRequest`
   (`application.ts:513-518`), so once gRPC is dispatched from inside the kernel it answers `503`
   during the drain like every other path.
@@ -165,7 +190,18 @@ reintroduced.
   carrying a body is disturbed by it and would fail the handshake in a way that differs per runtime.
   RFC 6455 forbids a body on the handshake, so refusing it is correct and makes the behaviour one
   thing on all four adapters instead of four.
-- **Test home:** `packages/runtime/test/unit/upgrade-with-body.test.ts`.
+- **CORRECTED during implementation: the refusal belongs to the KERNEL, and cannot be driven off
+  `content-length`.** The first implementation read that header and so refused nothing in either
+  case that matters — an in-process `Request` carries no `content-length`, and neither does a
+  chunked upload; measured, an upgrade with a body was answered `101`. The check now reads the
+  **mapped** body (`ctx.request.bytes()`), which is already buffered and is authoritative on every
+  path. It runs only after the router has ACCEPTED, and closes the sink with code `1006` before
+  answering, so a reserved connection slot is not leaked per malformed upgrade.
+- **Test home:** the refusal itself is
+  `packages/kernel/test/integration/pipeline-runs-for-upgrade.test.ts`, because only the kernel sees
+  both the mapped body and the router decision.
+  `packages/runtime/test/unit/upgrade-with-body.test.ts` pins the adapter half — that no adapter
+  handshakes without an intent.
 
 ## 4. Exported surface — every symbol names its consumer
 

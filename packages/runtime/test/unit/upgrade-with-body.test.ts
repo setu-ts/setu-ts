@@ -1,11 +1,16 @@
 /**
- * upgrade-with-body — An upgrade carrying a body is refused 400 on every
- * adapter.
+ * upgrade-with-body — an adapter never handshakes on its own initiative.
  *
- * Verifies M70a §3.6: RFC 6455 forbids a body on the handshake. After the
- * mapping consumes the body via arrayBuffer(), a non-conformant upgrade
- * request carrying a body is refused with 400 before the handshake is
- * attempted, making the behaviour one thing on all four adapters instead of four.
+ * M70a §3.6 decides that a non-conformant upgrade carrying a body is refused
+ * `400`. That refusal lives in the KERNEL terminal handler, which is the only
+ * place that sees both the mapped body and the router decision — see
+ * `packages/kernel/test/integration/pipeline-runs-for-upgrade.test.ts` for the
+ * 400 itself.
+ *
+ * What these tests pin is the adapter half of the same rule: with no
+ * `UPGRADE_INTENT` branded on the request the adapter performs no handshake and
+ * simply returns the framework response, on all four adapters. Without that,
+ * an adapter could still upgrade a request the kernel had refused.
  *
  * @module
  */
@@ -34,8 +39,8 @@ function upgradeRequest(): Request {
   });
 }
 
-describe('Upgrade with body refused (M70a §3.6)', () => {
-  it('Deno: an upgrade carrying a body is refused 400', async () => {
+describe('Adapters never handshake without an upgrade intent (M70a §3.6)', () => {
+  it('Deno: an upgrade carrying a body is not handshaken by the adapter', async () => {
     let upgradeCalled = false;
     const host: DenoServeHost = {
       serve: () => ({ shutdown: () => Promise.resolve() }),
@@ -116,7 +121,7 @@ describe('Upgrade with body refused (M70a §3.6)', () => {
     expect(upgradeCalled).toBe(true);
   });
 
-  it('CF Workers: an upgrade carrying a body falls through to HTTP', async () => {
+  it('CF Workers: an upgrade carrying a body is not handshaken by the adapter', async () => {
     const wsHost: CloudflareWebSocketHost = {
       createPair: () => ({
         1: {
@@ -183,7 +188,7 @@ describe('Upgrade with body refused (M70a §3.6)', () => {
     expect(result.status).toBe(200);
   });
 
-  it('Bun: an upgrade carrying a body falls through to HTTP', async () => {
+  it('Bun: an upgrade carrying a body is not handshaken by the adapter', async () => {
     const host: BunServeHost = {
       serve: () =>
         ({
@@ -206,7 +211,7 @@ describe('Upgrade with body refused (M70a §3.6)', () => {
     expect(result.status).toBe(200);
   });
 
-  it('Node: an upgrade carrying a body falls through to HTTP', async () => {
+  it('Node: an upgrade carrying a body is not handshaken by the adapter', async () => {
     const host: NodeServeHost = {
       serve: () =>
         Promise.resolve({

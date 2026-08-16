@@ -6,6 +6,53 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **The middleware pipeline now runs before every WebSocket upgrade and gRPC request** (M70a).
+  `setUpgradeRouter` and `setRpcHandler` were consulted inside the HTTP adapter _before_ the request
+  was mapped and entered the pipeline, so **no middleware applied to either**: an unauthenticated
+  WebSocket could write through a guarded endpoint, an unauthenticated gRPC client could read and
+  write through one, metrics and security headers were absent on both, and RPC kept answering `200`
+  through a shutdown drain while ordinary paths answered `503`. Every inbound request now runs the
+  pipeline first; the handshake or RPC dispatch happens only in the kernel's terminal handler, after
+  the pipeline declines to short-circuit. No application change is required.
+
+### Added
+
+- `IRequest.raw?: Request` and `IRequestContext.raw?: Request` — the undisturbed web `Request`,
+  attached by the HTTP adapter beside the mapped request whose body has been buffered. Optional, so
+  existing implementors are unaffected; the kernel treats an absent `raw` as neither an upgrade nor
+  RPC and falls through to the `404`.
+- `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf` in `common` —
+  how the kernel tells the adapter to perform a handshake it has already authorized.
+- `isWebSocketUpgradeRequest` in `common` — the shared RFC 6455 §4.2.1 predicate. `@setu-ts/runtime`
+  re-exports it rather than keeping a second copy, so its published surface is unchanged.
+- `IWebSocketService.routeUpgrade?` and `IGrpcService.claims?` — both optional, so existing
+  implementors keep compiling. `claims` is the path guard that keeps an ordinary `404` intact.
+- `inject()` now populates `IRequest.raw`, so an injected request can exercise the upgrade and gRPC
+  paths instead of silently falling through to the `404`.
+
+### Deprecated
+
+- `IHttpAdapter.setRpcHandler?` — the kernel resolves `IGrpcService` from the service registry and
+  dispatches after the pipeline, so nothing calls this. All four first-party adapters accept it as a
+  no-op. To be removed in the next major release.
+- `RpcInterceptorStore` (`@setu-ts/runtime`), `GrpcUnavailableError` and
+  `GrpcService.createFetchHandler` (`@setu-ts/grpc-plugin`) — all reachable only through the retired
+  pre-pipeline seam. Retained as published surface; nothing throws or installs them.
+
+### Changed
+
+- `IGrpcService.available` is now unconditionally `true`. It reported whether the HTTP adapter
+  implemented `setRpcHandler`; dispatch no longer depends on any adapter capability.
+- A non-conformant WebSocket upgrade carrying a body is refused `400` by the kernel rather than
+  failing inside the runtime's own upgrade call with a runtime-specific message. RFC 6455 forbids a
+  body on the handshake.
+- WebSocket upgrade **detection** moved from the HTTP adapter into `WebSocketService`'s own router,
+  which is where a routing failure can still be logged. Behaviour on the wire is unchanged.
+- Node's raw `upgrade` listener now refuses an unroutable upgrade with the status the pipeline
+  produced (`404` for a path with no WebSocket route) rather than a fixed `400`.
+
 ## [0.1.0-alpha.8] — 2026-08-14
 
 **A release about what the generator actually produces, and what the database adapters actually

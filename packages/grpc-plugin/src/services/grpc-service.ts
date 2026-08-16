@@ -17,7 +17,11 @@ import type {
 } from '@setu-ts/common';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
-import { dispatchRequest, normalizeBasePath } from '../transports/rpc-dispatcher.ts';
+import {
+  dispatchRequest,
+  isWithinBasePath,
+  normalizeBasePath,
+} from '../transports/rpc-dispatcher.ts';
 import { buildConnectRouter, type ServiceEntry } from '../transports/connect-router-builder.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
 
@@ -96,10 +100,33 @@ export class GrpcService implements IGrpcService {
   }
 
   /**
-   * Handles an RPC request directly, bypassing the adapter seam.
+   * Whether this service claims the request's path — that is, whether the path
+   * lies inside the configured `basePath`.
+   *
+   * The kernel calls this before {@linkcode GrpcService.handleRequest}, which
+   * answers `404` for a claimed path with no matching procedure and therefore
+   * cannot itself be used to tell "not mine" from "mine, but unknown". Without
+   * this guard every unmatched route in the application would be answered by
+   * gRPC's plain-text `404` instead of the kernel's JSON one.
+   *
+   * A root `basePath` claims every path by construction; that is the
+   * documented meaning of mounting at the root, and `#dispatch` still falls
+   * through to `null` — hence a `404` — for an unknown procedure there.
+   *
+   * @param request - The native fetch request
+   * @returns `true` when the path lies inside `basePath`
+   * @since 0.3.0
+   */
+  claims(request: Request): boolean {
+    return isWithinBasePath(new URL(request.url).pathname, this.#basePath);
+  }
+
+  /**
+   * Handles an RPC request directly.
    *
    * Returns a 404 response when the request does not match any registered
-   * service path.
+   * service path. Callers routing traffic should consult
+   * {@linkcode GrpcService.claims} first.
    */
   handleRequest(request: Request): Promise<Response> {
     return Promise.resolve(this.#dispatch(request)).then(
@@ -108,9 +135,15 @@ export class GrpcService implements IGrpcService {
   }
 
   /**
-   * The handler installed into `IHttpAdapter.setRpcHandler`. Returns `null` for
-   * any request outside `basePath`, so ordinary traffic falls through to Hono
-   * untouched.
+   * The handler that used to be installed into `IHttpAdapter.setRpcHandler`.
+   * Returns `null` for any request outside `basePath`.
+   *
+   * @deprecated Since M70a the kernel dispatches gRPC itself, after the
+   * middleware pipeline, so nothing installs this handler — the pre-pipeline
+   * interceptor was the security defect that change closed. Use
+   * {@linkcode GrpcService.claims} together with
+   * {@linkcode GrpcService.handleRequest} instead. Retained because
+   * {@linkcode GrpcService} is published surface (AI_GUIDELINES §9.2).
    */
   createFetchHandler(): RpcFetchHandler {
     return (request: Request): Promise<Response | null> => Promise.resolve(this.#dispatch(request));
