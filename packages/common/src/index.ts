@@ -53,8 +53,17 @@ export type {
   RouteSchema,
   RouteSecurityMetadata,
   SecurityRequirement,
+  WebSocketUpgradeIntent,
 } from './http.ts';
-export { SECURITY_METADATA, securityMetadataOf, withSecurityMetadata } from './http.ts';
+export {
+  isWebSocketUpgradeRequest,
+  SECURITY_METADATA,
+  securityMetadataOf,
+  setUpgradeIntent,
+  UPGRADE_INTENT,
+  upgradeIntentOf,
+  withSecurityMetadata,
+} from './http.ts';
 
 // Runtime abstraction
 export type {

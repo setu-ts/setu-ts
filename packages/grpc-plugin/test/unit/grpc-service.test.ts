@@ -6,14 +6,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GrpcService } from '../../src/services/grpc-service.ts';
-import { GrpcUnavailableError } from '../../src/errors/grpc-errors.ts';
 import {
   createFakeConnectRuntime,
   type FakeConnectRuntime,
   fakeFile,
   fakeService,
 } from '../fixtures/fake-connect-runtime.ts';
-import type { GrpcServiceDefinition, IHttpAdapter } from '@setu-ts/common';
+import type { GrpcServiceDefinition } from '@setu-ts/common';
 import type { EmbeddedDescriptors as EmbeddedDescriptorsType } from '../../src/descriptors/embedded-descriptors.ts';
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 
@@ -31,16 +30,6 @@ const echoDefinition = fakeService(
   fakeFile('example/echo.proto'),
 ) as unknown as GrpcServiceDefinition;
 
-/** An adapter that implements the RPC seam. */
-function capableAdapter(): IHttpAdapter {
-  return { setRpcHandler: () => {} } as unknown as IHttpAdapter;
-}
-
-/** An adapter predating the M49 widening. */
-function legacyAdapter(): IHttpAdapter {
-  return {} as unknown as IHttpAdapter;
-}
-
 function runtimeWith(extra: ReturnType<typeof fakeService>[] = []): FakeConnectRuntime {
   return createFakeConnectRuntime({
     services: [
@@ -56,41 +45,19 @@ function createService(
   overrides: {
     runtime?: FakeConnectRuntime;
     options?: GrpcPluginOptions;
-    adapter?: IHttpAdapter | undefined;
   } = {},
 ): GrpcService {
   return new GrpcService({
     connectRuntime: overrides.runtime ?? runtimeWith(),
     embeddedDescriptors,
     options: overrides.options ?? {},
-    adapter: 'adapter' in overrides ? overrides.adapter : capableAdapter(),
     healthService: undefined,
   });
 }
 
 describe('GrpcService — availability', () => {
-  it('is available when the adapter implements setRpcHandler', () => {
+  it('is always available (kernel dispatches gRPC after pipeline)', () => {
     expect(createService().available).toBe(true);
-  });
-
-  it('is unavailable when the adapter predates the widening', () => {
-    expect(createService({ adapter: legacyAdapter() }).available).toBe(false);
-  });
-
-  it('is unavailable when no adapter was resolved', () => {
-    expect(createService({ adapter: undefined }).available).toBe(false);
-  });
-
-  it('rejects handleRequest with GrpcUnavailableError when unavailable', async () => {
-    const service = createService({ adapter: legacyAdapter() });
-    await expect(service.handleRequest(new Request('http://x/grpc/example.Echo/Echo')))
-      .rejects.toBeInstanceOf(GrpcUnavailableError);
-  });
-
-  it('still accepts addService when unavailable, so wiring is not lost', () => {
-    const service = createService({ adapter: legacyAdapter() });
-    service.addService(echoDefinition);
-    expect(service.serviceCount).toBe(1);
   });
 });
 
@@ -183,11 +150,6 @@ describe('GrpcService — fetch handler', () => {
     );
     expect(response?.status).toBe(200);
   });
-
-  it('returns null for traffic outside the base path even when unavailable', async () => {
-    const service = createService({ adapter: legacyAdapter() });
-    expect(await service.createFetchHandler()(new Request('http://x/users'))).toBeNull();
-  });
 });
 
 describe('GrpcService — shutdown', () => {
@@ -233,5 +195,20 @@ describe('GrpcService — shutdown', () => {
       new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
     );
     expect(response.status).toBe(503);
+  });
+
+  it('a closed root-mounted service claims only what it served', async () => {
+    // At the root `claims()` cannot fall back on the prefix — `''` contains
+    // every path — so after close it must consult the served-path set. Claiming
+    // the whole application here would 503 every ordinary route during the
+    // drain, which is the failure `#dispatch` already guards against.
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime, options: { basePath: '/' } });
+    service.addService(echoDefinition);
+    await service.handleRequest(new Request('http://x/example.Echo/Echo', { method: 'POST' }));
+    service.close();
+
+    expect(service.claims(new Request('http://x/example.Echo/Echo'))).toBe(true);
+    expect(service.claims(new Request('http://x/users'))).toBe(false);
   });
 });

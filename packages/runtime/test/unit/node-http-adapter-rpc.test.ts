@@ -16,11 +16,16 @@ function createFakeHost(): { host: NodeServeHost } {
 }
 
 // ---------------------------------------------------------------------------
-// RPC interceptor integration tests
+// RPC interceptor — post-M70a behavior
+//
+// After M70a, the adapter fetch handler no longer consults #rpcStore.
+// The framework handler (kernel pipeline) runs FIRST, and gRPC dispatch
+// happens inside the kernel terminal handler. setRpcHandler is deprecated
+// but still accepted for backward compatibility.
 // ---------------------------------------------------------------------------
 
-describe('node-http-adapter | RPC interceptor', () => {
-  it('RPC handler short-circuits before body mapping', async () => {
+describe('node-http-adapter | RPC interceptor (post-M70a)', () => {
+  it('setRpcHandler stores the handler but fetch does not consult it', async () => {
     const { host } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
@@ -31,7 +36,12 @@ describe('node-http-adapter | RPC interceptor', () => {
 
     adapter.setHandler(async (_request: any) => {
       return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
       } as any;
     });
 
@@ -39,10 +49,10 @@ describe('node-http-adapter | RPC interceptor', () => {
     const response = await adapter.fetch(request);
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('grpc response');
+    expect(await response.text()).toBe('framework');
   });
 
-  it('RPC handler returning null falls through to framework handler', async () => {
+  it('setRpcHandler with null-returning handler still lets framework handler run', async () => {
     const { host } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
@@ -53,7 +63,12 @@ describe('node-http-adapter | RPC interceptor', () => {
 
     adapter.setHandler(async (_request: any) => {
       return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
       } as any;
     });
 
@@ -61,10 +76,10 @@ describe('node-http-adapter | RPC interceptor', () => {
     const response = await adapter.fetch(request);
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('hono');
+    expect(await response.text()).toBe('framework');
   });
 
-  it('RPC throwing handler returns 500 error', async () => {
+  it('setRpcHandler with throwing handler does not affect fetch path', async () => {
     const { host } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
@@ -75,24 +90,12 @@ describe('node-http-adapter | RPC interceptor', () => {
 
     adapter.setHandler(async (_request: any) => {
       return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
-      } as any;
-    });
-
-    const request = new Request('http://localhost/');
-    const response = await adapter.fetch(request);
-
-    expect(response.status).toBe(500);
-    expect(await response.text()).toContain('Internal server error');
-  });
-
-  it('no RPC handler falls through to framework handler', async () => {
-    const { host } = createFakeHost();
-    const adapter = new NodeHttpAdapter(host);
-
-    adapter.setHandler(async (_request: any) => {
-      return {
-        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'hono' }),
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
       } as any;
     });
 
@@ -100,6 +103,28 @@ describe('node-http-adapter | RPC interceptor', () => {
     const response = await adapter.fetch(request);
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('hono');
+    expect(await response.text()).toBe('framework');
+  });
+
+  it('no RPC handler: framework handler runs', async () => {
+    const { host } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
+
+    adapter.setHandler(async (_request: any) => {
+      return {
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'framework',
+        }),
+      } as any;
+    });
+
+    const request = new Request('http://localhost/');
+    const response = await adapter.fetch(request);
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('framework');
   });
 });

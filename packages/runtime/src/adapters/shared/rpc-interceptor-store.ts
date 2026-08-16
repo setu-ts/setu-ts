@@ -16,6 +16,12 @@ import type { RpcFetchHandler } from '@setu-ts/common';
 /**
  * Stores an adapter's RPC interceptor and consults it safely.
  *
+ * @deprecated Since M70a no first-party adapter uses this. gRPC dispatch
+ * happens inside the kernel terminal handler, after the middleware pipeline,
+ * via `IGrpcService` resolved from the service registry — the pre-pipeline
+ * interceptor was the security defect that change closed. Retained because the
+ * class is published surface (AI_GUIDELINES §9.2); it will be removed
+ * alongside {@linkcode IHttpAdapter.setRpcHandler} in the next major release.
  * @since 0.3.0
  */
 export class RpcInterceptorStore {

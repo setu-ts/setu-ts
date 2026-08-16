@@ -11,6 +11,7 @@ import {
   NodeHttpAdapter,
   NodeHttpServerHandle,
 } from '../../src/adapters/node/node-http-adapter.ts';
+import { UPGRADE_INTENT } from '@setu-ts/common';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
@@ -212,5 +213,43 @@ describe('node-http-adapter | isNodeHttpServerHandle', () => {
   it('rejects invalid handles', () => {
     expect(isNodeHttpServerHandle({} as any)).toBe(false);
     expect(isNodeHttpServerHandle(null as any)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// performUpgrade (fetch path) returns 501
+// ---------------------------------------------------------------------------
+
+describe('node-http-adapter | performUpgrade via fetch path', () => {
+  it('returns 501 when upgrade intent reaches fetch handler', async () => {
+    const { host } = createFakeHost();
+    const adapter = new NodeHttpAdapter(host);
+
+    // Track whether onClose was called on the sink.
+    let onCloseCalled = false;
+    let onCloseReason = '';
+
+    // deno-lint-ignore require-await
+    adapter.setHandler(async (request) => {
+      // Write upgrade intent on the request (simulating kernel terminal handler).
+      (request as unknown as Record<symbol, any>)[UPGRADE_INTENT] = {
+        sink: {
+          onClose(info: { code: number; reason: string }) {
+            onCloseCalled = true;
+            onCloseReason = info.reason;
+          },
+        },
+      };
+      return {
+        snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
+      } as any;
+    });
+
+    const response = await adapter.fetch(new Request('https://example.com/'));
+
+    // #performUpgrade returns 501 and calls sink.onClose.
+    expect(response.status).toBe(501);
+    expect(onCloseCalled).toBe(true);
+    expect(onCloseReason).toBe('Upgrade unsupported on fetch path');
   });
 });

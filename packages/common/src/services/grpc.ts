@@ -114,10 +114,41 @@ export interface IGrpcService {
   ): void;
 
   /**
-   * Handles an incoming RPC request directly. Used by internal tests and by
-   * advanced scenarios that bypass the adapter seam. Throws
-   * {@linkcode GrpcUnavailableError} when the adapter does not support the
-   * RPC interceptor widening.
+   * Whether this service claims a request — that is, whether the request path
+   * lies inside the configured `basePath`.
+   *
+   * The kernel terminal handler calls this **before** {@linkcode
+   * IGrpcService.handleRequest} so an ordinary unmatched route keeps the
+   * kernel's own `404`. That guard cannot be derived from `handleRequest`,
+   * which returns `Promise<Response>` and never `null`: a path outside the
+   * base path is indistinguishable from a claimed path with no such procedure
+   * once both have collapsed into a `404`.
+   *
+   * Detection is prefix-only and deliberately so — Connect's real unary
+   * content types include `application/json`, so media-type sniffing would
+   * hijack ordinary application routes.
+   *
+   * Optional for source compatibility with implementors written before this
+   * member existed. The kernel treats an **absent** `claims` as "claims
+   * nothing" and falls through to its own `404`, because silently claiming
+   * every unmatched route is the more damaging default.
+   *
+   * @param request - The native fetch request
+   * @returns `true` when the request lies inside this service's base path
+   * @since 0.3.0
+   */
+  claims?(request: Request): boolean;
+
+  /**
+   * Handles an incoming RPC request directly.
+   *
+   * Called by the kernel terminal handler after the middleware pipeline has
+   * run and {@linkcode IGrpcService.claims} has accepted the path; also usable
+   * directly by tests and advanced scenarios.
+   *
+   * Returns a `404` response for a path this service claims but for which no
+   * procedure is registered. It never returns `null`, which is why
+   * {@linkcode IGrpcService.claims} exists.
    *
    * @param request - The native fetch request
    * @returns The gRPC/Connect response
@@ -125,8 +156,12 @@ export interface IGrpcService {
   handleRequest(request: Request): Promise<Response>;
 
   /**
-   * Whether the HTTP adapter supports the RPC interceptor seam.
-   * This is true when the adapter implements {@linkcode IHttpAdapter.setRpcHandler?}.
+   * Whether gRPC dispatch is available.
+   *
+   * Before M70a this reported whether the resolved HTTP adapter implemented
+   * the `setRpcHandler` seam. The kernel now dispatches gRPC itself, after the
+   * middleware pipeline, so no adapter capability is required and the
+   * framework's own service reports `true` unconditionally.
    */
   readonly available: boolean;
 }

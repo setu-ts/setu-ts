@@ -91,11 +91,11 @@ describe('GrpcPlugin integration', () => {
     );
   });
 
-  it('pins the documented limitation: inject() never reaches the interceptor', async () => {
-    // `Application.inject()` synthesizes an IRequest and calls the kernel
-    // handler directly, bypassing the adapter the interceptor is installed on.
-    // Pinned as a test so the README/PUBLIC_API claim is not just prose — if
-    // inject() ever did reach RPC, this fails and the docs get revisited.
+  it('inject() reaches gRPC dispatch after M70a (kernel owns dispatch)', async () => {
+    // After M70a, gRPC dispatch moved from the adapter interceptor into the
+    // kernel terminal handler. Since inject() calls #handleRequest directly,
+    // it now reaches the gRPC dispatch — the adapter bypass no longer applies.
+    // Both fetch() and inject() exercise the same kernel code path for gRPC.
     await withApp(
       createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] }),
       async (app) => {
@@ -109,15 +109,16 @@ describe('GrpcPlugin integration', () => {
         expect(viaFetch.status).toBe(200);
         expect(await viaFetch.json()).toEqual({ status: 'SERVING' });
 
-        // The same path through inject() misses the interceptor entirely and
-        // falls to the kernel router, which has no such route.
+        // After M70a: inject() reaches the kernel terminal handler, which
+        // dispatches gRPC via #tryGrpc. Both paths return the same result.
         const viaInject = await app.inject({
           method: 'POST',
           url: '/grpc/grpc.health.v1.Health/Check',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ service: '' }),
         });
-        expect(viaInject.statusCode).toBe(404);
+        expect(viaInject.statusCode).toBe(200);
+        expect(viaInject.json()).toEqual({ status: 'SERVING' });
       },
     );
   });

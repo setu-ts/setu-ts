@@ -16,13 +16,14 @@ import type {
   IResponse,
   RpcFetchHandler,
   ServerHandle,
+  WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
+import { upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
-import { RpcInterceptorStore } from '../shared/rpc-interceptor-store.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { DenoWebSocketUpgrade } from './deno-ws-upgrader.ts';
@@ -112,7 +113,6 @@ export class DenoHttpServerHandle {
   #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
   #server: DenoServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
-  readonly #rpcStore = new RpcInterceptorStore();
   #host: DenoServeHost;
 
   constructor(host: DenoServeHost) {
@@ -134,10 +134,12 @@ export class DenoHttpServerHandle {
   }
 
   /**
-   * Stores the gRPC/Connect fetch handler set by `setRpcHandler`.
+   * @deprecated gRPC dispatch now runs through the kernel pipeline.
+   * This method is retained for backward compatibility but no longer stores
+   * or consults an RPC handler.
    */
-  setRpcHandler(handler: RpcFetchHandler): void {
-    this.#rpcStore.set(handler);
+  setRpcHandler(_handler: RpcFetchHandler): void {
+    // No-op — the handler is no longer used (M70a).
   }
 
   /**
@@ -157,52 +159,47 @@ export class DenoHttpServerHandle {
   /**
    * Creates the web-standard fetch handler for Deno.serve.
    *
-   * The WebSocket upgrade is consulted first and short-circuits: the request
-   * body must stay undisturbed for `Deno.upgradeWebSocket` to succeed. Then the
-   * RPC interceptor is consulted exactly once; a returned Response
-   * short-circuits as RPC, while null falls through. Only then is the body
-   * mapped via `mapWebRequestToFrameworkRequest`, which reads it.
+   * The framework handler (kernel pipeline) runs FIRST on every request.
+   * After it returns, the adapter checks for an upgrade intent written by
+   * the kernel terminal handler on the IRequest and performs the WebSocket
+   * handshake. This ensures middleware (auth, metrics, security headers)
+   * applies to upgrade requests uniformly.
    */
   createFetchHandler(): (request: Request) => Promise<Response> {
     return async (request: Request): Promise<Response> => {
-      const upgraded = await this.#tryUpgrade(request);
-      if (upgraded !== null) {
-        return upgraded;
-      }
-
-      const rpcResult = await this.#rpcStore.consult(request);
-      if (rpcResult !== null) {
-        return rpcResult;
-      }
-
       const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
+
+      // Run the framework handler FIRST — this executes the full middleware
+      // pipeline, including auth, metrics, security headers, and shutdown drain.
       const frameworkResponse = await this.#handler(frameworkRequest);
+
+      // After the handler returns, check if the kernel requested an upgrade.
+      // The kernel writes WebSocketUpgradeIntent on the IRequest keyed by
+      // UPGRADE_INTENT so the adapter can read it here.
+      const intent = upgradeIntentOf(frameworkRequest);
+      if (intent !== undefined) {
+        return this.#performUpgrade(request, intent);
+      }
+
       return mapSnapshotToWebResponse(frameworkResponse.snapshot());
     };
   }
 
   /**
-   * Performs the handshake when the router accepts. Returns `null` to fall
-   * through to normal HTTP handling.
+   * Performs the WebSocket handshake using the stored raw Request and the
+   * upgrade intent written by the kernel terminal handler.
    */
-  async #tryUpgrade(request: Request): Promise<Response | null> {
-    const decision = await this.#upgrades.consult(request);
-    if (decision === null) {
-      return null;
-    }
-    if (!decision.accept) {
-      return new Response(null, { status: decision.status });
-    }
-
+  #performUpgrade(
+    request: Request,
+    intent: WebSocketUpgradeIntent,
+  ): Response {
     const upgradeWebSocket = this.#host.upgradeWebSocket;
     if (upgradeWebSocket === undefined) {
-      // A host injected before this seam existed cannot handshake. Refusing is
-      // the honest answer; falling through would hand a WebSocket client an
-      // ordinary HTTP response it cannot interpret.
-      decision.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
+      intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
       return new Response(null, { status: 501 });
     }
 
@@ -210,15 +207,12 @@ export class DenoHttpServerHandle {
       const { socket, response } = upgradeWebSocket.call(
         this.#host,
         request,
-        decision.protocol !== undefined ? { protocol: decision.protocol } : undefined,
+        intent.protocol !== undefined ? { protocol: intent.protocol } : undefined,
       );
-      bindDenoSocketToSink(socket, decision.sink);
+      bindDenoSocketToSink(socket, intent.sink);
       return response;
     } catch (cause) {
-      // The router already accepted, so the consumer may be holding resources
-      // for this socket (a reserved connection slot). Tell it the connection is
-      // over rather than leaving the sink dangling forever.
-      decision.sink.onClose({
+      intent.sink.onClose({
         code: ABNORMAL_CLOSURE,
         reason: cause instanceof Error ? cause.message : 'Handshake failed',
       });

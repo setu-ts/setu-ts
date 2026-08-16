@@ -6873,13 +6873,16 @@ all merge before the release branch is cut.
 
 Ordered by the sequence they should be worked, not by severity alone.
 
-- ⬜ **M70a — Pipeline bypass** (`runtime`, `kernel`, `websocket-plugin`, `grpc-plugin`,
-  `graphql-plugin`). **Security.** `setUpgradeRouter`/`setRpcHandler` are consulted in the HTTP
-  adapter **before** the kernel pipeline, so no middleware applies: an unauthenticated WebSocket
-  writes through a guarded endpoint (X6-1) and an unauthenticated gRPC client reads and writes
-  through one (X7-6), with metrics and security headers absent on both. X7-7 is the same seam seen
-  from shutdown — RPC serves `200` through the whole drain while ordinary paths answer `503`. One
-  architectural fix; the three consumers of that seam are why it goes first.
+- ✅ **M70a — Pipeline bypass** (`common`, `kernel`, `runtime`, `websocket-plugin`, `grpc-plugin`) —
+  complete (PR #167). **Security.** `setUpgradeRouter`/`setRpcHandler` were consulted in the HTTP
+  adapter **before** the kernel pipeline, so no middleware applied: an unauthenticated WebSocket
+  wrote through a guarded endpoint (X6-1) and an unauthenticated gRPC client read and wrote through
+  one (X7-6), with metrics and security headers absent on both. X7-7 was the same seam seen from
+  shutdown — RPC served `200` through the whole drain while ordinary paths answered `503`. One
+  architectural fix; the three consumers of that seam are why it went first. Every inbound request
+  now runs the pipeline before any upgrade or RPC dispatch, and that dispatch runs **before** route
+  matching so an application catch-all cannot shadow it. `graphql-plugin` was listed here and is
+  **not** in scope — its own WS transport is M70i's, which owns GraphQL viability.
 - ⬜ **M70b — Tenant isolation and data exposure** (`cache-plugin`, `multi-tenancy-plugin`,
   `session-plugin`, `database-plugin`, `exceptions`). **Security.** A tenant is served another
   tenant's cached response body, because `cacheMiddleware` keys on `method:url` and the
@@ -7099,7 +7102,7 @@ branch during a version bump.
 | 68        | ✅     | common + kernel (contract gaps)       |
 | 69        | ✅     | database-plugin (drizzle query seam)  |
 | 70        | ⬜     | alpha-9 defect closeout (umbrella)    |
-| 70a       | ⬜     | pipeline bypass (security)            |
+| 70a       | ✅     | pipeline bypass (security)            |
 | 70b       | ⬜     | tenant isolation, data exposure (sec) |
 | 70c       | ⬜     | health-signal sweep (6 packages)      |
 | 70d       | ⬜     | no-argument registration seams        |

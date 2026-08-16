@@ -92,6 +92,7 @@ package fits the plugin architecture.
 | `isNone`                     | function  |
 | `isOk`                       | function  |
 | `isSome`                     | function  |
+| `isWebSocketUpgradeRequest`  | function  |
 | `isWorkerReadySignal`        | function  |
 | `isWorkerTaskReply`          | function  |
 | `isWorkerTaskRequest`        | function  |
@@ -100,14 +101,17 @@ package fits the plugin architecture.
 | `parseCookie`                | function  |
 | `securityMetadataOf`         | function  |
 | `serializeCookie`            | function  |
+| `setUpgradeIntent`           | function  |
 | `some`                       | function  |
 | `splitWorkerEnv`             | function  |
 | `unwrap`                     | function  |
+| `upgradeIntentOf`            | function  |
 | `withSecurityMetadata`       | function  |
 | `CAPABILITIES`               | const     |
 | `PLUGIN_PRIORITY`            | const     |
 | `SECURITY_METADATA`          | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`   | const     |
+| `UPGRADE_INTENT`             | const     |
 | `AddJobOptions`              | interface |
 | `AuditEntry`                 | interface |
 | `BulkheadPolicy`             | interface |
@@ -271,6 +275,7 @@ package fits the plugin architecture.
 | `WebSocketHandlers`          | interface |
 | `WebSocketRoom`              | interface |
 | `WebSocketRouteOptions`      | interface |
+| `WebSocketUpgradeIntent`     | interface |
 | `WorkerErrorShape`           | interface |
 | `WorkerReadySignal`          | interface |
 | `WorkerRunOptions`           | interface |
