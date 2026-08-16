@@ -44,7 +44,11 @@ Then read, in order:
    must exist in code (grep for its mechanism, read it), every planned test file must exist, and
    every deviation goes in the report as a finding. M10 shipped "✅" with the plan's data-source
    implementations, transaction-scoped repositories, and two whole test files silently missing — the
-   plan was right and nothing checked the code against it.
+   plan was right and nothing checked the code against it. **The committed-doc-conflicts table is a
+   commitment too**: each row names a doc correction as a PR deliverable, so for each one run
+   `git diff main..HEAD -- <the file that row names>` and read what actually moved. M70b's plan
+   promised a package README's `contains` prose be rewritten; the diff changed only that README's
+   export table, so the package kept promising behavior the same milestone had just changed.
 3. `PUBLIC_API.md` — the section for this package. Every `src/index.ts` export must be documented
    there; every documented export must exist.
 4. `packages/common/src/` — the committed interface(s) this package implements. The implementation
@@ -117,6 +121,12 @@ Check each item and note where it holds or fails:
 - **Tracking flipped in this PR** — ROADMAP.md "Progress Tracking" row is ✅ and CLAUDE.md "Current
   status" marks the milestone complete and points "Next milestone" at the following one, on this
   branch.
+- **CHANGELOG.md carries every behavior change, with migration text for each breaking one** — a
+  `packages/*/src` change that moves a released default, refuses input it used to accept, or alters
+  a response body needs an entry naming what restores the old behavior. Run
+  `git diff main..HEAD -- CHANGELOG.md`; empty output on a milestone that changed a default is a
+  finding, not a detail for the PR body. This has slipped twice — M66 shipped two breaking
+  configuration changes with the file untouched, M70b shipped three, and no gate saw either.
 
 # Step 6 — Behavioral exercise (run the real code at its real surface)
 

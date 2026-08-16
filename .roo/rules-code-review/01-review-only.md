@@ -87,9 +87,29 @@ Sort every finding into one of two buckets:
   efficiency, altitude. Report them so a Code-mode subtask can apply the low-risk ones; they do not
   hold the merge.
 
-Also confirm, against the milestone's plan under `plans/` and `PUBLIC_API.md`: every planned design
-decision exists in code, every `src/index.ts` export is documented, and no `common` contract / token
-/ PUBLIC_API shape drifted silently.
+## The bookkeeping no gate can see
+
+The milestone's plan under `plans/` is part of the review scope, not background for it. Check all
+three of these against `git diff main...HEAD`:
+
+- **Every planned design decision exists in code**, every `src/index.ts` export is documented in
+  `PUBLIC_API.md`, and no `common` contract / capability token / PUBLIC_API shape drifted silently.
+- **Every doc deliverable the plan named actually shipped.** The plan's committed-doc-conflicts
+  table lists each correction as a named PR deliverable, and one has already been skipped with every
+  gate green: the plan promised a package README's `contains` prose be rewritten, the diff changed
+  only that README's export table, and the package went on promising behavior the same milestone had
+  just changed. The check is mechanical — for each row in that table,
+  `git diff main...HEAD -- <the file the row names>` and read what actually moved.
+- **A change under `packages/*/src` that alters released behavior has a `CHANGELOG.md` entry, and a
+  breaking one carries migration text** naming what restores the old behavior.
+  `git diff main...HEAD -- CHANGELOG.md` coming back empty on a milestone that moved a default is a
+  finding in its own right. This has now happened twice — M66 shipped two breaking configuration
+  changes with the file untouched, M70b shipped three.
+
+**All three block the merge.** The first two are contract lies in the same class as a wrong JSDoc: a
+README that documents behavior the code no longer has is exactly the defect this repo keeps
+shipping. The third is required outright by CLAUDE.md's "Before reporting a task done". None of them
+is a cleanup, and none may be downgraded to one.
 
 ## The report you hand back
 
