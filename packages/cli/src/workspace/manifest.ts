@@ -117,6 +117,20 @@ export interface WorkspaceMember {
   readonly port: number;
   /** Sibling services that must answer `/ready` before this member starts. */
   readonly dependsOn?: readonly string[];
+  /**
+   * Whether this member serves `/live` and `/ready`.
+   *
+   * Recorded at `generate app` time, where the chosen template is known, because
+   * the Kubernetes renderer has only the manifest. Every named template reaches
+   * `HealthPlugin` — the three plugin-list ones declare it and the
+   * starter-composed one gets it through the REST tier — so only a
+   * template-LESS member answers neither path.
+   *
+   * ABSENT means "unknown", not "no": a workspace created before M70h has no
+   * such record, and the renderer falls back to the TCP probe rather than
+   * pointing a probe at a path that may 404 (X2-7).
+   */
+  readonly healthProbes?: boolean;
 }
 
 /** A workspace's CLI-owned record of itself. */
@@ -224,7 +238,13 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     (!Array.isArray(dependsOn) ||
       !dependsOn.every((entry) => typeof entry === 'string' && entry !== ''))
   ) return undefined;
-  return { name, port, ...(dependsOn === undefined ? {} : { dependsOn }) };
+  const healthProbes = record['healthProbes'];
+  return {
+    name,
+    port,
+    ...(dependsOn === undefined ? {} : { dependsOn }),
+    ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),
+  };
 }
 
 /**

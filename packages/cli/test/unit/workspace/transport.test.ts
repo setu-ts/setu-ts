@@ -222,3 +222,43 @@ describe('the transport registry', () => {
     }
   });
 });
+
+// X2-3. `--transport rabbitmq` rewrote MessagingPlugin correctly and then left
+// `QueuePlugin()` on the memory adapter — so in the one template built for
+// distributed work, background jobs were process-local: lost on restart,
+// invisible to a second replica, and unaffected by the broker the workspace was
+// explicitly pointed at.
+describe('the queue arm of a transport', () => {
+  /** The adapters `QueueAdapterType` supports, from the queue plugin's source. */
+  const QUEUE_CAPABLE = ['redis', 'rabbitmq'] as const;
+
+  for (const name of QUEUE_CAPABLE) {
+    it(`derives a ${name} queue adapter from the transport`, () => {
+      const spec = transportSpec(name);
+      expect(spec.queueArgs).toBeDefined();
+      expect(spec.queueArgs?.('CONNECTION')).toContain(`adapter: '${name}'`);
+      // The SAME connection value the broker uses — one datum, so a workspace
+      // cannot point its queue at a different server than its bus.
+      expect(spec.queueArgs?.('CONNECTION')).toContain('url: CONNECTION');
+    });
+  }
+
+  it('leaves the queue on memory for a transport the queue cannot serve', () => {
+    // `QueueAdapterType` is 'memory' | 'redis' | 'rabbitmq' | 'sqs', so these
+    // brokers have no queue adapter at all. Keeping the in-memory default is the
+    // honest outcome; inventing one would be a silently wrong backend.
+    for (const name of ['nats', 'kafka', 'pubsub', 'service-bus'] as const) {
+      expect(transportSpec(name).queueArgs).toBeUndefined();
+    }
+  });
+
+  it('declares a connection wherever it declares queue arguments', () => {
+    // Same pairing the messaging arm is held to: an arm with arguments but no
+    // connection would render `url: undefined` into a member's config.
+    for (const name of listTransports()) {
+      const spec = transportSpec(name.name);
+      if (spec.queueArgs === undefined) continue;
+      expect(spec.connection).toBeDefined();
+    }
+  });
+});

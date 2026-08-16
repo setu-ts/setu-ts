@@ -40,8 +40,8 @@ describe('generateModule', () => {
         'src/modules/user-profile/user-profile.service.ts',
         'src/modules/user-profile/user-profile.service.test.ts',
         'src/modules/user-profile/index.ts',
-        'src/routes/user-profile.routes.ts',
-        'src/routes/index.ts',
+        'src/controllers/user-profile.routes.ts',
+        'src/controllers/index.ts',
       ]);
     });
 
@@ -52,7 +52,7 @@ describe('generateModule', () => {
     });
 
     it('registers ctx-first handlers through the router API', () => {
-      const source = fileAt(files, 'src/routes/user-profile.routes.ts');
+      const source = fileAt(files, 'src/controllers/user-profile.routes.ts');
       expect(source).toContain('export function registerUserProfileRoutes(router: IRouterApi)');
       expect(source).toContain("router.group('/user-profile'");
       // The write answers a real 201, which a decorated handler can only do
@@ -64,7 +64,7 @@ describe('generateModule', () => {
       // The module's own files are the developer's; the barrel is CLI-owned, and
       // that exemption is the only reason a second module does not refuse.
       expect(files.filter((f) => f.managed === true).map((f) => f.path))
-        .toEqual(['src/routes/index.ts']);
+        .toEqual(['src/controllers/index.ts']);
     });
 
     it('lists the existing route modules alongside the new one', () => {
@@ -72,7 +72,7 @@ describe('generateModule', () => {
         deriveNames('user'),
         options([], [], { route: ['gizmo', 'billing'] }),
       );
-      const barrel = fileAt(files, 'src/routes/index.ts');
+      const barrel = fileAt(files, 'src/controllers/index.ts');
       for (const call of ['registerGizmoRoutes', 'registerBillingRoutes', 'registerUserRoutes']) {
         expect(barrel).toContain(`${call}(router);`);
       }
@@ -80,7 +80,7 @@ describe('generateModule', () => {
 
     it('lists a regenerated module exactly once', () => {
       const files = generateModule(deriveNames('user'), options([], [], { route: ['user'] }));
-      const barrel = fileAt(files, 'src/routes/index.ts');
+      const barrel = fileAt(files, 'src/controllers/index.ts');
       expect(barrel.match(/registerUserRoutes\(router\);/g)?.length).toBe(1);
     });
 
@@ -91,9 +91,14 @@ describe('generateModule', () => {
       expect(source).not.toContain('Deno.test');
     });
 
-    it('re-exports the function from the per-module barrel', () => {
-      expect(fileAt(files, 'src/modules/user-profile/index.ts'))
-        .toContain('export { listUserProfile }');
+    it('re-exports the module SURFACE, not the stub symbol, from the barrel', () => {
+      // A3: naming the stub meant that replacing it — the obvious next step —
+      // broke the barrel and the generated test with TS2305, and neither file is
+      // reachable from `deno check main.ts setu.config.ts`, so both stayed
+      // broken through a full green run of every gate.
+      const barrel = fileAt(files, 'src/modules/user-profile/index.ts');
+      expect(barrel).toContain("export * from './user-profile.service.ts';");
+      expect(barrel).not.toContain('listUserProfile');
     });
   });
 

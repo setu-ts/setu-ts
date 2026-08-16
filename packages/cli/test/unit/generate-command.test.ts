@@ -169,33 +169,45 @@ describe('runGenerateCommand', () => {
   // decorators. Refusing `g controller` with only "install the decorator
   // plugin" told a developer the opposite — that decorators are the way to get
   // an HTTP handler — when `g route` is ungated, wired, and right there.
-  describe('the decorator-free alternative in a gate refusal', () => {
-    for (const schematic of ['controller'] as const) {
-      it(`names \`generate route\` when ${schematic} is refused`, async () => {
-        const h = harness();
-        expect(await h.run([schematic, 'widget'])).toBe(1);
-        const text = h.err.text();
+  describe('generating HTTP artifacts without decorators', () => {
+    // M61 gated `controller` and redirected to `g route` in a second directory.
+    // E8 merged the two directories, so there is nowhere to redirect TO — the
+    // schematic is ungated and emits the functional shape instead, exactly as
+    // `service` already did.
+    it('emits a functional controller rather than refusing', async () => {
+      const h = harness();
+      expect(await h.run(['controller', 'widget'])).toBe(0);
 
-        // The gate itself is unchanged: still refused, still exit 1, still names
-        // the package. Removing the gate would emit source whose own import
-        // cannot resolve (the M34b defect).
-        expect(text).toContain('@setu-ts/decorator-plugin');
-        expect(text).toContain('setu generate route widget');
-        expect(text).toContain('needs no decorators');
-        expect(h.fs.writes).toEqual([]);
-      });
-    }
+      const module = h.fs.read('/app/src/controllers/widget.controller.ts');
+      expect(module).toContain('export function registerWidgetRoutes(router: IRouterApi)');
+      // The whole reason the gate existed: an ungated CLASS would emit an import
+      // the project cannot resolve (the M34b defect). The functional shape
+      // imports only `@setu-ts/common`.
+      expect(module).not.toContain('@setu-ts/decorator-plugin');
+      expect(module).not.toContain('@Controller');
+    });
+
+    it('names no alternative, because there is no second directory', async () => {
+      const h = harness();
+      await h.run(['controller', 'UserProfile']);
+      expect(h.err.text()).not.toContain('setu generate route');
+      expect(h.err.text()).not.toContain('Or run');
+    });
+
+    it('wires the functional controller through the shared HTTP barrel', async () => {
+      const h = harness();
+      await h.run(['controller', 'widget']);
+      const barrel = h.fs.read('/app/src/controllers/index.ts');
+      expect(barrel).toContain('registerWidgetRoutes(router);');
+      // No APP_CONTROLLERS in a functional project: the class array would name a
+      // symbol none of these modules export.
+      expect(barrel).not.toContain('APP_CONTROLLERS');
+    });
 
     it('allows a functional module when decorators are absent', async () => {
       const h = harness();
       expect(await h.run(['module', 'widget'])).toBe(0);
-      expect(h.fs.read('/app/src/routes/widget.routes.ts')).toContain('registerWidgetRoutes');
-    });
-
-    it('suggests the name the user actually typed', async () => {
-      const h = harness();
-      await h.run(['controller', 'UserProfile']);
-      expect(h.err.text()).toContain('setu generate route UserProfile');
+      expect(h.fs.read('/app/src/controllers/widget.routes.ts')).toContain('registerWidgetRoutes');
     });
 
     // A schematic with no honest alternative must print nothing extra —
@@ -208,10 +220,15 @@ describe('runGenerateCommand', () => {
       expect(text).not.toContain('Or run');
     });
 
-    it('says nothing about alternatives once the plugin is installed', async () => {
+    it('emits the decorated class once the plugin is installed', async () => {
       const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
       expect(await h.run(['controller', 'widget'])).toBe(0);
       expect(h.err.text()).not.toContain('Or run');
+
+      const module = h.fs.read('/app/src/controllers/widget.controller.ts');
+      expect(module).toContain('@Controller');
+      expect(module).toContain('export class WidgetController');
+      expect(h.fs.read('/app/src/controllers/index.ts')).toContain('APP_CONTROLLERS');
     });
   });
 
@@ -239,10 +256,14 @@ describe('runGenerateCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
-    it('marks a gated schematic unavailable in --help when its plugin is absent', async () => {
+    it('marks a gated schematic unavailable in --help, naming the command that fixes it', async () => {
+      // D3: this used to say "install @setu-ts/auth-plugin" and offer no
+      // command to do it, so unlocking a gated schematic meant hand-editing
+      // `deno.json`. Every gate the CLI shipped pointed at a step it would not
+      // take.
       const h = harness();
       await h.run(['--help']);
-      expect(h.out.text()).toContain('guard  (unavailable — install @setu-ts/auth-plugin)');
+      expect(h.out.text()).toContain('guard  (unavailable — run `setu add auth`)');
     });
 
     it('lists a gated schematic plainly once its plugin is installed', async () => {
@@ -437,7 +458,7 @@ describe('runGenerateCommand', () => {
     it('accepts a reserved word, which schematics always affix', async () => {
       const h = harness();
       expect(await h.run(['route', 'class'])).toBe(0);
-      expect(h.fs.read('/app/src/routes/class.routes.ts'))
+      expect(h.fs.read('/app/src/controllers/class.routes.ts'))
         .toContain('export function registerClassRoutes');
     });
   });
@@ -456,10 +477,49 @@ describe('runGenerateCommand', () => {
     expect(err.text()).toContain('Failed to write: EROFS');
   });
 
+  // E8's migration path, found by review. A project predating the merge is
+  // invisible to every other check in this command: the artifact scan reads
+  // `src/controllers/`, so a file under `src/routes/` is never scanned, never
+  // skipped, and never reported — while `setu.config.ts` still imports the old
+  // barrel, because that file is the developer's and the CLI does not rewrite it.
+  // Measured against a real scaffold before the fix: two `created` lines, exit 0,
+  // and a new barrel nothing imports.
+  it('reports a pre-E8 src/routes directory, naming the migration', async () => {
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST(),
+      '/app/src/routes/index.ts': 'export {};',
+      '/app/src/routes/orders.routes.ts': 'export {};',
+    });
+
+    expect(await h.run(['route', 'billing'])).toBe(0);
+
+    const reported = h.err.text();
+    expect(reported).toContain('src/routes/');
+    expect(reported).toContain('orders.routes.ts');
+    expect(reported).toContain('unreachable');
+    // It reports and does not refuse: the developer needs the generator to work
+    // inside the project they are migrating.
+    expect(h.fs.writes).toContain('/app/src/controllers/billing.routes.ts');
+  });
+
+  it('stays silent in a project that has no legacy directory', async () => {
+    // The notice must not fire on every generate in every healthy project.
+    const h = harness({ '/app/deno.json': DENO_MANIFEST() });
+
+    expect(await h.run(['route', 'billing'])).toBe(0);
+    expect(h.err.text()).not.toContain('still holds');
+  });
+
   it('uses the injected clock for the migration filename', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin') });
     expect(await h.run(['migration', 'add-orders'])).toBe(0);
-    expect(h.fs.writes).toEqual(['/app/src/migrations/20260728123045-add-orders.ts']);
+    // The runner and its barrel ride along since D5 — the migration used to be
+    // an orphan that nothing imported and nothing could run.
+    expect(h.fs.writes).toEqual([
+      '/app/src/migrations/20260728123045-add-orders.ts',
+      '/app/src/migrations/index.ts',
+      '/app/src/migrations/run.ts',
+    ]);
   });
 });
 

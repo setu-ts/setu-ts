@@ -234,7 +234,7 @@ describe('runNewCommand', () => {
       await h.run(['app']);
       const main = h.fs.read('/work/app/main.ts');
       expect(main).toContain("import { createApp } from './setu.config.ts'");
-      expect(main).toContain('app.start({ port: 3000 })');
+      expect(main).toContain("app.start({ port: Number(runtime.env.PORT ?? '3000') })");
       expect(main).not.toContain('RuntimePlugin');
       expect(main).not.toContain('createApplication');
     });
@@ -502,7 +502,7 @@ describe('runNewCommand', () => {
       expect(config).toContain('for (const generated of GENERATED_MIDDLEWARE) {');
       // The barrels those imports name are emitted at scaffold time, so the
       // config never imports a module the project does not have.
-      expect(h.fs.read('/work/bare/src/routes/index.ts')).toContain('registerGeneratedRoutes');
+      expect(h.fs.read('/work/bare/src/controllers/index.ts')).toContain('registerGeneratedRoutes');
       expect(h.fs.read('/work/bare/src/middleware/index.ts')).toContain('GENERATED_MIDDLEWARE');
       expect(h.fs.read('/work/bare/src/plugins/index.ts')).toContain('GENERATED_PLUGINS');
     });
@@ -527,7 +527,14 @@ describe('runNewCommand', () => {
       ) {
         expect(config).not.toContain(absent);
       }
-      expect(h.fs.has('/work/bare/src/controllers/index.ts')).toBe(false);
+      // The HTTP barrel IS emitted — `controller` is ungated since E8, so a
+      // bare project has one directory that answers requests. What it must not
+      // carry is the CLASS-shaped registration: no APP_CONTROLLERS above, and
+      // no import of `@setu-ts/decorator-plugin` anywhere.
+      expect(h.fs.has('/work/bare/src/controllers/index.ts')).toBe(true);
+      expect(h.fs.read('/work/bare/src/controllers/index.ts'))
+        .toContain('export function registerGeneratedRoutes');
+      expect(config).not.toContain('decorator-plugin');
       expect(h.fs.has('/work/bare/src/cqrs/index.ts')).toBe(false);
     });
 
@@ -682,7 +689,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'deno']);
       const main = h.fs.read('/work/app/main.ts');
-      expect(main).toContain('await app.start({ port: 3000 })');
+      expect(main).toContain("await app.start({ port: Number(runtime.env.PORT ?? '3000') })");
       // The plugin list lives in setu.config.ts, not here.
       expect(main).toContain("from './setu.config.ts'");
       expect(h.fs.read('/work/app/setu.config.ts')).toContain('RuntimePlugin()');
@@ -713,17 +720,23 @@ describe('runNewCommand', () => {
 
   for (const runtime of ['node', 'bun']) {
     describe(`--runtime ${runtime} — npm scripts`, () => {
-      it('declares the module test dependencies without a frontend build script', async () => {
-        // The `rest` template declares @std/* so the module schematic's emitted
-        // test can run. That must NOT be read as "this template has a frontend
-        // npm build" — a REST project with `npm run build` invoking a tool it
+      it('runs the generated test with the runtime own runner, and no frontend build', async () => {
+        // These targets declare NO `@std/*`: that harness reaches `Deno.test`
+        // internally, so a generated test importing it cannot execute here at
+        // all. `bun:test` and `node:test` are built in — verified by running
+        // them (`1 pass` / `pass 1`) against real scaffolds.
+        //
+        // And a `test` script must not be read as "this template has a frontend
+        // npm build": a REST project with `npm run build` invoking a tool it
         // does not depend on is a broken script the developer did not ask for.
         const h = harness();
 
         await h.run(['app', '--runtime', runtime, '--template', 'rest']);
 
         const pkg = JSON.parse(h.fs.read('/work/app/package.json'));
-        expect(pkg.devDependencies['@std/expect']).toBe('npm:@jsr/std__expect@^1.0.20');
+        expect(pkg.devDependencies?.['@std/expect']).toBeUndefined();
+        expect(pkg.devDependencies?.['@std/testing']).toBeUndefined();
+        expect(pkg.scripts.test).toBe(runtime === 'bun' ? 'bun test' : 'tsx --test');
         expect(pkg.scripts.build).toBeUndefined();
         expect(pkg.scripts.start).toBeDefined();
       });
@@ -763,7 +776,9 @@ describe('runNewCommand', () => {
       it('emits the serve entry and no deno.json', async () => {
         const h = harness();
         await h.run(['app', '--runtime', runtime]);
-        expect(h.fs.read('/work/app/main.ts')).toContain('app.start({ port: 3000 })');
+        expect(h.fs.read('/work/app/main.ts')).toContain(
+          "app.start({ port: Number(runtime.env.PORT ?? '3000') })",
+        );
         expect(h.fs.has('/work/app/deno.json')).toBe(false);
       });
 

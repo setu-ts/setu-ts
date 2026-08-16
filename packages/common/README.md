@@ -320,6 +320,7 @@ package fits the plugin architecture.
 | `RouteHandler`               | type      |
 | `RpcFetchHandler`            | type      |
 | `RuntimePlatform`            | type      |
+| `RuntimeSignal`              | type      |
 | `SchedulerBackoff`           | type      |
 | `SchedulerJobHandler`        | type      |
 | `SecurityRequirement`        | type      |

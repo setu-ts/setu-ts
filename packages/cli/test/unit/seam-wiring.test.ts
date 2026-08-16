@@ -7,7 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { getTemplate, listTemplates } from '../../src/templates/registry.ts';
+import { getTemplate, listTemplates, packagesOf } from '../../src/templates/registry.ts';
 import type { TemplateDefinition } from '../../src/templates/registry.ts';
 import {
   decoratorSeamExtras,
@@ -44,9 +44,9 @@ describe('the no-template host', () => {
   // plugin, which is what makes the host possible without a fourth template.
   it('carries exactly the three barrels that need no plugin', () => {
     expect((MINIMAL_HOST.files ?? []).map((f) => f.path).sort()).toEqual([
+      'src/controllers/index.ts',
       'src/middleware/index.ts',
       'src/plugins/index.ts',
-      'src/routes/index.ts',
     ]);
   });
 
@@ -62,7 +62,9 @@ describe('seam selection', () => {
   it('omits a seam whose backing plugin the host does not install', () => {
     // Emitting it would put an unresolvable import in the generated config.
     const bare = seamsFor(new Set()).map((s) => s.schematic).sort();
-    expect(bare).toEqual(['middleware', 'plugin', 'route']);
+    // `controller` is ungated since M70h/E8 and appears here in its functional
+    // shape, sharing the `route` barrel rather than adding one.
+    expect(bare).toEqual(['controller', 'middleware', 'plugin', 'route']);
   });
 
   it('selects every seam for a host installing every backing plugin', () => {
@@ -181,11 +183,28 @@ describe('seam hosts', () => {
   }
 
   it('keeps functional hosts decorator-free while class-based hosts class seams', () => {
-    expect(barrels(getTemplate('rest')!)).not.toContain('src/controllers/index.ts');
+    // Both modes now scaffold the HTTP barrel — E8 gave `controller` a
+    // functional shape, so the directory exists either way. What still
+    // separates them is the SERVICE barrel, which has a registration site only
+    // when a decorator plugin is present.
+    expect(barrels(getTemplate('rest')!)).toContain('src/controllers/index.ts');
     expect(barrels(getTemplate('rest')!)).not.toContain('src/services/index.ts');
     expect(barrels(getTemplate('class-based')!)).toContain('src/controllers/index.ts');
     expect(barrels(getTemplate('class-based')!)).toContain('src/services/index.ts');
     expect(barrels(getTemplate('microservice')!)).toContain('src/cqrs/index.ts');
+  });
+
+  it('gives each mode its OWN HTTP shape, not merely the same barrel path', () => {
+    const shapeOf = (name: 'rest' | 'class-based'): readonly string[] =>
+      seamsFor(new Set(packagesOf(getTemplate(name)!.plugins, getTemplate(name)!.middleware)))
+        .filter((spec) => spec.barrel === 'src/controllers/index.ts')
+        .flatMap((spec) => spec.exports);
+
+    // The class-based barrel declares the controller array; the functional one
+    // must not, or `setu.config.ts` would spread a symbol nothing exports.
+    expect(shapeOf('class-based')).toContain('APP_CONTROLLERS');
+    expect(shapeOf('rest')).not.toContain('APP_CONTROLLERS');
+    expect(shapeOf('rest')).toContain('registerGeneratedRoutes');
   });
 
   it('gives the cqrs and events seams to microservice alone', () => {
@@ -197,22 +216,40 @@ describe('seam hosts', () => {
     expect(barrels(getTemplate('microservice')!)).toContain('src/events/index.ts');
   });
 
-  it('gives full-stack no seam at all', () => {
-    // Its layering is `routes → features → services` and it composes through a starter
-    // factory, so it has no plugin array to spread into and no `src/` families.
+  it('gives full-stack the ungated seams, wired as STATEMENTS', () => {
+    // X5-8: it used to host none, so `setu generate route` — which the generated
+    // README tells the developer to run — wrote a module and a barrel that
+    // `setu.config.ts` imported neither of, and the route answered 404.
     const fullStack = getTemplate('full-stack')!;
-    expect(barrels(fullStack)).toEqual([]);
-    expect(fullStack.setupCalls).toBeUndefined();
-    expect(fullStack.pluginSpreads).toBeUndefined();
+    expect(barrels(fullStack)).toEqual([
+      'src/controllers/index.ts',
+      'src/middleware/index.ts',
+      'src/plugins/index.ts',
+    ]);
+    expect(fullStack.setupCalls ?? []).toContain('registerGeneratedRoutes(app.router);');
+  });
+
+  it('registers generated plugins through app.register, having no array to spread', () => {
+    // A starter builds the plugin list and no starter accepts extra plugins, so
+    // the spread mechanism is unavailable here. `IApplication.register` is the
+    // equivalent: the kernel resolves plugins at `start()`, and the generated
+    // factory deliberately does not start.
+    const fullStack = getTemplate('full-stack')!;
+    expect(fullStack.setupCalls ?? []).toContain(
+      'for (const generated of GENERATED_PLUGINS) app.register(generated);',
+    );
+    expect(fullStack.pluginSpreads ?? []).toEqual([]);
   });
 
   // Enforced across the registry rather than by a runtime check no user input could
   // reach, exactly as the `plugins`-vs-`appFactory` rule already is.
-  it('never pairs a starter factory with either new field', () => {
+  it('never spreads into a plugin array it does not have', () => {
     for (const template of listTemplates()) {
       if (template.appFactory === undefined) continue;
-      expect(template.setupCalls ?? []).toEqual([]);
+      // `setupCalls` are statements and compose with a starter factory; a
+      // `pluginSpreads` entry would name an array the generated config lacks.
       expect(template.pluginSpreads ?? []).toEqual([]);
+      expect(template.plugins).toEqual([]);
     }
   });
 });

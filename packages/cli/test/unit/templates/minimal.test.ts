@@ -18,14 +18,27 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { MINIMAL_HOST, MINIMAL_SEAMS } from '../../../src/templates/minimal.ts';
-import { REGISTER_ROUTES_EXPORT } from '../../../src/seams/routes.ts';
+import { REGISTER_ROUTES_EXPORT } from '../../../src/seams/http.ts';
 import { GENERATED_MIDDLEWARE_EXPORT } from '../../../src/seams/middleware.ts';
 import { GENERATED_PLUGINS_EXPORT } from '../../../src/seams/plugins.ts';
 
 describe('MINIMAL_SEAMS', () => {
-  it('is exactly the three families that need no plugin', () => {
+  it('is exactly the four families that need no plugin', () => {
+    // `controller` joined this list in M70h/E8, in its functional shape: it is
+    // no longer gated, so a bare project can generate one. It shares the
+    // `route` barrel rather than adding a fourth.
     expect(MINIMAL_SEAMS.map((spec) => spec.schematic).sort())
-      .toEqual(['middleware', 'plugin', 'route']);
+      .toEqual(['controller', 'middleware', 'plugin', 'route']);
+  });
+
+  it('selects the FUNCTIONAL HTTP shapes, never the decorated ones', () => {
+    const http = MINIMAL_SEAMS.filter((spec) => spec.barrel === 'src/controllers/index.ts');
+    expect(http.length).toBe(2);
+    for (const spec of http) {
+      // The class-based specs export APP_CONTROLLERS; the functional ones must
+      // not, or the generated config would spread a symbol nothing declares.
+      expect(spec.exports).toEqual(['registerGeneratedRoutes']);
+    }
   });
 
   // M60 declined this host reasoning that "six of the ten seams would be
@@ -55,9 +68,12 @@ describe('MINIMAL_HOST', () => {
 
   it('emits one barrel per selected seam, and no other file', () => {
     expect((MINIMAL_HOST.files ?? []).map((f) => f.path).sort()).toEqual([
+      // One HTTP barrel, not two: since M70h `controller` and `route` share
+      // `src/controllers/`, so a bare project has exactly one directory that
+      // answers requests (E8).
+      'src/controllers/index.ts',
       'src/middleware/index.ts',
       'src/plugins/index.ts',
-      'src/routes/index.ts',
     ]);
   });
 
@@ -68,7 +84,7 @@ describe('MINIMAL_HOST', () => {
     for (const from of imported) expect(emitted.has(from)).toBe(true);
   });
 
-  it('registers the route seam through a call inside createApp()', () => {
+  it('registers the HTTP seam through a call inside createApp()', () => {
     expect(MINIMAL_HOST.setupCalls).toContain(`${REGISTER_ROUTES_EXPORT}(app.router);`);
   });
 
@@ -85,7 +101,6 @@ describe('MINIMAL_HOST', () => {
     const paths = (MINIMAL_HOST.files ?? []).map((f) => f.path);
     for (
       const gated of [
-        'src/controllers/index.ts',
         'src/services/index.ts',
         'src/cqrs/index.ts',
         'src/events/index.ts',
