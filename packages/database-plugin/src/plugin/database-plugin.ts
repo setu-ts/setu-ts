@@ -183,6 +183,9 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   if (opts?.prismaClient !== undefined) {
     result.prismaClient = opts.prismaClient;
   }
+  if (opts?.provider !== undefined) {
+    result.provider = opts.provider;
+  }
   if (opts?.drizzleInstance !== undefined) {
     result.drizzleInstance = opts.drizzleInstance;
   }

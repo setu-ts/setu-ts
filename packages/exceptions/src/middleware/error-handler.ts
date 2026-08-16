@@ -24,7 +24,7 @@ import type { HandlerResult, ILogger, IRequestContext, MiddlewareFunction } from
 import { CAPABILITIES } from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
-import { internalServerError } from '../errors/exceptions.ts';
+import { internalServerError, statusTitle } from '../errors/exceptions.ts';
 import {
   type ErrorFormat,
   type ErrorHandlerFormatter,
@@ -49,8 +49,33 @@ export interface ErrorHandlerOptions {
    * **Never** enable this in production — pass a config-derived boolean (e.g.
    * `config.get('NODE_ENV') === 'development'`), never read `process.env`
    * directly (AI_GUIDELINES §4.1). Defaults to `false`.
+   *
+   * Note the stack is the _secondary_ disclosure: the primary one is the
+   * error **message**, which for a failed query carries the SQL and its bound
+   * parameter values. Masking that is `maskInternalErrors`' job.
+   *
+   * The two compose safely, and masking wins: an error masked by
+   * {@linkcode ErrorHandlerOptions.maskInternalErrors} carries **no** stack in
+   * the body even when this option is `true`, because a stack begins with the
+   * very message that was masked. Set `maskInternalErrors: false` to see the
+   * stack of an internal error.
    */
   readonly includeStackTrace?: boolean;
+  /**
+   * When `true` (the default), a caught value that was **not** an
+   * {@linkcode HttpError} and resolves to a status `>= 500` is masked in the
+   * response: its `detail`/`message` becomes the status title
+   * (`'Internal Server Error'`) and the raw message — which for a failed
+   * query carries the SQL and its bound parameter values — is dropped from the
+   * body. The log is unaffected: `logErrors` still records the unmasked error
+   * and its cause chain, so an operator loses nothing unless `logErrors` is
+   * _also_ `false`, the configuration that already logs nothing.
+   *
+   * A deliberately thrown `HttpError` is never masked — `instanceof HttpError`
+   * is the line between "the developer wrote this for a caller" and "this
+   * escaped from a driver". `false` restores the previous behaviour verbatim.
+   */
+  readonly maskInternalErrors?: boolean;
   /**
    * When `true` (the default), caught errors are logged at `error` level via
    * the `ILogger` resolved from `ctx.services` — but only if a logger is
@@ -101,6 +126,7 @@ const PROBLEM_DETAILS_FORMATTERS: ReadonlySet<ErrorHandlerFormatter> = new Set([
 export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction {
   const format = options?.format ?? 'default';
   const includeStackTrace = options?.includeStackTrace ?? false;
+  const maskInternalErrors = options?.maskInternalErrors ?? true;
   const logErrors = options?.logErrors ?? true;
   const formatter = selectFormatter(format);
   const contentType = PROBLEM_DETAILS_FORMATTERS.has(formatter) ? PROBLEM_JSON : JSON_CONTENT_TYPE;
@@ -114,17 +140,46 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       return;
     } catch (rawError) {
       // Normalize: HttpError passes through, anything else becomes a 500.
-      const error: HttpError = rawError instanceof HttpError ? rawError : internalServerError(
+      const isHttpError = rawError instanceof HttpError;
+      const error: HttpError = isHttpError ? rawError : internalServerError(
         rawError instanceof Error ? rawError.message : 'Internal Server Error',
         rawError instanceof Error ? rawError : undefined,
       );
 
+      // Log the UNMASKED error first, so the log keeps the SQL, the bound
+      // parameters, and the cause chain regardless of masking.
       if (logErrors) {
         logError(ctx, error);
       }
 
-      const body = formatter(error, ctx);
-      if (includeStackTrace && error.stack !== undefined) {
+      // Mask a driver-shaped 500 for the response: the raw message becomes the
+      // status title so the body carries neither the statement nor the values.
+      // A deliberately thrown HttpError is never masked, and a 4xx is left
+      // alone — only a non-HttpError with status >= 500 is rewritten.
+      let responseError = error;
+      let masked = false;
+      if (maskInternalErrors && !isHttpError && error.statusCode >= 500) {
+        masked = true;
+        // Preserve the log's cause chain without leaking the message. `cause`
+        // is `unknown` on `Error`; only an `Error` value is a valid
+        // `HttpError` cause, so narrow rather than cast.
+        const cause = error.cause instanceof Error ? error.cause : undefined;
+        responseError = new HttpError(
+          error.statusCode,
+          statusTitle(error.statusCode),
+          undefined,
+          cause,
+        );
+      }
+
+      const body = formatter(responseError, ctx);
+      // Masking wins over `includeStackTrace`. A stack's first line is
+      // `<name>: <message>`, so attaching the unmasked error's stack would put
+      // the SQL and its bound parameter values straight back into the body that
+      // was just masked — defeating the mask through the one option documented
+      // as unsafe in production. A masked error therefore carries no stack at
+      // all; the unmasked one is in the log, where `logErrors` already sent it.
+      if (includeStackTrace && !masked && error.stack !== undefined) {
         body.stack = error.stack;
       }
 

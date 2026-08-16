@@ -23,7 +23,11 @@ function toITenantResolver(fake: FakeResolver): ITenantResolver {
 
 // -- Helpers ---------------------------------------------------------------
 
-function makeContext(opts?: { state?: Map<string, unknown>; tenant?: unknown }) {
+function makeContext(opts?: {
+  state?: Map<string, unknown>;
+  tenant?: unknown;
+  path?: string;
+}) {
   const state = opts?.state ?? new Map();
   let storedTenant: { id: string; name?: string } | undefined = opts?.tenant as
     | { id: string; name?: string }
@@ -31,7 +35,7 @@ function makeContext(opts?: { state?: Map<string, unknown>; tenant?: unknown }) 
   const request = {
     method: 'GET',
     url: 'https://acme.example.com/',
-    path: '/',
+    path: opts?.path ?? '/',
     headers: new Headers(),
     json: () => Promise.resolve({}),
     text: () => Promise.resolve(''),
@@ -322,5 +326,115 @@ describe('tenant middleware', () => {
     });
     await mw(ctx as never, next);
     expect(!getNextCalled()).toBeTruthy();
+  });
+
+  describe('exclude — operational probe exemption (X4-2)', () => {
+    const noneResolver: FakeResolver = {
+      resolve(_request) {
+        return Promise.resolve({ present: false });
+      },
+    };
+
+    it('default list exempts all six probe paths under required:true', async () => {
+      for (const path of ['/live', '/ready', '/health', '/metrics', '/openapi.json', '/docs']) {
+        const { ctx, next, getNextCalled } = makeContext({ path });
+        const mw = tenantMiddleware({
+          service: makeService(),
+          resolvers: [toITenantResolver(noneResolver)],
+          options: { required: true },
+        });
+        await mw(ctx as never, next);
+        expect(getNextCalled(), `expected ${path} to be exempt by default`).toBeTruthy();
+      }
+    });
+
+    it('a non-excluded path still rejects under required:true', async () => {
+      const { ctx, next, getNextCalled } = makeContext({ path: '/api/orders' });
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [toITenantResolver(noneResolver)],
+        options: { required: true },
+      });
+      await mw(ctx as never, next);
+      expect(!getNextCalled()).toBeTruthy();
+    });
+
+    it('a custom string entry exempts that path only', async () => {
+      const { ctx, next, getNextCalled } = makeContext({ path: '/internal/ping' });
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [toITenantResolver(noneResolver)],
+        options: { required: true, exclude: ['/internal/ping'] },
+      });
+      await mw(ctx as never, next);
+      expect(getNextCalled()).toBeTruthy();
+
+      const other = makeContext({ path: '/internal/ping2' });
+      await mw(other.ctx as never, other.next);
+      expect(!other.getNextCalled()).toBeTruthy();
+    });
+
+    it('a custom RegExp entry exempts matching paths', async () => {
+      const { ctx, next, getNextCalled } = makeContext({ path: '/internal/ping' });
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [toITenantResolver(noneResolver)],
+        options: { required: true, exclude: [/^\/internal\//] },
+      });
+      await mw(ctx as never, next);
+      expect(getNextCalled()).toBeTruthy();
+
+      const other = makeContext({ path: '/api/orders' });
+      await mw(other.ctx as never, other.next);
+      expect(!other.getNextCalled()).toBeTruthy();
+    });
+
+    it('exclude: [] restores rejection on the default probe paths', async () => {
+      const { ctx, next, getNextCalled } = makeContext({ path: '/live' });
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [toITenantResolver(noneResolver)],
+        options: { required: true, exclude: [] },
+      });
+      await mw(ctx as never, next);
+      expect(!getNextCalled()).toBeTruthy();
+    });
+
+    it('an exempted path skips resolution entirely (no tenant stamped)', async () => {
+      const { ctx, next, getNextCalled } = makeContext({ path: '/live' });
+      let resolved = 0;
+      const countingResolver: FakeResolver = {
+        resolve(_request) {
+          resolved += 1;
+          return Promise.resolve({ present: false });
+        },
+      };
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [toITenantResolver(countingResolver)],
+        options: { required: true },
+      });
+      await mw(ctx as never, next);
+      expect(getNextCalled()).toBeTruthy();
+      expect(resolved).toBe(0);
+      const typedRequest = ctx.request as { tenant?: { id: string } };
+      expect(typedRequest.tenant).toBeUndefined();
+    });
+
+    it('a stateful global RegExp is matched on every request (lastIndex reset)', async () => {
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [toITenantResolver(noneResolver)],
+        options: { required: true, exclude: [/^\/live/g] },
+      });
+      // Two consecutive exempted requests: a `g`-flagged RegExp would fail the
+      // second if `lastIndex` were not reset between `.test` calls.
+      const first = makeContext({ path: '/live' });
+      await mw(first.ctx as never, first.next);
+      expect(first.getNextCalled()).toBeTruthy();
+      const second = makeContext({ path: '/live' });
+      await mw(second.ctx as never, second.next);
+      expect(second.getNextCalled()).toBeTruthy();
+    });
   });
 });

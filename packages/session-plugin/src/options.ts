@@ -132,6 +132,16 @@ export interface SessionPluginOptions {
    * registered; an empty object enables it with defaults.
    */
   readonly csrf?: CsrfFormOptions;
+  /**
+   * Bind a session to the tenant it was minted under. Default `true`: when a
+   * tenant is resolved for the request, the tenant id is sealed into the
+   * session on commit, and a later request presenting that session under a
+   * different tenant is refused with `403` before the handler runs. When
+   * either the session or the request carries no tenant, nothing is compared,
+   * so an application without tenancy is inert. `false` restores the previous
+   * behaviour (no seal, no compare).
+   */
+  readonly tenantBinding?: boolean;
 }
 
 /** Fully-defaulted configuration the service and middleware read. */
@@ -148,6 +158,7 @@ export interface ResolvedSessionConfig {
   readonly rolling: boolean;
   readonly idleTimeoutMs?: number;
   readonly maxCookieBytes: number;
+  readonly tenantBinding: boolean;
 }
 
 /**
@@ -185,6 +196,7 @@ export function resolveSessionConfig(options: SessionPluginOptions = {}): Resolv
     maxAgeMs: maxAgeSeconds * 1000,
     rolling: options.rolling ?? false,
     maxCookieBytes,
+    tenantBinding: options.tenantBinding ?? true,
   } as const;
 
   return {

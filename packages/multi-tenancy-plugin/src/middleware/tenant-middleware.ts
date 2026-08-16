@@ -38,7 +38,25 @@ interface MiddlewareOptionsPartial {
   cache?: { prefix?: boolean; separator?: string };
   required?: boolean;
   rejectionStatus?: number;
+  exclude?: readonly (string | RegExp)[];
 }
+
+/**
+ * The operational probes exempted by default: the paths the framework's own
+ * plugins serve (health, metrics, OpenAPI) plus the interactive docs. They are
+ * read from those plugins' own defaults, not copied from a register — a probe
+ * carries no tenant header, so a `required` deployment would otherwise never
+ * become ready. Compiled once at module load; the per-request check is a
+ * membership test, never a re-parse.
+ */
+const DEFAULT_EXCLUDED_PATHS: readonly (string | RegExp)[] = [
+  '/live',
+  '/ready',
+  '/health',
+  '/metrics',
+  '/openapi.json',
+  '/docs',
+];
 
 /** Options accepted by `tenantMiddleware`. */
 interface TenantMiddlewareOptions {
@@ -71,7 +89,32 @@ export function tenantMiddleware({
   const rejectionStatus = options?.rejectionStatus ?? 400;
   const cacheConfig = options?.cache;
 
+  // The exemption list is resolved once at registration: omitted → the six
+  // operational defaults; `[]` → nothing exempt; otherwise the caller's list.
+  const exclude = options?.exclude ?? DEFAULT_EXCLUDED_PATHS;
+
   return async (ctx: IRequestContext, next: NextFunction) => {
+    // Excluded paths skip the middleware body entirely — no resolver runs, no
+    // tenant is stamped, and a `required` deployment does not reject them. A
+    // probe carries no tenant header, so running the resolver chain for it can
+    // only waste a lookup and, with the JWT resolver, emit a spurious warning.
+    for (const entry of exclude) {
+      if (typeof entry === 'string') {
+        if (entry === ctx.request.path) {
+          await next();
+          return;
+        }
+      } else {
+        // Reset `lastIndex` first: a `g`/`y`-flagged RegExp is stateful across
+        // `.test` calls, and the middleware runs on every request.
+        entry.lastIndex = 0;
+        if (entry.test(ctx.request.path)) {
+          await next();
+          return;
+        }
+      }
+    }
+
     // Resolve tenant by chaining resolvers; first `Some` wins.
     let resolved: ITenant | undefined;
 

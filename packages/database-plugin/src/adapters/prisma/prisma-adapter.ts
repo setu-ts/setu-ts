@@ -9,9 +9,42 @@
  *
  * @module
  */
-import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
+import type { DatabaseAdapterOptions, PrismaSqlProvider } from '../../interfaces/index.ts';
 import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
+import { UnsupportedFilterOperatorError } from '../../errors.ts';
+import { escapeLikePattern } from '../../query/like-escape.ts';
+
+// ---------------------------------------------------------------------------
+// Prisma connector (provider) — decides how `contains` is translated.
+// ---------------------------------------------------------------------------
+
+/** The connectors whose `LIKE` defaults the escape character to backslash. */
+const ESCAPING_PROVIDERS: ReadonlySet<string> = new Set([
+  'postgresql',
+  'postgres',
+  'mysql',
+  'sqlserver',
+  'cockroachdb',
+]);
+
+/**
+ * Connectors whose `contains` is not `LIKE`-based, so the value is already a
+ * literal substring and escaping it would be actively wrong.
+ *
+ * MongoDB is the case: Prisma compiles `contains` to a `$regex` match, in which
+ * `%` and `_` carry no special meaning at all. Escaping them to `\%` / `\_`
+ * would search for a backslash that is not in the data — the same class of
+ * wrong answer escaping produces on SQLite, reached from the other direction.
+ */
+const PASSTHROUGH_PROVIDERS: ReadonlySet<string> = new Set(['mongodb']);
+
+/** Every connector the adapter recognises, for structural detection. */
+const PROVIDERS: ReadonlySet<string> = new Set<string>([
+  ...ESCAPING_PROVIDERS,
+  ...PASSTHROUGH_PROVIDERS,
+  'sqlite',
+]);
 
 // ---------------------------------------------------------------------------
 // Prisma client type — resolved from the application at connect() time.
@@ -108,6 +141,8 @@ export class PrismaAdapter implements IDatabaseAdapter {
   private _client: PrismaClient | null = null;
   private _connected = false;
   private readonly _options: DatabaseAdapterOptions | undefined;
+  /** The resolved connector, or `undefined` when it could not be determined. */
+  private _provider: PrismaSqlProvider | undefined;
 
   constructor(options?: DatabaseAdapterOptions) {
     this._options = options ?? undefined;
@@ -116,6 +151,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
   /** @inheritdoc */
   async connect(): Promise<void> {
     this._client = await this.resolveClient();
+    this._provider = this.resolveProvider();
     await this._client.$connect();
     this._connected = true;
   }
@@ -154,6 +190,9 @@ export class PrismaAdapter implements IDatabaseAdapter {
       throw new Error('PrismaAdapter is not connected — call connect() first');
     }
     const client = this._client!;
+    // Capture for the returned transaction's data-source factory, whose `this`
+    // is the transaction object, not this adapter.
+    const provider = this._provider;
 
     const txReady = new Deferred<PrismaClient>();
     const hold = new Deferred<void>();
@@ -187,7 +226,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
 
     return {
       createDataSource(entity: string): DataSource {
-        return createPrismaDataSourceInner(tx, entity);
+        return createPrismaDataSourceInner(tx, entity, provider);
       },
 
       async commit(): Promise<void> {
@@ -226,7 +265,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
     if (!this._client) {
       throw new Error('PrismaAdapter is not connected — call connect() first');
     }
-    return createPrismaDataSourceInner(this._client, entity);
+    return createPrismaDataSourceInner(this._client, entity, this._provider);
   }
 
   /**
@@ -277,6 +316,32 @@ export class PrismaAdapter implements IDatabaseAdapter {
     }
     return client as PrismaClient;
   }
+
+  /**
+   * Resolve the connector the client is bound to.
+   *
+   * An explicit `options.provider` always wins. Otherwise the client's active
+   * provider is read structurally — `{ _activeProvider?: unknown }` narrowed
+   * with `typeof === 'string'`, never a cast to `any` — and accepted only when
+   * it is one of the known connectors. The field is underscore-prefixed and
+   * therefore not a stability promise, which is exactly why an unrecognised or
+   * absent value is `undefined` (refuse) rather than a guess, and why the
+   * explicit option exists.
+   *
+   * @returns The resolved connector, or `undefined` when undetermined
+   */
+  private resolveProvider(): PrismaSqlProvider | undefined {
+    const explicit = this._options?.provider;
+    if (explicit !== undefined) {
+      return explicit;
+    }
+    const client = this._client as unknown as Record<string, unknown>;
+    const active = client._activeProvider;
+    if (typeof active === 'string' && (PROVIDERS as ReadonlySet<string>).has(active)) {
+      return active as PrismaSqlProvider;
+    }
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,13 +366,15 @@ export class PrismaAdapter implements IDatabaseAdapter {
 export function createPrismaDataSource(
   client: PrismaClient,
   entity: string,
+  provider?: PrismaSqlProvider,
 ): DataSource {
-  return createPrismaDataSourceInner(client, entity);
+  return createPrismaDataSourceInner(client, entity, provider);
 }
 
 function createPrismaDataSourceInner(
   client: PrismaClient,
   entity: string,
+  provider?: PrismaSqlProvider,
 ): DataSource {
   // Resolve delegate: 'User' → client.user
   const delegateKey = entity.charAt(0).toLowerCase() + entity.slice(1);
@@ -324,7 +391,7 @@ function createPrismaDataSourceInner(
 
     findAll: (query) => {
       const args: Parameters<ModelDelegate['findMany']>[0] = {};
-      const where = prismaWhere(query.where, query.filter);
+      const where = prismaWhere(query.where, query.filter, provider);
       if (where !== undefined) {
         args.where = where;
       }
@@ -376,7 +443,7 @@ function createPrismaDataSourceInner(
     },
 
     count: (where, filter) => {
-      const predicate = prismaWhere(where, filter);
+      const predicate = prismaWhere(where, filter, provider);
       return delegate.count(predicate === undefined ? {} : { where: predicate });
     },
   };
@@ -385,25 +452,29 @@ function createPrismaDataSourceInner(
 function prismaWhere(
   where: Record<string, unknown>,
   filter?: FilterExpression,
+  provider?: PrismaSqlProvider,
 ): Record<string, unknown> | undefined {
   const equality = Object.keys(where).length === 0 ? undefined : where;
   if (filter === undefined) return equality;
-  const expression = prismaFilter(filter);
+  const expression = prismaFilter(filter, provider);
   if (equality === undefined) return expression;
   return { AND: [equality, expression] };
 }
 
-function prismaFilter(filter: FilterExpression): Record<string, unknown> {
+function prismaFilter(
+  filter: FilterExpression,
+  provider?: PrismaSqlProvider,
+): Record<string, unknown> {
   if (filter.type !== 'comparison') {
     return filter.type === 'and'
-      ? { AND: filter.filters.map(prismaFilter) }
-      : { OR: filter.filters.map(prismaFilter) };
+      ? { AND: filter.filters.map((f) => prismaFilter(f, provider)) }
+      : { OR: filter.filters.map((f) => prismaFilter(f, provider)) };
   }
   switch (filter.operator) {
     case 'eq':
       return { [filter.field]: filter.value };
     case 'contains':
-      return { [filter.field]: { contains: filter.value } };
+      return { [filter.field]: { contains: prismaContainsValue(filter.value, provider) } };
     case 'gt':
       return { [filter.field]: { gt: filter.value } };
     case 'gte':
@@ -428,4 +499,72 @@ function prismaFilter(filter: FilterExpression): Record<string, unknown> {
       };
     }
   }
+}
+
+/**
+ * Translate a `contains` filter value for Prisma, honouring the connector.
+ *
+ * - Escaping connectors (`postgresql`, `postgres`, `mysql`, `sqlserver`,
+ *   `cockroachdb`): escape `\`, `%` and `_` so the value is a literal
+ *   substring. Their `LIKE` defaults the escape character to backslash, so the
+ *   escaping is effective without an `ESCAPE` clause.
+ * - Passthrough connectors (`mongodb`): return the value unchanged. `contains`
+ *   compiles to a `$regex` match there, so `%` and `_` are already literal and
+ *   escaping them would search for a backslash the data does not contain.
+ * - `sqlite`: **refuse**. Prisma emits no `ESCAPE` clause and SQLite defines
+ *   no default escape character, so a literal `contains` is not expressible
+ *   through Prisma's filter API there. Returning wrong rows quietly is the
+ *   defect; returning a named error is the repair.
+ * - Connector not determined: refuse, naming the `provider` option as the fix.
+ *
+ * The refusal is at translation time, not at `connect()`: an application that
+ * never uses `contains` must not be blocked from starting because its
+ * connector could not be identified.
+ *
+ * @param value - The raw search value
+ * @param provider - The resolved connector, or `undefined` when undetermined
+ * @returns The (escaped) value to pass to Prisma's `contains`
+ * @throws {UnsupportedFilterOperatorError} When the connector is `sqlite` or
+ *   could not be determined
+ */
+function prismaContainsValue(
+  value: string,
+  provider: PrismaSqlProvider | undefined,
+): string {
+  if (provider === 'sqlite') {
+    throw new UnsupportedFilterOperatorError(
+      'contains',
+      'sqlite',
+      "The 'contains' filter operator is not supported by the Prisma adapter on SQLite: " +
+        'Prisma emits no ESCAPE clause and SQLite defines no default escape character, so a ' +
+        "literal substring match is not expressible through Prisma's filter API there. Use a raw " +
+        "query, or the memory/drizzle adapter (both honour 'contains' as a literal substring).",
+    );
+  }
+  if (provider === undefined) {
+    throw new UnsupportedFilterOperatorError(
+      'contains',
+      undefined,
+      "The 'contains' filter operator requires a known Prisma connector, and it could not be " +
+        "determined. Pass `provider` (e.g. `provider: 'postgresql'`) in the database adapter " +
+        "options so the adapter knows how to translate 'contains'.",
+    );
+  }
+  // Not `LIKE`-based: the value is already a literal substring, so escaping it
+  // would be the wrong answer rather than a safer one.
+  if (PASSTHROUGH_PROVIDERS.has(provider)) {
+    return value;
+  }
+  // Every remaining recognised connector defaults its LIKE escape character to
+  // backslash, so the escaping is effective.
+  if (!ESCAPING_PROVIDERS.has(provider)) {
+    // Defensive: an unrecognised provider that slipped through detection.
+    throw new UnsupportedFilterOperatorError(
+      'contains',
+      provider,
+      `The 'contains' filter operator is not supported by the Prisma adapter on connector ` +
+        `'${provider}'.`,
+    );
+  }
+  return escapeLikePattern(value);
 }

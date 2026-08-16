@@ -97,8 +97,18 @@ export interface CacheMiddlewareOptions {
   /**
    * Custom cache key generator. Defaults to
    * `${request.method}:${request.url}`.
+   *
+   * The tenant discriminator segment is composed around this key too, so a
+   * tenant-aware application stores one entry per tenant regardless.
    */
   key?: (ctx: IRequestContext) => string;
+  /**
+   * Per-request discriminator values appended to the cache key after the
+   * tenant segment. Each returned string is length-prefixed and joined in
+   * order, so two requests differing in any value never share an entry.
+   * Omitted leaves the key unchanged.
+   */
+  vary?: (ctx: IRequestContext) => readonly string[];
   /**
    * Bypass function — when `true`, skip caching entirely for this
    * request and pass through to the handler.

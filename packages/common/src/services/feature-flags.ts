@@ -14,6 +14,18 @@ export interface FlagContext {
   /** The user the flag is evaluated for. */
   readonly userId?: string;
   /**
+   * The tenant the flag is evaluated for, when the request resolves one.
+   *
+   * A flag scoped with `tenants` (see the feature-flags plugin's
+   * `FlagDefinition`) is `false` for a context whose `tenantId` is not in that
+   * list — and `false` when no tenant is resolved at all. Optional, so every
+   * existing caller and implementor is source-compatible: a context without a
+   * `tenantId` only matters against a flag that scopes itself.
+   *
+   * @since 0.2.0
+   */
+  readonly tenantId?: string;
+  /**
    * Additional targeting attributes.
    *
    * The built-in evaluation path accepts these but does not read them — only

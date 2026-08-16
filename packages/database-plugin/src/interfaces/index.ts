@@ -14,6 +14,36 @@ import type { CountOptions, FindOptions } from '../query/find-options.ts';
 export type { CountOptions, FindOptions, OrderDirection } from '../query/find-options.ts';
 
 /**
+ * The SQL connector a Prisma client is bound to.
+ *
+ * Only `contains` is connector-sensitive in the Prisma adapter, and only
+ * because the escaping it applies is correct solely on connectors whose `LIKE`
+ * defaults the escape character to backslash. The three groups are:
+ *
+ * - **Escaped** (`postgresql`/`postgres`, `mysql`, `sqlserver`, `cockroachdb`)
+ *   — `LIKE`-based with a backslash default escape, so the value is escaped.
+ * - **Passed through** (`mongodb`) — `contains` compiles to a `$regex` match in
+ *   which `%` and `_` are already literal, so escaping them would be wrong.
+ * - **Refused** (`sqlite`) — `LIKE`-based with no default escape character and
+ *   no `ESCAPE` clause from Prisma, so a literal `contains` is inexpressible.
+ *
+ * `'postgres'` is accepted alongside `'postgresql'` because the schema spells
+ * it the long way while the driver adapter reports the short one. An
+ * application whose connector cannot be detected passes `provider` explicitly
+ * rather than have the adapter guess.
+ *
+ * @since 0.2.0
+ */
+export type PrismaSqlProvider =
+  | 'postgresql'
+  | 'postgres'
+  | 'mysql'
+  | 'sqlserver'
+  | 'cockroachdb'
+  | 'mongodb'
+  | 'sqlite';
+
+/**
  * Generic repository providing CRUD operations over an entity type.
  *
  * @typeParam Entity - The entity shape the repository manages
@@ -315,6 +345,19 @@ export interface DatabaseAdapterOptions {
    * @since 0.1.0
    */
   readonly prismaClient?: unknown;
+
+  /**
+   * The SQL connector the injected Prisma client is bound to.
+   *
+   * Only `contains` is connector-sensitive in the Prisma adapter. When omitted
+   * the adapter reads the client's active provider structurally at
+   * `connect()` time; when that cannot be determined, a `contains` filter
+   * throws `UnsupportedFilterOperatorError` naming this option as the fix.
+   * Pass it explicitly when the adapter cannot detect the connector.
+   *
+   * @since 0.2.0
+   */
+  readonly provider?: PrismaSqlProvider;
 
   /**
    * Registry mapping entity name → a real Drizzle table definition. Required

@@ -8,6 +8,7 @@
  * @module
  */
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
+import { escapeLikePattern } from '../../query/like-escape.ts';
 import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import {
@@ -624,15 +625,6 @@ function filterPredicateFor(
       return filterOperators.or(nullPredicate, filterOperators.inArray(column, nonNullValues));
     }
   }
-}
-
-/**
- * Escape SQL LIKE metacharacters so `contains` remains literal substring
- * matching. Read together with the `ESCAPE '\'` clause emitted beside it —
- * the escaping is inert without it.
- */
-function escapeLikePattern(value: string): string {
-  return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
 }
 
 type FilterOperators = Required<
