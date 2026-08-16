@@ -873,8 +873,13 @@ app.register(DatabasePlugin({
 Prisma v7 clients are generated into an application-selected output path, so the Prisma adapter
 requires an application-created `options.prismaClient`; it never imports or constructs that client.
 `DatabaseAdapterOptions.url` remains source-compatible but is deprecated for Prisma configuration.
-Drizzle requires both `options.drizzleInstance` and `options.drizzleTables`. The instance is a
-opaque `DrizzleDatabase<T>` configuration created by
+`DatabaseAdapterOptions.provider` (type `PrismaSqlProvider`) names the SQL connector the injected
+client is bound to. Only the `contains` filter is connector-sensitive: it is escaped on
+PostgreSQL/MySQL/SQL Server/CockroachDB and refused on SQLite (see the `contains` note above). When
+omitted, the adapter reads the client's active provider structurally at `connect()` time; if it
+cannot be determined, a `contains` filter throws `UnsupportedFilterOperatorError` naming this
+option, so pass it explicitly in that case. Drizzle requires both `options.drizzleInstance` and
+`options.drizzleTables`. The instance is a opaque `DrizzleDatabase<T>` configuration created by
 `createDrizzleDatabase(database, transactionBridge)`; the registry's tables must carry an `id`
 column and the adapter translates every repository field to a real Drizzle column. Drizzle `create`,
 `update`, and `delete` require a driver with `RETURNING` support so their results are actual driver
@@ -1090,6 +1095,15 @@ sensitivity is the database's**, not the framework's — Memory and D1 match cas
 `LIKE`-based backend follows the column's collation (case-sensitive on PostgreSQL, case-insensitive
 on SQLite and most MySQL collations). Collation control is not part of this contract.
 
+On the **Prisma** adapter the connector decides how that guarantee is met. On PostgreSQL, MySQL, SQL
+Server, and CockroachDB the value is escaped and matched literally, because their `LIKE` defaults
+its escape character to backslash. On **SQLite** the guarantee is not expressible through Prisma's
+filter API (Prisma emits no `ESCAPE` clause and SQLite has no default escape character), so a
+`contains` filter throws `UnsupportedFilterOperatorError` rather than return wrong rows; pass a raw
+query, or use the Memory/Drizzle adapter (both honour `contains` as a literal substring). When the
+adapter cannot determine the connector it throws the same error naming the `provider` option; pass
+`provider` (e.g. `provider: 'postgresql'`) in the adapter options to name it explicitly.
+
 ### Custom Adapters (external backends)
 
 `DatabasePluginOptions` is a union discriminated on `type`. The `'custom'` arm accepts any
@@ -1146,6 +1160,8 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 | `BaseRepository`, `UnitOfWork`                                                                                              | classes                           |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                                          | classes                           |
 | `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                           |
+| `UnsupportedFilterOperatorError`                                                                                            | class                             |
+| `PrismaSqlProvider`                                                                                                         | type                              |
 | `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                         |
 | `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                             |
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                        |
@@ -4367,7 +4383,10 @@ app.router.get('/beta', {
 ## Multi-Tenancy Plugin (`@setu-ts/multi-tenancy-plugin`)
 
 Provides multi-tenancy support: tenant resolution, tenant context, tenant-scoped repositories,
-cache-key isolation, and pluggable database-isolation strategies.
+cache-key isolation, and pluggable database-isolation strategies. The cache-key isolation is applied
+by `cacheMiddleware` (from `@setu-ts/cache-plugin`) reading `ctx.request.tenant` and composing a
+length-prefixed tenant segment into the cache key — not by the `cache.prefix` string stamped into
+`ctx.state`, which no package reads.
 
 ### Registration
 
@@ -4407,22 +4426,23 @@ app.router.get('/users', async (ctx) => {
 
 ### Options
 
-| Option                  | Type                                                                                              | Required | Description                                                                          |
-| ----------------------- | ------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
-| `resolver`              | `'subdomain' \| 'header' \| 'path' \| 'jwt' \| ITenantResolver \| ITenantResolver[]`              | yes      | Discriminant for tenant resolution method, or a custom resolver / array of resolvers |
-| `subdomain.baseDomain?` | `string`                                                                                          | no       | Stripped from host to isolate tenant label; absent → first host label is tenant id   |
-| `header.name?`          | `string`                                                                                          | no       | Header to read; default `'x-tenant-id'`                                              |
-| `path.segment?`         | `number`                                                                                          | no       | Path segment index to read; default `0`                                              |
-| `jwt.claim?`            | `string`                                                                                          | no       | JWT claim to read; default `'tenant_id'`                                             |
-| `jwt.headerName?`       | `string`                                                                                          | no       | Authorization header name; default `'authorization'`                                 |
-| `jwt.decode?`           | `(token: string) => Record<string, unknown> \| null`                                              | no       | Custom decoder; falls back to `IJwtService.decode` from `CAPABILITIES.JWT` if absent |
-| `database`              | `'column-per-tenant' \| 'schema-per-tenant' \| 'database-per-tenant' \| ITenantIsolationStrategy` | no       | Isolation strategy; default `'column-per-tenant'`                                    |
-| `dataStore?`            | `ITenantDataStore`                                                                                | no       | Injected CRUD backend; default `MemoryTenantDataStore`                               |
-| `cache.prefix?`         | `boolean`                                                                                         | no       | When `true`, stamps resolved prefix into `ctx.state` via `getTenantCachePrefix()`    |
-| `cache.separator?`      | `string`                                                                                          | no       | Default `':'` — used by `prefixCacheKey` and the `ctx.state` stamp                   |
-| `required?`             | `boolean`                                                                                         | no       | When `true`, short-circuits unresolved requests at 400 without calling `next()`      |
-| `rejectionStatus?`      | `number`                                                                                          | no       | Status code for required-tenant short-circuit; default `400`                         |
-| `middlewarePriority?`   | `number`                                                                                          | no       | Priority for auto-added middleware; default `40`                                     |
+| Option                  | Type                                                                                              | Required | Description                                                                                                                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolver`              | `'subdomain' \| 'header' \| 'path' \| 'jwt' \| ITenantResolver \| ITenantResolver[]`              | yes      | Discriminant for tenant resolution method, or a custom resolver / array of resolvers                                                                                                                                      |
+| `subdomain.baseDomain?` | `string`                                                                                          | no       | Stripped from host to isolate tenant label; absent → first host label is tenant id                                                                                                                                        |
+| `header.name?`          | `string`                                                                                          | no       | Header to read; default `'x-tenant-id'`                                                                                                                                                                                   |
+| `path.segment?`         | `number`                                                                                          | no       | Path segment index to read; default `0`                                                                                                                                                                                   |
+| `jwt.claim?`            | `string`                                                                                          | no       | JWT claim to read; default `'tenant_id'`                                                                                                                                                                                  |
+| `jwt.headerName?`       | `string`                                                                                          | no       | Authorization header name; default `'authorization'`                                                                                                                                                                      |
+| `jwt.decode?`           | `(token: string) => Record<string, unknown> \| null`                                              | no       | Custom decoder; falls back to `IJwtService.decode` from `CAPABILITIES.JWT` if absent                                                                                                                                      |
+| `database`              | `'column-per-tenant' \| 'schema-per-tenant' \| 'database-per-tenant' \| ITenantIsolationStrategy` | no       | Isolation strategy; default `'column-per-tenant'`                                                                                                                                                                         |
+| `dataStore?`            | `ITenantDataStore`                                                                                | no       | Injected CRUD backend; default `MemoryTenantDataStore`                                                                                                                                                                    |
+| `cache.prefix?`         | `boolean`                                                                                         | no       | When `true`, stamps resolved prefix into `ctx.state` via `getTenantCachePrefix()`                                                                                                                                         |
+| `cache.separator?`      | `string`                                                                                          | no       | Default `':'` — used by `prefixCacheKey` and the `ctx.state` stamp                                                                                                                                                        |
+| `required?`             | `boolean`                                                                                         | no       | When `true`, short-circuits unresolved requests at 400 without calling `next()`                                                                                                                                           |
+| `rejectionStatus?`      | `number`                                                                                          | no       | Status code for required-tenant short-circuit; default `400`                                                                                                                                                              |
+| `exclude?`              | `readonly (string \| RegExp)[]`                                                                   | no       | Paths that skip tenant resolution entirely (exact string or `RegExp.test`); default the six operational probes (`/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`); `[]` restores the previous behaviour |
+| `middlewarePriority?`   | `number`                                                                                          | no       | Priority for auto-added middleware; default `40`                                                                                                                                                                          |
 
 ### Exports
 
@@ -7470,15 +7490,15 @@ middleware via the application's pipeline.
 
 ### Types
 
-| Export                  | Kind | Purpose                                                                      |
-| ----------------------- | ---- | ---------------------------------------------------------------------------- |
-| `ValidationError`       | type | A single validation failure (`{ field, message, code? }`)                    |
-| `HttpErrorInit`         | type | Options object for `HttpError.from()`                                        |
-| `ErrorHandlerOptions`   | type | Options for `errorHandler()` (`{ format?, includeStackTrace?, logErrors? }`) |
-| `ErrorHandlerFormatter` | type | `(error: Error, ctx?) => Record<string, unknown>`                            |
-| `ErrorFormat`           | type | `'default' \| 'rfc9457' \| 'rfc7807'` (this package's union, no `'nestjs'`)  |
-| `DefaultErrorBody`      | type | Framework-standard error body shape                                          |
-| `ProblemDetails`        | type | RFC 9457 Problem Details body shape                                          |
+| Export                  | Kind | Purpose                                                                                           |
+| ----------------------- | ---- | ------------------------------------------------------------------------------------------------- |
+| `ValidationError`       | type | A single validation failure (`{ field, message, code? }`)                                         |
+| `HttpErrorInit`         | type | Options object for `HttpError.from()`                                                             |
+| `ErrorHandlerOptions`   | type | Options for `errorHandler()` (`{ format?, includeStackTrace?, logErrors?, maskInternalErrors? }`) |
+| `ErrorHandlerFormatter` | type | `(error: Error, ctx?) => Record<string, unknown>`                                                 |
+| `ErrorFormat`           | type | `'default' \| 'rfc9457' \| 'rfc7807'` (this package's union, no `'nestjs'`)                       |
+| `DefaultErrorBody`      | type | Framework-standard error body shape                                                               |
+| `ProblemDetails`        | type | RFC 9457 Problem Details body shape                                                               |
 
 Contract notes:
 
@@ -7518,9 +7538,17 @@ Contract notes:
 - **Logger is optional**: `errorHandler` logs via `ILogger` resolved from
   `ctx.services.get(CAPABILITIES.LOGGER)` only when a logger is registered; otherwise logging is
   silently skipped.
+- **`maskInternalErrors` (default `true`)**: an unhandled error that is **not** an `HttpError` and
+  resolves to status ≥ 500 is masked to a generic `detail` before the response is built, so the
+  failing SQL and its bound parameter values never reach the client. The real error is still written
+  to the logger first. An `HttpError` (a message the developer chose for the caller) and every 4xx
+  pass through unmasked, and `maskInternalErrors: false` restores the previous body verbatim. This
+  is a behaviour change from the previous release — see the CHANGELOG.
 - **`includeStackTrace` is config-supplied**: pass `config.get('NODE_ENV') ===
   'development'` —
-  never read `process.env` directly.
+  never read `process.env` directly. The stack trace is secondary to the message, which is what
+  carries the failing statement and its bound parameters; `maskInternalErrors` (default `true`) is
+  what guards that message, not `includeStackTrace`.
 - **Short-circuit**: when `next()` throws, `errorHandler` produces a response (`HandlerResult`)
   without re-invoking `next()`.
 

@@ -14,7 +14,8 @@ import type { IKernelApplication } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { errorHandler } from '../../src/middleware/error-handler.ts';
-import { notFound, validationError } from '../../src/errors/exceptions.ts';
+import type { ErrorHandlerOptions } from '../../src/middleware/error-handler.ts';
+import { internalServerError, notFound, validationError } from '../../src/errors/exceptions.ts';
 import type { ErrorFormat } from '../../src/formatters/error-formatter.ts';
 
 /**
@@ -27,13 +28,14 @@ import type { ErrorFormat } from '../../src/formatters/error-formatter.ts';
 async function createErroringApp(
   format: ErrorFormat,
   thrown: Error,
+  extra?: Omit<ErrorHandlerOptions, 'format' | 'logErrors'>,
 ): Promise<IKernelApplication> {
   const app = await createTestApp({
     plugins: [RuntimePlugin()],
     autoStart: false,
   });
 
-  app.middleware.add(errorHandler({ format, logErrors: false }), {
+  app.middleware.add(errorHandler({ format, logErrors: false, ...extra }), {
     priority: 0,
     name: 'error-handler',
   });
@@ -98,6 +100,49 @@ describe('errorHandler in a kernel application', () => {
         expect(body.errors).toEqual([
           { field: 'email', message: 'Invalid email', code: 'invalid_type' },
         ]);
+      } finally {
+        await app.stop();
+      }
+    });
+  });
+
+  describe('maskInternalErrors (X12-3)', () => {
+    // A real driver-shaped error — the message carries SQL and bound values.
+    const driverError = new Error(
+      `P2002: Unique constraint failed on the fields (email) \n` +
+        `SQL: INSERT INTO "User" ("email") VALUES ('alice@example.com')`,
+    );
+
+    it('masks a driver-shaped 500 while retaining application/problem+json', async () => {
+      const app = await createErroringApp('rfc9457', driverError);
+      try {
+        const { status, contentType, body } = await fetchProblem(app);
+
+        expect(status).toBe(500);
+        // The media type is half of RFC 9457 conformance and must survive
+        // masking — the masked body is still a Problem Details body.
+        expect(contentType).toBe('application/problem+json');
+
+        // The raw message (SQL + the bound value) must be absent from the
+        // body; the detail is the status title.
+        expect(body.detail).toBe('Internal Server Error');
+        expect(body.title).toBe('Internal Server Error');
+        const serialized = JSON.stringify(body);
+        expect(serialized).not.toContain('INSERT INTO');
+        expect(serialized).not.toContain('alice@example.com');
+      } finally {
+        await app.stop();
+      }
+    });
+
+    it('does not mask a deliberately thrown HttpError through the real pipeline', async () => {
+      const app = await createErroringApp(
+        'rfc9457',
+        internalServerError('Payment gateway timed out'),
+      );
+      try {
+        const { body } = await fetchProblem(app);
+        expect(body.detail).toBe('Payment gateway timed out');
       } finally {
         await app.stop();
       }

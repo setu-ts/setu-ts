@@ -21,6 +21,7 @@ describe('resolveSessionConfig', () => {
       maxAgeMs: 7_200_000,
       rolling: false,
       maxCookieBytes: 4096,
+      tenantBinding: true,
     });
   });
 

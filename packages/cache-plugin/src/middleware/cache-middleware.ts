@@ -10,7 +10,7 @@
 import type { ICacheStore, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { CachedResponsePayload, CacheMiddlewareOptions } from '../interfaces/index.ts';
-import { defaultCacheKey } from '../utils/cache-key.ts';
+import { composeCacheKey } from '../utils/cache-key.ts';
 import { decodePayload, encodePayload } from '../utils/cache-payload.ts';
 
 /**
@@ -43,6 +43,7 @@ export function cacheMiddleware(
 ): MiddlewareFunction {
   const ttlSeconds = options?.ttlSeconds;
   const keyFn = options?.key;
+  const varyFn = options?.vary;
   const bypassFn = options?.bypass;
   const storeToken = options?.store ?? CAPABILITIES.CACHE;
   const cacheableStatuses = options?.cacheableStatuses ?? [200];
@@ -54,7 +55,11 @@ export function cacheMiddleware(
       return;
     }
 
-    const key = keyFn !== undefined ? keyFn(ctx) : defaultCacheKey(ctx);
+    // The tenant and vary segments are composed around the base key (custom
+    // `key` or default), so a tenant-aware application stores one entry per
+    // tenant even when the caller supplies its own key function.
+    const baseKey = keyFn !== undefined ? keyFn(ctx) : undefined;
+    const key = composeCacheKey(ctx, baseKey, varyFn);
 
     // Resolve store at request time (not middleware-creation time).
     const store = ctx.services.get<ICacheStore>(storeToken);

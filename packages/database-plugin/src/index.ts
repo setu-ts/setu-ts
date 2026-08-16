@@ -25,7 +25,11 @@ export type {
   IRepository,
   IUnitOfWork,
   OrderDirection,
+  PrismaSqlProvider,
 } from './interfaces/index.ts';
+
+// Errors
+export { UnsupportedFilterOperatorError } from './errors.ts';
 
 // The data-access port, promoted to `common` in M52c. Re-exported here so a
 // backend author can reach the whole contract from one import, and so the
