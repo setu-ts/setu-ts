@@ -11,7 +11,10 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IWorkerPool } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
+import { MetricsPlugin } from '@setu-ts/metrics-plugin';
+
 import { WorkerPoolPlugin, WorkerTaskError, WorkerTaskTimeoutError } from '../../src/index.ts';
+import { WORKER_POOL_METRICS } from '../../src/metrics/metric-names.ts';
 
 const echoTaskUrl = new URL('../fixtures/echo-task.ts', import.meta.url).href;
 const errorTaskUrl = new URL('../fixtures/error-task.ts', import.meta.url).href;
@@ -86,6 +89,30 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
       const stuck = pool.run(noHandlerTaskUrl, { n: 1 });
       await expect(stuck).rejects.toBeInstanceOf(WorkerTaskTimeoutError);
       await expect(stuck).rejects.toMatchObject({ timeoutMs: 300 });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('should render metrics for work done on a real thread', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), MetricsPlugin(), WorkerPoolPlugin({ taskTimeoutMs: 2000 })],
+    });
+    await app.start();
+    try {
+      const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
+      await pool.run(echoTaskUrl, { n: 1 });
+      await expect(pool.run(errorTaskUrl, { n: 1 })).rejects.toBeInstanceOf(WorkerTaskError);
+
+      // The one place the instruments are driven by a genuine thread rather
+      // than a fake host: real spawn, real structured clone, real reply.
+      const response = await app.inject({ method: 'GET', url: '/metrics' });
+      const body = response.body as string;
+      expect(body).toContain(`${WORKER_POOL_METRICS.COMPLETED}{task_module="${echoTaskUrl}"} 1`);
+      expect(body).toContain(
+        `${WORKER_POOL_METRICS.FAILED}{reason="handler",task_module="${errorTaskUrl}"} 1`,
+      );
+      expect(body).toContain(`${WORKER_POOL_METRICS.WORKERS}{task_module="${echoTaskUrl}"} 1`);
     } finally {
       await app.stop();
     }
