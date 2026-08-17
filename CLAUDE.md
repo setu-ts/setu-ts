@@ -2639,9 +2639,33 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   shipped `MetricsPlugin` sits at priority 100 against this plugin's 500 and is ordered first
   regardless — so the plan's claim that the edge is what guarantees ordering was overstated and is
   corrected in the plan. The edge is load-bearing only for a REPLACEMENT provider at a higher
-  priority number, which §3.4 explicitly permits, and a test now constructs exactly that case. All
-  `src` files at 100% branch/function/line except `task-pool.ts` (98.8/100/100)) — complete (PR
-  pending)
+  priority number, which §3.4 explicitly permits, and a test now constructs exactly that case.
+
+  **Code review then found the milestone's own instrumentation reintroducing X8-2 through a
+  different door.** Instrument writes are throwing calls — `MetricBase.validateLabels` rejects an
+  undeclared or incomplete label set, and `IMetricsService` is a replaceable capability — and every
+  collector call was unguarded, with two of them placed BEFORE the task was settled. Probed: with
+  only the completed counter refusing, the caller's promise **never settled** while `stats()`
+  reported `completed: 1`, so a task the worker had finished successfully lost its result and hung
+  its caller forever; with a wholly failing backend the throw escaped `emitReady`/`replyOk`, which
+  in production is `Worker.onmessage` — an uncaught exception, i.e. the same process kill X8-2 was.
+  A third consequence: a refusing gauge rejected the caller from inside `run()`'s own promise
+  executor **while the task stayed queued and still executed**, telling the caller it had failed
+  while the work happened. Fixed in two places — `WorkerPoolCollector` guards every write and
+  reports through `ctx.logger` (read at CALL time, the M52b lesson; instrument CREATION stays
+  unguarded so a name collision fails `register()` loudly), and `TaskPool` settles each task before
+  observing it. **Both halves are independently proven, which took three controls**: reverting only
+  the ordering PASSED, because the guard alone covers those cases — so the ordering was unproven
+  until a case was added where the REPORTER itself throws (a broken logger transport is real), which
+  strands the caller when reverted and passes when not. Review also shipped the ROADMAP metric table
+  the plan's C1 row had promised and never delivered (the section still described five instruments
+  while six shipped), corrected `RecordedMetric.observe` to honour counter semantics
+  (`Counter.observe` delegates to `inc`, so a double that always assigned would hide precisely the
+  double-count bug these tests exist to catch), and keyed `GAUGE_OPTIONS`/`COUNTER_OPTIONS` on their
+  name unions so a wrong lookup is a compile error rather than an `undefined` that strips a metric's
+  labels. Writing the coverage test for the reporter surfaced a fixture bug the type checker caught:
+  `{ ...base }` on a class copies fields and DROPS every prototype method. All `src` files at 100%
+  branch/function/line except `task-pool.ts` (98.8/100/100)) — complete (PR #170)
 - **Next milestone** — **M70c** (health signals that describe lifecycle, not reachability). Six
   packages answer `up` with their backends stopped and `/ready` stays `200` (X2-1, X3-2, X8-5,
   X10-3), so a dead dependency triggers no restart, no alert, and no rolling-deploy gate; the
