@@ -55,7 +55,17 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
 
     register(ctx: IPluginContext): void {
       const collector = ctx.services.has(CAPABILITIES.METRICS)
-        ? new WorkerPoolCollector(ctx.services.get<IMetricsService>(CAPABILITIES.METRICS))
+        ? new WorkerPoolCollector(
+          ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
+          // Read through `ctx` at CALL time, never captured here: a logger
+          // registered after this plugin would otherwise be missed for the
+          // life of the application (the M52b `waitUntil` lesson).
+          (error: Error): void => {
+            ctx.logger?.warn('worker-pool metrics write failed', {
+              error: error.message,
+            });
+          },
+        )
         : undefined;
       const service = new WorkerPoolService(options, ctx.runtime, collector);
       ctx.services.register<IWorkerPool>(CAPABILITIES.WORKER_POOL, service);

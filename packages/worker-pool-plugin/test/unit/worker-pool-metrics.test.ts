@@ -14,7 +14,7 @@ import {
   WORKER_POOL_METRICS,
 } from '../../src/metrics/metric-names.ts';
 import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
-import { RecordingMetrics } from '../fixtures/metrics-fakes.ts';
+import { RecordingMetrics, throwOnReport } from '../fixtures/metrics-fakes.ts';
 
 const SPEC = 'file:///tasks/echo.ts';
 const MODULE_LABELS = { [TASK_MODULE_LABEL]: SPEC };
@@ -40,7 +40,7 @@ function makeInstrumentedPool(
     },
     host,
     runtime,
-    new WorkerPoolCollector(metrics),
+    new WorkerPoolCollector(metrics, throwOnReport),
   );
   return { pool, host, timers, metrics };
 }
@@ -56,7 +56,7 @@ function expectGaugesMatchStats(pool: TaskPool, metrics: RecordingMetrics): void
 describe('WorkerPoolCollector — instrument creation', () => {
   it('should create all six instruments eagerly, before any task runs', () => {
     const metrics = new RecordingMetrics();
-    new WorkerPoolCollector(metrics);
+    new WorkerPoolCollector(metrics, throwOnReport);
 
     expect([...metrics.metrics.keys()].sort()).toEqual([
       WORKER_POOL_METRICS.BUSY,
@@ -70,7 +70,7 @@ describe('WorkerPoolCollector — instrument creation', () => {
 
   it('should declare the documented type and labels for each instrument', () => {
     const metrics = new RecordingMetrics();
-    new WorkerPoolCollector(metrics);
+    new WorkerPoolCollector(metrics, throwOnReport);
 
     expect(metrics.require(WORKER_POOL_METRICS.WORKERS).type).toBe('gauge');
     expect(metrics.require(WORKER_POOL_METRICS.BUSY).type).toBe('gauge');
@@ -93,7 +93,7 @@ describe('WorkerPoolCollector — instrument creation', () => {
 
   it('should give every instrument non-empty help text', () => {
     const metrics = new RecordingMetrics();
-    new WorkerPoolCollector(metrics);
+    new WorkerPoolCollector(metrics, throwOnReport);
 
     for (const metric of metrics.metrics.values()) {
       expect(metric.help.length).toBeGreaterThan(0);

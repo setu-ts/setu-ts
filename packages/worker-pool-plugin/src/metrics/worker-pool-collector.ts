@@ -38,6 +38,7 @@ export class WorkerPoolCollector {
   readonly #completed: ICounter;
   readonly #failed: ICounter;
   readonly #rejected: ICounter;
+  readonly #report: (error: Error) => void;
 
   /**
    * Creates every instrument eagerly, so all six series exist — with their
@@ -45,9 +46,16 @@ export class WorkerPoolCollector {
    * has run. An operator scraping a freshly started replica sees the pool
    * declared rather than an empty response.
    *
+   * Instrument CREATION is deliberately unguarded: a name colliding with an
+   * application-declared metric of another type should fail `register()`
+   * loudly at startup rather than degrade silently. Instrument WRITES are the
+   * opposite — see the `#guard` note below.
+   *
    * @param metrics - The metrics service resolved from `CAPABILITIES.METRICS`
+   * @param report - Receives any error thrown by an instrument write
    */
-  constructor(metrics: IMetricsService) {
+  constructor(metrics: IMetricsService, report: (error: Error) => void) {
+    this.#report = report;
     this.#workers = metrics.gauge(
       WORKER_POOL_METRICS.WORKERS,
       GAUGE_OPTIONS[WORKER_POOL_METRICS.WORKERS],
@@ -84,10 +92,33 @@ export class WorkerPoolCollector {
    * @param stats - A snapshot of one pool's state
    */
   syncGauges(stats: TaskPoolStats): void {
-    const labels = { [TASK_MODULE_LABEL]: stats.taskModule };
-    this.#workers.set(stats.workers, labels);
-    this.#busy.set(stats.busy, labels);
-    this.#queued.set(stats.queued, labels);
+    this.#guard(() => {
+      const labels = { [TASK_MODULE_LABEL]: stats.taskModule };
+      this.#workers.set(stats.workers, labels);
+      this.#busy.set(stats.busy, labels);
+      this.#queued.set(stats.queued, labels);
+    });
+  }
+
+  /**
+   * Runs one instrument write, reporting rather than propagating a failure.
+   *
+   * **Observing the pool must never break it.** An `IMetricsService` is a
+   * replaceable capability and its writes genuinely throw — `validateLabels`
+   * rejects an undeclared label set, and a substitute implementation may
+   * refuse for its own reasons. Unguarded, such a throw reaches the pool from
+   * inside a worker `message` callback, where it is an uncaught exception that
+   * kills the host process: exactly the X8-2 failure this milestone fixed, by
+   * a different door. The task's own settlement is sequenced BEFORE these
+   * calls in `TaskPool`, so a metrics outage can neither strand a caller's
+   * promise nor lose a completed result.
+   */
+  #guard(write: () => void): void {
+    try {
+      write();
+    } catch (error) {
+      this.#report(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   /**
@@ -100,7 +131,9 @@ export class WorkerPoolCollector {
    * @param taskModule - The pool's task-module specifier
    */
   taskCompleted(taskModule: string): void {
-    this.#completed.inc(1, { [TASK_MODULE_LABEL]: taskModule });
+    this.#guard(() => {
+      this.#completed.inc(1, { [TASK_MODULE_LABEL]: taskModule });
+    });
   }
 
   /**
@@ -111,7 +144,9 @@ export class WorkerPoolCollector {
    * @param reason - Why the task failed
    */
   taskFailed(taskModule: string, reason: TaskFailureReason): void {
-    this.#failed.inc(1, { [TASK_MODULE_LABEL]: taskModule, [REASON_LABEL]: reason });
+    this.#guard(() => {
+      this.#failed.inc(1, { [TASK_MODULE_LABEL]: taskModule, [REASON_LABEL]: reason });
+    });
   }
 
   /**
@@ -123,6 +158,8 @@ export class WorkerPoolCollector {
    * @param reason - Why the task was refused
    */
   taskRejected(taskModule: string, reason: TaskRejectionReason): void {
-    this.#rejected.inc(1, { [TASK_MODULE_LABEL]: taskModule, [REASON_LABEL]: reason });
+    this.#guard(() => {
+      this.#rejected.inc(1, { [TASK_MODULE_LABEL]: taskModule, [REASON_LABEL]: reason });
+    });
   }
 }
