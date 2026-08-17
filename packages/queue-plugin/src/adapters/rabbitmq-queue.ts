@@ -115,6 +115,19 @@ export class RabbitMqQueue implements QueueAdapter {
   #connection: IAmqpQueueConnection | null = null;
   #channel: IAmqpQueueChannel | null = null;
   #ready = false;
+  /**
+   * M70c: set when the connection fires `'error'`/`'close'` — the same fault
+   * mechanism as the RabbitMQ broker. `isHealthy` reads it, so a faulted
+   * connection is `down` even though it is still "ready".
+   */
+  #faulted = false;
+  /**
+   * M70c: present only when the connection exposes `on?`; its absence is
+   * *unknown* reachability, not `false`.
+   *
+   * @since 0.1.0
+   */
+  isHealthy?: () => Promise<boolean>;
   // Per-name: processing jobs (reserved but not acked/dead-lettered)
   #processing: Map<string, Map<string, { message: unknown; job: StoredJob<unknown> }>>;
   // Recurring jobs (in-memory, non-durable)
@@ -198,6 +211,27 @@ export class RabbitMqQueue implements QueueAdapter {
     // Create channel unconditionally from the resolved connection
     this.#channel = await this.#connection.createChannel();
     this.#ready = true;
+    this.#faulted = false;
+    this.#attachFaultListener();
+  }
+
+  /**
+   * M70c: attaches the `'error'`/`'close'` fault listener when the connection
+   * exposes `on?`; a connection without it is *unknown* reachability (the
+   * indicator reads absence, not `false`).
+   */
+  #attachFaultListener(): void {
+    const connection = this.#connection;
+    if (connection !== null && typeof connection.on === 'function') {
+      const listener = (): void => {
+        this.#faulted = true;
+      };
+      connection.on('error', listener);
+      connection.on('close', listener);
+      this.isHealthy = (): Promise<boolean> => Promise.resolve(!this.#faulted);
+    } else {
+      delete this.isHealthy;
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -205,6 +239,9 @@ export class RabbitMqQueue implements QueueAdapter {
     this.#processing.clear();
     // Clear asserted queues so they are re-asserted on next connect
     this.#asserted.clear();
+    // Clear the fault flag (M70c)
+    this.#faulted = false;
+    delete this.isHealthy;
     // Close channel
     if (this.#channel) {
       await this.#channel.close();

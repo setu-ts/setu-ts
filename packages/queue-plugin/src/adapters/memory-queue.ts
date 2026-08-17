@@ -62,6 +62,17 @@ export class MemoryQueue implements QueueAdapter {
     return this.#connected;
   }
 
+  /**
+   * M70c: an in-memory queue has no backend to be unreachable, so it is always
+   * reachable (M47).
+   *
+   * @returns `true`
+   * @since 0.1.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
   // deno-lint-ignore require-await
   async enqueue<T>(job: StoredJob<T>): Promise<void> {
     if (!this.#connected) {
