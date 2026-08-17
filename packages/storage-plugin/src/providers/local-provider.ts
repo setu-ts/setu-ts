@@ -56,6 +56,26 @@ export class LocalStorageProvider implements StorageProvider {
     return this.#fs !== null;
   }
 
+  /**
+   * M70c: `runtime.fs.stat(root)` succeeds — a disk that vanished or a
+   * permission change is a real, common failure.
+   *
+   * @returns `true` when the root directory is reachable
+   * @since 0.1.0
+   */
+  async isHealthy(): Promise<boolean> {
+    const fs = this.#fs;
+    if (fs === null) {
+      return false;
+    }
+    try {
+      await fs.stat(this.#root);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async #resolvePath(path: string): Promise<string> {
     if (this.#fs === null) {
       throw new Error('LocalStorageProvider is not connected');

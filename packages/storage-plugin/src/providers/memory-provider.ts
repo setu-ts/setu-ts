@@ -46,6 +46,17 @@ export class MemoryProvider implements StorageProvider {
   }
 
   /**
+   * M70c: an in-memory store has no backend to be unreachable, so it is always
+   * reachable (M47).
+   *
+   * @returns `true`
+   * @since 0.1.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  /**
    * Stores an object in memory.
    *
    * @param path - Object path/key

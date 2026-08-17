@@ -151,3 +151,55 @@ describe('StoragePlugin', () => {
     expect(provider.isReady()).toBe(false);
   });
 });
+
+describe('StoragePlugin health indicator (M70c)', () => {
+  function makeFs(rootPresent: boolean): import('@setu-ts/common').IFileSystem {
+    const fs: Record<string, unknown> = {
+      stat: (path: string) =>
+        rootPresent ? Promise.resolve({ size: 0 }) : Promise.reject(new Error(`ENOENT: ${path}`)),
+    };
+    return fs as unknown as import('@setu-ts/common').IFileSystem;
+  }
+
+  it('reports up with reachable true when ready and the backend answers', async () => {
+    const { ctx, healthIndicators } = createFakeContext({}, false, makeFs(true));
+    const plugin = StoragePlugin({ provider: 'local', options: { rootDir: '/data' } });
+    await plugin.register!(ctx);
+
+    const indicator = healthIndicators.get(CAPABILITIES.STORAGE);
+    const result = await indicator!();
+    expect(result.status).toBe('up');
+    expect(result.data).toEqual({ provider: 'local', reachable: true });
+  });
+
+  it('reports down with reachable false when ready but the backend is gone', async () => {
+    const { ctx, healthIndicators } = createFakeContext({}, false, makeFs(false));
+    const plugin = StoragePlugin({ provider: 'local', options: { rootDir: '/data' } });
+    await plugin.register!(ctx);
+
+    const indicator = healthIndicators.get(CAPABILITIES.STORAGE);
+    const result = await indicator!();
+    expect(result.status).toBe('down');
+    expect(result.data).toEqual({ provider: 'local', reachable: false });
+  });
+
+  it('reports up with reachable unknown when the provider cannot probe', async () => {
+    // A gcs client without the optional isHealthy member: absence, not false.
+    const { ctx, healthIndicators } = createFakeContext();
+    const plugin = StoragePlugin({
+      provider: 'gcs',
+      options: {
+        bucket: 'b',
+        client: {
+          bucket: () => ({}),
+        } as unknown as import('../../src/interfaces/index.ts').IGcsClient,
+      },
+    });
+    await plugin.register!(ctx);
+
+    const indicator = healthIndicators.get(CAPABILITIES.STORAGE);
+    const result = await indicator!();
+    expect(result.status).toBe('up');
+    expect(result.data).toEqual({ provider: 'gcs', reachable: 'unknown' });
+  });
+});
