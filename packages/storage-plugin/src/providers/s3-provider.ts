@@ -253,6 +253,26 @@ export class S3Provider implements StorageProvider {
     return this.#client !== null;
   }
 
+  /**
+   * M70c: a `client.head('')`-shaped bucket probe using the existing `head`
+   * member. Resolves `true` when the bucket answers, `false` when it does not
+   * (or the provider is not connected).
+   *
+   * @returns `true` when the bucket is reachable
+   * @since 0.1.0
+   */
+  async isHealthy(): Promise<boolean> {
+    const client = this.#client;
+    if (client === null) {
+      return false;
+    }
+    try {
+      return await client.head('');
+    } catch {
+      return false;
+    }
+  }
+
   #assertConnected(): void {
     if (this.#client === null) {
       throw new Error('S3Provider is not connected. Call connect() first.');

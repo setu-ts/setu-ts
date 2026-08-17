@@ -4,7 +4,13 @@
  *
  * @module
  */
-import type { IPlugin, IPluginContext, IRuntimeServices, IStorage } from '@setu-ts/common';
+import type {
+  HealthCheckResult,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+  IStorage,
+} from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   AzureBlobProviderOptions,
@@ -153,11 +159,28 @@ export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
       const service = new StorageService(provider);
       ctx.services.register<IStorage>(CAPABILITIES.STORAGE, service);
 
-      ctx.health.register(CAPABILITIES.STORAGE, () =>
-        Promise.resolve({
-          status: provider.isReady() ? 'up' : 'down',
-          data: { provider: providerType },
-        }));
+      // M70c: reports BOTH signals. `isReady()` is lifecycle (never started /
+      // shut down → `down`); `isHealthy()` is reachability (the backend answers
+      // right now). A ready-but-unreachable provider is `down` with
+      // `data.reachable: false` — the distinction an operator needs to tell
+      // "we never started" from "the disk/bucket vanished under us". A provider
+      // that cannot probe (gcs/azure client without the optional member) is
+      // `up` with `data.reachable: 'unknown'`, honestly reporting "we did not
+      // check".
+      const storageIndicator = async (): Promise<HealthCheckResult> => {
+        if (!provider.isReady()) {
+          return { status: 'down', data: { provider: providerType, reachable: false } };
+        }
+        if (typeof provider.isHealthy !== 'function') {
+          return { status: 'up', data: { provider: providerType, reachable: 'unknown' } };
+        }
+        const reachable = await provider.isHealthy();
+        if (reachable === false) {
+          return { status: 'down', data: { provider: providerType, reachable: false } };
+        }
+        return { status: 'up', data: { provider: providerType, reachable: true } };
+      };
+      ctx.health.register(CAPABILITIES.STORAGE, storageIndicator);
 
       ctx.lifecycle.onClose(async () => {
         await provider.disconnect();
