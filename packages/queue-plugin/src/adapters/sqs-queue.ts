@@ -73,6 +73,15 @@ export interface ISqsTransport {
   delete(queueUrl: string, receiptHandle: string): Promise<void>;
   /** Change visibility timeout (requeue). */
   changeVisibility(queueUrl: string, receiptHandle: string, seconds: number): Promise<void>;
+  /**
+   * M70c: reports whether the queue is reachable — the real adapter issues
+   * `GetQueueAttributes`. Optional so a minimal injected fake still
+   * type-checks; a transport that omits it is *unknown*, not `false`.
+   *
+   * @returns `true` when the queue is reachable
+   * @since 0.1.0
+   */
+  isHealthy?(): Promise<boolean>;
   /** Close the client. */
   close(): Promise<void>;
 }
@@ -218,6 +227,14 @@ export class SqsQueue implements QueueAdapter {
   #injectedClient: ISqsTransport | undefined;
   #transport: ISqsTransport | null = null;
   #ready = false;
+  /**
+   * M70c: present only when the transport exposes `isHealthy?()` (the real
+   * adapter issues `GetQueueAttributes`); its absence is *unknown* reachability,
+   * not `false`.
+   *
+   * @since 0.1.0
+   */
+  isHealthy?: () => Promise<boolean>;
   #receipts: Map<string, ReceiptEntry>;
   #recurring: Map<string, StoredRecurring>;
   #logger: { error: (msg: string) => void } | undefined;
@@ -268,6 +285,21 @@ export class SqsQueue implements QueueAdapter {
     }
 
     this.#ready = true;
+    this.#installProbe();
+  }
+
+  /**
+   * M70c: installs `isHealthy` from the transport's optional member when
+   * present; leaves it absent (unknown) otherwise.
+   */
+  #installProbe(): void {
+    const transport = this.#transport;
+    if (transport !== null && typeof transport.isHealthy === 'function') {
+      const probe = transport.isHealthy;
+      this.isHealthy = (): Promise<boolean> => probe();
+    } else {
+      delete this.isHealthy;
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -277,6 +309,7 @@ export class SqsQueue implements QueueAdapter {
     }
     this.#receipts.clear();
     this.#ready = false;
+    delete this.isHealthy;
   }
 
   isReady(): boolean {

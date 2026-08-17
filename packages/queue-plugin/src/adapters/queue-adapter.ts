@@ -43,6 +43,20 @@ export interface QueueAdapter {
   isReady(): boolean;
 
   /**
+   * M70c: reports whether the adapter's backend is reachable right now, for
+   * the service's health indicator.
+   *
+   * Optional: an adapter with no meaningful liveness check omits it, and the
+   * indicator then reports only the lifecycle state (`isReady`). This answers a
+   * fact (reachability), not a policy: the indicator owns the `up`/`down`
+   * mapping.
+   *
+   * @returns `true` when the backend is reachable
+   * @since 0.1.0
+   */
+  isHealthy?(): Promise<boolean>;
+
+  /**
    * Enqueues a job.
    *
    * @param job - The job to enqueue

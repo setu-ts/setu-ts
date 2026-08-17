@@ -34,6 +34,11 @@ export interface IRedisQueueClient {
   del(...keys: string[]): Promise<number>;
   /** Connect to Redis (optional). */
   connect?(): Promise<void>;
+  /**
+   * M70c: resolves when the connection is alive. Optional so a minimal injected
+   * fake still type-checks; a client that omits it is *unknown*, not `false`.
+   */
+  ping?(): Promise<unknown>;
   /** Close the connection. */
   quit(): Promise<void>;
 }
@@ -46,6 +51,16 @@ export interface IRedisQueueClient {
 export interface IAmqpQueueConnection {
   /** Create a channel. */
   createChannel(): Promise<IAmqpQueueChannel>;
+  /**
+   * M70c: registers a fault listener. The real amqplib connection exposes
+   * `'error'`/`'close'`; the adapter sets a fault flag when either fires, which
+   * `isHealthy` reads. Optional so a minimal fake still type-checks.
+   *
+   * @param event - The event name (`'error'` or `'close'`)
+   * @param listener - Invoked when the event fires
+   * @since 0.1.0
+   */
+  on?(event: string, listener: (err?: unknown) => void): void;
   /** Close the connection. */
   close(): Promise<void>;
 }
