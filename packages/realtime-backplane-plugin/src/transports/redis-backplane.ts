@@ -56,6 +56,17 @@ export class RedisBackplane implements IRealtimeBackplane {
   #generation = 0;
 
   /**
+   * M70c: present only when both connections expose `status` and `ping`; the
+   * indicator reads absence as *unknown* (a minimal fake that lacks the
+   * surface has not told us the backend is dead). A subscriber-mode connection
+   * refuses every command but (un)subscribe, so the pair is probed separately
+   * (M47's two-connection requirement).
+   *
+   * @since 0.2.0
+   */
+  isHealthy?: () => Promise<boolean>;
+
+  /**
    * @param options - The Redis arm's options
    * @param origin - This instance's identity
    * @param topic - The Redis channel every instance shares
@@ -188,6 +199,46 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#publisher = publisher;
     this.#subscriber = subscriber;
     this.#listener = listener;
+    this.#installProbe(publisher, subscriber);
+  }
+
+  /**
+   * M70c: installs the two-connection probe when both connections expose the
+   * `status`/`ping` surface; leaves `isHealthy` absent (unknown) otherwise.
+   *
+   * @param publisher - The publishing connection
+   * @param subscriber - The subscriber-mode connection
+   */
+  #installProbe(publisher: IRedisBackplaneClient, subscriber: IRedisBackplaneClient): void {
+    if (
+      typeof publisher.ping !== 'function' ||
+      typeof subscriber.ping !== 'function' ||
+      publisher.status === undefined ||
+      subscriber.status === undefined
+    ) {
+      delete this.isHealthy;
+      return;
+    }
+    this.isHealthy = async (): Promise<boolean> => {
+      // A subscriber-mode connection refuses every command but (un)subscribe,
+      // so each half is checked on its own connection (M47).
+      const halves = [publisher, subscriber];
+      for (const client of halves) {
+        if (client.status !== 'ready') {
+          return false;
+        }
+        const ping = client.ping;
+        if (typeof ping !== 'function') {
+          return false;
+        }
+        try {
+          await ping();
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    };
   }
 
   /**
@@ -249,6 +300,8 @@ export class RedisBackplane implements IRealtimeBackplane {
     // Drop the memoized open, or a connect() after this close would await the
     // already-resolved attempt and return without reconnecting.
     this.#opening = undefined;
+    // A closed backplane has no live connections to probe; report unknown.
+    delete this.isHealthy;
 
     if (subscriber !== undefined) {
       if (listener !== undefined) {
