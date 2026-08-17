@@ -25,6 +25,8 @@ import {
   WorkerTaskError,
   WorkerTaskTimeoutError,
 } from '../errors.ts';
+import type { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
+import type { TaskFailureReason } from '../metrics/metric-names.ts';
 
 /** Configuration resolved by the service before constructing a pool. */
 export interface TaskPoolConfig {
@@ -87,6 +89,12 @@ export class TaskPool {
     private readonly config: TaskPoolConfig,
     private readonly host: IWorkerHost,
     private readonly runtime: IRuntimeServices,
+    /**
+     * Present only when the application registered `CAPABILITIES.METRICS`.
+     * Every call site is optional-chained, so an application without the
+     * metrics plugin runs exactly the code M45 shipped.
+     */
+    private readonly collector?: WorkerPoolCollector,
   ) {}
 
   /**
@@ -100,9 +108,13 @@ export class TaskPool {
    */
   run(input: unknown, timeoutMs?: number): Promise<unknown> {
     if (this.closed) {
+      this.collector?.taskRejected(this.config.specifier, 'pool_closed');
       return Promise.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));
     }
     if (this.pending.length >= this.config.maxQueue) {
+      // Counted as a REJECTION, not a failure: no `Task` exists yet, so this
+      // never reaches `rejectTask` and `stats().failed` cannot see it either.
+      this.collector?.taskRejected(this.config.specifier, 'queue_full');
       return Promise.reject(
         new WorkerQueueFullError(this.config.specifier, this.config.maxQueue),
       );
@@ -121,6 +133,7 @@ export class TaskPool {
       }
       this.pending.push(task);
       this.pump();
+      this.syncMetrics();
     });
   }
 
@@ -148,14 +161,20 @@ export class TaskPool {
         this.rejectTask(
           slot.task,
           new WorkerPoolUnavailableError('Worker pool has been shut down'),
+          'shutdown',
         );
         slot.task = null;
       }
     }
     const queued = this.pending.splice(0);
     for (const task of queued) {
-      this.rejectTask(task, new WorkerPoolUnavailableError('Worker pool has been shut down'));
+      this.rejectTask(
+        task,
+        new WorkerPoolUnavailableError('Worker pool has been shut down'),
+        'shutdown',
+      );
     }
+    this.syncMetrics();
     await Promise.all(slots.map((slot) => slot.handle.terminate()));
   }
 
@@ -168,11 +187,18 @@ export class TaskPool {
       if (this.pending.length === 0) {
         return;
       }
-      if (slot.ready && slot.task === null) {
+      // A dispatch that fails to hand the task over (a non-cloneable input)
+      // settles that task and leaves the slot free, so the same slot takes the
+      // next waiting task rather than the queue stalling behind one bad input.
+      // The loop therefore ends either when the slot becomes busy or when the
+      // queue runs dry — the `undefined` shift IS that second exit, not a
+      // defensive arm.
+      while (slot.ready && slot.task === null) {
         const item = this.pending.shift();
-        if (item !== undefined) {
-          this.dispatch(slot, item);
+        if (item === undefined) {
+          break;
         }
+        this.dispatch(slot, item);
       }
     }
     // Spawn at most one worker per waiting task not already covered by a
@@ -196,6 +222,19 @@ export class TaskPool {
     this.slots.push(slot);
   }
 
+  /**
+   * Hands one task to one worker.
+   *
+   * `postMessage` throws synchronously when the input is not
+   * structured-clonable (a function, a class instance with methods, a stream).
+   * That throw MUST be caught here rather than at the call sites: reached from
+   * `run()` it would reject the caller's promise, but reached from `pump()`
+   * inside an `onMessage` callback it is an uncaught exception that kills the
+   * host process (X8-2). Catching in one place makes both paths agree.
+   *
+   * The worker never received anything, so it stays in the pool and its slot
+   * is freed for the next task — only the task is bad, not the pool.
+   */
   private dispatch(slot: WorkerSlot, task: Task): void {
     task.id = ++this.nextTaskId;
     slot.task = task;
@@ -205,13 +244,23 @@ export class TaskPool {
       id: task.id,
       input: task.input,
     };
-    slot.handle.postMessage(request);
+    try {
+      slot.handle.postMessage(request);
+    } catch (error) {
+      slot.task = null;
+      this.rejectTask(
+        task,
+        error instanceof Error ? error : new Error(String(error)),
+        'clone',
+      );
+    }
   }
 
   private onMessage(slot: WorkerSlot, message: unknown): void {
     if (isWorkerReadySignal(message)) {
       slot.ready = true;
       this.pump();
+      this.syncMetrics();
       return;
     }
     if (!isWorkerTaskReply(message)) {
@@ -231,9 +280,11 @@ export class TaskPool {
           this.config.specifier,
           message.error ?? { name: 'Error', message: 'Unknown worker error' },
         ),
+        'handler',
       );
     }
     this.pump();
+    this.syncMetrics();
   }
 
   /**
@@ -252,14 +303,15 @@ export class TaskPool {
     if (slot.task !== null) {
       const task = slot.task;
       slot.task = null;
-      this.rejectTask(task, new WorkerTaskError(this.config.specifier, shape));
+      this.rejectTask(task, new WorkerTaskError(this.config.specifier, shape), 'crash');
     } else if (!slot.ready) {
       const waiting = this.pending.shift();
       if (waiting !== undefined) {
-        this.rejectTask(waiting, new WorkerTaskError(this.config.specifier, shape));
+        this.rejectTask(waiting, new WorkerTaskError(this.config.specifier, shape), 'crash');
       }
     }
     this.pump();
+    this.syncMetrics();
   }
 
   /**
@@ -281,22 +333,48 @@ export class TaskPool {
         void slot.handle.terminate();
       }
     }
-    this.rejectTask(task, new WorkerTaskTimeoutError(this.config.specifier, task.timeoutMs));
+    this.rejectTask(
+      task,
+      new WorkerTaskTimeoutError(this.config.specifier, task.timeoutMs),
+      'timeout',
+    );
     this.pump();
+    this.syncMetrics();
   }
 
   /** Settles a task as fulfilled. Callers remove it from its location first. */
   private resolveTask(task: Task, result: unknown): void {
     this.clearTaskTimer(task);
     this.completedCount++;
+    this.collector?.taskCompleted(this.config.specifier);
     task.resolve(result);
   }
 
-  /** Settles a task as rejected. Callers remove it from its location first. */
-  private rejectTask(task: Task, error: Error): void {
+  /**
+   * Settles a task as rejected. Callers remove it from its location first.
+   *
+   * `reason` is pushed to the failure counter here, at the one site that also
+   * increments `failedCount`, so the counter summed over `reason` always
+   * equals `stats().failed` for this pool.
+   */
+  private rejectTask(task: Task, error: Error, reason: TaskFailureReason): void {
     this.clearTaskTimer(task);
     this.failedCount++;
+    this.collector?.taskFailed(this.config.specifier, reason);
     task.reject(error);
+  }
+
+  /**
+   * Writes the pool-state gauges from the same snapshot `/health` reads, so
+   * the two surfaces cannot disagree.
+   *
+   * Called from the five origins of state change — `run`, `onMessage`,
+   * `onWorkerError`, `onTimeout` and `shutdown`. Every other mutation
+   * (`pump`, `dispatch`, `spawnSlot`, `dropSlot`, the settle helpers) is
+   * reached only from one of those, so no transition escapes.
+   */
+  private syncMetrics(): void {
+    this.collector?.syncGauges(this.stats());
   }
 
   private clearTaskTimer(task: Task): void {

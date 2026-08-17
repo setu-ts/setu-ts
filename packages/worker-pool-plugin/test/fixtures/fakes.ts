@@ -25,8 +25,17 @@ export class FakeHandle implements IWorkerHandle {
   private messageListener: ((message: unknown) => void) | null = null;
   private errorListener: ((error: Error) => void) | null = null;
 
+  /**
+   * @param onPostMessage - Inspected before the request is recorded. Throwing
+   * from it reproduces a real `postMessage` refusing a non-cloneable input:
+   * the throw propagates to the caller AND the worker never sees the request,
+   * which is what makes the X8-2 path testable.
+   */
+  constructor(private readonly onPostMessage?: (request: WorkerTaskRequest) => void) {}
+
   postMessage(message: unknown): void {
     if (isWorkerTaskRequest(message)) {
+      this.onPostMessage?.(message);
       this.requests.push(message);
     }
   }
@@ -77,10 +86,18 @@ export class FakeHost implements IWorkerHost {
   readonly handles: FakeHandle[] = [];
   readonly spawnedSpecifiers: string[] = [];
 
-  constructor(private readonly parallelism = 2) {}
+  /**
+   * @param parallelism - Reported by `availableParallelism()`
+   * @param onPostMessage - Passed to every handle this host spawns; see
+   * {@linkcode FakeHandle}
+   */
+  constructor(
+    private readonly parallelism = 2,
+    private readonly onPostMessage?: (request: WorkerTaskRequest) => void,
+  ) {}
 
   spawn(specifier: string): IWorkerHandle {
-    const handle = new FakeHandle();
+    const handle = new FakeHandle(this.onPostMessage);
     this.handles.push(handle);
     this.spawnedSpecifiers.push(specifier);
     return handle;
@@ -95,6 +112,13 @@ export class FakeHost implements IWorkerHost {
 export class FakeTimers {
   private readonly pending = new Map<number, () => void>();
   private nextId = 1;
+  /**
+   * Every `setInterval` call made through the runtime this fixture backs.
+   * The metrics design is a push from state transitions with NO timer, so a
+   * test asserts this stays empty (M53: an interval that outlives `onClose`
+   * leaks, and `clearInterval` can silently no-op).
+   */
+  readonly intervals: number[] = [];
 
   setTimeout(fn: () => void, _ms: number): TimerHandle {
     const id = this.nextId++;
@@ -109,6 +133,12 @@ export class FakeTimers {
   /** Number of armed timers. */
   get armed(): number {
     return this.pending.size;
+  }
+
+  /** Records an interval registration; never fires it. */
+  setInterval(_fn: () => void, ms: number): TimerHandle {
+    this.intervals.push(ms);
+    return this.nextId++;
   }
 
   /** Fires every armed timer. */
@@ -140,7 +170,7 @@ export function createFakeRuntime(
     hrtime: () => 0,
     setTimeout: (fn, ms) => timers.setTimeout(fn, ms),
     clearTimeout: (handle) => timers.clearTimeout(handle),
-    setInterval: () => 0,
+    setInterval: (fn, ms) => timers.setInterval(fn, ms),
     clearInterval: () => undefined,
     env: {},
     exit: (() => {
