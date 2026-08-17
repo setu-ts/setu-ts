@@ -14,14 +14,14 @@ import type {
  * (custom brokers, `cloudflare-plugin`'s messaging arm) breaks.
  */
 const brokerWithoutHealth: IMessageBroker = {
-  connect: async () => {},
-  disconnect: async () => {},
-  publish: async () => {},
-  subscribe: async (): Promise<ISubscription> => ({ unsubscribe: async () => {} }),
-  request: async <TReq, TRes>(_topic: string, _message: TReq): Promise<TRes> => {
-    throw new Error('not implemented');
-  },
-  respond: async (): Promise<ISubscription> => ({ unsubscribe: async () => {} }),
+  connect: () => Promise.resolve(),
+  disconnect: () => Promise.resolve(),
+  publish: () => Promise.resolve(),
+  subscribe: (): Promise<ISubscription> =>
+    Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+  request: <TReq, TRes>(_topic: string, _message: TReq): Promise<TRes> =>
+    Promise.reject(new Error('not implemented')),
+  respond: (): Promise<ISubscription> => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
 };
 
 /**
@@ -30,15 +30,15 @@ const brokerWithoutHealth: IMessageBroker = {
  * broker builds its probe through.
  */
 const brokerWithHealth: IMessageBroker = {
-  connect: async () => {},
-  disconnect: async () => {},
-  publish: async () => {},
-  subscribe: async (): Promise<ISubscription> => ({ unsubscribe: async () => {} }),
-  request: async <TReq, TRes>(_topic: string, _message: TReq): Promise<TRes> => {
-    throw new Error('not implemented');
-  },
-  respond: async (): Promise<ISubscription> => ({ unsubscribe: async () => {} }),
-  isHealthy: async () => true,
+  connect: () => Promise.resolve(),
+  disconnect: () => Promise.resolve(),
+  publish: () => Promise.resolve(),
+  subscribe: (): Promise<ISubscription> =>
+    Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+  request: <TReq, TRes>(_topic: string, _message: TReq): Promise<TRes> =>
+    Promise.reject(new Error('not implemented')),
+  respond: (): Promise<ISubscription> => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+  isHealthy: () => Promise.resolve(true),
 };
 
 /**
@@ -48,10 +48,10 @@ const brokerWithHealth: IMessageBroker = {
  */
 const backplaneWithoutHealth: IRealtimeBackplane = {
   origin: 'test-origin',
-  connect: async () => {},
-  publish: async (_frame: RealtimeFrame) => {},
-  subscribe: async (_handler: RealtimeFrameHandler) => () => {},
-  close: async () => {},
+  connect: () => Promise.resolve(),
+  publish: (_frame: RealtimeFrame) => Promise.resolve(),
+  subscribe: (_handler: RealtimeFrameHandler) => Promise.resolve(() => {}),
+  close: () => Promise.resolve(),
 };
 
 /**
@@ -59,11 +59,11 @@ const backplaneWithoutHealth: IRealtimeBackplane = {
  */
 const backplaneWithHealth: IRealtimeBackplane = {
   origin: 'test-origin',
-  connect: async () => {},
-  publish: async (_frame: RealtimeFrame) => {},
-  subscribe: async (_handler: RealtimeFrameHandler) => () => {},
-  close: async () => {},
-  isHealthy: async () => false,
+  connect: () => Promise.resolve(),
+  publish: (_frame: RealtimeFrame) => Promise.resolve(),
+  subscribe: (_handler: RealtimeFrameHandler) => Promise.resolve(() => {}),
+  close: () => Promise.resolve(),
+  isHealthy: () => Promise.resolve(false),
 };
 
 describe('isHealthy?() port widenings (M70c)', () => {

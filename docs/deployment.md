@@ -174,6 +174,28 @@ imports only the kernel and runtime and serves a single `/` route — so a Deplo
 passes readiness. The committed manifests reference `apps/rest-api`, which reaches HealthPlugin
 through `rest-starter`.
 
+### What the probes measure
+
+The three endpoints aggregate the registered indicators differently:
+
+| Endpoint  | `200` when                  | `503` when                                                   |
+| --------- | --------------------------- | ------------------------------------------------------------ |
+| `/live`   | the process responds at all | (never — liveness is always `200` while the process answers) |
+| `/ready`  | **every** indicator is `up` | any indicator is `down` **or `degraded`**                    |
+| `/health` | no indicator is `down`      | any indicator is `down`                                      |
+
+A `degraded` replica is therefore **withdrawn from its Service** by `/ready` while still answering
+`/health` with `200` — it is impaired, not dead. Since M70c the gRPC health bridge agrees: a
+`degraded` process reports `NOT_SERVING` on `grpc.health.v1.Health/Check` rather than `SERVING`, so
+gRPC load balancers stop routing to it at the same moment Kubernetes does (before M70c the two faces
+disagreed — X7-8).
+
+Since M70c the plugin indicators for `messaging`, `realtime-backplane`, `storage`, `mail`, `queue`,
+and `service-discovery` report **reachability** as well as lifecycle — a backend that is configured
+but unreachable is `down` (or `degraded` for the backplane, whose local delivery still works), not
+`up`. The full classification of every indicator in the framework is in
+[health-indicators.md](health-indicators.md).
+
 ### Security context
 
 The chart sets `runAsNonRoot: true`, `readOnlyRootFilesystem: true`, drops all capabilities, and

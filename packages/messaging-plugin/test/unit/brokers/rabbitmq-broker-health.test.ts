@@ -194,4 +194,76 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
     // Still faulted (never succeeded), not terminated.
     expect(await broker.reachability()).toBe(false);
   });
+
+  it('a client without an event surface yields a no-op fault disposer', async () => {
+    // Minimal injected client: createChannel only, no on/off. The fault window
+    // is then only observable through the probe (no fault flag is ever set).
+    const client = {
+      createChannel: () => Promise.resolve({ assertExchange: () => Promise.resolve() }),
+      close: () => Promise.resolve(),
+    } as unknown as IAmqpConnection;
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    await broker.connect();
+    expect(broker.isReady()).toBe(true);
+    expect(await broker.reachability()).toBe(true);
+    await broker.disconnect();
+    expect(broker.isReady()).toBe(false);
+  });
+
+  it('a client without off() detaches without throwing', async () => {
+    const listeners = new Map<string, Array<() => void>>();
+    const client = {
+      createChannel: () => Promise.resolve({ assertExchange: () => Promise.resolve() }),
+      close: () => Promise.resolve(),
+      on: (event: string, listener: () => void) => {
+        const arr = listeners.get(event) ?? [];
+        arr.push(listener);
+        listeners.set(event, arr);
+      },
+      // no off(): the disposer must skip removal rather than throw
+    } as unknown as IAmqpConnection;
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    await broker.connect();
+    // disconnect() stops the supervisor, which runs the disposer; with no off
+    // the disposer is a no-op and must not throw.
+    await broker.disconnect();
+    expect(broker.isReady()).toBe(false);
+  });
+
+  it('rejects an injected client that is not an object', async () => {
+    const broker = new RabbitMqBroker(
+      createFakeRuntime(),
+      new JsonSerializer(),
+      { client: 'not-an-object' as unknown as IAmqpConnection },
+    );
+    await expect(broker.connect()).rejects.toThrow(
+      'Injected AMQP client does not match the required structural shape',
+    );
+  });
+
+  it('rejects an injected client missing createChannel', async () => {
+    const broker = new RabbitMqBroker(
+      createFakeRuntime(),
+      new JsonSerializer(),
+      { client: { close: () => Promise.resolve() } as unknown as IAmqpConnection },
+    );
+    await expect(broker.connect()).rejects.toThrow(
+      'Injected AMQP client does not match the required structural shape',
+    );
+  });
+
+  it('rejects an injected client missing close', async () => {
+    const broker = new RabbitMqBroker(
+      createFakeRuntime(),
+      new JsonSerializer(),
+      {
+        client: {
+          createChannel: () => Promise.resolve({ assertExchange: () => Promise.resolve() }),
+        } as unknown as IAmqpConnection,
+      },
+    );
+    await expect(broker.connect()).rejects.toThrow(
+      'Injected AMQP client does not match the required structural shape',
+    );
+  });
 });

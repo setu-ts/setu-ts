@@ -67,10 +67,11 @@ registers no extensions); an unknown filename, symbol or type answers `NOT_FOUND
 Health (`grpc.health.v1.Health`, default ON) implements `Check` only, resolving
 `CAPABILITIES.HEALTH` optionally — absent, it answers `SERVING`. An empty `service` field means "the
 whole server" and returns the mapped aggregate: `up → SERVING`, `down → NOT_SERVING`, and
-`degraded → SERVING` (degraded means impaired but still serving; reporting `NOT_SERVING` would make
-Kubernetes withdraw the replica exactly when the app is functional but under stress). A `service`
-naming something this server does not serve answers `SERVICE_UNKNOWN`. `List` and `Watch` are left
-to Connect's automatic `unimplemented` responder.
+`degraded → NOT_SERVING`. Since M70c the bridge agrees with the health plugin's `/ready`, which
+already withdraws a degraded replica from its Service (503) — reporting `SERVING` here would leave
+the two health faces of one process disagreeing, with gRPC clients load-balancing onto a replica
+HTTP has taken out of rotation. A `service` naming something this server does not serve answers
+`SERVICE_UNKNOWN`. `List` and `Watch` are left to Connect's automatic `unimplemented` responder.
 
 ## Errors
 

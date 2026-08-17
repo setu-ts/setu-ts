@@ -47,6 +47,30 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Reachability-aware health signals for six infrastructure plugins** (M70c). `messaging-plugin`,
+  `realtime-backplane-plugin`, `storage-plugin`, `mail-plugin`, `queue-plugin`, and
+  `service-discovery-plugin` now report a backend's _reachability_, not just its lifecycle. Each
+  provider/broker/adapter gains an optional `isHealthy()` probe (a `PING`, a `HEAD`, a
+  `GetQueueAttributes`, Consul's `/v1/status/leader`, a Kubernetes `limit=1` EndpointSlice LIST),
+  and each plugin's indicator maps the two signals — `isReady()` (lifecycle) and `isHealthy()`
+  (reachability) — to a status. A configured backend that is down is now `down` (or `degraded` for
+  the backplane, whose local delivery still works) instead of `up`. An unprobeable provider honestly
+  reports `data.reachable: 'unknown'` rather than claiming health.
+- **`createCachedProbe(options)` and `CachedProbeOptions` in `@setu-ts/common`** (M70c). A small
+  pure helper that wraps a reachability check in a bounded cache so a health scrape does not become
+  load against the backend: the probe runs at most once per interval, a failure is remembered for a
+  (shorter) failure interval so a flapping backend does not thrash, and the result degrades to
+  `unknown` on a probe error rather than `false`.
+- **`ReconnectSupervisor` in `messaging-plugin`** (M70c). A `drive`-mode broker now re-establishes
+  its connection on loss through a bounded, backoff-driven supervisor instead of failing open; the
+  broker exposes a `reachability()` that distinguishes "connected and answering" from "connected but
+  the backend stopped answering".
+- **`docs/health-indicators.md` and `test/health-indicator-audit.test.ts`** (M70c). A classification
+  of every `ctx.health.register` site in the framework — `live-state`, `justified-literal`, or
+  `configuration-literal` — enforced by a test that fails if a new (or moved) indicator is added
+  unclassified. Five out-of-scope `configuration-literal` sites that hide a real backend are
+  recorded in `smoke/DEFECTS.md` (H-70c-1…H-70c-5).
+
 - **`setu add <plugin>`** — installs a framework package into the current project, pinned to the
   version of the CLI that added it, and updates `deno.json` and `package.json` when a project
   carries both. Accepts a short name, the bare package name, or the full specifier (`setu add auth`,
@@ -102,6 +126,24 @@ All notable changes to this project are documented here. The format follows
   **`UnsupportedFilterOperatorError`** — see **Changed** for the `contains` behaviour they govern.
 
 ### Changed
+
+- **Breaking (behaviour): the gRPC health bridge maps `degraded → NOT_SERVING`** (M70c, X7-8). It
+  previously mapped `degraded → SERVING`, so a degraded process answered `SERVING` on
+  `grpc.health.v1.Health/Check` while the health plugin's `/ready` already returned `503` — the two
+  health faces of one process disagreed, and gRPC clients kept load-balancing onto a replica HTTP
+  had taken out of rotation. **Migration:** a client that relied on `SERVING` while a process is
+  degraded now sees `NOT_SERVING`; that is the agreement the framework's own default already
+  produced on the HTTP side. `up → SERVING` and `down → NOT_SERVING` are unchanged.
+- **Breaking (behaviour): a service-discovery indicator reports `down`, not `up`, when its backend
+  was never reached** (M70c, X10-3). The old comment claimed `down` was "unreachable by
+  construction", but a provider that never resolved (e.g. a Kubernetes API whose TLS the runtime
+  rejects) reported `up` forever. The indicator now composes `everResolved` (set on the first
+  successful read, never by a stale-cache serve) with the provider's reachability probe:
+  never-resolved-and-unreachable is `down`, a stale cache or a just-unreachable warm cache is
+  `degraded`, otherwise `up`.
+- **Health indicators are projected to `{ status, data }`** (M70c, X3-7). An indicator's undeclared
+  fields were previously echoed verbatim into `/health` — a returned `details` sat beside the
+  built-ins' `data`. The health service now projects every result to the documented shape.
 
 - **Breaking (behaviour): an unhandled non-`HttpError` 500 no longer carries its own message.**
   `maskInternalErrors` defaults to `true`, so the body's `detail`/`message` becomes the status
@@ -195,6 +237,14 @@ All notable changes to this project are documented here. The format follows
   which is where a routing failure can still be logged. Behaviour on the wire is unchanged.
 - Node's raw `upgrade` listener now refuses an unroutable upgrade with the status the pipeline
   produced (`404` for a path with no WebSocket route) rather than a fixed `400`.
+
+### Fixed
+
+- **X10-3 — a service-discovery indicator that never reached its backend reported `up`** (M70c). See
+  Changed.
+- **X7-8 — the gRPC health bridge disagreed with `/ready` about a degraded process** (M70c). See
+  Changed.
+- **X3-7 — a health indicator's undeclared fields leaked into `/health`** (M70c). See Changed.
 
 ### Deprecated
 

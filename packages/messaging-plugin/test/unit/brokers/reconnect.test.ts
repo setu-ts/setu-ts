@@ -259,4 +259,100 @@ describe('ReconnectSupervisor', () => {
     expect(added).toBe(1 + 3); // start + 3 re-attaches
     expect(removed).toBe(1 + 3); // 3 detach-on-reattach + 1 final stop
   });
+
+  it('start() is idempotent: a second call attaches no extra listeners', () => {
+    const runtime = makeRuntime(makeClock());
+    let added = 0;
+    const sup = new ReconnectSupervisor({
+      runtime,
+      mode: 'observe',
+      attachFaultListener: () => {
+        added++;
+        return () => {};
+      },
+    });
+    sup.start();
+    sup.start(); // already running: no-op
+    expect(added).toBe(1);
+  });
+
+  it('start() after stop() is a no-op', () => {
+    const runtime = makeRuntime(makeClock());
+    let added = 0;
+    const sup = new ReconnectSupervisor({
+      runtime,
+      mode: 'observe',
+      attachFaultListener: () => {
+        added++;
+        return () => {};
+      },
+    });
+    sup.start();
+    sup.stop();
+    sup.start(); // stopping: no-op
+    expect(added).toBe(1);
+  });
+
+  it('fault() before start() is a no-op', () => {
+    const runtime = makeRuntime(makeClock());
+    const sup = new ReconnectSupervisor({
+      runtime,
+      mode: 'observe',
+      attachFaultListener: () => () => {},
+    });
+    sup.fault(); // not running: no-op
+    expect(sup.faulted).toBe(false);
+  });
+
+  it('fault() after stop() is a no-op', () => {
+    const runtime = makeRuntime(makeClock());
+    const sup = new ReconnectSupervisor({
+      runtime,
+      mode: 'observe',
+      attachFaultListener: () => () => {},
+    });
+    sup.start();
+    sup.stop();
+    sup.fault(); // stopping: no-op
+    expect(sup.faulted).toBe(false);
+  });
+
+  it('recovered() after stop() is a no-op', () => {
+    const runtime = makeRuntime(makeClock());
+    const sup = new ReconnectSupervisor({
+      runtime,
+      mode: 'observe',
+      attachFaultListener: () => () => {},
+    });
+    sup.start();
+    sup.fault();
+    sup.stop();
+    sup.recovered(); // stopping: no-op
+    expect(sup.faulted).toBe(false);
+  });
+
+  it('observe: a recovery listener attached at start() clears the fault', () => {
+    const runtime = makeRuntime(makeClock());
+    let onFault: (() => void) | undefined;
+    let onRecovered: (() => void) | undefined;
+    const sup = new ReconnectSupervisor({
+      runtime,
+      mode: 'observe',
+      attachFaultListener: (fn) => {
+        onFault = fn;
+        return () => {};
+      },
+      attachRecoveryListener: (fn) => {
+        onRecovered = fn;
+        return () => {};
+      },
+    });
+    sup.start();
+    expect(onFault).toBeDefined();
+    expect(onRecovered).toBeDefined();
+    onFault!();
+    expect(sup.faulted).toBe(true);
+    onRecovered!();
+    expect(sup.faulted).toBe(false);
+  });
 });
