@@ -2630,10 +2630,26 @@ app.router.post('/thumbnail', async (ctx) => {
   worker is retained). A worker-level crash drops the worker and re-dispatches its queued work to
   survivors. A timeout terminates and replaces the worker (in-flight JS cannot be cancelled).
 - **Structured clone only.** `input`/`output` must be structured-clonable — no functions or class
-  instances. A clone failure surfaces as a rejected `run()`.
+  instances. A clone failure surfaces as a rejected `run()` on both dispatch paths (immediately, and
+  when the task is dispatched later from the queue); the worker is retained and the pool keeps
+  serving.
+- **`taskTimeoutMs: 0` disables crash detection for a self-terminated worker.** Worker termination
+  is not delivered as a host event, so the timeout is the only thing that settles the task of a
+  worker that ended itself; with it off, that `run()` never settles and its pool slot is not
+  released. Owned by M70k.
 - **Node `.ts` task modules** need an app-level loader/build, exactly as the frontend build is the
   app's responsibility (AI_GUIDELINES §12.2); the plugin consumes the module specifier as given.
 - Health indicator `worker-pool` reports `{ available, pools }`.
+- **Metrics (opt-in by capability).** When `CAPABILITIES.METRICS` is registered, the plugin
+  publishes six series, all labelled `task_module`: gauges `worker_pool_workers`,
+  `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
+  `worker_pool_tasks_completed_total`, `worker_pool_tasks_failed_total` (also labelled `reason`:
+  `handler`/`timeout`/`crash`/`clone`/`shutdown`) and `worker_pool_tasks_rejected_total` (`reason`:
+  `queue_full`/`pool_closed`/`unavailable`). No plugin option enables them and none disables them —
+  the instruments exist exactly when the metrics capability does. `..._failed_total` summed over
+  `reason` equals the health payload's `failed`; `..._rejected_total` counts refusals that never
+  became tasks, which the health payload cannot see. Gauges are written from the health snapshot on
+  each state change, so the two surfaces cannot disagree, and no interval timer is armed.
 
 ---
 

@@ -15,6 +15,7 @@ import type {
 import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import { WorkerPoolUnavailableError } from '../errors.ts';
 import { TaskPool } from '../pool/task-pool.ts';
+import type { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 
 /** Default pending-queue bound per pool. */
 const DEFAULT_MAX_QUEUE = 1024;
@@ -39,6 +40,11 @@ export class WorkerPoolService implements IWorkerPool {
   constructor(
     private readonly options: WorkerPoolPluginOptions | undefined,
     private readonly runtime: IRuntimeServices,
+    /**
+     * Present only when the application registered `CAPABILITIES.METRICS`.
+     * Threaded into every pool this service creates.
+     */
+    private readonly collector?: WorkerPoolCollector,
   ) {
     this.host = options?.host ?? runtime.workers;
   }
@@ -60,11 +66,20 @@ export class WorkerPoolService implements IWorkerPool {
   ): Promise<TOutput> {
     const host = this.host;
     if (host === undefined) {
+      // No pool exists to report through, so the rejection is recorded here.
+      // On a runtime without threads (Cloudflare Workers) this series is the
+      // only signal that work was attempted at all.
+      this.collector?.taskRejected(taskModule, 'unavailable');
       return Promise.reject(new WorkerPoolUnavailableError());
     }
     let pool = this.pools.get(taskModule);
     if (pool === undefined) {
-      pool = new TaskPool(this.resolveConfig(taskModule, host), host, this.runtime);
+      pool = new TaskPool(
+        this.resolveConfig(taskModule, host),
+        host,
+        this.runtime,
+        this.collector,
+      );
       this.pools.set(taskModule, pool);
     }
     // The worker protocol erases types across the thread boundary; the cast
