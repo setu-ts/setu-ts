@@ -6,7 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IWorkerPool } from '@setu-ts/common';
+import type { ICounter, IMetricsService, IWorkerPool, MetricOptions } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { WorkerPoolPlugin } from '../../src/index.ts';
@@ -136,6 +136,44 @@ describe('WorkerPoolPlugin — optional metrics wiring', () => {
       metrics.require(WORKER_POOL_METRICS.COMPLETED)
         .valueFor({ [TASK_MODULE_LABEL]: 'file:///t.ts' }),
     ).toBe(1);
+  });
+
+  it('should report a failed instrument write through ctx.logger', async () => {
+    const host = new FakeHost();
+    const base = new RecordingMetrics();
+    // Delegated explicitly rather than spread: `RecordingMetrics` is a class,
+    // so `{ ...base }` would copy its fields and DROP every prototype method.
+    const metrics: IMetricsService = {
+      counter: (name: string, options?: MetricOptions): ICounter => {
+        const real = base.counter(name, options);
+        if (name !== WORKER_POOL_METRICS.COMPLETED) {
+          return real;
+        }
+        const boom = (): never => {
+          throw new Error('metrics backend down');
+        };
+        return { name, type: 'counter', help: name, inc: boom, observe: boom };
+      },
+      gauge: (name, options) => base.gauge(name, options),
+      histogram: (name, options) => base.histogram(name, options),
+      summary: (name, options) => base.summary(name, options),
+      get: (name) => base.get(name),
+    };
+
+    const fake = createFakeContext(createFakeRuntime(new FakeTimers(), host));
+    fake.registered.set(CAPABILITIES.METRICS, metrics);
+    WorkerPoolPlugin({ host }).register(fake.ctx);
+
+    const pool = fake.registered.get(CAPABILITIES.WORKER_POOL) as IWorkerPool;
+    const promise = pool.run('file:///t.ts', 1);
+    host.handles[0].emitReady();
+    host.handles[0].replyOk('done');
+
+    // The task is unaffected; the failure surfaces on the logger instead.
+    await expect(promise).resolves.toBe('done');
+    expect(fake.logged).toHaveLength(1);
+    expect(fake.logged[0].message).toContain('metrics write failed');
+    expect(fake.logged[0].metadata).toEqual({ error: 'metrics backend down' });
   });
 
   it('should report a rejection when the runtime provides no worker host', async () => {

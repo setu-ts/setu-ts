@@ -25,6 +25,26 @@ import type {
   MetricType,
 } from '@setu-ts/common';
 
+/**
+ * Reporter for tests where no instrument write is expected to fail.
+ *
+ * It THROWS rather than ignoring, so a metrics failure a test did not intend
+ * surfaces as a test failure instead of being swallowed by the collector's
+ * guard — the guard exists to protect production, not to hide bugs here.
+ */
+export function throwOnReport(error: Error): never {
+  throw new Error(`unexpected metrics write failure in test: ${error.message}`);
+}
+
+/** Collects reported instrument-write failures for assertion. */
+export function recordReports(): {
+  report: (error: Error) => void;
+  errors: Error[];
+} {
+  const errors: Error[] = [];
+  return { report: (error: Error): void => void errors.push(error), errors };
+}
+
 /** Serializes a label set to a stable key (label names sorted). */
 export function labelKey(labels?: Readonly<Record<string, string>>): string {
   if (labels === undefined) {
@@ -49,7 +69,18 @@ export class RecordedMetric implements ICounter, IGauge {
     readonly labels: readonly string[],
   ) {}
 
+  /**
+   * Records an observation with the SAME meaning the real instrument gives it
+   * (`IMetric.observe`): the increment for a counter, the new value for a
+   * gauge. `Counter.observe` in `metrics-plugin` delegates to `inc`, so a
+   * double that always assigned would hide precisely the double-counting bug
+   * these tests exist to catch.
+   */
   observe(value = 1, labels?: Readonly<Record<string, string>>): void {
+    if (this.type === 'counter') {
+      this.inc(value, labels);
+      return;
+    }
     this.set(value, labels);
   }
 

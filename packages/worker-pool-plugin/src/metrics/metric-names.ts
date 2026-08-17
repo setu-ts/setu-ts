@@ -66,8 +66,27 @@ export type TaskFailureReason = 'handler' | 'timeout' | 'crash' | 'clone' | 'shu
  */
 export type TaskRejectionReason = 'queue_full' | 'pool_closed' | 'unavailable';
 
-/** Creation options for the three pool-state gauges. */
-export const GAUGE_OPTIONS: Readonly<Record<string, MetricOptions>> = {
+/** Name of one of the three pool-state gauges. */
+export type GaugeName =
+  | typeof WORKER_POOL_METRICS.WORKERS
+  | typeof WORKER_POOL_METRICS.BUSY
+  | typeof WORKER_POOL_METRICS.QUEUED;
+
+/** Name of one of the three task counters. */
+export type CounterName =
+  | typeof WORKER_POOL_METRICS.COMPLETED
+  | typeof WORKER_POOL_METRICS.FAILED
+  | typeof WORKER_POOL_METRICS.REJECTED;
+
+/**
+ * Creation options for the three pool-state gauges.
+ *
+ * Keyed on {@linkcode GaugeName} rather than `string`, so reading it with a
+ * counter's name is a COMPILE error. Under a `Record<string, …>` it would
+ * type-check and yield `undefined`, creating an instrument with no declared
+ * labels — whose first write then throws from `validateLabels`.
+ */
+export const GAUGE_OPTIONS: Readonly<Record<GaugeName, MetricOptions>> = {
   [WORKER_POOL_METRICS.WORKERS]: {
     help: 'Worker threads alive in the pool',
     labels: [TASK_MODULE_LABEL],
@@ -82,8 +101,8 @@ export const GAUGE_OPTIONS: Readonly<Record<string, MetricOptions>> = {
   },
 };
 
-/** Creation options for the three task counters. */
-export const COUNTER_OPTIONS: Readonly<Record<string, MetricOptions>> = {
+/** Creation options for the three task counters. See {@linkcode GAUGE_OPTIONS}. */
+export const COUNTER_OPTIONS: Readonly<Record<CounterName, MetricOptions>> = {
   [WORKER_POOL_METRICS.COMPLETED]: {
     help: 'Total worker tasks completed successfully',
     labels: [TASK_MODULE_LABEL],

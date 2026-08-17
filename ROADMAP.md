@@ -4513,11 +4513,26 @@ the snapshot and wired it to the health indicator; nothing else reads it.
 
 ### Package: `@setu-ts/worker-pool-plugin` (no new package)
 
-`WorkerPoolPlugin` resolves `CAPABILITIES.METRICS` **optionally** and, when present, registers
-gauges for `workers`/`busy`/`queued` and counters for `completed`/`failed`, labelled by task module.
-Absent `metrics-plugin`, nothing changes — the M47 precedent, where `websocket-plugin` and
-`sse-plugin` optionally resolve `REALTIME_BACKPLANE`. No `common` widening, no new capability token,
-one package's `src` touched.
+`WorkerPoolPlugin` resolves `CAPABILITIES.METRICS` **optionally** and, when present, registers six
+instruments, all labelled by task module. Absent `metrics-plugin`, nothing changes — the M47
+precedent, where `websocket-plugin` and `sse-plugin` optionally resolve `REALTIME_BACKPLANE`. No
+`common` widening, no new capability token, one package's `src` touched.
+
+| Metric                              | Type    | Labels                 | Meaning                           |
+| ----------------------------------- | ------- | ---------------------- | --------------------------------- |
+| `worker_pool_workers`               | gauge   | `task_module`          | Worker threads alive              |
+| `worker_pool_busy_workers`          | gauge   | `task_module`          | Workers executing a task          |
+| `worker_pool_queued_tasks`          | gauge   | `task_module`          | Tasks waiting in the queue        |
+| `worker_pool_tasks_completed_total` | counter | `task_module`          | Tasks that completed successfully |
+| `worker_pool_tasks_failed_total`    | counter | `task_module`,`reason` | Admitted tasks that then failed   |
+| `worker_pool_tasks_rejected_total`  | counter | `task_module`,`reason` | Tasks refused before admission    |
+
+**The sixth instrument is a deliberate addition to this section's original five** (conflict C1 in
+the plan). `TaskPool.run` refuses a queue-full submission before a `Task` exists, so
+`stats().failed` can never see the clearest saturation signal the pool produces;
+`..._rejected_total` carries it (`queue_full`/`pool_closed`/`unavailable`) while `..._failed_total`
+summed over `reason` (`handler`/`timeout`/`crash`/`clone`/`shutdown`) stays exactly equal to the
+health payload's `failed`.
 
 ### The one open design decision: how the gauges are sampled
 

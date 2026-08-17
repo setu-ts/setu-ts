@@ -21,7 +21,7 @@ import {
   WORKER_POOL_METRICS,
 } from '../../src/metrics/metric-names.ts';
 import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
-import { RecordingMetrics } from '../fixtures/metrics-fakes.ts';
+import { RecordingMetrics, throwOnReport } from '../fixtures/metrics-fakes.ts';
 
 const SPEC = 'file:///tasks/echo.ts';
 const POISON = '__poison__';
@@ -46,7 +46,7 @@ function makePool(size: number): {
     { specifier: SPEC, size, maxQueue: 1024, taskTimeoutMs: 0 },
     host,
     createFakeRuntime(timers),
-    new WorkerPoolCollector(metrics),
+    new WorkerPoolCollector(metrics, throwOnReport),
   );
   return { pool, host, metrics };
 }
@@ -138,7 +138,7 @@ describe('TaskPool — a non-cloneable input (X8-2)', () => {
       { specifier: SPEC, size: 1, maxQueue: 1024, taskTimeoutMs: 0 },
       host,
       createFakeRuntime(new FakeTimers()),
-      new WorkerPoolCollector(new RecordingMetrics()),
+      new WorkerPoolCollector(new RecordingMetrics(), throwOnReport),
     );
 
     const promise = pool.run(POISON);

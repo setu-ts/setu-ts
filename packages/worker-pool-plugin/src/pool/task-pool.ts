@@ -342,12 +342,20 @@ export class TaskPool {
     this.syncMetrics();
   }
 
-  /** Settles a task as fulfilled. Callers remove it from its location first. */
+  /**
+   * Settles a task as fulfilled. Callers remove it from its location first.
+   *
+   * The caller's promise is settled BEFORE the metric is recorded, and never
+   * after: observing the work must not be able to lose it. With the order
+   * reversed, an instrument write that throws leaves `task.resolve` unreached,
+   * so a task the worker completed successfully would hang its caller forever
+   * while the pool counted it as done.
+   */
   private resolveTask(task: Task, result: unknown): void {
     this.clearTaskTimer(task);
     this.completedCount++;
-    this.collector?.taskCompleted(this.config.specifier);
     task.resolve(result);
+    this.collector?.taskCompleted(this.config.specifier);
   }
 
   /**
@@ -360,8 +368,8 @@ export class TaskPool {
   private rejectTask(task: Task, error: Error, reason: TaskFailureReason): void {
     this.clearTaskTimer(task);
     this.failedCount++;
-    this.collector?.taskFailed(this.config.specifier, reason);
     task.reject(error);
+    this.collector?.taskFailed(this.config.specifier, reason);
   }
 
   /**
