@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { IMailer, IPlugin, IPluginContext } from '@setu-ts/common';
+import type { HealthCheckResult, IMailer, IPlugin, IPluginContext } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { MailProvider, MailProviderOptions, MailProviderType } from '../interfaces/index.ts';
 import { MailService } from '../services/mail-service.ts';
@@ -106,11 +106,25 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
 
       ctx.logger?.debug('MailPlugin registered', { provider: providerType });
 
-      ctx.health.register(CAPABILITIES.MAIL, () =>
-        Promise.resolve({
-          status: provider.isReady() ? 'up' : 'down',
-          data: { provider: providerType },
-        }));
+      // M70c: reports BOTH signals. `isReady()` is lifecycle (never started /
+      // shut down → `down`); `isHealthy()` is reachability (the mail backend
+      // answers right now). A ready-but-unreachable provider is `down` with
+      // `data.reachable: false`. A provider that cannot probe (smtp/SES client
+      // without the optional member) is `up` with `data.reachable: 'unknown'`.
+      const mailIndicator = async (): Promise<HealthCheckResult> => {
+        if (!provider.isReady()) {
+          return { status: 'down', data: { provider: providerType, reachable: false } };
+        }
+        if (typeof provider.isHealthy !== 'function') {
+          return { status: 'up', data: { provider: providerType, reachable: 'unknown' } };
+        }
+        const reachable = await provider.isHealthy();
+        if (reachable === false) {
+          return { status: 'down', data: { provider: providerType, reachable: false } };
+        }
+        return { status: 'up', data: { provider: providerType, reachable: true } };
+      };
+      ctx.health.register(CAPABILITIES.MAIL, mailIndicator);
 
       ctx.lifecycle.onClose(async () => {
         await provider.disconnect();

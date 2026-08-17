@@ -54,6 +54,15 @@ export interface ISmtpTransport {
     cc?: string;
     bcc?: string;
   }): Promise<unknown>;
+  /**
+   * M70c: verifies the SMTP connection. nodemailer's real transport exposes
+   * this; a minimal injected fake may omit it, in which case the provider
+   * reports *unknown* reachability rather than `false`.
+   *
+   * @returns Resolves when the connection is verified
+   * @since 0.1.0
+   */
+  verify?(): Promise<unknown>;
 }
 
 /**
@@ -70,6 +79,15 @@ export interface ISesClient {
    * @returns Resolves when SES accepts the message
    */
   sendEmail(message: OutgoingMail): Promise<void>;
+  /**
+   * M70c: reports whether the SES account is reachable — the real adapter
+   * issues `GetAccount`. Optional so a minimal injected fake still
+   * type-checks; a client that omits it is *unknown*, not `false`.
+   *
+   * @returns `true` when the account is reachable
+   * @since 0.1.0
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 /**
@@ -171,6 +189,19 @@ export interface MailProvider {
    * @throws {Error} If the provider rejects the message
    */
   send(message: OutgoingMail): Promise<void>;
+  /**
+   * M70c: reports whether the provider's backend is reachable right now, for
+   * the plugin's health indicator.
+   *
+   * Optional: a provider with no meaningful liveness check omits it, and the
+   * indicator then reports only the lifecycle state (`isReady`). This answers a
+   * fact (reachability), not a policy: the indicator owns the `up`/`down`
+   * mapping.
+   *
+   * @returns `true` when the backend is reachable
+   * @since 0.1.0
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 /** Re-exported for provider constructors that accept a logger. */

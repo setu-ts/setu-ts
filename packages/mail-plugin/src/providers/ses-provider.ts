@@ -123,6 +123,14 @@ function buildSesConfig(
 export class SesProvider implements MailProvider {
   #client: ISesClient | null = null;
   readonly #options: SesProviderOptions;
+  /**
+   * M70c: present only when the client exposes `isHealthy?()` (the real
+   * adapter issues `GetAccount`); its absence is *unknown* reachability, not
+   * `false`.
+   *
+   * @since 0.1.0
+   */
+  isHealthy?: () => Promise<boolean>;
 
   /**
    * @param options - AWS connection/injection options
@@ -138,13 +146,29 @@ export class SesProvider implements MailProvider {
         throw new Error('Injected SES client is missing the required sendEmail method');
       }
       this.#client = injected;
-      return;
+    } else {
+      this.#client = adaptSesModule(await loadSesModule(), this.#options);
     }
-    this.#client = adaptSesModule(await loadSesModule(), this.#options);
+    this.#installProbe();
+  }
+
+  /**
+   * M70c: installs `isHealthy` from the client's optional member when present;
+   * leaves it absent (unknown) otherwise.
+   */
+  #installProbe(): void {
+    const client = this.#client;
+    if (client !== null && typeof client.isHealthy === 'function') {
+      const probe = client.isHealthy;
+      this.isHealthy = (): Promise<boolean> => probe();
+    } else {
+      delete this.isHealthy;
+    }
   }
 
   disconnect(): Promise<void> {
     this.#client = null;
+    delete this.isHealthy;
     return Promise.resolve();
   }
 

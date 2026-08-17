@@ -59,6 +59,17 @@ export class LogProvider implements MailProvider {
   }
 
   /**
+   * M70c: a log provider never touches a network, so it is always reachable
+   * (M47).
+   *
+   * @returns `true`
+   * @since 0.1.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  /**
    * Records and logs a message.
    *
    * @param message - The outgoing mail
