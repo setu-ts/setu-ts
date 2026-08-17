@@ -90,23 +90,36 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         });
       }
 
-      ctx.health.register(
-        'service-discovery',
-        (): Promise<HealthCheckResult> =>
-          Promise.resolve({
-            // 'down' is unreachable by construction: with nothing cached and a
-            // failing backend no resolve() ever succeeded, so the caller
-            // already received a DiscoveryUnavailableError.
-            status: service.degraded ? 'degraded' : 'up',
-            data: {
-              provider: service.providerKind,
-              cachedServices: service.cachedServices,
-              watchedServices: service.watchedServices,
-              ejectedInstances: service.ejectedInstances,
-              degraded: service.degraded,
-            },
-          }),
-      );
+      // M70c: the indicator composes three facts. `everResolved` is `false`
+      // until the first successful provider read (so a backend that was never
+      // reached is `down`, not `up` — the X10-3 case the old comment hid);
+      // `degraded` means a stale cache is being served; `isHealthy()` is the
+      // live reachability probe. Mapping: never resolved AND not reachable is
+      // `down`; degraded (or a warm cache that just went unreachable) is
+      // `degraded`; otherwise `up`.
+      const discoveryIndicator = async (): Promise<HealthCheckResult> => {
+        const reachable = await service.isHealthy();
+        const everResolved = service.everResolved;
+        const degraded = service.degraded;
+        const status = !everResolved && !reachable
+          ? 'down'
+          : degraded || (everResolved && !reachable)
+          ? 'degraded'
+          : 'up';
+        return {
+          status,
+          data: {
+            provider: service.providerKind,
+            cachedServices: service.cachedServices,
+            watchedServices: service.watchedServices,
+            ejectedInstances: service.ejectedInstances,
+            degraded,
+            reachable,
+            everResolved,
+          },
+        };
+      };
+      ctx.health.register('service-discovery', discoveryIndicator);
 
       ctx.lifecycle.onClose(() => {
         service.close();

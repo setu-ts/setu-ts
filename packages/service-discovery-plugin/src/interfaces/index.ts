@@ -57,6 +57,20 @@ export interface DiscoveryProvider {
    * @param registration - The registration to remove
    */
   deregisterSelf?(registration: SelfRegistration): Promise<void>;
+
+  /**
+   * M70c: reports whether the discovery backend is reachable right now, for the
+   * plugin's health indicator.
+   *
+   * Optional: a provider with no meaningful liveness check omits it, and the
+   * indicator then relies on the service's `everResolved` state. This answers a
+   * fact (reachability), not a policy: the indicator owns the `up`/`degraded`/
+   * `down` mapping.
+   *
+   * @returns `true` when the backend is reachable
+   * @since 0.2.0
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 /**

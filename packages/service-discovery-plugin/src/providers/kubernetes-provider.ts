@@ -187,6 +187,24 @@ export class KubernetesProvider implements DiscoveryProvider {
     return this.mapSlices(JSON.parse(response.text), serviceName);
   }
 
+  /**
+   * M70c: probes the API server with a `limit=1` EndpointSlice LIST through the
+   * existing seam. This is the probe that makes X10-3 visible: an `UnknownIssuer`
+   * TLS rejection surfaces here as `down`. 2xx means the API is reachable.
+   */
+  async isHealthy(): Promise<boolean> {
+    try {
+      const url = `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
+        `${encodeURIComponent(this.#options.namespace)}/endpointslices?limit=1`;
+      const response = await this.#http.request(url, {
+        headers: { Authorization: await this.authHeader() },
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   watch(
     serviceName: string,
     listener: (instances: readonly ServiceInstance[]) => void,

@@ -147,6 +147,20 @@ export class ConsulProvider implements DiscoveryProvider {
     return this.mapEntries(JSON.parse(response.text), serviceName);
   }
 
+  /**
+   * M70c: probes the agent's leader endpoint — `GET /v1/status/leader` — through
+   * the existing `IDiscoveryHttp` seam. 2xx means the agent is reachable; any
+   * other status or a transport failure means it is not.
+   */
+  async isHealthy(): Promise<boolean> {
+    try {
+      const response = await this.#http.request(`${this.#base}/v1/status/leader`);
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
   watch(
     serviceName: string,
     listener: (instances: readonly ServiceInstance[]) => void,
