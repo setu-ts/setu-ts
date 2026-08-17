@@ -165,4 +165,18 @@ export interface IMessageBroker {
     handler: RequestHandler<TReq, TRes>,
     options?: SubscribeOptions,
   ): Promise<ISubscription>;
+  /**
+   * Reports whether the broker's backend is reachable right now, for the
+   * plugin's health indicator.
+   *
+   * Optional: a broker with no meaningful liveness check omits it, and the
+   * indicator then reports only the lifecycle state (`isReady`).
+   *
+   * This answers a fact (reachability), not a policy: the indicator that
+   * consumes it owns the `up`/`down` mapping.
+   *
+   * @returns `true` when the backend is reachable
+   * @since 0.1.0
+   */
+  isHealthy?(): Promise<boolean>;
 }

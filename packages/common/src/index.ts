@@ -13,6 +13,10 @@
 export { contentTypeFor } from './static/content-types.ts';
 export { assertRealPathContained, isLexicallyContained } from './static/path-containment.ts';
 
+// Health probe
+export { createCachedProbe } from './health/probe.ts';
+export type { CachedProbeOptions } from './health/probe.ts';
+
 // Capability tokens
 export { CAPABILITIES, createCapabilityToken } from './tokens.ts';
 export type { CapabilityToken, StandardCapability } from './tokens.ts';

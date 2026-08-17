@@ -81,6 +81,15 @@ export interface IPubSubTransport {
   deleteSubscription(subscription: string): Promise<void>;
   /** Close the client and all subscriptions. */
   close(): Promise<void>;
+  /**
+   * Reports whether the Pub/Sub backend is reachable (optional, M70c).
+   *
+   * The real adapter calls the SDK's `topic.exists()`; a transport without a
+   * liveness check omits it and the broker reports `unknown` reachability.
+   * The SDK owns streaming-pull reconnection, so the broker issues no
+   * reconnect loop of its own.
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 /** Handle for an open Pub/Sub subscription. */
@@ -345,6 +354,39 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
 
   isReady(): boolean {
     return this.#ready;
+  }
+
+  /**
+   * Tri-state backend reachability (M70c).
+   *
+   * The GCP SDK owns streaming-pull reconnection, so the broker issues no
+   * reconnect loop of its own; the probe delegates to the transport's
+   * `isHealthy?()` (the real adapter calls the SDK's `topic.exists()`).
+   * `true`/`false` from the transport, `undefined` when the transport omits
+   * the member (a minimal fake) — the indicator then reports
+   * `reachable: 'unknown'`.
+   *
+   * @returns `true`/`false`/`undefined` as described
+   * @since 0.1.0
+   */
+  async reachability(): Promise<boolean | undefined> {
+    const transport = this.#transport;
+    if (transport === null || typeof transport.isHealthy !== 'function') {
+      return undefined;
+    }
+    return await transport.isHealthy();
+  }
+
+  /**
+   * Boolean port member (M70c): `false` only when positively unreachable.
+   *
+   * @returns `true` when reachable or unprobeable, `false` when the
+   *   transport reports unreachable
+   * @since 0.1.0
+   */
+  async isHealthy(): Promise<boolean> {
+    const reachable = await this.reachability();
+    return reachable !== false;
   }
 
   async publish<T>(topic: string, message: T): Promise<void> {

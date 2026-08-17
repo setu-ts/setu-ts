@@ -16,13 +16,48 @@ describe('asBrokerAdapter', () => {
     };
   }
 
-  it('returns instance unchanged when isReady is present', () => {
+  it('returns instance unchanged when the full internal seam is present', () => {
     const broker = createMinimalBroker({
       isReady: () => true,
+      reachability: () => Promise.resolve(true),
+      isHealthy: () => Promise.resolve(true),
     });
     const adapter = asBrokerAdapter(broker);
     expect(adapter).toBe(broker);
     expect(adapter.isReady()).toBe(true);
+  });
+
+  it('wraps an instance that has isReady but not the full seam', () => {
+    const broker = createMinimalBroker({
+      isReady: () => true,
+    });
+    const adapter = asBrokerAdapter(broker);
+    expect(adapter).not.toBe(broker);
+    expect(adapter.isReady()).toBe(true);
+  });
+
+  it('derives reachability from the wrapped isHealthy when present', async () => {
+    const broker = createMinimalBroker({
+      isHealthy: () => Promise.resolve(false),
+    });
+    const adapter = asBrokerAdapter(broker);
+    expect(await adapter.reachability()).toBe(false);
+    const probe = adapter.isHealthy;
+    expect(typeof probe).toBe('function');
+    if (typeof probe === 'function') {
+      expect(await probe()).toBe(false);
+    }
+  });
+
+  it('reports unknown reachability when the wrapped instance cannot probe', async () => {
+    const broker = createMinimalBroker();
+    const adapter = asBrokerAdapter(broker);
+    expect(await adapter.reachability()).toBeUndefined();
+    const probe = adapter.isHealthy;
+    expect(typeof probe).toBe('function');
+    if (typeof probe === 'function') {
+      expect(await probe()).toBe(true);
+    }
   });
 
   it('wraps instance when isReady is absent', () => {

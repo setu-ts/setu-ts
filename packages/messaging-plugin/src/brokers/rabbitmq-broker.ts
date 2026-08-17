@@ -11,6 +11,7 @@ import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
+import { ReconnectSupervisor } from './reconnect.ts';
 import type { IAmqpConnection, RabbitMqOptions } from '../interfaces/index.ts';
 // amqplib's frame codec requires a Node Buffer for message content (it throws
 // `TypeError('content is not a buffer')` for a string or a Uint8Array). This is
@@ -75,17 +76,29 @@ async function resolveClient(
 }
 
 /**
- * Internal subscriber entry.
+ * Internal subscriber entry, kept as a *specification* (topic + handler +
+ * queue) rather than a live channel handle. M70c: after a broker restart the
+ * old channel is dead, so replay re-derives the consumer on the fresh
+ * channel from this spec.
  */
 interface ActiveConsumer {
   id: string;
-  channel: unknown;
-  consumerTag: string;
+  topic: string;
+  handler: MessageHandler<unknown>;
   queue: string | undefined; // undefined means exclusive server-named queue
+  consumerTag: string;
+  channel: unknown;
 }
 
 /**
  * RabbitMQ message broker implementation using AMQP 0-9-1 topic exchange.
+ *
+ * M70c: amqplib has no reconnect of any kind, so this broker runs the
+ * {@linkcode ReconnectSupervisor} in **drive** mode — on a connection
+ * `'error'`/`'close'` event it reconnects, re-asserts the exchange, and
+ * replays every active subscription. `isReady()` keeps its lifecycle meaning
+ * (a reconnecting broker is still ready); `reachability()` reports the
+ * fault window, which the health indicator maps to `down`.
  *
  * @since 0.1.0
  */
@@ -102,6 +115,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
   #rr: RequestReplyCore;
+  #supervisor: ReconnectSupervisor;
 
   /**
    * Creates a new RabbitMQ broker.
@@ -136,6 +150,14 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
         uuid: () => this.#runtime.uuid(),
       }),
     });
+    this.#supervisor = new ReconnectSupervisor({
+      runtime,
+      mode: 'drive',
+      reconnect: () => this.#reconnect(),
+      reassert: () => this.#reassertExchange(),
+      replay: () => this.#replayConsumers(),
+      attachFaultListener: (onFault) => this.#attachFaultListeners(onFault),
+    });
   }
 
   /**
@@ -149,10 +171,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       return;
     }
     this.#connection = await resolveClient(this.#url, this.#injectedClient);
-    // Create channel unconditionally from the resolved connection
-    const realConn = this.#connection as unknown as { createChannel(): Promise<unknown> };
-    this.#channel = await realConn.createChannel();
+    this.#channel = await this.#createChannel();
+    await this.#reassertExchange();
     this.#ready = true;
+    this.#supervisor.start();
   }
 
   /**
@@ -162,6 +184,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async disconnect(): Promise<void> {
+    this.#supervisor.stop();
     await this.#rr.close();
     // Close all active consumers
     for (const consumer of this.#activeConsumers.values()) {
@@ -186,13 +209,45 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Checks if the broker is connected.
+   * Checks if the broker is connected (lifecycle — M70c).
+   *
+   * `true` while `connect()` has run and `disconnect()` has not, even during
+   * a reconnect window: the lifecycle is intact, the backend is what is
+   * down. Reachability is {@linkcode isHealthy}/{@linkcode reachability}.
    *
    * @returns `true` if connected, `false` otherwise
    * @since 0.1.0
    */
   isReady(): boolean {
     return this.#ready;
+  }
+
+  /**
+   * Tri-state backend reachability (M70c).
+   *
+   * `false` while the supervisor is in a fault window (the connection
+   * dropped and the drive-mode reconnect has not yet succeeded); `true`
+   * otherwise. This reads the fault flag directly — it is a zero-cost,
+   * always-current value, so caching it (as the I/O probes do) would make the
+   * signal stale exactly when it matters.
+   *
+   * @returns `true` when reachable, `false` when the broker is in a fault
+   *   window
+   * @since 0.1.0
+   */
+  reachability(): Promise<boolean> {
+    return Promise.resolve(!this.#supervisor.faulted);
+  }
+
+  /**
+   * Boolean port member (M70c): `false` only when positively unreachable.
+   *
+   * @returns `true` when reachable or unprobeable, `false` when the broker
+   *   is in a fault window
+   * @since 0.1.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(!this.#supervisor.faulted);
   }
 
   /**
@@ -256,75 +311,25 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       throw new Error('RabbitMqBroker is not connected');
     }
 
-    const realChannel = this.#channel as unknown as {
-      assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
-      assertQueue(queue: string, options?: unknown): Promise<{ queue: string }>;
-      bindQueue(queue: string, source: string, pattern: string): Promise<void>;
-      consume(
-        queue: string,
-        onMessage: (msg: unknown) => void,
-        options?: unknown,
-      ): Promise<{ consumerTag: string }>;
-      ack(msg: unknown): void;
-      nack(msg: unknown, allUpTo: boolean, requeue: boolean): void;
-      cancel(tag: string): Promise<void>;
-    };
-
-    // Assert topic exchange
-    await realChannel.assertExchange(this.#exchangeName, 'topic', { durable: true });
-
     // Determine queue name
     const queueName = options?.queue ?? `${this.#defaultQueue}-${this.#runtime.uuid()}`;
     const isExclusive = options?.queue === undefined;
 
-    // Assert queue and bind to topic
-    await realChannel.assertQueue(queueName, { durable: false });
-    await realChannel.bindQueue(queueName, this.#exchangeName, topic);
-
-    // Consume messages
     const subscriptionId = this.#runtime.uuid();
-    const result = await realChannel.consume(
+    const { consumerTag, channel } = await this.#consumeOn(
       queueName,
-      async (msg) => {
-        if (!msg) {
-          return;
-        }
-        try {
-          // Extract message properties
-          const msgTyped = msg as { content?: unknown; properties?: Record<string, unknown> };
-          const content = new TextDecoder().decode(msgTyped.content as Uint8Array);
-          const deserialized = this.#serializer.deserialize<T>(content);
-
-          const metadata: MessageMetadata = {
-            topic,
-            messageId: msgTyped.properties?.messageId as string ??
-              this.#runtime.uuid(),
-            timestamp: msgTyped.properties?.timestamp as Date ??
-              new Date(this.#runtime.now()),
-            headers: (msgTyped.properties?.headers as Readonly<Record<string, string>>) ??
-              undefined,
-          };
-
-          await handler(deserialized, metadata);
-
-          // Ack on success
-          realChannel.ack(msg);
-        } catch (error) {
-          // Nack on failure without requeue
-          realChannel.nack(msg, false, false);
-          this.#logger?.error(`Message handler failed: ${error}`);
-        }
-      },
-      { noAck: false },
+      topic,
+      handler as MessageHandler<unknown>,
     );
 
-    const activeConsumer: ActiveConsumer = {
+    this.#activeConsumers.set(subscriptionId, {
       id: subscriptionId,
-      channel: this.#channel!,
-      consumerTag: result.consumerTag,
+      topic,
+      handler: handler as MessageHandler<unknown>,
       queue: isExclusive ? undefined : queueName,
-    };
-    this.#activeConsumers.set(subscriptionId, activeConsumer);
+      consumerTag,
+      channel,
+    });
 
     return {
       unsubscribe: async (): Promise<void> => {
@@ -359,7 +364,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @param topic - Destination topic a responder is listening on
    * @param message - The request payload
    * @param options - Reply timeout behavior
-   * @returns The reply payload
+   * @returns The reply
    * @since 0.1.0
    */
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
@@ -387,5 +392,151 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       (message, metadata) => handler(message as TReq, metadata),
       options,
     );
+  }
+
+  /**
+   * Creates a fresh channel on the current connection.
+   */
+  async #createChannel(): Promise<unknown> {
+    const realConn = this.#connection as unknown as { createChannel(): Promise<unknown> };
+    return await realConn.createChannel();
+  }
+
+  /**
+   * Re-asserts the topic exchange on the current channel (idempotent).
+   */
+  async #reassertExchange(): Promise<void> {
+    const realChannel = this.#channel as unknown as {
+      assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
+    };
+    await realChannel.assertExchange(this.#exchangeName, 'topic', { durable: true });
+  }
+
+  /**
+   * Establishes a consumer for a spec on the current channel, returning the
+   * fresh tag and channel. Shared by {@linkcode subscribe} and the drive-mode
+   * replay so both derive the consumer identically.
+   */
+  async #consumeOn(
+    queueName: string,
+    topic: string,
+    handler: MessageHandler<unknown>,
+  ): Promise<{ consumerTag: string; channel: unknown }> {
+    const realChannel = this.#channel as unknown as {
+      assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
+      assertQueue(queue: string, options?: unknown): Promise<{ queue: string }>;
+      bindQueue(queue: string, source: string, pattern: string): Promise<void>;
+      consume(
+        queue: string,
+        onMessage: (msg: unknown) => void,
+        options?: unknown,
+      ): Promise<{ consumerTag: string }>;
+      ack(msg: unknown): void;
+      nack(msg: unknown, allUpTo: boolean, requeue: boolean): void;
+    };
+
+    // Assert topic exchange
+    await realChannel.assertExchange(this.#exchangeName, 'topic', { durable: true });
+
+    // Assert queue and bind to topic
+    await realChannel.assertQueue(queueName, { durable: false });
+    await realChannel.bindQueue(queueName, this.#exchangeName, topic);
+
+    const result = await realChannel.consume(
+      queueName,
+      async (msg) => {
+        if (!msg) {
+          return;
+        }
+        try {
+          // Extract message properties
+          const msgTyped = msg as { content?: unknown; properties?: Record<string, unknown> };
+          const content = new TextDecoder().decode(msgTyped.content as Uint8Array);
+          const deserialized = this.#serializer.deserialize<unknown>(content);
+
+          const metadata: MessageMetadata = {
+            topic,
+            messageId: msgTyped.properties?.messageId as string ??
+              this.#runtime.uuid(),
+            timestamp: msgTyped.properties?.timestamp as Date ??
+              new Date(this.#runtime.now()),
+            headers: (msgTyped.properties?.headers as Readonly<Record<string, string>>) ??
+              undefined,
+          };
+
+          await handler(deserialized, metadata);
+
+          // Ack on success
+          realChannel.ack(msg);
+        } catch (error) {
+          // Nack on failure without requeue
+          realChannel.nack(msg, false, false);
+          this.#logger?.error(`Message handler failed: ${error}`);
+        }
+      },
+      { noAck: false },
+    );
+
+    return { consumerTag: result.consumerTag, channel: this.#channel };
+  }
+
+  /**
+   * Drive-mode reconnect: re-establish the connection (when the broker owns
+   * it) and a fresh channel.
+   */
+  async #reconnect(): Promise<void> {
+    if (this.#injectedClient === undefined && this.#connection !== null) {
+      try {
+        await (this.#connection as unknown as { close(): Promise<void> }).close();
+      } catch {
+        // The old connection is already gone; ignore close failures
+      }
+      this.#connection = await resolveClient(this.#url, undefined);
+    }
+    this.#channel = await this.#createChannel();
+  }
+
+  /**
+   * Drive-mode replay: re-subscribe every active consumer on the fresh
+   * channel. This is why X2-1's queues showed no consumers after a broker
+   * restart and never recovered — without it the subscriptions are lost.
+   */
+  async #replayConsumers(): Promise<void> {
+    for (const consumer of [...this.#activeConsumers.values()]) {
+      const queueName = consumer.queue ?? `${this.#defaultQueue}-${consumer.id}`;
+      const { consumerTag, channel } = await this.#consumeOn(
+        queueName,
+        consumer.topic,
+        consumer.handler,
+      );
+      consumer.consumerTag = consumerTag;
+      consumer.channel = channel;
+    }
+  }
+
+  /**
+   * Attaches the `'error'`/`'close'` fault listeners to the current
+   * connection and returns a disposer that removes them. A client without an
+   * event surface (a minimal injected fake) returns a no-op disposer; the
+   * fault window is then only observable through the probe, which still
+   * reports the truth (no fault flag set).
+   */
+  #attachFaultListeners(onFault: () => void): () => void {
+    const connection = this.#connection;
+    if (connection === null || typeof connection.on !== 'function') {
+      return () => {};
+    }
+    const listener = (err?: unknown): void => {
+      void err;
+      onFault();
+    };
+    connection.on('error', listener);
+    connection.on('close', listener);
+    return (): void => {
+      if (typeof connection.off === 'function') {
+        connection.off('error', listener);
+        connection.off('close', listener);
+      }
+    };
   }
 }
