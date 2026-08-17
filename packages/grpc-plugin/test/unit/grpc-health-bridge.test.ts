@@ -49,10 +49,10 @@ describe('mapHealthStatus', () => {
     expect(mapHealthStatus('down')).toBe('not-serving');
   });
 
-  it("maps 'degraded' to serving, not not-serving", () => {
-    // Reporting NOT_SERVING here would make Kubernetes withdraw the replica
-    // exactly when the app is functional but under stress.
-    expect(mapHealthStatus('degraded')).toBe('serving');
+  it("maps 'degraded' to not-serving", () => {
+    // M70c: the health plugin already withdraws a degraded replica via /ready,
+    // so the gRPC face must agree rather than keep load-balancing onto it.
+    expect(mapHealthStatus('degraded')).toBe('not-serving');
   });
 });
 
@@ -69,7 +69,7 @@ describe('resolveServingStatus', () => {
       'not-serving',
     );
     expect(await resolveServingStatus(healthServiceReporting('degraded'), SERVICE_NAMES, '')).toBe(
-      'serving',
+      'not-serving',
     );
   });
 

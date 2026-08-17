@@ -39,17 +39,20 @@ const SERVING_STATUS: Record<GrpcServingStatus, number> = {
 /**
  * Maps a framework {@linkcode HealthStatus} onto a gRPC serving status.
  *
- * `'degraded'` maps to `serving`: degraded means impaired but still serving,
- * and reporting `NOT_SERVING` would make Kubernetes withdraw the replica from
- * its Service exactly when the application is functional but under stress —
- * shedding capacity in the wrong direction (plan §3.6).
+ * `'degraded'` maps to `not-serving`: the health plugin already withdraws a
+ * degraded replica from its Service via `/ready` (503), so reporting `SERVING`
+ * here would leave the two health faces of one process disagreeing — gRPC
+ * clients would keep load-balancing onto a replica HTTP has taken out of
+ * rotation. The old comment argued `NOT_SERVING` would "shed capacity in the
+ * wrong direction", but that withdrawal already happens on the HTTP side;
+ * agreeing is the point (M70c, plan §3.6).
  */
 export function mapHealthStatus(status: 'up' | 'down' | 'degraded'): GrpcServingStatus {
   switch (status) {
     case 'up':
       return 'serving';
     case 'degraded':
-      return 'serving';
+      return 'not-serving';
     case 'down':
       return 'not-serving';
   }
