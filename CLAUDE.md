@@ -2590,6 +2590,82 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   omitted, mirroring the M70h correction). X12-3 closes without a `cli` change: the fix is a safe
   default, so every already-scaffolded project picks it up by upgrading the package. — complete (PR
   #168)
+- **Milestone 45b** (`packages/worker-pool-plugin` — `TaskPoolStats` as a Prometheus signal. M45
+  built the snapshot and gave it exactly one consumer, the `worker-pool` health indicator, so pool
+  saturation was answerable only by polling `/health` and diffing counts by hand. The plugin now
+  resolves `CAPABILITIES.METRICS` **optionally** — `optionalDependencies` + `ctx.services.has`, the
+  M47 `REALTIME_BACKPLANE` precedent — and pushes six instruments from an internal
+  `WorkerPoolCollector`. **No `common` change, no new token, and `src/index.ts` is unchanged**: this
+  ships a signal, not an API, and a `barrel-exports` test pins that (the M56 defect class). Absent
+  `metrics-plugin` every call site is optional-chained and behaviour is byte-identical to M45.
+
+  **Sampling is a push from the pool's own state transitions, and that was a decision rather than a
+  default**: `IMetricsService` (`common/src/services/metrics.ts:154`) exposes no scrape-time
+  callback, so the model had to be chosen, and interval sampling is the arm with a real wrong answer
+  — a timer outliving `onClose` leaks a handle per application, which is the M53
+  `RedisStreamsBroker` defect exactly. A test asserts no `setInterval` is ever armed. Gauges are
+  written with `set()` from the SAME `stats()` the health indicator reads, at the five origins of
+  state change (`run`/`onMessage`/`onWorkerError`/`onTimeout`/`shutdown` — every other mutation is
+  reached only from one of those), so the two surfaces cannot disagree; counters take `inc(1)` at
+  the settle sites, never the cumulative snapshot, which is the double-count trap the ROADMAP named.
+
+  **The two failure counters are deliberately separate, and the split is what makes them honest.**
+  `worker_pool_tasks_failed_total{task_module,reason}` is incremented at the one site that also
+  increments `failedCount`, so summed over `reason` it always equals the health payload's `failed`.
+  But `TaskPool.run` refuses a queue-full submission BEFORE a `Task` exists, so `stats().failed` can
+  never see the clearest saturation signal the pool produces — hence
+  `worker_pool_tasks_rejected_total`, a sixth instrument beyond the ROADMAP's five, covering
+  `queue_full`/`pool_closed`/`unavailable`. Replicating the gap or widening `failedCount` (a
+  behaviour change to a published health payload) were both rejected.
+
+  **X8-2 is fixed here, and X8-7 stays with M70k** — the ROADMAP named both as prerequisites and the
+  scope was set by the maintainer. X8-2 is a `try`/`catch` around one `postMessage`: reached from
+  `run()` a `DataCloneError` rejects the caller's promise, but reached from `pump()` inside an
+  `onMessage` callback the identical throw is an uncaught exception that **killed the host process**
+  — so a bad input on a busy pool took the application down while the same input on an idle pool
+  rejected cleanly. Catching inside `dispatch` makes both paths agree, retains the worker (it never
+  received anything), and the drain loop now re-offers the freed slot to the next queued task rather
+  than stalling behind the bad one. X8-7's named fix needs a worker exit signal `IWorkerHandle`
+  (`common/src/runtime.ts:149`) does not have — an optional `common` widening plus per-runtime
+  implementations, and a web `Worker` fires nothing on `self.close()` — so it is documented in the
+  README and `PUBLIC_API.md` rather than half-fixed.
+
+  **Two of the four negative controls corrected the work rather than confirming it.** Reverting the
+  X8-2 guard failed all five clone tests with the raw `DataCloneError` escaping — but it also
+  revealed that the test named "dispatched straight from `run()` (path A)" was not testing that path
+  at all: no worker was ready yet, so `run()` merely queued and the drain did the dispatch, making
+  both cases the same path. It now warms the pool first. And dropping `CAPABILITIES.METRICS` from
+  `optionalDependencies` failed **only the metadata assertion** and no functional test, because the
+  shipped `MetricsPlugin` sits at priority 100 against this plugin's 500 and is ordered first
+  regardless — so the plan's claim that the edge is what guarantees ordering was overstated and is
+  corrected in the plan. The edge is load-bearing only for a REPLACEMENT provider at a higher
+  priority number, which §3.4 explicitly permits, and a test now constructs exactly that case.
+
+  **Code review then found the milestone's own instrumentation reintroducing X8-2 through a
+  different door.** Instrument writes are throwing calls — `MetricBase.validateLabels` rejects an
+  undeclared or incomplete label set, and `IMetricsService` is a replaceable capability — and every
+  collector call was unguarded, with two of them placed BEFORE the task was settled. Probed: with
+  only the completed counter refusing, the caller's promise **never settled** while `stats()`
+  reported `completed: 1`, so a task the worker had finished successfully lost its result and hung
+  its caller forever; with a wholly failing backend the throw escaped `emitReady`/`replyOk`, which
+  in production is `Worker.onmessage` — an uncaught exception, i.e. the same process kill X8-2 was.
+  A third consequence: a refusing gauge rejected the caller from inside `run()`'s own promise
+  executor **while the task stayed queued and still executed**, telling the caller it had failed
+  while the work happened. Fixed in two places — `WorkerPoolCollector` guards every write and
+  reports through `ctx.logger` (read at CALL time, the M52b lesson; instrument CREATION stays
+  unguarded so a name collision fails `register()` loudly), and `TaskPool` settles each task before
+  observing it. **Both halves are independently proven, which took three controls**: reverting only
+  the ordering PASSED, because the guard alone covers those cases — so the ordering was unproven
+  until a case was added where the REPORTER itself throws (a broken logger transport is real), which
+  strands the caller when reverted and passes when not. Review also shipped the ROADMAP metric table
+  the plan's C1 row had promised and never delivered (the section still described five instruments
+  while six shipped), corrected `RecordedMetric.observe` to honour counter semantics
+  (`Counter.observe` delegates to `inc`, so a double that always assigned would hide precisely the
+  double-count bug these tests exist to catch), and keyed `GAUGE_OPTIONS`/`COUNTER_OPTIONS` on their
+  name unions so a wrong lookup is a compile error rather than an `undefined` that strips a metric's
+  labels. Writing the coverage test for the reporter surfaced a fixture bug the type checker caught:
+  `{ ...base }` on a class copies fields and DROPS every prototype method. All `src` files at 100%
+  branch/function/line except `task-pool.ts` (98.8/100/100)) — complete (PR #170)
 - **Next milestone** — **M70c** (health signals that describe lifecycle, not reachability). Six
   packages answer `up` with their backends stopped and `/ready` stays `200` (X2-1, X3-2, X8-5,
   X10-3), so a dead dependency triggers no restart, no alert, and no rolling-deploy gate; the

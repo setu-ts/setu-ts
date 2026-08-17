@@ -8,12 +8,21 @@
 import type { HealthIndicatorFn, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
+/** One captured logger call. */
+export interface LoggedMessage {
+  readonly level: 'warn';
+  readonly message: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
 /** The fake context and its capture buffers. */
 export interface FakeContext {
   readonly ctx: IPluginContext;
   readonly registered: Map<string, unknown>;
   readonly healthIndicators: Map<string, HealthIndicatorFn>;
   readonly onCloseHandlers: Array<() => Promise<void> | void>;
+  /** Messages the plugin sent through `ctx.logger`. */
+  readonly logged: LoggedMessage[];
 }
 
 /**
@@ -26,6 +35,7 @@ export function createFakeContext(runtime: IRuntimeServices): FakeContext {
   const registered = new Map<string, unknown>();
   const healthIndicators = new Map<string, HealthIndicatorFn>();
   const onCloseHandlers: Array<() => Promise<void> | void> = [];
+  const logged: LoggedMessage[] = [];
   registered.set(CAPABILITIES.RUNTIME, runtime);
 
   const ctx = {
@@ -46,8 +56,19 @@ export function createFakeContext(runtime: IRuntimeServices): FakeContext {
         onCloseHandlers.push(fn);
       },
     },
+    logger: {
+      warn: (message: string, metadata?: Readonly<Record<string, unknown>>): void => {
+        logged.push(
+          metadata === undefined ? { level: 'warn', message } : {
+            level: 'warn',
+            message,
+            metadata,
+          },
+        );
+      },
+    },
     runtime,
   } as unknown as IPluginContext;
 
-  return { ctx, registered, healthIndicators, onCloseHandlers };
+  return { ctx, registered, healthIndicators, onCloseHandlers, logged };
 }
