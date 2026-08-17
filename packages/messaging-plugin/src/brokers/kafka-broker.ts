@@ -11,7 +11,8 @@ import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
-import type { IKafkaFactory, KafkaOptions } from '../interfaces/index.ts';
+import { ReconnectSupervisor } from './reconnect.ts';
+import type { IKafkaEventEmitter, IKafkaFactory, KafkaOptions } from '../interfaces/index.ts';
 
 /** Reply topic used when {@link KafkaOptions.replyTopic} is omitted. */
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
@@ -108,6 +109,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
   #rr: RequestReplyCore;
+  #supervisor: ReconnectSupervisor;
 
   /**
    * Creates a new Kafka broker.
@@ -136,6 +138,12 @@ export class KafkaBroker implements MessageBrokerAdapter {
       setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
       clearTimeout: (handle) => this.#runtime.clearTimeout(handle),
       openInbox: (onReply) => this.#openReplyInbox(onReply),
+    });
+    this.#supervisor = new ReconnectSupervisor({
+      runtime,
+      mode: 'observe',
+      attachFaultListener: (onFault) => this.#attachProducerEvent('DISCONNECT', onFault),
+      attachRecoveryListener: (onRecovered) => this.#attachProducerEvent('CONNECT', onRecovered),
     });
   }
 
@@ -184,6 +192,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     await (this.#producer as unknown as { connect(): Promise<void> }).connect();
 
     this.#ready = true;
+    this.#supervisor.start();
   }
 
   /**
@@ -193,6 +202,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async disconnect(): Promise<void> {
+    this.#supervisor.stop();
     // Reject in-flight requests and close the reply inbox before the transport
     // goes away, so no timer or subscription outlives the connection.
     await this.#rr.close();
@@ -229,6 +239,70 @@ export class KafkaBroker implements MessageBrokerAdapter {
    */
   isReady(): boolean {
     return this.#ready;
+  }
+
+  /**
+   * Tri-state backend reachability (M70c).
+   *
+   * kafkajs retries internally, so the broker runs the supervisor in
+   * **observe** mode: the producer's `DISCONNECT`/`CONNECT` events mark the
+   * fault window (`CRASH` with `restart: false` is terminal and surfaces as a
+   * `DISCONNECT` the client does not recover from). `false` while the window
+   * is active, `true` otherwise, `undefined` when the producer exposes no
+   * event surface (a minimal fake) — the indicator then reports
+   * `reachable: 'unknown'`.
+   *
+   * @returns `true`/`false`/`undefined` as described
+   * @since 0.1.0
+   */
+  reachability(): Promise<boolean | undefined> {
+    if (this.#supervisor.faulted) {
+      return Promise.resolve(false);
+    }
+    const producer = this.#producer;
+    if (producer === null || typeof (producer as IKafkaEventEmitter).on !== 'function') {
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(true);
+  }
+
+  /**
+   * Boolean port member (M70c): `false` only when positively unreachable.
+   *
+   * @returns `true` when reachable or unprobeable, `false` when the fault
+   *   window is active
+   * @since 0.1.0
+   */
+  async isHealthy(): Promise<boolean> {
+    const reachable = await this.reachability();
+    return reachable !== false;
+  }
+
+  /**
+   * Attaches a producer event listener and returns a disposer that removes
+   * it. A producer without an event surface (a minimal injected fake) returns
+   * a no-op disposer.
+   */
+  #attachProducerEvent(event: string, onEvent: () => void): () => void {
+    const producer = this.#producer;
+    if (producer === null || typeof (producer as IKafkaEventEmitter).on !== 'function') {
+      return () => {};
+    }
+    const listener = (...args: unknown[]): void => {
+      void args;
+      onEvent();
+    };
+    (producer as IKafkaEventEmitter).on(event, listener);
+    return (): void => {
+      const p = this.#producer as
+        | (IKafkaEventEmitter & {
+          off?: (event: string, listener: (...args: unknown[]) => void) => void;
+        })
+        | null;
+      if (p !== null && typeof p.off === 'function') {
+        p.off(event, listener);
+      }
+    };
   }
 
   /**

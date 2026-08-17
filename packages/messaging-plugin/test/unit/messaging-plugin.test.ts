@@ -233,7 +233,7 @@ describe('MessagingPlugin', () => {
     const result = await indicator();
 
     expect(result.status).toBe('up');
-    expect(result.data).toEqual({ broker: 'memory' });
+    expect(result.data).toEqual({ broker: 'memory', reachable: true });
   });
 
   it('lifecycle handler disconnects broker on close', async () => {
@@ -276,7 +276,7 @@ describe('MessagingPlugin', () => {
     indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<HealthCheckResult>;
     result = await indicator();
     expect(result.status).toBe('down');
-    expect(result.data).toEqual({ broker: 'memory' });
+    expect(result.data).toEqual({ broker: 'memory', reachable: false });
   });
 
   it('logger is optional and used when provided', async () => {
@@ -390,7 +390,7 @@ describe('MessagingPlugin', () => {
     >;
     const memoryResult = await memoryIndicator();
 
-    expect(memoryResult.data).toEqual({ broker: 'memory' });
+    expect(memoryResult.data).toEqual({ broker: 'memory', reachable: true });
   });
 
   it.ignore('redis-streams uses custom URL', async () => {
@@ -426,7 +426,7 @@ describe('MessagingPlugin', () => {
     >;
     const result = await indicator();
 
-    expect(result.data).toEqual({ broker: 'memory' });
+    expect(result.data).toEqual({ broker: 'memory', reachable: true });
   });
 
   it('logger is registered and used', async () => {
@@ -817,7 +817,8 @@ describe('MessagingPlugin', () => {
     >;
     const result = await indicator();
     expect(result.status).toBe('up');
-    expect(result.data).toEqual({ broker: 'custom' });
+    // The custom instance exposes no isHealthy, so reachability is unknown.
+    expect(result.data).toEqual({ broker: 'custom', reachable: 'unknown' });
   });
 
   // custom arm — isReady wrapper reports false after disconnect
@@ -953,7 +954,8 @@ describe('MessagingPlugin', () => {
       { status: string; data?: { broker: string } }
     >;
     const result = await indicator();
-    expect(result.data).toEqual({ broker: 'pubsub' });
+    // The fake transport exposes no isHealthy, so reachability is unknown.
+    expect(result.data).toEqual({ broker: 'pubsub', reachable: 'unknown' });
   });
 
   it('health indicator reports service-bus broker type', async () => {
@@ -978,7 +980,8 @@ describe('MessagingPlugin', () => {
       { status: string; data?: { broker: string } }
     >;
     const result = await indicator();
-    expect(result.data).toEqual({ broker: 'service-bus' });
+    // The fake transport exposes no isHealthy, so reachability is unknown.
+    expect(result.data).toEqual({ broker: 'service-bus', reachable: 'unknown' });
   });
 
   // ─── kafka with injected client (no fake factory, just registers) ─────────

@@ -1,3 +1,4 @@
+import { createCachedProbe } from '@setu-ts/common';
 import type {
   ISubscription,
   MessageHandler,
@@ -11,6 +12,7 @@ import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
+import { ReconnectSupervisor } from './reconnect.ts';
 import type { INatsConnection, NatsOptions } from '../interfaces/index.ts';
 
 /**
@@ -94,6 +96,8 @@ export class NatsBroker implements MessageBrokerAdapter {
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
   #rr: RequestReplyCore;
+  #supervisor: ReconnectSupervisor;
+  #probe: () => Promise<boolean>;
 
   /**
    * Creates a new NATS broker.
@@ -123,6 +127,35 @@ export class NatsBroker implements MessageBrokerAdapter {
         subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
         uuid: () => this.#runtime.uuid(),
       }),
+    });
+    this.#supervisor = new ReconnectSupervisor({
+      runtime,
+      mode: 'observe',
+      attachFaultListener: (onFault) => this.#attachEvent('Disconnect', onFault),
+      attachRecoveryListener: (onRecovered) => this.#attachEvent('Reconnect', onRecovered),
+    });
+    // Built once so the TTL cache and coalescing persist across health
+    // scrapes (M70c §3.3). The inner probe performs only the I/O half of the
+    // check (isClosed + rtt); the zero-cost fault-flag check is done fresh in
+    // reachability() so an observed Disconnect is never hidden by the cache.
+    this.#probe = createCachedProbe({
+      probe: async () => {
+        const connection = this.#connection;
+        if (connection === null) {
+          return false;
+        }
+        if (typeof connection.isClosed !== 'function' || typeof connection.rtt !== 'function') {
+          return false;
+        }
+        const isClosed = connection.isClosed;
+        const rtt = connection.rtt;
+        if (isClosed.call(connection) === false) {
+          await rtt.call(connection);
+          return true;
+        }
+        return false;
+      },
+      hrtime: () => this.#runtime.hrtime(),
     });
   }
 
@@ -170,6 +203,7 @@ export class NatsBroker implements MessageBrokerAdapter {
     const realConn2 = this.#connection as unknown as { jetstream(): unknown };
     this.#js = realConn2.jetstream();
     this.#ready = true;
+    this.#supervisor.start();
   }
 
   /**
@@ -179,6 +213,7 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async disconnect(): Promise<void> {
+    this.#supervisor.stop();
     await this.#rr.close();
     // Stop all active consumers
     for (const consumer of this.#activeConsumers.values()) {
@@ -207,6 +242,70 @@ export class NatsBroker implements MessageBrokerAdapter {
    */
   isReady(): boolean {
     return this.#ready;
+  }
+
+  /**
+   * Tri-state backend reachability (M70c).
+   *
+   * nats reconnects itself, so the broker runs the supervisor in **observe**
+   * mode: `Disconnect`/`Reconnect` events mark the fault window, and the
+   * probe is `isClosed() === false` **and** `rtt()` resolving. `true` when
+   * both hold, `false` when the window is active or the connection reports
+   * closed, `undefined` when the injected client exposes neither member (a
+   * minimal fake) — the indicator then reports `reachable: 'unknown'`.
+   *
+   * @returns `true`/`false`/`undefined` as described
+   * @since 0.1.0
+   */
+  async reachability(): Promise<boolean | undefined> {
+    const connection = this.#connection;
+    if (connection === null) {
+      return undefined;
+    }
+    if (typeof connection.isClosed !== 'function' || typeof connection.rtt !== 'function') {
+      return undefined;
+    }
+    // The observed fault window is a zero-cost, always-current signal; check
+    // it fresh (uncached) so a Disconnect is reported immediately and a
+    // Reconnect clears it without waiting for the I/O probe's TTL.
+    if (this.#supervisor.faulted) {
+      return false;
+    }
+    return await this.#probe();
+  }
+
+  /**
+   * Boolean port member (M70c): `false` only when positively unreachable.
+   *
+   * @returns `true` when reachable or unprobeable, `false` when the fault
+   *   window is active or the connection is closed
+   * @since 0.1.0
+   */
+  async isHealthy(): Promise<boolean> {
+    const reachable = await this.reachability();
+    return reachable !== false;
+  }
+
+  /**
+   * Attaches a connection event listener and returns a disposer that removes
+   * it. A client without an event surface (a minimal injected fake) returns a
+   * no-op disposer.
+   */
+  #attachEvent(event: string, onEvent: () => void): () => void {
+    const connection = this.#connection;
+    if (connection === null || typeof connection.on !== 'function') {
+      return () => {};
+    }
+    const listener = (...args: unknown[]): void => {
+      void args;
+      onEvent();
+    };
+    connection.on(event, listener);
+    return (): void => {
+      if (typeof connection.off === 'function') {
+        connection.off(event, listener);
+      }
+    };
   }
 
   /**

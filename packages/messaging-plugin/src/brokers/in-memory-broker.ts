@@ -96,6 +96,30 @@ export class InMemoryBroker implements MessageBrokerAdapter {
   }
 
   /**
+   * Tri-state backend reachability (M70c).
+   *
+   * There is no backend to be unreachable: the bus is in-process, so the
+   * answer is simply whether the broker is running. `true` while ready,
+   * `false` before `connect()` or after `disconnect()`.
+   *
+   * @returns `true` when the broker is running, `false` otherwise
+   * @since 0.1.0
+   */
+  reachability(): Promise<boolean> {
+    return Promise.resolve(this.#ready);
+  }
+
+  /**
+   * Boolean port member (M70c).
+   *
+   * @returns `true` when the broker is running, `false` otherwise
+   * @since 0.1.0
+   */
+  isHealthy(): Promise<boolean> {
+    return this.reachability();
+  }
+
+  /**
    * Publishes a message to a topic.
    *
    * Delivers to all subscribers without a queue (fanout), and to one
