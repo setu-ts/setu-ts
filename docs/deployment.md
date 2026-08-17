@@ -297,6 +297,19 @@ apiGroup or a missing verb renders and applies perfectly cleanly and only fails 
 It is **off by default**: an application that does not use the provider should not carry cluster
 read permission. Leave it off and the Deployment also sets `automountServiceAccountToken: false`.
 
+RBAC alone is not enough: the API server presents a cluster-internal CA that `fetch` rejects, and no
+code change fixes that from inside the process. Point the runtime at the CA bundle Kubernetes mounts
+into every pod at the fixed service-account path:
+
+- Deno: `DENO_CERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`
+- Node: `NODE_EXTRA_CA_CERTS=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`
+
+A reader who gets the RBAC above right but omits the CA still fails — on a TLS error rather than a
+`403`, which is easy to misread as a permissions problem. The `http` option is the alternative:
+supply your own `IDiscoveryHttp` over a TLS-configured client. The full in-cluster setup, including
+token rotation, is documented in the
+[service-discovery plugin](../packages/service-discovery-plugin/README.md#kubernetes-in-cluster-tls).
+
 > **Scope.** These are the platform objects. Resolving a name to instances, load-balancing across
 > them, watching for changes and ejecting outliers are the plugin's job, documented with the service
 > discovery plugin.
