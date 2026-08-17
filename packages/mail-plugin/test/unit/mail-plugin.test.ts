@@ -61,7 +61,7 @@ describe('MailPlugin.register', () => {
     // Health indicator reports up (provider connected during register).
     const health = await fake.healthIndicators.get(CAPABILITIES.MAIL)?.();
     expect(health?.status).toBe('up');
-    expect(health?.data).toEqual({ provider: 'log' });
+    expect(health?.data).toEqual({ provider: 'log', reachable: true });
 
     // The debug log was emitted.
     expect(fake.logs.some((l) => l.message === 'MailPlugin registered')).toBe(true);
@@ -77,5 +77,49 @@ describe('MailPlugin.register', () => {
     await MailPlugin({ provider: 'log' }).register(fake.ctx);
     expect(fake.registered.has(CAPABILITIES.MAIL)).toBe(true);
     expect(fake.logs).toHaveLength(0);
+  });
+});
+
+describe('MailPlugin health indicator (M70c)', () => {
+  it('reports up with reachable true when the provider is ready and reachable', async () => {
+    const fake = createFakeContext();
+    await MailPlugin({ provider: 'log' }).register(fake.ctx);
+    const health = await fake.healthIndicators.get(CAPABILITIES.MAIL)?.();
+    expect(health?.status).toBe('up');
+    expect(health?.data).toEqual({ provider: 'log', reachable: true });
+  });
+
+  it('reports up with reachable unknown when the provider cannot probe', async () => {
+    // An SMTP transport without verify(): absence, not false.
+    const fake = createFakeContext();
+    await MailPlugin({
+      provider: 'smtp',
+      options: {
+        transport: {
+          sendMail: () => Promise.resolve({}),
+        } as unknown as import('../../src/interfaces/index.ts').ISmtpTransport,
+      },
+    }).register(fake.ctx);
+    const health = await fake.healthIndicators.get(CAPABILITIES.MAIL)?.();
+    expect(health?.status).toBe('up');
+    expect(health?.data).toEqual({ provider: 'smtp', reachable: 'unknown' });
+  });
+
+  it('reports down with reachable false when ready but the backend is unreachable', async () => {
+    // A SendGrid API that answers 503: reachable is false, so the indicator is down.
+    const fake = createFakeContext();
+    await MailPlugin({
+      provider: 'sendgrid',
+      options: {
+        apiKey: 'key',
+        http: (url: string) => {
+          void url;
+          return Promise.resolve(new Response(null, { status: 503 }));
+        },
+      },
+    }).register(fake.ctx);
+    const health = await fake.healthIndicators.get(CAPABILITIES.MAIL)?.();
+    expect(health?.status).toBe('down');
+    expect(health?.data).toEqual({ provider: 'sendgrid', reachable: false });
   });
 });

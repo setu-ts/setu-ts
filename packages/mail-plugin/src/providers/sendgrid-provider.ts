@@ -63,6 +63,7 @@ export class SendGridProvider implements MailProvider {
   readonly #endpoint: string;
   readonly #http: IMailHttp;
   readonly #apiKey: string;
+  readonly #scopesUrl: string;
   #ready = false;
 
   /**
@@ -72,6 +73,9 @@ export class SendGridProvider implements MailProvider {
     this.#endpoint = options?.endpoint ?? DEFAULT_ENDPOINT;
     this.#apiKey = options?.apiKey ?? '';
     this.#http = options?.http ?? ((url, init): Promise<Response> => fetch(url, init));
+    // The scopes endpoint shares the API's origin and version prefix with the
+    // send endpoint (…/v3/mail/send → …/v3/scopes).
+    this.#scopesUrl = this.#endpoint.replace(/\/mail\/send$/, '/scopes');
   }
 
   connect(): Promise<void> {
@@ -89,6 +93,27 @@ export class SendGridProvider implements MailProvider {
 
   isReady(): boolean {
     return this.#ready;
+  }
+
+  /**
+   * M70c: a `GET /v3/scopes` through the existing `IMailHttp` seam. 2xx means
+   * the key is valid; 401 means the API reached us (so the backend is
+   * reachable even though the key is wrong); any other status or a network
+   * failure means unreachable.
+   *
+   * @returns `true` when the SendGrid API is reachable
+   * @since 0.1.0
+   */
+  async isHealthy(): Promise<boolean> {
+    try {
+      const res = await this.#http(this.#scopesUrl, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${this.#apiKey}` },
+      });
+      return res.status < HTTP_MULTIPLE_CHOICES || res.status === 401;
+    } catch {
+      return false;
+    }
   }
 
   /**
