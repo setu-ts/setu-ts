@@ -34,9 +34,9 @@ describe('createCachedProbe', () => {
     const clock = new FakeClock();
     let calls = 0;
     const isHealthy = createCachedProbe({
-      probe: async () => {
+      probe: () => {
         calls += 1;
-        return true;
+        return Promise.resolve(true);
       },
       ttlMs: 1000,
       hrtime: clock.fn,
@@ -54,9 +54,9 @@ describe('createCachedProbe', () => {
     const clock = new FakeClock();
     let calls = 0;
     const isHealthy = createCachedProbe({
-      probe: async () => {
+      probe: () => {
         calls += 1;
-        return calls % 2 === 1;
+        return Promise.resolve(calls % 2 === 1);
       },
       ttlMs: 1000,
       hrtime: clock.fn,
@@ -74,9 +74,9 @@ describe('createCachedProbe', () => {
     const clock = new FakeClock();
     let calls = 0;
     const isHealthy = createCachedProbe({
-      probe: async () => {
+      probe: () => {
         calls += 1;
-        return true;
+        return Promise.resolve(true);
       },
       hrtime: clock.fn,
     });
@@ -133,9 +133,7 @@ describe('createCachedProbe', () => {
   it('treats a rejecting probe as unreachable and never escapes the throw', async () => {
     const clock = new FakeClock();
     const isHealthy = createCachedProbe({
-      probe: async () => {
-        throw new Error('backend down');
-      },
+      probe: () => Promise.reject(new Error('backend down')),
       ttlMs: 1000,
       timeoutMs: 50,
       hrtime: clock.fn,
@@ -163,9 +161,9 @@ describe('createCachedProbe', () => {
     let reachable = false;
     let calls = 0;
     const isHealthy = createCachedProbe({
-      probe: async () => {
+      probe: () => {
         calls += 1;
-        return reachable;
+        return Promise.resolve(reachable);
       },
       ttlMs: 100,
       hrtime: clock.fn,
@@ -181,7 +179,7 @@ describe('createCachedProbe', () => {
   it('accepts the full options shape (type-level)', () => {
     const clock = new FakeClock();
     const options: CachedProbeOptions = {
-      probe: async () => true,
+      probe: () => Promise.resolve(true),
       ttlMs: 100,
       timeoutMs: 10,
       hrtime: clock.fn,

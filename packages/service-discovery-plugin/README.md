@@ -229,10 +229,22 @@ working while the pod is still healthy.
 
 ## Health indicator
 
-Registered as `service-discovery`, reporting `provider`, `cachedServices`, `watchedServices`,
-`ejectedInstances`, and `degraded`. It reads the cache's own observed state and never issues a
-backend call of its own — a health scrape should not become load against Consul. `degraded` means a
-refresh failed and a stale snapshot is being served.
+Registered as `service-discovery`. Since M70c it composes three facts:
+
+- `everResolved` — `false` until the first successful provider read, so a backend that was never
+  reached is `down`, not `up` (the X10-3 fix).
+- `degraded` — a refresh failed and a stale snapshot is being served.
+- `isHealthy()` — the provider's live reachability probe (Consul `GET /v1/status/leader`, Kubernetes
+  a `limit=1` EndpointSlice LIST).
+
+| Status     | Meaning                                                              |
+| ---------- | -------------------------------------------------------------------- |
+| `up`       | The provider has resolved at least once and is reachable.            |
+| `degraded` | A stale cache is being served, or the backend just went unreachable. |
+| `down`     | The provider has never resolved and is unreachable.                  |
+
+`data` reports
+`{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
 
 ## Related documentation
 

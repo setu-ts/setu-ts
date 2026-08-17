@@ -106,6 +106,21 @@ the broker:
 app.register(EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'] }));
 ```
 
+## Health indicator
+
+Registered under the broker's capability token. Since M70c it reports two signals: the broker's
+lifecycle (`isReady()`) and its reachability. A ready-but-unreachable broker is `down` with
+`data.reachable: false` — the distinction an operator needs to tell "we never started" from "the
+broker restarted under us". An unprobeable broker (e.g. the `custom` arm without `isHealthy`) is
+`up` with `data.reachable: 'unknown'`, honestly reporting "we did not check".
+
+| Status | Meaning                                                                                  |
+| ------ | ---------------------------------------------------------------------------------------- |
+| `up`   | The broker is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The broker is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
+
 ## Exports
 
 | Export                         | Kind      |

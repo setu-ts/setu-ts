@@ -2189,6 +2189,20 @@ Discriminated on `transport`.
 
 ---
 
+### Health status
+
+Since M70c the indicator probes the transport's reachability (`isHealthy()`). A fan-out failure is
+`degraded` — local delivery still works, so `/ready` keeps serving — never `down`. A transport that
+cannot probe reports `up` with `reachable: 'unknown'`.
+
+| Status     | Meaning                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `up`       | The transport is reachable, or cannot be probed (`reachable` is `'unknown'`).           |
+| `degraded` | The transport is unreachable — a fan-out to a peer failed (local delivery still works). |
+
+`data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
+`'unknown'`.
+
 ## SessionPlugin() (`@setu-ts/session-plugin`)
 
 Cookie-backed sessions and session-backed form CSRF. Registers a `SessionService`
@@ -3398,6 +3412,21 @@ export type {
 
 ---
 
+### Health status
+
+Since M70c the indicator reports two signals: the broker's lifecycle (`isReady()`) and its
+reachability. A ready-but-unreachable broker is `down` with `data.reachable: false` — the
+distinction an operator needs to tell "we never started" from "the broker restarted under us". An
+unprobeable broker (e.g. the `custom` arm without `isHealthy`) is `up` with
+`data.reachable: 'unknown'`, honestly reporting "we did not check".
+
+| Status | Meaning                                                                                  |
+| ------ | ---------------------------------------------------------------------------------------- |
+| `up`   | The broker is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The broker is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
+
 ## Queue (`@setu-ts/queue-plugin`)
 
 Provides background job queue with Memory and Redis adapters.
@@ -3627,6 +3656,19 @@ interface IQueue {
 ```
 
 ---
+
+### Health status
+
+Since M70c the indicator reports two signals: the adapter's lifecycle (`isReady()`) and its
+reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                   |
+| ------ | ----------------------------------------------------------------------------------------- |
+| `up`   | The adapter is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The adapter is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ adapter, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the adapter has no liveness check.
 
 ## Scheduler (`@setu-ts/scheduler-plugin`)
 
@@ -4037,6 +4079,19 @@ All cloud providers support an injectable `client` option (`IAwsS3Client` / `IGc
 
 ---
 
+### Health status
+
+Since M70c the indicator reports two signals: the provider's lifecycle (`isReady()`) and its
+reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `up`   | The provider is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The provider is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the provider has no liveness check.
+
 ## MailPlugin() (`@setu-ts/mail-plugin`)
 
 Provides email sending: registers an `IMailer` under `CAPABILITIES.MAIL`, backed by a pluggable
@@ -4146,6 +4201,19 @@ app.router.post('/users', async (ctx) => {
   `SendGridProvider` is the Cloudflare Workers-portable path.
 
 ---
+
+### Health status
+
+Since M70c the indicator reports two signals: the provider's lifecycle (`isReady()`) and its
+reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `up`   | The provider is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The provider is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the provider has no liveness check (e.g. the log provider always reports `true`).
 
 ## Notifications (`@setu-ts/notification-plugin`)
 
@@ -6767,6 +6835,22 @@ and every read here sends `passing=true`.
 
 ---
 
+### Health status
+
+Since M70c the indicator composes three facts. `everResolved` is `false` until the first successful
+provider read, so a backend that was never reached is `down`, not `up` (the X10-3 fix). `degraded`
+means a stale cache is being served. `isHealthy()` is the live reachability probe (Consul
+`/v1/status/leader`, Kubernetes a `limit=1` EndpointSlice LIST).
+
+| Status     | Meaning                                                              |
+| ---------- | -------------------------------------------------------------------- |
+| `up`       | The provider has resolved at least once and is reachable.            |
+| `degraded` | A stale cache is being served, or the backend just went unreachable. |
+| `down`     | The provider has never resolved and is unreachable.                  |
+
+`data` reports
+`{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
+
 ## Programmatic vs Decorator API
 
 The framework provides both APIs for every feature. They are equivalent.
@@ -8281,9 +8365,12 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 - **Bidi streaming requires HTTP/2.** `grpc.reflection.v1.ServerReflection` is bidi-only. Over a
   real HTTP/1.1 socket, bidi calls fail at the transport. Unary, server-streaming, and
   client-streaming work on every runtime.
-- **Health bridge maps `degraded → SERVING`**. `'up' → SERVING (1)`, `'down' → NOT_SERVING (2)`,
-  `'degraded' → SERVING (1)`. Degraded still serves; mapping it to `NOT_SERVING` would shed capacity
-  in the wrong direction.
+- **Health bridge maps `degraded → NOT_SERVING`**. `'up' → SERVING (1)`, `'down' → NOT_SERVING (2)`,
+  `'degraded' → NOT_SERVING (2)`. The health plugin already withdraws a degraded replica from its
+  Service via `/ready` (503), so reporting `SERVING` here would leave the two health faces of one
+  process disagreeing — gRPC clients would keep load-balancing onto a replica HTTP has taken out of
+  rotation. Since M70c the bridge agrees with `/ready`; a client relying on `SERVING` while a
+  process is degraded now sees `NOT_SERVING` (see the CHANGELOG).
 - **`Check` honors the `service` field.** The empty string means "the whole server" and returns the
   mapped aggregate health. A name the server does not serve returns `SERVICE_UNKNOWN (3)`,
   regardless of overall health.

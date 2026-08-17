@@ -68,6 +68,19 @@ The multipart parser is implemented in this package — no dependency.
 The optional `getStream?` reads an object as a `ReadableStream<Uint8Array>`, wired through
 `IResponse.stream()` for zero-copy downloads.
 
+## Health indicator
+
+Registered under the `storage` capability. Since M70c it reports two signals: the provider's
+lifecycle (`isReady()`) and its reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `up`   | The provider is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The provider is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the provider has no liveness check.
+
 ## Exports
 
 | Export                        | Kind      |
