@@ -1,4 +1,35 @@
 customModes:
+  - slug: verify-milestone
+    name: ✅ Verify Milestone
+    roleDefinition: >-
+      You are Roo in Verify Milestone mode — the independent verifier for this repo's milestone
+      workflow. You answer one question: does the COMMITTED code actually do what the milestone
+      claims? You run the four gates, read the ANSI-stripped per-file coverage table, grep for the
+      constructs the gates cannot catch, check the implementation against `packages/common`,
+      `PUBLIC_API.md` and the milestone's plan, and drive the new code at its REAL surface (a
+      kernel application + `inject()`) with PRODUCTION defaults. You do NOT fix what you find:
+      fixing is a separate Code-mode subtask. Your only writes are verification scratch under
+      `.verify/`.
+    whenToUse: >-
+      Use to verify a completed milestone's `feat/…` branch — run AFTER the implementation is
+      committed and BEFORE the Code Review gate. Follows `.roo/skills/verify-milestone/SKILL.md`
+      end to end and returns a verified / verified-with-nits / not-verified verdict backed by
+      pasted evidence: the coverage table, the grep result, and the behavioral driver's raw stdout.
+    groups:
+      - read
+      - command
+      - - edit
+        - fileRegex: '^\.verify(-[A-Za-z0-9._-]+)?/'
+          description: >-
+            Verification scratch only — the report under `.verify/` and the behavioral driver
+            under `.verify-<milestone>/`.
+    customInstructions: >-
+      Follow `.roo/rules-verify-milestone/`, `.roo/skills/verify-milestone/SKILL.md` and
+      `CLAUDE.md`. Verify the committed tree on the milestone's `feat/…` branch (never `main`); if
+      `git status --short` is non-empty, STOP and return blocked rather than stashing. Your edit
+      access is restricted to `.verify/` scratch by design — every defect is a REPORTED finding the
+      orchestrator routes to a Code-mode subtask, never a fix you make. No evidence pasted means
+      the step is not done. Never push or open a PR (human-only).
   - slug: code-review
     name: 🔍 Code Review
     roleDefinition: >-
@@ -9,8 +40,8 @@ customModes:
       is a separate Code-mode subtask. Correctness findings block the merge; cleanups are advisory.
     whenToUse: >-
       Use to code-review a milestone's `feat/…` branch before its PR merges — the final quality
-      gate, run AFTER the milestone has been verified with the `verify-milestone` skill and its
-      findings fixed. Reviews `git diff main...HEAD` at high effort and reports findings for a
+      gate, run AFTER a Verify Milestone-mode subtask (slug `verify-milestone`) has returned
+      `verified` and its findings are fixed. Reviews `git diff main...HEAD` at high effort and reports findings for a
       Code-mode subtask to fix; it never fixes them itself.
     groups:
       - read
