@@ -12,7 +12,12 @@
         "127.0.0.1:6379",
         "localhost:6379",
         "127.0.0.1:9324",
-        "localhost:9324"
+        "localhost:9324",
+        "127.0.0.1:5672",
+        "localhost:5672"
+      ],
+      "run": [
+        "docker"
       ],
       "sys": [
         "hostname"

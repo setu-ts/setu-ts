@@ -20,7 +20,46 @@ function makeClient(ping?: () => Promise<unknown>): IRedisQueueClient {
   return client as unknown as IRedisQueueClient;
 }
 
+/**
+ * An ioredis-shaped client whose `ping` is a method reading `this.options`,
+ * exactly like the real ioredis. An unbound call throws
+ * `TypeError: Cannot read properties of undefined (reading 'options')` — the
+ * M70c defect that made `isHealthy()` report `false` forever against a
+ * healthy server.
+ */
+function makeIoredisShapedClient(): IRedisQueueClient {
+  const client = {
+    zadd: () => Promise.resolve(1),
+    zrangebyscore: () => Promise.resolve([]),
+    zrem: () => Promise.resolve(0),
+    hset: () => Promise.resolve(1),
+    hget: () => Promise.resolve(null),
+    hdel: () => Promise.resolve(0),
+    del: () => Promise.resolve(0),
+    quit: () => Promise.resolve(),
+    options: { lazyConnect: false },
+    ping() {
+      // Unbound (`this === undefined` in strict mode) → TypeError, as ioredis does.
+      void this.options;
+      return Promise.resolve('PONG');
+    },
+  };
+  return client as unknown as IRedisQueueClient;
+}
+
 describe('RedisQueue health (M70c)', () => {
+  it('M70c regression: an ioredis-shaped `ping` that reads `this` still reports reachable', async () => {
+    // ioredis `ping` reads `this.options`; an unbound call throws TypeError and
+    // `isHealthy()` would report `false` forever against a healthy server.
+    const queue = new RedisQueue({ client: makeIoredisShapedClient() });
+    await queue.connect();
+    const probe = queue.isHealthy;
+    expect(typeof probe).toBe('function');
+    if (typeof probe === 'function') {
+      expect(await probe()).toBe(true);
+    }
+  });
+
   it('is reachable when client.ping() resolves', async () => {
     const queue = new RedisQueue({ client: makeClient(() => Promise.resolve('PONG')) });
     await queue.connect();

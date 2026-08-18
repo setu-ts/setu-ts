@@ -506,6 +506,8 @@ describe('adaptAwsS3Module', () => {
             expect(config.region).toBe('us-east-1');
             expect(config.credentials).toBeUndefined();
             expect(config.endpoint).toBeUndefined();
+            // No custom endpoint → no path-style override (AWS default addressing).
+            expect(config.forcePathStyle).toBeUndefined();
           }
           send() {
             return Promise.resolve({});
@@ -603,6 +605,10 @@ describe('adaptAwsS3Module', () => {
         S3Client: class {
           constructor(config: Record<string, unknown>) {
             expect(config.endpoint).toEqual('https://custom.s3.example.com');
+            // M70c regression: a custom endpoint (MinIO, R2, B2, LocalStack) must
+            // force path-style addressing — virtual-hosted style against a custom
+            // host fails with 400 MalformedXML / 404 NoSuchBucket.
+            expect(config.forcePathStyle).toBe(true);
           }
           send() {
             return Promise.resolve({});

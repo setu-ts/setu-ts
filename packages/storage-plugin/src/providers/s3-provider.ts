@@ -83,7 +83,17 @@ function isS3NotFound(error: unknown): boolean {
 
 // ── Adapt / Load seams ────────────────────────────────────────────────────
 
-/** Builds an S3 client config without assigning `undefined` to optional fields. */
+/**
+ * Builds an S3 client config without assigning `undefined` to optional fields.
+ *
+ * When a custom `endpoint` is configured (R2, MinIO, B2, LocalStack, …) the config also sets
+ * `forcePathStyle: true`: S3-compatible gateways do not support virtual-hosted-style
+ * addressing (`<bucket>.<endpoint>`) against a custom host, so the SDK must address the
+ * bucket as a path segment (`<endpoint>/<bucket>/<key>`) instead.
+ *
+ * @param options - S3 connection options
+ * @returns The config record for the lazily-loaded `S3Client`
+ */
 function buildS3Config(options: S3ProviderOptions): Record<string, unknown> {
   const config: Record<string, unknown> = {};
   if (options.region !== undefined) config.region = options.region;
@@ -93,7 +103,12 @@ function buildS3Config(options: S3ProviderOptions): Record<string, unknown> {
       secretAccessKey: options.secretAccessKey,
     };
   }
-  if (options.endpoint !== undefined) config.endpoint = options.endpoint;
+  if (options.endpoint !== undefined) {
+    config.endpoint = options.endpoint;
+    // Custom endpoints (MinIO, R2, B2, LocalStack) reject virtual-hosted-style
+    // addressing; force `<endpoint>/<bucket>/<key>` path-style requests.
+    config.forcePathStyle = true;
+  }
   return config;
 }
 

@@ -140,7 +140,10 @@ export class RedisQueue implements QueueAdapter {
       const ping = client.ping;
       this.isHealthy = async (): Promise<boolean> => {
         try {
-          await ping();
+          // ioredis `ping` reads `this.options` — an unbound call throws
+          // `TypeError: Cannot read properties of undefined (reading 'options')`
+          // and `isHealthy()` would report `false` forever against a healthy server.
+          await ping.call(client);
           return true;
         } catch {
           return false;
