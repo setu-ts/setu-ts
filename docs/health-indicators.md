@@ -65,8 +65,9 @@ status tables).
 ## Out-of-scope defects recorded (not changed on this branch)
 
 Per plan §3.9, the `configuration-literal` sites **outside** the six in-scope packages that
-nonetheless hide a real backend behind a decorative status are recorded in
-[`smoke/DEFECTS.md`](../smoke/DEFECTS.md) and not fixed here:
+nonetheless hide a real backend behind a decorative status are recorded in the smoke register
+(`smoke/DEFECTS.md`, which is deliberately not tracked in git — hence a plain reference rather than
+a link) and not fixed here:
 
 | Defect ID | Package             | Issue                                                                                                             |
 | --------- | ------------------- | ----------------------------------------------------------------------------------------------------------------- |
