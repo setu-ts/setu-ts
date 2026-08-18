@@ -47,6 +47,15 @@ export class QueryBus implements IQueryBus {
   }
 
   /**
+   * Replaces the behavior list.
+   *
+   * INTERNAL: not part of the `IQueryBus` interface.
+   */
+  setBehaviors(behaviors: readonly IPipelineBehavior[]): void {
+    this.bus.setBehaviors(behaviors);
+  }
+
+  /**
    * The number of registered query handlers.
    *
    * INTERNAL: not part of the `IQueryBus` interface.

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IHealthIndicator } from '@setu-ts/common';
+import type { IHealthIndicator, RegistryFactory } from '@setu-ts/common';
 
 /**
  * Options for configuring the health plugin endpoints.
@@ -34,6 +34,24 @@ export interface EndpointsOptions {
 }
 
 /**
+ * One entry of {@linkcode HealthPluginOptions.indicators}: either a ready
+ * indicator instance or a factory that builds one from the service registry.
+ *
+ * The factory arm exists because a health indicator often exists to probe a
+ * capability — the database, the broker — that the `IHealthIndicator`
+ * contract's argument-less `check()` cannot reach. The factory is called at
+ * the `onInit` phase, after every plugin has registered, so the capability
+ * it resolves is present regardless of plugin priority.
+ *
+ * Named (rather than inlining the union) because the CLI's generated
+ * `src/health/index.ts` declares its array with this element type, and the
+ * renderer does not add the parentheses an inline union would need.
+ *
+ * @since 0.1.0
+ */
+export type HealthIndicatorEntry = IHealthIndicator | RegistryFactory<IHealthIndicator>;
+
+/**
  * Options for configuring the health plugin.
  *
  * @since 0.2.0
@@ -47,10 +65,16 @@ export interface HealthPluginOptions {
   readonly endpoints?: EndpointsOptions;
 
   /**
-   * Additional indicators to register at plugin registration time.
+   * Additional indicators to register.
    *
-   * These are registered before the `onInit` drain, so they are present
-   * even if the lifecycle is bypassed. Defaults to `[]`.
+   * An instance entry is registered during `register()`, unchanged from the
+   * pre-factory behaviour. A factory entry is resolved and registered at the
+   * start of the `onInit` phase — before the `CAPABILITIES.HEALTH_INDICATOR`
+   * contribution drain — so it can resolve a capability registered by a
+   * plugin that registers after this one. A factory that throws rejects
+   * `start()`, naming the option and the entry.
+   *
+   * Defaults to `[]`.
    */
-  readonly indicators?: readonly IHealthIndicator[];
+  readonly indicators?: readonly HealthIndicatorEntry[];
 }

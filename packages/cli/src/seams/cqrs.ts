@@ -8,6 +8,13 @@
  * as pure additions, shaped as `{ type, handler }` pairs because that is exactly
  * what `ICommandBus.register(type, handler)` takes.
  *
+ * Since M70d the barrel writes no `new`: each artifact module owns a
+ * zero-parameter factory (`create<Pascal>CommandHandler`), and the barrel
+ * references that factory by name — a bare reference, not a construction. The
+ * factory is the single construction site, and it lives in the developer-owned
+ * artifact module, so a dependency wired into it by taking `services` survives
+ * the next unrelated `setu generate`.
+ *
  * Both `command-handler` and `query-handler` write into `src/cqrs/`, so both specs
  * render the SAME barrel path from the SAME two name lists — which is why
  * `SeamArtifacts` is keyed by schematic rather than by directory.
@@ -29,11 +36,15 @@ import { deriveNames } from '../utils/names.ts';
 /**
  * Symbols the barrel imports from one command-handler module.
  *
+ * The factory rather than the class: the barrel references the factory by name
+ * and never constructs, so an artifact whose author replaced the class with
+ * whatever the factory returns stays admissible.
+ *
  * @param names - The artifact's derived naming forms
  * @returns The symbols to import
  */
 function commandImportSymbols(names: DerivedNames): readonly string[] {
-  return [`${names.screaming}_COMMAND`, `${names.pascal}CommandHandler`];
+  return [`${names.screaming}_COMMAND`, `create${names.pascal}CommandHandler`];
 }
 
 /**
@@ -43,7 +54,7 @@ function commandImportSymbols(names: DerivedNames): readonly string[] {
  * @returns The symbols to import
  */
 function queryImportSymbols(names: DerivedNames): readonly string[] {
-  return [`${names.screaming}_QUERY`, `${names.pascal}QueryHandler`];
+  return [`${names.screaming}_QUERY`, `create${names.pascal}QueryHandler`];
 }
 
 /** Barrel export naming every generated command handler with its command type. */
@@ -89,13 +100,18 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
   // The type constant travels with the handler because the bus routes on it and the
   // emitted module already declares it — deriving a type name from the class here
   // would invent a second source of truth for the same string.
+  //
+  // The handler is the artifact's factory BY NAME, not `new <Class>()`: the barrel
+  // writes no `new` anywhere, the factory is the single construction site, and it
+  // lives in the developer-owned artifact module where a dependency can be wired
+  // in by taking `services`.
   const commandEntries = commands.map((name) => {
     const n = deriveNames(name);
-    return `{ type: ${n.screaming}_COMMAND, handler: new ${n.pascal}CommandHandler() }`;
+    return `{ type: ${n.screaming}_COMMAND, handler: create${n.pascal}CommandHandler }`;
   });
   const queryEntries = queries.map((name) => {
     const n = deriveNames(name);
-    return `{ type: ${n.screaming}_QUERY, handler: new ${n.pascal}QueryHandler() }`;
+    return `{ type: ${n.screaming}_QUERY, handler: create${n.pascal}QueryHandler }`;
   });
 
   return assembleSeamBarrel(header, imports, [

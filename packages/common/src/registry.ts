@@ -29,10 +29,40 @@ export interface RegisterOptions {
  * A factory invoked lazily on the first lookup of a token registered with
  * {@linkcode IServiceRegistry.registerFactory}.
  *
+ * No-argument: the registry holds the factory and calls it with nothing when
+ * the token is first resolved. Do not confuse with {@linkcode RegistryFactory},
+ * which takes the {@linkcode IServiceRegistry} as its one argument — the two
+ * differ in arity and are not interchangeable.
+ *
  * @typeParam T - The service type produced
  * @since 0.1.0
  */
 export type ServiceFactory<T> = () => T;
+
+/**
+ * A factory that constructs a registry entry from the service registry.
+ *
+ * This is the "factory arm" of a registration option: an entry that is a
+ * function is called — once, at the `onInit` phase — with the application's
+ * {@linkcode IServiceRegistry}, and its return value is the instance the
+ * option would have accepted. It exists so a generated artifact (a command
+ * handler, event handler, or health indicator) can reach a capability — the
+ * event bus, the logger, the database — that its contract's single message
+ * parameter cannot carry.
+ *
+ * The argument is named `services` at every call site. It is deliberately the
+ * registry and nothing narrower: everything a generated artifact could want is
+ * reachable through it under a `CAPABILITIES` token, and a narrower context
+ * would ship with no in-repo reader.
+ *
+ * Do not confuse with {@linkcode ServiceFactory}: that is a no-argument lazy
+ * factory the registry invokes on first lookup, whereas this takes the
+ * registry as its one argument and is invoked by a plugin's `onInit` hook.
+ *
+ * @typeParam T - The instance type produced
+ * @since 0.1.0
+ */
+export type RegistryFactory<T> = (services: IServiceRegistry) => T;
 
 /**
  * Maps capability tokens to service instances.
@@ -120,4 +150,55 @@ export interface IServiceRegistry {
    * @returns `true` if a registration was removed
    */
   unregister(token: CapabilityToken): boolean;
+}
+
+/**
+ * Resolves one entry of a registration option that accepts either an instance
+ * or a {@linkcode RegistryFactory}.
+ *
+ * A non-function entry is returned unchanged — the instance arm is
+ * byte-identical to the pre-factory behaviour. A function entry is called
+ * once with `services`, and its return value is the result. A throw from the
+ * factory is wrapped in an `Error` whose message names `label` and whose
+ * `cause` is the original, so a factory that resolves a capability the
+ * application forgot to register fails `start()` naming the option and the
+ * entry rather than escaping with a bare registry message.
+ *
+ * The discrimination is `typeof entry === 'function'`: no instance of any
+ * registration contract is callable, and a class — the one shape that is a
+ * function and not a factory — is not assignable to `RegistryFactory<T>`, so
+ * passing one is a compile error rather than a runtime `TypeError`.
+ *
+ * @typeParam T - The instance type the option accepts
+ * @param entry - An instance or a factory producing one
+ * @param services - The registry handed to a factory
+ * @param label - A human-readable name of the option and entry, for error attribution
+ * @returns The resolved instance
+ * @throws {Error} If a factory entry throws; the message names `label` and the
+ * `cause` is the original error
+ * @since 0.1.0
+ */
+export function resolveRegistryEntry<T>(
+  entry: T | RegistryFactory<T>,
+  services: IServiceRegistry,
+  label: string,
+): T {
+  if (typeof entry === 'function') {
+    try {
+      return (entry as RegistryFactory<T>)(services);
+    } catch (cause) {
+      throw new Error(`Failed to resolve ${label}: ${causeMessage(cause)}`, { cause });
+    }
+  }
+  return entry;
+}
+
+/**
+ * Extracts a message from an unknown thrown value.
+ *
+ * @param cause - The value a factory threw
+ * @returns The message, or a stable fallback when the value is not an `Error`
+ */
+function causeMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

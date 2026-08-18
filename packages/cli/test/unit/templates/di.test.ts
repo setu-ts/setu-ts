@@ -12,13 +12,15 @@ import { CLASS_BASED_PLUGINS } from '../../../src/templates/class-based.ts';
 
 describe('DI_WIRING', () => {
   it('names the package and symbol the generated config imports', () => {
-    expect(DI_WIRING).toEqual({ pkg: 'di-plugin', symbol: 'DiPlugin' });
+    expect(DI_WIRING.pkg).toBe('di-plugin');
+    expect(DI_WIRING.symbol).toBe('DiPlugin');
   });
 
-  it('carries no args, because the DiPlugin options parameter is optional', () => {
-    // `DiPlugin(options?: DiPluginOptions)` — a bare `DiPlugin()` type-checks,
-    // so an args string would be text with nothing to say.
-    expect(DI_WIRING.args).toBeUndefined();
+  it('emits autoRegister: true, because the default disables the container', () => {
+    // `autoRegister` defaults to `false`, and both the external resolver and the
+    // registry fallback are gated on it — a bare `DiPlugin()` makes every
+    // `@Inject(CAPABILITIES.X)` throw at startup. E3.
+    expect(DI_WIRING.args).toBe('{ autoRegister: true }');
   });
 });
 
