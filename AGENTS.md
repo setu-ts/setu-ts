@@ -100,7 +100,8 @@ These are plain markdown and tool-agnostic; read and follow them directly.
 - **Verify a finished milestone:** `.roo/skills/verify-milestone/SKILL.md` — gates, ANSI-stripped
   per-file coverage, forbidden-construct grep, contract fidelity, a real behavioral exercise, and
   the tracking-table checks. It defers to `CLAUDE.md` as source of truth and is the step-by-step
-  procedure.
+  procedure. `.roo/rules-verify-milestone/01-verify-only.md` adds the policy that goes with it:
+  verify the committed tree, report every defect as a finding, and never fix what you are verifying.
 - **Review before merge:** `.roo/rules-code-review/01-review-only.md` for the policy. Scope is
   `git diff main...HEAD` on the milestone's `feat/…` branch. Correctness findings block the merge;
   reuse / simplification / efficiency cleanups are advisory.

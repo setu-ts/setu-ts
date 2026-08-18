@@ -4499,7 +4499,7 @@ importing another plugin.
 
 ---
 
-## Milestone 45b: Worker Pool Metrics — `TaskPoolStats` as a Prometheus Signal ⬜ PLANNED
+## Milestone 45b: Worker Pool Metrics — `TaskPoolStats` as a Prometheus Signal ✅ COMPLETE
 
 **Objective:** Expose the pool state `TaskPoolStats` already carries — `workers`, `busy`, `queued`,
 `completed`, `failed`, per task module — as metrics an operator can scrape and alert on. M45 built
@@ -4513,11 +4513,26 @@ the snapshot and wired it to the health indicator; nothing else reads it.
 
 ### Package: `@setu-ts/worker-pool-plugin` (no new package)
 
-`WorkerPoolPlugin` resolves `CAPABILITIES.METRICS` **optionally** and, when present, registers
-gauges for `workers`/`busy`/`queued` and counters for `completed`/`failed`, labelled by task module.
-Absent `metrics-plugin`, nothing changes — the M47 precedent, where `websocket-plugin` and
-`sse-plugin` optionally resolve `REALTIME_BACKPLANE`. No `common` widening, no new capability token,
-one package's `src` touched.
+`WorkerPoolPlugin` resolves `CAPABILITIES.METRICS` **optionally** and, when present, registers six
+instruments, all labelled by task module. Absent `metrics-plugin`, nothing changes — the M47
+precedent, where `websocket-plugin` and `sse-plugin` optionally resolve `REALTIME_BACKPLANE`. No
+`common` widening, no new capability token, one package's `src` touched.
+
+| Metric                              | Type    | Labels                 | Meaning                           |
+| ----------------------------------- | ------- | ---------------------- | --------------------------------- |
+| `worker_pool_workers`               | gauge   | `task_module`          | Worker threads alive              |
+| `worker_pool_busy_workers`          | gauge   | `task_module`          | Workers executing a task          |
+| `worker_pool_queued_tasks`          | gauge   | `task_module`          | Tasks waiting in the queue        |
+| `worker_pool_tasks_completed_total` | counter | `task_module`          | Tasks that completed successfully |
+| `worker_pool_tasks_failed_total`    | counter | `task_module`,`reason` | Admitted tasks that then failed   |
+| `worker_pool_tasks_rejected_total`  | counter | `task_module`,`reason` | Tasks refused before admission    |
+
+**The sixth instrument is a deliberate addition to this section's original five** (conflict C1 in
+the plan). `TaskPool.run` refuses a queue-full submission before a `Task` exists, so
+`stats().failed` can never see the clearest saturation signal the pool produces;
+`..._rejected_total` carries it (`queue_full`/`pool_closed`/`unavailable`) while `..._failed_total`
+summed over `reason` (`handler`/`timeout`/`crash`/`clone`/`shutdown`) stays exactly equal to the
+health payload's `failed`.
 
 ### The one open design decision: how the gauges are sampled
 
@@ -4557,30 +4572,45 @@ Telemetry and worker pool do not interact today — zero references either way �
 
 ### Prerequisite: the two open worker-pool defects
 
-The smoke programme has `worker-pool-plugin` at two open defects — a non-cloneable input killing the
+The smoke programme had `worker-pool-plugin` at two open defects — a non-cloneable input killing the
 host process when queued rather than dispatched (X8-2), and `taskTimeoutMs: 0` leaking a pool slot
-permanently (X8-7). Both are correctness; this is observability. **Fix those first** — and note that
-X8-5 names this plugin's health indicator as the counter-example the other five packages should
-copy, so this pool is already the best-observed component in the repo.
+permanently (X8-7). Both are correctness; this is observability. Note that X8-5 names this plugin's
+health indicator as the counter-example the other five packages should copy, so this pool is already
+the best-observed component in the repo.
+
+**Resolved as follows, at the maintainer's direction rather than as originally written.** **X8-2 is
+fixed on this milestone's branch** — it lives in `task-pool.ts`, the file this milestone modifies,
+and the fix is a `try`/`catch` around one `postMessage` with no contract change. **X8-7 stays with
+M70k**: its named fix needs a worker exit signal that `IWorkerHandle`
+(`packages/common/src/runtime.ts:149`) does not have, so it is an optional `common` widening plus
+per-runtime implementations — M70k's kind of work, not an observability milestone's. The limitation
+is documented in the package README and `PUBLIC_API.md` instead of being left to discovery. M70k's
+row is amended to keep X8-7 and drop X8-2.
 
 ### Implementation Files
 
-- ⬜ `src/plugin/worker-pool-plugin.ts` — optional `CAPABILITIES.METRICS` resolution
-- ⬜ `src/pool/task-pool.ts` — instrument updates on the chosen sampling model
-- ⬜ barrel exports in `src/index.ts` if any option type is added
+- [x] `src/plugin/worker-pool-plugin.ts` — optional `CAPABILITIES.METRICS` resolution
+- [x] `src/pool/task-pool.ts` — instrument updates on the chosen sampling model, plus the X8-2
+      dispatch guard
+- [x] `src/metrics/{metric-names,worker-pool-collector}.ts` — the six instruments (new, internal)
+- [x] `src/services/worker-pool-service.ts` — threads the collector into each pool
+- [x] no barrel change: the collector is internal, so `src/index.ts` is unchanged
 
 ### Test Files
 
-- ⬜ `test/unit/worker-pool-metrics.test.ts` — instruments registered and updated per task module
-- ⬜ `test/integration/metrics-absent.test.ts` — byte-identical behaviour with no `metrics-plugin`
-- ⬜ a real kernel app asserting the series appear in `GET /metrics` **before** anything samples
+- [x] `test/unit/worker-pool-metrics.test.ts` — instruments registered and updated per task module
+- [x] `test/integration/metrics-absent.test.ts` — byte-identical behaviour with no `metrics-plugin`
+- [x] `test/integration/worker-pool-metrics-app.test.ts` — a real kernel app asserting the series
+      appear in `GET /metrics` **before** anything samples
+- [x] `test/unit/task-pool-clone-failure.test.ts` — the X8-2 regression, both dispatch paths
+- [x] `test/unit/barrel-exports.test.ts` — the published surface is unchanged
 
 ### Doc Deliverables (to ship in this milestone's PR)
 
-- ⬜ **PUBLIC_API.md** — the metric names, labels and types in the Worker pool section.
-- ⬜ **ROADMAP.md** — this section and the Progress Tracking row `45b`.
-- ⬜ **CLAUDE.md** — Current status `45b` entry; Next milestone repointed.
-- ⬜ **README** — `packages/worker-pool-plugin/README.md` metrics table.
+- [x] **PUBLIC_API.md** — the metric names, labels and types in the Worker pool section.
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `45b`.
+- [x] **CLAUDE.md** — Current status `45b` entry; Next milestone repointed.
+- [x] **README** — `packages/worker-pool-plugin/README.md` metrics table.
 
 ---
 
@@ -6966,12 +6996,13 @@ Ordered by the sequence they should be worked, not by severity alone.
   (X12-5), which makes it a test double that lies in the M55/M53 sense. Plus X4-9, X12-4, X12-6, D7.
 - ⬜ **M70k — Storage, queue and worker operability** (`storage-plugin`, `queue-plugin`,
   `worker-pool-plugin`). Upload `maxSize` does not bound what is buffered, so a 1 KB limit
-  multipart-parses a 40 MB body first (X8-3); a non-cloneable task input **kills the host process**
-  when queued rather than dispatched (X8-2); `taskTimeoutMs: 0` leaks a pool slot permanently
-  (X8-7); a job exhausting its retries is invisible through every surface (X8-4); `IStorage.put`
-  takes no metadata, so every object is `application/octet-stream` (X8-6); and the `local` provider
-  cannot work in a scaffolded project at all (X8-9). Plus X8-8, X8-10, X8-11. **Blocks M45b**, whose
-  section names X8-2 and X8-7 as its prerequisites.
+  multipart-parses a 40 MB body first (X8-3); `taskTimeoutMs: 0` leaks a pool slot permanently (X8-7
+  — its fix needs a worker exit signal on `IWorkerHandle`, which `common` does not have; X8-2 was
+  fixed in M45b, whose branch already touched that file); a job exhausting its retries is invisible
+  through every surface (X8-4); `IStorage.put` takes no metadata, so every object is
+  `application/octet-stream` (X8-6); and the `local` provider cannot work in a scaffolded project at
+  all (X8-9). Plus X8-8, X8-10, X8-11. M45b shipped ahead of this row: it closed X8-2 itself and
+  documented X8-7's limitation, so this row no longer blocks it.
 - ⬜ **M70l — Deployment and operations** (`cli`, `scheduler-plugin`, `messaging-plugin`,
   `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the CLI-generated stack crash-loops
   two of three services (X10-1); a scheduled job runs once per replica and `distributedLock` does
@@ -7081,7 +7112,7 @@ branch during a version bump.
 | 43        | ✅     | sse-plugin                            |
 | 44        | ✅     | react-router-plugin                   |
 | 45        | ✅     | worker-pool-plugin                    |
-| 45b       | ⬜     | worker-pool-plugin (metrics)          |
+| 45b       | ✅     | worker-pool-plugin (metrics)          |
 | 46        | ✅     | websocket-plugin                      |
 | 47        | ✅     | alpha-3 limitations                   |
 | 48        | ✅     | session-plugin                        |
