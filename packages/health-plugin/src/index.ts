@@ -31,7 +31,7 @@
 
 // Plugin factory
 export { HealthPlugin } from './plugin/health-plugin.ts';
-export type { HealthPluginOptions } from './interfaces/index.ts';
+export type { HealthIndicatorEntry, HealthPluginOptions } from './interfaces/index.ts';
 
 // Service
 export { HealthService } from './services/health-service.ts';

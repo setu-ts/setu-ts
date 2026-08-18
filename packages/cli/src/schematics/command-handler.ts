@@ -48,6 +48,8 @@ export interface ${names.pascal}Command extends CqrsCommand<${names.pascal}Paylo
  * Registered through the \`${COMMAND_HANDLERS_EXPORT}\` barrel in \`src/cqrs/index.ts\`,
  * which \`setu.config.ts\` passes to \`CqrsPlugin\` — so this class needs no further
  * wiring, and \`commandBus.execute({ type: ${names.screaming}_COMMAND, … })\` reaches it.
+ * The barrel references the factory below by name, so the factory is the single
+ * construction site.
  */
 export class ${names.pascal}CommandHandler
   implements ICommandHandler<${names.pascal}Command, ${names.pascal}Result> {
@@ -61,6 +63,23 @@ export class ${names.pascal}CommandHandler
     // Replace with the real write.
     return Promise.resolve({ id: command.data.id });
   }
+}
+
+/**
+ * Builds the handler. The barrel references this factory by name, so it is the
+ * single construction site — and the place to wire a dependency in.
+ * \`CqrsPluginOptions.commandHandlers\` accepts a factory that builds a handler
+ * from the service registry, called at the \`onInit\` phase, after every plugin
+ * has registered, so to take a dependency change the one line to:
+ *
+ * \`\`\`ts
+ * export function create${names.pascal}CommandHandler(services: IServiceRegistry): ${names.pascal}CommandHandler {
+ *   // resolve a capability from services and build with it
+ * }
+ * \`\`\`
+ */
+export function create${names.pascal}CommandHandler(): ${names.pascal}CommandHandler {
+  return new ${names.pascal}CommandHandler();
 }
 `;
   return [

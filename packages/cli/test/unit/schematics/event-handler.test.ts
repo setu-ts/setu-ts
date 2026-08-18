@@ -19,13 +19,16 @@ describe('event-handler schematic', () => {
     assertSeamContract('event-handler', 'order-item', ['gizmo', 'billing']);
   });
 
-  it('carries the event type alongside the handler, as subscribe requires', () => {
+  it('references the factory by name, not a construction, as the barrel requires', () => {
+    // The barrel writes no `new` anywhere: the handler is the artifact's factory
+    // BY NAME, which is the single construction site.
     expect(barrelOf(files, 'event-handler').contents).toContain(
-      '{ type: ORDER_ITEM_EVENT, handler: new OrderItemEventHandler() }',
+      '{ type: ORDER_ITEM_EVENT, handler: createOrderItemEventHandler }',
     );
     expect(barrelOf(files, 'event-handler').contents).toContain(
       'readonly EventHandlerRegistration[]',
     );
+    expect(barrelOf(files, 'event-handler').contents).not.toContain('new ');
   });
 
   it('emits it at src/events/order-item.event-handler.ts', () => {
@@ -60,5 +63,14 @@ describe('event-handler schematic', () => {
   it('reads the committed IDomainEvent.data field', () => {
     expect(file.contents).toContain('event.data.id');
     expect(file.contents).not.toContain('event.payload');
+  });
+
+  it('emits a zero-parameter factory with a written-out return type', () => {
+    // The factory is the single construction site; a written-out return type is
+    // required because an inferred one is a JSR slow type.
+    expect(file.contents).toContain(
+      'export function createOrderItemEventHandler(): OrderItemEventHandler {',
+    );
+    expect(file.contents).toContain('return new OrderItemEventHandler();');
   });
 });

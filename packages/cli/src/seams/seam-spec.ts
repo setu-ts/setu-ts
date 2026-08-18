@@ -134,10 +134,37 @@ export function seamNames(
  * @param module - The module specifier, already relative
  * @returns The import statement
  */
+/**
+ * Sorts import specifiers the way `deno fmt` does: case-insensitively, with the
+ * uppercase spelling first on a tie.
+ *
+ * `deno fmt` reorders the specifiers inside an import statement, so a barrel that
+ * lists them in any other order fails the generated project's own
+ * `deno fmt --check`. Pre-M70d the CQRS and event barrels happened to list their two
+ * symbols already in the sorted order — the SCREAMING constant sorts before its
+ * PascalCase class, because `_` (0x5F) sorts before a letter — which is why the
+ * defect surfaced only when the camelCase factory symbol was added: `create…` sorts
+ * before the constant, so the emit order (constant first) no longer matched.
+ */
+function fmtSortSpecifiers(symbols: readonly string[]): string[] {
+  return [...symbols].sort((a, b) => {
+    const la = a.toLowerCase();
+    const lb = b.toLowerCase();
+    if (la !== lb) return la < lb ? -1 : 1;
+    for (let i = 0; i < a.length; i++) {
+      const ca = a.charCodeAt(i);
+      const cb = b.charCodeAt(i);
+      if (ca !== cb) return ca < cb ? -1 : 1;
+    }
+    return 0;
+  });
+}
+
 function renderImport(symbols: readonly string[], module: string): string {
-  const inline = `import { ${symbols.join(', ')} } from '${module}';`;
+  const sorted = fmtSortSpecifiers(symbols);
+  const inline = `import { ${sorted.join(', ')} } from '${module}';`;
   if (inline.length <= GENERATED_LINE_WIDTH) return inline;
-  return `import {\n  ${symbols.join(',\n  ')},\n} from '${module}';`;
+  return `import {\n  ${sorted.join(',\n  ')},\n} from '${module}';`;
 }
 
 /**

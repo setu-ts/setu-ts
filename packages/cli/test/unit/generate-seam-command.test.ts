@@ -68,22 +68,25 @@ describe('setu generate, with seams', () => {
       '/app/src/health/external-api.indicator.ts',
       '/app/src/health/index.ts',
     ]);
-    expect(h.fs.read('/app/src/health/index.ts')).toContain('new ExternalApiHealthIndicator()');
+    // The barrel references the factory by name; it writes no `new`.
+    expect(h.fs.read('/app/src/health/index.ts')).toContain('createExternalApiHealthIndicator');
   });
 
   it('lists an artifact the scan found alongside the new one', async () => {
     // The whole point of the scan: the barrel is regenerated from the directory, so an
-    // artifact generated in an earlier invocation must survive the next one.
+    // artifact generated in an earlier invocation must survive the next one. The seed is
+    // new-shape (class + factory), which is what the scanner now requires.
     const h = harness({
       ...WIRED,
-      '/app/src/health/billing.indicator.ts': 'export class BillingHealthIndicator {}',
+      '/app/src/health/billing.indicator.ts': 'export class BillingHealthIndicator {}\n' +
+        'export function createBillingHealthIndicator() { return new BillingHealthIndicator(); }',
     });
 
     expect(await h.run(['health-indicator', 'external-api'])).toBe(0);
 
     const barrel = h.fs.read('/app/src/health/index.ts');
-    expect(barrel).toContain('BillingHealthIndicator');
-    expect(barrel).toContain('ExternalApiHealthIndicator');
+    expect(barrel).toContain('createBillingHealthIndicator');
+    expect(barrel).toContain('createExternalApiHealthIndicator');
   });
 
   it('rewrites the barrel rather than refusing on it', async () => {
@@ -242,6 +245,48 @@ describe('setu generate, with seams', () => {
     });
   });
 
+  // The M70d upgrade path. The barrel now references each handler's factory by
+  // name, so a pre-M70d artifact that exports only the class is rejected with the
+  // factory named — the regenerated barrel omits it, and the developer is told,
+  // not silently unwired.
+  describe('an artifact predating the factory arm (M70d)', () => {
+    const PRE_M70D = {
+      ...WIRED,
+      '/app/src/cqrs/legacy.command-handler.ts': 'export const LEGACY_COMMAND = "Legacy";\n' +
+        'export class LegacyCommandHandler { handle() { return Promise.resolve({ id: "x" }); } }',
+    };
+
+    it('leaves the old-shape artifact out of the barrel', async () => {
+      const h = harness(PRE_M70D);
+
+      expect(await h.run(['command-handler', 'current'])).toBe(0);
+
+      const barrel = h.fs.read('/app/src/cqrs/index.ts');
+      expect(barrel).toContain('createCurrentCommandHandler');
+      // The factory the old file does not export must not appear at all.
+      expect(barrel).not.toContain('createLegacyCommandHandler');
+      expect(barrel).not.toContain('legacy.command-handler.ts');
+    });
+
+    it('says so, naming the factory, rather than dropping it silently', async () => {
+      const h = harness(PRE_M70D);
+
+      expect(await h.run(['command-handler', 'current'])).toBe(0);
+
+      const reported = h.err.lines.join('\n');
+      expect(reported).toContain('src/cqrs/legacy.command-handler.ts');
+      expect(reported).toContain('createLegacyCommandHandler');
+      expect(reported).toContain('Rename its export');
+      expect(reported).toContain('delete the file');
+    });
+
+    it('still exits 0, because the generate itself succeeded', async () => {
+      const h = harness(PRE_M70D);
+      expect(await h.run(['command-handler', 'current'])).toBe(0);
+      expect(h.fs.writes).toContain('/app/src/cqrs/current.command-handler.ts');
+    });
+  });
+
   it('survives an unreadable family directory', async () => {
     // `readdir` throws for every family in a fresh project; a generate must still work.
     const h = harness();
@@ -252,9 +297,11 @@ describe('setu generate, with seams', () => {
   it('roots the scan at --dir, so scan and write cannot disagree', async () => {
     const fs = createFakeFs({
       '/other/deno.json': manifest('decorator-plugin', 'health-plugin'),
-      '/other/src/health/billing.indicator.ts': 'export class BillingHealthIndicator {}',
+      '/other/src/health/billing.indicator.ts': 'export class BillingHealthIndicator {}\n' +
+        'export function createBillingHealthIndicator() { return new BillingHealthIndicator(); }',
       // Same-named artifact under the CWD, which must be invisible.
-      '/app/src/health/ignored.indicator.ts': 'export class IgnoredHealthIndicator {}',
+      '/app/src/health/ignored.indicator.ts': 'export class IgnoredHealthIndicator {}\n' +
+        'export function createIgnoredHealthIndicator() { return new IgnoredHealthIndicator(); }',
     });
     const err = createRecorder();
     const code = await runGenerateCommand(
@@ -264,8 +311,8 @@ describe('setu generate, with seams', () => {
 
     expect(code).toBe(0);
     const barrel = fs.read('/other/src/health/index.ts');
-    expect(barrel).toContain('BillingHealthIndicator');
-    expect(barrel).not.toContain('IgnoredHealthIndicator');
+    expect(barrel).toContain('createBillingHealthIndicator');
+    expect(barrel).not.toContain('createIgnoredHealthIndicator');
   });
 
   describe('the collision refusal', () => {

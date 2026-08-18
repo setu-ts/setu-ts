@@ -370,6 +370,116 @@ export function auditLogMiddleware(): MiddlewareFunction {
     });
   });
 
+  // The M70d functional bar (X2-2). The barrel is `managed`, so a dependency wired
+  // into it is erased by the next unrelated `setu generate`. The factory lives in the
+  // developer-owned artifact module, so a dependency wired into it SURVIVES the next
+  // unrelated generate and still arrives at boot. This is the property the milestone
+  // exists to prove: edit the factory to take `services`, run an UNRELATED generate,
+  // boot, and observe the dependency still arriving.
+  describe('a factory that takes services survives an unrelated generate (X2-2)', () => {
+    // The developer's edit, exactly as the generated factory's JSDoc documents it:
+    // the factory takes \`services\`, resolves the event bus, and builds the class
+    // with it — the dependency the argument-less \`handle()\` cannot reach.
+    const EDITED_FACTORY =
+      `import type { CqrsCommand, ICommandHandler, IEventBus, IServiceRegistry } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+
+/** Type name the command bus routes on. */
+export const WIDGET_COMMAND = 'Widget';
+
+/** Payload of the Widget command. */
+export interface WidgetPayload {
+  readonly id: string;
+}
+
+/** Result the Widget handler returns. */
+export interface WidgetResult {
+  readonly id: string;
+}
+
+/** The Widget command. */
+export interface WidgetCommand extends CqrsCommand<WidgetPayload> {
+  readonly type: typeof WIDGET_COMMAND;
+}
+
+export class WidgetCommandHandler implements ICommandHandler<WidgetCommand, WidgetResult> {
+  constructor(private readonly events: IEventBus) {}
+  handle(command: WidgetCommand): Promise<WidgetResult> {
+    void this.events.publish({
+      type: WIDGET_COMMAND,
+      id: 'evt-1',
+      occurredOn: new Date(0),
+      data: { id: command.data.id },
+    });
+    return Promise.resolve({ id: command.data.id });
+  }
+}
+
+/**
+ * Builds the handler. The developer wired the event bus into it: the factory
+ * takes \`services\`, resolves the bus, and builds the class with it.
+ */
+export function createWidgetCommandHandler(
+  services: IServiceRegistry,
+): WidgetCommandHandler {
+  const events = services.get<IEventBus>(CAPABILITIES.EVENTS);
+  return new WidgetCommandHandler(events);
+}
+`;
+
+    const DEPENDENCY_PROBE = `import { CAPABILITIES } from '@setu-ts/common';
+import type { IEventBus, ICqrsFacade } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+
+const app = await createApp();
+await app.start();
+const services = app.services;
+const bus = services.get<IEventBus>(CAPABILITIES.EVENTS);
+const cqrs = services.get<ICqrsFacade>(CAPABILITIES.CQRS);
+const { WIDGET_COMMAND } = await import('./src/cqrs/widget.command-handler.ts');
+
+// An INDEPENDENT subscriber, registered by the probe, not the handler.
+const seen: string[] = [];
+bus.subscribe(WIDGET_COMMAND, (event) => void seen.push(event.data.id));
+
+const result = await cqrs.commandBus.execute({ type: WIDGET_COMMAND, data: { id: 'c-1' } });
+console.log('__PROBE_RESULT__' + JSON.stringify({
+  commandResult: result,
+  publishedId: seen[0] ?? null,
+}));
+await app.stop();
+`;
+
+    it('the edited factory survives an unrelated generate and its dependency arrives', async () => {
+      expect(await run(['new', 'shop', '--template', 'microservice'])).toBe(0);
+      const project = `${root}/shop`;
+
+      // Generate the command handler, then the developer edits its factory.
+      expect(await run(['g', 'command-handler', 'widget', '--dir', project])).toBe(0);
+      await Deno.writeTextFile(
+        `${project}/src/cqrs/widget.command-handler.ts`,
+        EDITED_FACTORY,
+      );
+
+      // The regression X2-2 records: an UNRELATED generate. The barrel is managed and
+      // regenerated, but the artifact — and the developer's factory edit — must survive.
+      expect(await run(['g', 'query-handler', 'gadget', '--dir', project])).toBe(0);
+
+      // The developer's factory edit survived the unrelated generate.
+      const artifact = await Deno.readTextFile(`${project}/src/cqrs/widget.command-handler.ts`);
+      expect(artifact).toContain('createWidgetCommandHandler');
+      expect(artifact).toContain('CAPABILITIES.EVENTS');
+
+      await useWorkspacePackages(project);
+      const result = await bootAndProbe(project, DEPENDENCY_PROBE);
+
+      // The command executed, and the event the factory-built handler published was
+      // observed by an independent subscriber: the dependency arrived at boot.
+      expect(result['commandResult']).toEqual({ id: 'c-1' });
+      expect(result['publishedId']).toBe('c-1');
+    });
+  });
+
   // The wiring is what makes these collisions real: before the seams, two artifacts
   // sharing a name were two inert files. Both refusals below were derived from observed
   // failures — a 500 on every module request, and a silently unreachable route.

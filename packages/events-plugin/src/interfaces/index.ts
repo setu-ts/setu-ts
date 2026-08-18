@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IDomainEvent } from '@setu-ts/common';
+import type { IDomainEvent, RegistryFactory } from '@setu-ts/common';
 import type { IEventHandler } from '../handlers/event-handler.ts';
 
 /**
@@ -23,8 +23,16 @@ import type { IEventHandler } from '../handlers/event-handler.ts';
 export interface EventHandlerRegistration {
   /** Event type name, matching `event.type`. */
   readonly type: string;
-  /** The handler to subscribe for that type. */
-  readonly handler: IEventHandler<unknown>;
+  /**
+   * The handler to subscribe for that type, or a factory that builds one
+   * from the service registry.
+   *
+   * An instance subscribes during `register()` through `subscribeHandler`.
+   * A factory is called at the `onInit` phase — after every plugin has
+   * registered — and its result subscribes through the SAME
+   * `subscribeHandler`, so the option and the manual route cannot drift.
+   */
+  readonly handler: IEventHandler<unknown> | RegistryFactory<IEventHandler<unknown>>;
 }
 
 /**

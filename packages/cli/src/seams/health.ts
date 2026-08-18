@@ -2,8 +2,10 @@
  * The health-indicator seam.
  *
  * The one family whose registration site the ROADMAP described correctly:
- * `HealthPluginOptions.indicators` already exists, already takes INSTANCES of
- * `IHealthIndicator`, and the plugin registers each at `register()` time.
+ * `HealthPluginOptions.indicators` already existed and took instances of
+ * `IHealthIndicator` — until M70d widened it to `HealthIndicatorEntry`, so an
+ * entry may also be a factory that builds an indicator from the service
+ * registry.
  *
  * Two shapes since M70h (A2). `health-plugin` ships with the `rest` template, so
  * a project the CLI itself decided is FUNCTIONAL was getting the one class in an
@@ -13,11 +15,13 @@
  * constructed it with `new`, and M60's scanner requires that exact export, so
  * the artifact was dropped from the barrel and **the check silently stopped
  * running** — no type error, no lint error, no boot failure, `/health` still
- * reporting healthy. The remediation text even looped, because regenerating
- * restored the class the developer was replacing.
+ * reporting healthy.
  *
- * The functional barrel spreads VALUES, which is what this file's own comment
- * already said the option wanted: "Instances, not constructors".
+ * Since M70d the barrel writes no `new` anywhere: each artifact module owns a
+ * zero-parameter factory, and the barrel references that factory by name. The
+ * factory is the single construction site, and — because the artifact file is
+ * developer-owned and never rewritten — it is where a developer wires a
+ * dependency in by taking `services`.
  *
  * @module
  */
@@ -47,6 +51,20 @@ export function indicatorClassSymbol(names: DerivedNames): string {
 }
 
 /**
+ * The factory a decorated project's indicator module exports.
+ *
+ * Owned here rather than in the schematic, for the reason
+ * {@linkcode SeamSpec.importSymbols} gives: the renderer that names a symbol and
+ * the scanner that admits a file by it must read ONE definition.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The exported factory's name
+ */
+export function indicatorClassFactorySymbol(names: DerivedNames): string {
+  return `create${names.pascal}HealthIndicator`;
+}
+
+/**
  * The value a functional project's indicator module exports.
  *
  * Owned here rather than in the schematic, for the reason
@@ -61,7 +79,20 @@ export function indicatorValueSymbol(names: DerivedNames): string {
 }
 
 /**
+ * The factory a functional project's indicator module exports.
+ *
+ * @param names - The artifact's derived naming forms
+ * @returns The exported factory's name
+ */
+export function indicatorValueFactorySymbol(names: DerivedNames): string {
+  return `create${names.pascal}Indicator`;
+}
+
+/**
  * Renders `src/health/index.ts` for a generator mode.
+ *
+ * The barrel writes no `new`: it references each artifact's factory by name, so
+ * the artifact module is the single construction site.
  *
  * @param classBased - Whether the project's indicators are classes
  * @returns A barrel renderer for that mode
@@ -72,24 +103,20 @@ function renderHealthBarrel(classBased: boolean): (artifacts: SeamArtifacts) => 
     const header = seamHeader('setu generate health-indicator', [
       `HealthPlugin({ indicators: [...${HEALTH_INDICATORS_EXPORT}] })`,
     ]);
-    const symbol = classBased ? indicatorClassSymbol : indicatorValueSymbol;
+    const factory = classBased ? indicatorClassFactorySymbol : indicatorValueFactorySymbol;
     const imports = [
-      `import type { IHealthIndicator } from '@setu-ts/common';`,
-      renderSeamImports(names, (n) => [symbol(n)], (kebab) => `./${kebab}.indicator.ts`),
+      `import type { HealthIndicatorEntry } from '@setu-ts/health-plugin';`,
+      renderSeamImports(names, (n) => [factory(n)], (kebab) => `./${kebab}.indicator.ts`),
     ].filter((line) => line !== '').join('\n\n');
 
-    // Instances, not constructors: `HealthPluginOptions.indicators` is
-    // `readonly IHealthIndicator[]` and the plugin reads `.name` and binds
-    // `.check` off each entry, so a class would fail the option's own type. The
-    // functional shape IS the instance, so it needs no `new`.
-    const entries = names.map((name) => {
-      const derived = deriveNames(name);
-      return classBased ? `new ${indicatorClassSymbol(derived)}()` : indicatorValueSymbol(derived);
-    });
+    // Bare factory references, not `new`: the factory is the single construction
+    // site, and it lives in the developer-owned artifact module, so a dependency
+    // wired into it survives the next `setu generate`.
+    const entries = names.map((name) => factory(deriveNames(name)));
 
     return assembleSeamBarrel(header, imports, [
       `/** Every generated health indicator, for \`HealthPlugin({ indicators })\`. */\n` +
-      renderExportedArray(HEALTH_INDICATORS_EXPORT, 'IHealthIndicator', entries),
+      renderExportedArray(HEALTH_INDICATORS_EXPORT, 'HealthIndicatorEntry', entries),
     ]);
   };
 }
@@ -99,7 +126,7 @@ export const HEALTH_SEAM: SeamSpec = {
   schematic: 'health-indicator',
   dir: 'src/health',
   suffix: '.indicator.ts',
-  importSymbols: (names) => [indicatorClassSymbol(names)],
+  importSymbols: (names) => [indicatorClassFactorySymbol(names)],
   barrel: 'src/health/index.ts',
   exports: [HEALTH_INDICATORS_EXPORT],
   requiresPlugin: 'health-plugin',
@@ -111,7 +138,7 @@ export const FUNCTIONAL_HEALTH_SEAM: SeamSpec = {
   schematic: 'health-indicator',
   dir: 'src/health',
   suffix: '.indicator.ts',
-  importSymbols: (names) => [indicatorValueSymbol(names)],
+  importSymbols: (names) => [indicatorValueFactorySymbol(names)],
   barrel: 'src/health/index.ts',
   exports: [HEALTH_INDICATORS_EXPORT],
   requiresPlugin: 'health-plugin',

@@ -3,8 +3,16 @@
  *
  * @module
  */
-import type { ICqrsFacade, IPlugin, IPluginContext } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type {
+  ICommandHandler,
+  ICqrsFacade,
+  IPipelineBehavior,
+  IPlugin,
+  IPluginContext,
+  IQueryHandler,
+  RegistryFactory,
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, resolveRegistryEntry } from '@setu-ts/common';
 import type { CqrsPluginOptions } from '../interfaces/index.ts';
 import { CommandBus } from '../bus/command-bus.ts';
 import { QueryBus } from '../bus/query-bus.ts';
@@ -48,6 +56,30 @@ const DEFAULT_OPTIONS: Required<CqrsPluginOptions> = {
 export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
+  // Split the two arms once, at plugin construction. Instances keep their
+  // `register()` timing (byte-identical to the pre-factory behaviour);
+  // factories are resolved at `onInit`, the first phase at which the registry
+  // holds every capability — this plugin shares the NORMAL priority band with
+  // the capabilities a factory may consume, where order is registration order.
+  const commandInstances = opts.commandHandlers.filter(
+    (entry): entry is { readonly type: string; readonly handler: ICommandHandler } =>
+      typeof entry.handler !== 'function',
+  );
+  const commandFactories = opts.commandHandlers.filter(
+    (
+      entry,
+    ): entry is { readonly type: string; readonly handler: RegistryFactory<ICommandHandler> } =>
+      typeof entry.handler === 'function',
+  );
+  const queryInstances = opts.queryHandlers.filter(
+    (entry): entry is { readonly type: string; readonly handler: IQueryHandler } =>
+      typeof entry.handler !== 'function',
+  );
+  const queryFactories = opts.queryHandlers.filter(
+    (entry): entry is { readonly type: string; readonly handler: RegistryFactory<IQueryHandler> } =>
+      typeof entry.handler === 'function',
+  );
+
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
@@ -56,17 +88,23 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
 
     // deno-lint-ignore require-await
     async register(ctx: IPluginContext): Promise<void> {
-      // Build buses with the configured behaviors.
-      const commandBus = new CommandBus(opts.behaviors);
-      const queryBus = new QueryBus(opts.behaviors);
+      // Build buses with the configured behaviors. Instance behaviors are
+      // passed to the constructors as today; factory behaviors are resolved at
+      // onInit and the whole list replaced through setBehaviors.
+      const instanceBehaviors = opts.behaviors.filter(
+        (entry): entry is IPipelineBehavior => typeof entry !== 'function',
+      );
+      const commandBus = new CommandBus(instanceBehaviors);
+      const queryBus = new QueryBus(instanceBehaviors);
 
-      // Register the declaratively-supplied handlers. Done here rather than left to
-      // the application because the buses do not exist until this point and
-      // `IApplication` exposes no lifecycle hook in which app code could reach them.
-      for (const entry of opts.commandHandlers) {
+      // Register the declaratively-supplied handler INSTANCES. Done here rather
+      // than left to the application because the buses do not exist until this
+      // point and `IApplication` exposes no lifecycle hook in which app code
+      // could reach them.
+      for (const entry of commandInstances) {
         commandBus.register(entry.type, entry.handler);
       }
-      for (const entry of opts.queryHandlers) {
+      for (const entry of queryInstances) {
         queryBus.register(entry.type, entry.handler);
       }
 
@@ -90,6 +128,40 @@ export function CqrsPlugin(options?: CqrsPluginOptions): IPlugin {
           queries: queryBus.handlerCount,
         },
       }));
+
+      // At onInit: resolve the handler factories and the behavior list.
+      // Handlers register under their entry's type; the behavior list is
+      // resolved WHOLE, in declared order, and installed on both buses so a
+      // mixed list runs in declared order rather than instances-then-factories.
+      // A factory that throws rejects start(), naming the option and entry.
+      ctx.lifecycle.onInit(() => {
+        for (const [index, entry] of commandFactories.entries()) {
+          const handler = resolveRegistryEntry(
+            entry.handler,
+            ctx.services,
+            `CqrsPlugin({ commandHandlers })[${index}]`,
+          );
+          commandBus.register(entry.type, handler);
+        }
+        for (const [index, entry] of queryFactories.entries()) {
+          const handler = resolveRegistryEntry(
+            entry.handler,
+            ctx.services,
+            `CqrsPlugin({ queryHandlers })[${index}]`,
+          );
+          queryBus.register(entry.type, handler);
+        }
+
+        const behaviors = opts.behaviors.map((entry, index) =>
+          resolveRegistryEntry(
+            entry,
+            ctx.services,
+            `CqrsPlugin({ behaviors })[${index}]`,
+          )
+        );
+        commandBus.setBehaviors(behaviors);
+        queryBus.setBehaviors(behaviors);
+      });
 
       // Register shutdown hook.
       // deno-lint-ignore require-await

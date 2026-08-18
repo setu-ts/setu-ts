@@ -446,9 +446,10 @@ describe('a three-service workspace — end to end', () => {
     expect(await run(['g', 'service', 'pricing', '--dir', project])).toBe(0);
     expect(await run(['g', 'controller', 'invoice', '--dir', project])).toBe(0);
 
-    // The container is registered, and the decorated artifacts are wired.
+    // The container is registered (since M70d with `autoRegister: true`, E3),
+    // and the decorated artifacts are wired.
     const config = await Deno.readTextFile(`${project}/setu.config.ts`);
-    expect(config).toContain('DiPlugin()');
+    expect(config).toContain('DiPlugin({ autoRegister: true })');
     expect(config).toContain('DecoratorPlugin(');
 
     await useWorkspacePackages(project);

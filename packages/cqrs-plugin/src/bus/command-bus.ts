@@ -47,6 +47,15 @@ export class CommandBus implements ICommandBus {
   }
 
   /**
+   * Replaces the behavior list.
+   *
+   * INTERNAL: not part of the `ICommandBus` interface.
+   */
+  setBehaviors(behaviors: readonly IPipelineBehavior[]): void {
+    this.bus.setBehaviors(behaviors);
+  }
+
+  /**
    * The number of registered command handlers.
    *
    * INTERNAL: not part of the `ICommandBus` interface.

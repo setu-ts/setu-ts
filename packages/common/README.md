@@ -100,6 +100,7 @@ package fits the plugin architecture.
 | `none`                       | function  |
 | `ok`                         | function  |
 | `parseCookie`                | function  |
+| `resolveRegistryEntry`       | function  |
 | `securityMetadataOf`         | function  |
 | `serializeCookie`            | function  |
 | `setUpgradeIntent`           | function  |
@@ -315,6 +316,7 @@ package fits the plugin architecture.
 | `Provider`                   | type      |
 | `RealtimeFrameHandler`       | type      |
 | `RealtimeFrameKind`          | type      |
+| `RegistryFactory`            | type      |
 | `RequestHandler`             | type      |
 | `ResilientCall`              | type      |
 | `ResponseSnapshot`           | type      |

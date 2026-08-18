@@ -39,7 +39,8 @@ export interface ${names.pascal}Payload {
  * which \`setu.config.ts\` passes to \`EventsPlugin\` — so this class needs no further
  * wiring, and any \`bus.publish\` of \`${names.screaming}_EVENT\` reaches it. The plugin
  * subscribes each entry through the exported \`subscribeHandler\`, which is also how to
- * subscribe one by hand.
+ * subscribe one by hand. The barrel references the factory below by name, so the
+ * factory is the single construction site.
  */
 export class ${names.pascal}EventHandler implements IEventHandler<${names.pascal}Payload> {
   /**
@@ -51,6 +52,23 @@ export class ${names.pascal}EventHandler implements IEventHandler<${names.pascal
     // Replace with the real reaction.
     await Promise.resolve(event.data.id);
   }
+}
+
+/**
+ * Builds the handler. The barrel references this factory by name, so it is the
+ * single construction site — and the place to wire a dependency in.
+ * \`EventsPluginOptions.handlers\` accepts a factory that builds a handler from
+ * the service registry, called at the \`onInit\` phase, after every plugin has
+ * registered, so to take a dependency change the one line to:
+ *
+ * \`\`\`ts
+ * export function create${names.pascal}EventHandler(services: IServiceRegistry): ${names.pascal}EventHandler {
+ *   // resolve a capability from services and build with it
+ * }
+ * \`\`\`
+ */
+export function create${names.pascal}EventHandler(): ${names.pascal}EventHandler {
+  return new ${names.pascal}EventHandler();
 }
 `;
   return [

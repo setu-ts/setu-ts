@@ -10,14 +10,16 @@ import type {
   HandlerResult,
   HealthIndicatorFn,
   HealthReport,
+  IHealthIndicator,
   IHealthService,
   IPlugin,
   IPluginContext,
   IRequestContext,
+  RegistryFactory,
   RouteHandler,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
-import type { HealthPluginOptions } from '../interfaces/index.ts';
+import { CAPABILITIES, resolveRegistryEntry } from '@setu-ts/common';
+import type { HealthIndicatorEntry, HealthPluginOptions } from '../interfaces/index.ts';
 import { HealthService } from '../services/health-service.ts';
 import { createSelfIndicator } from '../indicators/self-indicator.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -53,7 +55,19 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
     live: '/live',
     ready: '/ready',
   };
-  const indicators = options?.indicators ?? [];
+  const indicators: readonly HealthIndicatorEntry[] = options?.indicators ?? [];
+
+  // Split the two arms once, at plugin construction, so `register` and the
+  // `onInit` hook each read a single list. Instances keep their pre-factory
+  // timing; factories are resolved at `onInit`, the first phase at which the
+  // registry holds every capability — this plugin registers at priority 100,
+  // before the database and every other ordinary capability plugin.
+  const instances = indicators.filter((entry): entry is IHealthIndicator =>
+    typeof entry !== 'function'
+  );
+  const factories = indicators.filter((entry): entry is RegistryFactory<IHealthIndicator> =>
+    typeof entry === 'function'
+  );
 
   return {
     name: 'health-plugin',
@@ -74,16 +88,30 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       const selfIndicator = createSelfIndicator(runtime);
       service.registerIndicator(selfIndicator.name, selfIndicator.check.bind(selfIndicator));
 
-      // Register any app-supplied indicators
-      for (const indicator of indicators) {
+      // Register any app-supplied indicator INSTANCES, exactly as before the
+      // factory arm existed.
+      for (const indicator of instances) {
         service.registerIndicator(indicator.name, indicator.check.bind(indicator));
       }
 
       // Register the health endpoints
       registerHealthEndpoints(ctx, service, endpoints);
 
-      // Drain HEALTH_INDICATOR contributions at onInit
+      // At onInit: resolve the factory entries FIRST, then drain
+      // HEALTH_INDICATOR contributions. Factories precede contributions so
+      // the existing invariant — application-supplied indicators before plugin
+      // contributions — decides which side of a duplicate name is reported.
+      // A factory that throws rejects start(), naming the option and entry.
       ctx.lifecycle.onInit(() => {
+        factories.forEach((factory, index) => {
+          const indicator = resolveRegistryEntry(
+            factory,
+            ctx.services,
+            `HealthPlugin({ indicators })[${index}]`,
+          );
+          service.registerIndicator(indicator.name, indicator.check.bind(indicator));
+        });
+
         const contributions = ctx.services.getAll<{
           name: string;
           check: HealthIndicatorFn;

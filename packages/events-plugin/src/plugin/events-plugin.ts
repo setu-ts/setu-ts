@@ -3,11 +3,12 @@
  *
  * @module
  */
-import type { IEventBus, ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IEventBus, ILogger, IPlugin, IPluginContext, RegistryFactory } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, resolveRegistryEntry } from '@setu-ts/common';
 import type { EventsPluginOptions } from '../interfaces/index.ts';
 import { InMemoryEventBus } from '../bus/in-memory-event-bus.ts';
 import { subscribeHandler } from '../handlers/event-handler.ts';
+import type { IEventHandler } from '../handlers/event-handler.ts';
 import type { EventDispatchOptions } from '../interfaces/index.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -40,6 +41,23 @@ const DEFAULT_OPTIONS: EventsPluginOptions = {
  */
 export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
   const opts = { ...DEFAULT_OPTIONS, ...options };
+  const handlers = opts.handlers ?? [];
+
+  // Split the two arms once, at plugin construction. Instances keep their
+  // `register()` timing (byte-identical to the pre-factory behaviour);
+  // factories are resolved at `onInit`, the first phase at which the registry
+  // holds every capability — this plugin shares the NORMAL priority band with
+  // the capabilities a factory may consume, where order is registration order.
+  const instances = handlers.filter(
+    (entry): entry is { readonly type: string; readonly handler: IEventHandler<unknown> } =>
+      typeof entry.handler !== 'function',
+  );
+  const factories = handlers.filter(
+    (entry): entry is {
+      readonly type: string;
+      readonly handler: RegistryFactory<IEventHandler<unknown>>;
+    } => typeof entry.handler === 'function',
+  );
 
   return {
     name: PLUGIN_NAME,
@@ -80,13 +98,29 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // Register the bus under CAPABILITIES.EVENTS.
       ctx.services.register<IEventBus>(CAPABILITIES.EVENTS, bus);
 
-      // Subscribe the declaratively-supplied handlers, through the SAME
-      // `subscribeHandler` a caller would use by hand — so the option and the manual
-      // route cannot diverge. The `Unsubscribe` is dropped deliberately: `onClose`
-      // clears the bus and no caller could hold the handle.
-      for (const entry of opts.handlers ?? []) {
+      // Subscribe the declaratively-supplied handler INSTANCES, through the
+      // SAME `subscribeHandler` a caller would use by hand — so the option and
+      // the manual route cannot diverge. The `Unsubscribe` is dropped
+      // deliberately: `onClose` clears the bus and no caller could hold the
+      // handle.
+      for (const entry of instances) {
         subscribeHandler(bus, entry.type, entry.handler);
       }
+
+      // At onInit: resolve the handler factories and subscribe each result
+      // through the SAME `subscribeHandler` the instance arm uses, so the two
+      // arms cannot drift. A factory that throws rejects start(), naming the
+      // option and the entry.
+      ctx.lifecycle.onInit(() => {
+        for (const [index, entry] of factories.entries()) {
+          const handler = resolveRegistryEntry(
+            entry.handler,
+            ctx.services,
+            `EventsPlugin({ handlers })[${index}]`,
+          );
+          subscribeHandler(bus, entry.type, handler);
+        }
+      });
 
       // Register health indicator.
       // deno-lint-ignore require-await
