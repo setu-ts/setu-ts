@@ -2695,7 +2695,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   against a custom endpoint failed with 400/404), two ioredis `ping()` calls were unbound (the probe
   reported `false` forever against a healthy Redis), and `RabbitMqQueue` threw on `disconnect()`
   after a fault and crashed the host process on a reset during `createChannel()` (the connection
-  fault listener was installed too late) — all fixed and regression-tested. — complete (PR pending)
+  fault listener was installed too late) — all fixed and regression-tested. — complete (PR #172)
 - **Next milestone** — **M70d** (seams that construct with no arguments). The register's "single
   most repeated defect": a CLI-owned barrel builds an artifact with `new X()` and the contract hands
   it no context, so generated health indicators and command/query/event handlers can reach nothing,
