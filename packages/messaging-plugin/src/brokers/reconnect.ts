@@ -158,6 +158,17 @@ export class ReconnectSupervisor {
     if (this.#stopping || !this.#running) {
       return;
     }
+    // One attempt loop per fault window. A client may report the same loss
+    // through more than one event — amqplib's `onSocketError` emits `'error'`
+    // and then `'close'`, and both are wired to this method — and without
+    // this guard each would start its own reconnect loop, so a single outage
+    // would open two connections, orphan one of them (the second's
+    // `#reconnect()` replaces `#connection` after the first already stored
+    // it, and nothing ever closes the loser), and register a duplicate
+    // consumer per active subscription.
+    if (this.#faulted) {
+      return;
+    }
     this.#faulted = true;
     if (this.#options.mode === 'drive') {
       this.#scheduleAttempt(0);
@@ -213,6 +224,10 @@ export class ReconnectSupervisor {
     if (this.#stopping) {
       return;
     }
+    // Never overwrite a live handle: the field tracks one timer, so replacing
+    // it without cancelling would leak the previous timer and fire two
+    // attempts.
+    this.#cancelPending();
     const initialMs = this.#options.initialMs ?? 500;
     const maxMs = this.#options.maxMs ?? 30_000;
     const delay = fullJitterDelay(attempt, initialMs, maxMs);

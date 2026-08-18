@@ -147,6 +147,35 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
     expect(await broker.isHealthy()).toBe(false);
   });
 
+  it('a real error+close pair replays each subscription exactly once', async () => {
+    // amqplib's `onSocketError` emits `'error'` and THEN `'close'` (verified
+    // in amqplib 0.10.9: onSocketError emits 'error', then toClosed emits
+    // 'close'), and both are wired to the same fault listener. Every other
+    // test in this file fires only `'close'`, so the fake never reproduced the
+    // real sequence and a duplicate reconnect could not be constructed. The
+    // exact count is the assertion that matters: a `toBeGreaterThan` passes
+    // just as happily with two replays as with one.
+    const clock = makeClock();
+    const runtime = makeRuntime(clock);
+    const { client, fire, consumeCount } = makeAmqp();
+    const broker = new RabbitMqBroker(runtime, new JsonSerializer(), { client });
+    await broker.connect();
+
+    await broker.subscribe('orders.created', () => {});
+    const before = consumeCount();
+    expect(before).toBe(1);
+
+    fire('error');
+    fire('close');
+    expect(await broker.reachability()).toBe(false);
+
+    clock.advance(10_000);
+    await flush();
+
+    expect(await broker.reachability()).toBe(true);
+    expect(consumeCount()).toBe(before + 1);
+  });
+
   it('drive mode reconnects, re-asserts, and replays subscriptions (X2-1)', async () => {
     const clock = makeClock();
     const runtime = makeRuntime(clock);

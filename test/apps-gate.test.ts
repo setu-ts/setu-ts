@@ -141,7 +141,12 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain('- 5672:5672');
       expect(text).toContain('RABBITMQ_URL: amqp://localhost:5672');
       // MinIO (storage S3 outage suite)
-      expect(text).toContain('image: minio/minio:RELEASE.2024-05-28T17-19-04Z');
+      expect(text).toContain('image: minio/minio:edge-cicd');
+      // A service container takes no `command`/`environment` key, so a block
+      // carrying either is an invalid workflow — and the text pins above would
+      // still pass. Assert their absence too.
+      expect(text).not.toMatch(/^\s+command:/m);
+      expect(text).not.toMatch(/^\s+environment:/m);
       expect(text).toContain('- 9000:9000');
       expect(text).toContain('S3_ENDPOINT_URL: http://localhost:9000');
       // Mailpit (mail SMTP outage suite)
