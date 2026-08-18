@@ -16,6 +16,12 @@ import manifest from '../../deno.json' with { type: 'json' };
  * See plans/milestone-53-real-backend-ci.md §3.4 and §3.6.
  */
 const UNREACHABLE_REDIS_URL = 'redis://127.0.0.1:6390';
+// NOT a port in the test net-permission list (5672/6379/9324). The wrong-shaped
+// client must be dropped and the lazy-load path taken, which we observe as a
+// connect failure — so the target has to be unreachable. Using 5673 (outside the
+// net list) makes the lazy-load fail deterministically regardless of whether a
+// real RabbitMQ is live on 5672 (it is, under the M70c §3.7 CI service).
+const UNREACHABLE_RABBITMQ_URL = 'amqp://127.0.0.1:5673';
 
 /**
  * Fake runtime for testing.
@@ -271,12 +277,18 @@ describe('QueuePlugin', () => {
     const ctx = new FakeContext();
     const plugin = QueuePlugin({
       adapter: 'rabbitmq',
-      url: 'amqp://localhost:5672',
+      // NOT the default 5672. The wrong-shaped client must be dropped and the
+      // lazy-load path taken, which we observe as a connect failure — so the
+      // target has to be unreachable. Hardcoding 5672 made this pass only while
+      // 5672 was outside the test net permission; now that the M70c §3.7 outage
+      // suite grants 5672 (and a real RabbitMQ is live there in CI), the
+      // lazy-load would succeed and the test would fail.
+      url: UNREACHABLE_RABBITMQ_URL,
       client: wrongShapedAmqpClient as never,
     });
 
     // The plugin should not throw; it falls through to lazy-load amqplib
-    // Since we don't have a real RabbitMQ, the lazy-load will fail at connect time
+    // Since the target is unreachable, the lazy-load will fail at connect time
     // We're testing that the wrong-shaped client is DROPPED (guard fails)
     // and the code proceeds to the lazy-load path
     await expect(plugin.register(ctx as never)).rejects.toThrow();

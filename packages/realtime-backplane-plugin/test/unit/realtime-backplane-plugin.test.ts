@@ -80,7 +80,7 @@ describe('RealtimeBackplanePlugin', () => {
     expect(indicator).toBeDefined();
     expect(await indicator?.()).toEqual({
       status: 'up',
-      data: { transport: 'memory', origin: 'uuid-1' },
+      data: { transport: 'memory', origin: 'uuid-1', reachable: true },
     });
   });
 
@@ -98,7 +98,8 @@ describe('RealtimeBackplanePlugin', () => {
     const indicator = harness.health.get('realtime-backplane');
     expect(await indicator?.()).toEqual({
       status: 'up',
-      data: { transport: 'custom', origin: 'custom-origin' },
+      // The custom instance exposes no isHealthy, so reachability is unknown.
+      data: { transport: 'custom', origin: 'custom-origin', reachable: 'unknown' },
     });
   });
 
@@ -139,7 +140,7 @@ describe('RealtimeBackplanePlugin transport naming', () => {
     const indicator = harness.health.get('realtime-backplane');
     expect(await indicator?.()).toEqual({
       status: 'up',
-      data: { transport: 'memory', origin: 'uuid-1' },
+      data: { transport: 'memory', origin: 'uuid-1', reachable: true },
     });
   });
 });

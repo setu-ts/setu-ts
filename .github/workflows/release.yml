@@ -40,6 +40,15 @@ jobs:
       SQS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
+      # M70c §3.7 real-outage suites (must match ci.yml — the release job
+      # re-runs the same suite, and test/apps-gate.test.ts asserts the wiring
+      # on both workflows).
+      RABBITMQ_URL: amqp://localhost:5672
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_BUCKET: m70c-verify
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      SMTP_URL: smtp://localhost:1025
     services:
       redis:
         image: redis:7
@@ -62,6 +71,43 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # M70c §3.7: same three real-outage services as ci.yml — the release job
+      # re-runs the suite, so the backend environment must agree exactly.
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+      minio:
+        # `edge-cicd` is MinIO's purpose-built CI image: it starts the server
+        # with NO command. That matters because a GitHub Actions service
+        # container accepts only image/credentials/env/ports/volumes/options —
+        # there is no `command` (or `environment`) key, and the stock RELEASE
+        # image prints its usage and exits when started without `server /data`.
+        image: minio/minio:edge-cicd
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.20.4
+        ports:
+          - 1025:1025
+        options: >-
+          --health-cmd "/mailpit readyz"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 

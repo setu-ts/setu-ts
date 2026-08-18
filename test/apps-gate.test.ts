@@ -101,9 +101,21 @@ describe('real-backend CI wiring', () => {
         readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
       }>(`packages/${pkg}/deno.json`);
       // Scoped, not `true`: the grant exists for the Redis round trips alone.
-      expect(config.test?.permissions?.net).toEqual(['127.0.0.1:6379', 'localhost:6379']);
+      // messaging-plugin also carries the RabbitMQ outage suite (M70c §3.7),
+      // so it grants the AMQP port too.
+      if (pkg === 'messaging-plugin') {
+        expect(config.test?.permissions?.net).toEqual([
+          '127.0.0.1:6379',
+          'localhost:6379',
+          '127.0.0.1:5672',
+          'localhost:5672',
+        ]);
+      } else {
+        expect(config.test?.permissions?.net).toEqual(['127.0.0.1:6379', 'localhost:6379']);
+      }
     }
-    // queue-plugin also needs ElasticMQ endpoints for SQS e2e.
+    // queue-plugin also needs ElasticMQ endpoints for SQS e2e and the
+    // RabbitMQ port for the M70c §3.7 queue outage suite.
     const queueConfig = await readJson<{
       readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
     }>('packages/queue-plugin/deno.json');
@@ -112,7 +124,36 @@ describe('real-backend CI wiring', () => {
       'localhost:6379',
       '127.0.0.1:9324',
       'localhost:9324',
+      '127.0.0.1:5672',
+      'localhost:5672',
     ]);
+  });
+
+  it('pins the M70c §3.7 real-outage services, ports, and env vars', async () => {
+    // The five §3.7 outage-real.test.ts suites guard on RABBITMQ_URL /
+    // REDIS_URL / S3_ENDPOINT_URL / SMTP_URL and are NOT in ALLOW_SKIP, so a
+    // dropped service or a missing var must fail CI, not skip. These pins keep
+    // the service, the port mapping, and the env var from drifting.
+    for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
+      const text = await Deno.readTextFile(workflow);
+      // RabbitMQ (messaging broker + queue outage suites)
+      expect(text).toContain('image: rabbitmq:3.13-management-alpine');
+      expect(text).toContain('- 5672:5672');
+      expect(text).toContain('RABBITMQ_URL: amqp://localhost:5672');
+      // MinIO (storage S3 outage suite)
+      expect(text).toContain('image: minio/minio:edge-cicd');
+      // A service container takes no `command`/`environment` key, so a block
+      // carrying either is an invalid workflow — and the text pins above would
+      // still pass. Assert their absence too.
+      expect(text).not.toMatch(/^\s+command:/m);
+      expect(text).not.toMatch(/^\s+environment:/m);
+      expect(text).toContain('- 9000:9000');
+      expect(text).toContain('S3_ENDPOINT_URL: http://localhost:9000');
+      // Mailpit (mail SMTP outage suite)
+      expect(text).toContain('image: axllent/mailpit:v1.20.4');
+      expect(text).toContain('- 1025:1025');
+      expect(text).toContain('SMTP_URL: smtp://localhost:1025');
+    }
   });
 
   it('does not exempt the full-stack example from the smoke gate', async () => {

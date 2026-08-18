@@ -34,6 +34,17 @@ export interface IRedisStreamsClient {
   quit(): Promise<void>;
   /** Connect to the server (optional, for lazy clients). */
   connect?(): Promise<void>;
+  /**
+   * Pings the server (optional, M70c). The broker's reachability probe calls
+   * it; a client that does not expose it reports `unknown` reachability
+   * rather than lying. The real ioredis adapter implements it.
+   */
+  ping?(): Promise<string>;
+  /**
+   * Connection status string (optional, M70c). ioredis reports `'ready'`,
+   * `'connecting'`, `'reconnecting'`, `'end'`, …
+   */
+  status?: string;
 }
 
 /**
@@ -48,6 +59,27 @@ export interface IAmqpConnection {
   createChannel(): Promise<unknown>;
   /** Close the connection. */
   close(): Promise<void>;
+  /**
+   * Registers a connection-level event listener (optional, M70c).
+   *
+   * amqplib's `ChannelModel` is an `EventEmitter`; the real adapter
+   * implements this for `'error'` and `'close'`, which the broker's
+   * reconnect supervisor listens on. A client without an event surface
+   * omits it and reports `unknown` reachability.
+   *
+   * @param event - Event name (`'error'` or `'close'`)
+   * @param listener - Invoked when the event fires
+   */
+  on?(event: string, listener: (err?: unknown) => void): void;
+  /**
+   * Removes a connection-level event listener (optional, M70c). Paired with
+   * {@linkcode on}; the supervisor's `stop()` calls it so a reconnect cycle
+   * accumulates no listeners. The real amqplib adapter implements it.
+   *
+   * @param event - Event name (`'error'` or `'close'`)
+   * @param listener - The listener to remove
+   */
+  off?(event: string, listener: (err?: unknown) => void): void;
 }
 
 /**
@@ -64,6 +96,37 @@ export interface INatsConnection {
   jetstreamManager(): Promise<unknown>;
   /** Close the connection. */
   close(): void;
+  /**
+   * True when the connection is closed (optional, M70c). The broker's
+   * reachability probe requires `isClosed() === false` **and** a successful
+   * `rtt()`. The real nats adapter implements it.
+   */
+  isClosed?(): boolean;
+  /**
+   * Measures round-trip time (optional, M70c). Resolving proves the server
+   * answers; the probe bounds it with its timeout. The real nats adapter
+   * implements it.
+   */
+  rtt?(): Promise<number>;
+  /**
+   * Connection status (optional, M70c). nats reports an enum such as
+   * `CONNECTED` or `DISCONNECTED`.
+   */
+  status?(): unknown;
+  /**
+   * Registers a connection event listener (optional, M70c).
+   *
+   * The broker's reconnect supervisor listens on `Disconnect`/`Reconnect`
+   * so `isHealthy` is truthful during the outage window. nats reconnects
+   * itself; the supervisor only observes.
+   */
+  on?(event: string, listener: (...args: unknown[]) => void): void;
+  /**
+   * Removes a connection event listener (optional, M70c). Paired with
+   * {@linkcode on}; the supervisor's `stop()` calls it so a reconnect cycle
+   * accumulates no listeners. The real nats adapter implements it.
+   */
+  off?(event: string, listener: (...args: unknown[]) => void): void;
 }
 
 /**
@@ -78,6 +141,26 @@ export interface IKafkaFactory {
   producer(): unknown;
   /** Create a consumer. */
   consumer(options: { groupId: string }): unknown;
+}
+
+/**
+ * Structural type for a kafkajs consumer or producer instance (M70c).
+ *
+ * kafkajs instances expose an `on(event, listener)` surface emitting
+ * `CONNECT`, `DISCONNECT`, and `CRASH` (consumer) events. The broker's
+ * reconnect supervisor tracks those so `isHealthy` is truthful while the
+ * client self-heals.
+ *
+ * @since 0.1.0
+ */
+export interface IKafkaEventEmitter {
+  /**
+   * Registers an event listener.
+   *
+   * @param event - Event name (`'CONNECT'`, `'DISCONNECT'`, `'CRASH'`, …)
+   * @param listener - Invoked when the event fires
+   */
+  on(event: string, listener: (...args: unknown[]) => void): void;
 }
 
 /**

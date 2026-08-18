@@ -61,6 +61,17 @@ export class MessagingBackplane implements IRealtimeBackplane {
   #subscription: ISubscription | undefined;
 
   /**
+   * M70c: delegates to the resolved broker's `isHealthy?()` — the only way the
+   * backplane can report the broker's reachability without importing the
+   * messaging plugin (§3.1). Assigned only when the broker provides the
+   * member: a broker that omits it is *unknown*, and the indicator reads
+   * absence of `isHealthy` (not `false`) as that.
+   *
+   * @since 0.2.0
+   */
+  isHealthy?: () => Promise<boolean>;
+
+  /**
    * @param broker - The broker resolved from `CAPABILITIES.MESSAGING`
    * @param origin - This instance's identity
    * @param topic - The topic every instance shares
@@ -69,15 +80,12 @@ export class MessagingBackplane implements IRealtimeBackplane {
     this.#broker = broker;
     this.origin = origin;
     this.#topic = topic;
+    const probe = broker.isHealthy;
+    if (typeof probe === 'function') {
+      this.isHealthy = (): Promise<boolean> => probe();
+    }
   }
 
-  /**
-   * Opens the shared subscription.
-   *
-   * One broker subscription serves every handler: a per-handler subscription
-   * would make each consumer plugin a competing consumer on brokers that
-   * load-balance, so only one of them would see any given frame.
-   */
   /** Errors thrown by subscribers during delivery, oldest first. */
   get handlerErrors(): readonly Error[] {
     return this.#handlerErrors;

@@ -197,14 +197,27 @@ export class QueueService implements IQueue {
 
   /**
    * Creates a health indicator for this service.
+   *
+   * M70c: reports BOTH signals. `isReady()` is lifecycle (never started /
+   * shut down → `down`); `isHealthy()` is reachability (the backend answers
+   * right now). A ready-but-unreachable adapter is `down` with
+   * `data.reachable: false`; an adapter that cannot probe is `up` with
+   * `data.reachable: 'unknown'`. `data.adapter` is preserved.
    */
   createHealthIndicator(): HealthIndicatorFn {
-    return (): Promise<HealthCheckResult> => {
-      const isReady = this.isReady();
-      return Promise.resolve({
-        status: isReady ? 'up' : 'down',
-        data: { adapter: this.#adapter.constructor.name },
-      });
+    return async (): Promise<HealthCheckResult> => {
+      const adapterName = this.#adapter.constructor.name;
+      if (!this.isReady()) {
+        return { status: 'down', data: { adapter: adapterName, reachable: false } };
+      }
+      if (typeof this.#adapter.isHealthy !== 'function') {
+        return { status: 'up', data: { adapter: adapterName, reachable: 'unknown' } };
+      }
+      const reachable = await this.#adapter.isHealthy();
+      if (reachable === false) {
+        return { status: 'down', data: { adapter: adapterName, reachable: false } };
+      }
+      return { status: 'up', data: { adapter: adapterName, reachable: true } };
     };
   }
 

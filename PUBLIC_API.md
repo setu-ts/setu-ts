@@ -2189,6 +2189,20 @@ Discriminated on `transport`.
 
 ---
 
+### Health status
+
+Since M70c the indicator probes the transport's reachability (`isHealthy()`). A fan-out failure is
+`degraded` — local delivery still works, so `/ready` keeps serving — never `down`. A transport that
+cannot probe reports `up` with `reachable: 'unknown'`.
+
+| Status     | Meaning                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `up`       | The transport is reachable, or cannot be probed (`reachable` is `'unknown'`).           |
+| `degraded` | The transport is unreachable — a fan-out to a peer failed (local delivery still works). |
+
+`data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
+`'unknown'`.
+
 ## SessionPlugin() (`@setu-ts/session-plugin`)
 
 Cookie-backed sessions and session-backed form CSRF. Registers a `SessionService`
@@ -3414,6 +3428,21 @@ export type {
 
 ---
 
+### Health status
+
+Since M70c the indicator reports two signals: the broker's lifecycle (`isReady()`) and its
+reachability. A ready-but-unreachable broker is `down` with `data.reachable: false` — the
+distinction an operator needs to tell "we never started" from "the broker restarted under us". An
+unprobeable broker (e.g. the `custom` arm without `isHealthy`) is `up` with
+`data.reachable: 'unknown'`, honestly reporting "we did not check".
+
+| Status | Meaning                                                                                  |
+| ------ | ---------------------------------------------------------------------------------------- |
+| `up`   | The broker is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The broker is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
+
 ## Queue (`@setu-ts/queue-plugin`)
 
 Provides background job queue with Memory and Redis adapters.
@@ -3643,6 +3672,19 @@ interface IQueue {
 ```
 
 ---
+
+### Health status
+
+Since M70c the indicator reports two signals: the adapter's lifecycle (`isReady()`) and its
+reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                   |
+| ------ | ----------------------------------------------------------------------------------------- |
+| `up`   | The adapter is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The adapter is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ adapter, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the adapter has no liveness check.
 
 ## Scheduler (`@setu-ts/scheduler-plugin`)
 
@@ -4053,6 +4095,19 @@ All cloud providers support an injectable `client` option (`IAwsS3Client` / `IGc
 
 ---
 
+### Health status
+
+Since M70c the indicator reports two signals: the provider's lifecycle (`isReady()`) and its
+reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `up`   | The provider is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The provider is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the provider has no liveness check.
+
 ## MailPlugin() (`@setu-ts/mail-plugin`)
 
 Provides email sending: registers an `IMailer` under `CAPABILITIES.MAIL`, backed by a pluggable
@@ -4162,6 +4217,19 @@ app.router.post('/users', async (ctx) => {
   `SendGridProvider` is the Cloudflare Workers-portable path.
 
 ---
+
+### Health status
+
+Since M70c the indicator reports two signals: the provider's lifecycle (`isReady()`) and its
+reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `up`   | The provider is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The provider is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the provider has no liveness check (e.g. the log provider always reports `true`).
 
 ## Notifications (`@setu-ts/notification-plugin`)
 
@@ -4557,7 +4625,17 @@ interface HealthReport {
     Record<string, Readonly<HealthCheckResult & { readonly latencyMs?: number }>>
   >;
 }
+```
 
+Since **M70c** each indicator's result is **projected** to the declared {@linkcode
+HealthCheckResult} shape — `status`, and `data` when present — before it enters the report. An
+indicator that returns anything else (a typo'd `details` instead of `data`, or its own `latencyMs`)
+has that field **dropped rather than published**: excess-property checking does not survive
+`Promise.resolve({ ... })` at the generic call, so the mistyped field type-checks, and `/health` is
+frequently the least protected endpoint in a deployment. The `latencyMs` in the report is always the
+one the health service measured.
+
+```typescript
 interface HealthCheckResult {
   readonly status: HealthStatus;
   readonly data?: Readonly<Record<string, unknown>>;
@@ -6783,6 +6861,22 @@ and every read here sends `passing=true`.
 
 ---
 
+### Health status
+
+Since M70c the indicator composes three facts. `everResolved` is `false` until the first successful
+provider read, so a backend that was never reached is `down`, not `up` (the X10-3 fix). `degraded`
+means a stale cache is being served. `isHealthy()` is the live reachability probe (Consul
+`/v1/status/leader`, Kubernetes a `limit=1` EndpointSlice LIST).
+
+| Status     | Meaning                                                              |
+| ---------- | -------------------------------------------------------------------- |
+| `up`       | The provider has resolved at least once and is reachable.            |
+| `degraded` | A stale cache is being served, or the backend just went unreachable. |
+| `down`     | The provider has never resolved and is unreachable.                  |
+
+`data` reports
+`{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
+
 ## Programmatic vs Decorator API
 
 The framework provides both APIs for every feature. They are equivalent.
@@ -7067,24 +7161,25 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Values (runtime exports)
 
-| Export                        | Kind     | Purpose                                                                                                                                                                                                                                                                               |
-| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions) |
-| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                 |
-| `encodeFrameData(data)`       | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                           |
-| `decodeFrameData(payload)`    | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                          |
-| `parseCookie(header)`         | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `@Cookie` both need it and no plugin may import another                                                |
-| `serializeCookie(n, v, a?)`   | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                |
-| `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                              |
-| `isWorkerTaskRequest(m)`      | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                              |
-| `isWorkerTaskReply(m)`        | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                                                                |
-| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                                                                 |
-| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                                                                                                                                                                                 |
-| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                                                                                                                                                                                  |
-| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                                                                      |
-| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                                                           |
-| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                                                                  |
-| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                      |
+| Export                        | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions)                                                                                                                                                                                 |
+| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                 |
+| `encodeFrameData(data)`       | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                           |
+| `decodeFrameData(payload)`    | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `createCachedProbe(options)`  | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false` |
+| `parseCookie(header)`         | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `@Cookie` both need it and no plugin may import another                                                                                                                                                                                                                                |
+| `serializeCookie(n, v, a?)`   | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                                                                                                                                                                                                |
+| `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `isWorkerTaskRequest(m)`      | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `isWorkerTaskReply(m)`        | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ### Types
 
@@ -7102,7 +7197,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Config              | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                               |
-| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`                                                                                                                                                                                                                                                                                                            |
+| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`                                                                                                                                                                                                                                                                                      |
 | Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                             |
 | Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                             |
 | Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                                                                                                                                    |
@@ -8297,9 +8392,12 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 - **Bidi streaming requires HTTP/2.** `grpc.reflection.v1.ServerReflection` is bidi-only. Over a
   real HTTP/1.1 socket, bidi calls fail at the transport. Unary, server-streaming, and
   client-streaming work on every runtime.
-- **Health bridge maps `degraded → SERVING`**. `'up' → SERVING (1)`, `'down' → NOT_SERVING (2)`,
-  `'degraded' → SERVING (1)`. Degraded still serves; mapping it to `NOT_SERVING` would shed capacity
-  in the wrong direction.
+- **Health bridge maps `degraded → NOT_SERVING`**. `'up' → SERVING (1)`, `'down' → NOT_SERVING (2)`,
+  `'degraded' → NOT_SERVING (2)`. The health plugin already withdraws a degraded replica from its
+  Service via `/ready` (503), so reporting `SERVING` here would leave the two health faces of one
+  process disagreeing — gRPC clients would keep load-balancing onto a replica HTTP has taken out of
+  rotation. Since M70c the bridge agrees with `/ready`; a client relying on `SERVING` while a
+  process is degraded now sees `NOT_SERVING` (see the CHANGELOG).
 - **`Check` honors the `service` field.** The empty string means "the whole server" and returns the
   mapped aggregate health. A name the server does not serve returns `SERVICE_UNKNOWN (3)`,
   regardless of overall health.

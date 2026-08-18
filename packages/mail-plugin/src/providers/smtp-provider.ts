@@ -126,6 +126,14 @@ function joinAddresses(to: string | readonly string[]): string {
 export class SmtpProvider implements MailProvider {
   #transport: ISmtpTransport | null = null;
   readonly #options: SmtpProviderOptions;
+  /**
+   * M70c: present only when the transport exposes `verify()`; its absence is
+   * *unknown* reachability, not `false` (a minimal injected fake has not told
+   * us the server is dead).
+   *
+   * @since 0.1.0
+   */
+  isHealthy?: () => Promise<boolean>;
 
   /**
    * @param options - SMTP connection/injection options
@@ -141,13 +149,36 @@ export class SmtpProvider implements MailProvider {
         throw new Error('Injected SMTP transport is missing the required sendMail method');
       }
       this.#transport = injected;
-      return;
+    } else {
+      this.#transport = adaptNodemailerModule(await loadNodemailerModule(), this.#options);
     }
-    this.#transport = adaptNodemailerModule(await loadNodemailerModule(), this.#options);
+    this.#installProbe();
+  }
+
+  /**
+   * M70c: installs `isHealthy` from the transport's `verify()` when present;
+   * leaves it absent (unknown) otherwise.
+   */
+  #installProbe(): void {
+    const transport = this.#transport;
+    if (transport !== null && typeof transport.verify === 'function') {
+      const verify = transport.verify;
+      this.isHealthy = async (): Promise<boolean> => {
+        try {
+          await verify();
+          return true;
+        } catch {
+          return false;
+        }
+      };
+    } else {
+      delete this.isHealthy;
+    }
   }
 
   disconnect(): Promise<void> {
     this.#transport = null;
+    delete this.isHealthy;
     return Promise.resolve();
   }
 

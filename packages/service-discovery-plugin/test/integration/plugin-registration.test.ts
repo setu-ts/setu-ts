@@ -157,6 +157,8 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
       watchedServices: 0,
       ejectedInstances: 0,
       degraded: false,
+      reachable: true,
+      everResolved: true,
     });
 
     await app.stop();

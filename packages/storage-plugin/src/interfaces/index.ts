@@ -118,6 +118,13 @@ export interface IAwsS3Client {
  */
 export interface IGcsClient {
   bucket(_name?: string): unknown;
+  /**
+   * M70c: resolves when the bucket is reachable — the real adapter calls
+   * `bucket.exists()`. Optional so a minimal injected fake still type-checks.
+   *
+   * @since 0.1.0
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 /**
@@ -129,6 +136,14 @@ export interface IAzureBlobClient {
   getContainerClient(_name: string): unknown;
   /** Creates a SAS-signed URL. Added by adaptAzureModule internally. */
   getSignedUrl?(_path: string, _expiresIn: number): Promise<string>;
+  /**
+   * M70c: resolves when the container is reachable — the real adapter calls the
+   * container client's `exists()`. Optional so a minimal injected fake still
+   * type-checks.
+   *
+   * @since 0.1.0
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 // ── Uploaded file shape ───────────────────────────────────────────────────
@@ -230,4 +245,17 @@ export interface StorageProvider {
    * @returns A `ReadableStream` of object bytes, or `null`
    */
   getStream?(path: string): Promise<ReadableStream<Uint8Array> | null>;
+  /**
+   * M70c: reports whether the provider's backend is reachable right now, for
+   * the plugin's health indicator.
+   *
+   * Optional: a provider with no meaningful liveness check omits it, and the
+   * indicator then reports only the lifecycle state (`isReady`). This answers a
+   * fact (reachability), not a policy: the indicator owns the `up`/`down`
+   * mapping.
+   *
+   * @returns `true` when the backend is reachable
+   * @since 0.1.0
+   */
+  isHealthy?(): Promise<boolean>;
 }

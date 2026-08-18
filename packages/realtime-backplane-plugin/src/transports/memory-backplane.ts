@@ -63,6 +63,18 @@ export class MemoryBackplane implements IRealtimeBackplane {
     return this.#handlerErrors;
   }
 
+  /**
+   * M70c: a real single-process bus has no backend to be unreachable, so it is
+   * always reachable. There is no external dependency whose outage could make
+   * this transport `down` (M47).
+   *
+   * @returns `true`
+   * @since 0.2.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
   connect(): Promise<void> {
     if (this.#connected) {
       return Promise.resolve();

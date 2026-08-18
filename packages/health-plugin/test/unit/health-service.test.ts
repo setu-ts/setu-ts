@@ -97,6 +97,67 @@ describe('HealthService', () => {
     });
   });
 
+  describe('report projection (X3-7)', () => {
+    it('drops undeclared fields an indicator returns; status/latencyMs survive', async () => {
+      const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const service = new HealthService(runtime);
+
+      service.registerIndicator('sloppy', () =>
+        Promise.resolve({
+          status: 'up',
+          details: { leak: true },
+          latencyMs: 999,
+        } as unknown as { status: 'up'; details: { leak: boolean }; latencyMs: number }));
+
+      const report = await service.check();
+      const entry = report.checks['sloppy'] as {
+        status: string;
+        latencyMs: number;
+        details?: unknown;
+      };
+
+      expect(entry.status).toBe('up');
+      expect(entry.details).toBeUndefined();
+      // The caller-supplied latencyMs is dropped; the service's own measurement wins.
+      expect(entry.latencyMs).not.toBe(999);
+      expect(entry.latencyMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it('keeps data when present and omits the key entirely when absent', async () => {
+      const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const service = new HealthService(runtime);
+
+      service.registerIndicator(
+        'with-data',
+        () => Promise.resolve({ status: 'up', data: { broker: 'memory' } }),
+      );
+      service.registerIndicator('no-data', () => Promise.resolve({ status: 'down' }));
+
+      const report = await service.check();
+
+      expect(report.checks['with-data']?.data).toEqual({ broker: 'memory' });
+      expect('data' in (report.checks['no-data'] as object)).toBe(false);
+      expect(report.checks['no-data']?.data).toBeUndefined();
+    });
+
+    it('does not change worst-status aggregation while projecting', async () => {
+      const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const service = new HealthService(runtime);
+
+      service.registerIndicator('a', () => Promise.resolve({ status: 'up' }));
+      service.registerIndicator(
+        'b',
+        () => Promise.resolve({ status: 'degraded', data: { reason: 'stale' } }),
+      );
+      service.registerIndicator('c', () => Promise.resolve({ status: 'down' }));
+
+      const report = await service.check();
+
+      expect(report.status).toBe('down');
+      expect(report.checks['b']?.data).toEqual({ reason: 'stale' });
+    });
+  });
+
   describe('checkLive()', () => {
     it('should only include the self indicator', async () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });

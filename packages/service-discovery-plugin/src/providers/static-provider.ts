@@ -40,6 +40,14 @@ export class StaticProvider implements DiscoveryProvider {
   }
 
   /**
+   * M70c: a static map is in memory and cannot be unreachable, so it is always
+   * reachable (M47).
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  /**
    * Fires once with the configured list and never again.
    *
    * The list is immutable by construction, so there is nothing further to

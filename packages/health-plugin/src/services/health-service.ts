@@ -102,8 +102,14 @@ export class HealthService implements IHealthService {
       const result = await indicator.check();
       const latencyMs = this.#runtime.hrtime() - startTime;
 
+      // Project to the declared `HealthCheckResult` shape: `status` and
+      // `data` (when present). Anything else an indicator returns — a typo'd
+      // field, a caller-supplied `latencyMs` — is dropped, not published on
+      // `/health`. `exactOptionalPropertyTypes` is on, so `data` is spread
+      // conditionally rather than assigned `undefined`.
       checks[name] = {
-        ...result,
+        status: result.status,
+        ...(result.data !== undefined && { data: result.data }),
         latencyMs,
       };
 

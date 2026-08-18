@@ -135,4 +135,18 @@ export interface IRealtimeBackplane {
    * Closes the underlying transport and drops every handler.
    */
   close(): Promise<void>;
+  /**
+   * Reports whether the transport's backend is reachable right now, for the
+   * plugin's health indicator.
+   *
+   * Optional: a transport with no meaningful liveness check omits it, and the
+   * indicator then reports only the lifecycle state.
+   *
+   * This answers a fact (reachability), not a policy: the indicator that
+   * consumes it owns the `up`/`degraded`/`down` mapping.
+   *
+   * @returns `true` when the backend is reachable
+   * @since 0.2.0
+   */
+  isHealthy?(): Promise<boolean>;
 }

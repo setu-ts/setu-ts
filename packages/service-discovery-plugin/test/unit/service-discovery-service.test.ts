@@ -252,3 +252,46 @@ describe('ServiceDiscoveryService — watch and close', () => {
     expect(service.cachedServices).toBe(1);
   });
 });
+
+describe('ServiceDiscoveryService — M70c everResolved', () => {
+  it('is false before any successful resolve', () => {
+    const { service } = setup();
+    expect(service.everResolved).toBe(false);
+    expect(service.degraded).toBe(false);
+  });
+
+  it('is true once a resolve succeeds', async () => {
+    const { service } = setup();
+    await service.resolve('billing');
+    expect(service.everResolved).toBe(true);
+  });
+
+  it('is NOT set by a cold failure (no stale to serve) — the X10-3 case', async () => {
+    const { service, provider } = setup();
+    provider.failWith(new Error('backend unreachable'));
+    await expect(service.resolve('billing')).rejects.toThrow(DiscoveryUnavailableError);
+    // A failure must not flip everResolved: there was no prior success.
+    expect(service.everResolved).toBe(false);
+    expect(service.degraded).toBe(false);
+  });
+
+  it('is set by a watch push (a delivered list is a successful read)', async () => {
+    const { service, provider } = setup();
+    expect(service.everResolved).toBe(false);
+    await service.watch('billing', () => {});
+    provider.emit('billing', [a]);
+    expect(service.everResolved).toBe(true);
+  });
+
+  it('is already true when a stale-cache serve happens (the stale path does not set it)', async () => {
+    const { service, provider, runtime } = setup({ cacheTtlMs: 1_000 });
+    await service.resolve('billing');
+    expect(service.everResolved).toBe(true);
+
+    provider.failWith(new Error('down'));
+    runtime.advance(1_001);
+    await service.resolve('billing'); // serves stale, sets degraded
+    expect(service.degraded).toBe(true);
+    expect(service.everResolved).toBe(true);
+  });
+});

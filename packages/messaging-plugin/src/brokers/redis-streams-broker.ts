@@ -1,3 +1,4 @@
+import { createCachedProbe } from '@setu-ts/common';
 import type {
   ISubscription,
   MessageHandler,
@@ -111,6 +112,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   // used to coerce it, which silently discarded object-shaped handles.
   #pollIntervals: Map<string, TimerHandle>; // subscription id -> interval handle
   #rr: RequestReplyCore;
+  #probe: () => Promise<boolean>;
 
   /**
    * Creates a new Redis Streams broker.
@@ -146,6 +148,23 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
         subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
         uuid: () => this.#runtime.uuid(),
       }),
+    });
+    // Built once so the TTL cache and coalescing persist across health
+    // scrapes (M70c §3.3). The inner probe reads the live client each call
+    // (it is set in connect()); a rejecting ping is unreachable.
+    this.#probe = createCachedProbe({
+      probe: async () => {
+        const client = this.#client;
+        if (client === null || typeof client.ping !== 'function') {
+          return false;
+        }
+        const ping = client.ping;
+        await ping.call(client);
+        return true;
+      },
+      hrtime: () => this.#runtime.hrtime(),
+      setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+      clearTimer: (handle) => this.#runtime.clearTimeout(handle),
     });
   }
 
@@ -196,6 +215,38 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    */
   isReady(): boolean {
     return this.#ready;
+  }
+
+  /**
+   * Tri-state backend reachability (M70c).
+   *
+   * ioredis auto-reconnects via its default retry strategy, so the broker
+   * does not run a reconnect loop of its own; the truth is what `ping()`
+   * reports right now. `true` when `ping()` resolves, `false` when it
+   * rejects (the server is down or the socket is mid-reconnect), `undefined`
+   * when the injected client exposes no `ping` (a minimal fake) — in which
+   * case the indicator reports `reachable: 'unknown'` rather than lying.
+   *
+   * @returns `true`/`false`/`undefined` as described
+   * @since 0.1.0
+   */
+  async reachability(): Promise<boolean | undefined> {
+    const client = this.#client;
+    if (client === null || typeof client.ping !== 'function') {
+      return undefined;
+    }
+    return await this.#probe();
+  }
+
+  /**
+   * Boolean port member (M70c): `false` only when positively unreachable.
+   *
+   * @returns `true` when reachable or unprobeable, `false` when `ping` fails
+   * @since 0.1.0
+   */
+  async isHealthy(): Promise<boolean> {
+    const reachable = await this.reachability();
+    return reachable !== false;
   }
 
   /**

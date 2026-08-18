@@ -6926,7 +6926,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   body assigned but the original list omitted (mirroring the M70h correction). X12-3 closes without
   a `cli` change: the fix is a safe default on `ErrorHandlerOptions.maskInternalErrors`, so every
   already-scaffolded project picks it up by upgrading the package.
-- ⬜ **M70c — Health signals that describe lifecycle, not reachability** (`messaging-plugin`,
+- ✅ **M70c — Health signals that describe lifecycle, not reachability** (`messaging-plugin`,
   `realtime-backplane-plugin`, `storage-plugin`, `mail-plugin`, `queue-plugin`,
   `service-discovery-plugin`, `grpc-plugin`). **Six packages answer `up` with their backends
   stopped** and `/ready` stays `200` (X2-1, X3-2, X8-5, X10-3), so a dead dependency triggers no
@@ -7140,7 +7140,7 @@ branch during a version bump.
 | 70        | ⬜     | alpha-9 defect closeout (umbrella)    |
 | 70a       | ✅     | pipeline bypass (security)            |
 | 70b       | ✅     | tenant isolation, data exposure (sec) |
-| 70c       | ⬜     | health-signal sweep (6 packages)      |
+| 70c       | ✅     | health-signal sweep (6 packages)      |
 | 70d       | ⬜     | no-argument registration seams        |
 | 70e       | ⬜     | default branches of injectable seams  |
 | 70f       | ⬜     | error format and error visibility     |
