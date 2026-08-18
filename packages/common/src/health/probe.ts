@@ -17,11 +17,15 @@
  * The TTL is an interval, so it is measured on a **monotonic** clock that the
  * caller injects (`IRuntimeServices.hrtime()`); a wall clock would be wrong
  * here, and `Date.now()` is banned outside `packages/runtime` regardless.
- * The per-probe timeout uses the ambient `setTimeout`, a Web-standard API
- * present on every runtime this package runs on.
+ * The per-probe timeout runs on an injected timer surface for the same reason
+ * — `IRuntimeServices.setTimeout`/`clearTimeout`, so a custom runtime's timers
+ * are honoured rather than bypassed (the class M51b fixed when transports
+ * reached for global timers). Both default to the ambient Web-standard
+ * functions for a caller that has no runtime to hand.
  *
  * @since 0.1.0
  */
+import type { TimerHandle } from '../runtime.ts';
 
 /**
  * Options for {@linkcode createCachedProbe}.
@@ -52,6 +56,19 @@ export interface CachedProbeOptions {
    * Injected so the TTL is an interval, not a wall-clock reading.
    */
   readonly hrtime: () => number;
+  /**
+   * Timer used to bound each probe (e.g. `IRuntimeServices.setTimeout`).
+   *
+   * @default the ambient `setTimeout`
+   */
+  readonly setTimer?: (fn: () => void, ms: number) => TimerHandle;
+  /**
+   * Cancels a timer created by {@linkcode CachedProbeOptions.setTimer}
+   * (e.g. `IRuntimeServices.clearTimeout`).
+   *
+   * @default the ambient `clearTimeout`
+   */
+  readonly clearTimer?: (handle: TimerHandle) => void;
 }
 
 /**
@@ -80,14 +97,18 @@ export interface CachedProbeOptions {
 export function createCachedProbe(options: CachedProbeOptions): () => Promise<boolean> {
   const ttlMs = options.ttlMs ?? 5000;
   const timeoutMs = options.timeoutMs ?? 2000;
+  const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = options.clearTimer ?? ((handle) => {
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
+  });
 
   let cached: { readonly value: boolean; readonly at: number } | null = null;
   let inFlight: Promise<boolean> | null = null;
 
   const runProbe = (): Promise<boolean> => {
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: TimerHandle;
     const timeout = new Promise<boolean>((resolve) => {
-      timer = setTimeout(() => resolve(false), timeoutMs);
+      timer = setTimer(() => resolve(false), timeoutMs);
     });
     // A probe that rejects, or throws synchronously, is unreachable — not an
     // error. The attempt therefore never rejects.
@@ -95,7 +116,7 @@ export function createCachedProbe(options: CachedProbeOptions): () => Promise<bo
       .then(() => options.probe())
       .then((reachable) => reachable, () => false);
     return Promise.race([attempt, timeout]).finally(() => {
-      clearTimeout(timer);
+      clearTimer(timer);
     });
   };
 

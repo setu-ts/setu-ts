@@ -60,10 +60,12 @@ All notable changes to this project are documented here. The format follows
   pure helper that wraps a reachability check in a cache so a health scrape does not become load
   against the backend: the outcome is cached for `ttlMs` (default 5000) measured on an injected
   **monotonic** clock, concurrent callers during one in-flight probe share a single probe call, and
-  each probe is bounded by `timeoutMs` (default 2000). A probe that rejects, throws, or exceeds its
-  timeout resolves `false` — the returned function never rejects. Reporting _unprobeable_ is the
-  caller's job, not the helper's: a port that implements no probe is what each plugin's indicator
-  surfaces as `data.reachable: 'unknown'`.
+  each probe is bounded by `timeoutMs` (default 2000) on an injected timer seam
+  (`setTimer`/`clearTimer`, defaulting to the ambient ones) so a custom `IRuntimeServices`' timers
+  are honoured rather than bypassed. A probe that rejects, throws, or exceeds its timeout resolves
+  `false` — the returned function never rejects. Reporting _unprobeable_ is the caller's job, not
+  the helper's: a port that implements no probe is what each plugin's indicator surfaces as
+  `data.reachable: 'unknown'`.
 - **`ReconnectSupervisor` in `messaging-plugin`** (M70c). A `drive`-mode broker (RabbitMQ — amqplib
   has no reconnection of its own) now re-establishes its connection on loss through a backoff-driven
   supervisor instead of failing open, re-asserting the exchange and replaying every active

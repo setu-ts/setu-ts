@@ -259,10 +259,13 @@ it; the fake-only path then reports `unknown` rather than lying.
   test injects a client fake that never dies, so the state `#ready` fails to describe cannot be
   constructed". A milestone about truthful health signals whose only evidence is a fake would be the
   defect it is fixing.
-- **`ALLOW_SKIP` discipline (M53):** these suites are **not** added to the skip allowlist, so a
-  dropped service container or a missing env var fails CI instead of quietly skipping;
-  `test/apps-gate.test.ts` pins the service, the port mapping and the env var, as it already does
-  for Redis.
+- **CI-wiring discipline (M53):** the enforcement is `test/apps-gate.test.ts`, which pins the
+  service, the port mapping and the env var in **both** workflows, as it already does for Redis — so
+  a dropped service container or a missing env var fails the gate instead of quietly skipping.
+  _(Correction, made during code review: an earlier draft of this plan said these suites are "not
+  added to `ALLOW_SKIP`". That is a category error — `ALLOW_SKIP` is read only by
+  `scripts/check-apps.ts` and governs `apps/`, never a package's integration tests. The suites do
+  skip locally on a missing env var; the apps-gate pin is what makes that safe.)_
 - **Test home:** `<pkg>/test/integration/outage-real.test.ts` per package.
 
 ### 3.8 X3-7: the report projects, it does not spread
@@ -368,7 +371,7 @@ real deployment needs them — a dead option is the defect §4 exists to prevent
 | `messaging-plugin/test/unit/brokers/reconnect.test.ts`                             | `brokers/reconnect.ts`                          | Against `ReconnectSupervisor`: backoff sequence under a fake `setTimeout` (full-jitter bounds), replay invokes the registry's re-subscribe per entry, a reconnect failing mid-loop retries rather than terminating, `stop()` cancels a pending attempt and removes every listener (the M47/M50 listener-accumulation class: N cycles → N added, N removed). |
 | `messaging-plugin/test/unit/brokers/<broker>-health.test.ts` (×8)                  | each broker + `custom-adapter.ts`               | Four arms per §3.2: not started → `down`; probe true → `up`; probe false/timeout → `down`; facade without the optional member → `unknown`. `drive`-mode brokers additionally: an injected `'close'` event flips `isHealthy` to `false` while `isReady()` stays `true`, and replay re-subscribes every `#activeConsumers` entry.                             |
 | `messaging-plugin/test/unit/plugin/messaging-plugin.test.ts`                       | `plugin/messaging-plugin.ts`                    | The indicator's four arms and that `data` carries `broker` plus `reachable`.                                                                                                                                                                                                                                                                                |
-| `messaging-plugin/test/integration/outage-real.test.ts`                            | rabbitmq + redis-streams brokers                | §3.7: real broker, real stop/restart, `up → down → up`, and a pre-outage subscription receives a post-outage publish (the X2-1 reproduction). Guarded on `RABBITMQ_URL`/`REDIS_URL`; **not** in `ALLOW_SKIP`.                                                                                                                                               |
+| `messaging-plugin/test/integration/outage-real.test.ts`                            | rabbitmq + redis-streams brokers                | §3.7: real broker, real stop/restart, `up → down → up`, and a pre-outage subscription receives a post-outage publish (the X2-1 reproduction). Guarded on `RABBITMQ_URL`/`REDIS_URL`; the apps-gate workflow pin is the enforcement.                                                                                                                         |
 | `realtime-backplane-plugin/test/unit/transports/<t>-health.test.ts` (×3 + factory) | each transport, `backplane-factory.ts`          | Memory always `true`; messaging delegates to the broker's `isHealthy` and reports `unknown` when the broker omits it; redis requires **both** connections healthy (a healthy publisher with a dead subscriber is `false` — the M47 two-connection property); `'custom'` delegates or reports `unknown`.                                                     |
 | `realtime-backplane-plugin/test/unit/plugin/health-indicator.test.ts`              | `plugin/realtime-backplane-plugin.ts`           | A transport reporting unreachable yields `degraded`, **never** `down` (local delivery still works, so `/ready` keeps serving — the §3.2 mapping), with `transport` and `origin` preserved in `data`.                                                                                                                                                        |
 | `realtime-backplane-plugin/test/integration/outage-real.test.ts`                   | `redis-backplane.ts`                            | §3.7 against real Redis, including recovery (X3-2 recorded that this arm self-heals).                                                                                                                                                                                                                                                                       |
@@ -432,8 +435,8 @@ backends with their stop/restart observed, and each fix demonstrated to **fail w
   listener, asserted by an N-cycles add/remove count test (§6).
 - **CI gains two service containers** (RabbitMQ, MinIO) and gets slower / flakier. → M53's pattern:
   job-level env, `localhost` mapped ports (a `services:` label is not a resolvable hostname for a
-  job running on the runner), and the suites kept out of `ALLOW_SKIP` so a broken container fails
-  rather than silently skips.
+  job running on the runner), and the apps-gate workflow pin asserting each service so a
+  silently-dropped container fails rather than silently skips.
 - **A widened optional facade member is never implemented by the real adapter**, leaving the probe
   permanently `unknown` while every injected-fake test passes — the M55 `createReadStream` defect
   class exactly. → every real adapter's default path is driven once by the guarded real-import /

@@ -156,6 +156,8 @@ export class NatsBroker implements MessageBrokerAdapter {
         return false;
       },
       hrtime: () => this.#runtime.hrtime(),
+      setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+      clearTimer: (handle) => this.#runtime.clearTimeout(handle),
     });
   }
 

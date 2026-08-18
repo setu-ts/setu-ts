@@ -123,6 +123,37 @@ describe('NatsBroker health (M70c)', () => {
     expect(await broker.isHealthy()).toBe(true);
   });
 
+  it('refuses an injected client that fails the structural shape check', async () => {
+    // M70c review: the validation throw was reachable and untested, so a
+    // malformed injected client would have surfaced later as a bare TypeError
+    // rather than at connect() with a message naming the missing members.
+    const broker = makeBroker({ close: () => {} } as unknown as INatsConnection);
+    await expect(broker.connect()).rejects.toThrow(
+      'Injected NATS client does not match the required structural shape',
+    );
+  });
+
+  it('removes its event listeners on disconnect', async () => {
+    // The disposer returned by #attachEvent was never driven, so a listener
+    // leak across connect/disconnect cycles would not have been caught — the
+    // accumulation class M47 fixed in resilience-plugin.
+    const removed: string[] = [];
+    const { client } = makeNats({ isClosed: () => false, rtt: () => Promise.resolve(1) });
+    const withTracking = client as unknown as Record<string, unknown>;
+    const originalOff = withTracking.off as (e: string, l: unknown) => void;
+    withTracking.off = (event: string, listener: unknown) => {
+      removed.push(event);
+      originalOff(event, listener);
+    };
+
+    const broker = makeBroker(client);
+    await broker.connect();
+    await broker.disconnect();
+
+    expect(removed).toContain('Disconnect');
+    expect(removed).toContain('Reconnect');
+  });
+
   it('reports unknown when the client lacks liveness members', async () => {
     const { client } = makeNats();
     const broker = makeBroker(client);

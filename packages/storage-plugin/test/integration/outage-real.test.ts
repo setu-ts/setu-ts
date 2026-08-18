@@ -3,7 +3,10 @@
  * §3.7 real-outage bar: drives a **real** MinIO (S3-compatible) backend
  * through a **real** stop and restart, asserting `up → (stop) down → (restart) up`.
  *
- * Guarded on `S3_ENDPOINT_URL`. NOT in `ALLOW_SKIP`.
+ * Guarded on `S3_ENDPOINT_URL`: absent it, this suite skips. `ALLOW_SKIP` does
+ * not apply here — that variable is read only by `scripts/check-apps.ts` and
+ * governs `apps/`. What keeps this suite honest is `test/apps-gate.test.ts`,
+ * which pins the service, port mapping and env var in both workflows.
  * `test/apps-gate.test.ts` pins the service, port mapping, and env var.
  *
  * F1 regression: without `forcePathStyle: true` the AWS SDK uses virtual-host
