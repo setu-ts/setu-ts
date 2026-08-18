@@ -57,14 +57,22 @@ All notable changes to this project are documented here. The format follows
   the backplane, whose local delivery still works) instead of `up`. An unprobeable provider honestly
   reports `data.reachable: 'unknown'` rather than claiming health.
 - **`createCachedProbe(options)` and `CachedProbeOptions` in `@setu-ts/common`** (M70c). A small
-  pure helper that wraps a reachability check in a bounded cache so a health scrape does not become
-  load against the backend: the probe runs at most once per interval, a failure is remembered for a
-  (shorter) failure interval so a flapping backend does not thrash, and the result degrades to
-  `unknown` on a probe error rather than `false`.
-- **`ReconnectSupervisor` in `messaging-plugin`** (M70c). A `drive`-mode broker now re-establishes
-  its connection on loss through a bounded, backoff-driven supervisor instead of failing open; the
-  broker exposes a `reachability()` that distinguishes "connected and answering" from "connected but
-  the backend stopped answering".
+  pure helper that wraps a reachability check in a cache so a health scrape does not become load
+  against the backend: the outcome is cached for `ttlMs` (default 5000) measured on an injected
+  **monotonic** clock, concurrent callers during one in-flight probe share a single probe call, and
+  each probe is bounded by `timeoutMs` (default 2000). A probe that rejects, throws, or exceeds its
+  timeout resolves `false` — the returned function never rejects. Reporting _unprobeable_ is the
+  caller's job, not the helper's: a port that implements no probe is what each plugin's indicator
+  surfaces as `data.reachable: 'unknown'`.
+- **`ReconnectSupervisor` in `messaging-plugin`** (M70c). A `drive`-mode broker (RabbitMQ — amqplib
+  has no reconnection of its own) now re-establishes its connection on loss through a backoff-driven
+  supervisor instead of failing open, re-asserting the exchange and replaying every active
+  subscription. Retries are **unbounded** by design, with full-jitter exponential backoff capped at
+  30s: an outage longer than any attempt cap is exactly the case that must still self-repair, and
+  the health signal reports the fault throughout. A single connection loss opens exactly one attempt
+  loop even when the client reports it through more than one event (amqplib emits `'error'` and then
+  `'close'`). The broker exposes a `reachability()` that distinguishes "connected and answering"
+  from "connected but the backend stopped answering".
 - **`docs/health-indicators.md` and `test/health-indicator-audit.test.ts`** (M70c). A classification
   of every `ctx.health.register` site in the framework — `live-state`, `justified-literal`, or
   `configuration-literal` — enforced by a test that fails if a new (or moved) indicator is added

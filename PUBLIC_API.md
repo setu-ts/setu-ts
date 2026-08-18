@@ -4625,7 +4625,17 @@ interface HealthReport {
     Record<string, Readonly<HealthCheckResult & { readonly latencyMs?: number }>>
   >;
 }
+```
 
+Since **M70c** each indicator's result is **projected** to the declared {@linkcode
+HealthCheckResult} shape — `status`, and `data` when present — before it enters the report. An
+indicator that returns anything else (a typo'd `details` instead of `data`, or its own `latencyMs`)
+has that field **dropped rather than published**: excess-property checking does not survive
+`Promise.resolve({ ... })` at the generic call, so the mistyped field type-checks, and `/health` is
+frequently the least protected endpoint in a deployment. The `latencyMs` in the report is always the
+one the health service measured.
+
+```typescript
 interface HealthCheckResult {
   readonly status: HealthStatus;
   readonly data?: Readonly<Record<string, unknown>>;
@@ -7157,6 +7167,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                 |
 | `encodeFrameData(data)`       | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                           |
 | `decodeFrameData(payload)`    | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                          |
+| `createCachedProbe(options)`  | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs? }`. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false` |
 | `parseCookie(header)`         | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `@Cookie` both need it and no plugin may import another                                                |
 | `serializeCookie(n, v, a?)`   | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                |
 | `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                              |
@@ -7186,7 +7197,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Config              | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                               |
-| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`                                                                                                                                                                                                                                                                                                            |
+| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`                                                                                                                                                                                                                                                                                      |
 | Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                             |
 | Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                             |
 | Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                                                                                                                                    |

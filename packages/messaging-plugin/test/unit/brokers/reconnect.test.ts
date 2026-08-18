@@ -293,6 +293,74 @@ describe('ReconnectSupervisor', () => {
     expect(added).toBe(1);
   });
 
+  it('opens ONE attempt loop when the client reports a loss twice', async () => {
+    // amqplib's `onSocketError` emits `'error'` and then `'close'`, and
+    // RabbitMqBroker wires the SAME listener to both, so a single socket loss
+    // calls fault() twice. Without the fault-window guard each call started
+    // its own reconnect loop: two connections opened, one orphaned (never
+    // closed, because `#reconnect()` overwrites `#connection`), and a
+    // duplicate consumer registered per active subscription.
+    const clock = makeClock();
+    let reconnects = 0;
+    let replays = 0;
+    const sup = new ReconnectSupervisor({
+      runtime: makeRuntime(clock),
+      mode: 'drive',
+      reconnect: () => {
+        reconnects++;
+        return Promise.resolve();
+      },
+      replay: () => {
+        replays++;
+        return Promise.resolve();
+      },
+      attachFaultListener: () => () => {},
+    });
+    sup.start();
+
+    sup.fault(); // 'error'
+    sup.fault(); // 'close', same underlying loss
+
+    expect(clock.pending()).toBe(1);
+    clock.advance(60_000);
+    await flush();
+    await flush();
+
+    expect(reconnects).toBe(1);
+    expect(replays).toBe(1);
+  });
+
+  it('opens a fresh attempt loop for a LATER, distinct fault', async () => {
+    // The guard is a fault WINDOW, not a one-shot: once an attempt succeeds
+    // the window closes, and a subsequent outage must reconnect again.
+    const clock = makeClock();
+    let reconnects = 0;
+    const sup = new ReconnectSupervisor({
+      runtime: makeRuntime(clock),
+      mode: 'drive',
+      reconnect: () => {
+        reconnects++;
+        return Promise.resolve();
+      },
+      replay: () => Promise.resolve(),
+      attachFaultListener: () => () => {},
+    });
+    sup.start();
+
+    sup.fault();
+    clock.advance(60_000);
+    await flush();
+    await flush();
+    expect(reconnects).toBe(1);
+    expect(sup.faulted).toBe(false);
+
+    sup.fault(); // a new outage, after recovery
+    clock.advance(60_000);
+    await flush();
+    await flush();
+    expect(reconnects).toBe(2);
+  });
+
   it('fault() before start() is a no-op', () => {
     const runtime = makeRuntime(makeClock());
     const sup = new ReconnectSupervisor({

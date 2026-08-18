@@ -83,13 +83,17 @@ jobs:
           --health-timeout 5s
           --health-retries 20
       minio:
-        image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+        # `edge-cicd` is MinIO's purpose-built CI image: it starts the server
+        # with NO command. That matters because a GitHub Actions service
+        # container accepts only image/credentials/env/ports/volumes/options —
+        # there is no `command` (or `environment`) key, and the stock RELEASE
+        # image prints its usage and exits when started without `server /data`.
+        image: minio/minio:edge-cicd
         ports:
           - 9000:9000
-        environment:
+        env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin
-        command: server /data --console-address ":9001"
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
           --health-interval 10s
@@ -100,7 +104,7 @@ jobs:
         ports:
           - 1025:1025
         options: >-
-          --health-cmd "curl -f http://localhost:8025/health"
+          --health-cmd "/mailpit readyz"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
