@@ -83,6 +83,7 @@ package fits the plugin architecture.
 | `assertRealPathContained`    | function  |
 | `contentTypeFor`             | function  |
 | `createCapabilityToken`      | function  |
+| `createCachedProbe`          | function  |
 | `decodeFrameData`            | function  |
 | `encodeFrameData`            | function  |
 | `err`                        | function  |
@@ -115,6 +116,7 @@ package fits the plugin architecture.
 | `AddJobOptions`              | interface |
 | `AuditEntry`                 | interface |
 | `BulkheadPolicy`             | interface |
+| `CachedProbeOptions`         | interface |
 | `CircuitBreakerPolicy`       | interface |
 | `ClassProvider`              | interface |
 | `CookieAttributes`           | interface |

@@ -218,7 +218,7 @@ describe('QueuePlugin integration', () => {
     const health = await ctx.health.check();
     expect(health['queue.background']).toBeDefined();
     expect(health['queue.background']?.status).toBe('up');
-    expect(health['queue.background']?.data).toEqual({ adapter: 'MemoryQueue' });
+    expect(health['queue.background']?.data).toEqual({ adapter: 'MemoryQueue', reachable: true });
   });
 
   it('rabbitmq adapter: adds and processes a job through the recording fixture', async () => {

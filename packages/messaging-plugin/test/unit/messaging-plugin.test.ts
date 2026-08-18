@@ -233,7 +233,7 @@ describe('MessagingPlugin', () => {
     const result = await indicator();
 
     expect(result.status).toBe('up');
-    expect(result.data).toEqual({ broker: 'memory' });
+    expect(result.data).toEqual({ broker: 'memory', reachable: true });
   });
 
   it('lifecycle handler disconnects broker on close', async () => {
@@ -276,7 +276,7 @@ describe('MessagingPlugin', () => {
     indicator = healthIndicators.get(CAPABILITIES.MESSAGING) as () => Promise<HealthCheckResult>;
     result = await indicator();
     expect(result.status).toBe('down');
-    expect(result.data).toEqual({ broker: 'memory' });
+    expect(result.data).toEqual({ broker: 'memory', reachable: false });
   });
 
   it('logger is optional and used when provided', async () => {
@@ -390,7 +390,7 @@ describe('MessagingPlugin', () => {
     >;
     const memoryResult = await memoryIndicator();
 
-    expect(memoryResult.data).toEqual({ broker: 'memory' });
+    expect(memoryResult.data).toEqual({ broker: 'memory', reachable: true });
   });
 
   it.ignore('redis-streams uses custom URL', async () => {
@@ -426,7 +426,7 @@ describe('MessagingPlugin', () => {
     >;
     const result = await indicator();
 
-    expect(result.data).toEqual({ broker: 'memory' });
+    expect(result.data).toEqual({ broker: 'memory', reachable: true });
   });
 
   it('logger is registered and used', async () => {
@@ -531,6 +531,107 @@ describe('MessagingPlugin', () => {
     expect(broker).toBeDefined();
     expect(typeof (broker as { isReady: () => boolean }).isReady).toBe('function');
     expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
+
+  // M70c review: the per-arm option passthroughs in the broker factory were
+  // the only uncovered branches in this file, and an option that never reaches
+  // its broker is the dead-option defect CLAUDE.md calls out. Each assertion
+  // below is on the TRANSLATED call, not on the option going in.
+  it('rabbitmq arm passes exchangeName and defaultQueue through to the broker', async () => {
+    const fakeClient = new FakeAmqpConnection();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'rabbitmq',
+      client: fakeClient as unknown as IAmqpConnection,
+      url: 'amqp://localhost:5672',
+      exchangeName: 'custom-exchange',
+      defaultQueue: 'custom-queue',
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as {
+      subscribe: (topic: string, handler: () => void) => Promise<unknown>;
+    };
+    await broker.subscribe('orders.created', () => {});
+
+    const channel = await fakeClient.createChannel();
+    const exchanges = channel.calls
+      .filter((c) => c.method === 'assertExchange')
+      .map((c) => c.args[0]);
+    const queues = channel.calls
+      .filter((c) => c.method === 'assertQueue')
+      .map((c) => String(c.args[0]));
+
+    expect(exchanges).toContain('custom-exchange');
+    expect(exchanges).not.toContain('messaging');
+    expect(queues.some((q) => q.startsWith('custom-queue-'))).toBe(true);
+  });
+
+  it('pubsub arm passes defaultQueue and replyTopic through to the broker', async () => {
+    const opened: Array<{ topic: string; subscription: string }> = [];
+    const transport = {
+      publish: () => Promise.resolve(),
+      open: (topic: string, subscription: string) => {
+        opened.push({ topic, subscription });
+        return Promise.resolve({ close: () => Promise.resolve() });
+      },
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'pubsub',
+      projectId: 'test-project',
+      credentials: { client_email: 'x@y.z' },
+      defaultQueue: 'ps-consumers',
+      replyTopic: 'ps-replies',
+      client: transport as unknown as never,
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as {
+      subscribe: (topic: string, handler: () => void) => Promise<unknown>;
+    };
+    await broker.subscribe('orders.created', () => {});
+
+    expect(opened.length).toBeGreaterThan(0);
+    expect(opened[0].subscription).toContain('ps-consumers');
+  });
+
+  it('service-bus arm passes defaultQueue and replyTopic through to the broker', async () => {
+    const opened: Array<{ topic: string; subscription: string }> = [];
+    const transport = {
+      send: () => Promise.resolve(),
+      open: (topic: string, subscription: string) => {
+        opened.push({ topic, subscription });
+        return Promise.resolve({ close: () => Promise.resolve() });
+      },
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'service-bus',
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
+      defaultQueue: 'sb-consumers',
+      replyTopic: 'sb-replies',
+      client: transport as unknown as never,
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as {
+      subscribe: (topic: string, handler: () => void) => Promise<unknown>;
+    };
+    await broker.subscribe('orders.created', () => {});
+
+    expect(opened.length).toBeGreaterThan(0);
+    expect(opened[0].subscription).toContain('sb-consumers');
   });
 
   // P2: NATS broker registers with injected client
@@ -817,7 +918,8 @@ describe('MessagingPlugin', () => {
     >;
     const result = await indicator();
     expect(result.status).toBe('up');
-    expect(result.data).toEqual({ broker: 'custom' });
+    // The custom instance exposes no isHealthy, so reachability is unknown.
+    expect(result.data).toEqual({ broker: 'custom', reachable: 'unknown' });
   });
 
   // custom arm — isReady wrapper reports false after disconnect
@@ -953,7 +1055,8 @@ describe('MessagingPlugin', () => {
       { status: string; data?: { broker: string } }
     >;
     const result = await indicator();
-    expect(result.data).toEqual({ broker: 'pubsub' });
+    // The fake transport exposes no isHealthy, so reachability is unknown.
+    expect(result.data).toEqual({ broker: 'pubsub', reachable: 'unknown' });
   });
 
   it('health indicator reports service-bus broker type', async () => {
@@ -978,7 +1081,8 @@ describe('MessagingPlugin', () => {
       { status: string; data?: { broker: string } }
     >;
     const result = await indicator();
-    expect(result.data).toEqual({ broker: 'service-bus' });
+    // The fake transport exposes no isHealthy, so reachability is unknown.
+    expect(result.data).toEqual({ broker: 'service-bus', reachable: 'unknown' });
   });
 
   // ─── kafka with injected client (no fake factory, just registers) ─────────

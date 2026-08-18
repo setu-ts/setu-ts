@@ -348,6 +348,43 @@ describe('QueueService', () => {
       expect(result.data?.adapter).toBe('MemoryQueue');
     });
 
+    it('returns up with reachable true when ready and reachable', async () => {
+      await service.connect();
+      const result = await service.createHealthIndicator()();
+      expect(result.status).toBe('up');
+      expect(result.data).toEqual({ adapter: 'MemoryQueue', reachable: true });
+    });
+
+    it('returns up with reachable unknown when the adapter cannot probe', async () => {
+      const noProbe = new MemoryQueue();
+      // Shadow the prototype isHealthy with an absent own property (M53 class).
+      Object.defineProperty(noProbe, 'isHealthy', { value: undefined, configurable: true });
+      const svc = new QueueService(noProbe, runtime, {
+        defaultMaxAttempts: 3,
+        pollIntervalMs: 100,
+      });
+      await svc.connect();
+      const result = await svc.createHealthIndicator()();
+      expect(result.status).toBe('up');
+      expect(result.data).toEqual({ adapter: 'MemoryQueue', reachable: 'unknown' });
+    });
+
+    it('returns down with reachable false when ready but unreachable', async () => {
+      class UnhealthyQueue extends MemoryQueue {
+        override isHealthy(): Promise<boolean> {
+          return Promise.resolve(false);
+        }
+      }
+      const svc = new QueueService(new UnhealthyQueue(), runtime, {
+        defaultMaxAttempts: 3,
+        pollIntervalMs: 100,
+      });
+      await svc.connect();
+      const result = await svc.createHealthIndicator()();
+      expect(result.status).toBe('down');
+      expect(result.data).toEqual({ adapter: 'UnhealthyQueue', reachable: false });
+    });
+
     it('returns down when not ready', async () => {
       const indicator = service.createHealthIndicator();
       const result = await indicator();

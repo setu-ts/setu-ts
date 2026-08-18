@@ -47,6 +47,39 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Reachability-aware health signals for six infrastructure plugins** (M70c). `messaging-plugin`,
+  `realtime-backplane-plugin`, `storage-plugin`, `mail-plugin`, `queue-plugin`, and
+  `service-discovery-plugin` now report a backend's _reachability_, not just its lifecycle. Each
+  provider/broker/adapter gains an optional `isHealthy()` probe (a `PING`, a `HEAD`, a
+  `GetQueueAttributes`, Consul's `/v1/status/leader`, a Kubernetes `limit=1` EndpointSlice LIST),
+  and each plugin's indicator maps the two signals — `isReady()` (lifecycle) and `isHealthy()`
+  (reachability) — to a status. A configured backend that is down is now `down` (or `degraded` for
+  the backplane, whose local delivery still works) instead of `up`. An unprobeable provider honestly
+  reports `data.reachable: 'unknown'` rather than claiming health.
+- **`createCachedProbe(options)` and `CachedProbeOptions` in `@setu-ts/common`** (M70c). A small
+  pure helper that wraps a reachability check in a cache so a health scrape does not become load
+  against the backend: the outcome is cached for `ttlMs` (default 5000) measured on an injected
+  **monotonic** clock, concurrent callers during one in-flight probe share a single probe call, and
+  each probe is bounded by `timeoutMs` (default 2000) on an injected timer seam
+  (`setTimer`/`clearTimer`, defaulting to the ambient ones) so a custom `IRuntimeServices`' timers
+  are honoured rather than bypassed. A probe that rejects, throws, or exceeds its timeout resolves
+  `false` — the returned function never rejects. Reporting _unprobeable_ is the caller's job, not
+  the helper's: a port that implements no probe is what each plugin's indicator surfaces as
+  `data.reachable: 'unknown'`.
+- **`ReconnectSupervisor` in `messaging-plugin`** (M70c). A `drive`-mode broker (RabbitMQ — amqplib
+  has no reconnection of its own) now re-establishes its connection on loss through a backoff-driven
+  supervisor instead of failing open, re-asserting the exchange and replaying every active
+  subscription. Retries are **unbounded** by design, with full-jitter exponential backoff capped at
+  30s: an outage longer than any attempt cap is exactly the case that must still self-repair, and
+  the health signal reports the fault throughout. A single connection loss opens exactly one attempt
+  loop even when the client reports it through more than one event (amqplib emits `'error'` and then
+  `'close'`). The broker exposes a `reachability()` that distinguishes "connected and answering"
+  from "connected but the backend stopped answering".
+- **`docs/health-indicators.md` and `test/health-indicator-audit.test.ts`** (M70c). A classification
+  of every `ctx.health.register` site in the framework — `live-state`, `justified-literal`, or
+  `configuration-literal` — enforced by a test that fails if a new (or moved) indicator is added
+  unclassified. Five out-of-scope `configuration-literal` sites that hide a real backend are
+  recorded in `smoke/DEFECTS.md` (H-70c-1…H-70c-5).
 - **Worker pool metrics** (M45b). With `@setu-ts/metrics-plugin` registered,
   `@setu-ts/worker-pool-plugin` now publishes six Prometheus series, all labelled `task_module`:
   gauges `worker_pool_workers`, `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
@@ -115,6 +148,24 @@ All notable changes to this project are documented here. The format follows
   **`UnsupportedFilterOperatorError`** — see **Changed** for the `contains` behaviour they govern.
 
 ### Changed
+
+- **Breaking (behaviour): the gRPC health bridge maps `degraded → NOT_SERVING`** (M70c, X7-8). It
+  previously mapped `degraded → SERVING`, so a degraded process answered `SERVING` on
+  `grpc.health.v1.Health/Check` while the health plugin's `/ready` already returned `503` — the two
+  health faces of one process disagreed, and gRPC clients kept load-balancing onto a replica HTTP
+  had taken out of rotation. **Migration:** a client that relied on `SERVING` while a process is
+  degraded now sees `NOT_SERVING`; that is the agreement the framework's own default already
+  produced on the HTTP side. `up → SERVING` and `down → NOT_SERVING` are unchanged.
+- **Breaking (behaviour): a service-discovery indicator reports `down`, not `up`, when its backend
+  was never reached** (M70c, X10-3). The old comment claimed `down` was "unreachable by
+  construction", but a provider that never resolved (e.g. a Kubernetes API whose TLS the runtime
+  rejects) reported `up` forever. The indicator now composes `everResolved` (set on the first
+  successful read, never by a stale-cache serve) with the provider's reachability probe:
+  never-resolved-and-unreachable is `down`, a stale cache or a just-unreachable warm cache is
+  `degraded`, otherwise `up`.
+- **Health indicators are projected to `{ status, data }`** (M70c, X3-7). An indicator's undeclared
+  fields were previously echoed verbatim into `/health` — a returned `details` sat beside the
+  built-ins' `data`. The health service now projects every result to the documented shape.
 
 - **Breaking (behaviour): an unhandled non-`HttpError` 500 no longer carries its own message.**
   `maskInternalErrors` defaults to `true`, so the body's `detail`/`message` becomes the status
@@ -208,6 +259,39 @@ All notable changes to this project are documented here. The format follows
   which is where a routing failure can still be logged. Behaviour on the wire is unchanged.
 - Node's raw `upgrade` listener now refuses an unroutable upgrade with the status the pipeline
   produced (`404` for a path with no WebSocket route) rather than a fixed `400`.
+
+### Fixed
+
+- **X10-3 — a service-discovery indicator that never reached its backend reported `up`** (M70c). See
+  Changed.
+- **X7-8 — the gRPC health bridge disagreed with `/ready` about a degraded process** (M70c). See
+  Changed.
+- **X3-7 — a health indicator's undeclared fields leaked into `/health`** (M70c). See Changed.
+- **`S3Provider` is unusable against MinIO/R2/B2 with a custom `endpoint`** (M70c). The client
+  config never set `forcePathStyle`, so the AWS SDK used virtual-hosted-style addressing
+  (`<bucket>.<endpoint>`) against the custom host and every request failed (400 MalformedXML on
+  `put`, 404 NoSuchBucket on `get`). A custom `endpoint` now forces path-style
+  (`<endpoint>/<bucket>/<key>`), which is what the documented "R2 and MinIO via `endpoint`" promise
+  requires; AWS (no `endpoint`) is unchanged.
+- **The Redis backplane reachability probe reported `false` forever against a healthy Redis**
+  (M70c). `RedisBackplane` captured `client.ping` and called it unbound; ioredis's `ping()` reads
+  `this.options`, so the call threw
+  `TypeError: Cannot read properties of undefined (reading
+  'options')`, swallowed into `false` —
+  the indicator reported `degraded`/`reachable: false` for a healthy backplane, inverting the
+  milestone's purpose. The probe now calls `ping.call(client)` (the pattern `RedisStreamsBroker`
+  already used).
+- **`RedisQueue.isHealthy()` reported `false` forever against a healthy Redis** (M70c). The same
+  unbound `ping()` defect in the queue adapter's probe; fixed with `ping.call(client)`.
+- **`RabbitMqQueue` crashed the host process on a real backend outage** (M70c, surfaced by the §3.7
+  real-outage suite). Two defects no fake-based test could construct: `disconnect()` threw
+  `IllegalOperationError: Channel closed` when the channel/connection had already been torn down by
+  the fault (both closes are now best-effort), and `connect()` installed the connection's `'error'`
+  fault listener only AFTER `createChannel()` — a socket reset during channel creation (the port is
+  open before the AMQP handshake is ready after a restart) was an unhandled `'error'` event that
+  killed the process. The listener is now installed before the channel is created, and the channel
+  gets its own `'error'` listener (amqplib emits `error` on every channel when the connection
+  resets).
 
 ### Deprecated
 

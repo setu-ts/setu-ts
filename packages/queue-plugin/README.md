@@ -155,6 +155,19 @@ progression, and DLQ promotion.
 
 MIT
 
+## Health indicator
+
+Registered under the queue's capability token. Since M70c it reports two signals: the adapter's
+lifecycle (`isReady()`) and its reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                   |
+| ------ | ----------------------------------------------------------------------------------------- |
+| `up`   | The adapter is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The adapter is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ adapter, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the adapter has no liveness check.
+
 ## Exports
 
 | Export                         | Kind      |

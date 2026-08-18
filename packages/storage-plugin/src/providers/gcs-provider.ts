@@ -226,6 +226,15 @@ export class GcsProvider implements StorageProvider {
   #client: IGcsClient | null = null;
   readonly #options: GcsProviderOptions;
   readonly #now: () => number;
+  /**
+   * M70c: delegates to the injected client's optional `isHealthy?()` (the real
+   * adapter calls `bucket.exists()`). Assigned in `connect()` only when the
+   * client provides the member; a client that omits it is *unknown*, and the
+   * indicator reads absence (not `false`) as that.
+   *
+   * @since 0.1.0
+   */
+  isHealthy?: () => Promise<boolean>;
 
   /**
    * @param options - GCS connection/injection options
@@ -251,14 +260,30 @@ export class GcsProvider implements StorageProvider {
         );
       }
       this.#client = injected;
-      return;
+    } else {
+      this.#client = adaptGcsModule(await loadGcsModule(), this.#options);
     }
-    this.#client = adaptGcsModule(await loadGcsModule(), this.#options);
+    this.#installProbe();
+  }
+
+  /**
+   * M70c: installs `isHealthy` when the client exposes the optional member;
+   * leaves it absent (unknown) otherwise.
+   */
+  #installProbe(): void {
+    const client = this.#client;
+    if (client !== null && typeof client.isHealthy === 'function') {
+      const probe = client.isHealthy;
+      this.isHealthy = (): Promise<boolean> => probe();
+    } else {
+      delete this.isHealthy;
+    }
   }
 
   /** Disconnect is a no-op for GCS (connectionless HTTP client). */
   disconnect(): Promise<void> {
     this.#client = null;
+    delete this.isHealthy;
     return Promise.resolve();
   }
 

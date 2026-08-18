@@ -53,6 +53,20 @@ export interface IRedisBackplaneClient {
   off(event: string, listener: (channel: string, message: string) => void): void;
   /** Closes the connection. */
   quit(): Promise<unknown>;
+  /**
+   * M70c: resolves when this connection is alive. Optional so a minimal
+   * injected fake still type-checks; the real `ioredis` client exposes it.
+   *
+   * @since 0.2.0
+   */
+  ping?(): Promise<unknown>;
+  /**
+   * M70c: the `ioredis` connection state (`'ready'` when usable). Optional for
+   * the same reason as {@linkcode ping}.
+   *
+   * @since 0.2.0
+   */
+  readonly status?: string;
 }
 
 /**

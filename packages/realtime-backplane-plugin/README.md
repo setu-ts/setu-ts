@@ -113,6 +113,20 @@ Redis or the broker misses frames sent during the partition. Frames are not pers
 
 MIT
 
+## Health indicator
+
+Registered as `realtime-backplane`. Since M70c it probes the transport's reachability
+(`isHealthy()`). A fan-out failure is `degraded` — local delivery still works, so `/ready` keeps
+serving — never `down`. A transport that cannot probe reports `up` with `reachable: 'unknown'`.
+
+| Status     | Meaning                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `up`       | The transport is reachable, or cannot be probed (`reachable` is `'unknown'`).           |
+| `degraded` | The transport is unreachable — a fan-out to a peer failed (local delivery still works). |
+
+`data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
+`'unknown'`.
+
 ## Exports
 
 | Export                           | Kind      |

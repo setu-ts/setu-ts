@@ -232,13 +232,26 @@ export function MessagingPlugin(
       // Register the broker as IMessageBroker
       ctx.services.register<IMessageBroker>(token, broker);
 
-      // Register health indicator
-      // deno-lint-ignore require-await
+      // Register health indicator. M70c: reports BOTH signals. `isReady()` is
+      // lifecycle (never started / shut down → `down`); `reachability()` is
+      // reachability (the backend answers right now). A ready-but-unreachable
+      // broker is `down` with `data.reachable: false` — the distinction an
+      // operator needs to tell "we never started" from "the broker restarted
+      // under us". An unprobeable broker (custom arm without `isHealthy`) is
+      // `up` with `data.reachable: 'unknown'`, honestly reporting "we did not
+      // check".
       const healthIndicator: HealthIndicatorFn = async () => {
-        return {
-          status: broker.isReady() ? 'up' : 'down',
-          data: { broker: brokerType },
-        };
+        if (!broker.isReady()) {
+          return { status: 'down', data: { broker: brokerType, reachable: false } };
+        }
+        const reachable = await broker.reachability();
+        if (reachable === false) {
+          return { status: 'down', data: { broker: brokerType, reachable: false } };
+        }
+        if (reachable === undefined) {
+          return { status: 'up', data: { broker: brokerType, reachable: 'unknown' } };
+        }
+        return { status: 'up', data: { broker: brokerType, reachable: true } };
       };
       ctx.health.register(token, healthIndicator);
 

@@ -18,6 +18,15 @@ jobs:
       SQS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
+      # M70c §3.7 real-outage suites: a real broker/backend, really stopped.
+      # Guarded on these env vars and NOT in ALLOW_SKIP, so a dropped service
+      # or a missing var fails the job instead of quietly skipping.
+      RABBITMQ_URL: amqp://localhost:5672
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_BUCKET: m70c-verify
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      SMTP_URL: smtp://localhost:1025
     services:
       redis:
         image: redis:7
@@ -40,6 +49,53 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # M70c §3.7: the RabbitMQ outage suites (messaging broker + queue) need a
+      # real broker to stop and restart. Higher retries than the other services:
+      # the Erlang VM needs a few seconds before `rabbitmq-diagnostics ping`
+      # answers, and the outage test stops/restarts the container, so the
+      # service must be healthy before the first test runs.
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+      # M70c §3.7: the S3 outage suite (storage-plugin) needs a real
+      # S3-compatible gateway. The bucket is created by the test itself
+      # (ensureBucket), so the service starts with an empty data dir.
+      minio:
+        # `edge-cicd` is MinIO's purpose-built CI image: it starts the server
+        # with NO command. That matters because a GitHub Actions service
+        # container accepts only image/credentials/env/ports/volumes/options —
+        # there is no `command` (or `environment`) key, and the stock RELEASE
+        # image prints its usage and exits when started without `server /data`.
+        image: minio/minio:edge-cicd
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      # M70c §3.7: the SMTP outage suite (mail-plugin) needs a real SMTP
+      # server. Only the SMTP port is published; readiness uses Mailpit's own
+      # `readyz` subcommand because the image ships neither curl nor a
+      # `/health` route (verified: `/health` 404s, `/readyz` answers 200).
+      mailpit:
+        image: axllent/mailpit:v1.20.4
+        ports:
+          - 1025:1025
+        options: >-
+          --health-cmd "/mailpit readyz"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 

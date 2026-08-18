@@ -57,6 +57,19 @@ The template engine renders named `{{ variable }}` placeholders. The `html` body
 **HTML-escaped**; a missing variable or an unknown template **throws** rather than rendering an
 empty string.
 
+## Health indicator
+
+Registered under the `mail` capability. Since M70c it reports two signals: the provider's lifecycle
+(`isReady()`) and its reachability (`isHealthy()`).
+
+| Status | Meaning                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `up`   | The provider is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The provider is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
+the provider has no liveness check (e.g. the log provider always reports `true`).
+
 ## Exports
 
 | Export                    | Kind      |

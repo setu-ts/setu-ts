@@ -104,6 +104,14 @@ export class RedisQueue implements QueueAdapter {
   #url: string;
   #injectedClient: IRedisQueueClient | undefined;
   #ready = false;
+  /**
+   * M70c: present only when the client exposes `ping()`; its absence is
+   * *unknown* reachability, not `false` (a minimal injected fake has not told
+   * us the server is dead).
+   *
+   * @since 0.1.0
+   */
+  isHealthy?: () => Promise<boolean>;
 
   constructor(options?: RedisQueueOptions) {
     this.#url = options?.url ?? 'redis://localhost:6379';
@@ -119,6 +127,31 @@ export class RedisQueue implements QueueAdapter {
       await this.#client.connect();
     }
     this.#ready = true;
+    this.#installProbe();
+  }
+
+  /**
+   * M70c: installs `isHealthy` from the client's `ping()` when present; leaves
+   * it absent (unknown) otherwise.
+   */
+  #installProbe(): void {
+    const client = this.#client;
+    if (client !== null && typeof client.ping === 'function') {
+      const ping = client.ping;
+      this.isHealthy = async (): Promise<boolean> => {
+        try {
+          // ioredis `ping` reads `this.options` — an unbound call throws
+          // `TypeError: Cannot read properties of undefined (reading 'options')`
+          // and `isHealthy()` would report `false` forever against a healthy server.
+          await ping.call(client);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+    } else {
+      delete this.isHealthy;
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -127,6 +160,7 @@ export class RedisQueue implements QueueAdapter {
     }
     this.#client = null;
     this.#ready = false;
+    delete this.isHealthy;
   }
 
   isReady(): boolean {

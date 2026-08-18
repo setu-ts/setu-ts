@@ -115,6 +115,19 @@ export class RabbitMqQueue implements QueueAdapter {
   #connection: IAmqpQueueConnection | null = null;
   #channel: IAmqpQueueChannel | null = null;
   #ready = false;
+  /**
+   * M70c: set when the connection fires `'error'`/`'close'` — the same fault
+   * mechanism as the RabbitMQ broker. `isHealthy` reads it, so a faulted
+   * connection is `down` even though it is still "ready".
+   */
+  #faulted = false;
+  /**
+   * M70c: present only when the connection exposes `on?`; its absence is
+   * *unknown* reachability, not `false`.
+   *
+   * @since 0.1.0
+   */
+  isHealthy?: () => Promise<boolean>;
   // Per-name: processing jobs (reserved but not acked/dead-lettered)
   #processing: Map<string, Map<string, { message: unknown; job: StoredJob<unknown> }>>;
   // Recurring jobs (in-memory, non-durable)
@@ -195,9 +208,69 @@ export class RabbitMqQueue implements QueueAdapter {
       return;
     }
     this.#connection = await resolveClient(this.#url, this.#injectedClient);
+    // A freshly-resolved connection is not faulted. Set this BEFORE installing
+    // the fault listener so a reset that lands during `createChannel()` (right
+    // after a backend restart, when the port is open before the AMQP handshake
+    // is ready) is recorded, not cleared.
+    this.#faulted = false;
+    // Install the connection fault listener BEFORE `createChannel()`: the
+    // broker can reset the socket while the channel is being created, and an
+    // unlistened connection `'error'` is an unhandled event that crashes the
+    // host process — a defect a fake-based test can never construct (a fake
+    // connection never emits).
+    this.#installConnectionFaultListener();
     // Create channel unconditionally from the resolved connection
     this.#channel = await this.#connection.createChannel();
     this.#ready = true;
+    // Guard the channel the same way: amqplib emits `'error'` on every channel
+    // when the underlying connection resets.
+    this.#installChannelFaultListener();
+    // Expose the probe only once the lifecycle is ready. A connection without
+    // an `on` surface is *unknown* reachability, not `false` (the indicator
+    // reads absence, not a false positive).
+    if (this.#connection !== null && typeof this.#connection.on === 'function') {
+      this.isHealthy = (): Promise<boolean> => Promise.resolve(!this.#faulted);
+    } else {
+      delete this.isHealthy;
+    }
+  }
+
+  /**
+   * M70c: installs the `'error'`/`'close'` fault listener on the connection
+   * when it exposes `on?`. Installed before `createChannel()` (see
+   * {@linkcode connect}) so a reset during channel creation is handled rather
+   * than crashing the host process as an unhandled `'error'` event.
+   */
+  #installConnectionFaultListener(): void {
+    const connection = this.#connection;
+    if (connection !== null && typeof connection.on === 'function') {
+      const listener = (): void => {
+        this.#faulted = true;
+      };
+      connection.on('error', listener);
+      connection.on('close', listener);
+    }
+  }
+
+  /**
+   * M70c: installs an `'error'` listener on the channel when it exposes one.
+   * amqplib emits `error` on **every** channel when the underlying connection
+   * resets (ECONNRESET during a real backend outage). An unlistened channel
+   * `error` is an unhandled `'error'` event that crashes the host process — a
+   * defect a fake-based test can never construct (a fake channel never emits).
+   * The listener marks the adapter faulted (redundant with the connection
+   * listener, but truthful for a channel that faults before the connection
+   * event lands).
+   */
+  #installChannelFaultListener(): void {
+    const channel = this.#channel as unknown as {
+      on?: (event: string, listener: () => void) => void;
+    } | null;
+    if (channel !== null && typeof channel.on === 'function') {
+      channel.on('error', (): void => {
+        this.#faulted = true;
+      });
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -205,14 +278,29 @@ export class RabbitMqQueue implements QueueAdapter {
     this.#processing.clear();
     // Clear asserted queues so they are re-asserted on next connect
     this.#asserted.clear();
-    // Close channel
+    // Clear the fault flag (M70c)
+    this.#faulted = false;
+    delete this.isHealthy;
+    // Close channel. Best-effort: after a backend outage amqplib has already
+    // torn the channel down, so `close()` throws `IllegalOperationError:
+    // Channel closed`. A `disconnect()` must not throw on a faulted
+    // connection — the channel is already gone and there is nothing to close.
     if (this.#channel) {
-      await this.#channel.close();
+      try {
+        await this.#channel.close();
+      } catch {
+        // Already closed by the fault; nothing to do.
+      }
       this.#channel = null;
     }
-    // Close connection only if not injected (lazy-loaded)
+    // Close connection only if not injected (lazy-loaded). Same best-effort
+    // rationale as the channel above.
     if (this.#connection && !this.#injectedClient) {
-      await this.#connection.close();
+      try {
+        await this.#connection.close();
+      } catch {
+        // Already closed by the fault; nothing to do.
+      }
       this.#connection = null;
     }
     this.#ready = false;

@@ -44,6 +44,13 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   readonly #inFlight = new Map<string, Promise<readonly ServiceInstance[]>>();
   readonly #watches = new Set<Unsubscribe>();
   #degraded = false;
+  /**
+   * M70c: set on the first successful provider read. Distinct from
+   * `#degraded` (which requires a prior success to fall back to), this is what
+   * lets the indicator report `down` for a provider that has never once
+   * reached its backend — the X10-3 case.
+   */
+  #everResolved = false;
 
   /**
    * @param provider - The discovery backend
@@ -74,6 +81,15 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     return this.#degraded;
   }
 
+  /**
+   * M70c: whether the provider has ever successfully resolved a service.
+   * `false` until the first success; a stale-cache serve never sets it
+   * retroactively (there was no prior success to serve from).
+   */
+  get everResolved(): boolean {
+    return this.#everResolved;
+  }
+
   /** Number of service names currently cached. */
   get cachedServices(): number {
     return this.#cache.size;
@@ -87,6 +103,24 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   /** Number of instances currently ejected. */
   get ejectedInstances(): number {
     return this.#ejection?.ejectedCount ?? 0;
+  }
+
+  /**
+   * M70c: probes the backend reachability for the health indicator. Delegates
+   * to the provider's optional `isHealthy?()`; a provider that cannot probe
+   * (no member) is treated as reachable so the indicator can fall back on
+   * `everResolved`/`degraded` — absence is never reported as `false`.
+   */
+  async isHealthy(): Promise<boolean> {
+    const probe = this.#provider.isHealthy;
+    if (typeof probe !== 'function') {
+      return true;
+    }
+    try {
+      return await probe();
+    } catch {
+      return false;
+    }
   }
 
   async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
@@ -151,6 +185,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       // for watched ones.
       this.#cache.set(serviceName, { instances, stampMs: this.#runtime.hrtime() });
       this.#degraded = false;
+      this.#everResolved = true;
       listener(instances);
     });
 
@@ -180,6 +215,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       const instances = await this.#provider.resolve(serviceName);
       this.#cache.set(serviceName, { instances, stampMs: this.#runtime.hrtime() });
       this.#degraded = false;
+      this.#everResolved = true;
       return instances;
     } catch (error) {
       if (stale !== undefined) {
