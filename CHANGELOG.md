@@ -70,6 +70,18 @@ All notable changes to this project are documented here. The format follows
   `configuration-literal` — enforced by a test that fails if a new (or moved) indicator is added
   unclassified. Five out-of-scope `configuration-literal` sites that hide a real backend are
   recorded in `smoke/DEFECTS.md` (H-70c-1…H-70c-5).
+- **Worker pool metrics** (M45b). With `@setu-ts/metrics-plugin` registered,
+  `@setu-ts/worker-pool-plugin` now publishes six Prometheus series, all labelled `task_module`:
+  gauges `worker_pool_workers`, `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
+  `worker_pool_tasks_completed_total`, `worker_pool_tasks_failed_total` and
+  `worker_pool_tasks_rejected_total` (the last two also labelled `reason`). Pool saturation was
+  previously answerable only by polling `/health` and diffing counts by hand. **Nothing is
+  configured and nothing changes without the metrics plugin** — the instruments exist exactly when
+  `CAPABILITIES.METRICS` does, there is no new plugin option, and no export was added. The gauges
+  are written from the same snapshot the `worker-pool` health indicator reads, so the two surfaces
+  cannot disagree, and no polling interval is armed. `..._failed_total` summed over `reason` equals
+  the health payload's `failed`; `..._rejected_total` covers refusals that never became tasks
+  (`queue_full`/`pool_closed`/`unavailable`), which the health payload cannot see at all.
 
 - **`setu add <plugin>`** — installs a framework package into the current project, pinned to the
   version of the CLI that added it, and updates `deno.json` and `package.json` when a project
@@ -254,6 +266,29 @@ All notable changes to this project are documented here. The format follows
 - `RpcInterceptorStore` (`@setu-ts/runtime`), `GrpcUnavailableError` and
   `GrpcService.createFetchHandler` (`@setu-ts/grpc-plugin`) — all reachable only through the retired
   pre-pipeline seam. Retained as published surface; nothing throws or installs them.
+
+### Fixed
+
+- **A non-cloneable worker task input no longer kills the host process** (M45b, X8-2).
+  `@setu-ts/worker-pool-plugin` documents that task inputs travel by structured clone, so passing a
+  function or a class instance is a documented misuse that should reject the returned promise — and
+  it did, but only when a worker happened to be idle. When the task was **queued** first, the
+  dispatch ran from inside a worker `message` callback with no promise to reject into, so the
+  `DataCloneError` escaped as an uncaught exception and **took the whole process down**, losing the
+  results of every other in-flight task with it. A pool of `size: 1` with one task already running
+  is an entirely ordinary state under load. `TaskPool.dispatch` now catches, rejects that task
+  alone, and keeps the worker — which never received the message — so the pool carries on and the
+  freed slot takes the next queued task instead of stalling behind the bad one. Both paths now
+  behave identically. No application change is required.
+
+### Known limitations
+
+- **`WorkerPoolPlugin({ taskTimeoutMs: 0 })` also disables crash detection for a self-terminated
+  worker** (X8-7, owned by M70k). Worker termination is not delivered as a host event, so the
+  timeout is the only thing that settles the task of a worker that ended itself; with the timeout
+  off, that `run()` never settles and its pool slot is never released, which wedges a `size: 1` pool
+  permanently. Set a timeout on any pool whose task module can call `self.close()`. The durable fix
+  needs a worker exit signal on `IWorkerHandle`, which `@setu-ts/common` does not currently declare.
 
 ## [0.1.0-alpha.8] — 2026-08-14
 

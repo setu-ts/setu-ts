@@ -97,6 +97,11 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
   in-flight task, drops the worker, and re-dispatches its queued work to survivors.
 - **Timeout.** A task exceeding its timeout rejects with `WorkerTaskTimeoutError`; the worker is
   terminated and replaced (in-flight JavaScript cannot be cancelled).
+- **`taskTimeoutMs: 0` also disables crash detection for a self-terminated worker.** A worker that
+  ends itself is not reported through any host event, so the timeout is the only thing that settles
+  its task; with the timeout off, that `run()` never settles and its pool slot is not released. Set
+  a timeout on any pool whose task module can call `self.close()`. (Tracked as smoke finding X8-7;
+  the durable fix needs a worker exit signal on `IWorkerHandle` and is owned by M70k.)
 - **Overload.** When the pending queue is at its bound, `run()` rejects with `WorkerQueueFullError`
   instead of growing memory without limit.
 - **Shutdown.** The plugin's `onClose` hook terminates every worker and rejects pending tasks.
@@ -110,6 +115,36 @@ All four are exported for `instanceof` handling: `WorkerPoolUnavailableError`, `
 
 Registers a `worker-pool` health indicator reporting `{ available, pools }`, where `pools` is one
 `{ taskModule, workers, busy, queued, completed, failed }` snapshot per pool.
+
+## Metrics
+
+When the application also registers `@setu-ts/metrics-plugin`, the pool publishes six Prometheus
+series. Nothing is configured and nothing changes without that plugin — the instruments exist only
+if `CAPABILITIES.METRICS` does.
+
+| Metric                              | Type    | Labels                 | Meaning                           |
+| ----------------------------------- | ------- | ---------------------- | --------------------------------- |
+| `worker_pool_workers`               | gauge   | `task_module`          | Worker threads alive              |
+| `worker_pool_busy_workers`          | gauge   | `task_module`          | Workers executing a task          |
+| `worker_pool_queued_tasks`          | gauge   | `task_module`          | Tasks waiting in the queue        |
+| `worker_pool_tasks_completed_total` | counter | `task_module`          | Tasks that completed successfully |
+| `worker_pool_tasks_failed_total`    | counter | `task_module`,`reason` | Admitted tasks that then failed   |
+| `worker_pool_tasks_rejected_total`  | counter | `task_module`,`reason` | Tasks refused before admission    |
+
+`reason` is `handler` | `timeout` | `crash` | `clone` | `shutdown` on the failure counter, and
+`queue_full` | `pool_closed` | `unavailable` on the rejection counter.
+
+**Saturation** — the question a pool exists to raise — reads as `worker_pool_queued_tasks` rising
+while `worker_pool_busy_workers` sits at `worker_pool_workers`, with
+`worker_pool_tasks_rejected_total{reason="queue_full"}` marking the point where the queue
+overflowed.
+
+The two counters are deliberately separate. `..._failed_total` summed over `reason` always equals
+the `failed` count in the health payload; `..._rejected_total` covers refusals that never became
+tasks, which the health payload cannot see at all.
+
+The gauges are written from the same snapshot the health indicator reads, on every pool state change
+— no polling interval is armed, so there is no timer to leak at shutdown.
 
 ## Exports
 
