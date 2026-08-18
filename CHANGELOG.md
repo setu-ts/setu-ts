@@ -257,6 +257,31 @@ All notable changes to this project are documented here. The format follows
 - **X7-8 — the gRPC health bridge disagreed with `/ready` about a degraded process** (M70c). See
   Changed.
 - **X3-7 — a health indicator's undeclared fields leaked into `/health`** (M70c). See Changed.
+- **`S3Provider` is unusable against MinIO/R2/B2 with a custom `endpoint`** (M70c). The client
+  config never set `forcePathStyle`, so the AWS SDK used virtual-hosted-style addressing
+  (`<bucket>.<endpoint>`) against the custom host and every request failed (400 MalformedXML on
+  `put`, 404 NoSuchBucket on `get`). A custom `endpoint` now forces path-style
+  (`<endpoint>/<bucket>/<key>`), which is what the documented "R2 and MinIO via `endpoint`" promise
+  requires; AWS (no `endpoint`) is unchanged.
+- **The Redis backplane reachability probe reported `false` forever against a healthy Redis**
+  (M70c). `RedisBackplane` captured `client.ping` and called it unbound; ioredis's `ping()` reads
+  `this.options`, so the call threw
+  `TypeError: Cannot read properties of undefined (reading
+  'options')`, swallowed into `false` —
+  the indicator reported `degraded`/`reachable: false` for a healthy backplane, inverting the
+  milestone's purpose. The probe now calls `ping.call(client)` (the pattern `RedisStreamsBroker`
+  already used).
+- **`RedisQueue.isHealthy()` reported `false` forever against a healthy Redis** (M70c). The same
+  unbound `ping()` defect in the queue adapter's probe; fixed with `ping.call(client)`.
+- **`RabbitMqQueue` crashed the host process on a real backend outage** (M70c, surfaced by the §3.7
+  real-outage suite). Two defects no fake-based test could construct: `disconnect()` threw
+  `IllegalOperationError: Channel closed` when the channel/connection had already been torn down by
+  the fault (both closes are now best-effort), and `connect()` installed the connection's `'error'`
+  fault listener only AFTER `createChannel()` — a socket reset during channel creation (the port is
+  open before the AMQP handshake is ready after a restart) was an unhandled `'error'` event that
+  killed the process. The listener is now installed before the channel is created, and the channel
+  gets its own `'error'` listener (amqplib emits `error` on every channel when the connection
+  resets).
 
 ### Deprecated
 

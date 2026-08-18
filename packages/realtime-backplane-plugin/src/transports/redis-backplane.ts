@@ -232,7 +232,10 @@ export class RedisBackplane implements IRealtimeBackplane {
           return false;
         }
         try {
-          await ping();
+          // ioredis `ping` reads `this.options` — an unbound call throws
+          // `TypeError: Cannot read properties of undefined (reading 'options')`
+          // and the probe would report `false` forever against a healthy server.
+          await ping.call(client);
         } catch {
           return false;
         }

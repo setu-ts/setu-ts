@@ -80,4 +80,54 @@ describe('RabbitMqQueue health (M70c)', () => {
     await queue.disconnect();
     expect(queue.isHealthy).toBeUndefined();
   });
+
+  it('M70c regression: installs the connection fault listener before createChannel()', async () => {
+    // A real backend can reset the socket while the channel is being created
+    // (right after a restart, the port is open before the AMQP handshake is
+    // ready). The connection `'error'` listener must therefore be installed
+    // BEFORE `createChannel()`; otherwise the reset is an unhandled `'error'`
+    // event that crashes the host process — a defect a fake can only model by
+    // asserting the ordering directly.
+    const flags = { errorListenerAttached: false };
+    let observedBeforeCreateChannel: boolean | undefined;
+    const channel = {
+      close: () => Promise.resolve(),
+    } as unknown as IAmqpQueueChannel;
+    const connectionObj: Record<string, unknown> = {
+      createChannel: () => {
+        observedBeforeCreateChannel = flags.errorListenerAttached;
+        return Promise.resolve(channel);
+      },
+      close: () => Promise.resolve(),
+      on: (event: string): void => {
+        if (event === 'error') flags.errorListenerAttached = true;
+      },
+    };
+    const queue = new RabbitMqQueue(new FakeRuntimeServices(), {
+      client: connectionObj as unknown as IAmqpQueueConnection,
+    });
+    await queue.connect();
+    expect(observedBeforeCreateChannel).toBe(true);
+  });
+
+  it('M70c regression: disconnect() does not throw after the channel already closed', async () => {
+    // After a real backend outage amqplib has already torn the channel and
+    // connection down, so `close()` on each throws `IllegalOperationError`.
+    // `disconnect()` must swallow both and still clear the lifecycle.
+    const channel = {
+      close: () => Promise.reject(new Error('Channel closed')),
+    } as unknown as IAmqpQueueChannel;
+    const connectionObj: Record<string, unknown> = {
+      createChannel: () => Promise.resolve(channel),
+      close: () => Promise.reject(new Error('Connection closed')),
+      on: (): void => {},
+    };
+    const queue = new RabbitMqQueue(new FakeRuntimeServices(), {
+      client: connectionObj as unknown as IAmqpQueueConnection,
+    });
+    await queue.connect();
+    await queue.disconnect();
+    expect(queue.isReady()).toBe(false);
+    expect(queue.isHealthy).toBeUndefined();
+  });
 });

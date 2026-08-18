@@ -2666,11 +2666,42 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   labels. Writing the coverage test for the reporter surfaced a fixture bug the type checker caught:
   `{ ...base }` on a class copies fields and DROPS every prototype method. All `src` files at 100%
   branch/function/line except `task-pool.ts` (98.8/100/100)) — complete (PR #170)
-- **Next milestone** — **M70c** (health signals that describe lifecycle, not reachability). Six
-  packages answer `up` with their backends stopped and `/ready` stays `200` (X2-1, X3-2, X8-5,
-  X10-3), so a dead dependency triggers no restart, no alert, and no rolling-deploy gate; the
-  register scopes it as a sweep against the `ISessionStore.isHealthy?()` shape and names
-  `worker-pool`'s indicator as the counter-example to build from.
+- **Milestone 70c** (`messaging-plugin` + `realtime-backplane-plugin` + `storage-plugin` +
+  `mail-plugin` + `queue-plugin` + `service-discovery-plugin` + `grpc-plugin` — health signals that
+  describe lifecycle, not reachability). Six packages answered `up` with their backends stopped and
+  `/ready` stayed `200` (X2-1, X3-2, X8-5, X10-3), so a dead dependency triggered no restart, no
+  alert, and no rolling-deploy gate. The seam is one optional member on the port —
+  `isHealthy?(): Promise<boolean>` — never a new status type: `isReady()` keeps its lifecycle
+  meaning, and each indicator reports both, so a reconnecting broker is `isReady() === true` and
+  `isHealthy() === false`. Probes are cached and time-bounded through one pure helper in `common`
+  (`createCachedProbe`), and each implementation's probe is decided from the probed client surface
+  (§3.4): `client.ping()` for the Redis adapters, a connection-fault flag for RabbitMQ,
+  `transport.verify?.()` for SMTP, a `head('')`-shaped bucket probe for S3, and `unknown` (not
+  `false`) when an injected facade lacks the primitive. RabbitMQ gets an explicit
+  `ReconnectSupervisor` in **drive** mode (amqplib has no reconnect of any kind) that re-asserts the
+  exchange and replays every active subscription — which is why X2-1's queues showed no consumers
+  after a broker restart and never recovered; redis-streams/nats/kafka run it in **observe** mode
+  because their clients self-heal. X3-7: the health report projects (`{ status, data?, latencyMs }`)
+  instead of spreading, so an indicator's undeclared fields and caller-supplied `latencyMs` never
+  reach `/health`. X10-3: `ServiceDiscoveryService` gains `#everResolved`, so "never reached the
+  backend" is a distinct, reportable `down`. X7-8: the gRPC health bridge maps `degraded` →
+  `NOT_SERVING` so the two faces of one app agree. **The §3.7 bar — a real backend, stopped — is a
+  deliverable, not a note**: five `outage-real.test.ts` suites (messaging, realtime-backplane,
+  storage, mail, queue) drive a real broker/gateway through a real `docker stop`/`start` and assert
+  `up → down → up`, guarded on `RABBITMQ_URL`/`REDIS_URL`/`S3_ENDPOINT_URL`/`SMTP_URL`, wired into
+  CI's service containers (rabbitmq, minio, mailpit) and pinned by `test/apps-gate.test.ts`, and
+  deliberately NOT in `ALLOW_SKIP` so a dropped service fails CI instead of skipping. Writing those
+  suites surfaced defects no fake could: the S3 provider never set `forcePathStyle` (every request
+  against a custom endpoint failed with 400/404), two ioredis `ping()` calls were unbound (the probe
+  reported `false` forever against a healthy Redis), and `RabbitMqQueue` threw on `disconnect()`
+  after a fault and crashed the host process on a reset during `createChannel()` (the connection
+  fault listener was installed too late) — all fixed and regression-tested. — complete (PR pending)
+- **Next milestone** — **M70d** (seams that construct with no arguments). The register's "single
+  most repeated defect": a CLI-owned barrel builds an artifact with `new X()` and the contract hands
+  it no context, so generated health indicators and command/query/event handlers can reach nothing,
+  and every affected exercise invented the same module-level-holder workaround (D4, X2-2, E3, E5);
+  the register states the fix — a factory arm on the registration types, which is non-breaking and
+  closes all of them.
 
 ## Verification (run before declaring any work done)
 
