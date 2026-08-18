@@ -3,7 +3,11 @@
  * §3.7 real-outage bar: drives a **real** Mailpit (SMTP) backend through a
  * **real** stop and restart, asserting `up → (stop) down → (restart) up`.
  *
- * Guarded on `SMTP_URL` (e.g. `smtp://localhost:1025`). NOT in `ALLOW_SKIP`.
+ * Guarded on `SMTP_URL` (e.g. `smtp://localhost:1025`): absent it, this suite
+ * skips. `ALLOW_SKIP` does not apply here — that variable is read only by
+ * `scripts/check-apps.ts` and governs `apps/`. What keeps this suite honest is
+ * `test/apps-gate.test.ts`, which pins the service, port mapping and env var in
+ * both workflows, so CI cannot silently stop running it.
  * `test/apps-gate.test.ts` pins the service, port mapping, and env var.
  */
 import { describe, it } from '@std/testing/bdd';

@@ -201,7 +201,10 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
     // channel — this is the X2-1 reproduction (queues showed no consumers
     // after a broker restart and never recovered, without replay).
     expect(await broker.reachability()).toBe(true);
-    expect(consumeCount()).toBeGreaterThan(before);
+    // Exact, not `toBeGreaterThan`: a loose bound passes just as happily with
+    // a duplicated replay, which is precisely the defect the sibling
+    // error+close test exists to catch.
+    expect(consumeCount()).toBe(before + 1);
   });
 
   it('a failing reconnect retries rather than terminating', async () => {

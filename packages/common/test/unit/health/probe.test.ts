@@ -30,6 +30,51 @@ class Deferred {
 }
 
 describe('createCachedProbe', () => {
+  it('bounds the probe with an INJECTED timer, not the ambient one', async () => {
+    // M70c review: the timeout previously reached for the ambient setTimeout
+    // while the TTL clock was injected. A custom IRuntimeServices' timers were
+    // therefore bypassed — the class M51b fixed when transports reached for
+    // global timers. Driving the seam with a controllable timer is what proves
+    // the injected surface is actually the one used.
+    const clock = new FakeClock();
+    let armed: { fn: () => void; ms: number } | null = null;
+    let cleared = 0;
+    const never = new Promise<boolean>(() => {});
+
+    const isHealthy = createCachedProbe({
+      probe: () => never,
+      timeoutMs: 1234,
+      hrtime: clock.fn,
+      setTimer: (fn, ms) => {
+        armed = { fn, ms };
+        return { handle: true };
+      },
+      clearTimer: () => {
+        cleared++;
+      },
+    });
+
+    const pending = isHealthy();
+    expect(armed).not.toBeNull();
+    expect(armed!.ms).toBe(1234);
+
+    // Firing the injected timer is the only thing that can settle this probe.
+    armed!.fn();
+    expect(await pending).toBe(false);
+    expect(cleared).toBe(1);
+  });
+
+  it('falls back to the ambient timer when no seam is injected', async () => {
+    // The default arm still has to work for a caller with no runtime to hand.
+    const clock = new FakeClock();
+    const isHealthy = createCachedProbe({
+      probe: () => new Promise<boolean>(() => {}),
+      timeoutMs: 5,
+      hrtime: clock.fn,
+    });
+    expect(await isHealthy()).toBe(false);
+  });
+
   it('caches the outcome within the TTL: N reads issue one probe', async () => {
     const clock = new FakeClock();
     let calls = 0;

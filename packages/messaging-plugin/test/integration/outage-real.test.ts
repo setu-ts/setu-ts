@@ -5,8 +5,11 @@
  * RabbitMQ additionally that a subscription established before the outage
  * receives a message published after it (the X2-1 replay reproduction).
  *
- * Guarded on `RABBITMQ_URL` / `REDIS_URL` (M53 pattern). NOT in `ALLOW_SKIP`.
- * `test/apps-gate.test.ts` pins the service, port mapping, and env var.
+ * Guarded on `RABBITMQ_URL` / `REDIS_URL` (M53 pattern): absent them, this suite
+ * skips. `ALLOW_SKIP` does not apply here — that variable is read only by
+ * `scripts/check-apps.ts` and governs `apps/`. What keeps this suite honest is
+ * `test/apps-gate.test.ts`, which pins the service, port mapping and env var in
+ * both workflows, so CI cannot silently stop running it.
  *
  * Container discovery: `docker ps --filter publish=<port>` locates the backend
  * container by its published port, so the same suite works against the CI

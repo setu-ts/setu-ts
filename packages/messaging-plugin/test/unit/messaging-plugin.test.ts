@@ -533,6 +533,107 @@ describe('MessagingPlugin', () => {
     expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
   });
 
+  // M70c review: the per-arm option passthroughs in the broker factory were
+  // the only uncovered branches in this file, and an option that never reaches
+  // its broker is the dead-option defect CLAUDE.md calls out. Each assertion
+  // below is on the TRANSLATED call, not on the option going in.
+  it('rabbitmq arm passes exchangeName and defaultQueue through to the broker', async () => {
+    const fakeClient = new FakeAmqpConnection();
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'rabbitmq',
+      client: fakeClient as unknown as IAmqpConnection,
+      url: 'amqp://localhost:5672',
+      exchangeName: 'custom-exchange',
+      defaultQueue: 'custom-queue',
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as {
+      subscribe: (topic: string, handler: () => void) => Promise<unknown>;
+    };
+    await broker.subscribe('orders.created', () => {});
+
+    const channel = await fakeClient.createChannel();
+    const exchanges = channel.calls
+      .filter((c) => c.method === 'assertExchange')
+      .map((c) => c.args[0]);
+    const queues = channel.calls
+      .filter((c) => c.method === 'assertQueue')
+      .map((c) => String(c.args[0]));
+
+    expect(exchanges).toContain('custom-exchange');
+    expect(exchanges).not.toContain('messaging');
+    expect(queues.some((q) => q.startsWith('custom-queue-'))).toBe(true);
+  });
+
+  it('pubsub arm passes defaultQueue and replyTopic through to the broker', async () => {
+    const opened: Array<{ topic: string; subscription: string }> = [];
+    const transport = {
+      publish: () => Promise.resolve(),
+      open: (topic: string, subscription: string) => {
+        opened.push({ topic, subscription });
+        return Promise.resolve({ close: () => Promise.resolve() });
+      },
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'pubsub',
+      projectId: 'test-project',
+      credentials: { client_email: 'x@y.z' },
+      defaultQueue: 'ps-consumers',
+      replyTopic: 'ps-replies',
+      client: transport as unknown as never,
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as {
+      subscribe: (topic: string, handler: () => void) => Promise<unknown>;
+    };
+    await broker.subscribe('orders.created', () => {});
+
+    expect(opened.length).toBeGreaterThan(0);
+    expect(opened[0].subscription).toContain('ps-consumers');
+  });
+
+  it('service-bus arm passes defaultQueue and replyTopic through to the broker', async () => {
+    const opened: Array<{ topic: string; subscription: string }> = [];
+    const transport = {
+      send: () => Promise.resolve(),
+      open: (topic: string, subscription: string) => {
+        opened.push({ topic, subscription });
+        return Promise.resolve({ close: () => Promise.resolve() });
+      },
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const { ctx } = createFakeContext();
+
+    const plugin = MessagingPlugin({
+      broker: 'service-bus',
+      connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
+      adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
+      defaultQueue: 'sb-consumers',
+      replyTopic: 'sb-replies',
+      client: transport as unknown as never,
+    });
+    await plugin.register(ctx);
+
+    const broker = ctx.services.get(CAPABILITIES.MESSAGING) as {
+      subscribe: (topic: string, handler: () => void) => Promise<unknown>;
+    };
+    await broker.subscribe('orders.created', () => {});
+
+    expect(opened.length).toBeGreaterThan(0);
+    expect(opened[0].subscription).toContain('sb-consumers');
+  });
+
   // P2: NATS broker registers with injected client
   it('nats broker registers with an injected client', async () => {
     const fakeClient = new FakeNatsConnection();

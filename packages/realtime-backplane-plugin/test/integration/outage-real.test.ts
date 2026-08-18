@@ -6,7 +6,10 @@
  * self-heals — the probe flips back to reachable once the connections are
  * ready again).
  *
- * Guarded on `REDIS_URL`. NOT in `ALLOW_SKIP`.
+ * Guarded on `REDIS_URL`: absent it, this suite skips. `ALLOW_SKIP` does not
+ * apply here — that variable is read only by `scripts/check-apps.ts` and governs
+ * `apps/`. What keeps this suite honest is `test/apps-gate.test.ts`, which pins
+ * the service, port mapping and env var in both workflows.
  * `test/apps-gate.test.ts` pins the service, port mapping, and env var.
  *
  * F2 regression: without the bound `ping.call(client)` fix, the probe reports

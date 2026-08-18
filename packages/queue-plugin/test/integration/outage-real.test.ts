@@ -8,7 +8,8 @@
  *   forever against a healthy Redis, so the baseline `up` would fail.
  * - `RabbitMqQueue` against live RabbitMQ (guarded on `RABBITMQ_URL`).
  *
- * NOT in `ALLOW_SKIP`. `test/apps-gate.test.ts` pins the service, port
+ * `ALLOW_SKIP` does not apply here — that variable is read only by
+ * `scripts/check-apps.ts` and governs `apps/`. `test/apps-gate.test.ts` pins the service, port
  * mapping, and env var.
  */
 import { describe, it } from '@std/testing/bdd';
