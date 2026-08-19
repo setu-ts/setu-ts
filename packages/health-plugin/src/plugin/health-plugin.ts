@@ -43,9 +43,16 @@ import denoJson from '../../deno.json' with { type: 'json' };
  *   },
  *   indicators: [
  *     createHttpIndicator('external-api', { url: 'https://api.example.com/health' }),
+ *     (services) => createDatabaseIndicator(services),
  *   ],
  * }));
  * ```
+ *
+ * `indicators` accepts an instance or a `RegistryFactory`
+ * (`(services: IServiceRegistry) => IHealthIndicator`). A factory is resolved at
+ * `onInit` — the first phase at which the registry holds every capability — and,
+ * because `HealthPlugin` registers at priority 100, before the database and every
+ * other ordinary capability plugin. Instance indicators keep their `register()` timing.
  *
  * @since 0.2.0
  */

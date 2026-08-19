@@ -1747,13 +1747,22 @@ import type { EventHandlerRegistration } from '@setu-ts/events-plugin';
 
 const handlers: readonly EventHandlerRegistration[] = [
   { type: 'user-created', handler: new UserCreatedEventHandler() },
+  // Or a factory that builds the handler from the service registry:
+  { type: 'order-placed', handler: createOrderPlacedEventHandler },
 ];
 
 app.register(EventsPlugin({ handlers }));
 ```
 
-Reach for the imperative `subscribeHandler` when a handler needs a capability: the bus only exists
-once this plugin has registered, so that call belongs in a plugin's own `register`.
+The `handler` accepts an instance or a `RegistryFactory`
+(`(services: IServiceRegistry) =>
+handler`). A factory is called at the `onInit` phase — the first
+phase at which the registry holds every capability — so it can resolve any capability (the broker,
+the queue, the logger) and build the handler with it; the result subscribes through the same
+`subscribeHandler` the instance arm uses, so the two arms cannot diverge. A factory that throws
+rejects `start()`, naming the option and the entry. Instance handlers keep their `register()` timing
+byte-identically. The imperative `subscribeHandler` remains available for a handler wired from
+another plugin's own `register`.
 
 ### Defining Events
 
@@ -2927,6 +2936,8 @@ import type { CommandHandlerRegistration, QueryHandlerRegistration } from '@setu
 
 const commandHandlers: readonly CommandHandlerRegistration[] = [
   { type: 'CreateUserCommand', handler: new CreateUserHandler() },
+  // Or a factory that builds the handler from the service registry:
+  { type: 'PlaceOrderCommand', handler: createPlaceOrderCommandHandler },
 ];
 const queryHandlers: readonly QueryHandlerRegistration[] = [
   { type: 'GetUserQuery', handler: new GetUserHandler() },
@@ -2936,7 +2947,13 @@ app.register(CqrsPlugin({ commandHandlers, queryHandlers }));
 ```
 
 Each entry is a `{ type, handler }` pair because that is exactly what the bus takes — the type is a
-string the request carries, not something derivable from the handler's class.
+string the request carries, not something derivable from the handler's class. The `handler` accepts
+an instance or a `RegistryFactory` (`(services: IServiceRegistry) => handler`), and `behaviors`
+accepts the same `instance | RegistryFactory<IPipelineBehavior>` union. Factories are called at the
+`onInit` phase — the first phase at which the registry holds every capability — so a factory can
+resolve any capability (the event bus, a database, the logger) and build the handler or behavior
+with it. A factory that throws rejects `start()`, naming the option and the entry, with the original
+error preserved as `cause`. Instance entries keep their `register()` timing byte-identically.
 
 **Imperatively**, from a plugin — the route to take when a handler needs a capability, since the
 buses only exist once `CqrsPlugin` has registered and `IApplication` exposes no lifecycle hook:
@@ -4660,9 +4677,22 @@ app.register(HealthPlugin({
       url: 'https://api.example.com/health',
       timeoutMs: 3000,
     }),
+    // Or a factory that builds the indicator from the service registry:
+    (services) => createDatabaseIndicator(services),
   ],
 }));
 ```
+
+`indicators` accepts an instance or a `RegistryFactory`
+(`(services: IServiceRegistry) =>
+IHealthIndicator`), the exported `HealthIndicatorEntry` union. A
+factory is called at the `onInit` phase — the first phase at which the registry holds every
+capability — and, because `HealthPlugin` registers at priority 100, before the database and every
+other ordinary capability plugin, so a factory can resolve the capability it exists to probe and
+build the indicator with it. Factories are registered at the head of the existing `onInit` hook,
+before the `CAPABILITIES.HEALTH_INDICATOR` contribution drain. A factory that throws rejects
+`start()`, naming the option and the entry. Instance indicators keep their `register()` timing
+byte-identically.
 
 ### Custom Health Indicators
 
@@ -7190,7 +7220,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                                                                                                                         |
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                               |
 | Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                  |
-| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`                                                                                                                                                                                                                                                                                                                                                                |
+| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                  |
 | HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest` |
 | Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                            |
 | DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                            |
@@ -7726,12 +7756,15 @@ Contract notes:
   `FactoryProvider` (factory function), `ValueProvider` (pre-built value) — all defined in
   `@setu-ts/common`.
 - **Three lifecycle scopes**: `singleton` (one instance, shared across child scopes), `scoped` (one
-  instance per scope), `transient` (new instance every resolve). Default is `singleton`.
+  instance per `createScope()` scope), `transient` (new instance every resolve). Default is
+  `singleton`. The framework creates no scope per request, so a `scoped` service is not re-created
+  on every HTTP request.
 - **Circular dependency detection**: an instance-level resolution stack catches cycles that cross
   public `resolve()` boundaries (including factory providers calling back into the container).
   Throws `Error` with a readable `A → B → A` chain.
 - **Hierarchical containers**: `createScope()` returns a child container that shares singletons with
-  the parent but has its own scoped-instance cache.
+  the parent but has its own scoped-instance cache. A scope is created and disposed explicitly by
+  the application; the framework creates no scope per request.
 - **Auto-registration** (`autoRegister: true`): resolving a token not in the container falls back to
   the kernel's `ServiceRegistry`. The first successful fallback is cached as a singleton; explicit
   DI registrations always take precedence. `ClassProvider.inject` dependencies also use this

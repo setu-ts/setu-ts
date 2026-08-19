@@ -45,10 +45,19 @@ const DEFAULT_OPTIONS: Required<CqrsPluginOptions> = {
  *
  * app.register(CqrsPlugin({
  *   behaviors: [timingBehavior],
- *   commandHandlers: [{ type: CREATE_USER, handler: new CreateUserHandler() }],
+ *   commandHandlers: [
+ *     { type: CREATE_USER, handler: new CreateUserHandler() },
+ *     { type: PLACE_ORDER, handler: createPlaceOrderCommandHandler },
+ *   ],
  *   queryHandlers: [{ type: GET_USER, handler: new GetUserHandler() }],
  * }));
  * ```
+ *
+ * `commandHandlers`, `queryHandlers`, and `behaviors` each accept an instance or a
+ * `RegistryFactory` (`(services: IServiceRegistry) => T`). A factory is resolved at
+ * `onInit` — the first phase at which the registry holds every capability — so it can
+ * resolve any capability and build the handler or behavior with it. Instance entries
+ * keep their `register()` timing.
  * @param options - Plugin configuration
  * @returns The plugin instance
  * @since 0.1.0
