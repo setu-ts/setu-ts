@@ -134,6 +134,13 @@ export function seamNames(
  * @param module - The module specifier, already relative
  * @returns The import statement
  */
+function renderImport(symbols: readonly string[], module: string): string {
+  const sorted = fmtSortSpecifiers(symbols);
+  const inline = `import { ${sorted.join(', ')} } from '${module}';`;
+  if (inline.length <= GENERATED_LINE_WIDTH) return inline;
+  return `import {\n  ${sorted.join(',\n  ')},\n} from '${module}';`;
+}
+
 /**
  * Sorts import specifiers the way `deno fmt` does: case-insensitively, with the
  * uppercase spelling first on a tie.
@@ -158,13 +165,6 @@ function fmtSortSpecifiers(symbols: readonly string[]): string[] {
     }
     return 0;
   });
-}
-
-function renderImport(symbols: readonly string[], module: string): string {
-  const sorted = fmtSortSpecifiers(symbols);
-  const inline = `import { ${sorted.join(', ')} } from '${module}';`;
-  if (inline.length <= GENERATED_LINE_WIDTH) return inline;
-  return `import {\n  ${sorted.join(',\n  ')},\n} from '${module}';`;
 }
 
 /**

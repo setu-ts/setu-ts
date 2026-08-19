@@ -32,9 +32,18 @@ const DEFAULT_OPTIONS: EventsPluginOptions = {
  *
  * app.register(EventsPlugin({
  *   async: true,
- *   handlers: [{ type: 'user-created', handler: new UserCreatedEventHandler() }],
+ *   handlers: [
+ *     { type: 'user-created', handler: new UserCreatedEventHandler() },
+ *     { type: 'order-placed', handler: createOrderPlacedEventHandler },
+ *   ],
  * }));
  * ```
+ *
+ * `handlers` accepts an instance or a `RegistryFactory`
+ * (`(services: IServiceRegistry) => IEventHandler`). A factory is resolved at `onInit`
+ * — the first phase at which the registry holds every capability — and subscribes
+ * through the same `subscribeHandler` the instance arm uses. Instance handlers keep
+ * their `register()` timing.
  * @param options - Plugin configuration
  * @returns The plugin instance
  * @since 0.1.0
