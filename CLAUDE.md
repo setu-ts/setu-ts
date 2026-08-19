@@ -2712,9 +2712,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   wants an instance or a function, so it does NOT compile). `DiPlugin({ autoRegister:
   true })` in
   the `class-based` template (E3), the `ServiceScope` docs corrected (E5), and `apps/cqrs` converted
-  to the new arm. **Breaking for already-published generated output** — the generated barrel no
-  longer constructs with `new X()`, so a pre-existing artifact stops registering until the two-line
-  factory export is added. All `src` files ≥90% branch/function/line) — complete (PR pending)
+  to the new arm. E3 is proven by a BOOTED probe rather than by the emitted string: the class-based
+  `seam-probe` host injects `CAPABILITIES.CONFIG` into a generated `@Injectable` and resolves it
+  through the container, and reverting to a bare `DiPlugin()` fails it with
+  `No provider registered
+  for DI token 'config'` — the register's own E3 signature. **Breaking for
+  already-published generated output** — the generated barrel no longer constructs with `new X()`,
+  so a pre-existing artifact stops registering until the two-line factory export is added. All `src`
+  files ≥90% branch/function/line) — complete (PR pending)
 - **Next milestone** — **M70e** (default branches of injectable seams). Every one of `sdk`,
   `grpc-plugin` and `telemetry-plugin` offers a seam so tests can inject a fake, and because every
   test injects, the `?? <the real thing>` fallback is the one line no suite runs; `@setu-ts/sdk`
