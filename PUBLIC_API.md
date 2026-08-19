@@ -4912,8 +4912,13 @@ instance; when `otelProvider` is absent, the registry returns a no-op handle imm
 
 Each instrumentation uses the **inject-or-lazy seam**: when `InstrumentationConfig.instrumentation`
 is set, the instance is used directly (inject path); otherwise the registry lazy-loads the OTel
-package via `npm:` dynamic import (lazy path). Any loader failure is caught and recorded as a
-failure outcome — the plugin **never throws** from instrumentation setup.
+package via a literal `npm:` dynamic import (lazy path). Any loader failure is caught and recorded
+as a failure outcome — the plugin **never throws** from instrumentation setup.
+
+Every outcome is reported through the plugin's logger (`ctx.logger`, read at call time): an enabled
+instrumentation logs one line at `debug`, a failure one line at `warn` carrying `kind` and `reason`.
+A failure therefore remains a no-op rather than a throw, but is no longer silent — without a logger
+registered, the outcomes are still recorded on the registry handle and nothing is emitted.
 
 ### Span Processor
 
@@ -8120,6 +8125,11 @@ deno add jsr:@setu-ts/sdk@^0.1.0-alpha.8
 Factory that returns an `IHttpClient`. Requires a base URL; accepts default headers, an injectable
 `fetch` seam, a timing seam, resilience policies, rate-limit policy, and interceptor arrays.
 
+`ClientRequest.path` must be **relative** — no leading slash, no absolute URL. A leading-slash path
+would discard `baseUrl`'s own path prefix, and an absolute URL would leave `baseUrl`'s origin
+entirely, which is what makes the per-origin breaker and rate limiter meaningful. A path that
+violates the rule throws `ClientRequest.path must be relative (no leading slash).` at request time.
+
 ```typescript
 import { createClient } from '@setu-ts/sdk';
 
@@ -8130,7 +8140,7 @@ const client = createClient({
 
 const res = await client.request<User>({
   method: 'GET',
-  path: '/users/123',
+  path: 'users/123',
 });
 console.log(res.data); // User
 ```

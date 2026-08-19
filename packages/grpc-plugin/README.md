@@ -12,8 +12,27 @@ installs a fetch handler into the HTTP adapter's RPC interceptor seam.
 - gRPC-Web protocol (`application/grpc-web+json`, `application/grpc-web+proto`)
 - Server reflection (v1, default ON) for grpcurl, grpcui, and other tools
 - gRPC Health v1 service bridged to M20 health plugin (default ON)
-- Zero runtime dependencies — Connect-ES is loaded lazily behind a structural facade
-- Works on Node, Deno, Bun, and Cloudflare Workers without modification
+- Zero runtime dependencies in the source — Connect-ES is loaded lazily behind a structural facade
+- Module loading works on Node, Deno, Bun, and Cloudflare Workers without modification
+
+## Installation
+
+The Connect and Protobuf-ES modules are lazy-loaded on first use. Install them with the package
+manager that matches your runtime:
+
+```bash
+# Deno
+deno add npm:@connectrpc/connect@^2.1.2 npm:@bufbuild/protobuf@^2.7.0
+# npm
+npm i @connectrpc/connect @bufbuild/protobuf
+# Bun
+bun add @connectrpc/connect @bufbuild/protobuf
+```
+
+> **Native gRPC-binary transport is still limited.** This milestone settles _module loading_ on Node
+> and Bun (the `npm:` specifiers now survive JSR's static rewrite). The viability of the native
+> `application/grpc+proto` transport itself — and the default `basePath` reachability — is the
+> subject of M70i (register rows X7-2 / X7-4) and is **not** claimed here.
 
 ## Usage
 

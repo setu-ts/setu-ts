@@ -149,7 +149,11 @@ export async function loadRequestHandler(
   let buildMod: unknown;
   try {
     // Vite ESM build: { default: ServerBuild, routes: {}, ... }
-    buildMod = await import(/* @vite-ignore */ serverBuildPath);
+    buildMod = await import(
+      /* @vite-ignore */
+      /* computed-specifier: the application's own compiled server build path */
+      serverBuildPath
+    );
   } catch (err) {
     throw new Error(
       `Failed to load React Router server build from "${serverBuildPath}". ` +

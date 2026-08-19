@@ -6889,10 +6889,14 @@ all merge before the release branch is cut.
   read surface (X4-7), storage object metadata (X8-6), the no-argument registration seams (D4),
   resolver typing (X6-4). Each needs its own CHANGELOG entry with migration text — not one lumped
   release note.
-- **`packages/grpc-plugin` may not be salvageable within this milestone.** X7-2, X7-3 and X7-4
-  together say the default `basePath` is unreachable by any native client, the package cannot load
-  on Node or Bun, and native gRPC-binary works on no runtime it can run on. M70i decides
-  repair-versus-withdraw explicitly rather than inheriting it.
+- **`packages/grpc-plugin` may not be salvageable within this milestone.** X7-2 and X7-4 together
+  say the default `basePath` is unreachable by any native client and native gRPC-binary works on no
+  runtime it can run on. M70i decides repair-versus-withdraw explicitly rather than inheriting it.
+  The module-loading row X7-3 (the package cannot load on Node or Bun) is **M70e's**, not M70i's: it
+  is a self-contained fix with a known mechanism, and it is a _precondition_ for the viability
+  decision — whether `grpc-plugin` is worth repairing cannot be judged on Node or Bun while it
+  cannot load there at all. M70e closes X7-3 first, so M70i takes the decision against a package
+  that loads.
 - **X1's functional build no longer exists**, so `[functional]` and `[both]` rows cannot be
   re-verified against a live tree; `smoke/EXERCISES.md` X1 is the rebuild recipe. Any workstream
   depending on those rows rebuilds first.
@@ -7149,7 +7153,7 @@ branch during a version bump.
 | 70b       | ✅     | tenant isolation, data exposure (sec) |
 | 70c       | ✅     | health-signal sweep (6 packages)      |
 | 70d       | ✅     | no-argument registration seams        |
-| 70e       | ⬜     | default branches of injectable seams  |
+| 70e       | ✅     | default branches of injectable seams  |
 | 70f       | ⬜     | error format and error visibility     |
 | 70g       | ⬜     | routing collisions                    |
 | 70h       | ✅     | cli scaffold batch                    |

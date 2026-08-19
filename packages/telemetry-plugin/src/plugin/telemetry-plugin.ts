@@ -9,6 +9,7 @@
  */
 
 import type {
+  ILogger,
   IPlugin,
   ITelemetryService,
   MiddlewareFunction,
@@ -19,7 +20,10 @@ import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts'
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
 import { contextToTraceparent, extractContextFromHeaders } from '../tracing/tracer.ts';
-import { buildInstrumentationRegistry } from '../instrumentation/instrumentation-registry.ts';
+import {
+  buildInstrumentationRegistry,
+  type InstrumentationReporter,
+} from '../instrumentation/instrumentation-registry.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -30,6 +34,28 @@ import denoJson from '../../deno.json' with { type: 'json' };
 const MIDDLEWARE_PRIORITY = {
   TELEMETRY: 30,
 } as const;
+
+/**
+ * Builds the instrumentation-outcome reporter. `ctx.logger` is read **at call
+ * time** rather than captured at plugin construction: a logger registered
+ * imperatively after this plugin must still receive the lines (the M52b
+ * lesson). `debug` for an enabled instrumentation, `warn` for a failure — a
+ * failure remains a no-op, never a throw.
+ */
+function createInstrumentationReporter(ctx: { logger?: ILogger }): InstrumentationReporter {
+  return (outcome) => {
+    const logger = ctx.logger;
+    if (!logger) return;
+    if (outcome.enabled) {
+      logger.debug(`Auto-instrumentation enabled: ${outcome.kind}`, { kind: outcome.kind });
+    } else {
+      logger.warn(`Auto-instrumentation unavailable: ${outcome.kind}`, {
+        kind: outcome.kind,
+        reason: outcome.reason,
+      });
+    }
+  };
+}
 
 /**
  * Creates a telemetry plugin.
@@ -97,6 +123,7 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
             options.instrumentations,
             ctx.runtime,
             tracerHost.otelProvider,
+            createInstrumentationReporter(ctx),
           );
         }
 

@@ -41,13 +41,15 @@ const HEADER =
 const FAILING_COVERAGE = { branchPct: 80.0, functionPct: 70.0, linePct: 60.0 };
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly three canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(3);
+  it('has exactly four canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(4);
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/generate-api-docs.ts');
     // The pure half of the package-exports tooling. Its subprocess wrapper is
     // deliberately NOT a target — the decidable logic was extracted out of it.
     expect(SCRIPT_TARGETS).toContain('scripts/package-exports.ts');
+    // The pure half of the computed-`import()` recurrence gate (M70e).
+    expect(SCRIPT_TARGETS).toContain('scripts/npm-specifier-audit.ts');
   });
 
   it('rejects zero rows (no coverage data)', () => {
@@ -75,6 +77,7 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
@@ -87,6 +90,7 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
       row('scripts/some-other-script.ts', 99, 99, 99);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
@@ -98,11 +102,12 @@ describe('script-coverage target-set completeness', () => {
     const stdout = HEADER + '\n' +
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
-      row('scripts/package-exports.ts', 97, 98, 96);
+      row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
     expect(failures).toEqual([]);
-    expect(parsed.byTarget.size).toBe(3);
+    expect(parsed.byTarget.size).toBe(4);
     const below = belowThreshold(parsed);
     expect(below).toEqual([]);
   });
@@ -111,7 +116,8 @@ describe('script-coverage target-set completeness', () => {
     const stdout = HEADER + '\n' +
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
       row('scripts/generate-api-docs.ts', 80, 70, 60) + '\n' +
-      row('scripts/package-exports.ts', 97, 98, 96);
+      row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95);
     const parsed = parseCoverageTable(stdout);
     // The set is complete — completeness passes.
     const failures = validateTargetSet(parsed);
@@ -123,11 +129,12 @@ describe('script-coverage target-set completeness', () => {
     expect(below[0]?.coverage.branchPct).toBe(FAILING_COVERAGE.branchPct);
   });
 
-  it('flags both targets below threshold', () => {
+  it('flags two targets below threshold', () => {
     const stdout = HEADER + '\n' +
       row('scripts/check-docs.ts', 80, 70, 60) + '\n' +
       row('scripts/generate-api-docs.ts', 80, 70, 60) + '\n' +
-      row('scripts/package-exports.ts', 97, 98, 96);
+      row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95);
     const parsed = parseCoverageTable(stdout);
     expect(validateTargetSet(parsed)).toEqual([]);
     const below = belowThreshold(parsed);

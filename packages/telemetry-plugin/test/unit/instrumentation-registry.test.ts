@@ -514,4 +514,96 @@ describe('buildInstrumentationRegistry', () => {
       ['fetch', 'http', 'ioredis'].sort(),
     );
   });
+
+  // --- Reporter (M70e §3.6) ---
+
+  it('invokes the reporter once per outcome with kind and reason', async () => {
+    const runtime = createFakeRuntime('node');
+    const provider = { id: 'fake-provider' };
+    const reported: Array<{ enabled: boolean; kind: string; reason?: string | undefined }> = [];
+    const reporter = (o: { kind: string; enabled: boolean; reason?: string }): void => {
+      reported.push({ kind: o.kind, enabled: o.enabled, reason: o.reason });
+    };
+
+    const handle = await buildInstrumentationRegistry(
+      { http: true, fetch: true },
+      runtime,
+      provider,
+      reporter,
+    );
+
+    // One report per outcome, in the same shape as the handle's outcomes.
+    expect(reported).toHaveLength(handle.outcomes.length);
+    expect(reported).toHaveLength(2);
+    expect(reported.every((r) => r.kind === 'http' || r.kind === 'fetch')).toBe(true);
+    // The reporter saw the same outcomes the handle exposes.
+    expect(reported.map((r) => r.kind).sort()).toEqual(handle.outcomes.map((o) => o.kind).sort());
+  });
+
+  it('reports a failing lazy loader and the registry still resolves (never throws)', async () => {
+    // On a non-node platform the loader is never called, so drive the failure
+    // through an injected instance whose setTracerProvider throws — the
+    // degraded no-op outcome must be reported, not thrown.
+    const runtime = createFakeRuntime('node');
+    const provider = { id: 'fake-provider' };
+    const reported: Array<{ enabled: boolean; kind: string; reason?: string | undefined }> = [];
+    const reporter = (o: { kind: string; enabled: boolean; reason?: string }): void => {
+      reported.push({ kind: o.kind, enabled: o.enabled, reason: o.reason });
+    };
+
+    const failingInstance = {
+      setTracerProvider(): void {
+        throw new Error('provider rejected');
+      },
+    };
+
+    const handle = await buildInstrumentationRegistry(
+      { http: { instrumentation: failingInstance as never } },
+      runtime,
+      provider,
+      reporter,
+    );
+
+    expect(handle.outcomes[0]?.enabled).toBe(false);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]?.enabled).toBe(false);
+    expect(reported[0]?.reason).toBe('provider rejected');
+  });
+
+  it('does not break the build when the reporter itself throws', async () => {
+    // An observation path must not become the failure path (M45b).
+    const runtime = createFakeRuntime('node');
+    const provider = { id: 'fake-provider' };
+    const throwingReporter = (): void => {
+      throw new Error('observer blew up');
+    };
+
+    const handle = await buildInstrumentationRegistry(
+      { http: true, fetch: true },
+      runtime,
+      provider,
+      throwingReporter,
+    );
+
+    // The build completed and outcomes are still recorded on the handle.
+    expect(handle.outcomes).toHaveLength(2);
+  });
+
+  it('reports nothing on the no-provider path', async () => {
+    const runtime = createFakeRuntime('node');
+    const reported: unknown[] = [];
+    const reporter = (o: unknown): void => {
+      reported.push(o);
+    };
+
+    const handle = await buildInstrumentationRegistry(
+      { http: true },
+      runtime,
+      undefined as never,
+      reporter,
+    );
+
+    expect(handle.outcomes).toHaveLength(0);
+    expect(reported).toHaveLength(0);
+  });
 });

@@ -5,6 +5,11 @@
  * `@opentelemetry/instrumentation-undici` for the `fetch` kind via lazy
  * `npm:` imports. Honors the inject-or-lazy seam.
  *
+ * Each default `importFn` keeps its `npm:` specifier as a **literal** at the
+ * `import()` call. JSR's npm-compatibility rewrite is static and reaches only
+ * a literal argument; a specifier routed through a `(spec) => import(spec)`
+ * indirection ships `npm:` verbatim and cannot load on Node or Bun (X7-3).
+ *
  * @module
  * @since 0.2.0
  */
@@ -15,7 +20,11 @@ export interface LoadedInstrumentation {
   specifier: string;
 }
 
-const defaultImport = (spec: string) => import(spec);
+/** The `npm:` specifier the `http` loader resolves. */
+const HTTP_SPECIFIER = 'npm:@opentelemetry/instrumentation-http@^0.220.0';
+
+/** The `npm:` specifier the `fetch` (undici) loader resolves. */
+const FETCH_SPECIFIER = 'npm:@opentelemetry/instrumentation-undici@^0.30.0';
 
 /**
  * Constructs an HTTP instrumentation instance from a loaded module.
@@ -39,16 +48,18 @@ export function createHttpInstrumentation(
  * Lazy-loads and constructs an HTTP instrumentation.
  *
  * @param configArg - Opaque config forwarded to the constructor (or `undefined` for defaults).
+ * @param importFn - Zero-argument import seam; defaults to a real literal `import()`.
  * @returns A promise resolving to the constructed instrumentation.
  * @since 0.2.0
  */
 export async function loadHttpInstrumentation(
   configArg: unknown | undefined,
-  importFn: (spec: string) => Promise<Record<string, unknown>> = defaultImport,
+  importFn: () => Promise<Record<string, unknown>> = () =>
+    import('npm:@opentelemetry/instrumentation-http@^0.220.0'),
 ): Promise<LoadedInstrumentation> {
-  const mod = await importFn('npm:@opentelemetry/instrumentation-http@^0.220.0');
+  const mod = await importFn();
   const instance = createHttpInstrumentation(mod, configArg);
-  return { instance, specifier: 'npm:@opentelemetry/instrumentation-http@^0.220.0' };
+  return { instance, specifier: HTTP_SPECIFIER };
 }
 
 /**
@@ -73,14 +84,16 @@ export function createFetchInstrumentation(
  * Lazy-loads and constructs a Fetch (undici) instrumentation.
  *
  * @param configArg - Opaque config forwarded to the constructor (or `undefined` for defaults).
+ * @param importFn - Zero-argument import seam; defaults to a real literal `import()`.
  * @returns A promise resolving to the constructed instrumentation.
  * @since 0.2.0
  */
 export async function loadFetchInstrumentation(
   configArg: unknown | undefined,
-  importFn: (spec: string) => Promise<Record<string, unknown>> = defaultImport,
+  importFn: () => Promise<Record<string, unknown>> = () =>
+    import('npm:@opentelemetry/instrumentation-undici@^0.30.0'),
 ): Promise<LoadedInstrumentation> {
-  const mod = await importFn('npm:@opentelemetry/instrumentation-undici@^0.30.0');
+  const mod = await importFn();
   const instance = createFetchInstrumentation(mod, configArg);
-  return { instance, specifier: 'npm:@opentelemetry/instrumentation-undici@^0.30.0' };
+  return { instance, specifier: FETCH_SPECIFIER };
 }
