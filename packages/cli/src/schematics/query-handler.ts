@@ -48,6 +48,8 @@ export interface ${names.pascal}Query extends CqrsQuery<${names.pascal}Criteria>
  * Registered through the \`${QUERY_HANDLERS_EXPORT}\` barrel in \`src/cqrs/index.ts\`,
  * which \`setu.config.ts\` passes to \`CqrsPlugin\` — so this class needs no further
  * wiring, and \`queryBus.execute({ type: ${names.screaming}_QUERY, … })\` reaches it.
+ * The barrel references the factory below by name, so the factory is the single
+ * construction site.
  */
 export class ${names.pascal}QueryHandler
   implements IQueryHandler<${names.pascal}Query, ${names.pascal}View> {
@@ -61,6 +63,23 @@ export class ${names.pascal}QueryHandler
     // Replace with the real read. Queries must not mutate state.
     return Promise.resolve({ id: query.data.id });
   }
+}
+
+/**
+ * Builds the handler. The barrel references this factory by name, so it is the
+ * single construction site — and the place to wire a dependency in.
+ * \`CqrsPluginOptions.queryHandlers\` accepts a factory that builds a handler
+ * from the service registry, called at the \`onInit\` phase, after every plugin
+ * has registered, so to take a dependency change the one line to:
+ *
+ * \`\`\`ts
+ * export function create${names.pascal}QueryHandler(services: IServiceRegistry): ${names.pascal}QueryHandler {
+ *   // resolve a capability from services and build with it
+ * }
+ * \`\`\`
+ */
+export function create${names.pascal}QueryHandler(): ${names.pascal}QueryHandler {
+  return new ${names.pascal}QueryHandler();
 }
 `;
   return [

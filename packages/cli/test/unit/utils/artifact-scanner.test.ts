@@ -211,6 +211,30 @@ describe('readArtifactNames', () => {
       ]);
     });
 
+    it('skips an OLD-shape CQRS artifact (class only, no factory) and admits a new one', async () => {
+      // M70d: the barrel now references the factory by name, so a pre-M70d
+      // artifact that exports only the class is rejected with the factory named —
+      // the migration report the developer must act on. A new-shape artifact
+      // (class + factory) is admitted.
+      const COMMANDS = seamSpecFor('command-handler')!;
+      const scan = await readArtifactNames(
+        fsWith(['legacy.command-handler.ts', 'current.command-handler.ts'], {
+          spec: COMMANDS,
+          sources: {
+            // Old shape: the class, but no `createLegacyCommandHandler` factory.
+            'legacy.command-handler.ts':
+              'export const LEGACY_COMMAND = "Legacy";\nexport class LegacyCommandHandler { handle() {} }',
+          },
+        }),
+        '/app',
+        COMMANDS,
+      );
+      expect(scan.names).toEqual(['current']);
+      expect(scan.skipped).toEqual([
+        { path: 'src/cqrs/legacy.command-handler.ts', missing: ['createLegacyCommandHandler'] },
+      ]);
+    });
+
     it('reports a project-relative path, which is what a message should name', async () => {
       const scan = await readArtifactNames(
         fsWith(['user.routes.ts'], { sources: { 'user.routes.ts': 'export const X = 1;' } }),

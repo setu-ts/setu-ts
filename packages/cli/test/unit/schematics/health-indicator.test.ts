@@ -29,15 +29,19 @@ describe('health-indicator schematic', () => {
     assertSeamContract('health-indicator', 'order-item', ['gizmo', 'billing']);
   });
 
-  it('registers instances, which is what HealthPluginOptions.indicators takes', () => {
+  it('references the factory by name, which is what HealthIndicatorEntry takes', () => {
     const barrel = barrelOf(
       generateHealthIndicator(deriveNames('order-item'), options(CLASS_OPTIONS)),
       'health-indicator',
     );
-    // The plugin reads `.name` and binds `.check` off each entry, so a constructor
-    // would not satisfy the option's own type.
-    expect(barrel.contents).toContain('new OrderItemHealthIndicator()');
-    expect(barrel.contents).toContain('readonly IHealthIndicator[]');
+    // The barrel writes no `new`: it names the artifact's factory, which is the
+    // single construction site, and declares the widened entry type.
+    expect(barrel.contents).toContain('createOrderItemHealthIndicator');
+    expect(barrel.contents).not.toContain('new ');
+    expect(barrel.contents).toContain('readonly HealthIndicatorEntry[]');
+    expect(barrel.contents).toContain(
+      "import type { HealthIndicatorEntry } from '@setu-ts/health-plugin';",
+    );
   });
 
   it('produces non-empty contents ending in a newline', () => {
@@ -71,6 +75,16 @@ describe('health-indicator schematic', () => {
     expect(file.contents).toContain('HEALTH_INDICATORS');
     expect(file.contents).toContain('needs no further wiring');
   });
+
+  it('emits a zero-parameter factory with a written-out return type', () => {
+    // The factory is the single construction site; a written-out return type is
+    // required because an inferred one is a JSR slow type.
+    expect(file.contents).toContain(
+      'export function createOrderItemHealthIndicator(): OrderItemHealthIndicator {',
+    );
+    expect(file.contents).toContain('return new OrderItemHealthIndicator();');
+    expect(file.contents).toContain('export class OrderItemHealthIndicator');
+  });
 });
 
 describe('health-indicator schematic — functional mode', () => {
@@ -94,20 +108,29 @@ describe('health-indicator schematic — functional mode', () => {
     expect(file.contents).toContain("status: 'up'");
   });
 
-  it('spreads the value into the barrel rather than constructing it', () => {
+  it('references the factory in the barrel rather than constructing it', () => {
     const barrel = barrelOf(files, 'health-indicator');
-    // The barrel's own comment always said the option wants instances. A `new`
-    // here would fail to compile against a value export.
-    expect(barrel.contents).toContain('orderItemIndicator');
-    expect(barrel.contents).not.toContain('new OrderItemHealthIndicator()');
-    expect(barrel.contents).toContain('readonly IHealthIndicator[]');
+    // The barrel writes no `new`: it names the artifact's factory, which returns
+    // the value.
+    expect(barrel.contents).toContain('createOrderItemIndicator');
+    expect(barrel.contents).not.toContain('new ');
+    expect(barrel.contents).toContain('readonly HealthIndicatorEntry[]');
   });
 
-  it('imports the value symbol, so the scanner admits its own output', () => {
+  it('imports the factory symbol, so the scanner admits its own output', () => {
     const barrel = barrelOf(files, 'health-indicator');
     expect(barrel.contents).toContain(
-      "import { orderItemIndicator } from './order-item.indicator.ts';",
+      "import { createOrderItemIndicator } from './order-item.indicator.ts';",
     );
+  });
+
+  it('emits a zero-parameter factory that returns the value', () => {
+    // The factory is the single construction site; a written-out return type is
+    // required because an inferred one is a JSR slow type.
+    expect(file.contents).toContain(
+      'export function createOrderItemIndicator(): IHealthIndicator {',
+    );
+    expect(file.contents).toContain('return orderItemIndicator;');
   });
 
   it('tells the reader it is already wired, in both shapes', () => {

@@ -7,6 +7,13 @@
  * as a pure addition, and registers each entry through that same exported
  * `subscribeHandler` — one implementation behind two entry points.
  *
+ * Since M70d the barrel writes no `new`: each artifact module owns a
+ * zero-parameter factory (`create<Pascal>EventHandler`), and the barrel
+ * references that factory by name. The factory is the single construction
+ * site, and it lives in the developer-owned artifact module, so a dependency
+ * wired into it by taking `services` survives the next unrelated
+ * `setu generate`.
+ *
  * @module
  */
 
@@ -27,11 +34,15 @@ export const EVENT_HANDLERS_EXPORT = 'EVENT_HANDLERS';
 /**
  * Symbols the barrel imports from one event-handler module.
  *
+ * The factory rather than the class: the barrel references the factory by name
+ * and never constructs, so an artifact whose author replaced the class with
+ * whatever the factory returns stays admissible.
+ *
  * @param names - The artifact's derived naming forms
  * @returns The symbols to import
  */
 function importSymbols(names: DerivedNames): readonly string[] {
-  return [`${names.screaming}_EVENT`, `${names.pascal}EventHandler`];
+  return [`${names.screaming}_EVENT`, `create${names.pascal}EventHandler`];
 }
 
 /**
@@ -50,9 +61,12 @@ function renderEventsBarrel(artifacts: SeamArtifacts): string {
     renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.event-handler.ts`),
   ].filter((line) => line !== '').join('\n\n');
 
+  // The handler is the artifact's factory BY NAME, not `new <Class>()`: the
+  // barrel writes no `new` anywhere, and the factory is the single construction
+  // site, in the developer-owned artifact module.
   const entries = names.map((name) => {
     const n = deriveNames(name);
-    return `{ type: ${n.screaming}_EVENT, handler: new ${n.pascal}EventHandler() }`;
+    return `{ type: ${n.screaming}_EVENT, handler: create${n.pascal}EventHandler }`;
   });
 
   return assembleSeamBarrel(header, imports, [

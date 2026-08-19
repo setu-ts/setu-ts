@@ -40,7 +40,13 @@ export { fromNullable, isNone, isSome, none, some } from './option.ts';
 export type { None, Option, Some } from './option.ts';
 
 // Service registry
-export type { IServiceRegistry, RegisterOptions, ServiceFactory } from './registry.ts';
+export { resolveRegistryEntry } from './registry.ts';
+export type {
+  IServiceRegistry,
+  RegisterOptions,
+  RegistryFactory,
+  ServiceFactory,
+} from './registry.ts';
 
 // HTTP abstractions
 export type {

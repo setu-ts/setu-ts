@@ -6,6 +6,11 @@
  * project — and `IHealthIndicator` is only an interface, so the class was the
  * CLI's choice rather than the contract's.
  *
+ * Since M70d both shapes also export a zero-parameter factory, and the barrel
+ * references that factory by name — it writes no `new`. The factory is the
+ * single construction site, and it is where a developer wires a dependency in:
+ * take `services` and resolve a capability from it.
+ *
  * @module
  */
 
@@ -14,7 +19,9 @@ import {
   FUNCTIONAL_HEALTH_SEAM,
   HEALTH_INDICATORS_EXPORT,
   HEALTH_SEAM,
+  indicatorClassFactorySymbol,
   indicatorClassSymbol,
+  indicatorValueFactorySymbol,
   indicatorValueSymbol,
 } from '../seams/health.ts';
 import { seamNames } from '../seams/seam-spec.ts';
@@ -37,18 +44,41 @@ function wiringDoc(names: DerivedNames): string {
 }
 
 /**
+ * The factory's JSDoc, with the one-line edit that takes `services`.
+ *
+ * @param factory - The emitted factory's name
+ * @param target - The factory's return type name
+ * @returns The doc comment lines, without the surrounding delimiters
+ */
+function factoryDoc(factory: string, target: string): string {
+  return ` * Builds the indicator. The barrel references this factory by name, so it is
+ * the single construction site — and the place to wire a dependency in.
+ * \`HealthPluginOptions.indicators\` accepts a factory that builds an indicator
+ * from the service registry, called at the \`onInit\` phase, after every plugin
+ * has registered, so to take a dependency change the one line to:
+ *
+ * \`\`\`ts
+ * export function ${factory}(services: IServiceRegistry): ${target} {
+ *   // resolve a capability from services and build with it
+ * }
+ * \`\`\``;
+}
+
+/**
  * Renders the class shape, for a project carrying `decorator-plugin`.
  *
  * @param names - Naming forms derived from the user's input
  * @returns The module contents
  */
 function renderClassIndicator(names: DerivedNames): string {
+  const factory = indicatorClassFactorySymbol(names);
+  const cls = indicatorClassSymbol(names);
   return `import type { HealthCheckResult, IHealthIndicator } from '@setu-ts/common';
 
 /**
 ${wiringDoc(names)}
  */
-export class ${indicatorClassSymbol(names)} implements IHealthIndicator {
+export class ${cls} implements IHealthIndicator {
   readonly name = '${names.kebab}';
 
   /**
@@ -60,6 +90,13 @@ export class ${indicatorClassSymbol(names)} implements IHealthIndicator {
     // Replace with the real probe; report 'down' or 'degraded' on failure.
     return Promise.resolve({ status: 'up', data: { checked: '${names.kebab}' } });
   }
+}
+
+/**
+${factoryDoc(factory, cls)}
+ */
+export function ${factory}(): ${cls} {
+  return new ${cls}();
 }
 `;
 }
@@ -74,12 +111,14 @@ export class ${indicatorClassSymbol(names)} implements IHealthIndicator {
  * @returns The module contents
  */
 function renderValueIndicator(names: DerivedNames): string {
+  const factory = indicatorValueFactorySymbol(names);
+  const value = indicatorValueSymbol(names);
   return `import type { HealthCheckResult, IHealthIndicator } from '@setu-ts/common';
 
 /**
 ${wiringDoc(names)}
  */
-export const ${indicatorValueSymbol(names)}: IHealthIndicator = {
+export const ${value}: IHealthIndicator = {
   name: '${names.kebab}',
 
   /**
@@ -92,6 +131,13 @@ export const ${indicatorValueSymbol(names)}: IHealthIndicator = {
     return Promise.resolve({ status: 'up', data: { checked: '${names.kebab}' } });
   },
 };
+
+/**
+${factoryDoc(factory, 'IHealthIndicator')}
+ */
+export function ${factory}(): IHealthIndicator {
+  return ${value};
+}
 `;
 }
 

@@ -19,16 +19,18 @@ describe('command-handler schematic', () => {
     assertSeamContract('command-handler', 'order-item', ['gizmo', 'billing']);
   });
 
-  it('carries the command type alongside the handler, as the bus requires', () => {
+  it('references the factory by name, not a construction, as the barrel requires', () => {
     // `ICommandBus.register(type, handler)` takes a pair, and the module already declares
     // the type constant — deriving it from the class name would be a second source of
-    // truth for the same string.
+    // truth for the same string. The handler is the artifact's factory BY NAME: the
+    // barrel writes no `new` anywhere.
     expect(barrelOf(files, 'command-handler').contents).toContain(
-      '{ type: ORDER_ITEM_COMMAND, handler: new OrderItemCommandHandler() }',
+      '{ type: ORDER_ITEM_COMMAND, handler: createOrderItemCommandHandler }',
     );
     expect(barrelOf(files, 'command-handler').contents).toContain(
       'readonly CommandHandlerRegistration[]',
     );
+    expect(barrelOf(files, 'command-handler').contents).not.toContain('new ');
   });
 
   // Both schematics render the SAME barrel, so generating a command handler must not
@@ -39,8 +41,8 @@ describe('command-handler schematic', () => {
       options([], [], { 'query-handler': ['billing'] }),
     );
     const barrel = barrelOf(withQueries, 'command-handler').contents;
-    expect(barrel).toContain('BillingQueryHandler');
-    expect(barrel).toContain('OrderItemCommandHandler');
+    expect(barrel).toContain('createBillingQueryHandler');
+    expect(barrel).toContain('createOrderItemCommandHandler');
   });
 
   it('emits it at src/cqrs/order-item.command-handler.ts', () => {
@@ -74,5 +76,14 @@ describe('command-handler schematic', () => {
     for (const declared of ['OrderItemPayload', 'OrderItemResult']) {
       expect(file.contents).toContain(`export interface ${declared}`);
     }
+  });
+
+  it('emits a zero-parameter factory with a written-out return type', () => {
+    // The factory is the single construction site; a written-out return type is
+    // required because an inferred one is a JSR slow type.
+    expect(file.contents).toContain(
+      'export function createOrderItemCommandHandler(): OrderItemCommandHandler {',
+    );
+    expect(file.contents).toContain('return new OrderItemCommandHandler();');
   });
 });

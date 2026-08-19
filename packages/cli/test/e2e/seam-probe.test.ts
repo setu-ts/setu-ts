@@ -61,6 +61,37 @@ const CLASS_BASED_ONLY: readonly (readonly [schematic: string, name: string])[] 
   ['service', 'gadget-svc'],
 ];
 
+/**
+ * The E3 case: a generated `@Injectable` whose constructor injects a FRAMEWORK
+ * CAPABILITY rather than another generated class.
+ *
+ * This is the shape the class-based template's own showcase cannot reach — its service
+ * has no dependencies and its controller injects an explicit provider — which is why
+ * `DiPlugin()`'s `autoRegister: false` default shipped through five releases with every
+ * gate green. `autoRegister` gates BOTH the container's external resolver and its
+ * registry fallback, so without it this class cannot be constructed at all and
+ * `app.start()` never completes.
+ *
+ * The file keeps the `GadgetSvcService` export, because the seam scanner admits an
+ * artifact only when it exports every symbol the barrel names — dropping it would
+ * unwire the service instead of testing it.
+ */
+const CAPABILITY_INJECTING_SERVICE =
+  `import { Inject, Injectable } from '@setu-ts/decorator-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IConfig } from '@setu-ts/common';
+
+@Injectable({ token: 'gadget-svc-service' })
+export class GadgetSvcService {
+  constructor(@Inject(CAPABILITIES.CONFIG) private readonly config: IConfig) {}
+
+  /** Reports through the injected capability, so a stub cannot satisfy it. */
+  describe(): string {
+    return 'config:' + typeof this.config.get;
+  }
+}
+`;
+
 /** The CQRS and events artifacts, which only the microservice template can host. */
 const MICROSERVICE_ONLY: readonly (readonly [schematic: string, name: string])[] = [
   ['command-handler', 'widget'],
@@ -139,6 +170,13 @@ out['controller'] = { status: ctl.status, body: ctl.body };
 // service: the @Injectable reached the container through the services barrel.
 const container = services.get<import('@setu-ts/common').IContainer>(CAPABILITIES.DI_CONTAINER);
 out['serviceToken'] = container.resolve<{ describe(): string }>('widget-svc-service').describe();
+
+// E3: the service whose constructor injects CAPABILITIES.CONFIG. Reaching it at all
+// requires the container to fall back to the kernel registry, which only
+// autoRegister: true enables — so this reports the injected capability, not a stub.
+out['capabilityInjected'] = container
+  .resolve<{ describe(): string }>('gadget-svc-service')
+  .describe();
 `;
 
 /** The CQRS and events half of the probe, appended for the microservice host only. */
@@ -277,6 +315,16 @@ describe('generated artifacts are wired — end to end', () => {
         expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
       }
 
+      if (classBased) {
+        // E3. The generated service is the DEVELOPER'S file, so editing it is exactly
+        // what a developer does next — and it is the only way to reach the case the
+        // template's own showcase cannot: an injected framework capability.
+        await Deno.writeTextFile(
+          `${project}/src/services/gadget-svc.service.ts`,
+          CAPABILITY_INJECTING_SERVICE,
+        );
+      }
+
       await useWorkspacePackages(project);
       const probe = PROBE
         .replace('__CLASS__', classBased ? CLASS_PROBE : '')
@@ -306,6 +354,12 @@ describe('generated artifacts are wired — end to end', () => {
         // The @Injectable service resolves under the token its own JSDoc names —
         // through the container, which is where this composition puts it.
         expect(result['serviceToken']).toBe('widget-svc');
+        // E3: a decorated service constructor-injecting a FRAMEWORK CAPABILITY resolves,
+        // and what arrived is the live config service rather than a placeholder. This
+        // fails outright — `app.start()` never completes — if the template goes back to
+        // emitting a bare `DiPlugin()`, because `autoRegister` gates the container's
+        // only route to the kernel registry.
+        expect(result['capabilityInjected']).toBe('config:function');
       } else {
         // Both buses route to the generated handlers, through the plugin options.
         expect(result['commandResult']).toEqual({ id: 'c-1' });
@@ -367,6 +421,116 @@ export function auditLogMiddleware(): MiddlewareFunction {
       // 'AUDIT_LOG_MIDDLEWARE_PRIORITY'".
       expect(output).not.toContain('TS2305');
       expect(code).toBe(0);
+    });
+  });
+
+  // The M70d functional bar (X2-2). The barrel is `managed`, so a dependency wired
+  // into it is erased by the next unrelated `setu generate`. The factory lives in the
+  // developer-owned artifact module, so a dependency wired into it SURVIVES the next
+  // unrelated generate and still arrives at boot. This is the property the milestone
+  // exists to prove: edit the factory to take `services`, run an UNRELATED generate,
+  // boot, and observe the dependency still arriving.
+  describe('a factory that takes services survives an unrelated generate (X2-2)', () => {
+    // The developer's edit, exactly as the generated factory's JSDoc documents it:
+    // the factory takes \`services\`, resolves the event bus, and builds the class
+    // with it — the dependency the argument-less \`handle()\` cannot reach.
+    const EDITED_FACTORY =
+      `import type { CqrsCommand, ICommandHandler, IEventBus, IServiceRegistry } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+
+/** Type name the command bus routes on. */
+export const WIDGET_COMMAND = 'Widget';
+
+/** Payload of the Widget command. */
+export interface WidgetPayload {
+  readonly id: string;
+}
+
+/** Result the Widget handler returns. */
+export interface WidgetResult {
+  readonly id: string;
+}
+
+/** The Widget command. */
+export interface WidgetCommand extends CqrsCommand<WidgetPayload> {
+  readonly type: typeof WIDGET_COMMAND;
+}
+
+export class WidgetCommandHandler implements ICommandHandler<WidgetCommand, WidgetResult> {
+  constructor(private readonly events: IEventBus) {}
+  handle(command: WidgetCommand): Promise<WidgetResult> {
+    void this.events.publish({
+      type: WIDGET_COMMAND,
+      id: 'evt-1',
+      occurredOn: new Date(0),
+      data: { id: command.data.id },
+    });
+    return Promise.resolve({ id: command.data.id });
+  }
+}
+
+/**
+ * Builds the handler. The developer wired the event bus into it: the factory
+ * takes \`services\`, resolves the bus, and builds the class with it.
+ */
+export function createWidgetCommandHandler(
+  services: IServiceRegistry,
+): WidgetCommandHandler {
+  const events = services.get<IEventBus>(CAPABILITIES.EVENTS);
+  return new WidgetCommandHandler(events);
+}
+`;
+
+    const DEPENDENCY_PROBE = `import { CAPABILITIES } from '@setu-ts/common';
+import type { IEventBus, ICqrsFacade } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+
+const app = await createApp();
+await app.start();
+const services = app.services;
+const bus = services.get<IEventBus>(CAPABILITIES.EVENTS);
+const cqrs = services.get<ICqrsFacade>(CAPABILITIES.CQRS);
+const { WIDGET_COMMAND } = await import('./src/cqrs/widget.command-handler.ts');
+
+// An INDEPENDENT subscriber, registered by the probe, not the handler.
+const seen: string[] = [];
+bus.subscribe(WIDGET_COMMAND, (event) => void seen.push(event.data.id));
+
+const result = await cqrs.commandBus.execute({ type: WIDGET_COMMAND, data: { id: 'c-1' } });
+console.log('__PROBE_RESULT__' + JSON.stringify({
+  commandResult: result,
+  publishedId: seen[0] ?? null,
+}));
+await app.stop();
+`;
+
+    it('the edited factory survives an unrelated generate and its dependency arrives', async () => {
+      expect(await run(['new', 'shop', '--template', 'microservice'])).toBe(0);
+      const project = `${root}/shop`;
+
+      // Generate the command handler, then the developer edits its factory.
+      expect(await run(['g', 'command-handler', 'widget', '--dir', project])).toBe(0);
+      await Deno.writeTextFile(
+        `${project}/src/cqrs/widget.command-handler.ts`,
+        EDITED_FACTORY,
+      );
+
+      // The regression X2-2 records: an UNRELATED generate. The barrel is managed and
+      // regenerated, but the artifact — and the developer's factory edit — must survive.
+      expect(await run(['g', 'query-handler', 'gadget', '--dir', project])).toBe(0);
+
+      // The developer's factory edit survived the unrelated generate.
+      const artifact = await Deno.readTextFile(`${project}/src/cqrs/widget.command-handler.ts`);
+      expect(artifact).toContain('createWidgetCommandHandler');
+      expect(artifact).toContain('CAPABILITIES.EVENTS');
+
+      await useWorkspacePackages(project);
+      const result = await bootAndProbe(project, DEPENDENCY_PROBE);
+
+      // The command executed, and the event the factory-built handler published was
+      // observed by an independent subscriber: the dependency arrived at boot.
+      expect(result['commandResult']).toEqual({ id: 'c-1' });
+      expect(result['publishedId']).toBe('c-1');
     });
   });
 

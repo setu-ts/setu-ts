@@ -8,7 +8,9 @@ providers, circular-dependency detection, hierarchical scopes, and an optional f
 kernel's `ServiceRegistry`.
 
 The framework does not require this package — the kernel's service registry is enough for most
-applications. Reach for the container when you want constructor injection and per-request scopes.
+applications. Reach for the container when you want constructor injection and explicit scopes
+(`container.createScope()`); the framework creates no scope per request, so a `scoped` service is
+not re-created on every HTTP request.
 
 ## Installation
 
