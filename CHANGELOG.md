@@ -161,10 +161,13 @@ All notable changes to this project are documented here. The format follows
   `instrumentations` registry reports every outcome through the plugin's logger (`ctx.logger`, read
   at call time): an enabled instrumentation logs one line at `debug`, a loader or enable failure one
   line at `warn` carrying `kind` and `reason`. A failure remains a documented no-op — it is still
-  never thrown — but it is no longer invisible. Without a logger registered, the outcomes are still
-  recorded on the registry handle and nothing is emitted. The five instrumentation loaders' default
-  importers now take zero arguments (the specifier is a literal inside the default), so the default
-  path is the one a published artifact can actually run.
+  never thrown — but it is no longer invisible. The plugin declares the logger capability in
+  `optionalDependencies`, so the kernel registers a plugin-provided logger (e.g. `LoggerPlugin`)
+  before it and the standard configuration (`RuntimePlugin` + `LoggerPlugin` + `TelemetryPlugin`)
+  reports every outcome; without any logger plugin the app still boots and the outcomes are recorded
+  on the registry handle with nothing emitted. The five instrumentation loaders' default importers
+  now take zero arguments (the specifier is a literal inside the default), so the default path is
+  the one a published artifact can actually run.
 - **A recurrence gate for computed `import()` specifiers** (M70e). `scripts/npm-specifier-audit.ts`
   walks every `packages/*/src` file and refuses any dynamic `import()` whose first argument is not a
   string literal, unless the call carries a `computed-specifier: <reason>` marker (an empty reason
@@ -349,6 +352,15 @@ All notable changes to this project are documented here. The format follows
   injectable `importer` seam is unchanged. **Migration:** none — the published package now loads on
   Node and Bun; the Connect/Protobuf-ES packages must be installed with the host runtime's package
   manager (the README names the `deno add` / `npm i` / `bun add` commands).
+- **Telemetry outcome reporting was silent in the standard plugin configuration** (M70e). The
+  reporter reads `ctx.logger` at call time, but `TelemetryPlugin` (priority 30) declared no
+  dependency on the logger, so the kernel registered it before `LoggerPlugin` (priority 100) and
+  every outcome line was dropped — the documented "reported through the plugin's logger" behaviour
+  was unreachable in the standard configuration. `TelemetryPlugin` now declares
+  `CAPABILITIES.LOGGER` in `optionalDependencies`, so the kernel orders the logger provider first;
+  the edge is optional, so an app without a logger plugin still boots with no lines emitted. A
+  kernel-level e2e test with the real `LoggerPlugin` pins both directions. **Migration:** none — the
+  standard configuration now reports as documented.
 
 ### Deprecated
 

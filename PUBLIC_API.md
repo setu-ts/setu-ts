@@ -4917,8 +4917,11 @@ as a failure outcome — the plugin **never throws** from instrumentation setup.
 
 Every outcome is reported through the plugin's logger (`ctx.logger`, read at call time): an enabled
 instrumentation logs one line at `debug`, a failure one line at `warn` carrying `kind` and `reason`.
-A failure therefore remains a no-op rather than a throw, but is no longer silent — without a logger
-registered, the outcomes are still recorded on the registry handle and nothing is emitted.
+The plugin declares the logger capability in `optionalDependencies`, so the kernel orders a
+plugin-provided logger (e.g. `LoggerPlugin`) before it — the standard configuration
+(`RuntimePlugin` + `LoggerPlugin` + `TelemetryPlugin`) reports every outcome. A failure therefore
+remains a no-op rather than a throw, but is no longer silent — without a logger registered, the
+outcomes are still recorded on the registry handle and nothing is emitted.
 
 ### Span Processor
 
