@@ -6946,8 +6946,8 @@ Ordered by the sequence they should be worked, not by severity alone.
   `onInit`. The `class-based` template now emits `DiPlugin({ autoRegister: true })` (E3) and the
   `ServiceScope` docs are corrected (E5). **The contract addition is non-breaking, but the CLI's
   generated output shape changes** — a pre-existing generated artifact stops being registered until
-  its author adds the two-line factory export (rename the export, or delete and regenerate).
-  **Complete.**
+  its author adds the two-line factory export (add that export, or delete the file and regenerate —
+  renaming a class to the factory's name does NOT compile). **Complete.**
 - ⬜ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`).
   Every one of these packages offers a seam so tests can inject a fake, and because every test
   injects, the `?? <the real thing>` fallback is the one line no suite runs. `@setu-ts/sdk` cannot

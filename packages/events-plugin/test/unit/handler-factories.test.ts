@@ -131,4 +131,36 @@ describe('EventsPlugin handler factories', () => {
     const report = await health.find((h) => h.name === 'events')!.fn();
     expect(report.data).toEqual({ handlers: 2 });
   });
+
+  it("a throwing factory names its DECLARED index and the entry's type", async () => {
+    // The attribution the CHANGELOG and PUBLIC_API both promise had no test in
+    // this package. Driven with the arms MIXED, because a filtered index and a
+    // declared index are both 0 for a single-factory list — only a mix can tell
+    // them apart, and reporting `[0]` here names a working instance entry.
+    const { ctx, onInit } = makeContext();
+    const instance: IEventHandler = { handle: () => {} };
+    const boom = new Error('capability missing');
+    await EventsPlugin({
+      handlers: [
+        { type: 'A', handler: instance },
+        { type: 'B', handler: instance },
+        {
+          type: 'C-factory',
+          handler: (): IEventHandler => {
+            throw boom;
+          },
+        },
+      ],
+    }).register!(ctx);
+
+    let thrown: Error | undefined;
+    try {
+      for (const hook of onInit) hook();
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain('EventsPlugin({ handlers })[2]');
+    expect(thrown?.message).toContain('type "C-factory"');
+    expect(thrown?.cause).toBe(boom);
+  });
 });

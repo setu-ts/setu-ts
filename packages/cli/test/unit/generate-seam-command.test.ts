@@ -214,8 +214,18 @@ describe('setu generate, with seams', () => {
       // "Regenerate it", and regenerating is REFUSED — the artifact is not
       // CLI-owned, so the overwrite check stops it, and the developer was told
       // to run a command that then declines. Both real routes out are named.
-      expect(reported).toContain('Rename its export');
+      //
+      // ADD must be offered, and offered FIRST: after M70d the missing symbol is a
+      // factory for four of the five families, and renaming a class to a factory's
+      // name emits a barrel entry that is a class constructor where the option
+      // wants an instance or a function — the project then fails `deno check`.
+      // Rename stays as an alternative because it is still the right move for this
+      // fixture's case (a middleware that gained a second export).
+      expect(reported).toContain('Add that export');
       expect(reported).toContain('delete the file');
+      expect(reported.indexOf('Add that export')).toBeLessThan(
+        reported.indexOf('rename an existing one'),
+      );
       expect(reported).not.toContain('Regenerate it to bring it up to date');
     });
 
@@ -276,7 +286,7 @@ describe('setu generate, with seams', () => {
       const reported = h.err.lines.join('\n');
       expect(reported).toContain('src/cqrs/legacy.command-handler.ts');
       expect(reported).toContain('createLegacyCommandHandler');
-      expect(reported).toContain('Rename its export');
+      expect(reported).toContain('Add that export');
       expect(reported).toContain('delete the file');
     });
 

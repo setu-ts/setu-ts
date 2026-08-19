@@ -125,6 +125,58 @@ describe('CqrsPlugin handler factories', () => {
     expect(await bus.execute<unknown>({ type: 'read2', data: {} })).toBe('q2');
   });
 
+  it("a throwing factory names its DECLARED index and the entry's type", async () => {
+    // The attribution the CHANGELOG and PUBLIC_API both promise ("naming the
+    // option and the entry") had no test in this package at all. It has to be
+    // driven with the arms MIXED: a filtered index and a declared index are both
+    // 0 for a single-factory list, so only a mix can tell them apart — and
+    // reporting `[0]` here points the developer at the working instance entry.
+    const { ctx, onInit } = makeContext();
+    const instance: ICommandHandler = { handle: () => 'instance' };
+    const boom = new Error('capability missing');
+    await CqrsPlugin({
+      commandHandlers: [
+        { type: 'first-instance', handler: instance },
+        {
+          type: 'second-factory',
+          handler: (): ICommandHandler => {
+            throw boom;
+          },
+        },
+      ],
+    }).register!(ctx);
+
+    let thrown: Error | undefined;
+    try {
+      for (const hook of onInit) hook();
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain('CqrsPlugin({ commandHandlers })[1]');
+    expect(thrown?.message).toContain('type "second-factory"');
+    expect(thrown?.cause).toBe(boom);
+  });
+
+  it('a throwing query factory names its declared index too', async () => {
+    const { ctx, onInit } = makeContext();
+    const instance: IQueryHandler = { handle: () => 'q' };
+    await CqrsPlugin({
+      queryHandlers: [
+        { type: 'read', handler: instance },
+        { type: 'read2', handler: instance },
+        {
+          type: 'read3',
+          handler: (): IQueryHandler => {
+            throw new Error('capability missing');
+          },
+        },
+      ],
+    }).register!(ctx);
+    expect(() => {
+      for (const hook of onInit) hook();
+    }).toThrow('CqrsPlugin({ queryHandlers })[2] (type "read3")');
+  });
+
   it('a mixed list of two concretely-typed handlers plus a factory type-checks', () => {
     // Pins the method-syntax bivariance that keeps the list heterogeneous.
     const a: ICommandHandler<{ type: string; data: { id: string } }, string> = {

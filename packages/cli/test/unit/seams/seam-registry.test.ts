@@ -190,6 +190,35 @@ describe('seam rendering helpers', () => {
     expect(wrapped).toContain('import {\n');
   });
 
+  // `deno fmt` reorders the specifiers inside an import, so a barrel that emits any
+  // other order fails the generated project's own `deno fmt --check`. Both rules
+  // below were probed against `deno fmt` itself rather than assumed:
+  //   `import { bAlpha, Bbeta, aZulu }` → `{ aZulu, bAlpha, Bbeta }`  (case-insensitive)
+  //   `import { abc, ABC }`             → `{ ABC, abc }`              (uppercase on a tie)
+  // No seam spec can currently produce a case-insensitive TIE, so the tie-break is
+  // reached only from here — it is kept rather than dropped because it is what makes
+  // the emitted order total, and a family whose symbols happen to collide in case
+  // would otherwise emit whichever order the source listed.
+  it('sorts import specifiers the way deno fmt does, ties included', () => {
+    const caseInsensitive = renderSeamImports(
+      ['widget'],
+      () => ['bAlpha', 'Bbeta', 'aZulu'],
+      (k) => `./${k}.ts`,
+    );
+    expect(caseInsensitive).toBe("import { aZulu, bAlpha, Bbeta } from './widget.ts';");
+
+    const tie = renderSeamImports(['widget'], () => ['abc', 'ABC'], (k) => `./${k}.ts`);
+    expect(tie).toBe("import { ABC, abc } from './widget.ts';");
+
+    // The same order survives the wrapped form, which is a separate join.
+    const long = renderSeamImports(
+      ['widget'],
+      () => ['abc', 'ABC', `${'z'.repeat(70)}Symbol`],
+      (k) => `./${k}.ts`,
+    );
+    expect(long).toContain('import {\n  ABC,\n  abc,\n');
+  });
+
   it('renders no imports for an empty family', () => {
     expect(renderSeamImports([], (n) => [n.pascal], (k) => `./${k}.ts`)).toBe('');
   });
