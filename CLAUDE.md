@@ -2719,7 +2719,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   for DI token 'config'` — the register's own E3 signature. **Breaking for
   already-published generated output** — the generated barrel no longer constructs with `new X()`,
   so a pre-existing artifact stops registering until the two-line factory export is added. All `src`
-  files ≥90% branch/function/line) — complete (PR pending)
+  files ≥90% branch/function/line) — complete (PR #173)
 - **Next milestone** — **M70e** (default branches of injectable seams). Every one of `sdk`,
   `grpc-plugin` and `telemetry-plugin` offers a seam so tests can inject a fake, and because every
   test injects, the `?? <the real thing>` fallback is the one line no suite runs; `@setu-ts/sdk`

@@ -6947,7 +6947,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   `ServiceScope` docs are corrected (E5). **The contract addition is non-breaking, but the CLI's
   generated output shape changes** — a pre-existing generated artifact stops being registered until
   its author adds the two-line factory export (add that export, or delete the file and regenerate —
-  renaming a class to the factory's name does NOT compile). **Complete.**
+  renaming a class to the factory's name does NOT compile). **Complete (PR #173).**
 - ⬜ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`).
   Every one of these packages offers a seam so tests can inject a fake, and because every test
   injects, the `?? <the real thing>` fallback is the one line no suite runs. `@setu-ts/sdk` cannot
