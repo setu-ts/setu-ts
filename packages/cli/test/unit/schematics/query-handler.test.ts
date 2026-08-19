@@ -19,13 +19,16 @@ describe('query-handler schematic', () => {
     assertSeamContract('query-handler', 'order-item', ['gizmo', 'billing']);
   });
 
-  it('carries the query type alongside the handler, as the bus requires', () => {
+  it('references the factory by name, not a construction, as the barrel requires', () => {
+    // The barrel writes no `new`: it names the artifact's factory, which is the
+    // single construction site.
     expect(barrelOf(files, 'query-handler').contents).toContain(
-      '{ type: ORDER_ITEM_QUERY, handler: new OrderItemQueryHandler() }',
+      '{ type: ORDER_ITEM_QUERY, handler: createOrderItemQueryHandler }',
     );
     expect(barrelOf(files, 'query-handler').contents).toContain(
       'readonly QueryHandlerRegistration[]',
     );
+    expect(barrelOf(files, 'query-handler').contents).not.toContain('new ');
   });
 
   it('keeps existing command handlers in the shared barrel', () => {
@@ -34,8 +37,8 @@ describe('query-handler schematic', () => {
       options([], [], { 'command-handler': ['billing'] }),
     );
     const barrel = barrelOf(withCommands, 'query-handler').contents;
-    expect(barrel).toContain('BillingCommandHandler');
-    expect(barrel).toContain('OrderItemQueryHandler');
+    expect(barrel).toContain('createBillingCommandHandler');
+    expect(barrel).toContain('createOrderItemQueryHandler');
   });
 
   it('emits it at src/cqrs/order-item.query-handler.ts', () => {
@@ -67,5 +70,14 @@ describe('query-handler schematic', () => {
     for (const declared of ['OrderItemCriteria', 'OrderItemView']) {
       expect(file.contents).toContain(`export interface ${declared}`);
     }
+  });
+
+  it('emits a zero-parameter factory with a written-out return type', () => {
+    // The factory is the single construction site; a written-out return type is
+    // required because an inferred one is a JSR slow type.
+    expect(file.contents).toContain(
+      'export function createOrderItemQueryHandler(): OrderItemQueryHandler {',
+    );
+    expect(file.contents).toContain('return new OrderItemQueryHandler();');
   });
 });

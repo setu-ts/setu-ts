@@ -6934,13 +6934,20 @@ Ordered by the sequence they should be worked, not by severity alone.
   the shape to audit against (`ISessionStore.isHealthy?()`), and names the counter-example to build
   from — `worker-pool`'s indicator, the only one of the six reporting live state. Also X7-8 (the two
   health faces of one app disagree) and X3-7.
-- ⬜ **M70d — Seams that construct with no arguments** (`cli`, `common`, `health-plugin`,
+- ✅ **M70d — Seams that construct with no arguments** (`cli`, `common`, `health-plugin`,
   `cqrs-plugin`, `events-plugin`, `di-plugin`). The register's **"single most repeated defect"**: a
   CLI-owned barrel builds an artifact with `new X()` and the contract hands it no context, so
   generated health indicators and command/query/event handlers can reach nothing, and every affected
   exercise invented the same module-level-holder workaround (D4, X2-2, E3, E5). The register states
   the fix: **a factory arm on the registration types, which is non-breaking and closes all of
-  them**.
+  them**. Shipped as `RegistryFactory<T>` + one `resolveRegistryEntry` in `common`, with the factory
+  arm on `commandHandlers`/`queryHandlers`/**`behaviors`** (the third instance list, §3.11),
+  `EventsPluginOptions.handlers`, and `HealthPluginOptions.indicators`; factories resolve at
+  `onInit`. The `class-based` template now emits `DiPlugin({ autoRegister: true })` (E3) and the
+  `ServiceScope` docs are corrected (E5). **The contract addition is non-breaking, but the CLI's
+  generated output shape changes** — a pre-existing generated artifact stops being registered until
+  its author adds the two-line factory export (add that export, or delete the file and regenerate —
+  renaming a class to the factory's name does NOT compile). **Complete (PR #173).**
 - ⬜ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`).
   Every one of these packages offers a seam so tests can inject a fake, and because every test
   injects, the `?? <the real thing>` fallback is the one line no suite runs. `@setu-ts/sdk` cannot
@@ -7141,7 +7148,7 @@ branch during a version bump.
 | 70a       | ✅     | pipeline bypass (security)            |
 | 70b       | ✅     | tenant isolation, data exposure (sec) |
 | 70c       | ✅     | health-signal sweep (6 packages)      |
-| 70d       | ⬜     | no-argument registration seams        |
+| 70d       | ✅     | no-argument registration seams        |
 | 70e       | ⬜     | default branches of injectable seams  |
 | 70f       | ⬜     | error format and error visibility     |
 | 70g       | ⬜     | routing collisions                    |

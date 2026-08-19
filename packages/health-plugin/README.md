@@ -61,6 +61,7 @@ among them.
 | `HttpIndicatorOptions` | interface |
 | `IHealthIndicator`     | interface |
 | `IHealthService`       | interface |
+| `HealthIndicatorEntry` | type      |
 | `HealthIndicatorFn`    | type      |
 | `HealthStatus`         | type      |
 

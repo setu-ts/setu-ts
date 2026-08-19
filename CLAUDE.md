@@ -2696,12 +2696,36 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   reported `false` forever against a healthy Redis), and `RabbitMqQueue` threw on `disconnect()`
   after a fault and crashed the host process on a reset during `createChannel()` (the connection
   fault listener was installed too late) — all fixed and regression-tested. — complete (PR #172)
-- **Next milestone** — **M70d** (seams that construct with no arguments). The register's "single
-  most repeated defect": a CLI-owned barrel builds an artifact with `new X()` and the contract hands
-  it no context, so generated health indicators and command/query/event handlers can reach nothing,
-  and every affected exercise invented the same module-level-holder workaround (D4, X2-2, E3, E5);
-  the register states the fix — a factory arm on the registration types, which is non-breaking and
-  closes all of them.
+- **Milestone 70d** (`cli` + `common` + `health-plugin` + `cqrs-plugin` + `events-plugin` +
+  `di-plugin` — the no-argument registration seams, closing the register's "single most repeated
+  defect"). A CLI-owned barrel builds an artifact with `new X()` and the contract hands it no
+  context, so generated health indicators and command/query/event handlers could reach nothing, and
+  every affected exercise invented the same module-level-holder workaround (D4, X2-2, E3, E5).
+  `common` gains `RegistryFactory<T>` (`(services: IServiceRegistry) => T`) and one
+  `resolveRegistryEntry` resolver; the factory arm lands on `CqrsPluginOptions.commandHandlers` /
+  `queryHandlers` / **`behaviors`** (the third instance list, §3.11),
+  `EventsPluginOptions.handlers`, and `HealthPluginOptions.indicators`, each resolving at `onInit` —
+  the first phase at which the registry holds every capability. The four CLI schematics emit an
+  exported factory and the seam barrels reference it with no `new`; a pre-existing generated
+  artifact that exports no factory is skipped and reported (add that export, or delete the file and
+  regenerate — renaming a class to the factory's name emits a class constructor where the option
+  wants an instance or a function, so it does NOT compile). `DiPlugin({ autoRegister:
+  true })` in
+  the `class-based` template (E3), the `ServiceScope` docs corrected (E5), and `apps/cqrs` converted
+  to the new arm. E3 is proven by a BOOTED probe rather than by the emitted string: the class-based
+  `seam-probe` host injects `CAPABILITIES.CONFIG` into a generated `@Injectable` and resolves it
+  through the container, and reverting to a bare `DiPlugin()` fails it with
+  `No provider registered
+  for DI token 'config'` — the register's own E3 signature. **Breaking for
+  already-published generated output** — the generated barrel no longer constructs with `new X()`,
+  so a pre-existing artifact stops registering until the two-line factory export is added. All `src`
+  files ≥90% branch/function/line) — complete (PR #173)
+- **Next milestone** — **M70e** (default branches of injectable seams). Every one of `sdk`,
+  `grpc-plugin` and `telemetry-plugin` offers a seam so tests can inject a fake, and because every
+  test injects, the `?? <the real thing>` fallback is the one line no suite runs; `@setu-ts/sdk`
+  cannot complete a single request in a browser (X11-1) and `grpc-plugin`'s lazy `npm:` import goes
+  through a constant map JSR's npm-compat rewrite cannot reach (X7-3). General fix: construct the
+  default and drive it once, as `runtime`'s `read-stream-real.test.ts` already does.
 
 ## Verification (run before declaring any work done)
 

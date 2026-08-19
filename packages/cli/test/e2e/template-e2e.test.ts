@@ -421,8 +421,10 @@ describe('template scaffolding — end to end', () => {
         '        services: [...APP_SERVICES, ...MODULE_SERVICES],\n' +
         '      }),',
     );
-    // DiPlugin is what puts @Injectable classes on the container path.
-    expect(config).toContain('DiPlugin()');
+    // DiPlugin is what puts @Injectable classes on the container path. Since
+    // M70d (E3) it emits `autoRegister: true`, because the default disables the
+    // container's only route to the framework's own services.
+    expect(config).toContain('DiPlugin({ autoRegister: true })');
     // The local imports that bring the args identifiers into scope.
     // E4: the showcase reaches the config through the seam barrels now, not by
     // explicit path — which is the signal a developer copies when adding theirs.

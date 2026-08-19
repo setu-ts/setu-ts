@@ -19,7 +19,10 @@ export type Constructor<T = unknown> = new (...args: never[]) => T;
  * Service lifecycle scopes.
  *
  * - `singleton` — one instance for the application lifetime (default)
- * - `scoped` — one instance per request scope
+ * - `scoped` — one instance per {@linkcode IContainer.createScope} scope.
+ *   A scope is a child container the application creates and disposes
+ *   explicitly; the framework creates no scope per request, so a `scoped`
+ *   service is NOT re-created on every HTTP request.
  * - `transient` — a new instance per resolution
  *
  * @since 0.1.0

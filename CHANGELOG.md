@@ -144,6 +144,17 @@ All notable changes to this project are documented here. The format follows
 - **`ErrorHandlerOptions.maskInternalErrors`** (default `true`) — see **Security** and **Changed**.
 - **`FlagContext.tenantId`** (in `@setu-ts/common`) and **`FlagDefinition.tenants`** — both
   optional, so every existing caller, implementor, and flag definition is source-compatible.
+- **A factory arm on the four registration seams** (M70d). `CqrsPluginOptions.commandHandlers`,
+  `queryHandlers` and `behaviors`, `EventsPluginOptions.handlers`, and
+  `HealthPluginOptions.indicators` each accept, beside the instance, a factory —
+  `RegistryFactory<T> = (services: IServiceRegistry) => T` (new, `@setu-ts/common`). A factory is
+  resolved at the `onInit` phase — the first phase at which the registry holds every capability —
+  and its result is registered exactly as the instance arm would be, so a generated handler or
+  indicator can build a capability (the event bus, a database, the logger) at startup. Instance
+  entries keep their `register()` timing byte-identically, so an existing configuration is
+  unchanged. A factory that throws rejects `start()`, naming the option and the entry, with the
+  original error preserved as `cause` (through `resolveRegistryEntry`, also new in
+  `@setu-ts/common`).
 - **`DatabaseAdapterOptions.provider`**, the exported **`PrismaSqlProvider`** type, and
   **`UnsupportedFilterOperatorError`** — see **Changed** for the `contains` behaviour they govern.
 
@@ -232,6 +243,22 @@ All notable changes to this project are documented here. The format follows
   Rename its export to the one reported, or delete it and regenerate. (The report used to say
   "regenerate it", which could not be followed — the file is not CLI-owned, so the overwrite check
   refused. It now names both routes out.)
+
+- **Breaking (generated output): a CLI-generated registration artifact no longer registers until it
+  exports a factory** (M70d). The CLI-owned barrel no longer constructs the artifact with `new X()`
+  — it references an exported factory by name, and `setu generate` now emits that factory
+  (`create<Pascal>…()`) in the artifact file itself. An artifact generated before this change
+  exports no factory, so the seam scanner rejects it: it is left out of the regenerated barrel,
+  **not registered**, and `setu generate` reports the file by name. **Migration:** add the two-line
+  factory the new schematic emits —
+  `export function create<Pascal>…(): <Pascal>… { return new <Pascal>…(); }` — or delete the file
+  and re-run the schematic.
+- **The `class-based` template now emits `DiPlugin({ autoRegister: true })`** (M70d, E3).
+  `autoRegister` defaults to `false`, and both the container's external resolver and its registry
+  fallback are gated on it — so a bare `DiPlugin()` could not resolve any `@Inject(CAPABILITIES.X)`
+  at startup, and the entire plugin ecosystem was unreachable from a scaffolded class-based service.
+  **Migration:** none for new projects; a hand-written `setu.config.ts` that relies on the container
+  NOT falling back to the registry should pass `autoRegister: false` explicitly.
 
 - The documented install lines and the generated `install` task pass `--min-dep-age 0`, matching the
   `minimumDependencyAge` the scaffolded manifest already set.

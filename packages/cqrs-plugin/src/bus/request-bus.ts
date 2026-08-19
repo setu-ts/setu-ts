@@ -23,13 +23,31 @@ type ErasedHandler = (request: CqrsRequest) => Promise<unknown>;
  */
 export class RequestBus {
   private readonly handlers = new Map<string, ErasedHandler>();
+  private behaviors: readonly IPipelineBehavior[];
 
   /**
    * Creates a new request bus.
    *
    * @param behaviors - Behaviors to apply to every execution (default: `[]`)
    */
-  constructor(private readonly behaviors: readonly IPipelineBehavior[] = []) {}
+  constructor(behaviors: readonly IPipelineBehavior[] = []) {
+    this.behaviors = behaviors;
+  }
+
+  /**
+   * Replaces the behavior list.
+   *
+   * INTERNAL: not exported from the barrel. Used by the CqrsPlugin's `onInit`
+   * hook to install the fully-resolved behavior list (instances plus factory
+   * entries, in declared order). `execute` composes the pipeline per call, so
+   * replacing the field takes effect on the next execution with nothing to
+   * re-compose.
+   *
+   * @param behaviors - The new behavior list, replacing the current one
+   */
+  setBehaviors(behaviors: readonly IPipelineBehavior[]): void {
+    this.behaviors = behaviors;
+  }
 
   /**
    * Registers a handler for a request type.

@@ -283,26 +283,37 @@ describe('class-based template', () => {
     );
   });
 
-  it('leaves every wiring without a seam argument-free', () => {
-    // Three plugins now take a seam. Everything else must stay a bare call, or a
+  it('leaves every wiring without a seam argument-free, except di-plugin', () => {
+    // Three plugins take a seam, and — since M70d (E3) — `di-plugin` emits
+    // `autoRegister: true`, because the default disables the container's only
+    // route to the framework. Everything else must stay a bare call, or a
     // template has grown configuration nothing asked for.
     //
     // `config-plugin` is deliberately NOT in this set: its dotenv argument is
     // template MANIFEST data rendered by `configModule`, so a literal on the
     // wiring as well would be a second source of truth that `--env-file`
     // silently overrides.
-    const withSeams = new Set([
+    const withArgs = new Set([
       'decorator-plugin',
       'health-plugin',
       'metrics-plugin',
+      'di-plugin',
     ]);
     for (const wiring of CLASS_BASED_TEMPLATE.plugins) {
-      if (withSeams.has(wiring.pkg)) {
+      if (withArgs.has(wiring.pkg)) {
         expect(wiring.args).toBeDefined();
         continue;
       }
       expect(wiring.args).toBeUndefined();
     }
+  });
+
+  it('emits DiPlugin({ autoRegister: true }), not a bare call (E3)', () => {
+    // A bare `DiPlugin()` leaves `autoRegister` at its `false` default, so every
+    // `@Inject(CAPABILITIES.X)` throws at startup. The one file the developer
+    // does not hand-edit must set it.
+    const di = CLASS_BASED_TEMPLATE.plugins.find((w) => w.pkg === 'di-plugin');
+    expect(di?.args).toBe('{ autoRegister: true }');
   });
 
   it('does not leak its example classes into the shared REST_PLUGINS list', () => {

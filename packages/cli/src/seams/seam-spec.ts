@@ -135,9 +135,43 @@ export function seamNames(
  * @returns The import statement
  */
 function renderImport(symbols: readonly string[], module: string): string {
-  const inline = `import { ${symbols.join(', ')} } from '${module}';`;
+  const sorted = fmtSortSpecifiers(symbols);
+  const inline = `import { ${sorted.join(', ')} } from '${module}';`;
   if (inline.length <= GENERATED_LINE_WIDTH) return inline;
-  return `import {\n  ${symbols.join(',\n  ')},\n} from '${module}';`;
+  return `import {\n  ${sorted.join(',\n  ')},\n} from '${module}';`;
+}
+
+/**
+ * Sorts import specifiers the way `deno fmt` does: case-insensitively, with the
+ * uppercase spelling first on a case-only tie.
+ *
+ * `deno fmt` reorders the specifiers inside an import statement, so a barrel that
+ * lists them in any other order fails the generated project's own
+ * `deno fmt --check`. Pre-M70d the CQRS and event barrels happened to list their two
+ * symbols already in the sorted order — the SCREAMING constant sorts before its
+ * PascalCase class, because `_` (0x5F) sorts before a letter — which is why the
+ * defect surfaced only when the camelCase factory symbol was added: `create…` sorts
+ * before the constant, so the emit order (constant first) no longer matched.
+ *
+ * Both rules were probed against `deno fmt` itself rather than assumed:
+ * `{ bAlpha, Bbeta, aZulu }` → `{ aZulu, bAlpha, Bbeta }`, and `{ abc, ABC }` →
+ * `{ ABC, abc }`. They are expressed as one sort KEY — the case-folded name, a
+ * separator no identifier can contain, then the original spelling — rather than a
+ * hand-rolled tie-break loop. That is not only shorter: the loop's arms were
+ * unreachable from every seam spec (no two `importSymbols` results can collide in
+ * case), so they sat permanently untested, and a key has no arm to leave untaken.
+ *
+ * The comparator deliberately has no zero arm. Equal keys mean two BYTE-IDENTICAL
+ * symbols, which no `importSymbols` result contains — and if one ever did, their
+ * relative order would be unobservable, because the emitted text is the same either
+ * way. Keeping the arm would mean shipping a third branch nothing can reach.
+ *
+ * @param symbols - The names to order
+ * @returns The names, in the order `deno fmt` would leave them
+ */
+function fmtSortSpecifiers(symbols: readonly string[]): string[] {
+  const key = (symbol: string): string => `${symbol.toLowerCase()}\u0000${symbol}`;
+  return [...symbols].sort((a, b) => (key(a) < key(b) ? -1 : 1));
 }
 
 /**

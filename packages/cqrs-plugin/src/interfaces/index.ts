@@ -3,7 +3,12 @@
  *
  * @module
  */
-import type { ICommandHandler, IPipelineBehavior, IQueryHandler } from '@setu-ts/common';
+import type {
+  ICommandHandler,
+  IPipelineBehavior,
+  IQueryHandler,
+  RegistryFactory,
+} from '@setu-ts/common';
 
 /**
  * One command handler and the command type the bus routes to it.
@@ -23,8 +28,16 @@ import type { ICommandHandler, IPipelineBehavior, IQueryHandler } from '@setu-ts
 export interface CommandHandlerRegistration {
   /** Command type name, matching `command.type`. */
   readonly type: string;
-  /** The handler to register for that type. */
-  readonly handler: ICommandHandler;
+  /**
+   * The handler to register for that type, or a factory that builds one from
+   * the service registry.
+   *
+   * An instance registers on the bus during `register()`. A factory is called
+   * at the `onInit` phase — after every plugin has registered — and its result
+   * is registered under this entry's `type`, so it can resolve a capability
+   * (the event bus, the logger) its contract's message parameter cannot carry.
+   */
+  readonly handler: ICommandHandler | RegistryFactory<ICommandHandler>;
 }
 
 /**
@@ -38,8 +51,14 @@ export interface CommandHandlerRegistration {
 export interface QueryHandlerRegistration {
   /** Query type name, matching `query.type`. */
   readonly type: string;
-  /** The handler to register for that type. */
-  readonly handler: IQueryHandler;
+  /**
+   * The handler to register for that type, or a factory that builds one from
+   * the service registry.
+   *
+   * See {@linkcode CommandHandlerRegistration.handler} for the instance and
+   * factory arms and their timing.
+   */
+  readonly handler: IQueryHandler | RegistryFactory<IQueryHandler>;
 }
 
 /**
@@ -76,7 +95,12 @@ export interface CqrsPluginOptions {
    * request and a `next()` function; returning without calling `next()`
    * short-circuits the pipeline (the handler and later behaviors do not run).
    *
+   * An entry is either a behavior instance or a factory that builds one from
+   * the service registry. At the `onInit` phase the WHOLE list is resolved in
+   * declared order and installed on both buses, so a mixed list runs in
+   * declared order — not instances-then-factories.
+   *
    * Default: `[]` (no behaviors).
    */
-  behaviors?: readonly IPipelineBehavior[];
+  behaviors?: readonly (IPipelineBehavior | RegistryFactory<IPipelineBehavior>)[];
 }
