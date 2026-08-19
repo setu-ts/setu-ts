@@ -6952,13 +6952,13 @@ Ordered by the sequence they should be worked, not by severity alone.
   generated output shape changes** — a pre-existing generated artifact stops being registered until
   its author adds the two-line factory export (add that export, or delete the file and regenerate —
   renaming a class to the factory's name does NOT compile). **Complete (PR #173).**
-- ⬜ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`).
-  Every one of these packages offers a seam so tests can inject a fake, and because every test
-  injects, the `?? <the real thing>` fallback is the one line no suite runs. `@setu-ts/sdk` cannot
-  complete a single request in a browser (X11-1) and `grpc-plugin`'s lazy `npm:` import goes through
-  a constant map JSR's npm-compat rewrite cannot reach, which also leaves M24b's
-  auto-instrumentation enabled on no runtime (X7-3). Same family as this repo's most-repeated root
-  cause, one level up. General fix: **construct the default and drive it once**, as `runtime`'s
+- ✅ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`) —
+  complete (PR pending). Every one of these packages offers a seam so tests can inject a fake, and
+  because every test injects, the `?? <the real thing>` fallback is the one line no suite runs.
+  `@setu-ts/sdk` cannot complete a single request in a browser (X11-1) and `grpc-plugin`'s lazy
+  `npm:` import goes through a constant map JSR's npm-compat rewrite cannot reach, which also leaves
+  M24b's auto-instrumentation enabled on no runtime (X7-3). Same family as this repo's most-repeated
+  root cause, one level up. General fix: **construct the default and drive it once**, as `runtime`'s
   `read-stream-real.test.ts` already does for `IFileSystem`.
 - ⬜ **M70f — Error format and error visibility** (`storage-plugin`, `kernel`, `exceptions`,
   `multi-tenancy-plugin`, `session-plugin`, `grpc-plugin`, `logger-plugin`, `notification-plugin`).

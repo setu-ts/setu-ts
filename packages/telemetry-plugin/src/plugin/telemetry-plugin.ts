@@ -41,6 +41,13 @@ const MIDDLEWARE_PRIORITY = {
  * imperatively after this plugin must still receive the lines (the M52b
  * lesson). `debug` for an enabled instrumentation, `warn` for a failure — a
  * failure remains a no-op, never a throw.
+ *
+ * The plugin declares `CAPABILITIES.LOGGER` in `optionalDependencies` (below):
+ * the kernel resolver creates a registration-ordering edge from that entry, so
+ * a plugin-provided logger (e.g. `LoggerPlugin`) registers BEFORE this plugin
+ * and the call-time read finds it. The edge is optional, not required: an app
+ * without any logger plugin must still boot, with the outcomes recorded on the
+ * registry handle and nothing emitted.
  */
 function createInstrumentationReporter(ctx: { logger?: ILogger }): InstrumentationReporter {
   return (outcome) => {
@@ -97,6 +104,11 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
     name: 'telemetry-plugin',
     version: denoJson.version,
     provides: [CAPABILITIES.TELEMETRY],
+    // Optional edge on the logger capability: the kernel resolver orders the
+    // provider (e.g. LoggerPlugin) before this plugin so the outcome reporter's
+    // call-time read of ctx.logger finds it in the standard configuration.
+    // Optional — an app without a logger plugin must still boot.
+    optionalDependencies: [CAPABILITIES.LOGGER],
     priority: MIDDLEWARE_PRIORITY.TELEMETRY,
 
     async register(ctx) {
