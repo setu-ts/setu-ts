@@ -57,16 +57,27 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
   // factories are resolved at `onInit`, the first phase at which the registry
   // holds every capability — this plugin shares the NORMAL priority band with
   // the capabilities a factory may consume, where order is registration order.
+  //
+  // Each factory carries the index it holds in the DECLARED array, not its
+  // position among the factories: filtering first made the error label name a
+  // different — working — entry whenever the two arms were mixed. The entry's
+  // `type` travels with it, since it identifies the failing registration
+  // unambiguously where an index only locates it.
   const instances = handlers.filter(
     (entry): entry is { readonly type: string; readonly handler: IEventHandler<unknown> } =>
       typeof entry.handler !== 'function',
   );
-  const factories = handlers.filter(
-    (entry): entry is {
-      readonly type: string;
-      readonly handler: RegistryFactory<IEventHandler<unknown>>;
-    } => typeof entry.handler === 'function',
-  );
+  const factories = handlers
+    .map((entry, index) => ({ entry, index }))
+    .filter(
+      (slot): slot is {
+        entry: {
+          readonly type: string;
+          readonly handler: RegistryFactory<IEventHandler<unknown>>;
+        };
+        index: number;
+      } => typeof slot.entry.handler === 'function',
+    );
 
   return {
     name: PLUGIN_NAME,
@@ -121,11 +132,11 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // arms cannot drift. A factory that throws rejects start(), naming the
       // option and the entry.
       ctx.lifecycle.onInit(() => {
-        for (const [index, entry] of factories.entries()) {
+        for (const { entry, index } of factories) {
           const handler = resolveRegistryEntry(
             entry.handler,
             ctx.services,
-            `EventsPlugin({ handlers })[${index}]`,
+            `EventsPlugin({ handlers })[${index}] (type "${entry.type}")`,
           );
           subscribeHandler(bus, entry.type, handler);
         }

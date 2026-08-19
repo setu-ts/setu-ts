@@ -2707,13 +2707,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `EventsPluginOptions.handlers`, and `HealthPluginOptions.indicators`, each resolving at `onInit` —
   the first phase at which the registry holds every capability. The four CLI schematics emit an
   exported factory and the seam barrels reference it with no `new`; a pre-existing generated
-  artifact that exports no factory is skipped and reported (rename the export, or delete and
-  regenerate). `DiPlugin({ autoRegister:
-  true })` in the `class-based` template (E3), the
-  `ServiceScope` docs corrected (E5), and `apps/cqrs` converted to the new arm. **Breaking for
-  already-published generated output** — the generated barrel no longer constructs with `new X()`,
-  so a pre-existing artifact stops registering until the two-line factory export is added. All `src`
-  files ≥90% branch/function/line) — complete (PR pending)
+  artifact that exports no factory is skipped and reported (add that export, or delete the file and
+  regenerate — renaming a class to the factory's name emits a class constructor where the option
+  wants an instance or a function, so it does NOT compile). `DiPlugin({ autoRegister:
+  true })` in
+  the `class-based` template (E3), the `ServiceScope` docs corrected (E5), and `apps/cqrs` converted
+  to the new arm. **Breaking for already-published generated output** — the generated barrel no
+  longer constructs with `new X()`, so a pre-existing artifact stops registering until the two-line
+  factory export is added. All `src` files ≥90% branch/function/line) — complete (PR pending)
 - **Next milestone** — **M70e** (default branches of injectable seams). Every one of `sdk`,
   `grpc-plugin` and `telemetry-plugin` offers a seam so tests can inject a fake, and because every
   test injects, the `?? <the real thing>` fallback is the one line no suite runs; `@setu-ts/sdk`

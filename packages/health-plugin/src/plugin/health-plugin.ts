@@ -69,12 +69,19 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
   // timing; factories are resolved at `onInit`, the first phase at which the
   // registry holds every capability — this plugin registers at priority 100,
   // before the database and every other ordinary capability plugin.
+  //
+  // Each factory carries the index it holds in the DECLARED array, not its
+  // position among the factories: the index is the only thing the error label
+  // has to point a developer at the failing entry, and filtering first made it
+  // name a different — working — entry whenever the two arms were mixed.
   const instances = indicators.filter((entry): entry is IHealthIndicator =>
     typeof entry !== 'function'
   );
-  const factories = indicators.filter((entry): entry is RegistryFactory<IHealthIndicator> =>
-    typeof entry === 'function'
-  );
+  const factories = indicators
+    .map((entry, index) => ({ entry, index }))
+    .filter((slot): slot is { entry: RegistryFactory<IHealthIndicator>; index: number } =>
+      typeof slot.entry === 'function'
+    );
 
   return {
     name: 'health-plugin',
@@ -110,14 +117,14 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       // contributions — decides which side of a duplicate name is reported.
       // A factory that throws rejects start(), naming the option and entry.
       ctx.lifecycle.onInit(() => {
-        factories.forEach((factory, index) => {
+        for (const slot of factories) {
           const indicator = resolveRegistryEntry(
-            factory,
+            slot.entry,
             ctx.services,
-            `HealthPlugin({ indicators })[${index}]`,
+            `HealthPlugin({ indicators })[${slot.index}]`,
           );
           service.registerIndicator(indicator.name, indicator.check.bind(indicator));
-        });
+        }
 
         const contributions = ctx.services.getAll<{
           name: string;

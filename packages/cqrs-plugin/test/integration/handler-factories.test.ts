@@ -1,8 +1,15 @@
 /**
  * CqrsPlugin factory-arm integration: a command handler's factory resolves
- * `CAPABILITIES.EVENTS` and the executed command publishes an event an
- * independent subscriber observes — the X2-2 scenario ("a command handler has
- * no route to the event bus"), driven through `commandBus.execute`.
+ * `CAPABILITIES.EVENTS` — in the factory BODY, at `onInit` — and the executed
+ * command publishes an event an independent subscriber observes: the X2-2
+ * scenario ("a command handler has no route to the event bus"), driven through
+ * `commandBus.execute`.
+ *
+ * `EventsPlugin` is registered AFTER `CqrsPlugin`, so this fails if factory
+ * resolution moves back into `register()`. Both halves are load-bearing: an
+ * earlier version resolved the bus lazily inside `handle()` and listed the
+ * provider first, and it passed with resolution moved into `register()` — it
+ * proved the factory arm worked, and nothing about when it runs.
  *
  * @module
  */
@@ -66,27 +73,40 @@ describe('CqrsPlugin handler factories (integration)', () => {
     const app = createApplication({
       plugins: [
         fakeRuntimePlugin(),
-        EventsPlugin(),
         CqrsPlugin({
           commandHandlers: [
             {
               type: 'PlaceOrder',
-              handler: (services): ICommandHandler => ({
-                handle: (command) => {
-                  const id = (command.data as { id: string }).id;
-                  const events = services.get<IEventBus>(CAPABILITIES.EVENTS);
-                  void events.publish({
-                    type: 'OrderPlaced',
-                    id: 'evt-1',
-                    occurredOn: new Date(0),
-                    data: { id },
-                  });
-                  return id;
-                },
-              }),
+              // Resolved in the FACTORY BODY, not inside `handle`. That is what makes
+              // this test discriminate: `EventsPlugin` is listed AFTER `CqrsPlugin`
+              // below, so a factory invoked during `register()` would find no
+              // `events` capability and `start()` would reject. Resolving lazily
+              // inside `handle` would defer the lookup to execute time, where every
+              // plugin has long since registered — and the test would pass either
+              // way. (Verified: with resolution moved back into `register()`, this
+              // fails and the lazy shape did not.)
+              handler: (services): ICommandHandler => {
+                const events = services.get<IEventBus>(CAPABILITIES.EVENTS);
+                return {
+                  handle: (command) => {
+                    const id = (command.data as { id: string }).id;
+                    void events.publish({
+                      type: 'OrderPlaced',
+                      id: 'evt-1',
+                      occurredOn: new Date(0),
+                      data: { id },
+                    });
+                    return id;
+                  },
+                };
+              },
             },
           ],
         }),
+        // Registered AFTER CqrsPlugin and in the same NORMAL priority band, where
+        // order is registration order — so the capability the factory resolves does
+        // not exist yet when `CqrsPlugin.register()` runs.
+        EventsPlugin(),
       ],
     });
 

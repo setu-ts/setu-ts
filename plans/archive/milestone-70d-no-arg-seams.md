@@ -462,3 +462,39 @@ be a JSR slow type that `deno check` does not see (the M51 defect).
   not done here.
 - **X2-5 / X8-12 (an `Error` in log metadata serializing to `{}`).** It is why a generated handler's
   failure is invisible, and it belongs to M70f.
+
+## 10. Corrections found in code review (recorded, not quietly dropped)
+
+Four plan claims did not survive the end-of-milestone review. They are recorded here because an
+archived plan that still asserts them would be a lie about what shipped.
+
+- **§3.3's error attribution shipped naming the wrong entry.** The label carried each factory's
+  index within the FILTERED list rather than its index in the declared array, so with the two arms
+  mixed — the documented case — `commandHandlers[1]` was reported as `[0]` and `indicators[2]` as
+  `[0]`, pointing a developer at a different, working entry. `behaviors` was correct, because it
+  maps over the whole list, which is what established the intended semantics. Fixed in all four
+  remaining sites; the three `{ type, handler }` families now also name the entry's `type`, which
+  identifies the failing registration where an index only locates it. The one test that claimed to
+  cover this used a single-factory list, where a filtered index and a declared index are both `0`,
+  so it passed either way; `cqrs-plugin` and `events-plugin` had no label test at all.
+- **§3.12's migration route does not compile for four of the five families.** The plan leaned on the
+  committed skip report, which advises "Rename its export to …". The missing symbol is now a
+  FACTORY, so renaming a class to a factory's name emits a barrel entry that is a class constructor
+  where the option wants an instance or a function — `TS2322`, probed. Only the functional health
+  shape survives the rename, because that arm accepts an instance. The report now leads with adding
+  the export; `ROADMAP.md` and `CLAUDE.md` repeated the bad advice and are corrected.
+- **§6's designated timing test did not discriminate.** Both the health and CQRS integration tests
+  resolved their capability lazily — inside `check()` / `handle()`, which run at request time — so
+  moving factory resolution back into `register()` left them passing, while the health file's own
+  comment claimed that was "impossible". Measured: with resolution moved into `register()` the
+  health and CQRS integration tests passed and only the unit tests failed. Both now resolve in the
+  factory BODY, and the CQRS test registers `EventsPlugin` AFTER `CqrsPlugin`, so both fail under
+  that control. The `events-plugin` integration test already had the right shape and is the model
+  the other two were brought to.
+- **§6's E3 behavioural test was never written.** The plan promised a scaffolded class-based project
+  whose generated `@Injectable` injects `CAPABILITIES.CONFIG`, resolved through the container. What
+  shipped asserts only that the string `DiPlugin({ autoRegister: true })` is emitted. The behaviour
+  was verified by probe during review — `autoRegister: true` resolves a decorated service's injected
+  `ILogger`, `false` throws `No provider registered for DI token 'logger'` — and the mechanism is
+  independently covered by `di-plugin`'s own integration suite, so the gap is a missing regression
+  guard rather than a defect. Recorded as an open follow-up.

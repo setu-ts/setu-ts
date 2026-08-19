@@ -171,4 +171,20 @@ describe('HealthPlugin factory arm', () => {
       for (const hook of onInit) hook();
     }).toThrow('HealthPlugin({ indicators })[0]');
   });
+
+  it("names the failing entry's DECLARED index, not its position among the factories", async () => {
+    // The single-factory case above cannot tell a declared index from a filtered
+    // one — both are 0 — so it passed whichever the implementation used. With the
+    // arms MIXED they diverge: this factory is `indicators[2]`, and reporting `[0]`
+    // points the developer at a working instance entry instead.
+    const { ctx, onInit } = makeContext();
+    const factory = (): IHealthIndicator => {
+      throw new Error('capability missing');
+    };
+    await HealthPlugin({ indicators: [indicator('a'), indicator('b'), factory] })
+      .register!(ctx);
+    expect(() => {
+      for (const hook of onInit) hook();
+    }).toThrow('HealthPlugin({ indicators })[2]');
+  });
 });

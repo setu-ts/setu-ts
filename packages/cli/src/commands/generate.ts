@@ -263,8 +263,16 @@ export async function runGenerateCommand(
     // by review after A2 made `health-indicator` mode-aware. An alpha.8 project
     // generated its indicator as a class; a functional project now expects a
     // value, so the file is dropped and its health check stops running.
+    //
+    // ADD comes first, and renaming is only offered as an alternative, because
+    // M70d made rename a dead end for four of the five families it touched: the
+    // missing symbol is now a FACTORY, and renaming a class to a factory's name
+    // produces a barrel entry that is a class constructor where the option wants
+    // an instance or a function — `TS2322`, so the project stops compiling
+    // (probed). Leading with the route that works keeps this from being the M65
+    // dead-end advice in a new disguise.
     deps.error(
-      `  Rename its export to ${skip.missing.join(', ')}, ` +
+      `  Add that export to the file — or rename an existing one — ` +
         `or delete the file and run this schematic again.`,
     );
   }
