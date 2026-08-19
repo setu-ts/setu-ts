@@ -607,3 +607,140 @@ describe('buildInstrumentationRegistry', () => {
     expect(reported).toHaveLength(0);
   });
 });
+
+describe('buildInstrumentationRegistry — non-Error thrown values (never throws)', () => {
+  // JS permits `throw` of any value. The registry's documented guarantee is
+  // that a loader failure degrades to a no-op and NEVER throws; the `(err as
+  // Error).message` cast was a compile-time-only guard, so a non-Error throw
+  // made the catch itself throw a TypeError. These negative controls drive
+  // every catch site with a non-Error value and assert a degraded outcome.
+
+  function createFakeRuntime(platform: string): IRuntimeServices {
+    return {
+      platform: () => platform as never,
+      version: () => '1.0.0',
+      hostname: () => 'localhost',
+      uuid: () => 'fake-uuid-1',
+      randomBytes: (_n: number) => new Uint8Array(_n),
+      subtle: null as unknown as SubtleCrypto,
+      now: () => 0,
+      hrtime: () => 0,
+      setTimeout: () => 1 as never,
+      clearTimeout: () => {},
+      setInterval: () => 1 as never,
+      clearInterval: () => {},
+      env: {},
+      exit: () => {
+        throw new Error('exit');
+      },
+    } as IRuntimeServices;
+  }
+
+  /** A loader that throws `value` — drives the lazy path's catch. */
+  function throwingLoader(value: unknown) {
+    return (): Promise<{ instance: unknown; specifier: string }> => Promise.reject(value);
+  }
+
+  const nonErrors: Array<[string, unknown]> = [
+    ['null', null],
+    ['undefined', undefined],
+    ["'string'", 'boom'],
+  ];
+
+  for (const [label, value] of nonErrors) {
+    it(`degrades a lazy loader that throws ${label} to a no-op outcome (no throw)`, async () => {
+      const runtime = createFakeRuntime('node');
+      const provider = { id: 'fake-provider' };
+
+      const handle = await buildInstrumentationRegistry(
+        { http: true },
+        runtime,
+        provider,
+        undefined,
+        {
+          http: throwingLoader(value),
+          fetch: throwingLoader(value),
+          ioredis: throwingLoader(value),
+          amqplib: throwingLoader(value),
+          kafkajs: throwingLoader(value),
+        },
+      );
+
+      const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
+      expect(httpOutcome?.enabled).toBe(false);
+      // The reason is a non-empty string, not undefined.
+      expect(httpOutcome?.reason).toBeTruthy();
+      expect(typeof httpOutcome?.reason).toBe('string');
+    });
+  }
+
+  it('degrades an injected setTracerProvider that throws null to a no-op outcome (no throw)', async () => {
+    const runtime = createFakeRuntime('node');
+    const provider = { id: 'fake-provider' };
+
+    const handle = await buildInstrumentationRegistry(
+      {
+        http: {
+          instrumentation: {
+            setTracerProvider: () => {
+              throw null;
+            },
+          } as never,
+        },
+      },
+      runtime,
+      provider,
+    );
+
+    const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
+    expect(httpOutcome?.enabled).toBe(false);
+    expect(httpOutcome?.reason).toBeTruthy();
+  });
+
+  it('degrades an injected enable() that throws a string to a no-op outcome (no throw)', async () => {
+    const runtime = createFakeRuntime('node');
+    const provider = { id: 'fake-provider' };
+
+    const handle = await buildInstrumentationRegistry(
+      {
+        http: {
+          instrumentation: {
+            setTracerProvider: (_p: unknown) => {},
+            enable: () => {
+              throw 'enable blew up';
+            },
+          } as never,
+        },
+      },
+      runtime,
+      provider,
+    );
+
+    const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
+    expect(httpOutcome?.enabled).toBe(false);
+    expect(httpOutcome?.reason).toBe('enable blew up');
+  });
+
+  it('records a non-empty string reason for a lazy loader that throws a number (no throw)', async () => {
+    const runtime = createFakeRuntime('node');
+    const provider = { id: 'fake-provider' };
+
+    const handle = await buildInstrumentationRegistry(
+      { ioredis: true },
+      runtime,
+      provider,
+      undefined,
+      {
+        http: throwingLoader(null),
+        fetch: throwingLoader(null),
+        ioredis: throwingLoader(42),
+        amqplib: throwingLoader(null),
+        kafkajs: throwingLoader(null),
+      },
+    );
+
+    const ioredisOutcome = handle.outcomes.find((o) => o.kind === 'ioredis');
+    expect(ioredisOutcome?.enabled).toBe(false);
+    expect(ioredisOutcome?.reason).toBe('42');
+  });
+});

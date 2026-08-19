@@ -16,6 +16,15 @@
  * {@linkcode auditPackageSources} walker is the I/O seam that feeds it. The
  * pure core is what carries the 90% coverage bar via `SCRIPT_TARGETS`.
  *
+ * **Heuristic limits.** The scanner is a regex-based heuristic over masked
+ * source text, not a parser. A regex literal that happens to contain the text
+ * `import(` can false-positive, and a specifier built by
+ * `new Function("return import(...)")`-style construction is invisible to it.
+ * `eval`/`new Function` are forbidden repo-wide (AI_GUIDELINES §13.5), which
+ * is what keeps that blind spot empty; the `computed-specifier` marker is the
+ * escape hatch for a genuinely computed import the heuristic would otherwise
+ * refuse.
+ *
  * @module
  */
 
@@ -77,9 +86,9 @@ function scanSource(source: string): readonly ScanHit[] {
     if (argOffset >= code.length) continue;
 
     const argChar = code[argOffset];
-    const isComputed = argChar === "'" || argChar === '"' || argChar === '`'
-      ? !isCleanStringLiteral(source, argOffset)
-      : true;
+    const isComputed = argChar !== "'" && argChar !== '"' && argChar !== '`'
+      ? true
+      : !isBareStringArgument(source, code, argOffset, parenOffset);
     if (!isComputed) continue;
 
     const line = offsetToLine[start];
@@ -301,14 +310,61 @@ function firstNonSpace(code: string, from: number): number {
 }
 
 /**
- * True when the string/template literal opening at `offset` is a clean
- * literal — i.e. its value is fixed at publish time. Single- and
- * double-quoted strings always are; a template literal is clean only when it
- * has no `${ }` interpolation (an interpolated template is computed).
+ * True when the first argument of the `import(` call whose opening paren is
+ * at `parenOffset` is EXACTLY the string literal opening at `argOffset` —
+ * nothing but whitespace (and masked comments) between the literal's closing
+ * delimiter and the end of the argument. A concatenated (`'a' + b`), cast
+ * (`'a' as string`), or otherwise composed argument is not a bare literal and
+ * is reported as computed: JSR's static rewrite reaches only the literal, so
+ * the composed value would ship `npm:` verbatim (X7-3).
  */
-function isCleanStringLiteral(source: string, offset: number): boolean {
+function isBareStringArgument(
+  source: string,
+  code: string,
+  argOffset: number,
+  parenOffset: number,
+): boolean {
+  const literal = readStringLiteral(source, argOffset);
+  if (!literal.clean || literal.end < 0) return false;
+  const argEnd = firstArgumentEnd(code, parenOffset);
+  return /^\s*$/.test(code.slice(literal.end, argEnd));
+}
+
+/**
+ * The offset of the token that ends the FIRST argument of the call whose
+ * opening paren is at `parenOffset`: the first `,` at paren depth 0, or the
+ * matching `)`. Scans the masked `code` view, where string/template bodies
+ * and comments are spaces, so only real code tokens affect the depth count.
+ */
+function firstArgumentEnd(code: string, parenOffset: number): number {
+  let depth = 0;
+  for (let i = parenOffset + 1; i < code.length; i++) {
+    const c = code[i];
+    if (c === '(') {
+      depth++;
+    } else if (c === ')') {
+      if (depth === 0) return i;
+      depth--;
+    } else if (c === ',' && depth === 0) {
+      return i;
+    }
+  }
+  return code.length;
+}
+
+/**
+ * Reads the string/template literal opening at `offset` and reports where it
+ * ends (the offset just past the closing delimiter) and whether it is clean —
+ * i.e. its value is fixed at publish time. Single- and double-quoted strings
+ * are always clean; a template literal is clean only when it has no `${ }`
+ * interpolation (an interpolated template is computed). `end` is `-1` when
+ * the literal is unterminated or interpolated.
+ */
+function readStringLiteral(
+  source: string,
+  offset: number,
+): { end: number; clean: boolean } {
   const quote = source[offset];
-  if (quote !== '`') return true;
   const n = source.length;
   let i = offset + 1;
   while (i < n) {
@@ -317,11 +373,13 @@ function isCleanStringLiteral(source: string, offset: number): boolean {
       i += 2;
       continue;
     }
-    if (c === '`') return true;
-    if (c === '$' && source[i + 1] === '{') return false;
+    if (c === quote) return { end: i + 1, clean: true };
+    if (quote === '`' && c === '$' && source[i + 1] === '{') {
+      return { end: -1, clean: false };
+    }
     i++;
   }
-  return false;
+  return { end: -1, clean: false };
 }
 
 /**
