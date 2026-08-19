@@ -16,6 +16,12 @@ describe('findComputedImports — literal arguments are accepted', () => {
     expect(findComputedImports("const m = await import('npm:pino@10.x');")).toHaveLength(0);
   });
 
+  it('accepts a bare npm: literal (the @connectrpc/connect shape)', () => {
+    expect(
+      findComputedImports("const m = await import('npm:@connectrpc/connect');"),
+    ).toHaveLength(0);
+  });
+
   it('accepts a double-quoted literal', () => {
     expect(findComputedImports('const m = await import("npm:pino@10.x");')).toHaveLength(0);
   });
@@ -35,6 +41,23 @@ describe('findComputedImports — literal arguments are accepted', () => {
 });
 
 describe('findComputedImports — computed arguments are rejected', () => {
+  it('rejects a concatenated string argument (X7-3 bypass)', () => {
+    const findings = findComputedImports("const m = await import('npm:' + name);");
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.snippet).toContain("'npm:' + name");
+  });
+
+  it('rejects a string argument composed with a template literal', () => {
+    const findings = findComputedImports('const m = await import(`npm:` + name);');
+    expect(findings).toHaveLength(1);
+  });
+
+  it('rejects a string argument cast with `as`', () => {
+    const findings = findComputedImports("const m = await import('npm:foo' as string);");
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.snippet).toContain("'npm:foo' as string");
+  });
+
   it('rejects an identifier argument', () => {
     const findings = findComputedImports('const m = await import(spec);');
     expect(findings).toHaveLength(1);

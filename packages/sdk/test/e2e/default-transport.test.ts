@@ -36,9 +36,9 @@ async function handler(request: Request): Promise<Response> {
 }
 
 describe('default transport (real socket)', () => {
-  afterEach(() => {
+  afterEach(async () => {
     if (server) {
-      server.shutdown();
+      await server.shutdown();
       server = undefined;
     }
   });

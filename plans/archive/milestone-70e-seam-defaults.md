@@ -1,7 +1,7 @@
 # Milestone 70e — Default branches of injectable seams (`@setu-ts/sdk`, `@setu-ts/grpc-plugin`, `@setu-ts/telemetry-plugin`)
 
-> **Status:** Planning. Branch: `feat/m70e-seam-defaults`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Branch: `feat/m70e-seam-defaults`. `main` is protected — all
+> work (implementation + fixes) stayed on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 

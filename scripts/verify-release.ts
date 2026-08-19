@@ -8,7 +8,7 @@
  * deno run --allow-read scripts/verify-release.ts 0.1.0-alpha.1
  * ```
  *
- * Verifies five things a green test suite cannot:
+ * Verifies six things a green test suite cannot:
  *
  * 1. Every publishable package carries exactly the expected version — so the
  *    tag, the CHANGELOG entry, and what lands on JSR all agree.
