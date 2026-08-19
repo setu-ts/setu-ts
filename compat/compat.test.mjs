@@ -13,7 +13,7 @@
  * the first failed check.
  */
 import { createServer } from 'node:net';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 import { CAPABILITIES } from '@jsr/setu-ts__common';
 import { createApplication } from '@jsr/setu-ts__kernel';
@@ -207,6 +207,96 @@ try {
 //    listener from one the adapter merely stopped routing to.
 const rebound = await rebind(port);
 check('stop() releases the listening port', rebound === null, rebound ?? undefined);
+
+// 9. The published grpc/telemetry artifacts must ship no `npm:` inside an
+//    import() call. JSR's npm-compatibility rewrite is static and reaches only
+//    a literal import('npm:…') argument; a specifier routed through a variable
+//    ships `npm:` verbatim and cannot load on Node or Bun (X7-3, M70e). The
+//    source gate (scripts/npm-specifier-audit.ts) prevents the shape in the
+//    repo; only a published artifact settles that the rewrite actually ran.
+//
+//    Guarded by version: while the installed packages are at or below
+//    0.1.0-alpha.8 (the last release that shipped the defect) the check reports
+//    pending rather than failing — a hard check would turn this PR red for the
+//    very defect it fixes. Once a newer version is installed the guard lifts
+//    and a surviving `npm:` inside import( fails the suite.
+const LAST_BROKEN = '0.1.0-alpha.8';
+const FIXED_IN = '0.1.0-alpha.9';
+
+/** Compares two `0.1.0[-alpha.N]` versions; -1/0/1. Unparseable → 0 (don't gate). */
+function compareVersions(a, b) {
+  const parse = (v) => {
+    const m = /^(\d+)\.(\d+)\.(\d+)(?:-alpha\.(\d+))?$/.exec(v);
+    if (!m) return null;
+    return {
+      major: Number(m[1]),
+      minor: Number(m[2]),
+      patch: Number(m[3]),
+      pre: m[4] !== undefined ? Number(m[4]) : null,
+    };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (pa === null || pb === null) return 0;
+  for (const key of ['major', 'minor', 'patch']) {
+    if (pa[key] !== pb[key]) return pa[key] < pb[key] ? -1 : 1;
+  }
+  // Same tuple: a release (pre === null) sorts after any prerelease.
+  if (pa.pre === null && pb.pre === null) return 0;
+  if (pa.pre === null) return 1;
+  if (pb.pre === null) return -1;
+  return pa.pre === pb.pre ? 0 : pa.pre < pb.pre ? -1 : 1;
+}
+
+/** Offsets of every `import( "npm:…` / `import('npm:…` / `import(`npm:…` call. */
+function npmImportOccurrences(source) {
+  const re = /import\s*\(\s*["'`]npm:/g;
+  const hits = [];
+  let m;
+  while ((m = re.exec(source)) !== null) hits.push(m.index);
+  return hits;
+}
+
+/** Recursively lists every `.js` file under `dir`. */
+function listJsFiles(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...listJsFiles(path));
+    else if (entry.name.endsWith('.js')) out.push(path);
+  }
+  return out;
+}
+
+for (const name of ['@jsr/setu-ts__grpc-plugin', '@jsr/setu-ts__telemetry-plugin']) {
+  const pkgDir = `node_modules/${name}`;
+  let version;
+  try {
+    version = JSON.parse(readFileSync(`${pkgDir}/package.json`, 'utf8')).version;
+  } catch {
+    check(`${name} is installed with a readable version`, false, 'no package.json');
+    continue;
+  }
+
+  if (compareVersions(version, LAST_BROKEN) <= 0) {
+    console.log(
+      `  pend ${name} @ ${version} — npm:-in-import check pending, fixed in ${FIXED_IN}, not yet published`,
+    );
+    continue;
+  }
+
+  const survivors = [];
+  for (const file of listJsFiles(`${pkgDir}/src`)) {
+    if (npmImportOccurrences(readFileSync(file, 'utf8')).length > 0) {
+      survivors.push(file.replace(`${pkgDir}/`, ''));
+    }
+  }
+  check(
+    `${name} @ ${version} ships no npm: inside an import() call`,
+    survivors.length === 0,
+    `surviving npm: in: ${survivors.join(', ')}`,
+  );
+}
 
 console.log(failures === 0 ? `\nAll checks passed (${host}).` : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

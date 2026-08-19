@@ -58,6 +58,10 @@ instrumentation is a documented **no-op, never a throw**, so one codebase deploy
 
 Each plugin instance calls `setTracerProvider` on itself; there is no global singleton.
 
+Outcomes are reported through the plugin's logger (`ctx.logger`, read at call time): an enabled
+instrumentation logs at `debug`, a failure logs at `warn` with `kind` and `reason`. A failure
+remains a no-op rather than a throw — but it is no longer silent.
+
 ## Propagation
 
 The request-span middleware reads and writes the W3C `traceparent` header, so traces join across

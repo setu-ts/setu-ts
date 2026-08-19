@@ -25,11 +25,27 @@ export interface InstrumentationOutcome {
   reason?: string;
 }
 
+/**
+ * Reports a single instrumentation outcome as the registry builds. The plugin
+ * passes a reporter that reads `ctx.logger` at call time, so a logger
+ * registered after this plugin still receives the lines. A reporter that
+ * throws must not break the build — the observation path must not become the
+ * failure path.
+ *
+ * @since 0.2.0
+ */
+export type InstrumentationReporter = (outcome: InstrumentationOutcome) => void;
+
 /** Handle returned by the registry — call `shutdown()` on application teardown. */
 export interface InstrumentationHandle {
   /** Shuts down all enabled instrumentations. */
   shutdown(): Promise<void>;
-  /** Records of what happened during registry build. */
+  /**
+   * Records of what happened during registry build. Surfaced to the
+   * application through the plugin's logger (one line per outcome: `debug`
+   * for an enabled instrumentation, `warn` for a failure); a failure remains
+   * a no-op and is never rethrown.
+   */
   outcomes: InstrumentationOutcome[];
 }
 
@@ -55,6 +71,8 @@ export function isInstrumentationSupported(
  * @param config - The `instrumentations` option from plugin options.
  * @param runtime - Runtime services providing the platform gate.
  * @param provider - The OTel TracerProvider (from `TracerHost.otelProvider`); absent = no-op.
+ * @param reporter - Invoked once per outcome as the registry builds. The plugin
+ *   passes a `ctx.logger`-backed reporter; absent = outcomes are only recorded.
  * @returns An instrumentation handle (resolved after all lazy loads settle).
  * @since 0.2.0
  */
@@ -62,10 +80,26 @@ export async function buildInstrumentationRegistry(
   config: InstrumentationsConfig | undefined,
   runtime: IRuntimeServices,
   provider: unknown,
+  reporter: InstrumentationReporter | undefined = undefined,
 ): Promise<InstrumentationHandle> {
   const outcomes: InstrumentationOutcome[] = [];
 
+  // Record an outcome and surface it to the reporter. The reporter is an
+  // observation path: a throwing reporter must not break the build (M45b —
+  // an observer must never become the failure path).
+  function record(outcome: InstrumentationOutcome): void {
+    outcomes.push(outcome);
+    if (reporter) {
+      try {
+        reporter(outcome);
+      } catch {
+        // A failing observer must not become the failure path.
+      }
+    }
+  }
+
   // If no provider, the registry is a no-op (noop mode / custom factory without otelProvider).
+  // No outcomes are recorded, so the no-provider path reports nothing.
   if (!provider) {
     return {
       shutdown: async () => {},
@@ -94,7 +128,7 @@ export async function buildInstrumentationRegistry(
         (instance as { setTracerProvider: (p: unknown) => void }).setTracerProvider(provider);
       }
     } catch (err) {
-      outcomes.push({ kind, enabled: false, reason: (err as Error).message });
+      record({ kind, enabled: false, reason: (err as Error).message });
       return;
     }
 
@@ -104,11 +138,11 @@ export async function buildInstrumentationRegistry(
         (instance as { enable: () => void }).enable();
       }
     } catch (err) {
-      outcomes.push({ kind, enabled: false, reason: (err as Error).message });
+      record({ kind, enabled: false, reason: (err as Error).message });
       return;
     }
 
-    outcomes.push({ kind, enabled: true });
+    record({ kind, enabled: true });
     enabledInstrumentations.push({ kind, instance });
   }
 
@@ -121,7 +155,7 @@ export async function buildInstrumentationRegistry(
     ) => Promise<{ instance: unknown; specifier: string }>,
   ): Promise<void> {
     if (!isInstrumentationSupported(kind, platform)) {
-      outcomes.push({ kind, enabled: false, reason: 'unsupported platform' });
+      record({ kind, enabled: false, reason: 'unsupported platform' });
       return;
     }
 
@@ -130,7 +164,7 @@ export async function buildInstrumentationRegistry(
       const result = await loader(configArg);
       instance = result.instance;
     } catch (err) {
-      outcomes.push({ kind, enabled: false, reason: (err as Error).message });
+      record({ kind, enabled: false, reason: (err as Error).message });
       return;
     }
 

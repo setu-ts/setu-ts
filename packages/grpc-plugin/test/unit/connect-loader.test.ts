@@ -1,17 +1,25 @@
 /**
  * Unit tests for the Connect runtime loader: the pure `adaptConnectModule`
  * adapter and the per-specifier failure branches of `loadConnectModule`, driven
- * through the injected importer so no network is required.
+ * through the injected per-key importers so no network is required.
+ *
+ * The final test asserts each DEFAULT importer's source is a literal
+ * `import('npm:…')`. That is the replacement for the old assertion that only
+ * checked `String(defaultImporter)` contained `import(` — a stringified
+ * non-literal `import(specifier)` also contains `import(`, so the old test
+ * passed while the published artifact shipped `npm:` verbatim and could not
+ * load on Node or Bun (X7-3). The literal-argument property is what survives
+ * JSR's static npm-compatibility rewrite.
  */
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   adaptConnectModule,
+  type ConnectImporters,
   type ConnectModuleLike,
-  defaultImporter,
+  DEFAULT_IMPORTERS,
   loadConnectModule,
-  type ModuleImporter,
 } from '../../src/transports/connect-loader.ts';
 import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
 import { fakeFile, fakeService } from '../fixtures/fake-connect-runtime.ts';
@@ -145,6 +153,7 @@ describe('adaptConnectModule', () => {
 });
 
 describe('loadConnectModule', () => {
+  /** The four specifiers in load order. */
   const SPECIFIERS = [
     'npm:@connectrpc/connect@^2.1.2',
     'npm:@connectrpc/connect@^2.1.2/protocol',
@@ -152,23 +161,35 @@ describe('loadConnectModule', () => {
     'npm:@bufbuild/protobuf@^2.7.0/wkt',
   ];
 
-  /** An importer that resolves every specifier except the named one. */
-  function importerFailing(failing: string): ModuleImporter {
+  /** The specifier each importer key loads, in load order. */
+  const SPECIFIER_BY_KEY: Record<keyof ConnectImporters, string> = {
+    connect: 'npm:@connectrpc/connect@^2.1.2',
+    protocol: 'npm:@connectrpc/connect@^2.1.2/protocol',
+    protobuf: 'npm:@bufbuild/protobuf@^2.7.0',
+    wkt: 'npm:@bufbuild/protobuf@^2.7.0/wkt',
+  };
+
+  /** Per-key importers that resolve every key except the one named. */
+  function importersFailing(failing: string): Partial<ConnectImporters> {
     const { modules } = createFakeModules();
-    const bySpecifier: Record<string, unknown> = {
-      'npm:@connectrpc/connect@^2.1.2': modules.connect,
-      'npm:@connectrpc/connect@^2.1.2/protocol': modules.protocol,
-      'npm:@bufbuild/protobuf@^2.7.0': modules.protobuf,
-      'npm:@bufbuild/protobuf@^2.7.0/wkt': modules.wkt,
+    const byKey: Record<keyof ConnectImporters, unknown> = {
+      connect: modules.connect,
+      protocol: modules.protocol,
+      protobuf: modules.protobuf,
+      wkt: modules.wkt,
     };
-    return (specifier) =>
-      specifier === failing
-        ? Promise.reject(new Error(`Module not found: ${specifier}`))
-        : Promise.resolve(bySpecifier[specifier]);
+    const importers: Partial<ConnectImporters> = {};
+    for (const key of Object.keys(byKey) as Array<keyof ConnectImporters>) {
+      const specifier = SPECIFIER_BY_KEY[key];
+      importers[key] = specifier === failing
+        ? () => Promise.reject(new Error(`Module not found: ${specifier}`))
+        : () => Promise.resolve(byKey[key]);
+    }
+    return importers;
   }
 
   it('assembles a runtime when all four specifiers resolve', async () => {
-    const runtime = await loadConnectModule(importerFailing('none'));
+    const runtime = await loadConnectModule(importersFailing('none'));
     expect(typeof runtime.createConnectRouter).toBe('function');
     expect(typeof runtime.createFetchHandler).toBe('function');
     expect(typeof runtime.reviveDescriptorSet).toBe('function');
@@ -176,20 +197,29 @@ describe('loadConnectModule', () => {
     expect(typeof runtime.serializeFileDescriptor).toBe('function');
   });
 
-  it('requests exactly the four documented specifiers', async () => {
-    const requested: string[] = [];
-    await loadConnectModule((specifier) => {
-      requested.push(specifier);
-      return importerFailing('none')(specifier);
-    });
-    expect(requested).toEqual(SPECIFIERS);
+  it('uses a per-key override in place of the default importer', async () => {
+    // `connect` loads first, so a rejecting override for it surfaces before
+    // any default importer runs — proving the override is wired in while
+    // keeping the test hermetic.
+    let thrown: unknown;
+    try {
+      await loadConnectModule({
+        connect: () => Promise.reject(new Error('override-fail')),
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(GrpcRuntimeLoadError);
+    const error = thrown as GrpcRuntimeLoadError;
+    expect(error.specifier).toBe(SPECIFIER_BY_KEY.connect);
+    expect((error.cause as Error).message).toBe('override-fail');
   });
 
   for (const specifier of SPECIFIERS) {
     it(`throws GrpcRuntimeLoadError naming '${specifier}' when it cannot be imported`, async () => {
       let thrown: unknown;
       try {
-        await loadConnectModule(importerFailing(specifier));
+        await loadConnectModule(importersFailing(specifier));
       } catch (error) {
         thrown = error;
       }
@@ -197,16 +227,24 @@ describe('loadConnectModule', () => {
       const error = thrown as GrpcRuntimeLoadError;
       expect(error.specifier).toBe(specifier);
       expect(error.message).toContain(specifier);
-      // The message must carry a command the operator can actually run.
+      // The message must name all three package managers — a Bun project
+      // must not be told to run a Deno command.
       expect(error.message).toContain('deno add npm:');
+      expect(error.message).toContain('npm i ');
+      expect(error.message).toContain('bun add ');
       expect(error.cause).toBeInstanceOf(Error);
     });
   }
 
-  it('exposes a real dynamic import as the default importer, not a global hook', () => {
-    // A `globalThis.__x` shim would throw in production even with the package
-    // installed, because nothing would ever populate it.
-    expect(typeof defaultImporter).toBe('function');
-    expect(String(defaultImporter)).toContain('import(');
+  it('keeps each default specifier as a literal import() argument', () => {
+    // The old assertion only checked that the stringified default importer
+    // contained `import(` — and `(specifier) => import(specifier)` does,
+    // which is exactly the shape JSR's static rewrite cannot see, so the
+    // published artifact shipped `npm:` verbatim (X7-3). The property that
+    // survives publish is that the argument is a quoted literal.
+    for (const key of Object.keys(SPECIFIER_BY_KEY) as Array<keyof ConnectImporters>) {
+      const source = String(DEFAULT_IMPORTERS[key]);
+      expect(source).toContain(`import('${SPECIFIER_BY_KEY[key]}')`);
+    }
   });
 });

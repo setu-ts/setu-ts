@@ -24,11 +24,17 @@
  *    README.md is what renders on jsr.io rather than a one-line JSDoc blurb.
  *    See the long comment at check 5 — six packages shipped without a visible
  *    README in `v0.1.0-alpha.2` because of this.
+ * 6. No package `src` tree contains a computed `import()` without a
+ *    `computed-specifier` marker (M70e). JSR's npm-compatibility rewrite is
+ *    static and reaches only a literal `import('npm:…')`; a computed specifier
+ *    ships `npm:` verbatim and cannot load on Node or Bun (X7-3). The source
+ *    gate catches the cause on every PR; this is the release backstop.
  *
  * Exits non-zero and prints every problem found, rather than stopping at the
  * first — a release is easier to fix in one pass.
  */
 import { PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
+import { auditPackageSources } from './npm-specifier-audit.ts';
 
 const expected = Deno.args[0];
 if (!expected) {
@@ -192,6 +198,23 @@ for (const dir of PUBLISHED_PACKAGES) {
   }
 }
 
+// ── 6: no computed import() without a marker in packages/*/src ─────────────
+
+// The decidable half lives in scripts/npm-specifier-audit.ts (pure, and
+// coverage-gated via SCRIPT_TARGETS) so this check stays a thin caller. A
+// computed import() whose argument is not a string literal ships `npm:`
+// verbatim in the published artifact — JSR's static rewrite cannot see it —
+// so no release may contain one.
+const audit = await auditPackageSources('packages');
+for (const finding of audit.findings) {
+  problems.push(
+    `${finding.file}:${finding.line}: computed import() without a ` +
+      `\`computed-specifier\` marker — JSR's static npm-compatibility rewrite ` +
+      `cannot see a non-literal specifier, so any npm: string would ship ` +
+      `verbatim and fail to load on Node or Bun. ${finding.snippet}`,
+  );
+}
+
 // ── Report ──────────────────────────────────────────────────────────────────
 
 if (problems.length > 0) {
@@ -203,5 +226,7 @@ if (problems.length > 0) {
 
 console.log(
   `Release ${expected} verified: ${PUBLISHED_PACKAGES.length} packages to publish, ` +
-    `${UNPUBLISHED_PACKAGES.length} deliberately excluded.`,
+    `${UNPUBLISHED_PACKAGES.length} deliberately excluded, ` +
+    `${audit.markedSites} computed import() sites marked, ` +
+    `${audit.filesVisited} source files audited.`,
 );

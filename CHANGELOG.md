@@ -157,6 +157,20 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/common`).
 - **`DatabaseAdapterOptions.provider`**, the exported **`PrismaSqlProvider`** type, and
   **`UnsupportedFilterOperatorError`** — see **Changed** for the `contains` behaviour they govern.
+- **Telemetry auto-instrumentation outcomes are now reported, not silent** (M70e). The
+  `instrumentations` registry reports every outcome through the plugin's logger (`ctx.logger`, read
+  at call time): an enabled instrumentation logs one line at `debug`, a loader or enable failure one
+  line at `warn` carrying `kind` and `reason`. A failure remains a documented no-op — it is still
+  never thrown — but it is no longer invisible. Without a logger registered, the outcomes are still
+  recorded on the registry handle and nothing is emitted. The five instrumentation loaders' default
+  importers now take zero arguments (the specifier is a literal inside the default), so the default
+  path is the one a published artifact can actually run.
+- **A recurrence gate for computed `import()` specifiers** (M70e). `scripts/npm-specifier-audit.ts`
+  walks every `packages/*/src` file and refuses any dynamic `import()` whose first argument is not a
+  string literal, unless the call carries a `computed-specifier: <reason>` marker (an empty reason
+  is rejected). `test/npm-specifier-gate.test.ts` runs it on every suite run, and
+  `deno task release:verify` enforces it as check 6, so the X7-3 shape (a specifier routed through a
+  variable that JSR's static npm-compat rewrite cannot reach) cannot re-enter the source tree.
 
 ### Changed
 
@@ -319,6 +333,22 @@ All notable changes to this project are documented here. The format follows
   killed the process. The listener is now installed before the channel is created, and the channel
   gets its own `'error'` listener (amqplib emits `error` on every channel when the connection
   resets).
+- **X11-1 — the SDK's default `fetch` receiver broke the client in a browser** (M70e). The default
+  transport stored the bare global `fetch` on a private field and called it as `this.#fetch(...)`,
+  so in a browser its receiver was the `HttpClient` instance and the first request died with
+  `TypeError: Illegal invocation` before any network I/O. The default now resolves
+  `globalThis.fetch` at call time with the global as its receiver, so the default works in a browser
+  unchanged — and a `globalThis.fetch` installed after construction (a mocking library or polyfill)
+  is honoured rather than shadowed by a value captured at construction. An injected `fetch` is
+  always used as-is. No configuration change is required; the fix is in the default.
+- **X7-3 — `@setu-ts/grpc-plugin` could not load on Node or Bun** (M70e). The Connect/Protobuf-ES
+  specifiers reached `import()` through a constant map, so JSR's static npm-compatibility rewrite
+  never saw them and the published artifact shipped `npm:` verbatim — unresolvable on Node and Bun.
+  The default importer now calls four literal `import('npm:…')` expressions (one per module,
+  including the two `/protocol` and `/wkt` subpaths), so the rewrite reaches every one. The
+  injectable `importer` seam is unchanged. **Migration:** none — the published package now loads on
+  Node and Bun; the Connect/Protobuf-ES packages must be installed with the host runtime's package
+  manager (the README names the `deno add` / `npm i` / `bun add` commands).
 
 ### Deprecated
 
