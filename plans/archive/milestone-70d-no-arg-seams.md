@@ -496,5 +496,11 @@ archived plan that still asserts them would be a lie about what shipped.
   shipped asserts only that the string `DiPlugin({ autoRegister: true })` is emitted. The behaviour
   was verified by probe during review — `autoRegister: true` resolves a decorated service's injected
   `ILogger`, `false` throws `No provider registered for DI token 'logger'` — and the mechanism is
-  independently covered by `di-plugin`'s own integration suite, so the gap is a missing regression
-  guard rather than a defect. Recorded as an open follow-up.
+  independently covered by `di-plugin`'s own integration suite, so the gap was a missing regression
+  guard rather than a defect. **Closed in review**: the class-based `seam-probe` host now overwrites
+  its generated `gadget-svc` service with one whose constructor injects `CAPABILITIES.CONFIG`, and
+  the booted probe resolves it through the container and asserts the live config service arrived.
+  Reverting `DI_WIRING` to a bare `DiPlugin()` fails it with
+  `No provider registered for DI token
+  'config'` — the register's own E3 signature — so the guard
+  discriminates.

@@ -61,6 +61,37 @@ const CLASS_BASED_ONLY: readonly (readonly [schematic: string, name: string])[] 
   ['service', 'gadget-svc'],
 ];
 
+/**
+ * The E3 case: a generated `@Injectable` whose constructor injects a FRAMEWORK
+ * CAPABILITY rather than another generated class.
+ *
+ * This is the shape the class-based template's own showcase cannot reach — its service
+ * has no dependencies and its controller injects an explicit provider — which is why
+ * `DiPlugin()`'s `autoRegister: false` default shipped through five releases with every
+ * gate green. `autoRegister` gates BOTH the container's external resolver and its
+ * registry fallback, so without it this class cannot be constructed at all and
+ * `app.start()` never completes.
+ *
+ * The file keeps the `GadgetSvcService` export, because the seam scanner admits an
+ * artifact only when it exports every symbol the barrel names — dropping it would
+ * unwire the service instead of testing it.
+ */
+const CAPABILITY_INJECTING_SERVICE =
+  `import { Inject, Injectable } from '@setu-ts/decorator-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IConfig } from '@setu-ts/common';
+
+@Injectable({ token: 'gadget-svc-service' })
+export class GadgetSvcService {
+  constructor(@Inject(CAPABILITIES.CONFIG) private readonly config: IConfig) {}
+
+  /** Reports through the injected capability, so a stub cannot satisfy it. */
+  describe(): string {
+    return 'config:' + typeof this.config.get;
+  }
+}
+`;
+
 /** The CQRS and events artifacts, which only the microservice template can host. */
 const MICROSERVICE_ONLY: readonly (readonly [schematic: string, name: string])[] = [
   ['command-handler', 'widget'],
@@ -139,6 +170,13 @@ out['controller'] = { status: ctl.status, body: ctl.body };
 // service: the @Injectable reached the container through the services barrel.
 const container = services.get<import('@setu-ts/common').IContainer>(CAPABILITIES.DI_CONTAINER);
 out['serviceToken'] = container.resolve<{ describe(): string }>('widget-svc-service').describe();
+
+// E3: the service whose constructor injects CAPABILITIES.CONFIG. Reaching it at all
+// requires the container to fall back to the kernel registry, which only
+// autoRegister: true enables — so this reports the injected capability, not a stub.
+out['capabilityInjected'] = container
+  .resolve<{ describe(): string }>('gadget-svc-service')
+  .describe();
 `;
 
 /** The CQRS and events half of the probe, appended for the microservice host only. */
@@ -277,6 +315,16 @@ describe('generated artifacts are wired — end to end', () => {
         expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
       }
 
+      if (classBased) {
+        // E3. The generated service is the DEVELOPER'S file, so editing it is exactly
+        // what a developer does next — and it is the only way to reach the case the
+        // template's own showcase cannot: an injected framework capability.
+        await Deno.writeTextFile(
+          `${project}/src/services/gadget-svc.service.ts`,
+          CAPABILITY_INJECTING_SERVICE,
+        );
+      }
+
       await useWorkspacePackages(project);
       const probe = PROBE
         .replace('__CLASS__', classBased ? CLASS_PROBE : '')
@@ -306,6 +354,12 @@ describe('generated artifacts are wired — end to end', () => {
         // The @Injectable service resolves under the token its own JSDoc names —
         // through the container, which is where this composition puts it.
         expect(result['serviceToken']).toBe('widget-svc');
+        // E3: a decorated service constructor-injecting a FRAMEWORK CAPABILITY resolves,
+        // and what arrived is the live config service rather than a placeholder. This
+        // fails outright — `app.start()` never completes — if the template goes back to
+        // emitting a bare `DiPlugin()`, because `autoRegister` gates the container's
+        // only route to the kernel registry.
+        expect(result['capabilityInjected']).toBe('config:function');
       } else {
         // Both buses route to the generated handlers, through the plugin options.
         expect(result['commandResult']).toEqual({ id: 'c-1' });
