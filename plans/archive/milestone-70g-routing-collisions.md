@@ -295,6 +295,36 @@ deno task release:verify 0.1.0-alpha.8
 - **`apps/full-stack` runs a real Vite build, so the new assertions lengthen an already-slow gate.**
   Mitigation: the assertions reuse the app instance the smoke already boots; no second build.
 
+## 8b. Corrections found during implementation
+
+Recorded rather than quietly dropped, per the M70a and M70h precedent.
+
+- **Two negative controls did not hold as written.** Control 2 ("revert `staticSegmentCount`'s
+  wildcard exclusion") cannot be run in the obvious form: with the `wildcard` arm still in the
+  `Segment` union, a counter that also counts wildcards fails `deno check` rather than the tests, so
+  it measures the type-checker instead of the ranking. The equivalent control — reverting
+  `parsePattern`'s wildcard arm to `{ type: 'static', value: '*' }` — was run against the REAL
+  `apps/full-stack` smoke, which is the stronger site: `/openapi.json` answered **404** with the SSR
+  catch-all serving it, exactly as X5-1 reported, and `200` with the arm restored. Control 6 was
+  replaced for the same reason: pointing the smoke's request at a path that does not exist proves
+  the assertion discriminates, and the kernel-revert above proves the assertion measures the
+  milestone's own fix rather than an unrelated invariant.
+- **Two names moved.** `findPluginClaim` shipped as `findPluginIndicatorClaim` (the table is
+  indicator-specific and a bare `findPluginClaim` would invite a second, unrelated claim kind), and
+  `adopted-route-boots.test.ts` shipped as `adopted-route-e2e.test.ts`, matching the `*-e2e.test.ts`
+  convention every other file in that directory follows.
+- **`NameConflict` was reshaped rather than extended.** §3.4 planned to reuse the existing
+  `schematic` field for the plugin arm, which would have rendered "claimed by the
+  @setu-ts/database-plugin of the same name". The interface now carries `claimedBy` and `remedy` as
+  rendered phrases, so the command has one message for both kinds of claimant and neither reads as
+  the other.
+- **The claim table tripped the M70c indicator audit.** `test/health-indicator-audit.test.ts`
+  matches the registration call's literal text anywhere under a package's `src`, and this
+  milestone's JSDoc quoted it in prose — inside `packages/cli`, which holds no plugin context and
+  can register nothing. The full suite went red on it; the comment now names the concept instead and
+  says why. Recorded because the same trap catches the next milestone that writes about health
+  indicators in package source.
+
 ## 9. Out of scope
 
 - **A `405` for a method mismatch on an existing path.** M70f §9 deferred it here on the reasoning
