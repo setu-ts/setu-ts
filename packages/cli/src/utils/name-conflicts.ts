@@ -22,14 +22,23 @@
  *   generated project does not compile (`TS2300`, twice). Measured against a real
  *   scaffold: both commands reported success.
  *
- * Refusing beats warning for both. A silent 500 and a silently-dropped route are worse
- * than a command that will not run, and the fix is always the same — pick a different
- * name — so there is nothing the developer loses by being told now.
+ * A third collision has a different shape: a generated health indicator against a name
+ * an INSTALLED PLUGIN already claims. `HealthService.registerIndicator` throws on a
+ * duplicate name, so `setu g health-indicator database` in a project with
+ * `DatabasePlugin` produced a project that type-checked and then died at `app.start()`
+ * (register row A1). The other party is a plugin rather than another generated file, so
+ * it is looked up in `plugin-claims.ts` rather than in the scan.
+ *
+ * Refusing beats warning for all three. A silent 500, a silently-dropped route and a
+ * boot failure are all worse than a command that will not run, and the fix is always the
+ * same — pick a different name — so there is nothing the developer loses by being told
+ * now.
  *
  * @module
  */
 
 import type { SeamArtifacts } from '../seams/seam-spec.ts';
+import { findPluginIndicatorClaim } from './plugin-claims.ts';
 
 /** One reason two artifacts cannot share a name, and the artifacts that share it. */
 interface ConflictGroup {
@@ -86,14 +95,22 @@ const CONFLICT_GROUPS: readonly ConflictGroup[] = [
   },
 ];
 
-/** A generated artifact already present that the requested one cannot coexist with. */
+/** Something already present that the requested artifact cannot coexist with. */
 export interface NameConflict {
-  /** The schematic that produced the existing artifact. */
-  readonly schematic: string;
-  /** What the two artifacts would both claim. */
+  /**
+   * The other claimant, already rendered — `the route of the same name`, or
+   * `the installed plugin @setu-ts/database-plugin`.
+   *
+   * Rendered here rather than in the command layer because the two kinds of
+   * claimant read differently, and the command has one message for both.
+   */
+  readonly claimedBy: string;
+  /** What the two would both claim. */
   readonly resource: string;
   /** What goes wrong if both exist. */
   readonly consequence: string;
+  /** The way out other than renaming. */
+  readonly remedy: string;
 }
 
 /**
@@ -112,7 +129,9 @@ export interface NameConflict {
  *
  * @param schematic - The schematic about to run
  * @param kebab - The artifact's kebab-case name
- * @param plugins - The `@setu-ts` packages detected in the target project
+ * @param plugins - The `@setu-ts` packages detected in the target project — read both to
+ *   gate the DI-token group and to resolve a health-indicator name against the plugins
+ *   that already claim one
  * @param artifacts - Artifact names already present, by schematic name
  * @param modules - Domain module names already present
  * @returns The conflict, or `undefined` when the name is free
@@ -126,6 +145,21 @@ export function findNameConflict(
 ): NameConflict | undefined {
   const decorated = plugins.has('decorator-plugin');
 
+  // A1: the other claimant is a plugin, not a generated artifact, so it is reported
+  // with the plugin's package name in place of a schematic name.
+  if (schematic === 'health-indicator') {
+    const claimant = findPluginIndicatorClaim(kebab, plugins);
+    if (claimant !== undefined) {
+      return {
+        claimedBy: `the installed plugin @setu-ts/${claimant}`,
+        resource: `the health-indicator name '${kebab}'`,
+        consequence: 'the health service refuses a duplicate indicator name, so the application ' +
+          'would type-check and then throw at app.start()',
+        remedy: `remove @setu-ts/${claimant} from the project`,
+      };
+    }
+  }
+
   for (const group of CONFLICT_GROUPS) {
     if (group.requiresDecorators && !decorated) continue;
     if (!group.schematics.includes(schematic)) continue;
@@ -136,9 +170,10 @@ export function findNameConflict(
       const present = other === 'module' ? modules : artifacts[other] ?? [];
       if (present.includes(kebab)) {
         return {
-          schematic: other,
+          claimedBy: `the ${other} of the same name`,
           resource: group.resource(kebab),
           consequence: group.consequence,
+          remedy: `remove the existing ${other}`,
         };
       }
     }

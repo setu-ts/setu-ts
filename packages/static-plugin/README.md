@@ -53,6 +53,21 @@ await app.start({ port: 3000 });
 | `compressed`     | `boolean`                            | `true`         | Enable precompressed sidecar negotiation                              |
 | `maxBufferBytes` | `number`                             | `1048576`      | Maximum file size to read fully into memory (1MB)                     |
 
+### A root `urlPrefix` claims the bare wildcard
+
+The plugin registers `<urlPrefix>/*` on `GET` and `HEAD`, so the default `urlPrefix: '/'` mounts
+`GET /*`. The kernel admits one route per `METHOD path` and refuses a second, naming the plugin that
+registered it first:
+
+```
+Route 'GET /*' is already registered by plugin 'react-router'.
+```
+
+So an application that serves SSR (or any other catch-all) at the root cannot also mount static
+files there. Give the static files their own prefix — `urlPrefix: '/assets'` — which is what
+content-hashed build output wants anyway. A prefixed mount never competes with a root catch-all: a
+route with more static segments outranks a wildcard regardless of registration order.
+
 ## Cache-Control Behavior
 
 By default, the plugin uses content-hashed filenames (e.g., `index-a1b2c3d4.js`) to serve immutable

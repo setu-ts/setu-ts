@@ -24,7 +24,7 @@ describe('findNameConflict', () => {
         { controller: ['widget'] },
         [],
       );
-      expect(conflict?.schematic).toBe('controller');
+      expect(conflict?.claimedBy).toBe('the controller of the same name');
       expect(conflict?.resource).toBe('the HTTP path /widget');
       expect(conflict?.consequence).toContain('silently unreachable');
     });
@@ -34,23 +34,23 @@ describe('findNameConflict', () => {
       // cannot leave one pair unguarded.
       expect(
         findNameConflict('controller', 'widget', WITH_DECORATORS, { route: ['widget'] }, [])
-          ?.schematic,
-      ).toBe('route');
+          ?.claimedBy,
+      ).toBe('the route of the same name');
     });
 
     it('refuses a route whose name a domain module already mounts', () => {
       // Modules arrive through a separate scan, because a module is a directory holding
       // two specific files rather than one suffixed file.
       expect(
-        findNameConflict('route', 'widget', WITH_DECORATORS, {}, ['widget'])?.schematic,
-      ).toBe('module');
+        findNameConflict('route', 'widget', WITH_DECORATORS, {}, ['widget'])?.claimedBy,
+      ).toBe('the module of the same name');
     });
 
     it('refuses a module whose name a controller already mounts', () => {
       expect(
         findNameConflict('module', 'widget', WITH_DECORATORS, { controller: ['widget'] }, [])
-          ?.schematic,
-      ).toBe('controller');
+          ?.claimedBy,
+      ).toBe('the controller of the same name');
     });
   });
 
@@ -60,7 +60,7 @@ describe('findNameConflict', () => {
       // decorator plugin keeps the FIRST, and the module's controller was handed the
       // standalone service — a 500 on every request to that module.
       const conflict = findNameConflict('service', 'widget', WITH_DECORATORS, {}, ['widget']);
-      expect(conflict?.schematic).toBe('module');
+      expect(conflict?.claimedBy).toBe('the module of the same name');
       expect(conflict?.resource).toBe("the injection token 'widget-service'");
       expect(conflict?.consequence).toContain('wrong service would be injected');
     });
@@ -124,7 +124,7 @@ describe('findNameConflict', () => {
         route: ['widget'],
       }, []);
 
-      expect(conflict?.schematic).toBe('route');
+      expect(conflict?.claimedBy).toBe('the route of the same name');
       expect(conflict?.resource).toBe('the HTTP path /widget');
       // The functional failure is louder than the decorator one and the refusal says so:
       // both files export `registerWidgetRoutes` into one barrel.
@@ -135,16 +135,16 @@ describe('findNameConflict', () => {
       // Symmetric, so the order the developer generates in cannot leave a pair unguarded.
       expect(
         findNameConflict('route', 'widget', FUNCTIONAL, { controller: ['widget'] }, [])
-          ?.schematic,
-      ).toBe('controller');
+          ?.claimedBy,
+      ).toBe('the controller of the same name');
     });
 
     it('refuses a controller whose name a domain module already mounts', () => {
       // `module` is ungated since M65, and its functional arm emits a route module into
       // the same merged directory.
       expect(
-        findNameConflict('controller', 'widget', FUNCTIONAL, {}, ['widget'])?.schematic,
-      ).toBe('module');
+        findNameConflict('controller', 'widget', FUNCTIONAL, {}, ['widget'])?.claimedBy,
+      ).toBe('the module of the same name');
     });
 
     it('still allows a distinct name', () => {
