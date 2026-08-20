@@ -9,7 +9,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { findComputedImports } from '../../scripts/npm-specifier-audit.ts';
+import { auditPackageSources, findComputedImports } from '../../scripts/npm-specifier-audit.ts';
 
 describe('findComputedImports — literal arguments are accepted', () => {
   it('accepts a single-quoted literal', () => {
@@ -147,5 +147,76 @@ describe('findComputedImports — the computed-specifier marker', () => {
   it('requires the marker to be adjacent (not two lines above)', () => {
     const source = '/* computed-specifier: reason */\n\nconst m = import(url);';
     expect(findComputedImports(source)).toHaveLength(1);
+  });
+});
+
+describe('auditPackageSources — which src trees the walker reaches', () => {
+  /**
+   * Builds a throwaway package tree and returns its root. The nesting is the
+   * point: `flat/src` sits one level down, `group/nested/src` two — the shape
+   * `packages/starters/<name>/src` has, and the shape the first version of this
+   * walker silently skipped while still reporting a healthy file count.
+   */
+  async function createTree(): Promise<string> {
+    const root = await Deno.makeTempDir({ prefix: 'setu-audit-' });
+    await Deno.mkdir(`${root}/flat/src`, { recursive: true });
+    await Deno.writeTextFile(`${root}/flat/src/a.ts`, "await import('npm:ok@1');\n");
+    await Deno.mkdir(`${root}/group/nested/src/deep`, { recursive: true });
+    await Deno.writeTextFile(`${root}/group/nested/src/deep/b.ts`, 'export const b = 1;\n');
+    return root;
+  }
+
+  it('reaches a src tree nested more than one level below the root', async () => {
+    const root = await createTree();
+    try {
+      const result = await auditPackageSources(root);
+      expect(result.srcRootsVisited).toContain(`${root}/flat/src`);
+      expect(result.srcRootsVisited).toContain(`${root}/group/nested/src`);
+      expect(result.filesVisited).toBe(2);
+      expect(result.findings).toEqual([]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it('refuses a computed import in a deeply nested src tree', async () => {
+    const root = await createTree();
+    try {
+      await Deno.writeTextFile(
+        `${root}/group/nested/src/deep/b.ts`,
+        'const load = (spec: string) => import(spec);\nexport const l = load;\n',
+      );
+      const result = await auditPackageSources(root);
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0].file).toBe(`${root}/group/nested/src/deep/b.ts`);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it('never audits a vendored node_modules tree', async () => {
+    const root = await createTree();
+    try {
+      await Deno.mkdir(`${root}/flat/node_modules/dep/src`, { recursive: true });
+      await Deno.writeTextFile(
+        `${root}/flat/node_modules/dep/src/vendor.ts`,
+        'const load = (spec: string) => import(spec);\nexport const l = load;\n',
+      );
+      const result = await auditPackageSources(root);
+      // A dependency's own source is not ours to gate; it must not appear as a
+      // root, be counted, or be reported.
+      expect(result.srcRootsVisited.some((r) => r.includes('node_modules'))).toBe(false);
+      expect(result.filesVisited).toBe(2);
+      expect(result.findings).toEqual([]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it('returns an empty result for a root that does not exist', async () => {
+    const result = await auditPackageSources('/nonexistent-setu-audit-root');
+    expect(result.srcRootsVisited).toEqual([]);
+    expect(result.filesVisited).toBe(0);
+    expect(result.findings).toEqual([]);
   });
 });

@@ -50,6 +50,18 @@ export interface AuditResult {
   readonly filesVisited: number;
   /** The number of computed imports that carry a valid marker (vacuity guard). */
   readonly markedSites: number;
+  /**
+   * Every `src` root the walker audited, in discovery order.
+   *
+   * This is the coverage guard, and it exists because `filesVisited` is not
+   * one: a walker that reaches most of the tree still reports a large,
+   * healthy-looking count. The first version of this walker looked only at
+   * `<root>/<pkg>/src`, so it silently skipped `packages/starters/*` — three
+   * PUBLISHED packages — while reporting 651 files audited and a clean result
+   * for an import shape it would have refused anywhere else. Asserting on the
+   * roots themselves is what makes a missed subtree visible.
+   */
+  readonly srcRootsVisited: readonly string[];
 }
 
 /** The internal per-import record before the `file` is known. */
@@ -124,10 +136,8 @@ export async function auditPackageSources(root: string): Promise<AuditResult> {
   let filesVisited = 0;
   let markedSites = 0;
 
-  for await (const entry of Deno.readDir(root)) {
-    if (!entry.isDirectory) continue;
-    const srcDir = `${root}/${entry.name}/src`;
-    if (!(await isDirectory(srcDir))) continue;
+  const srcRootsVisited = await collectSrcRoots(root);
+  for (const srcDir of srcRootsVisited) {
     for await (const file of walkTsFiles(srcDir)) {
       filesVisited++;
       const source = await Deno.readTextFile(file);
@@ -141,7 +151,40 @@ export async function auditPackageSources(root: string): Promise<AuditResult> {
     }
   }
 
-  return { findings, filesVisited, markedSites };
+  return { findings, filesVisited, markedSites, srcRootsVisited };
+}
+
+/**
+ * Every `src` directory under `root`, at ANY depth.
+ *
+ * Depth matters: workspace members are not all one level down. The starters
+ * live at `packages/starters/<name>/src`, so a walker that only probes
+ * `<root>/<entry>/src` misses all three — and they are published packages, so
+ * the rewrite defect this gate exists to catch applies to them exactly as it
+ * does anywhere else.
+ *
+ * Descent stops at a `src` directory (its own subtree is audited by
+ * {@linkcode walkTsFiles}, so a nested `src/` inside it is not a second root),
+ * and `node_modules` is skipped so a vendored tree is never audited as ours.
+ */
+async function collectSrcRoots(root: string): Promise<string[]> {
+  const roots: string[] = [];
+
+  async function descend(dir: string): Promise<void> {
+    for await (const entry of Deno.readDir(dir)) {
+      if (!entry.isDirectory) continue;
+      if (entry.name === 'node_modules') continue;
+      const path = `${dir}/${entry.name}`;
+      if (entry.name === 'src') {
+        roots.push(path);
+        continue;
+      }
+      await descend(path);
+    }
+  }
+
+  if (await isDirectory(root)) await descend(root);
+  return roots;
 }
 
 // ── Masking: reduce the source to "code only" ────────────────────────────────
