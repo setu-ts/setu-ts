@@ -566,6 +566,123 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
     expect(mock.registeredTokens).toContain(CAPABILITIES.TELEMETRY);
     expect(mock.shutdownHooks).toHaveLength(1);
   });
+
+  // --- Instrumentation outcomes are reported through ctx.logger (M70e §3.6) ---
+
+  /** A recording logger satisfying the ILogger surface the reporter uses. */
+  function createRecordingLogger() {
+    const lines: Array<{
+      level: string;
+      message: string;
+      metadata?: Record<string, unknown> | undefined;
+    }> = [];
+    const record =
+      (level: string) => (message: string, metadata?: Record<string, unknown>): void => {
+        lines.push({ level, message, metadata });
+      };
+    return {
+      lines,
+      logger: {
+        level: 'debug' as never,
+        fatal: record('fatal'),
+        error: record('error'),
+        warn: record('warn'),
+        info: record('info'),
+        debug: record('debug'),
+        trace: record('trace'),
+        child: () => ({ level: 'debug' as never }) as never,
+      } as never,
+    };
+  }
+
+  it('reports instrumentation outcomes through ctx.logger read at call time', async () => {
+    // The plugin factory has no ctx, so the reporter cannot capture a logger at
+    // construction. It reads ctx.logger at call time — a logger present on the
+    // context (registered by the LoggerPlugin) is used for the outcome lines.
+    const mock = createMockContext();
+    const { lines, logger } = createRecordingLogger();
+    // Set the logger on the context object; the reporter reads it when an
+    // outcome is recorded, not from a value captured earlier.
+    (mock.ctx as { logger: unknown }).logger = logger;
+
+    const fakeInstrumentation = {
+      setTracerProvider: () => {},
+      enable: () => {},
+      disable: () => {},
+    };
+    const plugin = TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      tracerProviderFactory: async () => ({
+        ...createFakeTracerHost(),
+        otelProvider: { id: 'fake-provider' },
+        shutdown: async () => {},
+      }),
+      instrumentations: {
+        http: { instrumentation: fakeInstrumentation as never },
+      },
+    });
+    await plugin.register(mock.ctx);
+
+    // An enabled instrumentation is reported at debug, carrying the kind.
+    expect(lines.some((l) => l.level === 'debug' && l.metadata?.kind === 'http')).toBe(true);
+  });
+
+  it('reports a failed instrumentation at warn and does not throw', async () => {
+    // A loader/enable failure degrades to a no-op outcome and is reported at
+    // warn with the reason — it is never rethrown out of register().
+    const mock = createMockContext();
+    const { lines, logger } = createRecordingLogger();
+    (mock.ctx as { logger: unknown }).logger = logger;
+
+    const failingInstrumentation = {
+      setTracerProvider: () => {
+        throw new Error('no provider');
+      },
+    };
+    const plugin = TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      tracerProviderFactory: async () => ({
+        ...createFakeTracerHost(),
+        otelProvider: { id: 'fake-provider' },
+        shutdown: async () => {},
+      }),
+      instrumentations: {
+        http: { instrumentation: failingInstrumentation as never },
+      },
+    });
+    await expect(plugin.register(mock.ctx)).resolves.toBeUndefined();
+    expect(
+      lines.some((l) => l.level === 'warn' && l.metadata?.kind === 'http' && l.metadata?.reason),
+    ).toBe(true);
+  });
+
+  it('reports nothing when ctx.logger is absent (no crash)', async () => {
+    // Without a logger the outcomes are still recorded on the handle, but no
+    // line is emitted and register() must not throw.
+    const mock = createMockContext();
+    (mock.ctx as { logger: unknown }).logger = undefined;
+
+    const fakeInstrumentation = {
+      setTracerProvider: () => {},
+      enable: () => {},
+      disable: () => {},
+    };
+    const plugin = TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      tracerProviderFactory: async () => ({
+        ...createFakeTracerHost(),
+        otelProvider: { id: 'fake-provider' },
+        shutdown: async () => {},
+      }),
+      instrumentations: {
+        http: { instrumentation: fakeInstrumentation as never },
+      },
+    });
+    await expect(plugin.register(mock.ctx)).resolves.toBeUndefined();
+  });
 });
 
 /**

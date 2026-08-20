@@ -29,6 +29,7 @@ export type ModuleLoader = (url: string) => Promise<Record<string, unknown>>;
  * @returns The module's exports
  */
 export const importModule: ModuleLoader = async (url) =>
+  /* computed-specifier: application-supplied schematic module URL, not a package name */
   await import(url) as Record<string, unknown>;
 
 /**

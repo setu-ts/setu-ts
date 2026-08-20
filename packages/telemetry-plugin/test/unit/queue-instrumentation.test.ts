@@ -74,77 +74,44 @@ describe('queue-instrumentation', () => {
     expect((instance as { configPassed: unknown }).configPassed).toBeUndefined();
   });
 
-  it('should lazy-load the correct npm specifier for amqplib', async () => {
-    try {
-      const mod = await import('npm:@opentelemetry/instrumentation-amqplib@^0.67.0');
-      expect(mod.AmqplibInstrumentation).toBeDefined();
-      expect(typeof mod.AmqplibInstrumentation).toBe('function');
-    } catch {
-      // OTel packages not installed.
-    }
-  });
+  // --- Loader seam: zero-argument importFn (M70e §3.5) ---
+  //
+  // The default importFn is a real literal `import()`; the guarded
+  // `instrumentation-real-import.test.ts` drives it when the packages are
+  // present. The vacuous `try { … } catch { /* not installed */ }` pair is
+  // gone: it passed whether or not the real package loaded.
 
-  it('should lazy-load the correct npm specifier for kafkajs', async () => {
-    try {
-      const mod = await import('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0');
-      expect(mod.KafkaJsInstrumentation).toBeDefined();
-      expect(typeof mod.KafkaJsInstrumentation).toBe('function');
-    } catch {
-      // OTel packages not installed.
-    }
-  });
-
-  it('should reject when the package specifier is invalid', async () => {
-    await expect(
-      import('npm:@opentelemetry/instrumentation-nonexistent-fake@^999.0.0'),
-    ).rejects.toThrow();
-  });
-
-  // --- Direct coverage for loadAmqplibInstrumentation / loadKafkaJsInstrumentation ---
-
-  it('loadAmqplibInstrumentation should return { instance, specifier } when real package is available', async () => {
-    try {
-      const result = await loadAmqplibInstrumentation(undefined);
-      expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-amqplib@^0.67.0');
-      expect(result.instance).toBeDefined();
-    } catch {
-      // Packages not installed.
-    }
-  });
-
-  it('loadKafkaJsInstrumentation should return { instance, specifier } when real package is available', async () => {
-    try {
-      const result = await loadKafkaJsInstrumentation(undefined);
-      expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0');
-      expect(result.instance).toBeDefined();
-    } catch {
-      // Packages not installed.
-    }
-  });
-
-  it('loadAmqplibInstrumentation should use injected importFn', async () => {
-    const fakeMod = { AmqplibInstrumentation: class {} };
-    const importFn = (_spec: string) => Promise.resolve(fakeMod);
+  it('loadAmqplibInstrumentation should use an injected zero-argument importFn', async () => {
+    let calls = 0;
+    const importFn = () => {
+      calls++;
+      return Promise.resolve({ AmqplibInstrumentation: class {} });
+    };
     const result = await loadAmqplibInstrumentation(undefined, importFn);
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-amqplib@^0.67.0');
+    expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
+    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-amqplib@^0.67.0');
   });
 
-  it('loadKafkaJsInstrumentation should use injected importFn', async () => {
-    const fakeMod = { KafkaJsInstrumentation: class {} };
-    const importFn = (_spec: string) => Promise.resolve(fakeMod);
+  it('loadKafkaJsInstrumentation should use an injected zero-argument importFn', async () => {
+    let calls = 0;
+    const importFn = () => {
+      calls++;
+      return Promise.resolve({ KafkaJsInstrumentation: class {} });
+    };
     const result = await loadKafkaJsInstrumentation(undefined, importFn);
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0');
+    expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
+    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0');
   });
 
   it('loadAmqplibInstrumentation should reject when importFn rejects', async () => {
-    const importFn = (_spec: string) => Promise.reject(new Error('inject-fail'));
+    const importFn = () => Promise.reject(new Error('inject-fail'));
     await expect(loadAmqplibInstrumentation(undefined, importFn)).rejects.toThrow('inject-fail');
   });
 
   it('loadKafkaJsInstrumentation should reject when importFn rejects', async () => {
-    const importFn = (_spec: string) => Promise.reject(new Error('inject-fail'));
+    const importFn = () => Promise.reject(new Error('inject-fail'));
     await expect(loadKafkaJsInstrumentation(undefined, importFn)).rejects.toThrow('inject-fail');
   });
 });

@@ -5,6 +5,14 @@
  * but not that the four specifiers resolve or that the real modules satisfy the
  * port. This one performs the actual `import()`, and is skipped when the
  * packages are not installed.
+ *
+ * **Deno-only caveat:** this test resolves the specifiers through Deno's own
+ * loader, so it passes on Deno whether or not the specifier survives JSR's
+ * static npm-compatibility rewrite. That is precisely why it could never have
+ * caught X7-3 (the `npm:` string shipping verbatim in the published artifact):
+ * the published shape is only observable in a published artifact, which the
+ * compat suite checks — see `compat/compat.test.mjs`. Do not mistake this
+ * file for coverage of the published artifact.
  */
 
 import { describe, it } from '@std/testing/bdd';

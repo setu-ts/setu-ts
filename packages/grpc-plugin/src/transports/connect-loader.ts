@@ -10,6 +10,12 @@
  * naming the specifier, rather than degrading into a router that silently
  * answers `404`.
  *
+ * Each default importer keeps its `npm:` specifier as a **literal** at the
+ * `import()` call. JSR's npm-compatibility rewrite is static and reaches only a
+ * literal argument; a specifier routed through a parameter, a map lookup, or a
+ * `(spec) => import(spec)` indirection ships `npm:` verbatim and cannot load on
+ * Node or Bun (X7-3).
+ *
  * @module
  */
 
@@ -31,12 +37,21 @@ const SPECIFIERS = {
   wkt: 'npm:@bufbuild/protobuf@^2.7.0/wkt',
 } as const;
 
-/** The install command suggested for each failing specifier. */
+/**
+ * The install guidance suggested for each failing specifier. Every line names
+ * all three package managers — the plugin has no runtime context here to select
+ * one, and a Bun project told to run `deno add` is the defect this text
+ * replaces.
+ */
 const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
-  connect: 'deno add npm:@connectrpc/connect@^2.1.2',
-  protocol: 'deno add npm:@connectrpc/connect@^2.1.2',
-  protobuf: 'deno add npm:@bufbuild/protobuf@^2.7.0',
-  wkt: 'deno add npm:@bufbuild/protobuf@^2.7.0',
+  connect:
+    'deno add npm:@connectrpc/connect@^2.1.2 · npm i @connectrpc/connect · bun add @connectrpc/connect',
+  protocol:
+    'deno add npm:@connectrpc/connect@^2.1.2 · npm i @connectrpc/connect · bun add @connectrpc/connect',
+  protobuf:
+    'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
+  wkt:
+    'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
 };
 
 /** Structural shape of `@connectrpc/connect`. */
@@ -137,31 +152,55 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
 }
 
 /**
- * The dynamic import used by {@linkcode loadConnectModule}. Injectable so the
- * per-specifier failure branches are unit-testable without uninstalling a
- * package; the default performs the REAL `import()`.
+ * A zero-argument dynamic import for one of the four runtime modules. The
+ * zero-argument shape is deliberate: a specifier reaching `import()` through a
+ * parameter is invisible to JSR's static npm-compatibility rewrite, so the
+ * literal must sit at the `import()` call itself.
  */
-export type ModuleImporter = (specifier: string) => Promise<unknown>;
+export type ConnectImporter = () => Promise<unknown>;
 
-/** Default importer — a real dynamic `import()`, never a global hook. */
-export const defaultImporter: ModuleImporter = (specifier) => import(specifier);
+/** The four importers the runtime is assembled from, keyed like {@linkcode SPECIFIERS}. */
+export interface ConnectImporters {
+  connect: ConnectImporter;
+  protocol: ConnectImporter;
+  protobuf: ConnectImporter;
+  wkt: ConnectImporter;
+}
+
+/**
+ * The default importers. Each keeps its `npm:` specifier as a literal at the
+ * `import()` call, which is the only form that survives JSR's static
+ * npm-compatibility rewrite and loads on Node and Bun. Exported (module-only,
+ * not barrel) so the loader test can assert each default's source is a literal
+ * `import('npm:…')` — the property the old stringified-`import(specifier)`
+ * assertion pinned and the published artifact lost.
+ */
+export const DEFAULT_IMPORTERS: ConnectImporters = {
+  connect: () => import('npm:@connectrpc/connect@^2.1.2'),
+  protocol: () => import('npm:@connectrpc/connect@^2.1.2/protocol'),
+  protobuf: () => import('npm:@bufbuild/protobuf@^2.7.0'),
+  wkt: () => import('npm:@bufbuild/protobuf@^2.7.0/wkt'),
+};
 
 /**
  * Lazily imports the four Connect/Protobuf-ES specifiers and adapts them into
  * the internal runtime port.
  *
- * @param importer - Injected importer; defaults to a real dynamic `import()`.
+ * @param importers - Per-key importer overrides; each key not supplied takes
+ *   the real literal `import()`. Injectable so the per-specifier failure
+ *   branches are unit-testable without uninstalling a package.
  * @throws {GrpcRuntimeLoadError} If any specifier cannot be imported. The error
- *   names the failing specifier and the command that installs it.
+ *   names the failing specifier and the commands that install it.
  */
 export async function loadConnectModule(
-  importer: ModuleImporter = defaultImporter,
+  importers: Partial<ConnectImporters> = {},
 ): Promise<ConnectRuntime> {
   const loaded = {} as Record<keyof typeof SPECIFIERS, unknown>;
 
   for (const key of Object.keys(SPECIFIERS) as Array<keyof typeof SPECIFIERS>) {
+    const importer = importers[key] ?? DEFAULT_IMPORTERS[key];
     try {
-      loaded[key] = await importer(SPECIFIERS[key]);
+      loaded[key] = await importer();
     } catch (cause) {
       throw new GrpcRuntimeLoadError(SPECIFIERS[key], INSTALL_COMMANDS[key], { cause });
     }

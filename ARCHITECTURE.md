@@ -1573,11 +1573,11 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | Aspect               | Detail                                                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary Hono routes                                                           |
-| **Responsibilities** | Connect-ES core + Protobuf-ES; reflection and health over embedded descriptors; RPC handler interception                                |
+| **Responsibilities** | Connect-ES core + Protobuf-ES; reflection and health over embedded descriptors; RPC dispatch through the kernel pipeline              |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `GrpcPlugin()`; `IGrpcService`                                                                                                          |
 | **Extension Points** | Custom service definitions via embedded `FileDescriptorSet` constants                                                                   |
-| **Rules**            | Connect-ES + Protobuf-ES from `npm:`; detection is prefix-only; `setRpcHandler?` on `IHttpAdapter` is the interception seam             |
+| **Rules**            | Connect-ES + Protobuf-ES from `npm:`; detection is prefix-only; RPC dispatch runs in the kernel terminal handler after the middleware pipeline |
 
 #### @setu-ts/react-router-plugin
 

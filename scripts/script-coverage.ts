@@ -40,9 +40,9 @@ const COVERAGE_DIR = Deno.args[0] ?? 'coverage';
 const THRESHOLD = 90;
 
 /**
- * The canonical target set this gate measures — exactly two scripts, each once.
- * Adding a documentation script that should be coverage-gated means adding it
- * here, and the gate then refuses a run that omits it.
+ * The canonical target set this gate measures — each script exactly once.
+ * Adding a script that should be coverage-gated means adding it here, and the
+ * gate then refuses a run that omits it.
  */
 export const SCRIPT_TARGETS: readonly string[] = [
   'scripts/check-docs.ts',
@@ -52,6 +52,10 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // external-I/O seam the decidable logic was extracted OUT of, which is the
   // technique CLAUDE.md prescribes rather than an exemption from the bar.
   'scripts/package-exports.ts',
+  // The pure half of the computed-`import()` recurrence gate (M70e). Its
+  // `auditPackageSources` walker is the thin I/O seam; `findComputedImports`
+  // is the decidable core that carries the bar.
+  'scripts/npm-specifier-audit.ts',
 ];
 
 interface FileCoverage {

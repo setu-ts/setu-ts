@@ -33,6 +33,7 @@
     "npm:@opentelemetry/exporter-trace-otlp-http@0.220": "0.220.0_@opentelemetry+api@1.9.1",
     "npm:@opentelemetry/instrumentation-amqplib@0.67": "0.67.0_@opentelemetry+api@1.9.1",
     "npm:@opentelemetry/instrumentation-http@0.220": "0.220.0_@opentelemetry+api@1.9.1",
+    "npm:@opentelemetry/instrumentation-http@0.221": "0.221.0_@opentelemetry+api@1.9.1",
     "npm:@opentelemetry/instrumentation-ioredis@0.68": "0.68.0_@opentelemetry+api@1.9.1",
     "npm:@opentelemetry/instrumentation-kafkajs@0.29": "0.29.0_@opentelemetry+api@1.9.1",
     "npm:@opentelemetry/instrumentation-undici@0.30": "0.30.0_@opentelemetry+api@1.9.1",
@@ -786,6 +787,12 @@
         "@opentelemetry/api"
       ]
     },
+    "@opentelemetry/api-logs@0.221.0": {
+      "integrity": "sha512-OlanaW1vv7ufTqQ3/fPLI4arGt5ZoM+P8abOMki6uEYnpRazepSWDwDnnw+la7kE26SHVC18//SMccrDvLKOXQ==",
+      "dependencies": [
+        "@opentelemetry/api"
+      ]
+    },
     "@opentelemetry/api@1.9.1": {
       "integrity": "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="
     },
@@ -826,7 +833,7 @@
       "dependencies": [
         "@opentelemetry/api",
         "@opentelemetry/core@2.10.0_@opentelemetry+api@1.9.1",
-        "@opentelemetry/instrumentation",
+        "@opentelemetry/instrumentation@0.220.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/semantic-conventions@1.39.0"
       ]
     },
@@ -835,7 +842,17 @@
       "dependencies": [
         "@opentelemetry/api",
         "@opentelemetry/core@2.9.0_@opentelemetry+api@1.9.1",
-        "@opentelemetry/instrumentation",
+        "@opentelemetry/instrumentation@0.220.0_@opentelemetry+api@1.9.1",
+        "@opentelemetry/semantic-conventions@1.39.0",
+        "forwarded-parse"
+      ]
+    },
+    "@opentelemetry/instrumentation-http@0.221.0_@opentelemetry+api@1.9.1": {
+      "integrity": "sha512-oIP91CPIANuYr09tGFElPFKAh6JUar+awJf1kBRYlaeo9b0gDwZHEB2zBfFlvdNFHm0wAVutMZODVi5smKT30g==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/core@2.10.0_@opentelemetry+api@1.9.1",
+        "@opentelemetry/instrumentation@0.221.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/semantic-conventions@1.39.0",
         "forwarded-parse"
       ]
@@ -844,7 +861,7 @@
       "integrity": "sha512-M2MWPoKiMlNWzmW7+AwEwiFpTJQ7bhKpZuo9L3MS/z/KFm2yXY6B43IprAVyiszLFg8/JsF39t8b8wkGpxip2g==",
       "dependencies": [
         "@opentelemetry/api",
-        "@opentelemetry/instrumentation",
+        "@opentelemetry/instrumentation@0.220.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/redis-common",
         "@opentelemetry/semantic-conventions@1.39.0"
       ]
@@ -853,7 +870,7 @@
       "integrity": "sha512-rNCDUxtvPRRiRAL9Bn5zPWosZ7uE5RS7NDhxIa6DzaUs54GfhqP1DP7l/5jgilTMw8uoAK0/Hq+O2xmBKny8Hw==",
       "dependencies": [
         "@opentelemetry/api",
-        "@opentelemetry/instrumentation",
+        "@opentelemetry/instrumentation@0.220.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/semantic-conventions@1.39.0"
       ]
     },
@@ -862,7 +879,7 @@
       "dependencies": [
         "@opentelemetry/api",
         "@opentelemetry/core@2.10.0_@opentelemetry+api@1.9.1",
-        "@opentelemetry/instrumentation",
+        "@opentelemetry/instrumentation@0.220.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/semantic-conventions@1.39.0"
       ]
     },
@@ -870,7 +887,16 @@
       "integrity": "sha512-xQx3E2WxP1mDvKzxLxX+CTCtNLa560YJZ3087qYHerl2YmiKpv7AH+dAy7vmx+eVrZ5BwhfWUAVoKOoxCNHcpw==",
       "dependencies": [
         "@opentelemetry/api",
-        "@opentelemetry/api-logs",
+        "@opentelemetry/api-logs@0.220.0",
+        "import-in-the-middle",
+        "require-in-the-middle"
+      ]
+    },
+    "@opentelemetry/instrumentation@0.221.0_@opentelemetry+api@1.9.1": {
+      "integrity": "sha512-cCk80Z/iRDf/5gfsKMB4f74LqVA5yKETB/9ojPzVW/6/f70iu89nJvGxsFCxx4XfSohaOofkU19kiYm84AiAlw==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/api-logs@0.221.0",
         "import-in-the-middle",
         "require-in-the-middle"
       ]
@@ -887,7 +913,7 @@
       "integrity": "sha512-lXGrv7KXZ0gNH9SVNUaa6vv6phVYGvJxfXAlMbzbakiXru75f5MZl8Z7oqiMMQD77riVHJCFlQvbZs/VVN2/4A==",
       "dependencies": [
         "@opentelemetry/api",
-        "@opentelemetry/api-logs",
+        "@opentelemetry/api-logs@0.220.0",
         "@opentelemetry/core@2.9.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/resources@2.9.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/sdk-logs",
@@ -918,7 +944,7 @@
       "integrity": "sha512-WywcTkQtv2iNmt+6y5Kcd4rzvx9bLVsBa2Nwcmg01IUaBTkTow3W4d9KE5vNBpEDtb9tp21WcRBY/lANRrApYA==",
       "dependencies": [
         "@opentelemetry/api",
-        "@opentelemetry/api-logs",
+        "@opentelemetry/api-logs@0.220.0",
         "@opentelemetry/core@2.9.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/resources@2.9.0_@opentelemetry+api@1.9.1",
         "@opentelemetry/semantic-conventions@1.39.0"
