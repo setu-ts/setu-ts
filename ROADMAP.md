@@ -6967,14 +6967,61 @@ Ordered by the sequence they should be worked, not by severity alone.
   answer `{error}` JSON and log **nothing even with `LoggerPlugin` registered** (X9-6, X11-2),
   short-circuiting middleware emits `{error, message}` (X4-8/C3), a gRPC handler error is logged
   nowhere (X7-5), and a raw `Error` in log metadata serializes to `{}` (X2-5, X8-12).
-- ⬜ **M70g — Routing collisions** (`kernel`, `react-router-plugin`, `openapi-plugin`,
-  `static-plugin`, `cli`). The kernel's static-segment tie-break covers `:param` but not `/*`, so
-  against a wildcard **registration order alone decides** — which silently removes `/openapi.json`
-  and `/docs` from every full-stack app with no user error (X5-1/F1, F1), while `StaticPlugin` at
-  the root instead collides loudly with an error naming neither the owning plugin nor an alternative
-  (X5-6). Plus the seam scanner adopting hand-written files into a CLI-owned barrel, which since
-  M68's duplicate-route refusal now **stops the app booting** (X4-4/F2), and generated indicator
-  names colliding with the 15 plugins claim (A1).
+- ✅ **M70g — Routing collisions** (`kernel`, `cli`; docs in `react-router-plugin`, `static-plugin`;
+  the end-to-end gate in `apps/full-stack`) — complete (PR #175). The kernel's static-segment
+  tie-break covered `:param` but not `/*`, so against a wildcard **registration order alone
+  decided** — which silently removed `/openapi.json` and `/docs` from every full-stack app with no
+  user error (X5-1/F1), while `StaticPlugin` at the root instead collided loudly with an error
+  naming neither the owning plugin nor an alternative (X5-6). Plus the seam scanner adopting
+  hand-written files into a CLI-owned barrel, which since M68's duplicate-route refusal **stopped
+  the app booting** (X4-4/F2), and generated indicator names colliding with the 15 plugins claim
+  (A1).
+
+  **The package list is corrected from the original five**, which named `react-router-plugin`,
+  `openapi-plugin` and `static-plugin` as implementation packages (mirroring the M70b and M70h
+  corrections). The fix the register itself prefers is in the KERNEL — "a route with zero static
+  segments should sort last among candidates regardless of registration index", the only option that
+  generalises to the next plugin mounting a catch-all — so none of the three needs a `src` change,
+  and the two per-plugin alternatives (registering the SSR catch-all at `LOWEST`, or having the
+  static handler fall through) were rejected as narrower restatements of one kernel rule. They
+  receive doc corrections instead.
+
+  `*` becomes its own segment kind and the ranking is **static segments descending, then wildcards
+  ascending, then registration index**. That second key exists because a probe found the defect was
+  not only a tie: `/a/*` counted TWO statics against `/a/:id`'s one, so a wildcard outranked a param
+  in both registration orders. The rule compares counts rather than positions, so `/a/*` loses to
+  `/:x/b` on `/a/b` — recorded in `Router.match`'s JSDoc, in `PUBLIC_API.md` and in a test, so a
+  later move to per-segment ranking is deliberate. The duplicate-route refusal reads the `owner`
+  `RouteInfo` has carried since M68 and names the FIRST claimant; the kernel deliberately offers no
+  alternative, because it cannot know that `static-plugin`'s is a sub-prefix, which is why C5 puts
+  that in the plugin's own docs.
+
+  On the CLI side, requiring a provenance marker in generated artifacts was **rejected**: no
+  artifact the CLI has ever emitted carries one, so the requirement would un-wire every artifact in
+  every existing project. Barrel membership is the ownership signal that needs no migration, and it
+  reports exactly once, at the moment of claiming. The precise detector for the case that actually
+  breaks the boot is separate: a candidate whose symbol already appears in `setu.config.ts` — the
+  one wiring home the CLI's architecture defines (M34b), where a generated artifact's per-artifact
+  symbol never appears — is left OUT of the barrel, so the developer's own registration keeps
+  working and nothing registers twice. A1's refusal reads a static claim table, because `generate`
+  may not boot the target project and a zero-dependency CLI cannot import a plugin to ask it; a root
+  drift gate reads every `ctx.health.register` site in the package sources and fails on a name the
+  table is missing, with every derived-name site listed explicitly so it cannot pass vacuously.
+
+  **The end-to-end gate is the request no gate ever made**: `apps/full-stack/smoke.ts` asked for
+  `/products`, `/` and `/login` and never `/openapi.json`, which is exactly why this shipped. It now
+  asserts both endpoints answer `200` under their real content types, in the real composition, on
+  every CI run.
+
+  **One unrelated change is folded in at the maintainer's direction** (the M58/M59 precedent): the
+  Pub/Sub and Service Bus emulator e2e suites could not pass under `deno task test` at all, because
+  `messaging-plugin`'s scoped `test.permissions.net` covered only Redis and RabbitMQ and a CLI
+  `--allow-net` replaces that block rather than unioning (M53). The allowlist gains both emulator
+  ports — still endpoint-scoped, never loopback-wide — and `docs/messaging-emulators.md` gains three
+  corrections established by measurement: the Service Bus emulator collides with RabbitMQ on 5672
+  (publish 5673 and name it in the endpoint), the Pub/Sub emulator must be addressed by IP so
+  `grpc-js` skips a DNS lookup the grant does not authorize, and the suite is not repeatable without
+  restarting the container.
 - ✅ **M70h — CLI scaffold** (`cli`, `common`, `runtime`) — complete (PR #166). The largest row
   count and the one that amortizes best, because every row needs the same scaffold-boot gate:
   `--transport <broker>` leaves `QueuePlugin()` on memory in the one template built for distributed
@@ -7155,7 +7202,7 @@ branch during a version bump.
 | 70d       | ✅     | no-argument registration seams        |
 | 70e       | ✅     | default branches of injectable seams  |
 | 70f       | ⬜     | error format and error visibility     |
-| 70g       | ⬜     | routing collisions                    |
+| 70g       | ✅     | routing collisions                    |
 | 70h       | ✅     | cli scaffold batch                    |
 | 70i       | ⬜     | grpc and graphql viability            |
 | 70j       | ⬜     | database adapter correctness          |

@@ -17,7 +17,7 @@ import type {
   RouteInfo,
 } from '@setu-ts/common';
 
-import { parsePattern, staticSegmentCount } from './route-matcher.ts';
+import { parsePattern, staticSegmentCount, wildcardSegmentCount } from './route-matcher.ts';
 
 export interface RouteEntry {
   pattern: string;
@@ -33,6 +33,17 @@ export interface RouteEntry {
    * in M22.
    */
   statics: number;
+  /**
+   * Wildcard-segment count — hoisted at registration beside {@linkcode
+   * RouteEntry.statics} and read ASCENDING by the tie-break in {@linkcode
+   * Router.match}.
+   *
+   * Before M70g a `*` was counted as a static segment, so `/*` tied with
+   * `/openapi.json` and outranked `/a/:id`. Counting it separately is what makes
+   * an application catch-all sort last instead of eating every single-segment
+   * route registered after it.
+   */
+  wildcards: number;
   /** Plugin that registered this route, if it was registered by a plugin. */
   owner?: string;
 }
@@ -68,11 +79,18 @@ export class Router implements IRouterApi {
 
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
     const key = `${method} ${path}`;
-    if (this.#entryMap.has(key)) {
-      throw new Error(`Route '${key}' is already registered.`);
+    const existing = this.#entryMap.get(key);
+    if (existing !== undefined) {
+      // Name the FIRST claimant. The message used to give the pattern and the
+      // second claimant, which is the half the stack trace already carries; the
+      // half a developer needs is who got there first — `StaticPlugin` at the
+      // root collides with the SSR catch-all, and the old message named neither
+      // plugin. `owner` has carried this since M68.
+      throw new Error(`Route '${key}' is already registered by ${describeRouteOwner(existing)}.`);
     }
     const definition: RouteDefinition = typeof route === 'function' ? { handler: route } : route;
     const owner = this.#owner();
+    const segments = parsePattern(path);
     // Hoist per-request work to registration time (AI_GUIDELINES §14): parse
     // the pattern once here and keep only the static count the tie-break reads.
     const entry: RouteEntry = {
@@ -80,7 +98,8 @@ export class Router implements IRouterApi {
       method,
       definition,
       index: this.#index++,
-      statics: staticSegmentCount(parsePattern(path)),
+      statics: staticSegmentCount(segments),
+      wildcards: wildcardSegmentCount(segments),
       ...(owner === undefined ? {} : { owner }),
     };
     this.#routes.push(entry);
@@ -144,8 +163,23 @@ export class Router implements IRouterApi {
    * deterministic tie-break (§3.6 of M22 plan) when Hono returns multiple
    * candidates of equal specificity.
    *
-   * When multiple routes match, prefers the one with more static segments,
-   * then earliest registration order.
+   * When multiple routes match, the ranking is:
+   *
+   * 1. more literal (static) segments;
+   * 2. then FEWER `*` wildcard segments;
+   * 3. then earliest registration order.
+   *
+   * The wildcard key is what makes an application catch-all lose to a route that
+   * names its path, in either registration order. Before M70g a `*` counted as a
+   * static segment, so `GET /*` tied with `GET /openapi.json` and won merely by
+   * registering first — which is how a full-stack application silently lost its
+   * OpenAPI endpoints.
+   *
+   * The rule compares COUNTS rather than comparing segment by segment, and that
+   * has one documented consequence: `/a/*` (one static, one wildcard) loses to
+   * `/:x/b` (one static, no wildcard) on a request for `/a/b`, where a
+   * per-position rule would prefer the literal `a`. That case is pinned by a test
+   * so a future change to per-segment ranking is a deliberate one.
    *
    * @param method - HTTP method
    * @param path - Request path
@@ -225,11 +259,14 @@ export class Router implements IRouterApi {
       return { definition: entry.definition, params };
     }
 
-    // Tie-break: prefer the route with more static segments, then earliest
-    // registration order (§3.6 of M22 plan).
+    // Tie-break: more static segments, then fewer wildcards, then earliest
+    // registration order (§3.6 of the M22 plan, extended by M70g).
     candidates.sort((a, b) => {
       if (a.entry.statics !== b.entry.statics) {
         return b.entry.statics - a.entry.statics;
+      }
+      if (a.entry.wildcards !== b.entry.wildcards) {
+        return a.entry.wildcards - b.entry.wildcards;
       }
       return a.entry.index - b.entry.index;
     });
@@ -240,7 +277,7 @@ export class Router implements IRouterApi {
 
   /**
    * Returns all registered route entries, including the registration
-   * bookkeeping (`index`, `statics`) that drives the tie-break.
+   * bookkeeping (`index`, `statics`, `wildcards`) that drives the tie-break.
    *
    * @returns The route entries in registration order
    * @internal Test/diagnostics seam — `Router` is not exported from the package
@@ -258,6 +295,20 @@ export class Router implements IRouterApi {
       definition: entry.definition,
     }));
   }
+}
+
+/**
+ * Names the party that registered a route, for the duplicate-route refusal.
+ *
+ * Module-private with one caller by design: the two arms exist so the message
+ * never says "registered by undefined", and a second call site would be a second
+ * place for that wording to drift.
+ *
+ * @param entry - The entry already holding the `METHOD path` key
+ * @returns `plugin 'name'` for a plugin-registered route, `the application` otherwise
+ */
+function describeRouteOwner(entry: RouteEntry): string {
+  return entry.owner === undefined ? 'the application' : `plugin '${entry.owner}'`;
 }
 
 /**

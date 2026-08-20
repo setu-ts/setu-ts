@@ -36,8 +36,10 @@ describe('Router', () => {
     const first = () => ({ __handlerResult: true } as never);
     router.get('/users', first);
 
+    // The message names the FIRST claimant (M70g/X5-6): the stack trace already
+    // carries the second, and "who got there first" is the half a developer needs.
     expect(() => router.get('/users', () => ({ __handlerResult: true } as never))).toThrow(
-      "Route 'GET /users' is already registered.",
+      "Route 'GET /users' is already registered by the application.",
     );
     expect(router.match('GET', '/users')?.definition.handler).toBe(first);
   });
@@ -48,7 +50,7 @@ describe('Router', () => {
     router.group('/api', (group) => group.get('/status', first));
 
     expect(() => router.get('/api/status', () => ({ __handlerResult: true } as never))).toThrow(
-      "Route 'GET /api/status' is already registered.",
+      "Route 'GET /api/status' is already registered by the application.",
     );
     expect(router.listRoutes()).toHaveLength(1);
     expect(router.match('GET', '/api/status')?.definition.handler).toBe(first);

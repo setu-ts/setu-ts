@@ -100,6 +100,41 @@ try {
     fail('The index route did not link to /products.');
   }
 
+  // 2c — the endpoints the SSR catch-all used to swallow. `ReactRouterPlugin`
+  // mounts `GET /*` at PLUGIN_PRIORITY.NORMAL (500) and `OpenApiPlugin`
+  // registers at OPENAPI (700), deliberately last so it can document every
+  // route — so the catch-all was always in the router first, and until M70g
+  // that alone decided the match. Both endpoints answered the SSR 404 page in
+  // every full-stack application, with no error anywhere.
+  //
+  // Nothing requested them: this smoke asked for /products, / and /login, and
+  // no package test composes two plugins. That is exactly why it shipped.
+  const spec = await app.fetch(new Request(`${ORIGIN}/openapi.json`));
+  if (spec.status !== 200) {
+    fail(
+      `Expected /openapi.json to answer 200, received ${spec.status}. A root catch-all ` +
+        'is shadowing it: a route naming its own path must outrank a wildcard.',
+    );
+  }
+  if (!(spec.headers.get('content-type') ?? '').includes('application/json')) {
+    fail(
+      `Expected /openapi.json to be served as JSON, received ` +
+        `"${spec.headers.get('content-type')}" — an HTML body here is the SSR 404 page.`,
+    );
+  }
+  const document = await spec.json() as { openapi?: string };
+  if (typeof document.openapi !== 'string') {
+    fail('The /openapi.json body carried no `openapi` version field.');
+  }
+
+  const docs = await app.fetch(new Request(`${ORIGIN}/docs`));
+  if (docs.status !== 200) {
+    fail(`Expected /docs to answer 200, received ${docs.status}.`);
+  }
+  if (!(await docs.text()).includes('swagger')) {
+    fail('The /docs body did not render the Swagger UI page.');
+  }
+
   // 3 — the session and its form CSRF token, through the same SSR path.
   const loginPage = await app.fetch(new Request(`${ORIGIN}/login`));
   if (loginPage.status !== 200) {
