@@ -6968,7 +6968,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   short-circuiting middleware emits `{error, message}` (X4-8/C3), a gRPC handler error is logged
   nowhere (X7-5), and a raw `Error` in log metadata serializes to `{}` (X2-5, X8-12).
 - ✅ **M70g — Routing collisions** (`kernel`, `cli`; docs in `react-router-plugin`, `static-plugin`;
-  the end-to-end gate in `apps/full-stack`) — complete (PR pending). The kernel's static-segment
+  the end-to-end gate in `apps/full-stack`) — complete (PR #175). The kernel's static-segment
   tie-break covered `:param` but not `/*`, so against a wildcard **registration order alone
   decided** — which silently removed `/openapi.json` and `/docs` from every full-stack app with no
   user error (X5-1/F1), while `StaticPlugin` at the root instead collided loudly with an error
