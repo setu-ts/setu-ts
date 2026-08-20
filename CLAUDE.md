@@ -2778,7 +2778,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `barrel-exports.test.ts` (the M56 defect class). **The end-to-end gate is the request no gate ever
   made**: `apps/full-stack/smoke.ts` asked for `/products`, `/` and `/login` and never
   `/openapi.json`, which is precisely why this shipped — it now asserts both endpoints under their
-  real content types, in the real composition, on every CI run) — complete (PR pending)
+  real content types, in the real composition, on every CI run) — complete (PR #175)
 - **Next milestone** — **M70f** (error format and error visibility). Errors either bypass the
   configured RFC 9457 format or vanish entirely: `createUploadMiddleware` reports every downstream
   failure as a malformed body (X8-1), the kernel's own 404 and fallback 500 answer `{error}` JSON
