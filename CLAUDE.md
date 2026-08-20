@@ -2739,7 +2739,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `LoggerPlugin` that fails without the edge. A recurrence gate (`scripts/npm-specifier-audit.ts`)
   refuses any computed `import()` specifier in `packages/*/src` unless it carries a
   `computed-specifier: <reason>` marker, and runs on every suite run and as `release:verify`
-  check 6) — complete (PR pending)
+  check 6) — complete (PR #174)
 - **Next milestone** — **M70f** (error format and error visibility). Errors either bypass the
   configured RFC 9457 format or vanish entirely: `createUploadMiddleware` reports every downstream
   failure as a malformed body (X8-1), the kernel's own 404 and fallback 500 answer `{error}` JSON

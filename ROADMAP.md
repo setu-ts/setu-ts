@@ -6953,7 +6953,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   its author adds the two-line factory export (add that export, or delete the file and regenerate —
   renaming a class to the factory's name does NOT compile). **Complete (PR #173).**
 - ✅ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`) —
-  complete (PR pending). Every one of these packages offers a seam so tests can inject a fake, and
+  complete (PR #174). Every one of these packages offers a seam so tests can inject a fake, and
   because every test injects, the `?? <the real thing>` fallback is the one line no suite runs.
   `@setu-ts/sdk` cannot complete a single request in a browser (X11-1) and `grpc-plugin`'s lazy
   `npm:` import goes through a constant map JSR's npm-compat rewrite cannot reach, which also leaves
