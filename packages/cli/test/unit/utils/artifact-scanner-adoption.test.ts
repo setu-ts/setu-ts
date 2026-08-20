@@ -15,6 +15,7 @@ import type { IFileSystem, StatResult } from '@setu-ts/common';
 
 import { readArtifactNames, scanArtifacts } from '../../../src/utils/artifact-scanner.ts';
 import { FUNCTIONAL_ROUTES_SEAM } from '../../../src/seams/http.ts';
+import { FUNCTIONAL_SERVICES_SEAM } from '../../../src/seams/services.ts';
 
 const FILE_STAT: StatResult = { isFile: true, isDirectory: false, size: 12 };
 const ROUTES = FUNCTIONAL_ROUTES_SEAM;
@@ -180,5 +181,37 @@ describe('scanArtifacts aggregation', () => {
     expect(configReads).toBe(1);
     expect(scan.manual).toHaveLength(2);
     expect(scan.adopted).toEqual([]);
+  });
+});
+
+describe('a barrel that registers nothing', () => {
+  // The functional services barrel is the one seam whose `exports` is empty, because
+  // it is a convenience re-export rather than a registration site — its own header
+  // tells the developer to `import { describeThing } from './src/services/index.ts'`.
+  // Taking that symbol's presence in `setu.config.ts` as a hand REGISTRATION drops the
+  // artifact from the barrel, which breaks the very import the CLI documented: the
+  // project stops compiling (TS2305) from a command that reported success.
+  it('never treats a re-exported symbol as a hand registration', async () => {
+    const fs = fsWith(['widget.service.ts'], {
+      'src/services/widget.service.ts': 'export function describeWidget(): string { return ""; }',
+      'src/services/index.ts': "export { describeWidget } from './widget.service.ts';",
+    });
+
+    const scan = await readArtifactNames(fs, '/app', FUNCTIONAL_SERVICES_SEAM, {
+      path: 'setu.config.ts',
+      source:
+        "import { describeWidget } from './src/services/index.ts';\nconst x = describeWidget;",
+    });
+
+    expect(scan.manual).toEqual([]);
+    expect(scan.names).toEqual(['widget']);
+  });
+
+  it('still reports a hand registration for a barrel that IS a registration site', () => {
+    // The distinction is the seam's own `exports`: a registration barrel exports an
+    // AGGREGATE, so a per-artifact symbol in the config can only be a direct import
+    // from the artifact module.
+    expect(FUNCTIONAL_SERVICES_SEAM.exports).toEqual([]);
+    expect(ROUTES.exports.length).toBeGreaterThan(0);
   });
 });
