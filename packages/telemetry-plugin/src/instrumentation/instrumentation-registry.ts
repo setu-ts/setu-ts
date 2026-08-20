@@ -25,12 +25,68 @@ export interface InstrumentationOutcome {
   reason?: string;
 }
 
+/**
+ * Reports a single instrumentation outcome as the registry builds. The plugin
+ * passes a reporter that reads `ctx.logger` at call time, so a logger
+ * registered after this plugin still receives the lines. A reporter that
+ * throws must not break the build — the observation path must not become the
+ * failure path.
+ *
+ * @since 0.2.0
+ */
+export type InstrumentationReporter = (outcome: InstrumentationOutcome) => void;
+
 /** Handle returned by the registry — call `shutdown()` on application teardown. */
 export interface InstrumentationHandle {
   /** Shuts down all enabled instrumentations. */
   shutdown(): Promise<void>;
-  /** Records of what happened during registry build. */
+  /**
+   * Records of what happened during registry build. Surfaced to the
+   * application through the plugin's logger (one line per outcome: `debug`
+   * for an enabled instrumentation, `warn` for a failure); a failure remains
+   * a no-op and is never rethrown.
+   */
   outcomes: InstrumentationOutcome[];
+}
+
+/**
+ * Extracts a human-readable reason from a value caught in a `catch` block.
+ *
+ * `catch (err)` binds `unknown`: JS permits throwing any value, and a
+ * non-`Error` throw (`throw null`, `throw 'boom'`) would make an
+ * `(err as Error).message` read throw a fresh `TypeError` or yield
+ * `undefined`. The registry must degrade, never throw, so the reason is
+ * taken from `Error.message` when available and from `String(err)`
+ * otherwise.
+ *
+ * @param err - The caught value.
+ * @returns A non-empty string naming what was thrown.
+ * @internal
+ */
+function reasonOf(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+/** A single instrumentation loader: config → loaded instance + specifier. */
+export type InstrumentationLoader = (
+  configArg: unknown | undefined,
+) => Promise<{ instance: unknown; specifier: string }>;
+
+/**
+ * Per-kind loaders the registry dispatches to. The registry takes them as an
+ * option so tests can drive the lazy-load path without a real `npm:` import;
+ * production passes the real loaders (the defaults below).
+ *
+ * @internal
+ * @since 0.2.0
+ */
+export interface InstrumentationLoaders {
+  readonly http: InstrumentationLoader;
+  readonly fetch: InstrumentationLoader;
+  readonly ioredis: InstrumentationLoader;
+  readonly amqplib: InstrumentationLoader;
+  readonly kafkajs: InstrumentationLoader;
 }
 
 /** Platform check — all five instrumentations target Node internals. */
@@ -55,6 +111,10 @@ export function isInstrumentationSupported(
  * @param config - The `instrumentations` option from plugin options.
  * @param runtime - Runtime services providing the platform gate.
  * @param provider - The OTel TracerProvider (from `TracerHost.otelProvider`); absent = no-op.
+ * @param reporter - Invoked once per outcome as the registry builds. The plugin
+ *   passes a `ctx.logger`-backed reporter; absent = outcomes are only recorded.
+ * @param loaders - Per-kind loaders; defaults to the real lazy `npm:` loaders.
+ *   Injectable so the lazy path is testable without a real import.
  * @returns An instrumentation handle (resolved after all lazy loads settle).
  * @since 0.2.0
  */
@@ -62,10 +122,33 @@ export async function buildInstrumentationRegistry(
   config: InstrumentationsConfig | undefined,
   runtime: IRuntimeServices,
   provider: unknown,
+  reporter: InstrumentationReporter | undefined = undefined,
+  loaders: InstrumentationLoaders = {
+    http: loadHttpInstrumentation,
+    fetch: loadFetchInstrumentation,
+    ioredis: loadIORedisInstrumentation,
+    amqplib: loadAmqplibInstrumentation,
+    kafkajs: loadKafkaJsInstrumentation,
+  },
 ): Promise<InstrumentationHandle> {
   const outcomes: InstrumentationOutcome[] = [];
 
+  // Record an outcome and surface it to the reporter. The reporter is an
+  // observation path: a throwing reporter must not break the build (M45b —
+  // an observer must never become the failure path).
+  function record(outcome: InstrumentationOutcome): void {
+    outcomes.push(outcome);
+    if (reporter) {
+      try {
+        reporter(outcome);
+      } catch {
+        // A failing observer must not become the failure path.
+      }
+    }
+  }
+
   // If no provider, the registry is a no-op (noop mode / custom factory without otelProvider).
+  // No outcomes are recorded, so the no-provider path reports nothing.
   if (!provider) {
     return {
       shutdown: async () => {},
@@ -94,7 +177,7 @@ export async function buildInstrumentationRegistry(
         (instance as { setTracerProvider: (p: unknown) => void }).setTracerProvider(provider);
       }
     } catch (err) {
-      outcomes.push({ kind, enabled: false, reason: (err as Error).message });
+      record({ kind, enabled: false, reason: reasonOf(err) });
       return;
     }
 
@@ -104,11 +187,11 @@ export async function buildInstrumentationRegistry(
         (instance as { enable: () => void }).enable();
       }
     } catch (err) {
-      outcomes.push({ kind, enabled: false, reason: (err as Error).message });
+      record({ kind, enabled: false, reason: reasonOf(err) });
       return;
     }
 
-    outcomes.push({ kind, enabled: true });
+    record({ kind, enabled: true });
     enabledInstrumentations.push({ kind, instance });
   }
 
@@ -116,12 +199,10 @@ export async function buildInstrumentationRegistry(
   async function enableLazy(
     kind: InstrumentationKind,
     configArg: unknown | undefined,
-    loader: (
-      configArg: unknown | undefined,
-    ) => Promise<{ instance: unknown; specifier: string }>,
+    loader: InstrumentationLoader,
   ): Promise<void> {
     if (!isInstrumentationSupported(kind, platform)) {
-      outcomes.push({ kind, enabled: false, reason: 'unsupported platform' });
+      record({ kind, enabled: false, reason: 'unsupported platform' });
       return;
     }
 
@@ -130,7 +211,7 @@ export async function buildInstrumentationRegistry(
       const result = await loader(configArg);
       instance = result.instance;
     } catch (err) {
-      outcomes.push({ kind, enabled: false, reason: (err as Error).message });
+      record({ kind, enabled: false, reason: reasonOf(err) });
       return;
     }
 
@@ -144,9 +225,7 @@ export async function buildInstrumentationRegistry(
   function dispatch(
     kind: InstrumentationKind,
     cfg: true | InstrumentationConfig | undefined,
-    loader: (
-      configArg: unknown | undefined,
-    ) => Promise<{ instance: unknown; specifier: string }>,
+    loader: InstrumentationLoader,
   ): void {
     if (cfg === undefined) return;
 
@@ -162,27 +241,27 @@ export async function buildInstrumentationRegistry(
 
   const httpCfg = config?.http;
   if (httpCfg !== undefined) {
-    dispatch('http', httpCfg, loadHttpInstrumentation);
+    dispatch('http', httpCfg, loaders.http);
   }
 
   const fetchCfg = config?.fetch;
   if (fetchCfg !== undefined) {
-    dispatch('fetch', fetchCfg, loadFetchInstrumentation);
+    dispatch('fetch', fetchCfg, loaders.fetch);
   }
 
   const ioredisCfg = config?.ioredis;
   if (ioredisCfg !== undefined) {
-    dispatch('ioredis', ioredisCfg, loadIORedisInstrumentation);
+    dispatch('ioredis', ioredisCfg, loaders.ioredis);
   }
 
   const amqplibCfg = config?.amqplib;
   if (amqplibCfg !== undefined) {
-    dispatch('amqplib', amqplibCfg, loadAmqplibInstrumentation);
+    dispatch('amqplib', amqplibCfg, loaders.amqplib);
   }
 
   const kafkajsCfg = config?.kafkajs;
   if (kafkajsCfg !== undefined) {
-    dispatch('kafkajs', kafkajsCfg, loadKafkaJsInstrumentation);
+    dispatch('kafkajs', kafkajsCfg, loaders.kafkajs);
   }
 
   // Await all lazy loads before returning — outcomes and enabledInstrumentations

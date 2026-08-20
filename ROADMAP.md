@@ -6889,10 +6889,14 @@ all merge before the release branch is cut.
   read surface (X4-7), storage object metadata (X8-6), the no-argument registration seams (D4),
   resolver typing (X6-4). Each needs its own CHANGELOG entry with migration text — not one lumped
   release note.
-- **`packages/grpc-plugin` may not be salvageable within this milestone.** X7-2, X7-3 and X7-4
-  together say the default `basePath` is unreachable by any native client, the package cannot load
-  on Node or Bun, and native gRPC-binary works on no runtime it can run on. M70i decides
-  repair-versus-withdraw explicitly rather than inheriting it.
+- **`packages/grpc-plugin` may not be salvageable within this milestone.** X7-2 and X7-4 together
+  say the default `basePath` is unreachable by any native client and native gRPC-binary works on no
+  runtime it can run on. M70i decides repair-versus-withdraw explicitly rather than inheriting it.
+  The module-loading row X7-3 (the package cannot load on Node or Bun) is **M70e's**, not M70i's: it
+  is a self-contained fix with a known mechanism, and it is a _precondition_ for the viability
+  decision — whether `grpc-plugin` is worth repairing cannot be judged on Node or Bun while it
+  cannot load there at all. M70e closes X7-3 first, so M70i takes the decision against a package
+  that loads.
 - **X1's functional build no longer exists**, so `[functional]` and `[both]` rows cannot be
   re-verified against a live tree; `smoke/EXERCISES.md` X1 is the rebuild recipe. Any workstream
   depending on those rows rebuilds first.
@@ -6948,13 +6952,13 @@ Ordered by the sequence they should be worked, not by severity alone.
   generated output shape changes** — a pre-existing generated artifact stops being registered until
   its author adds the two-line factory export (add that export, or delete the file and regenerate —
   renaming a class to the factory's name does NOT compile). **Complete (PR #173).**
-- ⬜ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`).
-  Every one of these packages offers a seam so tests can inject a fake, and because every test
-  injects, the `?? <the real thing>` fallback is the one line no suite runs. `@setu-ts/sdk` cannot
-  complete a single request in a browser (X11-1) and `grpc-plugin`'s lazy `npm:` import goes through
-  a constant map JSR's npm-compat rewrite cannot reach, which also leaves M24b's
-  auto-instrumentation enabled on no runtime (X7-3). Same family as this repo's most-repeated root
-  cause, one level up. General fix: **construct the default and drive it once**, as `runtime`'s
+- ✅ **M70e — Default branches of injectable seams** (`sdk`, `grpc-plugin`, `telemetry-plugin`) —
+  complete (PR #174). Every one of these packages offers a seam so tests can inject a fake, and
+  because every test injects, the `?? <the real thing>` fallback is the one line no suite runs.
+  `@setu-ts/sdk` cannot complete a single request in a browser (X11-1) and `grpc-plugin`'s lazy
+  `npm:` import goes through a constant map JSR's npm-compat rewrite cannot reach, which also leaves
+  M24b's auto-instrumentation enabled on no runtime (X7-3). Same family as this repo's most-repeated
+  root cause, one level up. General fix: **construct the default and drive it once**, as `runtime`'s
   `read-stream-real.test.ts` already does for `IFileSystem`.
 - ⬜ **M70f — Error format and error visibility** (`storage-plugin`, `kernel`, `exceptions`,
   `multi-tenancy-plugin`, `session-plugin`, `grpc-plugin`, `logger-plugin`, `notification-plugin`).
@@ -7149,7 +7153,7 @@ branch during a version bump.
 | 70b       | ✅     | tenant isolation, data exposure (sec) |
 | 70c       | ✅     | health-signal sweep (6 packages)      |
 | 70d       | ✅     | no-argument registration seams        |
-| 70e       | ⬜     | default branches of injectable seams  |
+| 70e       | ✅     | default branches of injectable seams  |
 | 70f       | ⬜     | error format and error visibility     |
 | 70g       | ⬜     | routing collisions                    |
 | 70h       | ✅     | cli scaffold batch                    |

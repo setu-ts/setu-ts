@@ -94,6 +94,17 @@ export type ResolvedClientOptions = ClientOptions & { readonly timing: IClientTi
 export class HttpClient implements IHttpClient {
   #baseUrl: string;
   #defaultHeaders: HeadersInit | undefined;
+  /**
+   * The fetch used for every request. When none is injected, this is a wrapper
+   * that resolves `globalThis.fetch` **at call time** with the global as its
+   * receiver — never a bare reference to the global captured at construction.
+   * A bare `fetch` stored on an object field loses its receiver when called as
+   * `this.#fetch(...)`: browsers enforce the WebIDL receiver rule and throw
+   * `Illegal invocation` on the very first request (X11-1). Reading the global
+   * at call time also means a `globalThis.fetch` replaced after construction
+   * (a mocking library, a polyfill) is picked up by clients built at module
+   * scope, which a `fetch.bind(globalThis)` captured at construction would not.
+   */
   #fetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
   #timing: IClientTiming;
   #retry: RetryPolicy | undefined;
@@ -112,7 +123,7 @@ export class HttpClient implements IHttpClient {
   constructor(options: ResolvedClientOptions) {
     this.#baseUrl = options.baseUrl;
     this.#defaultHeaders = options.headers;
-    this.#fetch = options.fetch ?? fetch;
+    this.#fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.#timing = options.timing;
     this.#retry = options.retry;
     this.#circuitBreaker = options.circuitBreaker;

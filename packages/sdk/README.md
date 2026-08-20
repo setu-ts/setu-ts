@@ -67,6 +67,10 @@ console.log(res.data); // User
 — `Date.now()` appears nowhere in this package. See [Resilience](#resilience) for the three policy
 shapes and [Authentication](#authentication) for the bundled interceptors.
 
+The `fetch` default needs no browser-specific value: it resolves `globalThis.fetch` **at call
+time**, with the global as its receiver, so the default transport works in a browser unchanged. (An
+injected `fetch` is always used as-is, which is what tests rely on.)
+
 ## HTTP Client
 
 `createClient(options)` returns an `IHttpClient` whose single method is
@@ -78,7 +82,7 @@ shapes and [Authentication](#authentication) for the bundled interceptors.
 | ---------------------- | ----------------------------- | --------------------------------------------------------------------------- |
 | `baseUrl`              | `string` (required)           | Base URL for every request                                                  |
 | `headers`              | `Record<string, string>`      | Default headers cloned into each request                                    |
-| `fetch`                | `Function`                    | Injectable fetch seam (defaults to global `fetch`)                          |
+| `fetch`                | `Function`                    | Injectable fetch seam (default bound to the global realm)                   |
 | `timing`               | `IClientTiming`               | Injectable timing seam (defaults to `createDefaultClientTiming()`)          |
 | `retry`                | `RetryPolicy`                 | Retry policy (retries transport failures + 408/425/429/5xx on safe methods) |
 | `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy                                           |
@@ -372,8 +376,10 @@ covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, 
 
 - **Zero npm dependencies** — uses only web-standard APIs (`URL`, `Headers`, `AbortSignal`,
   `performance.now()`).
-- **Browser and server** — runs in Node.js, Deno, Bun, Cloudflare Workers, and browsers.
-- **Injectable `fetch`** — tests inject a fake; production defaults to the global.
+- **Browser and server** — runs in browsers, Node.js, Deno, Bun, and Cloudflare Workers. The default
+  transport needs no browser-specific value: it resolves `globalThis.fetch` at call time with the
+  global as its receiver, so the default works in a browser unchanged.
+- **Injectable `fetch`** — tests inject a fake; the default is bound to the global realm.
 - **Injectable timing** — `IClientTiming` makes backoff, breaker windows, and rate-limit waits
   testable without real time.
 

@@ -13,7 +13,7 @@
  * the first failed check.
  */
 import { createServer } from 'node:net';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 import { CAPABILITIES } from '@jsr/setu-ts__common';
 import { createApplication } from '@jsr/setu-ts__kernel';
@@ -207,6 +207,208 @@ try {
 //    listener from one the adapter merely stopped routing to.
 const rebound = await rebind(port);
 check('stop() releases the listening port', rebound === null, rebound ?? undefined);
+
+// 9. The published grpc/telemetry artifacts must ship no non-literal path from
+//    an `npm:` string into import(). JSR's npm-compatibility rewrite is static
+//    and reaches only a literal import('npm:…') argument; a specifier routed
+//    through a variable ships `npm:` verbatim and cannot load on Node or Bun
+//    (X7-3, M70e). The source gate (scripts/npm-specifier-audit.ts) prevents
+//    the shape in the repo; only a published artifact settles that the rewrite
+//    actually ran. Two shapes are refused: a literal `npm:` inside import(),
+//    AND the indirection that evades it — a parameterized importer that
+//    forwards its parameter into import() (the known-broken alpha.5 artifact
+//    carries the latter, not the former, so the first shape alone would pass
+//    against the exact broken build).
+//
+//    Guarded by version: while the installed packages are at or below
+//    0.1.0-alpha.8 (the last release that shipped the defect) the check reports
+//    pending rather than failing — a hard check would turn this PR red for the
+//    very defect it fixes. Once a newer version is installed the guard lifts
+//    and a surviving `npm:` inside import( fails the suite.
+const LAST_BROKEN = '0.1.0-alpha.8';
+const FIXED_IN = '0.1.0-alpha.9';
+
+/** Compares two `0.1.0[-alpha.N]` versions; -1/0/1. Unparseable → 0 (don't gate). */
+function compareVersions(a, b) {
+  const parse = (v) => {
+    const m = /^(\d+)\.(\d+)\.(\d+)(?:-alpha\.(\d+))?$/.exec(v);
+    if (!m) return null;
+    return {
+      major: Number(m[1]),
+      minor: Number(m[2]),
+      patch: Number(m[3]),
+      pre: m[4] !== undefined ? Number(m[4]) : null,
+    };
+  };
+  const pa = parse(a);
+  const pb = parse(b);
+  if (pa === null || pb === null) return 0;
+  for (const key of ['major', 'minor', 'patch']) {
+    if (pa[key] !== pb[key]) return pa[key] < pb[key] ? -1 : 1;
+  }
+  // Same tuple: a release (pre === null) sorts after any prerelease.
+  if (pa.pre === null && pb.pre === null) return 0;
+  if (pa.pre === null) return 1;
+  if (pb.pre === null) return -1;
+  return pa.pre === pb.pre ? 0 : pa.pre < pb.pre ? -1 : 1;
+}
+
+/**
+ * Returns `source` with every comment blanked to spaces — same length, so
+ * offsets are preserved. String-aware: a `//` or `/*` inside a string literal
+ * is not a comment (the audited artifacts carry `npm:` strings and `deno add`
+ * install-command text that contain `//`).
+ *
+ * Why: JSR's npm-compat build keeps JSDoc comments in the published `.js`,
+ * and this repo's loader JSDoc literally spells the indirection shape
+ * (`(spec) => import(spec)`) to document why it must not recur. A detector
+ * that scans comments would flag the FIXED artifact for its own explanation.
+ */
+function stripComments(source) {
+  const n = source.length;
+  const out = new Array(n);
+  let i = 0;
+  while (i < n) {
+    const c = source[i];
+    if (c === '"' || c === "'" || c === '`') {
+      // Keep the string verbatim; skip to its closing delimiter.
+      const quote = c;
+      out[i] = c;
+      i++;
+      while (i < n) {
+        out[i] = source[i];
+        if (source[i] === '\\') {
+          i++;
+          if (i < n) out[i] = source[i];
+          i++;
+          continue;
+        }
+        if (source[i] === quote) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (c === '/' && source[i + 1] === '/') {
+      while (i < n && source[i] !== '\n') {
+        out[i] = ' ';
+        i++;
+      }
+      continue;
+    }
+    if (c === '/' && source[i + 1] === '*') {
+      out[i] = ' ';
+      i++;
+      out[i] = ' ';
+      i++;
+      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) {
+        out[i] = source[i] === '\n' ? '\n' : ' ';
+        i++;
+      }
+      if (i < n) {
+        out[i] = ' ';
+        i++;
+        out[i] = ' ';
+        i++;
+      }
+      continue;
+    }
+    out[i] = c;
+    i++;
+  }
+  return out.join('');
+}
+
+/** Offsets of every `import( "npm:…` / `import('npm:…` / `import(`npm:…` call. */
+function npmImportOccurrences(source) {
+  const re = /import\s*\(\s*["'`]npm:/g;
+  const hits = [];
+  let m;
+  while ((m = re.exec(stripComments(source))) !== null) hits.push(m.index);
+  return hits;
+}
+
+/**
+ * Offsets of every parameterized importer that forwards its own parameter
+ * straight into import() — e.g. `(specifier)=>import(specifier)`,
+ * `(spec)=>import(spec)`, `(x)=>import(x)`.
+ *
+ * This is the indirection shape JSR's static rewrite cannot reach: the `npm:`
+ * string sits in a separate constant and only reaches `import()` through the
+ * parameter, so it ships verbatim and cannot load on Node or Bun (X7-3). The
+ * fixed shape — a zero-argument importer taking a literal,
+ * `() => import('npm:…')` — carries no parameter and does not match. Detecting
+ * this closes the false-confidence gap where the `npm:`-in-`import()` regex
+ * above finds zero matches in the known-broken artifact yet the artifact is
+ * still broken.
+ */
+function parameterizedImporterOccurrences(source) {
+  // Comments are stripped: the fixed artifact's own JSDoc documents the
+  // indirection shape it must not contain, and must not be mistaken for it.
+  const code = stripComments(source);
+  // Concise arrow body: (id) => import(id)
+  const concise = /\(\s*([A-Za-z_$][\w$]*)\s*\)\s*=>\s*import\(\s*\1\s*\)/g;
+  // Braced arrow body: (id) => { ... import(id) ... }
+  const braced = /\(\s*([A-Za-z_$][\w$]*)\s*\)\s*=>\s*\{[^{}]*import\(\s*\1\s*\)[^{}]*\}/g;
+  const hits = [];
+  for (const re of [concise, braced]) {
+    let m;
+    while ((m = re.exec(code)) !== null) hits.push(m.index);
+  }
+  hits.sort((a, b) => a - b);
+  return hits;
+}
+
+/** Recursively lists every `.js` file under `dir`. */
+function listJsFiles(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...listJsFiles(path));
+    else if (entry.name.endsWith('.js')) out.push(path);
+  }
+  return out;
+}
+
+for (const name of ['@jsr/setu-ts__grpc-plugin', '@jsr/setu-ts__telemetry-plugin']) {
+  const pkgDir = `node_modules/${name}`;
+  let version;
+  try {
+    version = JSON.parse(readFileSync(`${pkgDir}/package.json`, 'utf8')).version;
+  } catch {
+    check(`${name} is installed with a readable version`, false, 'no package.json');
+    continue;
+  }
+
+  if (compareVersions(version, LAST_BROKEN) <= 0) {
+    console.log(
+      `  pend ${name} @ ${version} — npm:-in-import check pending, fixed in ${FIXED_IN}, not yet published`,
+    );
+    continue;
+  }
+
+  const npmInImport = [];
+  const indirection = [];
+  for (const file of listJsFiles(`${pkgDir}/src`)) {
+    const source = readFileSync(file, 'utf8');
+    const rel = file.replace(`${pkgDir}/`, '');
+    if (npmImportOccurrences(source).length > 0) npmInImport.push(rel);
+    if (parameterizedImporterOccurrences(source).length > 0) indirection.push(rel);
+  }
+  const details = [
+    npmInImport.length > 0 ? `npm: inside import(): ${npmInImport.join(', ')}` : '',
+    indirection.length > 0 ? `parameterized importer: ${indirection.join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('; ');
+  check(
+    `${name} @ ${version} ships no non-literal npm: path into import()`,
+    npmInImport.length === 0 && indirection.length === 0,
+    details,
+  );
+}
 
 console.log(failures === 0 ? `\nAll checks passed (${host}).` : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);

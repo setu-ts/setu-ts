@@ -44,44 +44,27 @@ describe('database-instrumentation', () => {
     expect((instance as { configPassed: unknown }).configPassed).toBeUndefined();
   });
 
-  it('should lazy-load the correct npm specifier for ioredis', async () => {
-    try {
-      const mod = await import('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
-      expect(mod.IORedisInstrumentation).toBeDefined();
-      expect(typeof mod.IORedisInstrumentation).toBe('function');
-    } catch {
-      // OTel packages not installed.
-    }
-  });
+  // --- Loader seam: zero-argument importFn (M70e §3.5) ---
+  //
+  // The default importFn is a real literal `import()`; the guarded
+  // `instrumentation-real-import.test.ts` drives it when the package is
+  // present. The vacuous `try { … } catch { /* not installed */ }` pair is
+  // gone: it passed whether or not the real package loaded.
 
-  it('should reject when the package specifier is invalid', async () => {
-    await expect(
-      import('npm:@opentelemetry/instrumentation-nonexistent-fake@^999.0.0'),
-    ).rejects.toThrow();
-  });
-
-  // --- Direct coverage for loadIORedisInstrumentation ---
-
-  it('loadIORedisInstrumentation should return { instance, specifier } when real package is available', async () => {
-    try {
-      const result = await loadIORedisInstrumentation(undefined);
-      expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
-      expect(result.instance).toBeDefined();
-    } catch {
-      // Packages not installed.
-    }
-  });
-
-  it('loadIORedisInstrumentation should use injected importFn', async () => {
-    const fakeMod = { IORedisInstrumentation: class {} };
-    const importFn = (_spec: string) => Promise.resolve(fakeMod);
+  it('loadIORedisInstrumentation should use an injected zero-argument importFn', async () => {
+    let calls = 0;
+    const importFn = () => {
+      calls++;
+      return Promise.resolve({ IORedisInstrumentation: class {} });
+    };
     const result = await loadIORedisInstrumentation(undefined, importFn);
-    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
+    expect(calls).toBe(1);
     expect(result.instance).toBeDefined();
+    expect(result.specifier).toBe('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
   });
 
   it('loadIORedisInstrumentation should reject when importFn rejects', async () => {
-    const importFn = (_spec: string) => Promise.reject(new Error('inject-fail'));
+    const importFn = () => Promise.reject(new Error('inject-fail'));
     await expect(loadIORedisInstrumentation(undefined, importFn)).rejects.toThrow('inject-fail');
   });
 });

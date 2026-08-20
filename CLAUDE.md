@@ -2720,12 +2720,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   already-published generated output** — the generated barrel no longer constructs with `new X()`,
   so a pre-existing artifact stops registering until the two-line factory export is added. All `src`
   files ≥90% branch/function/line) — complete (PR #173)
-- **Next milestone** — **M70e** (default branches of injectable seams). Every one of `sdk`,
-  `grpc-plugin` and `telemetry-plugin` offers a seam so tests can inject a fake, and because every
-  test injects, the `?? <the real thing>` fallback is the one line no suite runs; `@setu-ts/sdk`
-  cannot complete a single request in a browser (X11-1) and `grpc-plugin`'s lazy `npm:` import goes
-  through a constant map JSR's npm-compat rewrite cannot reach (X7-3). General fix: construct the
-  default and drive it once, as `runtime`'s `read-stream-real.test.ts` already does.
+- **Milestone 70e** (`sdk` + `grpc-plugin` + `telemetry-plugin` — the default branches of injectable
+  seams, closing X11-1 and X7-3). Every one of the three packages offers a seam so tests can inject
+  a fake, and because every test injects, the `?? <the real thing>` fallback was the one line no
+  suite ran. **X11-1:** the SDK's default transport stored the bare global `fetch` and called it
+  with the client as receiver, so a browser's first request died with
+  `TypeError:
+  Illegal invocation`; the default now resolves `globalThis.fetch` at call time with
+  the global as receiver (an injected `fetch` still wins). **X7-3:** the grpc-plugin's
+  Connect/Protobuf-ES specifiers reached `import()` through a constant map that JSR's static
+  npm-compat rewrite cannot reach, so the published artifact shipped `npm:` verbatim and could not
+  load on Node or Bun — the default importer now calls four literal `import('npm:…')` expressions,
+  and telemetry-plugin's five instrumentation loaders default to zero-arg literal importers the same
+  way. Telemetry instrumentation outcomes are reported through the plugin's logger (`debug` for an
+  enabled instrumentation, `warn` for a failure carrying `kind` + `reason`); the plugin declares the
+  logger capability in `optionalDependencies` so the kernel orders `LoggerPlugin` first and the
+  standard configuration reports every outcome — pinned by a kernel-level e2e test with the real
+  `LoggerPlugin` that fails without the edge. A recurrence gate (`scripts/npm-specifier-audit.ts`)
+  refuses any computed `import()` specifier in `packages/*/src` unless it carries a
+  `computed-specifier: <reason>` marker, and runs on every suite run and as `release:verify`
+  check 6) — complete (PR #174)
+- **Next milestone** — **M70f** (error format and error visibility). Errors either bypass the
+  configured RFC 9457 format or vanish entirely: `createUploadMiddleware` reports every downstream
+  failure as a malformed body (X8-1), the kernel's own 404 and fallback 500 answer `{error}` JSON
+  and log nothing even with `LoggerPlugin` registered (X9-6, X11-2), short-circuiting middleware
+  emits `{error, message}` (X4-8/C3), a gRPC handler error is logged nowhere (X7-5), and a raw
+  `Error` in log metadata serializes to `{}` (X2-5, X8-12).
 
 ## Verification (run before declaring any work done)
 

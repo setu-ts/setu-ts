@@ -58,6 +58,13 @@ instrumentation is a documented **no-op, never a throw**, so one codebase deploy
 
 Each plugin instance calls `setTracerProvider` on itself; there is no global singleton.
 
+Outcomes are reported through the plugin's logger (`ctx.logger`, read at call time): an enabled
+instrumentation logs at `debug`, a failure logs at `warn` with `kind` and `reason`. A failure
+remains a no-op rather than a throw — but it is no longer silent. The plugin declares the logger
+capability as an **optional dependency**, so the kernel registers a plugin-provided logger (e.g.
+`LoggerPlugin`) before it and the standard configuration reports every outcome; an app without a
+logger plugin still boots, with nothing emitted.
+
 ## Propagation
 
 The request-span middleware reads and writes the W3C `traceparent` header, so traces join across
