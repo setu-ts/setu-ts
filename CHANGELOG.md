@@ -349,8 +349,12 @@ All notable changes to this project are documented here. The format follows
   never saw them and the published artifact shipped `npm:` verbatim — unresolvable on Node and Bun.
   The default importer now calls four literal `import('npm:…')` expressions (one per module,
   including the two `/protocol` and `/wkt` subpaths), so the rewrite reaches every one. The
-  injectable `importer` seam is unchanged. **Migration:** none — the published package now loads on
-  Node and Bun; the Connect/Protobuf-ES packages must be installed with the host runtime's package
+  injectable seam is reshaped rather than removed: `loadConnectModule` now takes a partial record of
+  per-module zero-argument importers (`Partial<ConnectImporters>`) instead of one specifier-taking
+  `ModuleImporter`, so each of the four failure branches is still drivable in isolation. Both
+  `ModuleImporter` and `defaultImporter` are gone; neither was exported from the package barrel, so
+  no consumer could reference them. **Migration:** none — the published package now loads on Node
+  and Bun; the Connect/Protobuf-ES packages must be installed with the host runtime's package
   manager (the README names the `deno add` / `npm i` / `bun add` commands).
 - **Telemetry outcome reporting was silent in the standard plugin configuration** (M70e). The
   reporter reads `ctx.logger` at call time, but `TelemetryPlugin` (priority 30) declared no

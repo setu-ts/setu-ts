@@ -228,5 +228,6 @@ console.log(
   `Release ${expected} verified: ${PUBLISHED_PACKAGES.length} packages to publish, ` +
     `${UNPUBLISHED_PACKAGES.length} deliberately excluded, ` +
     `${audit.markedSites} computed import() sites marked, ` +
-    `${audit.filesVisited} source files audited.`,
+    `${audit.filesVisited} source files audited across ` +
+    `${audit.srcRootsVisited.length} src roots.`,
 );

@@ -10,6 +10,7 @@ import type { InstrumentationKind } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 import {
   buildInstrumentationRegistry,
+  type InstrumentationLoaders,
   isInstrumentationSupported,
 } from '../../src/instrumentation/instrumentation-registry.ts';
 
@@ -55,6 +56,29 @@ describe('buildInstrumentationRegistry', () => {
         throw new Error('exit');
       },
     } as IRuntimeServices;
+  }
+
+  /**
+   * Loaders that never touch npm. The registry takes `loaders` precisely so the
+   * lazy path is hermetic; without injecting them these tests call the REAL
+   * `import('npm:@opentelemetry/instrumentation-*')`, which makes the unit
+   * suite depend on whether those packages happen to be cached and leaves the
+   * outcome unassertable in either direction.
+   *
+   * @param overrides - Per-kind loader overrides; every other kind rejects.
+   */
+  function createFakeLoaders(
+    overrides: Partial<InstrumentationLoaders> = {},
+  ): InstrumentationLoaders {
+    const unused = (kind: string) => () =>
+      Promise.reject(new Error(`loader for '${kind}' should not have been called`));
+    return {
+      http: overrides.http ?? unused('http'),
+      fetch: overrides.fetch ?? unused('fetch'),
+      ioredis: overrides.ioredis ?? unused('ioredis'),
+      amqplib: overrides.amqplib ?? unused('amqplib'),
+      kafkajs: overrides.kafkajs ?? unused('kafkajs'),
+    };
   }
 
   it('should return a no-op handle when config is undefined', async () => {
@@ -299,34 +323,50 @@ describe('buildInstrumentationRegistry', () => {
     const runtime = createFakeRuntime('node');
     const provider = { id: 'fake-provider' };
 
-    // The internal http lazy loader either succeeds or fails inside the awaited
-    // Promise.all; handle.outcomes must reflect the result immediately.
+    // Resolves only after a turn, so a registry that failed to await its lazy
+    // promises would return with the outcome still missing.
+    let settled = false;
     const handle = await buildInstrumentationRegistry(
       { http: true },
       runtime,
       provider,
+      undefined,
+      createFakeLoaders({
+        http: async () => {
+          await Promise.resolve();
+          settled = true;
+          return { instance: { enable() {} }, specifier: 'npm:fake-http' };
+        },
+      }),
     );
 
-    // After await, the http outcome must already be populated.
+    expect(settled).toBe(true);
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
-    expect(httpOutcome).toBeDefined();
+    expect(httpOutcome?.enabled).toBe(true);
   });
 
-  it('should record supported-platform lazy outcomes after async resolution', async () => {
+  it('should record a lazy-load failure as a failed outcome carrying its reason', async () => {
     const runtime = createFakeRuntime('node');
     const provider = { id: 'fake-provider' };
 
-    // The internal http lazy loader either succeeds or fails deterministically inside
-    // the awaited Promise.all; handle.outcomes must reflect the result immediately.
+    // The unhappy half of the lazy path: the loader rejects, the registry
+    // degrades to a no-op and records WHY. Asserting the reason is what the
+    // previous `expect(['true','false']).toContain(String(enabled))` could not
+    // do — that predicate holds for every boolean, so it passed whether the
+    // real package loaded or not.
     const handle = await buildInstrumentationRegistry(
       { http: true },
       runtime,
       provider,
+      undefined,
+      createFakeLoaders({
+        http: () => Promise.reject(new Error('package not installed')),
+      }),
     );
 
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
-    expect(httpOutcome).toBeDefined();
-    expect(['true', 'false']).toContain(String(httpOutcome?.enabled));
+    expect(httpOutcome?.enabled).toBe(false);
+    expect(httpOutcome?.reason).toBe('package not installed');
   });
 
   it('should record unsupported-platform outcome for lazy loader on non-node platform', async () => {
