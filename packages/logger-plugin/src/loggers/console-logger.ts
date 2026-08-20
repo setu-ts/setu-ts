@@ -9,6 +9,8 @@
  */
 import type { ILogger, IRuntimeServices, LogLevel, LogMetadata } from '@setu-ts/common';
 
+import { normalizeMetadata } from './normalize-metadata.ts';
+
 /**
  * Numeric severity ranking. Lower numbers are more severe (so a configured
  * level allows any entry whose rank is `<=` the configured rank).
@@ -135,7 +137,11 @@ export class ConsoleLogger implements ILogger {
       ...this.#bindings,
       ...metadata,
     };
-    const redacted = this.#redactFields(merged);
+    // Normalize raw `Error` values BEFORE redaction (X2-5): a redact path such
+    // as `error.token` must see the normalized object, and an un-normalized
+    // `Error` would otherwise reach `JSON.stringify` and render as `{}`.
+    const normalized = normalizeMetadata(merged);
+    const redacted = this.#redactFields(normalized);
     const entry = {
       level,
       time: this.#runtime.now(),

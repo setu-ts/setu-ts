@@ -7218,6 +7218,9 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `serializeError(value)`       | function | Serializes any thrown value into a plain `SerializedError` (`{ name, message, stack?, cause? }`) with the `cause` chain followed to a bounded depth; a non-`Error` value yields `{ name: 'Error', message: String(value) }`. Pure — no runtime-specific APIs. Here so the logger plugin (metadata normalization), the kernel (fallback-500 logging), `exceptions`, `grpc-plugin`, and `notification-plugin` can all serialize without importing one another.          |
+| `respondWithError(ctx, init)` | function | Writes an error response through the request's published `IErrorResponder` (the application's configured format), falling back to `{ error, detail? }` when `errorHandler` has not published one. The seam that lets a package that produces error responses but may not import `@setu-ts/exceptions` answer in the configured format (M70f).                                                                                                                         |
+| `ERROR_RESPONDER_STATE_KEY`   | const    | The `ctx.state` key under which `errorHandler` publishes its `IErrorResponder`                                                                                                                                                                                                                                                                                                                                                                                        |
 
 ### Types
 
@@ -7249,7 +7252,8 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                       |
 | Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                            |
 | Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                                                                                                                                                                                                        |
+| Notifications       | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                    |
+| Errors              | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError` — the request-scoped error responder seam and the pure error serializer (M70f)                                                                                                                                                                                                                                                          |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                            |
 | Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                 |
 | SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -7401,11 +7405,14 @@ Contract notes:
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.
-- The kernel emits only **bare status JSON** (`{ error: 'Bad Request' }` for a malformed request URL
-  or malformed percent-escape in the path → `400`; `{ error: 'Not Found' }` → `404`;
-  `{ error: 'Internal Server Error' }` → `500`; `{ error: 'Service Unavailable' }` for a request
-  arriving while `stop()` is draining → `503`). Error formatting belongs to the exceptions package,
-  not the kernel.
+- The kernel's own error responses (malformed request URL or malformed percent-escape in the path →
+  `400`; unmatched path → `404`; unhandled error → `500`; a request arriving while `stop()` is
+  draining → `503`) are written through the **error responder seam** (`respondWithError` in
+  `@setu-ts/common`). With `errorHandler` registered they answer in the application's configured
+  format; with **no** `errorHandler` registered they fall back to `{ error, detail? }` — the same
+  shape `errorHandler`'s default formatter produces. Error **formatting** belongs to the exceptions
+  package, not the kernel; the kernel only supplies the status and message. The unhandled-error
+  `500` additionally logs the error through `CAPABILITIES.LOGGER` when a logger is registered.
 - **`inject()` body semantics.** `InjectResponse.body` is text: a byte body written with
   `response.send(bytes)` is UTF-8 decoded rather than reported as `null`, and `json()` parses it. A
   **streaming** response cannot be presented as text without draining the live stream, so `inject()`
@@ -7677,7 +7684,16 @@ Contract notes:
   returns an `HttpError` with a pre-set `statusCode` — no `BadRequestError extends HttpError`
   hierarchy.
 - **`cause` chaining**: `internalServerError(message, cause)` forwards `cause` to the ES2022 `Error`
-  cause chain. The error handler logs it when a logger is registered.
+  cause chain. The error handler logs it when a logger is registered (the logged `cause` is
+  serialized through `serializeError`, so a nested `Error` never renders as `{}`).
+- **Error format is the framework's error-body contract**: `errorHandler` is the single place an
+  application configures how **every** error body is written. It publishes a request-scoped
+  `IErrorResponder` (via `respondWithError` in `@setu-ts/common`) before `next()`, and every
+  short-circuiting site — the kernel's own 404/400/500/503 terminals, the storage, multi-tenancy,
+  session, auth, http-security, and feature-flags middleware — answers through it. So with
+  `errorHandler({ format: 'rfc9457' })` registered, every error an application can produce is RFC
+  9457. With **no** `errorHandler` registered, every site falls back to `{ error, detail? }` (the
+  same shape the default formatter produces) — a site cannot answer in its own ad-hoc shape.
 - **RFC 9457 compliance**: when `format: 'rfc9457'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (Problem

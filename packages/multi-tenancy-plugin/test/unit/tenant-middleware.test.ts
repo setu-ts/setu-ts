@@ -135,15 +135,18 @@ describe('tenant middleware', () => {
   it('middleware — required:true short-circuit asserts full response body and status', async () => {
     let capturedBody: unknown;
     let capturedStatus: number | undefined;
+    // Models the real `IResponse`: `status()` records and returns the response
+    // itself; `json()` is a method on the response (M70f's responder seam calls
+    // the two separately rather than chaining).
     const response = {
-      status: (code: number) => ({
-        json: (body: unknown) => {
-          capturedStatus = code;
-          capturedBody = body;
-          return undefined;
-        },
-      }),
-      json: () => undefined,
+      status: (code: number) => {
+        capturedStatus = code;
+        return response;
+      },
+      json: (body: unknown) => {
+        capturedBody = body;
+        return undefined;
+      },
       snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
     };
     let nextCalled = false;
@@ -194,7 +197,8 @@ describe('tenant middleware', () => {
     expect(typeof capturedBody === 'object' && capturedBody != null).toBeTruthy();
     const body = capturedBody as Record<string, unknown>;
     expect(body.error).toEqual('Tenant Required');
-    expect(body.message).toEqual('No tenant could be resolved for this request');
+    // M70f (X4-8): the rejection converges on the responder's `detail` key.
+    expect(body.detail).toEqual('No tenant could be resolved for this request');
   });
 
   it('middleware — required:false + none() proceeds', async () => {

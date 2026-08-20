@@ -30,10 +30,11 @@ describe('requestSizeMiddleware', () => {
       });
       expect(nextCalled).toHaveLength(0);
       expect(response.statuses).toContain(413);
-      const body = response.body as { error: string; message: string };
+      // M70f (X4-8): the rejection converges on the responder's `detail` key.
+      const body = response.body as { error: string; detail: string };
       expect(body.error).toBe('Payload Too Large');
-      expect(body.message).toContain('2097152');
-      expect(body.message).toContain('1048576');
+      expect(body.detail).toContain('2097152');
+      expect(body.detail).toContain('1048576');
     });
   });
 

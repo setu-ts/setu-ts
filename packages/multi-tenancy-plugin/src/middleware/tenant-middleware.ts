@@ -12,6 +12,7 @@ import type {
   MiddlewareFunction,
   NextFunction,
 } from '@setu-ts/common';
+import { respondWithError } from '@setu-ts/common';
 
 /**
  * State key for the cache prefix — consumers should use `getTenantCachePrefix`
@@ -152,9 +153,10 @@ export function tenantMiddleware({
 
     // No tenant resolved.
     if (required) {
-      ctx.response.status(rejectionStatus).json({
-        error: 'Tenant Required',
-        message: 'No tenant could be resolved for this request',
+      respondWithError(ctx, {
+        status: rejectionStatus,
+        title: 'Tenant Required',
+        detail: 'No tenant could be resolved for this request',
       });
       return;
     }

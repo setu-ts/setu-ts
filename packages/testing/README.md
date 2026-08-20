@@ -39,6 +39,12 @@ console.log(res.statusCode); // 200
 > **Global middleware needs `autoStart: false`.** `start()` compiles the pipeline, after which
 > `app.middleware.add(...)` throws. Routes are unaffected — `app.router.get(...)` works on a started
 > app.
+>
+> **Unhandled errors answer in the kernel's fallback format.** `createTestApp` does not install
+> `errorHandler` (this package depends only on `common` and `kernel`, not `exceptions`), so an
+> unhandled error returns the kernel's `{ error, detail? }` fallback body, not RFC 9457. To assert a
+> configured error format, add `errorHandler(...)` from `@setu-ts/exceptions` to `plugins` — the
+> responder seam then governs the kernel's own 404/500 terminals too.
 
 ### inject
 

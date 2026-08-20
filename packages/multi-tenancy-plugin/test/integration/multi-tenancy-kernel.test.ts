@@ -134,9 +134,10 @@ describe('multi-tenancy — real kernel app', () => {
 
     const rejected = await app.inject({ method: 'GET', url: 'http://localhost/x' });
     expect(rejected.statusCode).toBe(422);
+    // M70f (X4-8): the rejection converges on the responder's `detail` key.
     expect(JSON.parse(rejected.body ?? '{}')).toEqual({
       error: 'Tenant Required',
-      message: 'No tenant could be resolved for this request',
+      detail: 'No tenant could be resolved for this request',
     });
     expect(handlerRan).toBe(false);
 

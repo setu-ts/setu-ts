@@ -4,7 +4,8 @@
  *
  * @module
  */
-import type { MiddlewareFunction } from '@setu-ts/common';
+import type { ILogger, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { CAPABILITIES, respondWithError } from '@setu-ts/common';
 import type { UploadedFile, UploadMiddlewareOptions } from '../interfaces/index.ts';
 import { parseMultipart } from '../multipart/multipart-parser.ts';
 
@@ -52,10 +53,12 @@ export function createUploadMiddleware(
     if (clHeader !== null) {
       const contentLength = parseInt(clHeader, 10);
       if (!isNaN(contentLength) && contentLength > maxBodyBytes) {
-        return ctx.response.status(400).json({
-          error: 'Request entity too large',
+        respondWithError(ctx, {
+          status: 400,
+          title: 'Request entity too large',
           detail: `Request body exceeds the maximum allowed size of ${maxBodyBytes} bytes`,
         });
+        return;
       }
     }
 
@@ -68,10 +71,12 @@ export function createUploadMiddleware(
 
       // Hard cap on buffered bytes — reject without parsing.
       if (body.length > maxBodyBytes) {
-        return ctx.response.status(400).json({
-          error: 'Request entity too large',
+        respondWithError(ctx, {
+          status: 400,
+          title: 'Request entity too large',
           detail: `Request body exceeds the maximum allowed size of ${maxBodyBytes} bytes`,
         });
+        return;
       }
 
       const parts = parseMultipart(body, ct);
@@ -81,26 +86,32 @@ export function createUploadMiddleware(
 
       // Enforce maxFiles cap.
       if (maxFiles !== undefined && filtered.length > maxFiles) {
-        return ctx.response.status(400).json({
-          error: 'Too many files',
+        respondWithError(ctx, {
+          status: 400,
+          title: 'Too many files',
           detail: `Maximum ${maxFiles} file(s) allowed`,
         });
+        return;
       }
 
       // Validate each file.
       const uploaded: UploadedFile[] = [];
       for (const part of filtered) {
         if (part.data.length > maxSize) {
-          return ctx.response.status(400).json({
-            error: 'File too large',
+          respondWithError(ctx, {
+            status: 400,
+            title: 'File too large',
             detail: `Maximum size is ${maxSize} bytes`,
           });
+          return;
         }
         if (allowedMimeTypes && !allowedMimeTypes.includes(part.mimeType)) {
-          return ctx.response.status(400).json({
-            error: 'Invalid MIME type',
+          respondWithError(ctx, {
+            status: 400,
+            title: 'Invalid MIME type',
             detail: `Type '${part.mimeType}' not allowed`,
           });
+          return;
         }
         uploaded.push({
           name: part.name,
@@ -113,16 +124,46 @@ export function createUploadMiddleware(
 
       // Store under state key.
       ctx.state.set(UPLOADS_STATE_KEY, uploaded);
-      await next();
-      return;
-    } catch {
-      // Malformed body → 400.
-      return ctx.response.status(400).json({
-        error: 'Malformed request',
+    } catch (error) {
+      // A malformed multipart body → 400. The catch guards ONLY the parse and
+      // validation above; `await next()` runs after it, so a downstream handler
+      // failure is no longer reported as a malformed body (X8-1). A genuinely
+      // malformed body is still diagnosable through the warn log.
+      logMalformedBody(ctx, error);
+      respondWithError(ctx, {
+        status: 400,
+        title: 'Bad Request',
         detail: 'Failed to parse multipart body',
       });
+      return;
     }
+
+    await next();
   };
+}
+
+/**
+ * Logs a caught multipart parse/validation failure at `warn` level when a
+ * logger is registered. Guarded so a missing or broken logger can never turn a
+ * rejected upload into a crashed request.
+ *
+ * @param ctx - The request context (supplies the logger registry)
+ * @param error - The caught error
+ */
+function logMalformedBody(ctx: IRequestContext, error: unknown): void {
+  try {
+    if (!ctx.services.has(CAPABILITIES.LOGGER)) {
+      return;
+    }
+    const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.warn('Failed to parse multipart body', {
+      error: err.message,
+      stack: err.stack,
+    });
+  } catch {
+    // No safe channel remains — degrade silently.
+  }
 }
 
 /**

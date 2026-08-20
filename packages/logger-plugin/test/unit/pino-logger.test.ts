@@ -33,23 +33,25 @@ class FakePino {
     this.#base = options.base;
   }
 
-  fatal(message: string, metadata?: LogMetadata): void {
-    this.calls.push({ level: 'fatal', message, metadata });
+  // Pino's real signature is (obj, msg) — the wrapper passes the (normalized)
+  // metadata object FIRST and the message second. The fake records both.
+  fatal(obj: unknown, msg: string): void {
+    this.calls.push({ level: 'fatal', message: msg, metadata: obj as LogMetadata | undefined });
   }
-  error(message: string, metadata?: LogMetadata): void {
-    this.calls.push({ level: 'error', message, metadata });
+  error(obj: unknown, msg: string): void {
+    this.calls.push({ level: 'error', message: msg, metadata: obj as LogMetadata | undefined });
   }
-  warn(message: string, metadata?: LogMetadata): void {
-    this.calls.push({ level: 'warn', message, metadata });
+  warn(obj: unknown, msg: string): void {
+    this.calls.push({ level: 'warn', message: msg, metadata: obj as LogMetadata | undefined });
   }
-  info(message: string, metadata?: LogMetadata): void {
-    this.calls.push({ level: 'info', message, metadata });
+  info(obj: unknown, msg: string): void {
+    this.calls.push({ level: 'info', message: msg, metadata: obj as LogMetadata | undefined });
   }
-  debug(message: string, metadata?: LogMetadata): void {
-    this.calls.push({ level: 'debug', message, metadata });
+  debug(obj: unknown, msg: string): void {
+    this.calls.push({ level: 'debug', message: msg, metadata: obj as LogMetadata | undefined });
   }
-  trace(message: string, metadata?: LogMetadata): void {
-    this.calls.push({ level: 'trace', message, metadata });
+  trace(obj: unknown, msg: string): void {
+    this.calls.push({ level: 'trace', message: msg, metadata: obj as LogMetadata | undefined });
   }
   child(bindings: LogMetadata): FakePino {
     const childOpts: {

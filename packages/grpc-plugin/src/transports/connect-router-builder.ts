@@ -28,7 +28,8 @@ import type {
   ServiceDescriptorLike,
 } from '../interfaces/connect-runtime.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
-import type { IHealthService } from '@setu-ts/common';
+import type { IHealthService, ILogger } from '@setu-ts/common';
+import { serializeError } from '@setu-ts/common';
 
 /** Fully-qualified name of the built-in health service. */
 const HEALTH_SERVICE_NAME = 'grpc.health.v1.Health';
@@ -50,6 +51,15 @@ export interface BuildConnectRouterOptions {
   readonly services: readonly ServiceEntry[];
   readonly embeddedDescriptors: EmbeddedDescriptors;
   readonly healthService: IHealthService | undefined;
+  /**
+   * Resolves the logger at RPC-call time (M52b lesson: read per call, not
+   * captured at `register()`, so a logger registered by a later plugin is seen).
+   * Returns `undefined` when no logger is registered. Used to log handler
+   * failures (X7-5) without changing the masked wire response. Omitted (or
+   * `undefined`) when no logging is wanted: the implementation is then passed
+   * through unwrapped.
+   */
+  readonly resolveLogger?: (() => ILogger | undefined) | undefined;
 }
 
 /**
@@ -70,6 +80,7 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
     services,
     embeddedDescriptors,
     healthService,
+    resolveLogger,
   } = options;
 
   const normalizedBase = normalizeBasePath(basePath);
@@ -88,7 +99,18 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
     seenTypeNames.add(definition.typeName);
     serviceNames.push(definition.typeName);
     reflectionFiles.push(definition.file);
-    router.service(definition, (entry.implementation ?? {}) as Record<string, unknown>);
+    // Wrap the application's implementation so a throwing handler is logged
+    // (X7-5) before Connect masks it into a wire error. The built-in health and
+    // reflection services are NOT wrapped — they are framework-owned and their
+    // failures are not application handler errors.
+    router.service(
+      definition,
+      withErrorLogging(
+        definition.typeName,
+        (entry.implementation ?? {}) as Record<string, unknown>,
+        resolveLogger,
+      ),
+    );
   }
 
   // The built-in health service.
@@ -134,4 +156,102 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
   }
 
   return { dispatchMap };
+}
+
+/**
+ * Wraps a service implementation's methods so a thrown handler error is logged
+ * at `error` level — with the procedure name and a serialized error (X7-5) —
+ * and then rethrown, leaving Connect's masked wire response unchanged.
+ *
+ * The logger is resolved per call through `resolveLogger` so a logger registered
+ * after the router was built is still seen (M52b). When no logger is present the
+ * error is simply rethrown. A Connect-ES implementation maps each method to a
+ * single function (`{ method: fn }`), so only function values are wrapped; any
+ * non-function value passes through untouched.
+ *
+ * @param typeName - The service's fully-qualified name (for the procedure label)
+ * @param implementation - The application's implementation object
+ * @param resolveLogger - Resolves the logger at call time
+ * @returns A wrapped implementation (the same object when there is no logger and nothing to wrap)
+ */
+function withErrorLogging(
+  typeName: string,
+  implementation: Record<string, unknown>,
+  resolveLogger: (() => ILogger | undefined) | undefined,
+): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  for (const [method, value] of Object.entries(implementation)) {
+    if (typeof value !== 'function') {
+      continue;
+    }
+    const wrapped = guardProcedure(
+      typeName,
+      method,
+      value as (...args: unknown[]) => unknown,
+      resolveLogger,
+    );
+    if (wrapped !== value) {
+      out ??= { ...implementation };
+      out[method] = wrapped;
+    }
+  }
+  return out ?? implementation;
+}
+
+/** True when a value settles like a Promise (has a callable `.then`). */
+function isThenable(value: unknown): value is Promise<unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
+/**
+ * Wraps one procedure function: on a handler error, logs it (when a logger is
+ * resolvable) and rethrows so the masked wire response is unchanged.
+ *
+ * The wrapper is **synchronous**, not `async`: a server-streaming implementation
+ * returns an `AsyncIterable` directly (not a `Promise`), and an `async` wrapper
+ * would box that iterable in a `Promise` that Connect cannot iterate — the
+ * stream would yield nothing. The wrapper therefore forwards every argument,
+ * returns the implementation's result unchanged when it is not a thenable, and
+ * only attaches a rejection handler when the result IS a thenable (a unary
+ * `Promise`). A synchronous throw is caught, logged, and rethrown.
+ */
+function guardProcedure(
+  typeName: string,
+  method: string,
+  fn: (...args: unknown[]) => unknown,
+  resolveLogger: (() => ILogger | undefined) | undefined,
+): (...args: unknown[]) => unknown {
+  if (resolveLogger === undefined) {
+    return fn;
+  }
+  const procedure = `${typeName}/${method}`;
+  // Logs the error (when a logger resolves) and rethrows it so the masked
+  // wire response is unchanged. Used for both the synchronous and the
+  // thenable-rejection paths.
+  const reportAndRethrow = (error: unknown): never => {
+    const logger = resolveLogger();
+    if (logger !== undefined) {
+      logger.error('gRPC handler failed', {
+        procedure,
+        ...serializeError(error),
+      });
+    }
+    throw error;
+  };
+  return (...args: unknown[]) => {
+    let result: unknown;
+    try {
+      result = fn(...args);
+    } catch (error) {
+      reportAndRethrow(error);
+    }
+    if (isThenable(result)) {
+      return result.catch((error) => reportAndRethrow(error));
+    }
+    return result;
+  };
 }

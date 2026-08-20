@@ -4,7 +4,12 @@
  * @module
  */
 import type { IEventBus, ILogger, IPlugin, IPluginContext, RegistryFactory } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY, resolveRegistryEntry } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  PLUGIN_PRIORITY,
+  resolveRegistryEntry,
+  serializeError,
+} from '@setu-ts/common';
 import type { EventsPluginOptions } from '../interfaces/index.ts';
 import { InMemoryEventBus } from '../bus/in-memory-event-bus.ts';
 import { subscribeHandler } from '../handlers/event-handler.ts';
@@ -97,7 +102,14 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
         event: import('@setu-ts/common').IDomainEvent,
       ) => void = (error, event) => {
         if (logger) {
-          logger.error('Event handler failed', { error, eventType: event.type });
+          // Serialize the raw `Error` (X2-5): a raw `Error` in log metadata
+          // renders as `{}` under `JSON.stringify`. Serialized explicitly so the
+          // line stays correct under a third-party `ILogger` that does not
+          // normalize metadata.
+          logger.error('Event handler failed', {
+            error: serializeError(error),
+            eventType: event.type,
+          });
         }
         // Silent no-op if no logger.
       };
