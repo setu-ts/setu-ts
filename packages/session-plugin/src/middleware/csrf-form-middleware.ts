@@ -15,6 +15,7 @@ import type {
   MiddlewareFunction,
   NextFunction,
 } from '@setu-ts/common';
+import { respondWithError } from '@setu-ts/common';
 
 import { CsrfTokenMismatchError } from '../errors.ts';
 import type { CsrfFormOptions } from '../options.ts';
@@ -65,10 +66,12 @@ export function csrfFormMiddleware(options: CsrfFormOptions = {}): MiddlewareFun
       if (error instanceof CsrfTokenMismatchError) {
         // The reason is deliberately not echoed to the client: it would tell an
         // attacker whether the session or the token was the problem.
-        return ctx.response.status(FORBIDDEN).json({
-          error: 'Forbidden',
-          message: 'CSRF token validation failed',
+        respondWithError(ctx, {
+          status: FORBIDDEN,
+          title: 'Forbidden',
+          detail: 'CSRF token validation failed',
         });
+        return;
       }
       throw error;
     }

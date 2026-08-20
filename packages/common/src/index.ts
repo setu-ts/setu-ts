@@ -13,6 +13,17 @@
 export { contentTypeFor } from './static/content-types.ts';
 export { assertRealPathContained, isLexicallyContained } from './static/path-containment.ts';
 
+// Error responder seam (M70f) — the request-scoped formatter carrier
+export { ERROR_RESPONDER_STATE_KEY, respondWithError } from './errors/error-responder.ts';
+export type {
+  ErrorResponderTarget,
+  ErrorResponseInit,
+  IErrorResponder,
+} from './errors/error-responder.ts';
+// Error serialization for structured logging (M70f, X2-5)
+export { serializeError } from './errors/serialize-error.ts';
+export type { SerializedError } from './errors/serialize-error.ts';
+
 // Health probe
 export { createCachedProbe } from './health/probe.ts';
 export type { CachedProbeOptions } from './health/probe.ts';
@@ -207,7 +218,7 @@ export type {
 } from './services/resilience.ts';
 export type { IStorage, SignedUrlOptions } from './services/storage.ts';
 export type { IMailer, MailMessage } from './services/mail.ts';
-export type { INotifier, NotificationMessage } from './services/notification.ts';
+export type { ChannelSendResult, INotifier, NotificationMessage } from './services/notification.ts';
 export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
 export type {
   IMultiTenancyService,

@@ -1359,9 +1359,12 @@ describe('Application review fixes', () => {
     const res = await app.inject({ method: 'GET', url: 'http://localhost/boom' });
     expect(res.statusCode).toBe(500);
     expect(secondHookRan).toBe(true);
-    expect(logged).toHaveLength(1);
+    // Two entries: the suppressed hook error (logged first) and the X11-2
+    // fallback-500 report of the unhandled request error (logged second).
+    expect(logged).toHaveLength(2);
     expect(logged[0].message).toBe('onError hook threw and was suppressed');
     expect(logged[0].metadata?.error).toBe('audit hook blew up');
+    expect(logged[1].message).toBe('Unhandled request error');
     await app.stop();
   });
 

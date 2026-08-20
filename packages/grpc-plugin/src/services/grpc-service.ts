@@ -12,6 +12,7 @@ import type {
   GrpcServiceDefinition,
   IGrpcService,
   IHealthService,
+  ILogger,
   RpcFetchHandler,
   ServiceImpl,
 } from '@setu-ts/common';
@@ -31,6 +32,12 @@ export interface GrpcServiceOptions {
   readonly embeddedDescriptors: EmbeddedDescriptors;
   readonly options: GrpcPluginOptions;
   readonly healthService: IHealthService | undefined;
+  /**
+   * Resolves the logger at RPC-call time (M52b: read per call, not captured at
+   * `register()`). Returns `undefined` when no logger is registered. Used to
+   * log handler failures (X7-5).
+   */
+  readonly resolveLogger?: () => ILogger | undefined;
 }
 
 /**
@@ -49,6 +56,7 @@ export class GrpcService implements IGrpcService {
   readonly #embeddedDescriptors: EmbeddedDescriptors;
   readonly #options: GrpcPluginOptions;
   readonly #healthService: IHealthService | undefined;
+  readonly #resolveLogger: (() => ILogger | undefined) | undefined;
 
   #dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
   #closed = false;
@@ -71,6 +79,7 @@ export class GrpcService implements IGrpcService {
     this.#embeddedDescriptors = init.embeddedDescriptors;
     this.#options = init.options;
     this.#healthService = init.healthService;
+    this.#resolveLogger = init.resolveLogger;
     this.#basePath = normalizeBasePath(init.options.basePath ?? '/grpc');
 
     for (const entry of init.options.services ?? []) {
@@ -200,6 +209,7 @@ export class GrpcService implements IGrpcService {
       services: this.#services,
       embeddedDescriptors: this.#embeddedDescriptors,
       healthService: this.#healthService,
+      resolveLogger: this.#resolveLogger,
     }).dispatchMap;
     return this.#dispatchMap;
   }

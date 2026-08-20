@@ -10,6 +10,8 @@
  */
 import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
 
+import { normalizeMetadata } from './normalize-metadata.ts';
+
 /**
  * Minimal structural shape of a Pino logger that this wrapper depends on.
  * Declared locally so we do not import Pino's types at module load time.
@@ -18,12 +20,15 @@ import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
  */
 interface PinoLoggerLike {
   readonly level: string;
-  fatal(msg: string, metadata?: LogMetadata): void;
-  error(msg: string, metadata?: LogMetadata): void;
-  warn(msg: string, metadata?: LogMetadata): void;
-  info(msg: string, metadata?: LogMetadata): void;
-  debug(msg: string, metadata?: LogMetadata): void;
-  trace(msg: string, metadata?: LogMetadata): void;
+  // Pino's real signature is (obj, msg) — the structured object FIRST, the
+  // message second. Calling it as (msg, obj) silently drops the object (verified
+  // against real pino, M70f §8), so the wrapper passes metadata first.
+  fatal(obj: unknown, msg: string): void;
+  error(obj: unknown, msg: string): void;
+  warn(obj: unknown, msg: string): void;
+  info(obj: unknown, msg: string): void;
+  debug(obj: unknown, msg: string): void;
+  trace(obj: unknown, msg: string): void;
   child(bindings: LogMetadata): PinoLoggerLike;
 }
 
@@ -142,32 +147,32 @@ export class PinoLogger implements ILogger {
 
   /** @inheritdoc */
   fatal(message: string, metadata?: LogMetadata): void {
-    this.#pino.fatal(message, metadata);
+    this.#pino.fatal(normalize(metadata), message);
   }
 
   /** @inheritdoc */
   error(message: string, metadata?: LogMetadata): void {
-    this.#pino.error(message, metadata);
+    this.#pino.error(normalize(metadata), message);
   }
 
   /** @inheritdoc */
   warn(message: string, metadata?: LogMetadata): void {
-    this.#pino.warn(message, metadata);
+    this.#pino.warn(normalize(metadata), message);
   }
 
   /** @inheritdoc */
   info(message: string, metadata?: LogMetadata): void {
-    this.#pino.info(message, metadata);
+    this.#pino.info(normalize(metadata), message);
   }
 
   /** @inheritdoc */
   debug(message: string, metadata?: LogMetadata): void {
-    this.#pino.debug(message, metadata);
+    this.#pino.debug(normalize(metadata), message);
   }
 
   /** @inheritdoc */
   trace(message: string, metadata?: LogMetadata): void {
-    this.#pino.trace(message, metadata);
+    this.#pino.trace(normalize(metadata), message);
   }
 
   /**
@@ -245,24 +250,37 @@ class PinoLoggerAdapter implements ILogger {
   }
 
   fatal(message: string, metadata?: LogMetadata): void {
-    this.#pino.fatal(message, metadata);
+    this.#pino.fatal(normalize(metadata), message);
   }
   error(message: string, metadata?: LogMetadata): void {
-    this.#pino.error(message, metadata);
+    this.#pino.error(normalize(metadata), message);
   }
   warn(message: string, metadata?: LogMetadata): void {
-    this.#pino.warn(message, metadata);
+    this.#pino.warn(normalize(metadata), message);
   }
   info(message: string, metadata?: LogMetadata): void {
-    this.#pino.info(message, metadata);
+    this.#pino.info(normalize(metadata), message);
   }
   debug(message: string, metadata?: LogMetadata): void {
-    this.#pino.debug(message, metadata);
+    this.#pino.debug(normalize(metadata), message);
   }
   trace(message: string, metadata?: LogMetadata): void {
-    this.#pino.trace(message, metadata);
+    this.#pino.trace(normalize(metadata), message);
   }
   child(bindings: LogMetadata): ILogger {
     return new PinoLoggerAdapter(this.level, this.#pino.child(bindings));
   }
+}
+
+/**
+ * Normalizes log metadata for hand-off to Pino: a raw `Error` is replaced by
+ * its serializable form (X2-5) and the result is passed as Pino's first
+ * (object) argument. `undefined` metadata stays `undefined`, so a message-only
+ * log emits no empty object.
+ *
+ * @param metadata - The caller's metadata
+ * @returns The normalized object, or `undefined`
+ */
+function normalize(metadata: LogMetadata | undefined): unknown {
+  return metadata !== undefined ? normalizeMetadata(metadata) : undefined;
 }

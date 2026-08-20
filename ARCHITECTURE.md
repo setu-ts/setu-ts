@@ -2210,6 +2210,35 @@ app.middleware.add(errorHandler({
 }));
 ```
 
+### Error Responder Seam
+
+The kernel ships zero error formatting, but it does produce error responses of its own (a malformed
+request URL → `400`, an unmatched path → `404`, an unhandled error → `500`, a request during a
+shutdown drain → `503`), and so does every short-circuiting middleware. Before M70f each of those
+sites wrote its own ad-hoc body, so an application that configured
+`errorHandler({ format: 'rfc9457' })` still saw a mix of formats.
+
+The fix is a request-scoped seam in `@setu-ts/common` — not `exceptions`, because no plugin may
+import `exceptions` (where every formatter lives), and the kernel and every middleware that answers
+an error all need the same contract. `errorHandler` builds an `IErrorResponder` from the formatter
+and content type it already resolved at factory time and publishes it in `ctx.state` **before**
+`next()`; any site inside the pipeline then calls
+`respondWithError(ctx, { status, title, detail?,
+details? })`, which delegates to the published
+responder and answers in the application's configured format. The responder builds a real
+`HttpError` from the init (so `buildProblemDetails` sees a genuine `statusCode` and the validation
+`errors` extension, and `maskInternalErrors` never masks a deliberate 4xx), runs the resolved
+formatter over it, and writes status, `content-type`, and the serialized body — the same three-step
+tail `errorHandler`'s catch path performs.
+
+With **no** `errorHandler` registered, `respondWithError` falls back to `{ error, detail? }` — the
+shape the default formatter produces — so a site can never answer in a shape the application did not
+ask for. The unhandled-error `500` additionally logs the error through `CAPABILITIES.LOGGER` when a
+logger is registered (X11-2); the body stays opaque. `serializeError` (also in `common`) is the pure
+serializer the logger plugin uses to normalize a raw `Error` out of log metadata before redaction
+(X2-5) and the kernel, `exceptions`, `grpc-plugin`, and `notification-plugin` use to serialize a
+cause without importing one another.
+
 ### Plugin Error Handling
 
 Plugins can register custom error handlers:

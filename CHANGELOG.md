@@ -47,6 +47,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A request-scoped error responder seam in `@setu-ts/common`** (M70f).
+  `respondWithError(ctx,
+  { status, title, detail?, details? })` and the `IErrorResponder` /
+  `ErrorResponseInit` / `ERROR_RESPONDER_STATE_KEY` types let a package that produces an error
+  response — but may not import `@setu-ts/exceptions`, where every formatter lives — answer in the
+  application's configured format. `errorHandler` publishes a responder (built from the formatter
+  and content type it already resolved at factory time) into `ctx.state` before `next()`; every
+  short-circuiting site in the kernel, the storage, multi-tenancy, session, auth, http-security,
+  feature-flags, and validation paths now delegates to it, so one
+  `errorHandler({ format: 'rfc9457' })` governs every error body an application can produce.
+  `@setu-ts/common` also gains `serializeError` / `SerializedError`, a pure serializer that turns
+  any thrown value into a plain object with a bounded `cause` chain.
+- **`INotifier.sendSettled?` and `ChannelSendResult` in `@setu-ts/common`** (M70f, X8-12). An
+  optional, non-throwing twin of `send` that reports one `{ channel, ok }` result per requested
+  channel (a failure carrying its serialized error), so a caller behind a retrying queue can retry
+  the one failing channel instead of re-sending the whole notification. `NotificationService`
+  implements it; `send`'s `AggregateError` members now each **name their channel**
+  (`"channel '<name>' failed"`), the original error riding on `cause`.
 - **Reachability-aware health signals for six infrastructure plugins** (M70c). `messaging-plugin`,
   `realtime-backplane-plugin`, `storage-plugin`, `mail-plugin`, `queue-plugin`, and
   `service-discovery-plugin` now report a backend's _reachability_, not just its lifecycle. Each
@@ -176,6 +194,32 @@ All notable changes to this project are documented here. The format follows
   variable that JSR's static npm-compat rewrite cannot reach) cannot re-enter the source tree.
 
 ### Changed
+
+- **Error bodies now answer in the application's configured format (X4-8, C3)** (M70f). Every
+  short-circuiting site — the kernel's 404/400/503/500 terminals, `createUploadMiddleware`'s
+  rejections, the multi-tenancy `400`, the session tenant-mismatch and form-CSRF `403`s, the auth
+  guards, the http-security `413`/`403`s, and the feature-flag guard — now writes its body through
+  the responder seam, so an `errorHandler({ format: 'rfc9457' })` governs them all. **Migration:**
+  sites that previously answered `{ error, message }` now answer `{ error, detail }` in the
+  no-`errorHandler` fallback (the disclosure moves from the non-standard `message` key to the RFC
+  9457 `detail` key), and the feature-flag guard's bare `text/plain` `Not Found` is now the JSON
+  fallback `{"error":"Not Found"}`. With `errorHandler` registered, every site answers in its
+  configured format as before.
+- **An unhandled request error is now logged by the kernel (X11-2)** (M70f). The fallback `500` path
+  previously discarded the error and logged nothing even with `LoggerPlugin` registered; it now
+  reports the message and stack through `CAPABILITIES.LOGGER` (guarded so a missing or broken logger
+  degrades silently). The response body stays opaque — the message is not disclosed to the client.
+- **A raw `Error` in log metadata no longer serializes to `{}` (X2-5)** (M70f). The console and pino
+  loggers normalize any `Error` value in merged metadata through `serializeError` before redaction,
+  and the two known raw-`Error` call sites (`events-plugin`'s handler failure and `errorHandler`'s
+  `cause`) now serialize explicitly, so the mistake cannot recur through any call site — including a
+  third-party `ILogger`.
+- **A gRPC handler error is now logged (X7-5)** (M70f). `grpc-plugin` wraps each application handler
+  so a thrown or rejected error is logged at `error` level with the procedure name and a serialized
+  error, then rethrown — the masked wire response is unchanged. The logger is resolved at call time,
+  so a logger registered after `GrpcPlugin` is still seen. `GrpcPluginOptions` gains
+  `interceptors?: readonly unknown[]`, threaded into `createConnectRouter` (which previously dropped
+  the argument its own facade declared).
 
 - **Breaking (behaviour): the gRPC health bridge maps `degraded → NOT_SERVING`** (M70c, X7-8). It
   previously mapped `degraded → SERVING`, so a degraded process answered `SERVING` on

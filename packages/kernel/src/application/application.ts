@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { CAPABILITIES, setUpgradeIntent } from '@setu-ts/common';
+import { CAPABILITIES, respondWithError, serializeError, setUpgradeIntent } from '@setu-ts/common';
 import type {
   CliCommandHandler,
   DecoratorHandler,
@@ -540,7 +540,13 @@ class Application implements IKernelApplication {
   async #handleRequest(request: IRequest): Promise<ResponseBuilder> {
     if (this.#stopping) {
       const builder = new ResponseBuilder();
-      builder.status(503).json({ error: 'Service Unavailable' });
+      // Pre-pipeline: no request context exists yet, so a responder (if any)
+      // is unreachable and the framework-default shape is written. The status
+      // is still written here, so metrics keep seeing 503.
+      respondWithError(
+        { state: new Map<string, unknown>(), response: builder, request },
+        { status: 503, title: 'Service Unavailable' },
+      );
       return builder;
     }
 
@@ -559,10 +565,10 @@ class Application implements IKernelApplication {
     try {
       handle = createRequestContext(request, this.#registry, runtime);
     } catch {
-      return this.#badRequest();
+      return this.#badRequest(request);
     }
     if (!isPathDecodable(handle.ctx.request.path)) {
-      return this.#badRequest();
+      return this.#badRequest(request);
     }
     const ctx = handle.ctx;
 
@@ -606,7 +612,7 @@ class Application implements IKernelApplication {
         const routeResult = this.#router.match(request.method, url.pathname);
 
         if (routeResult === null) {
-          ctx.response.status(404).json({ error: 'Not Found' });
+          respondWithError(ctx, { status: 404, title: 'Not Found' });
           return;
         }
 
@@ -648,7 +654,12 @@ class Application implements IKernelApplication {
         }
       }
 
-      (ctx.response as ResponseBuilder).status(500).json({ error: 'Internal Server Error' });
+      // X11-2: the unhandled error is visible to the operator. The body stays
+      // opaque — the message is not disclosed to the client (M70b's
+      // `maskInternalErrors` decision applied consistently); only the log
+      // carries it.
+      this.#reportUnhandledError(err, ctx);
+      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
       return ctx.response as ResponseBuilder;
     } finally {
       this.#inFlight--;
@@ -708,7 +719,7 @@ class Application implements IKernelApplication {
       // logger; the kernel does, so silence here would be a choice rather than
       // a constraint.
       this.#reportUpgradeRouterFailure(cause);
-      ctx.response.status(500).json({ error: 'Internal Server Error' });
+      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
       return true;
     }
 
@@ -717,7 +728,7 @@ class Application implements IKernelApplication {
     }
 
     if (!decision.accept) {
-      ctx.response.status(decision.status).json({ error: 'Upgrade rejected' });
+      respondWithError(ctx, { status: decision.status, title: 'Upgrade rejected' });
       return true;
     }
 
@@ -732,7 +743,7 @@ class Application implements IKernelApplication {
       // connection slot for this socket. RFC 6455 close code 1006 (abnormal
       // closure) is the honest signal that no connection was ever established.
       decision.sink.onClose({ code: 1006, reason: 'Upgrade request carried a body' });
-      ctx.response.status(400).json({ error: 'Bad Request' });
+      respondWithError(ctx, { status: 400, title: 'Bad Request' });
       return true;
     }
 
@@ -816,10 +827,16 @@ class Application implements IKernelApplication {
    * malformed percent-escape in the path). Kept as a helper so both
    * rejection sites in {@linkcode Application.#handleRequest} produce an
    * identical body.
+   *
+   * Pre-pipeline: no request context exists yet, so a responder (if any) is
+   * unreachable and the framework-default shape is written.
    */
-  #badRequest(): ResponseBuilder {
+  #badRequest(request: IRequest): ResponseBuilder {
     const builder = new ResponseBuilder();
-    builder.status(400).json({ error: 'Bad Request' });
+    respondWithError(
+      { state: new Map<string, unknown>(), response: builder, request },
+      { status: 400, title: 'Bad Request' },
+    );
     return builder;
   }
 
@@ -869,6 +886,37 @@ class Application implements IKernelApplication {
       logger.error('onError hook threw and was suppressed', {
         error: err.message,
         stack: err.stack,
+      });
+    } catch {
+      // The logger itself failed or none is resolvable — no safe channel
+      // remains without violating the no-console rule; degrade silently.
+    }
+  }
+
+  /**
+   * Surfaces an unhandled request error through the sanctioned logger channel
+   * (X11-2). The response body stays opaque — the message is not disclosed to
+   * the client (M70b's `maskInternalErrors` decision applied consistently) —
+   * but the operator sees the message and stack, with the request identified.
+   *
+   * Guarded exactly like {@linkcode Application.#reportSuppressedHookError}: a
+   * missing or itself-broken logger must not turn an already-failing request
+   * into a crashed one.
+   *
+   * @param error - The unhandled error
+   * @param ctx - The request context it occurred in
+   */
+  #reportUnhandledError(error: Error, ctx: IRequestContext): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      logger.error('Unhandled request error', {
+        ...serializeError(error),
+        requestId: ctx.id,
+        method: ctx.request.method,
+        path: ctx.request.path,
       });
     } catch {
       // The logger itself failed or none is resolvable — no safe channel

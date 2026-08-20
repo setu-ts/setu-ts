@@ -10,7 +10,7 @@ import type {
   IRequestContext,
   MiddlewareFunction,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, respondWithError } from '@setu-ts/common';
 import type { FlagGuardOptions } from '../interfaces/index.ts';
 
 /**
@@ -77,7 +77,6 @@ export function createFlagGuard(
     }
 
     const statusCode = options?.statusCode ?? 404;
-    ctx.response.status(statusCode);
-    ctx.response.text('Not Found');
+    respondWithError(ctx, { status: statusCode, title: 'Not Found' });
   };
 }
