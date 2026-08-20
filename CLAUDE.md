@@ -2778,7 +2778,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `barrel-exports.test.ts` (the M56 defect class). **The end-to-end gate is the request no gate ever
   made**: `apps/full-stack/smoke.ts` asked for `/products`, `/` and `/login` and never
   `/openapi.json`, which is precisely why this shipped — it now asserts both endpoints under their
-  real content types, in the real composition, on every CI run) — complete (PR #175)
+  real content types, in the real composition, on every CI run.
+
+  **Carries one change unrelated to routing, folded in at the maintainer's direction** (the M58
+  `g controller` / M59 `detectRuntime` precedent, recorded rather than silent): the GCP Pub/Sub and
+  Azure Service Bus emulator e2e suites could not pass under `deno task test` at all.
+  `packages/messaging-plugin/deno.json` scoped `test.permissions.net` to Redis and RabbitMQ only,
+  and a CLI `--allow-net` REPLACES that block rather than unioning with it (the M53 lesson), so with
+  both emulators running and their env vars set the suites still failed — Service Bus with
+  `getaddrinfo EPERM`, Pub/Sub with gRPC `14 UNAVAILABLE: Name resolution failed`.
+  `docs/messaging-emulators.md` hid it by telling the reader to run each file with `--allow-all`,
+  where it works. The allowlist gains the two emulator ports, and the doc gains three corrections
+  each established by measurement: the Service Bus emulator's own AMQP port is **5672, which
+  RabbitMQ already holds**, so it is published on 5673 and the port goes in the endpoint
+  (`UseDevelopmentEmulator=true` accepts one — undocumented); the Pub/Sub emulator must be addressed
+  as `127.0.0.1:8085` rather than `localhost:8085`, because `grpc-js` resolves a hostname through
+  DNS and a `host:port` grant does not authorize that lookup, while an IP literal skips resolution —
+  which is what keeps the grant endpoint-scoped instead of forcing the loopback-wide widening M53
+  rejected; and the suite is **not repeatable** against a persistent emulator (a second consecutive
+  run fails with `RequestTimeoutError`, contradicting the doc's "repeated runs never share state"),
+  so the container is restarted between runs. Both suites now pass under the project's own
+  permission model — 7 steps, verified in this worktree.) — complete (PR #175)
 - **Next milestone** — **M70f** (error format and error visibility). Errors either bypass the
   configured RFC 9457 format or vanish entirely: `createUploadMiddleware` reports every downstream
   failure as a malformed body (X8-1), the kernel's own 404 and fallback 500 answer `{error}` JSON

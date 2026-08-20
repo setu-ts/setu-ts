@@ -3,8 +3,15 @@
 The GCP Pub/Sub and Azure Service Bus backends ship guarded end-to-end suites that run against the
 vendors' own local emulators. Neither needs a cloud account, a credential, or a billing profile.
 
-Both suites skip silently when their environment variable is absent, so an ordinary `deno task test`
-is unaffected. They are **not** wired into CI — see "Why not CI" below.
+Both suites are `ignore`d when their environment variable is absent, so an ordinary `deno task test`
+is unaffected — and the ignored count is what proves they ran when it is set. They are **not** wired
+into CI — see "Why not CI" below.
+
+Their endpoints ARE in `packages/messaging-plugin/deno.json`'s scoped `test.permissions.net`
+allowlist, so both run under `deno task test` and not only under a standalone `--allow-all`. That
+grant is endpoint-scoped rather than loopback-wide, for the reason M53 recorded: a wide grant lets a
+retrying client (ioredis) spin against `ECONNREFUSED` until the runner is killed. Adding an emulator
+on a new port therefore means adding that port here **and** to the allowlist.
 
 ## GCP Pub/Sub
 
@@ -16,13 +23,23 @@ docker run -d --name he-pubsub -p 8085:8085 \
   gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
   gcloud beta emulators pubsub start --project=he-test --host-port=0.0.0.0:8085
 
-PUBSUB_EMULATOR_HOST=localhost:8085 PUBSUB_PROJECT_ID=he-test \
+PUBSUB_EMULATOR_HOST=127.0.0.1:8085 PUBSUB_PROJECT_ID=he-test \
   deno test --allow-all packages/messaging-plugin/test/e2e/pubsub-emulator.test.ts
 
 docker rm -f he-pubsub
 ```
 
-The suite creates and deletes its own topics, suffixed per run, so repeated runs never share state.
+**Address the emulator by IP, not by `localhost`.** Under the package's own scoped `net` grant
+(`deno task test`, which passes `-P`), `grpc-js` resolves a hostname through DNS, and a `host:port`
+permission does not authorize that lookup — the suite fails with
+`14 UNAVAILABLE: Name resolution failed for target dns:localhost:8085`. An IP literal skips
+resolution entirely, so `127.0.0.1:8085` needs no permission beyond the endpoint itself. This is
+invisible with `--allow-all`, which is why the standalone command above works either way.
+
+**Restart the emulator between runs.** The suite suffixes its own topics per run, but the RPC case
+uses the shared `messaging.replies` reply topic and a second consecutive run against the same
+emulator instance fails with `RequestTimeoutError: Request timed out waiting for a reply`.
+`docker restart he-pubsub` (its state is in memory) before each run.
 
 **What it proves that a fake cannot:** delivery through the real gRPC streaming pull into the
 `on('message')` bridge; that a handler throw reaches the platform as a `nack` and produces a genuine
@@ -35,21 +52,27 @@ broker is up and again after `stop()`.
 Microsoft's emulator is config-driven and needs a SQL Edge sidecar. Entities come from a mounted
 `Config.json`; the emulator creates nothing at runtime.
 
+The emulator's own AMQP port is 5672, which is **also RabbitMQ's** — and CI's RabbitMQ service, or a
+local container serving `RABBITMQ_URL` for the M70c outage suites, already holds it. Publish the
+emulator on **5673** and name that port in the endpoint; `UseDevelopmentEmulator=true` accepts one.
+
 ```bash
 docker network create he-sbnet
 
 docker run -d --name he-sqledge --network he-sbnet \
   -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD='<strong-password>' \
   mcr.microsoft.com/azure-sql-edge:latest
-sleep 25
+# Wait for readiness rather than guessing: the emulator fails to start against a
+# SQL Edge that is not yet accepting connections.
+until docker logs he-sqledge 2>&1 | grep -q 'Recovery is complete'; do sleep 2; done
 
-docker run -d --name he-sb --network he-sbnet -p 5672:5672 \
+docker run -d --name he-sb --network he-sbnet -p 5673:5672 \
   -v "$PWD/docs/fixtures/servicebus-emulator-config.json:/ServiceBus_Emulator/ConfigFiles/Config.json" \
   -e ACCEPT_EULA=Y -e SQL_SERVER=he-sqledge -e MSSQL_SA_PASSWORD='<strong-password>' \
   mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
-sleep 30
+until docker logs he-sb 2>&1 | grep -q 'Application started'; do sleep 2; done
 
-SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' \
+SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' \
   deno test --allow-all packages/messaging-plugin/test/e2e/service-bus-emulator.test.ts
 
 docker rm -f he-sb he-sqledge && docker network rm he-sbnet

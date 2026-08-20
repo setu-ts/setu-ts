@@ -7012,6 +7012,16 @@ Ordered by the sequence they should be worked, not by severity alone.
   `/products`, `/` and `/login` and never `/openapi.json`, which is exactly why this shipped. It now
   asserts both endpoints answer `200` under their real content types, in the real composition, on
   every CI run.
+
+  **One unrelated change is folded in at the maintainer's direction** (the M58/M59 precedent): the
+  Pub/Sub and Service Bus emulator e2e suites could not pass under `deno task test` at all, because
+  `messaging-plugin`'s scoped `test.permissions.net` covered only Redis and RabbitMQ and a CLI
+  `--allow-net` replaces that block rather than unioning (M53). The allowlist gains both emulator
+  ports — still endpoint-scoped, never loopback-wide — and `docs/messaging-emulators.md` gains three
+  corrections established by measurement: the Service Bus emulator collides with RabbitMQ on 5672
+  (publish 5673 and name it in the endpoint), the Pub/Sub emulator must be addressed by IP so
+  `grpc-js` skips a DNS lookup the grant does not authorize, and the suite is not repeatable without
+  restarting the container.
 - ✅ **M70h — CLI scaffold** (`cli`, `common`, `runtime`) — complete (PR #166). The largest row
   count and the one that amortizes best, because every row needs the same scaffold-boot gate:
   `--transport <broker>` leaves `QueuePlugin()` on memory in the one template built for distributed
