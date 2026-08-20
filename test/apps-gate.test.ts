@@ -102,13 +102,27 @@ describe('real-backend CI wiring', () => {
       }>(`packages/${pkg}/deno.json`);
       // Scoped, not `true`: the grant exists for the Redis round trips alone.
       // messaging-plugin also carries the RabbitMQ outage suite (M70c §3.7),
-      // so it grants the AMQP port too.
+      // so it grants the AMQP port too — plus the two cloud emulators
+      // `docs/messaging-emulators.md` documents, without which their e2e suites
+      // cannot pass under `deno task test` at all (they failed with
+      // `getaddrinfo EPERM` and gRPC `Name resolution failed` while the doc's
+      // standalone `--allow-all` command hid it).
+      //
+      // 5673 rather than the emulator's own 5672, which RabbitMQ already holds.
+      // Still endpoint-scoped, never loopback-wide: the Pub/Sub suite addresses
+      // the emulator as `127.0.0.1:8085` so grpc-js skips the DNS lookup a
+      // `host:port` grant does not authorize, which is what avoids the bare
+      // `localhost` entry M53 rejected.
       if (pkg === 'messaging-plugin') {
         expect(config.test?.permissions?.net).toEqual([
           '127.0.0.1:6379',
           'localhost:6379',
           '127.0.0.1:5672',
           'localhost:5672',
+          '127.0.0.1:5673',
+          'localhost:5673',
+          '127.0.0.1:8085',
+          'localhost:8085',
         ]);
       } else {
         expect(config.test?.permissions?.net).toEqual(['127.0.0.1:6379', 'localhost:6379']);

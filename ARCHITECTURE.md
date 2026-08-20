@@ -124,7 +124,12 @@ Hono's `LinearRouter`; the kernel's custom `(ctx, next)` middleware pipeline run
 Hono dispatch, and the application's `#handleRequest` method calls `router.match()` which maps
 Hono's matched route back to `{ definition, params }`. The kernel maintains its own `RouteEntry` map
 so `getAll()`/`listRoutes()` introspection is unchanged, and the kernel applies its own
-deterministic tie-break (statics-count + registration order) on top of Hono's match result.
+deterministic tie-break on top of Hono's match result: more static segments first, then FEWER `*`
+wildcard segments, then earliest registration order. The wildcard key is what stops an application
+catch-all (`GET /*`) from owning every single-segment route registered after it — before M70g a `*`
+counted as a static segment, so `/*` tied with `/openapi.json` and won merely by registering first.
+The rule compares counts rather than positions, so `/a/*` loses to `/:x/b` on `/a/b`; that limit is
+documented in `Router.match` and pinned by a test.
 
 Hono is chosen for several reasons:
 
