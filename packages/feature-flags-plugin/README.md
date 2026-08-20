@@ -3,8 +3,14 @@
 Feature flags with pluggable backends. Registers the **synchronous** `IFeatureFlags` under
 `CAPABILITIES.FEATURE_FLAGS` (`'feature-flags'`).
 
-Zero dependencies. Providers own a cached snapshot plus an async `start()`/`stop()` lifecycle the
-plugin drives, which is what lets `isEnabled` stay synchronous at the call site.
+No eager imports, and the built-in providers (`config`, `memory`, `database`) need no npm package at
+all. The `launchdarkly` provider lazy-loads `@launchdarkly/node-server-sdk`, which npm therefore
+installs alongside this package; nothing imports it unless you select that provider. See
+[Optional npm drivers](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-npm-drivers)
+for what that means on npm versus Deno.
+
+Providers own a cached snapshot plus an async `start()`/`stop()` lifecycle the plugin drives, which
+is what lets `isEnabled` stay synchronous at the call site.
 
 ## Installation
 
