@@ -46,8 +46,18 @@ export interface AdoptedArtifact {
  *
  * The precise detector for the case that breaks the boot. `setu.config.ts` is the one
  * wiring home the CLI's own architecture defines (M34b), and a GENERATED artifact's
- * symbol never appears there — the config imports the barrel's aggregate export, not
- * the per-artifact symbol — so a match means a hand registration and nothing else.
+ * symbol never appears there — a registration barrel exports an AGGREGATE
+ * (`registerGeneratedRoutes`, `GENERATED_PLUGINS`, …), never the per-artifact symbol —
+ * so a match means a hand registration and nothing else.
+ *
+ * That reasoning holds only for a barrel that IS a registration site, which is why the
+ * check is gated on {@linkcode SeamSpec.exports} being non-empty. The functional
+ * services barrel is the one seam with no exports, because it re-exports each service
+ * for convenience and registers nothing — and its own header tells the developer to
+ * `import { describeThing } from './src/services/index.ts'`. Reading that import as a
+ * hand registration dropped the service from the barrel, so the import the CLI itself
+ * documented stopped resolving and the project failed to compile, from a command that
+ * reported success.
  */
 export interface ManuallyWiredArtifact {
   /** The artifact's path, relative to the project root. */
@@ -239,7 +249,11 @@ export async function readArtifactNames(
     // Registered by hand already: listing it in the barrel too would register it
     // twice, which the kernel refuses at boot. The developer's wiring wins — it is
     // the one they wrote — and the report says the barrel stepped aside.
-    const wired = wiring === undefined
+    //
+    // Only for a barrel that registers something. A re-export barrel has no
+    // registration to duplicate, and the symbol in the config is the developer
+    // consuming the barrel exactly as its header documents.
+    const wired = wiring === undefined || spec.exports.length === 0
       ? undefined
       : symbols.find((symbol) => mentionsSymbol(wiring.source, symbol));
     if (wired !== undefined) {

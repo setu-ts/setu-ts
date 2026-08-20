@@ -4,9 +4,10 @@
  * `setu generate health-indicator database` wrote a file, the project type-checked,
  * and `app.start()` threw `Duplicate health indicator name: "database"` — because
  * `HealthService.registerIndicator` refuses a name twice and `DatabasePlugin`
- * registers under its own capability token. Fifteen shipped plugins claim exactly
- * the names a developer reaches for first, so this is the common case rather than
- * an unlucky one (register row A1).
+ * registers under its own capability token. The table below covers every plugin that
+ * registers an indicator; fifteen of them claim exactly the names a developer reaches
+ * for first (`database`, `cache`, `storage`, `session`, `events`, `mail`, `audit`, …),
+ * so this is the common case rather than an unlucky one (register row A1).
  *
  * The check is a static table rather than a probe of the target project: `generate`
  * must never boot the project (M34b), and a zero-dependency CLI cannot import a

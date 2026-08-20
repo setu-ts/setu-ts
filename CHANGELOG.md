@@ -204,7 +204,9 @@ All notable changes to this project are documented here. The format follows
   swept into the CLI-owned barrel by an UNRELATED `setu generate route report` — and since M68
   refuses a duplicate `METHOD path`, the application stopped booting, with an error naming two files
   the developer had not touched, from a command that reported success. A candidate whose symbol
-  already appears in `setu.config.ts` is now left out of the barrel and reported. A file the barrel
+  already appears in `setu.config.ts` is now left out of the barrel and reported — for a barrel that
+  registers something, which excludes the functional `src/services/index.ts` re-export, where that
+  symbol is the developer consuming the barrel exactly as its header documents. A file the barrel
   claims for the first time is reported as adopted, once, at the moment it happens. **Migration:**
   none for generated artifacts, whose symbols never appear in `setu.config.ts`. A project that
   deliberately wired a conventionally-named module by hand AND relied on the barrel registering it
@@ -212,10 +214,10 @@ All notable changes to this project are documented here. The format follows
 - **Breaking (behaviour): `setu generate health-indicator` refuses a name an installed plugin
   claims** (M70g, A1). `setu g health-indicator database` in a project with `DatabasePlugin` wrote a
   file, type-checked, and then threw `Duplicate health indicator name: "database"` at `app.start()`.
-  Fifteen shipped plugins claim exactly the names reached for first — `database`, `cache`,
-  `storage`, `session`, `events`, `mail`, `audit`, and more. The command now refuses before writing,
-  naming the plugin. **Migration:** choose a qualified name (`billing-schema` rather than
-  `database`), or remove the plugin.
+  Every plugin that registers an indicator claims a name, and fifteen of them claim exactly the ones
+  reached for first — `database`, `cache`, `storage`, `session`, `events`, `mail`, `audit`, and
+  more. The command now refuses before writing, naming the plugin. **Migration:** choose a qualified
+  name (`billing-schema` rather than `database`), or remove the plugin.
 
 - **Breaking (behaviour): the gRPC health bridge maps `degraded → NOT_SERVING`** (M70c, X7-8). It
   previously mapped `degraded → SERVING`, so a degraded process answered `SERVING` on

@@ -58,8 +58,9 @@ convention, plus the Vite build files.
 It deliberately emits **no** `lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`,
 `lib/kv.server.ts` or `lib/service-logger.server.ts` — those are the session, SSE, secrets and
 logger capabilities, reached through the service registry the SSR plugin attaches to every request.
-The generated `createApp()` is `async`, and emits no hello-world route (an exact `/` handler would
-shadow the SSR catch-all).
+The generated `createApp()` is `async`, and emits no hello-world route (an exact `/` handler
+outranks the SSR catch-all under the M70g specificity rule, so it would shadow the application's own
+index route).
 
 The frontend build runs on npm even when the server runs on Deno. Deno and Workers targets get a
 standalone `package.json` for Vite and React Router; Node and Bun get those dev dependencies merged
