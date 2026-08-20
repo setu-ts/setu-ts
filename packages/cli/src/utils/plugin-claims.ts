@@ -11,8 +11,14 @@
  * The check is a static table rather than a probe of the target project: `generate`
  * must never boot the project (M34b), and a zero-dependency CLI cannot import a
  * plugin to ask it. The table is kept honest by `test/plugin-claims-gate.test.ts` at
- * the repository root, which reads every `ctx.health.register('<literal>')` in
- * each plugin's `src` directory and fails when one is missing here.
+ * the repository root, which reads every health-indicator registration site in each
+ * plugin's `src` directory and fails when a name is missing here.
+ *
+ * That gate's own scan is why this comment does not spell the registration call out:
+ * `test/health-indicator-audit.test.ts` (M70c) matches the literal call text anywhere
+ * under a package's `src`, so writing it here — in prose, in a package that holds no
+ * plugin context and can register nothing — made this file read as an unclassified
+ * indicator site.
  *
  * @module
  */
