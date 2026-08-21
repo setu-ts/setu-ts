@@ -42,7 +42,23 @@ export function createErrorResponder(
 ): IErrorResponder {
   return {
     respond(target: ErrorResponderTarget, init: ErrorResponseInit): void {
-      const error = new HttpError(init.status, init.title, init.details);
+      // The title is the framework-default `error` member — the `message` of
+      // the `default` format and the `detail` fallback of the Problem Details
+      // formatters — so it stays `error.message`. The disclosure
+      // (`init.detail`) is kept verbatim by every format (the
+      // `ErrorResponseInit` contract in `@setu-ts/common`): it is carried in
+      // the error's structured `details` under a `detail` key, so the
+      // `default` format emits it as `details.detail` beside `message`, and
+      // `buildProblemDetails` promotes it to the Problem Details `detail`
+      // member (falling back to the title when a site supplies no disclosure).
+      // `init.details` (e.g. a validation `errors` array) is merged through
+      // unchanged. Carrying it this way — rather than in `error.message` —
+      // keeps the title verbatim, which a site's (non-)disclosure decision
+      // depends on.
+      const details = init.detail !== undefined
+        ? { ...init.details, detail: init.detail }
+        : init.details;
+      const error = new HttpError(init.status, init.title, details);
       // The responder is only reachable through a value `errorHandler` published
       // with a full request context, so the structural target is a full
       // `IRequestContext` at the call site. The formatter reads only

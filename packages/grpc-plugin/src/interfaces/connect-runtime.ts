@@ -111,8 +111,14 @@ export interface ConnectRouterLike {
  * downstream of the loader consumes this port.
  */
 export interface ConnectRuntime {
-  /** Creates a new `ConnectRouter` for registering services. */
-  createConnectRouter(): ConnectRouterLike;
+  /**
+   * Creates a new `ConnectRouter` for registering services.
+   *
+   * @param options - Options forwarded to `@connectrpc/connect`'s
+   *   `createConnectRouter` (e.g. `{ interceptors }`); omitted when there are
+   *   none.
+   */
+  createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike;
 
   /**
    * Adapts a Connect `UniversalHandler` into a fetch handler. The result

@@ -210,6 +210,7 @@ export class GrpcService implements IGrpcService {
       embeddedDescriptors: this.#embeddedDescriptors,
       healthService: this.#healthService,
       resolveLogger: this.#resolveLogger,
+      interceptors: this.#options.interceptors,
     }).dispatchMap;
     return this.#dispatchMap;
   }

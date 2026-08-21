@@ -157,4 +157,52 @@ describe('gRPC handler-error logging (X7-5)', () => {
 
     await app.stop();
   });
+
+  it('degrades to no logging (not a crash) when the logger registry is broken', async () => {
+    // The plugin resolves the logger per-call inside a try/catch so a broken
+    // registry degrades to "no logging" rather than failing the RPC (X7-5).
+    // Drive a REAL failing RPC with `services.has` throwing to exercise that
+    // catch: the handler must still be rethrown as a masked wire error.
+    const app = createApplication({
+      plugins: [RuntimePlugin(), GrpcPlugin()],
+    });
+    await app.start({ port: 0 });
+
+    const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+    grpc.addService(await reviveEchoService(), {
+      echo: () => {
+        throw new Error('broken registry handler');
+      },
+    });
+
+    // Break `has` ONLY for the logger token: the kernel's own `fetch` path calls
+    // `has(HTTP_ADAPTER)` first, so a blanket throw would crash the kernel before
+    // the RPC is even dispatched. The logger lookup is the one `resolveLogger`
+    // guards, so only it may throw.
+    const registry = app.services as unknown as { has: (token: string) => boolean };
+    // `has` is a method on the registry instance, so keep it bound: calling it
+    // unbound would drop its `this` and crash the kernel's own `has` call.
+    const originalHas = registry.has.bind(registry);
+    registry.has = (token: string) => {
+      if (token === CAPABILITIES.LOGGER) {
+        throw new Error('registry has() is broken');
+      }
+      return originalHas(token);
+    };
+    try {
+      const response = await app.fetch(
+        new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ message: 'x' }),
+        }),
+      );
+      // The broken registry did not crash the RPC: it still answers a masked error.
+      expect(response.status).not.toBe(200);
+    } finally {
+      registry.has = originalHas;
+    }
+
+    await app.stop();
+  });
 });

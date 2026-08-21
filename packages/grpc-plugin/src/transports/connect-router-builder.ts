@@ -60,6 +60,14 @@ export interface BuildConnectRouterOptions {
    * through unwrapped.
    */
   readonly resolveLogger?: (() => ILogger | undefined) | undefined;
+  /**
+   * Application-supplied Connect interceptors, forwarded to
+   * `createConnectRouter({ interceptors })` (M70f §3.7). The plugin's built-in
+   * handler-error logging wraps each application service's implementation
+   * (innermost), so a handler throw is logged before an application
+   * interceptor observes it.
+   */
+  readonly interceptors?: readonly unknown[] | undefined;
 }
 
 /**
@@ -81,10 +89,15 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
     embeddedDescriptors,
     healthService,
     resolveLogger,
+    interceptors,
   } = options;
 
   const normalizedBase = normalizeBasePath(basePath);
-  const router = connectRuntime.createConnectRouter();
+  // Thread the application's interceptors into the router (M70f §3.7). The
+  // built-in handler-error logging is innermost — it wraps each application
+  // service's implementation — so a handler throw is logged before any
+  // application interceptor observes it.
+  const router = connectRuntime.createConnectRouter({ interceptors });
 
   // Application services first, so their names lead `list_services`.
   const serviceNames: string[] = [];

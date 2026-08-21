@@ -110,8 +110,11 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
   const { connect, protocol, protobuf, wkt } = modules;
 
   return {
-    createConnectRouter(): ConnectRouterLike {
-      return connect.createConnectRouter();
+    createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike {
+      // The facade's `options` parameter is forwarded, not dropped (M70f §3.7):
+      // without this, the `GrpcPluginOptions.interceptors` option would be dead
+      // surface that never reaches Connect.
+      return connect.createConnectRouter(options);
     },
 
     createFetchHandler(handler: UniversalHandlerLike): (request: Request) => Promise<Response> {
