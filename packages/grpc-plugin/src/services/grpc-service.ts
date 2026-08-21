@@ -14,7 +14,6 @@ import type {
   IHealthService,
   ILogger,
   RpcFetchHandler,
-  ServiceImpl,
 } from '@setu-ts/common';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
@@ -83,10 +82,7 @@ export class GrpcService implements IGrpcService {
     this.#basePath = normalizeBasePath(init.options.basePath ?? '/grpc');
 
     for (const entry of init.options.services ?? []) {
-      this.addService(
-        entry.definition as GrpcServiceDefinition,
-        entry.implementation as Partial<ServiceImpl> | undefined,
-      );
+      this.addService(entry.definition as GrpcServiceDefinition, entry.implementation);
     }
   }
 
@@ -97,7 +93,7 @@ export class GrpcService implements IGrpcService {
 
   addService<TDef extends GrpcServiceDefinition>(
     definition: TDef,
-    implementation?: Partial<ServiceImpl>,
+    implementation?: unknown,
   ): void {
     const { typeName } = definition;
     if (this.#services.some((s) => (s.definition as GrpcServiceDefinition).typeName === typeName)) {

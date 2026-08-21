@@ -127,10 +127,10 @@ describe('every converted short-circuit site answers in the configured format (X
       });
       expect(size.status).toBe(413);
       expect(size.contentType).toBe('application/problem+json');
-      // The disclosure is kept verbatim in the configured format (F1). The
-      // `title` member is the status title, not the site's title, so it is not
-      // asserted here (and `STATUS_TITLES` has no 413 entry — a pre-existing
-      // gap outside this fix).
+      // The title is the canonical status title from the shared source of
+      // truth (`STATUS_TITLES`), and the site's disclosure is kept verbatim in
+      // the configured format (F1).
+      expect(size.body.title).toBe('Payload Too Large');
       expect(String(size.body.detail)).toContain('exceeds the maximum allowed size');
 
       const csrf = await drive(app, '/csrf', {
