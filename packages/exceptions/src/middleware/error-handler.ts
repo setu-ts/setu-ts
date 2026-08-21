@@ -21,7 +21,12 @@
  * @module
  */
 import type { HandlerResult, ILogger, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES, ERROR_RESPONDER_STATE_KEY, serializeError } from '@setu-ts/common';
+import {
+  brandErrorResponder,
+  CAPABILITIES,
+  ERROR_RESPONDER_STATE_KEY,
+  serializeError,
+} from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
 import { internalServerError, statusTitle } from '../errors/exceptions.ts';
@@ -136,10 +141,10 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
   // `Map.set` of a pre-built object, not a re-resolution (AI_GUIDELINES §14).
   const responder = createErrorResponder(formatter, contentType);
 
-  return async function handleError(
+  const handleError = async (
     ctx: IRequestContext,
     next: () => Promise<void>,
-  ): Promise<void | HandlerResult> {
+  ): Promise<void | HandlerResult> => {
     // Publish the responder BEFORE `next()` so every site inside the pipeline
     // — the kernel's own terminals and every short-circuiting middleware —
     // answers in this application's configured format (M70f).
@@ -202,6 +207,14 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
         .send(bytes);
     }
   };
+
+  // Brand the middleware with the SAME responder it publishes into `ctx.state`
+  // below, so the kernel can seed it into the state of the pre-pipeline sites
+  // — the drain `503`, the malformed-request `400`, and the request-lifecycle
+  // hooks — which run before this middleware and would otherwise always take
+  // the fallback shape (M70f re-review, findings 1 & 2).
+  brandErrorResponder(handleError, responder);
+  return handleError;
 }
 
 /**

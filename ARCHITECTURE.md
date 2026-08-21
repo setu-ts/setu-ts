@@ -2229,15 +2229,21 @@ responder and answers in the application's configured format. The responder buil
 `HttpError` from the init (so `buildProblemDetails` sees a genuine `statusCode` and the validation
 `errors` extension, and `maskInternalErrors` never masks a deliberate 4xx), runs the resolved
 formatter over it, and writes status, `content-type`, and the serialized body — the same three-step
-tail `errorHandler`'s catch path performs.
+tail `errorHandler`'s catch path performs. Three kernel sites run **before** the pipeline — the
+shutdown-drain `503`, the malformed-URL / undecodable-path `400`, and an `onRequest` lifecycle hook
+that throws (answered as the unhandled `500`) — so they cannot see `errorHandler`'s `ctx.state`
+publication; the kernel seeds the same resolved responder into their state from a cache it reads off
+the pipeline's `errorHandler` at startup, and the fallback below applies when no `errorHandler` is
+registered.
 
-With **no** `errorHandler` registered, `respondWithError` falls back to `{ error, detail? }` — the
-shape the default formatter produces — so a site can never answer in a shape the application did not
-ask for. The unhandled-error `500` additionally logs the error through `CAPABILITIES.LOGGER` when a
-logger is registered (X11-2); the body stays opaque. `serializeError` (also in `common`) is the pure
-serializer the logger plugin uses to normalize a raw `Error` out of log metadata before redaction
-(X2-5) and the kernel, `exceptions`, `grpc-plugin`, and `notification-plugin` use to serialize a
-cause without importing one another.
+With **no** `errorHandler` registered, `respondWithError` falls back to the no-handler shape
+`{ error, detail? }` — the framework's pre-formatter shape, written directly by the seam and **not**
+the same as the `default` formatter's `{ statusCode, message, details? }` body — so a site can never
+answer in a shape the application did not ask for. The unhandled-error `500` additionally logs the
+error through `CAPABILITIES.LOGGER` when a logger is registered (X11-2); the body stays opaque.
+`serializeError` (also in `common`) is the pure serializer the logger plugin uses to normalize a raw
+`Error` out of log metadata before redaction (X2-5) and the kernel, `exceptions`, `grpc-plugin`, and
+`notification-plugin` use to serialize a cause without importing one another.
 
 ### Plugin Error Handling
 

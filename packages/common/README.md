@@ -81,12 +81,14 @@ package fits the plugin architecture.
 | Export                       | Kind      |
 | ---------------------------- | --------- |
 | `assertRealPathContained`    | function  |
+| `brandErrorResponder`        | function  |
 | `contentTypeFor`             | function  |
 | `createCachedProbe`          | function  |
 | `createCapabilityToken`      | function  |
 | `decodeFrameData`            | function  |
 | `encodeFrameData`            | function  |
 | `err`                        | function  |
+| `errorResponderOf`           | function  |
 | `fromNullable`               | function  |
 | `isErr`                      | function  |
 | `isLexicallyContained`       | function  |
@@ -112,6 +114,7 @@ package fits the plugin architecture.
 | `upgradeIntentOf`            | function  |
 | `withSecurityMetadata`       | function  |
 | `CAPABILITIES`               | const     |
+| `ERROR_RESPONDER_BRAND`      | const     |
 | `ERROR_RESPONDER_STATE_KEY`  | const     |
 | `PLUGIN_PRIORITY`            | const     |
 | `SECURITY_METADATA`          | const     |
