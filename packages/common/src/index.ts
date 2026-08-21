@@ -14,7 +14,13 @@ export { contentTypeFor } from './static/content-types.ts';
 export { assertRealPathContained, isLexicallyContained } from './static/path-containment.ts';
 
 // Error responder seam (M70f) — the request-scoped formatter carrier
-export { ERROR_RESPONDER_STATE_KEY, respondWithError } from './errors/error-responder.ts';
+export {
+  brandErrorResponder,
+  ERROR_RESPONDER_BRAND,
+  ERROR_RESPONDER_STATE_KEY,
+  errorResponderOf,
+  respondWithError,
+} from './errors/error-responder.ts';
 export type {
   ErrorResponderTarget,
   ErrorResponseInit,

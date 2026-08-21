@@ -73,7 +73,10 @@ interface TenantMiddlewareOptions {
  *
  * On successful resolution: calls `next()`.
  * When `required: true` and no tenant resolves: short-circuits with a 400
- * JSON body `{ error, message }` without calling `next()`.
+ * (or `rejectionStatus`) without calling `next()`, written through the error
+ * responder seam (`respondWithError` in `@setu-ts/common`) so it answers in the
+ * application's configured format when `errorHandler` is registered, and in the
+ * no-handler fallback shape `{ error, detail? }` otherwise.
  * When `required: false` and no tenant resolves: proceeds with
  * `ctx.request.tenant === undefined`.
  *

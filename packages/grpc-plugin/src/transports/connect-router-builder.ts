@@ -244,6 +244,15 @@ function isThenable(value: unknown): value is Promise<unknown> {
   );
 }
 
+/** True when a value is an async iterable (has a callable `[Symbol.asyncIterator]`). */
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === 'function'
+  );
+}
+
 /**
  * Wraps one procedure function: on a handler error, logs it (when a logger is
  * resolvable) and rethrows so the masked wire response is unchanged.
@@ -251,10 +260,20 @@ function isThenable(value: unknown): value is Promise<unknown> {
  * The wrapper is **synchronous**, not `async`: a server-streaming implementation
  * returns an `AsyncIterable` directly (not a `Promise`), and an `async` wrapper
  * would box that iterable in a `Promise` that Connect cannot iterate — the
- * stream would yield nothing. The wrapper therefore forwards every argument,
- * returns the implementation's result unchanged when it is not a thenable, and
- * only attaches a rejection handler when the result IS a thenable (a unary
- * `Promise`). A synchronous throw is caught, logged, and rethrown.
+ * stream would yield nothing. The wrapper therefore forwards every argument and
+ * handles three result shapes:
+ *
+ * - a synchronous throw — caught, logged, and rethrown;
+ * - a thenable (a unary `Promise`) — a rejection handler is attached that logs
+ *   and rethrows;
+ * - an `AsyncIterable` (server-streaming or bidi) — wrapped in a transparent
+ *   iterable that delegates values, `return`, and `throw`, but logs (and
+ *   rethrows) a failure that surfaces from a later `next()`. A streaming
+ *   handler's common failure point is a `next()` rejection AFTER invocation has
+ *   returned, so without this the error would be logged nowhere (M70f
+ *   re-review, finding 3).
+ *
+ * A non-thenable, non-iterable result (a unary value) is returned unchanged.
  */
 function guardProcedure(
   typeName: string,
@@ -267,15 +286,28 @@ function guardProcedure(
   }
   const procedure = `${typeName}/${method}`;
   // Logs the error (when a logger resolves) and rethrows it so the masked
-  // wire response is unchanged. Used for both the synchronous and the
-  // thenable-rejection paths.
+  // wire response is unchanged. Used for the synchronous, the thenable-
+  // rejection, and the async-iteration paths.
+  //
+  // The logger RESOLUTION and EMISSION are each guarded (M70f re-review,
+  // finding 4): a broken logger — one whose `error()` throws, or whose
+  // resolution throws — must degrade silently rather than REPLACE the handler
+  // error. Without the guards, a logger failure would escape `reportAndRethrow`
+  // before the `throw error`, and an outer interceptor would observe the logger
+  // failure instead of the handler failure.
   const reportAndRethrow = (error: unknown): never => {
-    const logger = resolveLogger();
-    if (logger !== undefined) {
-      logger.error('gRPC handler failed', {
-        procedure,
-        ...serializeError(error),
-      });
+    try {
+      const logger = resolveLogger();
+      if (logger !== undefined) {
+        logger.error('gRPC handler failed', {
+          procedure,
+          ...serializeError(error),
+        });
+      }
+    } catch {
+      // The logger itself failed (or could not be resolved). No safe channel
+      // remains; degrade silently so the ORIGINAL handler error below is the
+      // one that propagates.
     }
     throw error;
   };
@@ -289,6 +321,57 @@ function guardProcedure(
     if (isThenable(result)) {
       return result.catch((error) => reportAndRethrow(error));
     }
+    if (isAsyncIterable(result)) {
+      return withErrorLoggingIterable(result, (error) => reportAndRethrow(error));
+    }
     return result;
+  };
+}
+
+/**
+ * Wraps an `AsyncIterable` in a transparent iterable that logs (and rethrows)
+ * a failure surfacing from a later `next()`, while preserving cancellation
+ * (`return`) and error propagation (`throw`) to the underlying iterator
+ * (M70f re-review, finding 3).
+ *
+ * The wrapper is **lazy**: it does not call `iterator()` until the consumer
+ * does, so a handler that returns an iterable but is never consumed does not
+ * start the underlying work. It delegates `next`, `return`, and `throw`
+ * verbatim, and catches only the `next()` rejection — the streaming handler's
+ * common failure point — to log it before rethrowing, leaving Connect's masked
+ * wire response unchanged.
+ *
+ * @param source - The implementation's async iterable result
+ * @param report - Logs the iteration failure and rethrows it
+ * @returns A transparent wrapper iterable
+ */
+function withErrorLoggingIterable(
+  source: AsyncIterable<unknown>,
+  report: (error: unknown) => never,
+): AsyncIterable<unknown> {
+  return {
+    [Symbol.asyncIterator]() {
+      const iterator = source[Symbol.asyncIterator]();
+      return {
+        async next(...args: [] | [unknown]): Promise<IteratorResult<unknown>> {
+          try {
+            return await iterator.next(...args);
+          } catch (error) {
+            report(error);
+          }
+        },
+        // Preserve cancellation and error propagation to the underlying
+        // iterator so the handler's cleanup (e.g. closing a cursor) still runs.
+        return(value?: unknown): Promise<IteratorResult<unknown>> {
+          return (
+            iterator.return?.(value) ??
+              Promise.resolve({ value: undefined, done: true })
+          );
+        },
+        throw(error?: unknown): Promise<IteratorResult<unknown>> {
+          return iterator.throw?.(error) ?? Promise.reject(error);
+        },
+      };
+    },
   };
 }
