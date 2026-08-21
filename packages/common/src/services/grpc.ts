@@ -105,12 +105,14 @@ export interface IGrpcService {
   addService<TDef extends GrpcServiceDefinition>(
     definition: TDef,
     /**
-     * Optional service implementation object mapping method local-names to
-     * handler functions. Typed permissively (methods are `unknown`) because the
-     * plugin is generic over the application's generated descriptors and cannot
-     * enumerate concrete method signatures.
+     * Optional service implementation mapping method local-names to handler
+     * functions. Typed permissively (`unknown`) because the plugin is generic
+     * over the application's generated descriptors and cannot enumerate
+     * concrete method signatures, and because Connect accepts both plain
+     * objects and class instances — the latter's methods live on the
+     * prototype, so an index-signature type would reject a valid implementation.
      */
-    implementation?: Partial<ServiceImpl>,
+    implementation?: unknown,
   ): void;
 
   /**

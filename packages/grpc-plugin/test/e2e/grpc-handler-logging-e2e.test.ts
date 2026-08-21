@@ -205,4 +205,48 @@ describe('gRPC handler-error logging (X7-5)', () => {
 
     await app.stop();
   });
+
+  it('logs a throwing PROTOTYPE method (class instance) — regression for the own-property-only wrap', async () => {
+    // A class instance's methods live on its prototype, so `Object.entries`
+    // of the implementation sees none of them — the pre-fix wrapper wrapped
+    // nothing and the throw was never logged. Connect resolves the procedure
+    // by property lookup (`impl[method.localName]`), which DOES find the
+    // prototype method, so it invokes it. The wrapper must wrap by the
+    // descriptor's declared method names + property lookup, and preserve
+    // receiver binding, so the class method is logged like any other.
+    class EchoService {
+      echo(): { response: string } {
+        throw new Error('class handler blew up');
+      }
+    }
+
+    const { logger, errors } = makeCapturingLogger();
+    const app = createApplication({
+      plugins: [RuntimePlugin(), loggerPlugin(logger), GrpcPlugin()],
+    });
+    await app.start({ port: 0 });
+
+    const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+    grpc.addService(await reviveEchoService(), new EchoService());
+
+    const response = await app.fetch(
+      new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'x' }),
+      }),
+    );
+    // The masked wire response is unchanged: Connect answers an error, not 200.
+    expect(response.status).not.toBe(200);
+
+    // The prototype method's throw WAS logged — the regression the own-
+    // property-only enumeration introduced.
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('gRPC handler failed');
+    expect(errors[0].metadata?.procedure).toBe('example.EchoService/echo');
+    expect(errors[0].metadata?.message).toBe('class handler blew up');
+    expect(errors[0].metadata?.name).toBe('Error');
+
+    await app.stop();
+  });
 });

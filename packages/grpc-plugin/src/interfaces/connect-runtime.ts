@@ -45,6 +45,14 @@ export interface MessageDescriptorLike {
 export interface MethodDescriptorLike {
   /** The proto method name, e.g. `Check` (not the camelCase `localName`). */
   readonly name: string;
+  /**
+   * The camelCase property name Connect looks up on the implementation
+   * (`impl[method.localName]` in `@connectrpc/connect`'s
+   * `createServiceImplSpec`), e.g. `check`. Real `DescMethod`s always carry it;
+   * it is optional on this facade so hand-built test descriptors may omit it,
+   * in which case the router builder falls back to `name`.
+   */
+  readonly localName?: string;
 }
 
 /**

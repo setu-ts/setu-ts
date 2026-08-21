@@ -1,7 +1,7 @@
 # Milestone 70f — Error format and error visibility (`kernel`, `exceptions`, `common`, and the short-circuit sites)
 
-> **Status:** Planning. Branch: `feat/m70f-error-visibility`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Branch: `feat/m70f-error-visibility`. `main` is protected — all
+> work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 

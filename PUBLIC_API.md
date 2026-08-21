@@ -7409,10 +7409,12 @@ Contract notes:
   `400`; unmatched path → `404`; unhandled error → `500`; a request arriving while `stop()` is
   draining → `503`) are written through the **error responder seam** (`respondWithError` in
   `@setu-ts/common`). With `errorHandler` registered they answer in the application's configured
-  format; with **no** `errorHandler` registered they fall back to `{ error, detail? }` — the same
-  shape `errorHandler`'s default formatter produces. Error **formatting** belongs to the exceptions
-  package, not the kernel; the kernel only supplies the status and message. The unhandled-error
-  `500` additionally logs the error through `CAPABILITIES.LOGGER` when a logger is registered.
+  format; with **no** `errorHandler` registered they fall back to the no-handler shape
+  `{ error, detail? }` — which is **not** the same as the `default` formatter's
+  `{ statusCode, message, details? }` body (see the exceptions contract notes). Error **formatting**
+  belongs to the exceptions package, not the kernel; the kernel only supplies the status and
+  message. The unhandled-error `500` additionally logs the error through `CAPABILITIES.LOGGER` when
+  a logger is registered.
 - **`inject()` body semantics.** `InjectResponse.body` is text: a byte body written with
   `response.send(bytes)` is UTF-8 decoded rather than reported as `null`, and `json()` parses it. A
   **streaming** response cannot be presented as text without draining the live stream, so `inject()`
@@ -7692,8 +7694,11 @@ Contract notes:
   short-circuiting site — the kernel's own 404/400/500/503 terminals, the storage, multi-tenancy,
   session, auth, http-security, and feature-flags middleware — answers through it. So with
   `errorHandler({ format: 'rfc9457' })` registered, every error an application can produce is RFC
-  9457. With **no** `errorHandler` registered, every site falls back to `{ error, detail? }` (the
-  same shape the default formatter produces) — a site cannot answer in its own ad-hoc shape.
+  9457. With **no** `errorHandler` registered, every site falls back to the no-handler shape
+  `{ error, detail? }` — a site cannot answer in its own ad-hoc shape. That fallback is a
+  **different** body from the `default` formatter's `{ statusCode, message, details? }`: it is the
+  framework's pre-formatter shape, written directly by `respondWithError`, and it is what an
+  application without `errorHandler` keeps receiving byte-for-byte.
 - **RFC 9457 compliance**: when `format: 'rfc9457'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (Problem
@@ -8382,6 +8387,7 @@ app.register(GrpcPlugin({
   health: true, // default — grpc.health.v1.Health (bridged to M20)
   services: [], // initial service definitions
   connectModule: undefined, // inject for testing; otherwise lazy-loaded
+  interceptors: [], // default — application Connect interceptors
 }));
 ```
 
@@ -8397,13 +8403,14 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 
 ### Options
 
-| Option          | Type                                     | Default | Description                                                                                           |
-| --------------- | ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
-| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.            |
-| `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch. |
-| `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                    |
-| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                              |
-| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.          |
+| Option          | Type                                     | Default | Description                                                                                                                                                                                                                                                                  |
+| --------------- | ---------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.                                                                                                                                                                                   |
+| `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch.                                                                                                                                                                        |
+| `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                                                                                                                                                                                           |
+| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                                                                                                                                                                                                     |
+| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.                                                                                                                                                                                 |
+| `interceptors`  | `readonly unknown[]`                     | `[]`    | Application Connect interceptors, forwarded to Connect router construction (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a handler throw is logged before an application interceptor observes it. Absent: none installed. |
 
 ### Exports
 

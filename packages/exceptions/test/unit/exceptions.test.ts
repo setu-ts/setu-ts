@@ -151,6 +151,7 @@ describe('statusTitle', () => {
     expect(statusTitle(403)).toBe('Forbidden');
     expect(statusTitle(404)).toBe('Not Found');
     expect(statusTitle(409)).toBe('Conflict');
+    expect(statusTitle(413)).toBe('Payload Too Large');
     expect(statusTitle(422)).toBe('Unprocessable Entity');
     expect(statusTitle(429)).toBe('Too Many Requests');
     expect(statusTitle(500)).toBe('Internal Server Error');

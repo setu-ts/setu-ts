@@ -61,6 +61,10 @@ The `GrpcPlugin` accepts optional configuration:
 - `health`: Whether to enable gRPC Health v1 service (defaults to `true`)
 - `services`: Initial services to register at startup
 - `connectModule`: Injected Connect runtime module (for testing)
+- `interceptors`: Application Connect interceptors, forwarded to Connect router construction
+  (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a
+  handler throw is logged before an application interceptor observes it. Absent: none installed
+  (defaults to `[]`)
 
 ```typescript
 GrpcPlugin({
@@ -70,6 +74,7 @@ GrpcPlugin({
   services: [
     { definition: MyServiceDescriptor, implementation: MyServiceImpl },
   ],
+  interceptors: [myInterceptor],
 });
 ```
 

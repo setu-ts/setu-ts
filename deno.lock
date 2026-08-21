@@ -23,6 +23,7 @@
     "npm:@azure/service-bus@7": "7.9.5",
     "npm:@azure/storage-blob@12": "12.33.0",
     "npm:@bufbuild/protobuf@^2.7.0": "2.13.0",
+    "npm:@connectrpc/connect@*": "2.1.2_@bufbuild+protobuf@2.13.0",
     "npm:@connectrpc/connect@^2.1.2": "2.1.2_@bufbuild+protobuf@2.13.0",
     "npm:@google-cloud/pubsub@6": "6.0.0",
     "npm:@google-cloud/secret-manager@5": "5.6.0",

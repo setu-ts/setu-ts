@@ -119,7 +119,7 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
     router.service(
       definition,
       withErrorLogging(
-        definition.typeName,
+        definition,
         (entry.implementation ?? {}) as Record<string, unknown>,
         resolveLogger,
       ),
@@ -172,40 +172,64 @@ export function buildConnectRouter(options: BuildConnectRouterOptions): {
 }
 
 /**
- * Wraps a service implementation's methods so a thrown handler error is logged
- * at `error` level — with the procedure name and a serialized error (X7-5) —
- * and then rethrown, leaving Connect's masked wire response unchanged.
+ * Wraps a service implementation's procedures so a thrown handler error is
+ * logged at `error` level — with the procedure name and a serialized error
+ * (X7-5) — and then rethrown, leaving Connect's masked wire response unchanged.
  *
- * The logger is resolved per call through `resolveLogger` so a logger registered
- * after the router was built is still seen (M52b). When no logger is present the
- * error is simply rethrown. A Connect-ES implementation maps each method to a
- * single function (`{ method: fn }`), so only function values are wrapped; any
+ * Procedures are resolved the same way Connect resolves them: by the service
+ * descriptor's declared method names and a property lookup on the
+ * implementation (`impl[method.localName]` in `@connectrpc/connect`'s
+ * `createServiceImplSpec`), NOT by enumerating the implementation's own
+ * properties. Enumerating own properties only (`Object.entries`) misses every
+ * method that lives on a class instance's prototype — the most common shape
+ * for a hand-written implementation — so a throwing class method was never
+ * wrapped and never logged. Property lookup finds prototype methods, and the
+ * wrapped function is bound to the implementation so `this` still refers to
+ * the application's object when Connect invokes it.
+ *
+ * The logger is resolved per call through `resolveLogger` so a logger
+ * registered after the router was built is still seen (M52b). When no logger
+ * is present the error is simply rethrown. A Connect-ES implementation maps
+ * each method to a single function, so only function values are wrapped; any
  * non-function value passes through untouched.
  *
- * @param typeName - The service's fully-qualified name (for the procedure label)
+ * @param definition - The service descriptor (declared method names + name)
  * @param implementation - The application's implementation object
  * @param resolveLogger - Resolves the logger at call time
  * @returns A wrapped implementation (the same object when there is no logger and nothing to wrap)
  */
 function withErrorLogging(
-  typeName: string,
+  definition: ServiceDescriptorLike,
   implementation: Record<string, unknown>,
   resolveLogger: (() => ILogger | undefined) | undefined,
 ): Record<string, unknown> {
+  // No logger → nothing to log → pass the implementation through untouched
+  // (the same object), exactly as before the logging wrapper existed.
+  if (resolveLogger === undefined) {
+    return implementation;
+  }
   let out: Record<string, unknown> | undefined;
-  for (const [method, value] of Object.entries(implementation)) {
+  for (const method of definition.methods ?? []) {
+    // Connect looks the procedure up by its camelCase local name, falling back
+    // to the proto name; mirror that so the wrap matches what Connect invokes.
+    const key = method.localName ?? method.name;
+    const value = implementation[key];
     if (typeof value !== 'function') {
       continue;
     }
+    // Bind the wrapped function to the implementation so a class method's
+    // `this` still refers to the application's object when Connect invokes it
+    // (Connect itself rebinds to the implementation; the bind here keeps the
+    // wrapper correct if it is ever called unbound).
     const wrapped = guardProcedure(
-      typeName,
-      method,
-      value as (...args: unknown[]) => unknown,
+      definition.typeName,
+      key,
+      (value as (...args: unknown[]) => unknown).bind(implementation),
       resolveLogger,
     );
     if (wrapped !== value) {
       out ??= { ...implementation };
-      out[method] = wrapped;
+      out[key] = wrapped;
     }
   }
   return out ?? implementation;
