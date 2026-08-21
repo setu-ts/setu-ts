@@ -125,12 +125,20 @@ export function buildProblemDetails(
   const isHttp = error instanceof HttpError;
   const statusCode = isHttp ? error.statusCode : 500;
   const errors = isHttp ? extractErrors(error) : undefined;
+  // A responder-built error carries the site's disclosure in its structured
+  // details under a `detail` key (M70f); the Problem Details `detail` member
+  // is that disclosure, falling back to the error message (the title) when a
+  // site supplied none. A thrown `notFound('User 42 does not exist')` has no
+  // such key, so its `detail` remains the message — the pre-M70f shape.
+  const details = isHttp ? error.details : undefined;
+  const carriedDetail = details !== undefined ? details.detail : undefined;
+  const detail = typeof carriedDetail === 'string' ? carriedDetail : error.message;
 
   return {
     type: resolveType(statusCode, errors !== undefined),
     title: statusTitle(statusCode),
     status: statusCode,
-    detail: error.message,
+    detail,
     ...(ctx !== undefined && { instance: ctx.request.path }),
     ...(errors !== undefined && { errors }),
   };

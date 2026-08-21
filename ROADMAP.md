@@ -7161,7 +7161,7 @@ branch during a version bump.
 | 70c       | ✅     | health-signal sweep (6 packages)      |
 | 70d       | ✅     | no-argument registration seams        |
 | 70e       | ✅     | default branches of injectable seams  |
-| 70f       | ⬜     | error format and error visibility     |
+| 70f       | ✅     | error format and error visibility     |
 | 70g       | ⬜     | routing collisions                    |
 | 70h       | ✅     | cli scaffold batch                    |
 | 70i       | ⬜     | grpc and graphql viability            |
