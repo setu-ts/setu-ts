@@ -55,7 +55,9 @@ export function createProvider(
       return new MemoryProvider(now);
 
     case 'local':
-      return new LocalStorageProvider(runtime.fs, config.options);
+      // `platform` is threaded in so a write-probe failure can name the Deno
+      // flag that fixes it (X8-9) without this provider reaching a runtime API.
+      return new LocalStorageProvider(runtime.fs, config.options, () => runtime.platform());
 
     case 's3': {
       const s3Opts = config.options;

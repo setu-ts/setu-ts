@@ -4087,46 +4087,57 @@ plus a typed `getUploadedFile()` helper.
 
 ```typescript
 const uploadMw = createUploadMiddleware({
-  fieldname: 'file',
-  maxSize: 10 * 1024 * 1024,         // 10 MB default
-  allowedMimeTypes?: ['image/jpeg', 'image/png'],  // optional
-  maxFiles?: 5,                      // optional
+  fieldname: 'file', // parts with any other name are dropped
+  maxSize: 10 * 1024 * 1024, // per file; exceeding it answers 413
+  allowedMimeTypes: ['image/jpeg', 'image/png'], // optional
+  maxFiles: 5, // optional; exceeding it answers 400
 });
 
-app.post('/upload', {
+app.router.post('/upload', {
   middleware: [uploadMw],
   handler: async (ctx) => {
+    // `getUploadedFile` returns `UploadedFile | undefined`, and the fieldname
+    // must match the middleware's — it filters parts to that name.
     const file = getUploadedFile(ctx, 'file');
-    if (!file) return ctx.json({ error: 'No file' }, 400);
+    if (!file) return ctx.response.status(400).json({ error: 'No file' });
 
     const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
     // `file.name` is the form field name; `file.filename` is the client's original file name.
-    const key = `uploads/${Date.now()}-${file.filename}`;
-    await storage.put(key, file.data);
+    const key = `uploads/${file.filename}`;
+    // Without `contentType` the object is stored as `application/octet-stream`
+    // and the signed URL below downloads it instead of rendering it.
+    await storage.put(key, file.data, { contentType: file.mimeType });
 
     const url = await storage.getSignedUrl(key, { expiresIn: 3600 });
-    return ctx.json({ url, key });
+    return ctx.response.json({ url, key });
   },
 });
 ```
 
+Refusal statuses: a body or file over its limit answers **413**; a malformed body, a disallowed MIME
+type and too many files answer **400**.
+
+`maxBodyBytes` (default 50 MB) caps the body the middleware will PARSE, with the effective bound
+`min(maxSize * 2 + framing, maxBodyBytes)`. It does not bound the initial read — the HTTP adapter
+buffers the whole body before any middleware runs, and `IRequest` exposes no body stream.
+
 ### Usage — buffered download
 
 ```typescript
-app.get('/files/:key', async (ctx) => {
+app.router.get('/files/:key', async (ctx) => {
   const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
-  const file = await storage.get(ctx.req.param('key'));
-  return ctx.header('content-type', 'application/octet-stream').send(file);
+  const file = await storage.get(ctx.params.key);
+  return ctx.response.header('content-type', 'application/octet-stream').send(file);
 });
 ```
 
 ### Usage — streaming download (`getStream?`)
 
 ```typescript
-app.get('/files/stream/:key', async (ctx) => {
+app.router.get('/files/stream/:key', async (ctx) => {
   const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
-  const stream = await storage.getStream!(ctx.req.param('key'));
-  return ctx.header('content-type', 'application/octet-stream').stream(stream);
+  const stream = await storage.getStream!(ctx.params.key);
+  return ctx.response.header('content-type', 'application/octet-stream').stream(stream);
 });
 ```
 
@@ -4143,19 +4154,30 @@ The plugin ships five named providers plus a first-class B2 preset that reuses S
 | `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?` | Lazy `npm:@azure/storage-blob@^12`           | SAS requires `accountKey`. No `@azure/identity` needed.                        |
 | B2 preset              | `'b2'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`                | Same as S3 (reuses `S3Provider`)             | Endpoint defaults to `https://s3.<region>.backblazeb2.com`. No separate class. |
 
-All cloud providers support an injectable `client` option (`IAwsS3Client` / `IGcsClient` /
-`IAzureBlobClient`) that bypasses the lazy import for testing.
+All cloud providers support an injectable `client` option that bypasses the lazy import, but the
+three types are NOT alike and the difference decides what you can pass:
+
+| Option type        | Mirrors its SDK? | What injecting it means                                                               |
+| ------------------ | ---------------- | ------------------------------------------------------------------------------------- |
+| `IGcsClient`       | yes              | A real `@google-cloud/storage` client fits structurally.                              |
+| `IAzureBlobClient` | yes              | A real `@azure/storage-blob` client fits structurally.                                |
+| `IS3Backend`       | **no**           | This package's own backend surface — implementing it, not handing over an `S3Client`. |
+
+`IS3Backend` was named `IAwsS3Client` before `v0.1.0-alpha.9`, which promised something it never
+was: `@aws-sdk/client-s3`'s surface is `send(command)`, so a real `S3Client` was refused with
+`Injected S3 client is missing required methods`. There is consequently no supported way to
+configure the underlying SDK client (custom retry policy, timeout, proxy agent).
 
 ### IStorage methods
 
-| Method                                                                   | Description                                                                                                                                                                                      |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `put(path: string, data: Uint8Array): Promise<void>`                     | Stores an object.                                                                                                                                                                                |
-| `get(path: string): Promise<Uint8Array>`                                 | Retrieves an object. **Throws** if absent.                                                                                                                                                       |
-| `delete(path: string): Promise<boolean>`                                 | Deletes an object. Returns `true` if present.                                                                                                                                                    |
-| `exists(path: string): Promise<boolean>`                                 | Checks existence.                                                                                                                                                                                |
-| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → throws; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`). |
-| `getStream?(path: string): Promise<ReadableStream<Uint8Array>>`          | **Optional.** Streams an object for zero-copy downloads. Native on S3/GCS/Azure; Memory/Local fall back to wrapping `get(path)` in a one-chunk stream. Absent objects throw.                     |
+| Method                                                                   | Description                                                                                                                                                                                        |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `put(path, data, options?: PutObjectOptions): Promise<void>`             | Stores an object. `options` carries `contentType` and `metadata`; S3, GCS, Azure and Cloudflare R2 record them on the object, while the memory and local providers accept and do not persist them. |
+| `get(path: string): Promise<Uint8Array>`                                 | Retrieves an object. **Throws** if absent.                                                                                                                                                         |
+| `delete(path: string): Promise<boolean>`                                 | Deletes an object. Returns `true` if present.                                                                                                                                                      |
+| `exists(path: string): Promise<boolean>`                                 | Checks existence.                                                                                                                                                                                  |
+| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → throws; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`).   |
+| `getStream?(path: string): Promise<ReadableStream<Uint8Array>>`          | **Optional.** Streams an object for zero-copy downloads. Native on S3/GCS/Azure; Memory/Local fall back to wrapping `get(path)` in a one-chunk stream. Absent objects throw.                       |
 
 ### Per-provider `getSignedUrl` behavior
 

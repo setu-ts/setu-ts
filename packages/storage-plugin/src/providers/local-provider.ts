@@ -19,6 +19,18 @@ import type { StorageProvider } from '../interfaces/index.ts';
 export class LocalStorageProvider implements StorageProvider {
   readonly #fs: IFileSystem | null;
   readonly #root: string;
+  /**
+   * Reports the runtime platform, so the write-probe failure can name the flag
+   * that fixes it on the runtime where it bites. Optional: injected by the
+   * plugin, absent when the provider is constructed directly.
+   */
+  readonly #platform: (() => string) | undefined;
+  /**
+   * Whether the root proved writable at `connect()`. Read by
+   * {@linkcode isHealthy}, so a root that stops being writable later is
+   * reported rather than assumed good for the life of the process.
+   */
+  #writable = false;
 
   /**
    * @param runtimeFs - The optional file-system service from runtime
@@ -27,23 +39,66 @@ export class LocalStorageProvider implements StorageProvider {
   constructor(
     runtimeFs: IFileSystem | undefined,
     options?: { rootDir?: string },
+    platform?: () => string,
   ) {
     this.#fs = runtimeFs ?? null;
     this.#root = options?.rootDir ?? '.';
+    this.#platform = platform;
   }
 
   /**
-   * Connects — throws when `runtime.fs` is absent.
+   * Connects, and PROVES the root is writable rather than assuming it.
    *
-   * @throws {Error} If the file system is not available
+   * The probe exists because of X8-9: a scaffolded Deno project's `start` task
+   * requests `--allow-net --allow-env --allow-read --allow-sys` and no
+   * `--allow-write`, so every upload failed while `/health` reported `up` —
+   * the M70c liveness probe calls `stat`, a READ, which the granted
+   * `--allow-read` satisfies. Three defects had to be understood before the
+   * one-flag cause was visible. Failing here instead, with the flag named,
+   * follows this repo's rule of failing at registration with a name rather than
+   * at the first request with a bare error.
+   *
+   * A startup probe rather than a per-check write: writability changes almost
+   * never, and a write on every health-probe interval is recurring I/O for a
+   * fact that does not move.
+   *
+   * @throws {Error} If the file system is not available, or the root cannot be
+   * created or written to
    */
-  connect(): Promise<void> {
-    if (this.#fs === null) {
+  async connect(): Promise<void> {
+    const fs = this.#fs;
+    if (fs === null) {
       throw new Error(
         'LocalStorageProvider requires runtime.fs which is not available on this runtime',
       );
     }
-    return Promise.resolve();
+    try {
+      await fs.mkdir(this.#root, { recursive: true });
+      const probe = `${this.#root}/.setu-write-probe`;
+      await fs.writeFile(probe, new Uint8Array());
+      await fs.rm(probe);
+      this.#writable = true;
+    } catch (error) {
+      throw new Error(
+        `LocalStorageProvider cannot write to '${this.#root}': ${
+          error instanceof Error ? error.message : String(error)
+        }${this.#permissionHint()}`,
+        { cause: error },
+      );
+    }
+  }
+
+  /**
+   * Names the Deno permission flag when that is the likely cause, and says
+   * nothing on runtimes where it is not — a Node process denied by real file
+   * permissions is not helped by being told about `--allow-write`.
+   *
+   * @returns The hint to append to the failure message, or an empty string
+   */
+  #permissionHint(): string {
+    return this.#platform?.() === 'deno'
+      ? ". On Deno this usually means the process was started without '--allow-write'."
+      : '';
   }
 
   /** Disconnect is a no-op for local storage. */
@@ -60,12 +115,17 @@ export class LocalStorageProvider implements StorageProvider {
    * M70c: `runtime.fs.stat(root)` succeeds — a disk that vanished or a
    * permission change is a real, common failure.
    *
-   * @returns `true` when the root directory is reachable
+   * Also reports `false` when the root never proved WRITABLE at `connect()`.
+   * A stat-only probe answered `up` for a root the process could read and not
+   * write, which is exactly the state X8-9 found: uploads failing while health
+   * said everything was fine.
+   *
+   * @returns `true` when the root directory is reachable and writable
    * @since 0.1.0
    */
   async isHealthy(): Promise<boolean> {
     const fs = this.#fs;
-    if (fs === null) {
+    if (fs === null || !this.#writable) {
       return false;
     }
     try {

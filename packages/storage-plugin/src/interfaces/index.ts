@@ -2,8 +2,14 @@
  * Internal types and structural facades for the StoragePlugin.
  *
  * The `StorageProvider` port is the internal adapter interface — NOT exported
- * from `src/index.ts`.  Structural client facades (`IAwsS3Client`, etc.) are
- * exported so consumers can inject a fake SDK for testing.
+ * from `src/index.ts`.
+ *
+ * The exported client types are NOT uniform, and the difference is worth
+ * knowing before injecting one: `IGcsClient` and `IAzureBlobClient` mirror
+ * their SDKs, so a real `@google-cloud/storage` `Storage` or
+ * `@azure/storage-blob` client fits structurally. {@linkcode IS3Backend} does
+ * not — it is this package's own backend surface, so supplying it means
+ * implementing the backend rather than handing over an SDK client (X8-10).
  *
  * @module
  */
@@ -134,8 +140,14 @@ export interface S3ProviderOptions {
   secretAccessKey?: string;
   /** Custom S3-compatible endpoint (R2, MinIO, B2). */
   endpoint?: string;
-  /** Injected structural client (bypasses lazy import). */
-  client?: IAwsS3Client;
+  /**
+   * An implementation of the S3 backend, bypassing the lazy SDK import.
+   *
+   * This is NOT a place to put an `@aws-sdk/client-s3` `S3Client`; see
+   * {@linkcode IS3Backend}. Injecting a real SDK client is refused at
+   * `connect()` with the methods it lacks.
+   */
+  client?: IS3Backend;
 }
 
 /** Options for {@linkcode GcsProvider}. */
@@ -165,12 +177,24 @@ export interface AzureBlobProviderOptions {
 // ── Structural client facades (exported for injection) ────────────────────
 
 /**
- * Minimal S3 client shape for structural injection.
- * Exposes data-methods directly (adaptAwsS3Module builds them from SDK commands).
+ * The S3 BACKEND surface this package drives — not an `@aws-sdk/client-s3`
+ * client.
+ *
+ * Renamed from `IAwsS3Client` because that name, and the docs around it,
+ * promised something it never was: the real SDK's surface is
+ * `send(command)`, so injecting an actual `S3Client` was rejected with
+ * `Injected S3 client is missing required methods` (X8-10). What this declares
+ * is the shape {@linkcode adaptAwsS3Module} PRODUCES from the SDK, so an
+ * application supplying it is implementing the backend, not swapping in a
+ * pre-configured client.
+ *
+ * That makes it useful for a test double or a wholly different backend, and
+ * NOT a way to configure the underlying SDK client — there is no path today for
+ * a custom retry policy, timeout or proxy agent.
  *
  * @since 0.1.0
  */
-export interface IAwsS3Client {
+export interface IS3Backend {
   put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
   get(path: string): Promise<Uint8Array | null>;
   delete(path: string): Promise<boolean>;
@@ -251,6 +275,22 @@ export interface UploadMiddlewareOptions {
   allowedMimeTypes?: readonly string[];
   /** Maximum number of files (default unlimited). */
   maxFiles?: number;
+  /**
+   * Hard ceiling, in bytes, on the request body this middleware will PARSE
+   * (default 50 MB). The effective bound is
+   * `min(maxSize * 2 + framing allowance, maxBodyBytes)`, so raising `maxSize`
+   * raises the bound only up to this ceiling.
+   *
+   * It bounds parsing and the per-part copies the parse produces, NOT the
+   * initial read: the HTTP adapter buffers the whole body into memory before
+   * any middleware runs (`mapWebRequestToFrameworkRequest` calls
+   * `arrayBuffer()`), and `IRequest` exposes no body stream, so no middleware
+   * can decline to read. Bounding the read needs a streaming request body,
+   * which is a framework-level change.
+   *
+   * @since 0.3.0
+   */
+  maxBodyBytes?: number;
 }
 
 // ── Internal provider port (NOT exported from barrel) ─────────────────────

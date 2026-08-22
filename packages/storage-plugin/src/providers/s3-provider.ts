@@ -2,13 +2,16 @@
  * S3Provider — AWS S3 object storage via lazy `npm:@aws-sdk/client-s3` +
  * `npm:@aws-sdk/s3-request-presigner`.
  *
- * Follows the M25 inject-or-lazy pattern: accept an injected
- * {@linkcode IAwsS3Client} facade, or lazily import and adapt the SDK.
+ * Follows the M25 inject-or-lazy pattern with one caveat worth stating
+ * plainly: the injectable {@linkcode IS3Backend} is the surface
+ * {@linkcode adaptAwsS3Module} PRODUCES, not the SDK's own, so injecting it
+ * means implementing the backend rather than supplying a configured
+ * `S3Client` (X8-10).
  *
  * @module
  */
 import type { PutObjectOptions } from '@setu-ts/common';
-import type { IAwsS3Client, StorageProvider } from '../interfaces/index.ts';
+import type { IS3Backend, StorageProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
@@ -55,7 +58,7 @@ export interface S3ProviderOptions {
   /** Custom endpoint (R2, MinIO, B2). */
   endpoint?: string | undefined;
   /** Injected client facade; bypasses the lazy SDK import. */
-  client?: IAwsS3Client | undefined;
+  client?: IS3Backend | undefined;
 }
 
 // ── Validation ────────────────────────────────────────────────────────────
@@ -63,7 +66,7 @@ export interface S3ProviderOptions {
 const REQUIRED_S3_METHODS = ['put', 'get', 'delete', 'head', 'getSignedUrl', 'getStream'] as const;
 
 /**
- * Validates that an injected object matches {@linkcode IAwsS3Client}.
+ * Validates that an injected object matches {@linkcode IS3Backend}.
  *
  * @param client - The candidate client
  * @returns `true` when the shape is valid
@@ -114,7 +117,7 @@ function buildS3Config(options: S3ProviderOptions): Record<string, unknown> {
 }
 
 /**
- * Adapts the AWS SDK module to the structural {@linkcode IAwsS3Client} facade. Pure — unit-tested with a fake
+ * Adapts the AWS SDK module to the structural {@linkcode IS3Backend} facade. Pure — unit-tested with a fake
  * module; the real module is supplied on the lazy path by {@linkcode loadAwsS3Module}.
  *
  * @param mod - The combined SDK module (real or fake)
@@ -124,7 +127,7 @@ function buildS3Config(options: S3ProviderOptions): Record<string, unknown> {
 export function adaptAwsS3Module(
   mod: AwsStorageSdkModule,
   options: S3ProviderOptions,
-): IAwsS3Client {
+): IS3Backend {
   const bucket = options.bucket;
   const s3Mod = mod.s3;
   const presignerMod = mod.presigner;
@@ -242,7 +245,7 @@ export async function loadAwsS3Module(): Promise<AwsStorageSdkModule> {
  * @since 0.1.0
  */
 export class S3Provider implements StorageProvider {
-  #client: IAwsS3Client | null = null;
+  #client: IS3Backend | null = null;
   readonly #options: S3ProviderOptions;
 
   /**
