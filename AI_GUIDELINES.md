@@ -917,7 +917,40 @@ Closes #123
 - Improvements go through the normal PR process.
 - Refactoring must be justified and must not break backward compatibility.
 
-### 16.5 Code Review Checklist
+### 16.5 Responding to Automated Review Comments
+
+**Applies to every AI agent working this repository — Claude Code, ChatGPT/Codex, Roo Code, and any
+future one.** Automated reviewers (CodeRabbit, the GitHub code-quality bot, and any successor) leave
+findings as **inline review comments on specific lines**. Answer them the same way.
+
+1. **Reply to each comment individually, in its own thread**, not in one summary comment on the PR.
+   A finding is anchored to a line; its resolution belongs on that line, where the next reader —
+   human or bot — will look for it. A single bundled reply forces every reviewer to map N answers
+   back onto N threads by hand, and it leaves each thread visibly unanswered.
+
+   ```bash
+   # Reply inside the thread the finding opened:
+   gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment-id>/replies -f body='…'
+   ```
+
+2. **Verify before you agree.** An automated finding is a hypothesis, not a fact. Reproduce it — a
+   probe, a failing test, or a source trace — before changing anything, and say in the reply which
+   you did. Several such findings have been half-right in this repo: correct about the defect and
+   wrong about the mechanism.
+
+3. **Say plainly when a finding is wrong**, in that thread, with the evidence. Do not silently
+   ignore it and do not make a change you cannot justify just to clear a comment. A refuted finding
+   is a useful record.
+
+4. **Each reply states the outcome**: fixed (with the commit), refuted (with the evidence), or
+   deferred (with the reason and the milestone that owns it).
+
+5. **A summary comment is optional and additional** — never a substitute for the per-thread replies.
+   Use one only to state the round's overall result and the gate evidence.
+
+The same rules apply to a human reviewer's inline comments.
+
+### 16.6 Code Review Checklist
 
 Reviewers must verify:
 

@@ -16,8 +16,15 @@ import type { NotificationChannel } from '../interfaces/index.ts';
  * @since 0.1.0
  */
 function toError(reason: unknown): Error {
-  if (reason instanceof Error) {
-    return reason;
+  try {
+    if (reason instanceof Error) {
+      return reason;
+    }
+  } catch {
+    // `instanceof` reads the left operand's prototype, and a revoked `Proxy`
+    // throws from every internal method — so even the type test can reject out
+    // of `sendSettled`, whose contract is that it never does. Fall through to
+    // serialization, which is total.
   }
   // `serializeError` stringifies without throwing. `String(reason)` alone
   // throws for a value with no path to a primitive (a null-prototype object,

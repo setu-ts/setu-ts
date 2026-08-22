@@ -141,8 +141,9 @@ the application's resolved formatter to every site that needs it, and converts e
   the body and content type follow the application.
 - **Why:** X9-6 is the 404 alone, but leaving the other six writing `{ error: … }` would mean an
   application answers in one shape for a missing route and another for a malformed path — the same
-  defect, one site over. The kernel is inside the pipeline for all seven, so the responder is
-  reachable at every one.
+  defect, one site over. Four of the seven run inside the pipeline, where the responder is reachable
+  from `ctx.state`; the other three run before any middleware and reach the same responder through
+  the `ERROR_RESPONDER_BRAND` channel, so every one of the seven answers in the configured format.
 - **Test home:** `packages/kernel/test/integration/error-format-terminal.test.ts` — one app with
   `errorHandler({ format: 'rfc9457' })` asserting a thrown `notFound()` and an unmatched route
   produce **identical** `type`/`title`/`status`/`content-type`, which is the assertion the register

@@ -3093,6 +3093,13 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   opened this way. Do not push or open a PR unprompted, though: finish the milestone, report the
   evidence, and wait for the human to ask. Publishing a branch is outward-facing and their call to
   time.
+- **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
+  the code-quality bot anchor findings to lines; answer in the thread
+  (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with
+  the commit), refuted (with the evidence), or deferred (with the owning milestone). Verify before
+  agreeing — several such findings have been correct about the defect and wrong about the mechanism,
+  and one was wholly refuted. AI_GUIDELINES §16.5 is canonical and binds every agent (Claude,
+  ChatGPT/Codex, Roo).
 - **Record the PR number in the same PR.** The CLAUDE.md "Current status" entry needs the number,
   which does not exist until the PR does, so the order is: commit the status entry as "complete (PR
   pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again.
