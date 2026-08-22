@@ -120,6 +120,27 @@ describe('serializeError never throws (code review, CodeRabbit)', () => {
     });
   }
 
+  it('describes a revoked Proxy as a top-level value instead of throwing', () => {
+    // A revoked `Proxy` throws from EVERY internal method — so `instanceof`,
+    // `String()` and even `Object.prototype.toString` all reject. Nothing is
+    // left to report but the fact itself.
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+
+    const out = serializeError(proxy);
+    expect(out.name).toBe('Error');
+    expect(out.message).toBe('[unstringifiable value]');
+  });
+
+  it('describes a revoked Proxy as an Error cause instead of throwing', () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+
+    const out = serializeError(new Error('outer', { cause: proxy }));
+    expect(out.message).toBe('outer');
+    expect(out.cause?.message).toBe('[unstringifiable value]');
+  });
+
   it('stringifies a symbol rather than treating it as hostile', () => {
     // `String(Symbol('x'))` is specified to return 'Symbol(x)', NOT to throw —
     // unlike `'' + sym`. Pinned so the guard above is never justified by a

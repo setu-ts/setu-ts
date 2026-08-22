@@ -110,9 +110,13 @@ describe('sendSettled never rejects, whatever a channel rejects with (code revie
     // whose entire contract is that it does not reject.
     const service = new NotificationService(
       new Map([
-        ['email', {
-          send: () => Promise.reject(Object.create(null)),
-        } as unknown as NotificationChannel],
+        [
+          'email',
+          {
+            name: 'email',
+            send: () => Promise.reject(Object.create(null)),
+          } satisfies NotificationChannel,
+        ],
       ]),
     );
 
@@ -126,5 +130,36 @@ describe('sendSettled never rejects, whatever a channel rejects with (code revie
     expect(results).toHaveLength(1);
     expect(results[0]?.ok).toBe(false);
     expect(results[0]?.channel).toBe('email');
+  });
+
+  it('reports a channel that rejects with a revoked Proxy', async () => {
+    // A revoked `Proxy` throws from every internal method — including the
+    // `[[GetPrototypeOf]]` that `instanceof` performs — so even the type test
+    // in `toError` can reject out of `sendSettled`.
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+
+    const service = new NotificationService(
+      new Map([
+        [
+          'sms',
+          {
+            name: 'sms',
+            send: () => Promise.reject(proxy),
+          } satisfies NotificationChannel,
+        ],
+      ]),
+    );
+
+    const results = await service.sendSettled({
+      channels: ['sms'],
+      subject: 's',
+      body: 'b',
+      to: { phone: '+10000000000' },
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.ok).toBe(false);
+    expect(results[0]?.channel).toBe('sms');
   });
 });

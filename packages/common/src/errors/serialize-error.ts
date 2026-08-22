@@ -61,7 +61,36 @@ function safeString(value: unknown): string {
   try {
     return String(value);
   } catch {
+    // Fall through to the structural description.
+  }
+  try {
     return Object.prototype.toString.call(value);
+  } catch {
+    // A REVOKED `Proxy` throws from every internal method, including the
+    // `[[Get]]` of `@@toStringTag` this performs — so even the structural
+    // description is unavailable and there is nothing left to report but the
+    // fact itself.
+    return '[unstringifiable value]';
+  }
+}
+
+/**
+ * `value instanceof Error`, but total.
+ *
+ * `instanceof` invokes `[[GetPrototypeOf]]` on its left operand, and a revoked
+ * `Proxy` throws from every internal method — so the plain check throws for a
+ * value this module is documented to accept ("any thrown value"). A value whose
+ * prototype cannot even be read is not an `Error` for our purposes, so a throw
+ * answers `false` and the caller falls back to stringification.
+ *
+ * @param value - Any value
+ * @returns `true` when the value is an `Error` and the check is answerable
+ */
+function isError(value: unknown): value is Error {
+  try {
+    return value instanceof Error;
+  } catch {
+    return false;
   }
 }
 
@@ -78,7 +107,7 @@ function safeString(value: unknown): string {
  * @since 0.1.0
  */
 export function serializeError(value: unknown): SerializedError {
-  if (value instanceof Error) {
+  if (isError(value)) {
     return serializeErrorInstance(value, MAX_CAUSE_DEPTH);
   }
   return { name: 'Error', message: safeString(value) };
@@ -105,7 +134,7 @@ function serializeErrorInstance(error: Error, depth: number): SerializedError {
     out.stack = error.stack;
   }
   if (depth > 0 && error.cause !== undefined) {
-    out.cause = error.cause instanceof Error
+    out.cause = isError(error.cause)
       ? serializeErrorInstance(error.cause, depth - 1)
       : { name: 'Error', message: safeString(error.cause) };
   }
