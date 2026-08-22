@@ -7700,12 +7700,16 @@ Contract notes:
   `IErrorResponder` (via `respondWithError` in `@setu-ts/common`) before `next()`, and every
   short-circuiting site — the kernel's own 404/400/500/503 terminals, the storage, multi-tenancy,
   session, auth, http-security, and feature-flags middleware — answers through it. So with
-  `errorHandler({ format: 'rfc9457' })` registered, every error an application can produce is RFC
-  9457. With **no** `errorHandler` registered, every site falls back to the no-handler shape
-  `{ error, detail? }` — a site cannot answer in its own ad-hoc shape. That fallback is a
-  **different** body from the `default` formatter's `{ statusCode, message, details? }`: it is the
-  framework's pre-formatter shape, written directly by `respondWithError`, and it is what an
-  application without `errorHandler` keeps receiving byte-for-byte.
+  `errorHandler({ format: 'rfc9457' })` registered, every error those sites produce is RFC 9457.
+  **`validation-plugin` is the deliberate exception**: it formats validation failures itself and
+  takes its own `errorFormat` option, so an application configures the two to agree — the CLI
+  templates and `rest-starter` pair `ValidationPlugin({ errorFormat: 'rfc9457' })` with the handler
+  for exactly that reason. With **no** `errorHandler` registered, every responder site falls back to
+  the no-handler shape `{ error, detail? }` — a site cannot answer in its own ad-hoc shape. That
+  fallback is a **different** body from the `default` formatter's
+  `{ statusCode, message, details? }`: it is the framework's pre-formatter shape, written directly
+  by `respondWithError`, and it is what an application without `errorHandler` keeps receiving
+  byte-for-byte.
 - **RFC 9457 compliance**: when `format: 'rfc9457'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (Problem

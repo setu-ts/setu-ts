@@ -1,8 +1,8 @@
 /**
  * gRPC handler-error logging e2e (X7-5).
  *
- * Drives a REAL failing RPC through the setRpcHandler? seam and asserts the
- * built-in logging wrapper caught the handler error, logged it at `error` level
+ * Drives a REAL failing RPC through kernel dispatch (`app.fetch()`) and asserts
+ * the built-in logging wrapper caught the handler error, logged it at `error` level
  * with the procedure name and a serialized error, and rethrew it so Connect's
  * masked wire response is unchanged. A logger registered by a LATER plugin is
  * still seen (the M52b per-call resolution), and a request with no logger

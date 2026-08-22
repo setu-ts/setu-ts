@@ -89,8 +89,11 @@ the application's resolved formatter to every site that needs it, and converts e
   site calls. `errorHandler` publishes the responder before `await next()`, built from the formatter
   and content type it has **already** resolved at factory time. When no responder is present — no
   `errorHandler` registered, or a site running outside it — `respondWithError` writes the
-  framework-default `{ error: title, detail? }` body, which is today's shape family, so an
-  application without `errorHandler` is byte-identical to today.
+  framework-default `{ error: title, detail? }` body, which is today's shape family. **Corrected
+  during review:** that is not byte-identical at every site — §3.11 converges `{ error, message }`
+  to `{ error, detail }` at the multi-tenancy and session sites, a released behaviour change
+  carrying its own CHANGELOG migration note. It IS byte-identical at every site that already
+  answered `{ error }` or `{ error, detail }`.
 - **Why:** the alternative the register offers first — have the kernel terminal and each
   short-circuit **throw**, and let `errorHandler` format — was rejected on measured grounds, not
   taste. `metrics-plugin`'s HTTP collector hardcodes `const status = '500'` on its catch path
@@ -128,10 +131,14 @@ the application's resolved formatter to every site that needs it, and converts e
 
 ### 3.3 Kernel-authored responses
 
-- **Decision:** all seven kernel sites route through `respondWithError`: the 503 drain, the 404
-  unmatched route, the 500 fallback, the 500 upgrade-router failure, the upgrade rejection, and both
-  400 bad-request paths. The status is still written by the kernel, so nothing about pipeline
-  semantics, metrics or hooks changes; only the body and content type follow the application.
+- **Decision:** all seven kernel sites route through `respondWithError`. **Corrected during
+  implementation:** this section assumed every one of them can read the responder from `ctx.state`.
+  Three cannot — the drain `503`, the malformed-request `400`, and the request-lifecycle hooks run
+  BEFORE any middleware, and are reached instead through the `ERROR_RESPONDER_BRAND` channel that
+  §10 records. The seven sites are: the 503 drain, the 404 unmatched route, the 500 fallback, the
+  500 upgrade-router failure, the upgrade rejection, and both 400 bad-request paths. The status is
+  still written by the kernel, so nothing about pipeline semantics, metrics or hooks changes; only
+  the body and content type follow the application.
 - **Why:** X9-6 is the 404 alone, but leaving the other six writing `{ error: … }` would mean an
   application answers in one shape for a missing route and another for a malformed path — the same
   defect, one site over. The kernel is inside the pipeline for all seven, so the responder is
@@ -169,7 +176,7 @@ the application's resolved formatter to every site that needs it, and converts e
   and its (non-)disclosure decision verbatim; only the body assembly moves.
 - **Why:** X4-8's own fix text asks for exactly this — "then grep for the remaining sites" — and the
   register's cross-cutting section calls it "one audit across every site that writes a response
-  without throwing". Converting three of seventeen would leave the milestone's claim untrue while
+  without throwing". Converting three of twenty-two would leave the milestone's claim untrue while
   reading as complete: an application would still get two shapes, just from different plugins. Each
   conversion is a one-line call swap against a single shared function, so the cost is proportional
   to the site count and the risk is not. **This widens the ROADMAP package list (C1) and is flagged
@@ -299,7 +306,7 @@ the application's resolved formatter to every site that needs it, and converts e
 | --------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ERROR_RESPONDER_STATE_KEY` (`common`)                    | `const string`  | Written by `exceptions`' `errorHandler`; read by `respondWithError`. Exported so a third-party error handler can publish a responder too                                                                       |
 | `IErrorResponder` (`common`)                              | interface       | Implemented by `exceptions`; the type of the value under the state key                                                                                                                                         |
-| `ErrorResponseInit` (`common`)                            | interface       | Parameter type of `respondWithError` and `IErrorResponder.respond`; constructed at all seventeen short-circuit sites and the seven kernel sites                                                                |
+| `ErrorResponseInit` (`common`)                            | interface       | Parameter type of `respondWithError` and `IErrorResponder.respond`; constructed at all twenty-two short-circuit sites and the seven kernel sites                                                               |
 | `respondWithError` (`common`)                             | function        | Called by `kernel` (7 sites), `storage-plugin` (7), `multi-tenancy-plugin` (1), `session-plugin` (2), `auth-plugin` (9), `http-security-plugin` (3), `feature-flags-plugin` (1)                                |
 | `serializeError` (`common`)                               | function        | Called by `logger-plugin` (metadata normalization), `kernel` (§3.4 fallback log), `events-plugin` (X2-5), `exceptions` (`logError` cause), `grpc-plugin` (§3.7), `notification-plugin` (`sendSettled` results) |
 | `SerializedError` (`common`)                              | interface       | Return type of `serializeError`; the `error` member of `ChannelSendResult`                                                                                                                                     |
@@ -356,9 +363,9 @@ would be an option whose only effect is to reinstate a defect, and nothing would
 | `common/test/unit/serialize-error.test.ts`                           | `errors/serialize-error.ts`             | `serializeError(new Error('x', { cause: new Error('y') }))` shape; a cyclic cause terminates at the bound; a string input; a `null` input                                                                                                         |
 | `exceptions/test/unit/error-responder-install.test.ts`               | `middleware/error-responder-impl.ts`    | Responder-produced `400` is **not** masked by `maskInternalErrors: true`; `application/problem+json` under `'rfc9457'`, `application/json; charset=utf-8` under `'default'`                                                                       |
 | `exceptions/test/integration/error-format-agreement.test.ts`         | `middleware/error-handler.ts`           | One kernel app: a thrown `notFound()` and an unmatched route produce identical `type`/`title`/`status`/`content-type`, under `'default'`, `'rfc9457'`, and a custom formatter function — the non-default drive the self-review checklist requires |
-| `exceptions/test/integration/short-circuit-format.test.ts`           | every converted middleware              | One app registering all seventeen sites; each rejection carries the configured shape and its original status                                                                                                                                      |
+| `exceptions/test/integration/short-circuit-format.test.ts`           | every converted middleware              | One app registering one route per converted middleware (seven routes covering the twenty-two call sites); each rejection carries the configured shape and its original status                                                                     |
 | `exceptions/test/unit/barrel-exports.test.ts` (extend)               | `src/index.ts`                          | The responder implementation is **not** exported                                                                                                                                                                                                  |
-| `kernel/test/integration/error-format-terminal.test.ts`              | `application/application.ts`            | All seven kernel bodies under a configured formatter; and byte-identical to today with **no** `errorHandler` registered                                                                                                                           |
+| `kernel/test/integration/error-format-terminal.test.ts`              | `application/application.ts`            | All seven kernel bodies under a configured formatter; and unchanged from today with **no** `errorHandler` registered                                                                                                                              |
 | `kernel/test/integration/unhandled-error-logging.test.ts`            | `application/application.ts`            | Real `LoggerPlugin`: a throwing handler emits one `error` line carrying message + stack; the body discloses neither; a 404 emits **no** error line                                                                                                |
 | `storage-plugin/test/integration/upload-error-passthrough.test.ts`   | `middleware/upload-middleware.ts`       | A throwing handler behind the upload middleware answers identically to the same handler without it (the register's control); a genuinely malformed body still answers `400` and logs                                                              |
 | `multi-tenancy-plugin/…`, `session-plugin/…` (extend existing)       | the three converted middlewares         | Status and disclosure text unchanged; body follows the configured format                                                                                                                                                                          |
@@ -401,7 +408,7 @@ deno task release:verify 0.1.0-alpha.8
 
 ## 8. Risks & mitigations
 
-- **The sweep touches seventeen call sites across eight packages.** A converted site that changes
+- **The sweep touches twenty-two call sites across eight packages.** A converted site that changes
   its status or its disclosure text is a security regression, not a formatting change (the CSRF
   rejection deliberately does not say which of session-or-token failed). Mitigation: each conversion
   is asserted against its **existing** test for status and text before the body assertion is added;

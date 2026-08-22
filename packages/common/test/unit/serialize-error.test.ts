@@ -90,3 +90,40 @@ describe('serializeError', () => {
     expect(out.message).toBe('[object Object]');
   });
 });
+
+describe('serializeError never throws (code review, CodeRabbit)', () => {
+  // A serializer on a logging path must never replace the error it was asked to
+  // describe with a failure of its own. `String(value)` throws for a value with
+  // no path to a primitive, and both shapes below are legal thrown values and
+  // legal `Error` causes.
+  const hostile: [string, unknown][] = [
+    ['a null-prototype object', Object.create(null)],
+    ['an object whose toString throws', {
+      toString() {
+        throw new Error('nope');
+      },
+    }],
+  ];
+
+  for (const [label, value] of hostile) {
+    it(`describes ${label} instead of throwing`, () => {
+      const out = serializeError(value);
+      expect(out.name).toBe('Error');
+      expect(typeof out.message).toBe('string');
+      expect(out.message.length).toBeGreaterThan(0);
+    });
+
+    it(`describes ${label} as an Error cause instead of throwing`, () => {
+      const out = serializeError(new Error('outer', { cause: value }));
+      expect(out.message).toBe('outer');
+      expect(typeof out.cause?.message).toBe('string');
+    });
+  }
+
+  it('stringifies a symbol rather than treating it as hostile', () => {
+    // `String(Symbol('x'))` is specified to return 'Symbol(x)', NOT to throw —
+    // unlike `'' + sym`. Pinned so the guard above is never justified by a
+    // claim that is not true.
+    expect(serializeError(Symbol('boom')).message).toBe('Symbol(boom)');
+  });
+});

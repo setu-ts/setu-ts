@@ -40,11 +40,37 @@ export interface SerializedError {
 const MAX_CAUSE_DEPTH = 10;
 
 /**
+ * Stringifies any value without throwing.
+ *
+ * `String(value)` throws a `TypeError` for a value with no path to a primitive
+ * — a null-prototype object (`Object.create(null)`) has neither `toString` nor
+ * `valueOf`, and an object may define a `toString` that throws. Both can reach
+ * here, because `serializeError` accepts any thrown value and any `cause`.
+ * A serializer that runs on logging paths must never replace the error it was
+ * asked to describe with a failure of its own: `ConsoleLogger` normalizes raw
+ * `Error` metadata through this, so a throw here escapes `logger.error(...)`
+ * and crashes the caller that was merely reporting a problem.
+ *
+ * (A `symbol` is NOT such a value — `String(Symbol('x'))` is specified to
+ * return `'Symbol(x)'` rather than throw, unlike `'' + sym`.)
+ *
+ * @param value - Any value
+ * @returns Its string form, or a structural description when it has none
+ */
+function safeString(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+/**
  * Serializes any thrown value to a plain, serializable object.
  *
  * An `Error` yields `{ name, message, stack?, cause? }` with the `cause` chain
  * followed to a bounded depth. A non-`Error` value (a string, a number, a
- * plain object) yields `{ name: 'Error', message: String(value) }` — the same
+ * plain object) yields `{ name: 'Error', message: <stringified> }` — the same
  * shape, so a caller can always read `name` and `message` without narrowing.
  *
  * @param value - The thrown value
@@ -55,7 +81,7 @@ export function serializeError(value: unknown): SerializedError {
   if (value instanceof Error) {
     return serializeErrorInstance(value, MAX_CAUSE_DEPTH);
   }
-  return { name: 'Error', message: String(value) };
+  return { name: 'Error', message: safeString(value) };
 }
 
 /**
@@ -81,7 +107,7 @@ function serializeErrorInstance(error: Error, depth: number): SerializedError {
   if (depth > 0 && error.cause !== undefined) {
     out.cause = error.cause instanceof Error
       ? serializeErrorInstance(error.cause, depth - 1)
-      : { name: 'Error', message: String(error.cause) };
+      : { name: 'Error', message: safeString(error.cause) };
   }
   return out;
 }

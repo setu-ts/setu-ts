@@ -20,6 +20,8 @@ import { requireAuth } from '@setu-ts/auth-plugin';
 import { createUploadMiddleware } from '@setu-ts/storage-plugin';
 import { csrfMiddleware, requestSizeMiddleware } from '@setu-ts/http-security-plugin';
 import { csrfFormMiddleware } from '@setu-ts/session-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IPlugin, ISession } from '@setu-ts/common';
 
 import { errorHandler } from '../../src/middleware/error-handler.ts';
 
@@ -30,6 +32,37 @@ const MALFORMED = 'not a real multipart body';
 const MALFORMED_HEADERS = { 'content-type': 'multipart/form-data' };
 
 /**
+ * A minimal `ISessionService` whose session carries no CSRF token.
+ *
+ * `csrfFormMiddleware` reaches its `403` only when a session RESOLVES and holds
+ * no token; with no `CAPABILITIES.SESSION` provider at all, `getSession` throws
+ * and the site answers `500`. Faithful for the case driven here — every reader
+ * is `readCsrfToken`, which asks for one key and accepts `undefined`.
+ */
+function sessionStubPlugin(): IPlugin {
+  const session: ISession = {
+    id: 'stub',
+    isNew: true,
+    get: () => undefined,
+    set: () => {},
+    has: () => false,
+    delete: () => false,
+    clear: () => {},
+    regenerate: () => Promise.resolve(),
+    destroy: () => Promise.resolve(),
+    toJSON: () => ({}),
+  };
+  return {
+    name: 'session-stub',
+    version: '0.0.0',
+    provides: [CAPABILITIES.SESSION],
+    register(ctx) {
+      ctx.services.register(CAPABILITIES.SESSION, { from: () => session });
+    },
+  };
+}
+
+/**
  * Builds a started app registering every converted site behind its own path,
  * with `errorHandler` at the configured format.
  */
@@ -37,6 +70,7 @@ async function allSitesApp(format: 'default' | 'rfc9457'): Promise<IKernelApplic
   const app = await createTestApp({
     plugins: [
       RuntimePlugin(),
+      sessionStubPlugin(),
       MultiTenancyPlugin({ resolver: 'header', required: true }),
       FeatureFlagsPlugin({
         provider: 'memory',
@@ -140,6 +174,18 @@ describe('every converted short-circuit site answers in the configured format (X
       expect(csrf.status).toBe(403);
       expect(csrf.body.title).toBe('Forbidden');
 
+      // The session form-CSRF site — registered above, and previously driven by
+      // neither test despite this suite's "every converted site" contract
+      // (code review). A POST with no session carries no synchronizer token.
+      const formCsrf = await drive(app, '/form-csrf', {
+        method: 'POST',
+        headers: { ...TENANT },
+      });
+      expect(formCsrf.status).toBe(403);
+      expect(formCsrf.contentType).toBe('application/problem+json');
+      expect(formCsrf.body.title).toBe('Forbidden');
+      expect(formCsrf.body.detail).toBe('CSRF token validation failed');
+
       const auth = await drive(app, '/auth', { headers: TENANT });
       expect(auth.status).toBe(401);
       expect(auth.body.title).toBe('Unauthorized');
@@ -174,6 +220,33 @@ describe('every converted short-circuit site answers in the configured format (X
       const flag = await drive(app, '/flagged', { headers: TENANT });
       expect(flag.status).toBe(404);
       expect(flag.body.message).toBe('Not Found');
+
+      // The three sites the default-format test previously omitted, so a
+      // formatter regression on any of them passed this suite (code review).
+      const size = await drive(app, '/size', {
+        headers: { ...TENANT, 'content-length': '100' },
+      });
+      expect(size.status).toBe(413);
+      expect(size.contentType).toBe('application/json; charset=utf-8');
+      expect(size.body.message).toBe('Payload Too Large');
+      expect(String((size.body.details as Record<string, unknown>).detail))
+        .toContain('exceeds the maximum allowed size');
+
+      const csrf = await drive(app, '/csrf', {
+        method: 'POST',
+        headers: { ...TENANT, origin: 'https://evil.example' },
+      });
+      expect(csrf.status).toBe(403);
+      expect(csrf.body.message).toBe('Forbidden');
+      expect(csrf.body.details).toEqual({ detail: 'Cross-origin request not allowed' });
+
+      const formCsrf = await drive(app, '/form-csrf', {
+        method: 'POST',
+        headers: { ...TENANT },
+      });
+      expect(formCsrf.status).toBe(403);
+      expect(formCsrf.body.message).toBe('Forbidden');
+      expect(formCsrf.body.details).toEqual({ detail: 'CSRF token validation failed' });
 
       const auth = await drive(app, '/auth', { headers: TENANT });
       expect(auth.status).toBe(401);

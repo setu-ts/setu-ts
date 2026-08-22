@@ -16,7 +16,15 @@ import type { NotificationChannel } from '../interfaces/index.ts';
  * @since 0.1.0
  */
 function toError(reason: unknown): Error {
-  return reason instanceof Error ? reason : new Error(String(reason));
+  if (reason instanceof Error) {
+    return reason;
+  }
+  // `serializeError` stringifies without throwing. `String(reason)` alone
+  // throws for a value with no path to a primitive (a null-prototype object,
+  // or one whose `toString` throws), which a channel is free to reject with —
+  // and that throw would escape `sendSettled`, whose whole contract is that it
+  // never rejects (M70f code review).
+  return new Error(serializeError(reason).message);
 }
 
 /** One per-channel outcome carrying the original failure, before wrapping. */

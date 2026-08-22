@@ -236,9 +236,10 @@ All notable changes to this project are documented here. The format follows
   degrades silently). The response body stays opaque — the message is not disclosed to the client.
 - **A raw `Error` in log metadata no longer serializes to `{}` (X2-5)** (M70f). The console and pino
   loggers normalize any `Error` value in merged metadata through `serializeError` before redaction,
-  and the two known raw-`Error` call sites (`events-plugin`'s handler failure and `errorHandler`'s
-  `cause`) now serialize explicitly, so the mistake cannot recur through any call site — including a
-  third-party `ILogger`.
+  so **any** call site is safe on those two loggers, and the two known raw-`Error` call sites
+  (`events-plugin`'s handler failure and `errorHandler`'s `cause`) serialize explicitly, so those
+  stay correct on a third-party `ILogger` too. A third-party logger does not normalize, so a NEW
+  call site handing it a raw `Error` can still render `{}` — pass `serializeError(err)` there.
 - **A gRPC handler error is now logged (X7-5)** (M70f). `grpc-plugin` wraps each application handler
   so a thrown or rejected error is logged at `error` level with the procedure name and a serialized
   error, then rethrown — the masked wire response is unchanged. The logger is resolved at call time,

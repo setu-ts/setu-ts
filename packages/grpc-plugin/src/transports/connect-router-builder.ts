@@ -295,11 +295,8 @@ function guardProcedure(
   typeName: string,
   method: string,
   fn: (...args: unknown[]) => unknown,
-  resolveLogger: (() => ILogger | undefined) | undefined,
+  resolveLogger: () => ILogger | undefined,
 ): (...args: unknown[]) => unknown {
-  if (resolveLogger === undefined) {
-    return fn;
-  }
   const procedure = `${typeName}/${method}`;
   // Logs the error (when a logger resolves) and rethrows it so the masked
   // wire response is unchanged. Used for the synchronous, the thenable-
