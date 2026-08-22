@@ -12,6 +12,9 @@ import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { IUnitOfWork } from '../../src/interfaces/index.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
+import { createDrizzleDatabase, getDrizzleDatabase } from '../../src/index.ts';
+import { DRIZZLE_QUERY_HANDLE } from '../../src/query/drizzle-query.ts';
+import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
 
 describe('DatabaseService — CRUD read-back and logging coverage', () => {
   let adapter: MemoryAdapter;
@@ -220,6 +223,88 @@ describe('DatabaseService — CRUD read-back and logging coverage', () => {
       // The required members still route through the logging wrapper rather
       // than being handed straight back, so the spread has not bypassed it.
       expect(wrapped).not.toBe(extended);
+    });
+
+    it('keeps a class-based data source working, private state included', async () => {
+      // The spread copies own enumerable properties only, so a prototype
+      // member is NOT carried. That is deliberate: `Object.create(ds)` would
+      // carry it but call it with `this` bound to the wrapper, and a method
+      // reading a `#private` field then throws — the M52c detached-method
+      // defect. What the contract actually guarantees is the six REQUIRED
+      // members, and each override calls `ds.method(...)`, so the receiver and
+      // its private state survive. This pins both halves.
+      const base = createMemoryDataSource(adapter, 'Proto');
+
+      class ProtoDataSource {
+        readonly #marker = 'private-state';
+        findAll = base.findAll;
+        findById = base.findById;
+        create = base.create;
+        update = base.update;
+        delete = base.delete;
+        count = base.count;
+        /** Prototype-backed, and reads private state — the hazardous shape. */
+        describeShape(): string {
+          return `prototype:${this.#marker}`;
+        }
+      }
+      const source = new ProtoDataSource();
+
+      const logging = new DatabaseService(
+        adapter as unknown as IDatabaseAdapter,
+        () => source as unknown as DataSource,
+        'memory',
+        { logQueries: true },
+        { debug: () => {} },
+      );
+      const repo = logging.getRepository<{ id: string; qty: number }>('Proto');
+
+      // Every required member still routes through the wrapper to the real
+      // instance, so a class-based source is fully usable with logging on.
+      await repo.create({ id: 'x1', qty: 4 });
+      expect((await repo.findById('x1'))?.qty).toBe(4);
+      expect(await repo.count()).toBe(1);
+
+      const wrapped = (repo as unknown as {
+        _dataSource: { describeShape?: () => string };
+      })._dataSource;
+      // The prototype-only extra is not carried — documented, not accidental.
+      expect(wrapped.describeShape).toBeUndefined();
+      // And it is still callable on the instance itself, which is what proves
+      // the member exists and that only the WRAPPER declines to forward it.
+      expect(source.describeShape()).toBe('prototype:private-state');
+    });
+  });
+
+  describe('the outer Drizzle query scope', () => {
+    it("refuses an adapter handle reporting 'transaction' scope", () => {
+      // The mirror of the refusal M69's review added to `UnitOfWork`: this one
+      // guards the OUTER service. An adapter whose handle reports a
+      // transaction-scoped query object would hand a caller a native builder
+      // bound to a transaction that has already settled, so it is refused by
+      // name rather than returned.
+      const configured = createDrizzleDatabase(
+        createFakeDrizzleInstance(),
+        (database, work) => database.transaction(work),
+      );
+      const misreporting = {
+        ...(adapter as unknown as Record<string, unknown>),
+        [DRIZZLE_QUERY_HANDLE]: () => ({
+          database: configured,
+          query: {},
+          scope: 'transaction' as const,
+        }),
+      } as unknown as IDatabaseAdapter;
+
+      const service = new DatabaseService(
+        misreporting,
+        (entity) => createMemoryDataSource(adapter, entity),
+        'drizzle',
+      );
+
+      expect(() => getDrizzleDatabase(service, configured)).toThrow(
+        "Drizzle query access expected 'outer' scope but received 'transaction' scope.",
+      );
     });
   });
 });

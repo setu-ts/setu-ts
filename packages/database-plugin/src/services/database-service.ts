@@ -174,16 +174,26 @@ export class DatabaseService implements IDatabaseService {
     const now = this._now;
 
     return {
-      // Spread FIRST, so a member `IDataSource` does not REQUIRE — an optional
-      // method added to the contract later, or an adapter-specific extra —
-      // passes through instead of being silently dropped. The six required
-      // methods then override it below.
+      // Spread FIRST, so an OWN ENUMERABLE member `IDataSource` does not
+      // REQUIRE — an optional method added to the contract later, or an
+      // adapter-specific extra — passes through instead of being silently
+      // dropped. The six required methods then override it below.
       //
       // Hand-listing every member is what let the `count` filter go missing:
       // an object literal satisfies `DataSource` with each optional member
       // absent, so the type checker cannot see the omission and the wrapper
-      // only diverges when logging is on. This closes that class, not just
-      // the one instance.
+      // only diverges when logging is on.
+      //
+      // A member reached through a PROTOTYPE is deliberately not carried, and
+      // the obvious fix is worse than the gap. `Object.create(ds)` delegates
+      // every unlisted member, but calls it with `this` bound to the wrapper
+      // rather than to `ds` — measured: a class method reading a `#private`
+      // field then throws `TypeError: Cannot read private member … from an
+      // object whose class did not declare it`. That is the M52c detached-
+      // method defect, and both loggers `logger-plugin` ships are written with
+      // `#` fields. The six REQUIRED members are unaffected either way: each
+      // override below calls `ds.method(...)`, so a class-based data source
+      // keeps its receiver and its private state (pinned by a test).
       ...ds,
       async findAll(query) {
         const start = now();
