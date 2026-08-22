@@ -34,9 +34,9 @@ export type {
   AzureStorageOptions,
   GcsProviderOptions,
   GcsStorageOptions,
-  IAwsS3Client,
   IAzureBlobClient,
   IGcsClient,
+  IS3Backend,
   LocalStorageOptions,
   LocalStorageProviderOptions,
   MemoryStorageOptions,
@@ -51,4 +51,4 @@ export type {
 
 // ── Re-export common contracts ────────────────────────────────────────────
 
-export type { IStorage, SignedUrlOptions } from '@setu-ts/common';
+export type { IStorage, PutObjectOptions, SignedUrlOptions } from '@setu-ts/common';

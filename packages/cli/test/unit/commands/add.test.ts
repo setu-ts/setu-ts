@@ -231,3 +231,30 @@ describe('runAddCommand', () => {
     }
   });
 });
+
+describe('setu add — permission notes (X8-9)', () => {
+  it('should tell a storage installer that the local provider needs --allow-write', async () => {
+    // X8-9: with `STORAGE_PROVIDER=local`, an otherwise untouched scaffolded
+    // project answered every upload with a parse failure while `/health` said
+    // `up`, because the generated `start` task requests `--allow-read` and not
+    // `--allow-write`. The provider now refuses to connect with the flag named;
+    // this is the earlier of the two signals.
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+
+    expect(await h.run(['storage'])).toBe(0);
+
+    const output = h.out.join('\n');
+    expect(output).toContain('--allow-write');
+    expect(output).toContain("'local' provider");
+  });
+
+  it('should say nothing about permissions for a package that needs none', async () => {
+    // The note must not become boilerplate printed after every add, or it stops
+    // being read.
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+
+    expect(await h.run(['auth'])).toBe(0);
+
+    expect(h.out.join('\n')).not.toContain('--allow-write');
+  });
+});

@@ -37,7 +37,9 @@ import { QueuePlugin } from '@setu-ts/queue-plugin';
 app.register(QueuePlugin({
   adapter: 'rabbitmq',
   url: 'amqp://localhost:5672',
-  queues: { default: 'tasks' },
+  // Queue names are derived per job name from this prefix
+  // (`<prefix>.<name>.ready` / `.delay` / `.dead`); there is no `queues` map.
+  prefix: 'he.queue',
 }));
 ```
 
@@ -73,6 +75,7 @@ app.register(QueuePlugin({ adapter: 'memory', name: 'background' }));
 
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
+import type { IQueue } from '@setu-ts/common';
 
 const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
 
@@ -83,20 +86,43 @@ await queue.add('send-email', { to: 'user@example.com' });
 await queue.add('send-email', { to: 'user@example.com' }, { delayMs: 5000 });
 
 // Job with retry limit
-await queue.add('process-data', data, { maxAttempts: 5 });
+await queue.add('process-data', { rows: 100 }, { maxAttempts: 5 });
 ```
 
 ### Processing Jobs
 
 ```typescript
-queue.process('send-email', async (job) => {
-  await emailService.send(job.data);
-}, { concurrency: 3 });
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger, IMailer, IQueue } from '@setu-ts/common';
+
+const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
+const mailer = ctx.services.get<IMailer>(CAPABILITIES.MAIL);
+const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+
+interface SendEmail {
+  to: string;
+}
+
+queue.process<SendEmail>('send-email', async (job) => {
+  await mailer.send({ to: job.data.to, subject: 'Welcome', text: 'Hello' });
+}, {
+  concurrency: 3,
+  // Invoked once when a job has exhausted its attempts, immediately before it
+  // is dead-lettered — the only programmatic notice that work was abandoned.
+  onFailed: (job, error) => {
+    logger.error('job dead-lettered', { id: job.id, name: job.name, error: String(error) });
+  },
+});
 ```
 
 ### Recurring Jobs
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IQueue } from '@setu-ts/common';
+
+const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
+
 await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midnight
 ```
 

@@ -252,7 +252,50 @@ export async function runAddCommand(
   // `minimumDependencyAge` (D1): this pin is the CLI's own version, which on
   // release day is younger than the policy allows.
   deps.log(`  deno install --min-dep-age 0`);
+  printPermissionNote(specifier, deps.log);
   return EXIT_OK;
+}
+
+/**
+ * Extra permissions a package needs that the generated `start` task does not
+ * already request, keyed by specifier.
+ *
+ * A NOTE rather than an automatic edit to `denoPermissions`: `--allow-write` is
+ * needed only by the storage plugin's `local` provider, and granting filesystem
+ * write to every project that installs an S3-backed capability would be a
+ * security regression traded for an ergonomics one. The generated task's
+ * contract is that it stays least-privilege.
+ */
+const PERMISSION_NOTES: ReadonlyMap<string, readonly string[]> = new Map([[
+  '@setu-ts/storage-plugin',
+  [
+    "  The 'local' provider writes files, so a Deno project needs --allow-write",
+    '  in its start task. Cloud providers (s3/gcs/azure/b2) do not.',
+  ],
+]]);
+
+/**
+ * Prints the permission note for a package that needs one.
+ *
+ * X8-9: with `STORAGE_PROVIDER=local` an otherwise untouched scaffolded project
+ * answered every upload with a parse failure and reported `storage: up`,
+ * because the generated task requests `--allow-read` but not `--allow-write`.
+ * The provider now refuses to connect with the flag named; this says so before
+ * the developer ever runs it.
+ *
+ * @param specifier - The package that was added
+ * @param log - Output sink
+ */
+function printPermissionNote(specifier: string, log: (message: string) => void): void {
+  const note = PERMISSION_NOTES.get(specifier);
+  if (note === undefined) {
+    return;
+  }
+  log('');
+  log('Note:');
+  for (const line of note) {
+    log(line);
+  }
 }
 
 /**

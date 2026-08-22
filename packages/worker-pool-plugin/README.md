@@ -44,6 +44,9 @@ level with `defineWorkerTask` from the runtime package's `./worker` subpath:
 // tasks/resize-image.ts — runs on a worker thread
 import { defineWorkerTask } from '@setu-ts/runtime/worker';
 
+// Whatever CPU-bound work belongs on a thread; your application owns it.
+declare function resize(input: Uint8Array): Promise<Uint8Array>;
+
 defineWorkerTask<Uint8Array, Uint8Array>(async (imageBytes) => {
   return await resize(imageBytes);
 });
@@ -69,6 +72,8 @@ const app = createApplication({
   ],
 });
 await app.start();
+
+const imageBytes = new Uint8Array([137, 80, 78, 71]);
 
 const pool = app.services.get<IWorkerPool>(CAPABILITIES.WORKER_POOL);
 const thumb = await pool.run<Uint8Array, Uint8Array>(

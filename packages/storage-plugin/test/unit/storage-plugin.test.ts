@@ -161,10 +161,18 @@ describe('StoragePlugin', () => {
 });
 
 describe('StoragePlugin health indicator (M70c)', () => {
+  /**
+   * A file system whose ROOT may be present or gone. It implements the write
+   * path too, because `LocalStorageProvider.connect()` now proves the root is
+   * writable (X8-9) — a fake offering only `stat` would fail to connect at all.
+   */
   function makeFs(rootPresent: boolean): import('@setu-ts/common').IFileSystem {
     const fs: Record<string, unknown> = {
       stat: (path: string) =>
         rootPresent ? Promise.resolve({ size: 0 }) : Promise.reject(new Error(`ENOENT: ${path}`)),
+      mkdir: () => Promise.resolve(),
+      writeFile: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
     };
     return fs as unknown as import('@setu-ts/common').IFileSystem;
   }

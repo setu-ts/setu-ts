@@ -250,6 +250,12 @@ describe('memory and local providers — accepted and not persisted (X8-6)', () 
       mkdir: () => Promise.resolve(),
       readFile: (path: string) => Promise.resolve(written.get(path) ?? new Uint8Array()),
       stat: () => Promise.resolve({ size: 0 }),
+      // `connect()` writes and removes a probe file to prove the root is
+      // writable (X8-9), so the probe must not linger in `written`.
+      rm: (path: string) => {
+        written.delete(path);
+        return Promise.resolve();
+      },
     } as unknown as IFileSystem;
     const provider = new LocalStorageProvider(fs, { rootDir: '/data' });
     await provider.connect();

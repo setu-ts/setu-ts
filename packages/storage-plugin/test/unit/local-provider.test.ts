@@ -10,8 +10,11 @@ import { expect } from '@std/expect';
 import { LocalStorageProvider } from '../../src/providers/local-provider.ts';
 
 describe('LocalStorageProvider', () => {
-  function makeFakeFs() {
+  function makeFakeFs(options?: { readonly writable?: boolean }) {
     const store = new Map<string, Uint8Array>();
+    /** Directories `mkdir` has created — a real fs reports these to `stat`. */
+    const dirs = new Set<string>();
+    const writable = options?.writable ?? true;
 
     return {
       fs: {
@@ -21,10 +24,25 @@ describe('LocalStorageProvider', () => {
           return Promise.resolve(data);
         },
         writeFile(path: string, data: Uint8Array) {
+          // A real file system refuses the write, not the stat, when the
+          // process lacks write permission — modelling it any other way would
+          // hide X8-9 rather than reproduce it.
+          if (!writable) {
+            return Promise.reject(
+              new Error(`PermissionDenied: Requires write access to "${path}"`),
+            );
+          }
           store.set(path, data);
           return Promise.resolve();
         },
         stat(path: string) {
+          // Directories exist independently of any file stored under them, so
+          // `stat('/root')` must succeed once the root has been created. The
+          // previous fake reported ENOENT for every directory, which is not
+          // how a file system behaves.
+          if (dirs.has(path)) {
+            return { size: 0 } as unknown as import('@setu-ts/common').StatResult;
+          }
           if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
           return {
             size: store.get(path)!.length,
@@ -41,17 +59,26 @@ describe('LocalStorageProvider', () => {
         readdir(_path: string): Promise<readonly string[]> {
           return Promise.resolve([]);
         },
-        mkdir(_path: string, _options?: { readonly recursive?: boolean }): Promise<void> {
+        mkdir(path: string, _options?: { readonly recursive?: boolean }): Promise<void> {
+          if (!writable) {
+            return Promise.reject(
+              new Error(`PermissionDenied: Requires write access to "${path}"`),
+            );
+          }
+          dirs.add(path);
           return Promise.resolve();
         },
       } as unknown as import('@setu-ts/common').IFileSystem,
       store,
+      dirs,
     };
   }
 
-  it('connect throws when runtime.fs is absent', () => {
+  it('connect rejects when runtime.fs is absent', async () => {
+    // A rejection rather than a synchronous throw, so a caller using `.catch()`
+    // on this `Promise`-typed method reaches it (the M52b/M52c defect class).
     const provider = new LocalStorageProvider(undefined, {});
-    expect(() => provider.connect()).toThrow(
+    await expect(provider.connect()).rejects.toThrow(
       'LocalStorageProvider requires runtime.fs which is not available on this runtime',
     );
   });

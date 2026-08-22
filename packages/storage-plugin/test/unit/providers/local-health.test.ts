@@ -4,10 +4,17 @@ import type { IFileSystem } from '@setu-ts/common';
 import { LocalStorageProvider } from '../../../src/providers/local-provider.ts';
 
 /**
- * A minimal fs whose `stat` succeeds for paths in `present` and throws for
- * everything else — enough to exercise the `stat(root)` probe.
+ * An fs whose `stat` succeeds for paths in `present` and throws for everything
+ * else, exercising the `stat(root)` probe.
+ *
+ * It also implements the write path, because `connect()` now proves the root is
+ * writable (X8-9). `writable: false` reproduces the case that made X8-9 hard to
+ * see: the root READS fine, so a stat-only probe reported `up` while every
+ * upload failed.
  */
-function makeFs(present: ReadonlySet<string>): IFileSystem {
+function makeFs(present: ReadonlySet<string>, writable = true): IFileSystem {
+  const denied = (path: string) =>
+    Promise.reject(new Error(`PermissionDenied: Requires write access to "${path}"`));
   const fs: Record<string, unknown> = {
     stat: (path: string) => {
       if (!present.has(path)) {
@@ -15,6 +22,9 @@ function makeFs(present: ReadonlySet<string>): IFileSystem {
       }
       return Promise.resolve({ size: 0 });
     },
+    mkdir: (path: string) => (writable ? Promise.resolve() : denied(path)),
+    writeFile: (path: string) => (writable ? Promise.resolve() : denied(path)),
+    rm: () => Promise.resolve(),
   };
   return fs as unknown as IFileSystem;
 }
@@ -39,6 +49,52 @@ describe('LocalStorageProvider health (M70c)', () => {
   it('is unreachable before connect when fs is absent', async () => {
     const provider = new LocalStorageProvider(undefined, { rootDir: '/data' });
     expect(provider.isReady()).toBe(false);
+    expect(await provider.isHealthy()).toBe(false);
+  });
+
+  it('refuses to connect when the root is readable but NOT writable (X8-9)', async () => {
+    // The exact state a scaffolded Deno project was in: `--allow-read` granted,
+    // `--allow-write` not. Every upload failed and `/health` said `up`.
+    const provider = new LocalStorageProvider(
+      makeFs(new Set(['/data']), false),
+      { rootDir: '/data' },
+      () => 'deno',
+    );
+
+    await expect(provider.connect()).rejects.toThrow("cannot write to '/data'");
+  });
+
+  it('names --allow-write on Deno, and does not on other runtimes', async () => {
+    const denoProvider = new LocalStorageProvider(
+      makeFs(new Set(['/data']), false),
+      { rootDir: '/data' },
+      () => 'deno',
+    );
+    await expect(denoProvider.connect()).rejects.toThrow('--allow-write');
+
+    // On Node the same failure is a real file permission, which that flag does
+    // not address — naming it there would send the reader down a dead end.
+    const nodeProvider = new LocalStorageProvider(
+      makeFs(new Set(['/data']), false),
+      { rootDir: '/data' },
+      () => 'node',
+    );
+    const error = await nodeProvider.connect().then(
+      () => null,
+      (raised: unknown) => raised as Error,
+    );
+    expect(error).not.toBeNull();
+    expect(error?.message).toContain("cannot write to '/data'");
+    expect(error?.message).not.toContain('--allow-write');
+  });
+
+  it('reports unhealthy when the root never proved writable', async () => {
+    // A stat-only probe answered `up` here, which is what hid the cause.
+    const provider = new LocalStorageProvider(makeFs(new Set(['/data']), false), {
+      rootDir: '/data',
+    });
+    await provider.connect().catch(() => {});
+
     expect(await provider.isHealthy()).toBe(false);
   });
 });
