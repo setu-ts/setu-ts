@@ -265,7 +265,6 @@ package fits the plugin architecture.
 | `ScheduledJob`               | interface |
 | `ScheduleOptions`            | interface |
 | `SerializedError`            | interface |
-| `ServiceImpl`                | interface |
 | `ServiceInstance`            | interface |
 | `SignedUrlOptions`           | interface |
 | `Some`                       | interface |

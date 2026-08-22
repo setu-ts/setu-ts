@@ -474,8 +474,10 @@ precedent).
   `IGrpcService.addService`'s `implementation` moved from `Partial<ServiceImpl>` to `unknown`,
   because an index-signature type rejects a class instance while Connect accepts one — which
   `withErrorLogging` needed, since it resolves procedures by property lookup rather than by
-  enumerating own properties. `ServiceImpl` is left with no reader and is deprecated rather than
-  removed (AI_GUIDELINES §9.2). Both are recorded in `CHANGELOG.md` and `PUBLIC_API.md`.
+  enumerating own properties. `ServiceImpl` is left with no reader and is **removed** — the project
+  is in prerelease, so a dead export is deleted rather than carried as deprecated surface
+  (maintainer's call, which supersedes AI_GUIDELINES §9.2 for the alpha). Both are recorded in
+  `CHANGELOG.md` and `PUBLIC_API.md`.
 
 Two further items were settled by measurement during implementation and review:
 

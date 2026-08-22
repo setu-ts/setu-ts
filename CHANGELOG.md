@@ -226,10 +226,10 @@ All notable changes to this project are documented here. The format follows
   live on the prototype rather than as own properties — although Connect accepts one, so a
   class-based service implementation could not be passed without a cast. Widening is
   source-compatible for callers: an implementation that type-checked before still does.
-  `ServiceImpl` is consequently **deprecated** — it now has no reader anywhere in the framework —
-  and is retained only because removing a published export is breaking (AI_GUIDELINES §9.2).
-  **Migration:** drop any `as Partial<ServiceImpl>` cast or `ServiceImpl` annotation at an
-  `addService` call site and pass the implementation directly.
+  **`ServiceImpl` is removed** from `@setu-ts/common` — the widening left it with no reader anywhere
+  in the framework, and while the project is in prerelease a dead export is deleted rather than
+  carried as deprecated surface. **Migration:** drop any `as Partial<ServiceImpl>` cast or
+  `ServiceImpl` annotation at an `addService` call site and pass the implementation directly.
 - **An unhandled request error is now logged by the kernel (X11-2)** (M70f). The fallback `500` path
   previously discarded the error and logged nothing even with `LoggerPlugin` registered; it now
   reports the message and stack through `CAPABILITIES.LOGGER` (guarded so a missing or broken logger
