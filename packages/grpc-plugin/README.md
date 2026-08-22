@@ -1,8 +1,11 @@
 # @setu-ts/grpc-plugin
 
 gRPC plugin for Setu-TS — enables co-serving of gRPC, Connect, and gRPC-Web protocols on the same
-port as ordinary Hono routes. The plugin registers an `IGrpcService` under `CAPABILITIES.GRPC` and
-installs a fetch handler into the HTTP adapter's RPC interceptor seam.
+port as ordinary Hono routes. The plugin registers an `IGrpcService` under `CAPABILITIES.GRPC`; the
+kernel resolves that service from the registry and dispatches RPC traffic itself — after the
+middleware pipeline, before route matching — so gRPC rides the same auth, metrics, and shutdown
+drain as every other route. No adapter seam is involved: `GrpcService.available` is unconditionally
+`true`, and `Application.inject()` reaches gRPC handlers exactly as it reaches ordinary routes.
 
 ## Features
 
@@ -61,6 +64,10 @@ The `GrpcPlugin` accepts optional configuration:
 - `health`: Whether to enable gRPC Health v1 service (defaults to `true`)
 - `services`: Initial services to register at startup
 - `connectModule`: Injected Connect runtime module (for testing)
+- `interceptors`: Application Connect interceptors, forwarded to Connect router construction
+  (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a
+  handler throw is logged before an application interceptor observes it. Absent: none installed
+  (defaults to `[]`)
 
 ```typescript
 GrpcPlugin({
@@ -70,6 +77,7 @@ GrpcPlugin({
   services: [
     { definition: MyServiceDescriptor, implementation: MyServiceImpl },
   ],
+  interceptors: [myInterceptor],
 });
 ```
 
@@ -94,11 +102,11 @@ HTTP has taken out of rotation. A `service` naming something this server does no
 
 ## Errors
 
-| Error                  | Thrown when                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| `GrpcRuntimeLoadError` | Any of the four Connect/Protobuf-ES specifiers cannot be imported              |
-| `GrpcDescriptorError`  | An embedded descriptor set cannot be decoded or lacks its expected service     |
-| `GrpcUnavailableError` | `handleRequest` is called while the adapter does not implement `setRpcHandler` |
+| Error                  | Thrown when                                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GrpcRuntimeLoadError` | Any of the four Connect/Protobuf-ES specifiers cannot be imported                                                                                                                                                  |
+| `GrpcDescriptorError`  | An embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                         |
+| `GrpcUnavailableError` | **Deprecated — never thrown since M70a.** Retained as published surface only; gRPC dispatch no longer depends on any adapter capability, so `handleRequest` is always serviceable and `available` is always `true` |
 
 ## Limitations
 
@@ -116,8 +124,10 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   HTTP/2 — but note it also applies to this plugin's OWN `grpc.reflection.v1.ServerReflection`,
   whose sole method is bidi-streaming. Unary, server-streaming and client-streaming are unaffected
   on every runtime.
-- **Application injection**: The `Application.inject()` method bypasses the HTTP adapter seam and
-  cannot reach gRPC handlers. Use `app.fetch()` for testing gRPC endpoints.
+- **Application injection**: `Application.inject()` reaches gRPC handlers — the kernel dispatches
+  gRPC from the service registry, not through the HTTP adapter, so an injected request is routed
+  exactly like an adapter-delivered one. `app.fetch()` with a web `Request` works too, for streaming
+  procedures.
 - **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are
   handled by generated Connect/gRPC client code in the application.
 - **gRPC-binary trailers on Deno**: Native gRPC-binary protocol (`application/grpc`) relies on
@@ -132,7 +142,10 @@ HTTP has taken out of rotation. A `service` naming something this server does no
 
 The plugin registers a health indicator named `'grpc'` whose `data` reports:
 
-- `available`: whether the HTTP adapter implements the `setRpcHandler?` seam
+- `available`: whether gRPC dispatch is available — unconditionally `true` since M70a, because the
+  kernel resolves `IGrpcService` from the service registry and dispatches after the middleware
+  pipeline; the previous adapter-based seam (and the `GrpcUnavailableError` that guarded it) is
+  retired
 - `serviceCount`: how many application services are registered
 
 ## Development

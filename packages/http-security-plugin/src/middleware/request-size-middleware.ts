@@ -8,6 +8,7 @@
  * @module
  */
 import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { respondWithError } from '@setu-ts/common';
 
 /** Default maximum body size: 1 MiB in bytes. */
 const DEFAULT_MAX_BODY_SIZE = 1_048_576;
@@ -59,9 +60,10 @@ export function requestSizeMiddleware(options: RequestSizeOptions = {}): Middlew
 
     if (size > maxBodySize) {
       // Short-circuit with 413 — do not call next()
-      ctx.response.status(413).json({
-        error: 'Payload Too Large',
-        message:
+      respondWithError(ctx, {
+        status: 413,
+        title: 'Payload Too Large',
+        detail:
           `Request body size (${size} bytes) exceeds the maximum allowed size (${maxBodySize} bytes)`,
       });
       return;

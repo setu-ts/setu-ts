@@ -12,6 +12,7 @@ import type {
   MiddlewareFunction,
   NextFunction,
 } from '@setu-ts/common';
+import { respondWithError } from '@setu-ts/common';
 
 /**
  * State key for the cache prefix — consumers should use `getTenantCachePrefix`
@@ -72,7 +73,10 @@ interface TenantMiddlewareOptions {
  *
  * On successful resolution: calls `next()`.
  * When `required: true` and no tenant resolves: short-circuits with a 400
- * JSON body `{ error, message }` without calling `next()`.
+ * (or `rejectionStatus`) without calling `next()`, written through the error
+ * responder seam (`respondWithError` in `@setu-ts/common`) so it answers in the
+ * application's configured format when `errorHandler` is registered, and in the
+ * no-handler fallback shape `{ error, detail? }` otherwise.
  * When `required: false` and no tenant resolves: proceeds with
  * `ctx.request.tenant === undefined`.
  *
@@ -152,9 +156,10 @@ export function tenantMiddleware({
 
     // No tenant resolved.
     if (required) {
-      ctx.response.status(rejectionStatus).json({
-        error: 'Tenant Required',
-        message: 'No tenant could be resolved for this request',
+      respondWithError(ctx, {
+        status: rejectionStatus,
+        title: 'Tenant Required',
+        detail: 'No tenant could be resolved for this request',
       });
       return;
     }

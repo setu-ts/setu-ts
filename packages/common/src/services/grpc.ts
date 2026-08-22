@@ -67,18 +67,6 @@ export interface GrpcServiceDefinition<TMethod = unknown> {
 export type GrpcServingStatus = 'unknown' | 'serving' | 'not-serving' | 'service-unknown';
 
 /**
- * A service implementation object as expected by Connect. Each method name
- * maps to a function implementing that procedure. This is a structural type
- * satisfied by generated descriptor objects from {@linkcode @bufbuild/protobuf}.
- *
- * @since 0.3.0
- */
-export interface ServiceImpl<TMethod = unknown> {
-  /** Map of method names to their implementation descriptors. */
-  readonly [key: string]: TMethod;
-}
-
-/**
  * The service contract that applications use to register gRPC/Connect services.
  * Provided by the `grpc-plugin` under the `CAPABILITIES.GRPC` token.
  *
@@ -105,12 +93,14 @@ export interface IGrpcService {
   addService<TDef extends GrpcServiceDefinition>(
     definition: TDef,
     /**
-     * Optional service implementation object mapping method local-names to
-     * handler functions. Typed permissively (methods are `unknown`) because the
-     * plugin is generic over the application's generated descriptors and cannot
-     * enumerate concrete method signatures.
+     * Optional service implementation mapping method local-names to handler
+     * functions. Typed permissively (`unknown`) because the plugin is generic
+     * over the application's generated descriptors and cannot enumerate
+     * concrete method signatures, and because Connect accepts both plain
+     * objects and class instances — the latter's methods live on the
+     * prototype, so an index-signature type would reject a valid implementation.
      */
-    implementation?: Partial<ServiceImpl>,
+    implementation?: unknown,
   ): void;
 
   /**

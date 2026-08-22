@@ -2740,6 +2740,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   refuses any computed `import()` specifier in `packages/*/src` unless it carries a
   `computed-specifier: <reason>` marker, and runs on every suite run and as `release:verify`
   check 6) — complete (PR #174)
+- **Milestone 70f** (`storage-plugin` + `kernel` + `exceptions` + `multi-tenancy-plugin` +
+  `session-plugin` + `grpc-plugin` + `logger-plugin` + `notification-plugin` + `events-plugin` +
+  `cli` + `common` + `testing` + `auth-plugin` + `http-security-plugin` + `feature-flags-plugin` +
+  `starters` — error format and error visibility). One application answers in one shape, and every
+  error it swallows becomes visible to an operator. `common` carries a request-scoped **error
+  responder** seam (`ERROR_RESPONDER_STATE_KEY`, `IErrorResponder`, `ErrorResponseInit`,
+  `respondWithError`) so a package that may not import `@setu-ts/exceptions` (AI_GUIDELINES §2.2)
+  still answers in the configured format: `errorHandler` publishes the responder once at factory
+  time, and all seven kernel terminals plus every first-party short-circuit site (upload ×6, tenant,
+  session ×2, auth ×9, http-security ×3, the flag guard) route through it — each keeping its status,
+  title, and disclosure **verbatim** under `'default'`, `'rfc9457'`, and a custom formatter (X9-6,
+  X4-8/C3). The upload middleware moves `await next()` out of its `try` so a downstream failure is
+  no longer reported as a malformed body (X8-1); the kernel's fallback 500 now logs the unhandled
+  error with `serializeError` + request id/method/path while the body stays opaque (X11-2); a gRPC
+  handler throw is logged at call time and rethrown, leaving the masked wire response unchanged
+  (X7-5), with `GrpcPluginOptions.interceptors` threaded into
+  `createConnectRouter({ interceptors })` (the `connect-loader` dropped-argument fix); a raw `Error`
+  in log metadata is normalized before redaction in `ConsoleLogger` and pino, and `serializeError`
+  closes the class for any call site (X2-5); a notification `AggregateError` names its channel and
+  `INotifier.sendSettled?` reports per-channel results without throwing (X8-12); and the
+  CLI/rest-starter default pairs `ValidationPlugin({ errorFormat: 'rfc9457' })` with the handler's
+  format so a validation failure and a thrown error answer in the same shape (C3). The
+  no-`errorHandler` fallback converges `{ error, message }` → `{ error, detail? }` (CHANGELOG
+  migration note). All `src` files ≥90% branch/function/line) — complete (PR #176)
 - **Milestone 70g** (`kernel` + `cli` — routing collisions; docs in `react-router-plugin` and
   `static-plugin`, and the end-to-end gate in `apps/full-stack`. Developed in an isolated worktree
   off `main`, in parallel with M70f, which it does not depend on). Four register rows with one
@@ -2799,12 +2823,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   run fails with `RequestTimeoutError`, contradicting the doc's "repeated runs never share state"),
   so the container is restarted between runs. Both suites now pass under the project's own
   permission model — 7 steps, verified in this worktree.) — complete (PR #175)
-- **Next milestone** — **M70f** (error format and error visibility). Errors either bypass the
-  configured RFC 9457 format or vanish entirely: `createUploadMiddleware` reports every downstream
-  failure as a malformed body (X8-1), the kernel's own 404 and fallback 500 answer `{error}` JSON
-  and log nothing even with `LoggerPlugin` registered (X9-6, X11-2), short-circuiting middleware
-  emits `{error, message}` (X4-8/C3), a gRPC handler error is logged nowhere (X7-5), and a raw
-  `Error` in log metadata serializes to `{}` (X2-5, X8-12).
+- **Next milestone** — **M70i** (gRPC and GraphQL viability). The repair-versus-withdraw decision
+  for `grpc-plugin`, plus the documented-API-does-not-exist rows both packages carry: every gRPC
+  registration snippet in README and `PUBLIC_API.md` throws because it resolves the capability
+  before `app.start()` (X7-1), and `graphql-plugin`'s only documented registration API uses a
+  `new Application()` / `app.use()` the kernel does not export (X6-2). Also X7-2, X7-4, X6-3 (the
+  code-first arm does not type-check against the real `graphql` package), X6-4, X6-5, X6-6, X6-7.
+  M70e closed X7-3 first, so the viability decision is taken against a package that loads.
 
 ## Verification (run before declaring any work done)
 
@@ -3068,6 +3093,13 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   opened this way. Do not push or open a PR unprompted, though: finish the milestone, report the
   evidence, and wait for the human to ask. Publishing a branch is outward-facing and their call to
   time.
+- **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
+  the code-quality bot anchor findings to lines; answer in the thread
+  (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with
+  the commit), refuted (with the evidence), or deferred (with the owning milestone). Verify before
+  agreeing — several such findings have been correct about the defect and wrong about the mechanism,
+  and one was wholly refuted. AI_GUIDELINES §16.5 is canonical and binds every agent (Claude,
+  ChatGPT/Codex, Roo).
 - **Record the PR number in the same PR.** The CLAUDE.md "Current status" entry needs the number,
   which does not exist until the PR does, so the order is: commit the status entry as "complete (PR
   pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again.

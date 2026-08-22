@@ -12,8 +12,8 @@ import type {
   GrpcServiceDefinition,
   IGrpcService,
   IHealthService,
+  ILogger,
   RpcFetchHandler,
-  ServiceImpl,
 } from '@setu-ts/common';
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
@@ -31,6 +31,12 @@ export interface GrpcServiceOptions {
   readonly embeddedDescriptors: EmbeddedDescriptors;
   readonly options: GrpcPluginOptions;
   readonly healthService: IHealthService | undefined;
+  /**
+   * Resolves the logger at RPC-call time (M52b: read per call, not captured at
+   * `register()`). Returns `undefined` when no logger is registered. Used to
+   * log handler failures (X7-5).
+   */
+  readonly resolveLogger?: () => ILogger | undefined;
 }
 
 /**
@@ -49,6 +55,7 @@ export class GrpcService implements IGrpcService {
   readonly #embeddedDescriptors: EmbeddedDescriptors;
   readonly #options: GrpcPluginOptions;
   readonly #healthService: IHealthService | undefined;
+  readonly #resolveLogger: (() => ILogger | undefined) | undefined;
 
   #dispatchMap: Map<string, (request: Request) => Promise<Response>> | null = null;
   #closed = false;
@@ -71,13 +78,11 @@ export class GrpcService implements IGrpcService {
     this.#embeddedDescriptors = init.embeddedDescriptors;
     this.#options = init.options;
     this.#healthService = init.healthService;
+    this.#resolveLogger = init.resolveLogger;
     this.#basePath = normalizeBasePath(init.options.basePath ?? '/grpc');
 
     for (const entry of init.options.services ?? []) {
-      this.addService(
-        entry.definition as GrpcServiceDefinition,
-        entry.implementation as Partial<ServiceImpl> | undefined,
-      );
+      this.addService(entry.definition as GrpcServiceDefinition, entry.implementation);
     }
   }
 
@@ -88,7 +93,7 @@ export class GrpcService implements IGrpcService {
 
   addService<TDef extends GrpcServiceDefinition>(
     definition: TDef,
-    implementation?: Partial<ServiceImpl>,
+    implementation?: unknown,
   ): void {
     const { typeName } = definition;
     if (this.#services.some((s) => (s.definition as GrpcServiceDefinition).typeName === typeName)) {
@@ -200,6 +205,8 @@ export class GrpcService implements IGrpcService {
       services: this.#services,
       embeddedDescriptors: this.#embeddedDescriptors,
       healthService: this.#healthService,
+      resolveLogger: this.#resolveLogger,
+      interceptors: this.#options.interceptors,
     }).dispatchMap;
     return this.#dispatchMap;
   }

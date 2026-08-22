@@ -524,6 +524,22 @@ Before marking a milestone as complete, verify:
 
 ## 9. Backward Compatibility Rules
 
+> **Scope: these rules govern a package from `v1.0.0` onward.** They are the post-v1 contract with
+> external consumers, and none of them applies while the project is in prerelease.
+>
+> **During prerelease (`0.x`, the `alpha`/`beta` line), a public export with no reader is DELETED,
+> not deprecated.** Carrying dead surface behind an `@deprecated` tag buys backward compatibility
+> nobody has asked for yet, and it costs a real reader — the tag reads as "still supported, for
+> now", so the next milestone consumes it and the debt compounds. Remove the symbol, its barrel
+> re-export, and its `PUBLIC_API.md` / package-README rows in the same change.
+>
+> What is **not** relaxed by prerelease is the bookkeeping, which is what makes deletion safe rather
+> than silent: a removal is a breaking change and needs its `CHANGELOG.md` entry with migration text
+> naming what a consumer does instead (§9.4's spirit), and the `PUBLIC_API.md` edit ships in the
+> same PR (§10.5). Deleting an export and saying nothing is still a defect.
+>
+> Once a package reaches `v1.0.0`, §9.1–§9.4 below apply as written.
+
 ### 9.1 Never Break Backward Compatibility
 
 - Once a public API is released, it must not break in a minor or patch release.
@@ -531,6 +547,8 @@ Before marking a milestone as complete, verify:
 - Breaking changes must be preceded by a deprecation period of at least one minor version.
 
 ### 9.2 Deprecation Process
+
+**Post-v1 only** — see the scope note above. In prerelease, skip this process and delete the symbol.
 
 1. Mark the API as `@deprecated` in JSDoc with a migration path.
 2. Provide a replacement API in the same version.
@@ -560,7 +578,12 @@ export function getRequired<T>(key: string): T { ... }
 
 - Never change the behavior of a public API without a version bump.
 - Never change the signature of a public function without a version bump.
-- Never remove a public export without a deprecation period.
+- Never remove a public export without a deprecation period (post-v1; in prerelease a removal needs
+  a `CHANGELOG.md` entry with migration text instead of a deprecation period — see the scope note
+  above).
+- In every case, "silent" is the defect being named: the version bump and the deprecation period are
+  post-v1 mechanisms for announcing a change, and prerelease replaces them with the CHANGELOG entry.
+  It never removes the obligation to announce.
 
 ---
 
@@ -894,7 +917,40 @@ Closes #123
 - Improvements go through the normal PR process.
 - Refactoring must be justified and must not break backward compatibility.
 
-### 16.5 Code Review Checklist
+### 16.5 Responding to Automated Review Comments
+
+**Applies to every AI agent working this repository — Claude Code, ChatGPT/Codex, Roo Code, and any
+future one.** Automated reviewers (CodeRabbit, the GitHub code-quality bot, and any successor) leave
+findings as **inline review comments on specific lines**. Answer them the same way.
+
+1. **Reply to each comment individually, in its own thread**, not in one summary comment on the PR.
+   A finding is anchored to a line; its resolution belongs on that line, where the next reader —
+   human or bot — will look for it. A single bundled reply forces every reviewer to map N answers
+   back onto N threads by hand, and it leaves each thread visibly unanswered.
+
+   ```bash
+   # Reply inside the thread the finding opened:
+   gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment-id>/replies -f body='…'
+   ```
+
+2. **Verify before you agree.** An automated finding is a hypothesis, not a fact. Reproduce it — a
+   probe, a failing test, or a source trace — before changing anything, and say in the reply which
+   you did. Several such findings have been half-right in this repo: correct about the defect and
+   wrong about the mechanism.
+
+3. **Say plainly when a finding is wrong**, in that thread, with the evidence. Do not silently
+   ignore it and do not make a change you cannot justify just to clear a comment. A refuted finding
+   is a useful record.
+
+4. **Each reply states the outcome**: fixed (with the commit), refuted (with the evidence), or
+   deferred (with the reason and the milestone that owns it).
+
+5. **A summary comment is optional and additional** — never a substitute for the per-thread replies.
+   Use one only to state the round's overall result and the gate evidence.
+
+The same rules apply to a human reviewer's inline comments.
+
+### 16.6 Code Review Checklist
 
 Reviewers must verify:
 

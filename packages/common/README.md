@@ -81,12 +81,14 @@ package fits the plugin architecture.
 | Export                       | Kind      |
 | ---------------------------- | --------- |
 | `assertRealPathContained`    | function  |
+| `brandErrorResponder`        | function  |
 | `contentTypeFor`             | function  |
-| `createCapabilityToken`      | function  |
 | `createCachedProbe`          | function  |
+| `createCapabilityToken`      | function  |
 | `decodeFrameData`            | function  |
 | `encodeFrameData`            | function  |
 | `err`                        | function  |
+| `errorResponderOf`           | function  |
 | `fromNullable`               | function  |
 | `isErr`                      | function  |
 | `isLexicallyContained`       | function  |
@@ -101,8 +103,10 @@ package fits the plugin architecture.
 | `ok`                         | function  |
 | `parseCookie`                | function  |
 | `resolveRegistryEntry`       | function  |
+| `respondWithError`           | function  |
 | `securityMetadataOf`         | function  |
 | `serializeCookie`            | function  |
+| `serializeError`             | function  |
 | `setUpgradeIntent`           | function  |
 | `some`                       | function  |
 | `splitWorkerEnv`             | function  |
@@ -110,6 +114,8 @@ package fits the plugin architecture.
 | `upgradeIntentOf`            | function  |
 | `withSecurityMetadata`       | function  |
 | `CAPABILITIES`               | const     |
+| `ERROR_RESPONDER_BRAND`      | const     |
+| `ERROR_RESPONDER_STATE_KEY`  | const     |
 | `PLUGIN_PRIORITY`            | const     |
 | `SECURITY_METADATA`          | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`   | const     |
@@ -127,6 +133,8 @@ package fits the plugin architecture.
 | `EncodedPayload`             | interface |
 | `EnvVarSpec`                 | interface |
 | `Err`                        | interface |
+| `ErrorResponderTarget`       | interface |
+| `ErrorResponseInit`          | interface |
 | `FactoryProvider`            | interface |
 | `FlagContext`                | interface |
 | `GraphqlConnectionInfo`      | interface |
@@ -160,6 +168,7 @@ package fits the plugin architecture.
 | `IDnsResolver`               | interface |
 | `IDomainEvent`               | interface |
 | `IEnvironmentApi`            | interface |
+| `IErrorResponder`            | interface |
 | `IEventBus`                  | interface |
 | `IFeatureFlags`              | interface |
 | `IFileSystem`                | interface |
@@ -255,7 +264,7 @@ package fits the plugin architecture.
 | `RouteSecurityMetadata`      | interface |
 | `ScheduledJob`               | interface |
 | `ScheduleOptions`            | interface |
-| `ServiceImpl`                | interface |
+| `SerializedError`            | interface |
 | `ServiceInstance`            | interface |
 | `SignedUrlOptions`           | interface |
 | `Some`                       | interface |
@@ -287,6 +296,7 @@ package fits the plugin architecture.
 | `WrapOptions`                | interface |
 | `BackoffStrategy`            | type      |
 | `CapabilityToken`            | type      |
+| `ChannelSendResult`          | type      |
 | `CircuitState`               | type      |
 | `CliCommandHandler`          | type      |
 | `Constructor`                | type      |

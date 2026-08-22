@@ -47,6 +47,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A request-scoped error responder seam in `@setu-ts/common`** (M70f).
+  `respondWithError(ctx,
+  { status, title, detail?, details? })` and the `IErrorResponder` /
+  `ErrorResponseInit` / `ERROR_RESPONDER_STATE_KEY` types let a package that produces an error
+  response — but may not import `@setu-ts/exceptions`, where every formatter lives — answer in the
+  application's configured format. `errorHandler` publishes a responder (built from the formatter
+  and content type it already resolved at factory time) into `ctx.state` before `next()`; every
+  short-circuiting site in the kernel and in the storage, multi-tenancy, session, auth,
+  http-security and feature-flags middleware now delegates to it, so one
+  `errorHandler({ format: 'rfc9457' })` governs every error body those sites produce.
+  `validation-plugin` is deliberately **not** part of the seam — it owns its own `errorFormat`
+  option and formats validation failures itself — so an application configures the two together; the
+  CLI templates and `rest-starter` now do (C3). `@setu-ts/common` also gains `serializeError` /
+  `SerializedError`, a pure serializer that turns any thrown value into a plain object with a
+  bounded `cause` chain.
+- **`INotifier.sendSettled?` and `ChannelSendResult` in `@setu-ts/common`** (M70f, X8-12). An
+  optional, non-throwing twin of `send` that reports one `{ channel, ok }` result per requested
+  channel (a failure carrying its serialized error), so a caller behind a retrying queue can retry
+  the one failing channel instead of re-sending the whole notification. `NotificationService`
+  implements it; `send`'s `AggregateError` members now each **name their channel**
+  (`"channel '<name>' failed"`), the original error riding on `cause`.
 - **Reachability-aware health signals for six infrastructure plugins** (M70c). `messaging-plugin`,
   `realtime-backplane-plugin`, `storage-plugin`, `mail-plugin`, `queue-plugin`, and
   `service-discovery-plugin` now report a backend's _reachability_, not just its lifecycle. Each
@@ -176,6 +197,55 @@ All notable changes to this project are documented here. The format follows
   variable that JSR's static npm-compat rewrite cannot reach) cannot re-enter the source tree.
 
 ### Changed
+
+- **Error bodies now answer in the application's configured format (X4-8, C3)** (M70f). Every
+  short-circuiting site — the kernel's 404/400/503/500 terminals, `createUploadMiddleware`'s
+  rejections, the multi-tenancy `400`, the session tenant-mismatch and form-CSRF `403`s, the auth
+  guards, the http-security `413`/`403`s, and the feature-flag guard — now writes its body through
+  the responder seam, so an `errorHandler({ format: 'rfc9457' })` governs them all.
+
+  **Migration — with `errorHandler` registered (every CLI template and starter).** This is the case
+  that changes, and it changes for every one of these sites: they previously bypassed the configured
+  format and answered their own `application/json` body, and they now answer in it. Under
+  `format: 'rfc9457'` a rejection that was
+  `{"error":"Too many files","detail":"Maximum 3 file(s) allowed"}` (`application/json`) becomes
+  `{"type":"about:blank","title":"Bad Request","status":400,"detail":"Maximum 3 file(s) allowed","instance":"/upload"}`
+  (`application/problem+json`). **A client that branched on the `error` member must read `detail`
+  instead** — the site-specific label (`Too many files`, `Tenant Required`, `Tenant Mismatch`,
+  `Invalid MIME type`) is no longer a body member, because RFC 9457 §4.2 requires `title` to be the
+  status title for the `about:blank` problem type. Under `format: 'default'` the label is the
+  `message` member and the disclosure is `details.detail`. There is no option that restores the
+  pre-M70f ad-hoc bodies; answering in the configured format is the defect being fixed (X4-8).
+
+  **Migration — with no `errorHandler` registered.** Sites that answered `{ error, message }` now
+  answer `{ error, detail }` (the disclosure moves from the non-standard `message` key to the RFC
+  9457 `detail` key), and the feature-flag guard's bare `text/plain` `Not Found` is now the JSON
+  fallback `{"error":"Not Found"}`.
+- **`IGrpcService.addService`'s `implementation` parameter is now `unknown`** (M70f). It was
+  `Partial<ServiceImpl>`, an index-signature type that **rejects a class instance** — whose methods
+  live on the prototype rather than as own properties — although Connect accepts one, so a
+  class-based service implementation could not be passed without a cast. Widening is
+  source-compatible for callers: an implementation that type-checked before still does.
+  **`ServiceImpl` is removed** from `@setu-ts/common` — the widening left it with no reader anywhere
+  in the framework, and while the project is in prerelease a dead export is deleted rather than
+  carried as deprecated surface. **Migration:** drop any `as Partial<ServiceImpl>` cast or
+  `ServiceImpl` annotation at an `addService` call site and pass the implementation directly.
+- **An unhandled request error is now logged by the kernel (X11-2)** (M70f). The fallback `500` path
+  previously discarded the error and logged nothing even with `LoggerPlugin` registered; it now
+  reports the message and stack through `CAPABILITIES.LOGGER` (guarded so a missing or broken logger
+  degrades silently). The response body stays opaque — the message is not disclosed to the client.
+- **A raw `Error` in log metadata no longer serializes to `{}` (X2-5)** (M70f). The console and pino
+  loggers normalize any `Error` value in merged metadata through `serializeError` before redaction,
+  so **any** call site is safe on those two loggers, and the two known raw-`Error` call sites
+  (`events-plugin`'s handler failure and `errorHandler`'s `cause`) serialize explicitly, so those
+  stay correct on a third-party `ILogger` too. A third-party logger does not normalize, so a NEW
+  call site handing it a raw `Error` can still render `{}` — pass `serializeError(err)` there.
+- **A gRPC handler error is now logged (X7-5)** (M70f). `grpc-plugin` wraps each application handler
+  so a thrown or rejected error is logged at `error` level with the procedure name and a serialized
+  error, then rethrown — the masked wire response is unchanged. The logger is resolved at call time,
+  so a logger registered after `GrpcPlugin` is still seen. `GrpcPluginOptions` gains
+  `interceptors?: readonly unknown[]`, threaded into `createConnectRouter` (which previously dropped
+  the argument its own facade declared).
 
 - **Breaking (behaviour): a route that names its path now beats a catch-all, in either registration
   order** (M70g, X5-1/F1). The kernel's tie-break ranked candidates by static-segment count, and a

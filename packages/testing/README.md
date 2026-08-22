@@ -39,6 +39,35 @@ console.log(res.statusCode); // 200
 > **Global middleware needs `autoStart: false`.** `start()` compiles the pipeline, after which
 > `app.middleware.add(...)` throws. Routes are unaffected — `app.router.get(...)` works on a started
 > app.
+>
+> **Unhandled errors answer in the kernel's fallback format.** `createTestApp` does not install
+> `errorHandler` (this package depends only on `common` and `kernel`, not `exceptions`), so an
+> unhandled error returns the kernel's `{ error, detail? }` fallback body, not RFC 9457.
+>
+> `errorHandler(...)` from `@setu-ts/exceptions` is a **middleware**, not a plugin — it cannot be
+> passed to `plugins` (which accepts `IPlugin[]` and would throw
+> `TypeError: plugin.register is not a function` at `start()`). Register it on an un-started app,
+> then start:
+>
+> ```typescript
+> import { createTestApp } from '@setu-ts/testing';
+> import { RuntimePlugin } from '@setu-ts/runtime';
+> import { errorHandler } from '@setu-ts/exceptions';
+>
+> const app = await createTestApp({
+>   plugins: [RuntimePlugin()],
+>   autoStart: false,
+> });
+>
+> app.middleware.add(errorHandler({ format: 'rfc9457' }), {
+>   priority: 0,
+>   name: 'error-handler',
+> });
+>
+> await app.start();
+> ```
+>
+> Once registered, the responder seam governs the kernel's own 404/500 terminals too.
 
 ### inject
 

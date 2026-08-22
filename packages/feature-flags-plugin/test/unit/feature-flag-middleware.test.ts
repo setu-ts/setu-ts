@@ -32,6 +32,9 @@ describe('createFlagGuard', () => {
     };
 
     const ctx = {
+      // `respondWithError` reads the responder from `ctx.state`; a real
+      // `IRequestContext` always carries one, so the fake must too.
+      state: new Map<string, unknown>(),
       services: {
         get: <T>(_token: string): T => {
           if (!capRegistered) {
@@ -52,6 +55,9 @@ describe('createFlagGuard', () => {
         },
         text: (t: string): void => {
           body = t;
+        },
+        json: (b: unknown): void => {
+          body = JSON.stringify(b);
         },
       },
     } as unknown as IRequestContext;
@@ -110,7 +116,9 @@ describe('createFlagGuard', () => {
     await guard(capture.ctx, capture.wrapNext(() => {}));
 
     expect(capture.statusCode).toBe(404);
-    expect(capture.body).toBe('Not Found');
+    // M70f (X4-8): the flag-guard rejection converges on the responder's JSON
+    // shape rather than a bare text 404.
+    expect(capture.body).toBe('{"error":"Not Found"}');
     expect(capture.nextCalled).toBe(false);
   });
 
@@ -120,7 +128,7 @@ describe('createFlagGuard', () => {
     await guard(capture.ctx, capture.wrapNext(() => {}));
 
     expect(capture.statusCode).toBe(403);
-    expect(capture.body).toBe('Not Found');
+    expect(capture.body).toBe('{"error":"Not Found"}');
     expect(capture.nextCalled).toBe(false);
   });
 
