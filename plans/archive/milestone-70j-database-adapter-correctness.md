@@ -1,7 +1,7 @@
 # Milestone 70j — Database adapter correctness (`@setu-ts/database-plugin`)
 
-> **Status:** Planning. Branch: `feat/m70j-database-adapter-correctness`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #177). Branch: `feat/m70j-database-adapter-correctness`. Archived on
+> completion; all work (implementation + fixes) stayed on this one branch.
 
 ## 0. Objective & scope
 
