@@ -195,10 +195,15 @@ Every one of these was measured on this machine during planning; each changed a 
   is what makes C4's README promise true. A slot the pool terminated ON PURPOSE carries a
   `terminating` flag set before every `terminate()` call (`onTimeout` and `shutdown`), and its exit
   is ignored.
-- **Why the flag is load-bearing rather than defensive:** P4 measured Bun firing `close` after a
-  deliberate `terminate()`. Without the flag, every timeout would fire a second settle path and
-  every `shutdown()` would report each worker as having crashed — and on a not-ready slot
-  `onWorkerError`'s existing branch would SHIFT and reject an unrelated pending task.
+- **Correction, established by running the plan's own negative control.** This plan claimed the flag
+  was load-bearing against a live defect. Removing it changes NO observable behaviour today:
+  `shutdown()` drains `pending` before it terminates anything and `onTimeout` nulls the slot's task
+  first, so the exit that follows finds nothing to settle. What the flag actually buys is that the
+  invariant becomes LOCAL rather than spread across two other methods — probed, with the flag gone
+  AND `shutdown()`'s drain moved after its `terminate()` calls, two queued tasks reject with
+  `WorkerExitError` instead of the shutdown error, because each not-yet-ready slot's exit takes the
+  startup-failure branch. It is kept on that basis and the code comment says so; the ordering it
+  backs up is pinned by its own test.
 - **Test home:** `test/unit/task-pool-exit.test.ts` — unexpected exit fails the in-flight task and
   frees the slot; a second task then runs on a fresh worker (this is X8-7's case D, the wedge);
   `taskTimeoutMs: 0` plus an exit still settles; a deliberate `terminate()` produces no extra settle
