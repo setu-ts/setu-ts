@@ -330,16 +330,19 @@ function guardProcedure(
 
 /**
  * Wraps an `AsyncIterable` in a transparent iterable that logs (and rethrows)
- * a failure surfacing from a later `next()`, while preserving cancellation
- * (`return`) and error propagation (`throw`) to the underlying iterator
- * (M70f re-review, finding 3).
+ * ANY failure surfacing from the underlying iterator — a synchronous throw
+ * while acquiring the iterator, a `next()` rejection, or a rejected delegated
+ * `return`/`throw` — while preserving cancellation (`return`) and error
+ * propagation (`throw`) to the underlying iterator (M70f re-review round 2,
+ * finding 3).
  *
  * The wrapper is **lazy**: it does not call `iterator()` until the consumer
  * does, so a handler that returns an iterable but is never consumed does not
- * start the underlying work. It delegates `next`, `return`, and `throw`
- * verbatim, and catches only the `next()` rejection — the streaming handler's
- * common failure point — to log it before rethrowing, leaving Connect's masked
- * wire response unchanged.
+ * start the underlying work. Every operation is delegated verbatim, and every
+ * failure it can surface is routed through the SAME protected `report` path
+ * used for `next()`: `report` logs the failure (degrading silently if the
+ * logger itself fails) and rethrows the ORIGINAL error, leaving Connect's
+ * masked wire response unchanged.
  *
  * @param source - The implementation's async iterable result
  * @param report - Logs the iteration failure and rethrows it
@@ -351,7 +354,16 @@ function withErrorLoggingIterable(
 ): AsyncIterable<unknown> {
   return {
     [Symbol.asyncIterator]() {
-      const iterator = source[Symbol.asyncIterator]();
+      // Guard iterator ACQUISITION: a synchronous throw from the underlying
+      // `iterator()` factory (e.g. a cursor that fails to open) is a handler
+      // failure just like a `next()` rejection, and must reach the same
+      // reporting path rather than escaping unlogged.
+      let iterator: AsyncIterator<unknown>;
+      try {
+        iterator = source[Symbol.asyncIterator]();
+      } catch (error) {
+        report(error);
+      }
       return {
         async next(...args: [] | [unknown]): Promise<IteratorResult<unknown>> {
           try {
@@ -362,14 +374,25 @@ function withErrorLoggingIterable(
         },
         // Preserve cancellation and error propagation to the underlying
         // iterator so the handler's cleanup (e.g. closing a cursor) still runs.
-        return(value?: unknown): Promise<IteratorResult<unknown>> {
-          return (
-            iterator.return?.(value) ??
-              Promise.resolve({ value: undefined, done: true })
-          );
+        // A REJECTED cleanup is a handler failure too: route it through the
+        // same reporting path so it is logged, and rethrow the ORIGINAL error
+        // (`report` degrades silently if the logger itself fails).
+        async return(value?: unknown): Promise<IteratorResult<unknown>> {
+          try {
+            return await (
+              iterator.return?.(value) ??
+                Promise.resolve({ value: undefined, done: true })
+            );
+          } catch (error) {
+            report(error);
+          }
         },
-        throw(error?: unknown): Promise<IteratorResult<unknown>> {
-          return iterator.throw?.(error) ?? Promise.reject(error);
+        async throw(error?: unknown): Promise<IteratorResult<unknown>> {
+          try {
+            return await (iterator.throw?.(error) ?? Promise.reject(error));
+          } catch (err) {
+            report(err);
+          }
         },
       };
     },

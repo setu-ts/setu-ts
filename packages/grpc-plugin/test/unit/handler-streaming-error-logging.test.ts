@@ -189,6 +189,147 @@ describe('gRPC handler wrapper — async-iterable (server-streaming / bidi) fail
     await it.return?.();
     expect(returned).toBe(true);
   });
+
+  it('logs and rethrows a synchronous iterator-acquisition failure', () => {
+    // A handler whose async iterable's `iterator()` factory throws synchronously
+    // (e.g. a cursor that fails to open) is a handler failure just like a
+    // `next()` rejection. Before the round-2 fix the wrapper acquired the
+    // iterator outside the try, so the failure escaped unlogged. Now it is
+    // routed through the same protected reporting path.
+    const { logger, errors } = makeCapturingLogger();
+    const acquireError = new Error('iterator factory failed');
+    const runtime = buildStreamService(
+      {
+        serverStream: () => {
+          // A custom async iterable whose iterator factory throws.
+          return {
+            [Symbol.asyncIterator]() {
+              throw acquireError;
+            },
+          };
+        },
+      },
+      () => logger,
+    );
+    const wrapped = runtime.registered[0].implementation as Record<string, unknown>;
+    const iterable = (wrapped.serverStream as (r: unknown) => AsyncIterable<unknown>)({});
+    let thrown: unknown;
+    try {
+      iterable[Symbol.asyncIterator]();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(acquireError);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('gRPC handler failed');
+    expect(errors[0].metadata?.procedure).toBe('example.Stream/serverStream');
+    expect(errors[0].metadata?.message).toBe('iterator factory failed');
+  });
+
+  it('logs and rethrows a rejected delegated return (cleanup failure after cancellation)', async () => {
+    // A handler whose cleanup REJECTS after the client cancels (a rejected
+    // `return`) is a handler failure. Before the round-2 fix the wrapper
+    // delegated `return` verbatim, so the rejection escaped unlogged. Now it is
+    // routed through the same protected reporting path and the ORIGINAL error
+    // propagates.
+    const { logger, errors } = makeCapturingLogger();
+    const cleanupError = new Error('cleanup rejected');
+    const runtime = buildStreamService(
+      {
+        serverStream: () => {
+          return {
+            [Symbol.asyncIterator]() {
+              let done = false;
+              return {
+                async next() {
+                  await Promise.resolve();
+                  if (done) {
+                    return { value: undefined, done: true };
+                  }
+                  done = true;
+                  return { value: { message: 'first' }, done: false };
+                },
+                // A cleanup that rejects when the consumer cancels.
+                async return() {
+                  await Promise.resolve();
+                  throw cleanupError;
+                },
+              };
+            },
+          };
+        },
+      },
+      () => logger,
+    );
+    const wrapped = runtime.registered[0].implementation as Record<string, unknown>;
+    const iterable = (wrapped.serverStream as (r: unknown) => AsyncIterable<unknown>)({});
+    const it = iterable[Symbol.asyncIterator]();
+    const first = await it.next();
+    expect(first.value).toEqual({ message: 'first' });
+    let thrown: unknown;
+    try {
+      await it.return?.();
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(cleanupError);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('gRPC handler failed');
+    expect(errors[0].metadata?.procedure).toBe('example.Stream/serverStream');
+    expect(errors[0].metadata?.message).toBe('cleanup rejected');
+  });
+
+  it('logs and rethrows a rejected delegated throw', async () => {
+    // A consumer that pushes an error into the iterator via `throw` and the
+    // underlying iterator's `throw` REJECTS is a handler failure. Before the
+    // round-2 fix the wrapper delegated `throw` verbatim, so the rejection
+    // escaped unlogged. Now it is routed through the same protected reporting
+    // path and the ORIGINAL error propagates.
+    const { logger, errors } = makeCapturingLogger();
+    const pushError = new Error('consumer pushed an error');
+    const rejectError = new Error('iterator throw rejected');
+    const runtime = buildStreamService(
+      {
+        serverStream: () => {
+          return {
+            [Symbol.asyncIterator]() {
+              return {
+                async next() {
+                  await Promise.resolve();
+                  return { value: { message: 'first' }, done: false };
+                },
+                // A `throw` that rejects with its own error.
+                async throw() {
+                  await Promise.resolve();
+                  throw rejectError;
+                },
+              };
+            },
+          };
+        },
+      },
+      () => logger,
+    );
+    const wrapped = runtime.registered[0].implementation as Record<string, unknown>;
+    const iterable = (wrapped.serverStream as (r: unknown) => AsyncIterable<unknown>)({});
+    const it = iterable[Symbol.asyncIterator]();
+    await it.next();
+    let thrown: unknown;
+    try {
+      await it.throw?.(pushError);
+    } catch (error) {
+      thrown = error;
+    }
+
+    // The underlying iterator's rejection is the one that propagates.
+    expect(thrown).toBe(rejectError);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('gRPC handler failed');
+    expect(errors[0].metadata?.procedure).toBe('example.Stream/serverStream');
+    expect(errors[0].metadata?.message).toBe('iterator throw rejected');
+  });
 });
 
 describe('gRPC handler wrapper — a broken logger does not replace the handler error', () => {

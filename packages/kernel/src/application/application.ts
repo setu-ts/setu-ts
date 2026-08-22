@@ -349,8 +349,9 @@ class Application implements IKernelApplication {
     //     the malformed-request 400, and the request-lifecycle hooks — can
     //     seed it into their state before they run, where `errorHandler`'s own
     //     `ctx.state` publication cannot reach them. The LAST branded stage
-    //     (the innermost, i.e. the lowest priority number) wins, matching the
-    //     responder that stage publishes into `ctx.state` for in-pipeline sites.
+    //     in execution order (the innermost, i.e. the highest priority number
+    //     among the selected stages) wins, matching the responder that stage
+    //     publishes into `ctx.state` for in-pipeline sites.
     this.#errorResponder = this.#resolveErrorResponder(chain);
 
     // 7. Run bootstrap hooks
@@ -583,7 +584,7 @@ class Application implements IKernelApplication {
         state.set(ERROR_RESPONDER_STATE_KEY, this.#errorResponder);
       }
       respondWithError(
-        { state, response: builder, request },
+        { state, response: builder, ...this.#safeRequestTarget(request) },
         { status: 503, title: 'Service Unavailable' },
       );
       return builder;
@@ -881,8 +882,9 @@ class Application implements IKernelApplication {
    * kernel caches that instance at startup so the pre-pipeline sites — which
    * run before the pipeline and cannot read `ctx.state` — can seed it into
    * their state. The LAST branded stage in execution order (the innermost,
-   * i.e. the lowest priority number) wins, because that is the stage whose
-   * `ctx.state` publication an in-pipeline site would see last. `undefined`
+   * i.e. the highest priority number among the selected stages) wins,
+   * because that is the stage whose `ctx.state` publication an in-pipeline
+   * site would see last. `undefined`
    * when no `errorHandler` is registered, in which case every site keeps the
    * byte-identical no-handler fallback.
    *
@@ -916,6 +918,13 @@ class Application implements IKernelApplication {
    * fresh state map — the same responder `errorHandler` would publish into
    * `ctx.state` were this site inside the pipeline. With no `errorHandler`
    * registered the cache is empty and the framework-default shape is written.
+   *
+   * The target carries a SAFE request ({@linkcode Application.#safeRequestTarget}),
+   * never the raw one: a malformed request URL keeps a throwing `path` getter
+   * on the synthetic `IRequest`, and a Problem Details formatter that reads
+   * `ctx.request.path` for the `instance` member would throw the URL parser
+   * error again inside the responder — turning the configured 400 back into an
+   * unhandled `TypeError: Invalid URL` (M70f re-review round 2, finding 1).
    */
   #badRequest(request: IRequest): ResponseBuilder {
     const builder = new ResponseBuilder();
@@ -924,10 +933,42 @@ class Application implements IKernelApplication {
       state.set(ERROR_RESPONDER_STATE_KEY, this.#errorResponder);
     }
     respondWithError(
-      { state, response: builder, request },
+      { state, response: builder, ...this.#safeRequestTarget(request) },
       { status: 400, title: 'Bad Request' },
     );
     return builder;
+  }
+
+  /**
+   * Builds the `request` member of a pre-pipeline {@linkcode respondWithError}
+   * target from a request whose path may be unreadable.
+   *
+   * A formatted error response needs the request path for the Problem Details
+   * `instance` member, and the target's `request` field is typed to supply it.
+   * But a request that failed URL parsing carries a `path` getter that throws
+   * (the synthetic `IRequest` in {@linkcode Application.inject} and the
+   * adapter-mapped requests both derive `path` from `new URL(...)`), so handing
+   * the raw request to the responder would make the formatter re-throw inside
+   * the very response that is supposed to report the failure.
+   *
+   * The safe target therefore carries the path only when it can be read
+   * without throwing — captured once, up front — and omits the `request` field
+   * entirely otherwise, which is the documented shape of
+   * {@linkcode ErrorResponderTarget.request} ("when one exists"). A formatter
+   * that receives no request answers without an `instance` member, which is
+   * the correct RFC 9457 outcome for a request whose path cannot be known.
+   *
+   * @param request - The request that failed pre-pipeline validation
+   * @returns `{ request: { path } }` when the path is readable, `{}` when it is not
+   */
+  #safeRequestTarget(request: IRequest): { request?: { readonly path: string } } {
+    let path: string | undefined;
+    try {
+      path = request.path;
+    } catch {
+      path = undefined;
+    }
+    return path === undefined ? {} : { request: { path } };
   }
 
   /**
