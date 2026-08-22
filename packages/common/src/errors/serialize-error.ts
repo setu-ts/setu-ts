@@ -121,22 +121,55 @@ export function serializeError(value: unknown): SerializedError {
  * @returns A plain, serializable representation
  */
 function serializeErrorInstance(error: Error, depth: number): SerializedError {
+  // Every member read is guarded independently. Passing `isError` proves only
+  // that the prototype chain is readable — a `Proxy` whose target is a real
+  // `Error` and whose `get` trap throws satisfies `instanceof` and then rejects
+  // `name`, `message`, `stack` and `cause` alike. Proxy-wrapped entities are
+  // ordinary in ORMs, DI containers and mocking libraries, so a rejected value
+  // of that shape is realistic rather than exotic. Reading each member on its
+  // own means one hostile accessor costs its own field, not the whole report.
+  const name = readMember(error, 'name');
+  const message = readMember(error, 'message');
+  const stack = readMember(error, 'stack');
+  const cause = readMember(error, 'cause');
+
   const out: {
     name: string;
     message: string;
     stack?: string;
     cause?: SerializedError;
   } = {
-    name: error.name,
-    message: error.message,
+    name: typeof name === 'string' ? name : 'Error',
+    // An unreadable message still describes the value it came from, so the log
+    // line names something rather than nothing.
+    message: typeof message === 'string' ? message : safeString(error),
   };
-  if (error.stack !== undefined) {
-    out.stack = error.stack;
+  if (typeof stack === 'string') {
+    out.stack = stack;
   }
-  if (depth > 0 && error.cause !== undefined) {
-    out.cause = isError(error.cause)
-      ? serializeErrorInstance(error.cause, depth - 1)
-      : { name: 'Error', message: safeString(error.cause) };
+  if (depth > 0 && cause !== undefined) {
+    out.cause = isError(cause)
+      ? serializeErrorInstance(cause, depth - 1)
+      : { name: 'Error', message: safeString(cause) };
   }
   return out;
+}
+
+/**
+ * Reads one member of a value, answering `undefined` when the read throws.
+ *
+ * A property access is not safe merely because the object is an `Error`: a
+ * `Proxy` `get` trap runs arbitrary code, and a getter may throw. This module
+ * is documented to accept any thrown value, so every read of one is guarded.
+ *
+ * @param source - The value to read from
+ * @param key - The member to read
+ * @returns The member's value, or `undefined` when it cannot be read
+ */
+function readMember(source: Error, key: 'name' | 'message' | 'stack' | 'cause'): unknown {
+  try {
+    return source[key];
+  } catch {
+    return undefined;
+  }
 }

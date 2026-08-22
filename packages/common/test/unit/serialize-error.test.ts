@@ -141,6 +141,36 @@ describe('serializeError never throws (code review, CodeRabbit)', () => {
     expect(out.cause?.message).toBe('[unstringifiable value]');
   });
 
+  it('describes a Proxy-wrapped Error whose get trap throws', () => {
+    // The target IS a real Error, so `getPrototypeOf` succeeds and the value
+    // passes `instanceof Error` — then every member read rejects. Proxy-wrapped
+    // entities are ordinary in ORMs, DI containers and mocking libraries.
+    const hostile = new Proxy(new Error('inner'), {
+      get() {
+        throw new Error('property access failed');
+      },
+    });
+
+    const out = serializeError(hostile);
+    expect(out.name).toBe('Error');
+    expect(typeof out.message).toBe('string');
+  });
+
+  it('keeps the readable members when only one accessor is hostile', () => {
+    // A per-member guard costs one field, not the whole report.
+    const partial = new Error('readable message');
+    Object.defineProperty(partial, 'stack', {
+      get() {
+        throw new Error('stack access failed');
+      },
+    });
+
+    const out = serializeError(partial);
+    expect(out.message).toBe('readable message');
+    expect(out.name).toBe('Error');
+    expect(out.stack).toBeUndefined();
+  });
+
   it('stringifies a symbol rather than treating it as hostile', () => {
     // `String(Symbol('x'))` is specified to return 'Symbol(x)', NOT to throw —
     // unlike `'' + sym`. Pinned so the guard above is never justified by a
