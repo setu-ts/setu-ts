@@ -714,7 +714,7 @@ A public API is any export from a package's `src/index.ts` file.
   plugin. (JSR has no peer-dependency concept, so the npm "peer dependency" pattern does not apply.)
 - Instead, adapters either:
   - accept a **client instance injected via plugin options** (preferred — e.g.,
-    `DatabasePlugin({ type: 'prisma', client: prismaClient })`), or
+    `DatabasePlugin({ type: 'prisma', options: { prismaClient } })`), or
   - **lazily load** the driver via dynamic `import()` of an `npm:` specifier, failing with a clear
     error if it is not installed.
 - The framework never installs a database driver by default.

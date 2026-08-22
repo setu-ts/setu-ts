@@ -406,6 +406,14 @@ export function createFakeDrizzleInstance(): {
       return rows.length;
     },
     async execute(values: unknown): Promise<{ rows: unknown[] }> {
+      // A real Drizzle `execute()` takes an SQLWrapper and immediately calls
+      // `getSQL()` on it. Accepting anything here is exactly what let the
+      // adapter ship a `{ sql, params }` argument no driver accepts (X12-2),
+      // so this fake reproduces the real failure verbatim.
+      const wrapper = values as { getSQL?: unknown } | null;
+      if (wrapper === null || typeof wrapper !== 'object' || typeof wrapper.getSQL !== 'function') {
+        throw new TypeError('query.getSQL is not a function');
+      }
       recordedCalls.push({ action: 'execute', args: { values } });
       return { rows: [] };
     },

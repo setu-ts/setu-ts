@@ -156,4 +156,50 @@ describe('typed Drizzle query seam on real SQLite', () => {
     expect(await outer.select().from(users)).toEqual([]);
     expect(await service.getRepository<User>('User').findById('u1')).toBeNull();
   });
+
+  it('refuses IDatabaseService.query() on a real execute-less SQLite instance', async () => {
+    // The refusal is a contract requirement, not an unfinished feature: this
+    // driver DOES expose `all()`, but on a raw statement the proxy protocol
+    // answers with POSITIONAL rows (`[['a', 1]]`) because Drizzle has no field
+    // map for a statement it did not build. `query<T>(): Promise<T[]>` promises
+    // row objects, which Prisma and D1 both return, so routing through `all()`
+    // would trade a loud failure for a silent shape divergence.
+    const engine = new DatabaseSync(':memory:');
+    engine.exec('CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL)');
+    engine.exec('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, team_id TEXT)');
+    engine.exec("INSERT INTO teams VALUES ('t1', 'Research')");
+
+    const drizzleDb = drizzle((statement, params, method) =>
+      executeSqlite(engine, statement, params, method)
+    );
+    // Measured, not assumed: the driver this whole file drives has no
+    // `execute`, which is the branch the refusal guards.
+    expect((drizzleDb as unknown as { execute?: unknown }).execute).toBeUndefined();
+
+    const database = createDrizzleDatabase(
+      drizzleDb,
+      (configured, work) => configured.transaction(work),
+    );
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: database,
+      drizzleTables: { User: users, Team: teams },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(
+      adapter,
+      (entity) => adapter.createDataSource(entity),
+      'drizzle',
+    );
+
+    await expect(service.query('select 1 as n')).rejects.toThrow(
+      "Configured Drizzle instance does not support raw execute(); use Drizzle's typed query builder for this driver.",
+    );
+
+    // Everything else on the same instance still works, which is what makes
+    // the refusal a narrow boundary rather than a broken adapter.
+    await service.getRepository<User>('User').create({ id: 'u1', name: 'Ada', teamId: 't1' });
+    expect(await getDrizzleDatabase(service, database).select().from(users)).toEqual([
+      { id: 'u1', name: 'Ada', teamId: 't1' },
+    ]);
+  });
 });

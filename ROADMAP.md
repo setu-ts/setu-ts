@@ -571,7 +571,7 @@ const app = createApplication({
     LoggerPlugin({ level: 'info' }),
     ConfigPlugin({ envFilePath: '.env' }),
     ValidationPlugin(),
-    DatabasePlugin({ type: 'prisma' }),
+    DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
     AuthPlugin({ jwt: { secret: '...' } }),
   ],
 });
@@ -1311,7 +1311,9 @@ interface RouteMetadata {
 app.register(DatabasePlugin({
   type: 'prisma',
   options: {
-    url: config.get('DATABASE_URL'),
+    // A Prisma v7 client is application-generated and carries its own
+    // connection configuration; `url` is deprecated and unread.
+    prismaClient,
     logQueries: true,
   },
 }));
@@ -5805,7 +5807,7 @@ import { CAPABILITIES, type IDatabase } from '@setu-ts/common';
 import { requireAuth } from '@setu-ts/auth-plugin';
 
 const app = createRestApp({
-  database: { type: 'prisma', url: Deno.env.get('DATABASE_URL')! },
+  database: { type: 'prisma', options: { prismaClient } },
 });
 
 app.router.get('/users', async (ctx) => {
@@ -5827,7 +5829,7 @@ closes the ordering gap once, for every option:
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
-  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  database: { type: 'prisma', options: { prismaClient } },
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
 }), { config: { envFilePath: ['.env.local', '.env'] } });
 
@@ -7056,11 +7058,66 @@ Ordered by the sequence they should be worked, not by severity alone.
   registration API uses a `new Application()` / `app.use()` the kernel does not export (X6-2). Also
   X7-2, X7-4, X6-3 (the code-first arm does not type-check against the real `graphql` package),
   X6-4, X6-5, X6-6, X6-7.
-- ⬜ **M70j — Database adapter correctness** (`database-plugin`). `IDatabaseService.query()` is
-  inoperative on the Drizzle adapter — it calls `execute({ sql, params })`, a shape no Drizzle
-  driver accepts (X12-2) — and the **default** Memory adapter silently accepts what both real
-  backends reject: a duplicate unique value, a string into an Int column, an unknown `select` column
-  (X12-5), which makes it a test double that lies in the M55/M53 sense. Plus X4-9, X12-4, X12-6, D7.
+- ✅ **M70j — Database adapter correctness** (`database-plugin`) — complete (PR #177).
+  `IDatabaseService.query()` was inoperative on the Drizzle adapter — it called
+  `execute({ sql, params })`, a shape no Drizzle driver accepts, so the method failed with the
+  internal `TypeError: query.getSQL is not a function` on every call (X12-2) — and the **default**
+  Memory adapter silently accepted what both real backends reject (X12-5), which made it a test
+  double that lies in the M55/M53 sense. Plus X4-9, X12-4, X12-6, D7.
+
+  **The `query()` fix is a binder, not a call-shape swap.** Prisma
+  (`$queryRawUnsafe(sql, ...params)`) and D1 (`prepare(sql).bind(...)`) both forward the statement
+  **verbatim** and bind natively, so that is the contract; Drizzle's `execute()` takes an
+  `SQLWrapper`, and passing the bare string — which the driver does accept — would have silently
+  dropped `params`, which is worse than the current failure. A pure internal scanner splits the
+  statement at its placeholders (skipping string literals, quoted identifiers, comments and
+  PostgreSQL dollar-quoted bodies, so a `?` inside `'text?'` is never a placeholder) and interleaves
+  `sql.param(value)`. Probed against the real generator: Drizzle numbers `Param` chunks in encounter
+  order and renders them dialect-natively, so an ascending-placeholder statement round-trips
+  byte-identically on all three dialects. Any disagreement between the statement and the parameter
+  list — a wrong count, a gap in the `$N` sequence, both styles at once — is refused before the
+  driver is reached, because a mis-bound parameter is silent.
+
+  **One boundary was measured rather than assumed, and the measurement reversed the obvious move.**
+  A `sqlite-proxy` instance has no `execute` but does have `all()`, which looked like a free lift of
+  the documented "only `query()` rejects" limitation. It is not: `all()` on a raw statement returns
+  **positional** rows (`[["a", 1]]`), because the proxy protocol returns array rows and Drizzle has
+  no field map for a statement it did not build, while `query<T>(): Promise<T[]>` promises objects —
+  as Prisma and D1 return. Routing through `all()` would have traded a loud failure for a silent
+  shape divergence, which is the defect class this row exists to close. The refusal stays, and the
+  README and `PUBLIC_API.md` now state the reason so it is not re-opened.
+
+  X12-5 is closed for the two divergences the register calls worth fixing and **documented** for the
+  two it does not: an unknown `select`/`orderBy` field is refused by name against the entity's
+  **observed** column set (the union of keys over the rows the store holds), while `where`/`filter`
+  are deliberately left alone — with no schema this adapter cannot distinguish an unknown column
+  from one absent on every row, and matching nothing is a defensible answer, whereas ordering by a
+  column no row has returns rows arbitrarily and projecting one silently changes the response shape.
+  An entity holding **no rows** skips the check entirely, since there is nothing to observe and
+  nothing to return. Uniqueness and column types get a stated guarantee table instead, because no
+  schema-less store can enforce them.
+
+  X4-9 needed no new code path: `createDrizzleDataSourceInner` already refuses an `id`-less table by
+  name, so the fix is deleting the eager check from `connect()` — the registry was enforcing the
+  **repository's** precondition on tables only the typed query builder reads.
+
+  D7 makes each built-in arm name what its adapter cannot run without, the guarantee the `'custom'`
+  arm has had since M52c. **Prisma is included with Drizzle**, because M66 made `prismaClient`
+  required at runtime and it is the identical defect — and that is what turned six stale doc sites
+  from silent lies into checked ones, since `DatabasePlugin({ type: 'prisma' })` and
+  `options: { url }` appear in the root README, `PUBLIC_API.md`, `ROADMAP.md`, a starter README and
+  `AI_GUIDELINES.md` §12.2 while the adapter has thrown on all of them since M66.
+  `packages/starters` needed no `src` change: `RestStarterOptions.database` is a pass-through
+  `DatabasePluginOptions`.
+
+  **One defect outside the register was found while reading the source and fixed with it**: with
+  `logQueries: true` the service's logging wrapper declared `count(where)` and called
+  `ds.count(where)`, dropping the `filter` argument `IDataSource.count(where, filter?)` defines — so
+  `repo.count({ filter })` answered a different number with logging on than off. Every existing test
+  built the service without logging. **A second was introduced and caught by its own test**: the new
+  column refusal threw **synchronously** from a method typed `Promise<…>`, bypassing any caller
+  using `.catch()` — the M52b/M52c class — so the check returns its error and the adapter rejects
+  with it.
 - ⬜ **M70k — Storage, queue and worker operability** (`storage-plugin`, `queue-plugin`,
   `worker-pool-plugin`). Upload `maxSize` does not bound what is buffered, so a 1 KB limit
   multipart-parses a 40 MB body first (X8-3); `taskTimeoutMs: 0` leaks a pool slot permanently (X8-7
@@ -7214,7 +7271,7 @@ branch during a version bump.
 | 70g       | ✅     | routing collisions                    |
 | 70h       | ✅     | cli scaffold batch                    |
 | 70i       | ⬜     | grpc and graphql viability            |
-| 70j       | ⬜     | database adapter correctness          |
+| 70j       | ✅     | database adapter correctness          |
 | 70k       | ⬜     | storage, queue, worker operability    |
 | 70l       | ⬜     | deployment and operations             |
 | 70m       | ⬜     | sdk and openapi                       |
