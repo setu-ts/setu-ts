@@ -2230,16 +2230,18 @@ and content type it already resolved at factory time and publishes it in `ctx.st
 `next()`; any site inside the pipeline then calls
 `respondWithError(ctx, { status, title, detail?,
 details? })`, which delegates to the published
-responder and answers in the application's configured format. The responder builds a real
-`HttpError` from the init (so `buildProblemDetails` sees a genuine `statusCode` and the validation
-`errors` extension, and `maskInternalErrors` never masks a deliberate 4xx), runs the resolved
-formatter over it, and writes status, `content-type`, and the serialized body — the same three-step
-tail `errorHandler`'s catch path performs. Three kernel sites run **before** the pipeline — the
-shutdown-drain `503`, the malformed-URL / undecodable-path `400`, and an `onRequest` lifecycle hook
-that throws (answered as the unhandled `500`) — so they cannot see `errorHandler`'s `ctx.state`
-publication; the kernel seeds the same resolved responder into their state from a cache it reads off
-the pipeline's `errorHandler` at startup, and the fallback below applies when no `errorHandler` is
-registered.
+responder and answers in the application's configured format. The one first-party site deliberately
+outside the seam is `validation-plugin`, which owns its own `errorFormat` option and formats
+validation failures itself; an application sets the two to the same format, as the CLI templates and
+`rest-starter` do. The responder builds a real `HttpError` from the init (so `buildProblemDetails`
+sees a genuine `statusCode` and the validation `errors` extension, and `maskInternalErrors` never
+masks a deliberate 4xx), runs the resolved formatter over it, and writes status, `content-type`, and
+the serialized body — the same three-step tail `errorHandler`'s catch path performs. Three kernel
+sites run **before** the pipeline — the shutdown-drain `503`, the malformed-URL / undecodable-path
+`400`, and an `onRequest` lifecycle hook that throws (answered as the unhandled `500`) — so they
+cannot see `errorHandler`'s `ctx.state` publication; the kernel seeds the same resolved responder
+into their state from a cache it reads off the pipeline's `errorHandler` at startup, and the
+fallback below applies when no `errorHandler` is registered.
 
 With **no** `errorHandler` registered, `respondWithError` falls back to the no-handler shape
 `{ error, detail? }` — the framework's pre-formatter shape, written directly by the seam and **not**

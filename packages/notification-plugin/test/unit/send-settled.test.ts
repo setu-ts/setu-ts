@@ -102,3 +102,29 @@ describe('sendSettled', () => {
     }
   });
 });
+
+describe('sendSettled never rejects, whatever a channel rejects with (code review)', () => {
+  it('reports a channel that rejects with a value String() cannot stringify', async () => {
+    // A null-prototype object has neither `toString` nor `valueOf`, so
+    // `String(reason)` throws — and that throw would escape `sendSettled`,
+    // whose entire contract is that it does not reject.
+    const service = new NotificationService(
+      new Map([
+        ['email', {
+          send: () => Promise.reject(Object.create(null)),
+        } as unknown as NotificationChannel],
+      ]),
+    );
+
+    const results = await service.sendSettled({
+      channels: ['email'],
+      subject: 's',
+      body: 'b',
+      to: { email: 'a@b.c' },
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.ok).toBe(false);
+    expect(results[0]?.channel).toBe('email');
+  });
+});

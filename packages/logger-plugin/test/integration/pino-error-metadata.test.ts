@@ -36,7 +36,7 @@ function captureStream(): { lines: string[]; stream: Writable } {
 describe('PinoLogger — raw Error metadata reaches a real Pino sink (X2-5)', () => {
   it('emits the Error message through real Pino (metadata is not dropped)', async () => {
     // Guard: only run when real Pino is installed (the M4 precedent).
-    let pino: (destination?: unknown, options?: Record<string, unknown>) => unknown;
+    let pino: (options?: Record<string, unknown>, destination?: unknown) => unknown;
     try {
       // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
       const mod = await import('npm:pino@10.x');
@@ -51,7 +51,12 @@ describe('PinoLogger — raw Error metadata reaches a real Pino sink (X2-5)', ()
     // wrapper's normalization and argument order are exercised end to end.
     // `PinoLoggerLike` is internal to the module, so the real Pino instance is
     // cast at this boundary (the test's only `any`).
-    const factory: PinoFactory = (opts) => pino(stream, { level: opts.level }) as any;
+    // `pino(options, destination)` — options FIRST. Handing the stream first
+    // makes Pino treat it as the destination and DISCARD the second argument
+    // (measured against real pino@10: `pino(stream, { level: 'error' })` yields
+    // a logger at level `info`), so the level this factory is handed would be
+    // silently ignored and the harness would stop testing what it claims to.
+    const factory: PinoFactory = (opts) => pino({ level: opts.level }, stream) as any;
     const logger = await PinoLogger.create({ level: 'info', pinoFactory: factory });
 
     logger.error('something failed', { error: new Error('the pino metadata message') });
