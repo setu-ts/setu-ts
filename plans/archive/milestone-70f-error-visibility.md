@@ -445,3 +445,45 @@ deno task release:verify 0.1.0-alpha.8
 - **`createTestApp` installing `errorHandler` by default** — blocked by `testing`'s dependency graph
   (`testing/deno.json:6-9`); §3.4's kernel-side logging closes the row's substance and the README
   note closes the rest.
+
+## 10. Deviations from this plan, recorded at implementation time
+
+Three of this plan's claims did not survive implementation. They are recorded here rather than
+silently worked around, so the archived plan describes what was built (the M50 / M52 / M70a
+precedent).
+
+- **§3.1 and §3.3 assumed `ctx.state` reaches every kernel site. It does not — three of the seven
+  run before any middleware.** The shutdown-drain `503` and the malformed-request `400` execute
+  before a request context exists at all, and the request-lifecycle hooks execute before the
+  pipeline, so `errorHandler`'s `ctx.state` publication has not happened yet. Those three would have
+  taken the no-handler fallback forever, even in an application that configures a format — the
+  defect this milestone exists to close, surviving at the kernel's own sites. A second channel was
+  added: `errorHandler` **brands** its middleware function with the same responder instance it
+  publishes (`brandErrorResponder` / `errorResponderOf` / `ERROR_RESPONDER_BRAND` in `common`,
+  `Symbol.for` per the M57 `SECURITY_METADATA` precedent), and the kernel reads that brand off the
+  compiled chain once at startup and seeds it into the state those sites hand to `respondWithError`.
+  §4's exported-surface table therefore undercounts: seven `common` exports shipped, not four.
+- **§3.2's `ErrorResponderTarget` had to be narrower than `IRequestContext`.** The pre-pipeline
+  sites have no context to pass, and handing a formatter a partial object would let a custom
+  formatter read a documented member and throw — replacing the configured `503`/`400` with an
+  unhandled `TypeError`. The responder therefore passes the formatter a context only when the target
+  genuinely is one, and supplies the Problem Details `instance` from a separately captured safe
+  path. That path is captured through a guard, because a request that failed URL parsing carries a
+  `path` getter that throws.
+- **The milestone changed a committed `common` contract the plan did not anticipate.**
+  `IGrpcService.addService`'s `implementation` moved from `Partial<ServiceImpl>` to `unknown`,
+  because an index-signature type rejects a class instance while Connect accepts one — which
+  `withErrorLogging` needed, since it resolves procedures by property lookup rather than by
+  enumerating own properties. `ServiceImpl` is left with no reader and is deprecated rather than
+  removed (AI_GUIDELINES §9.2). Both are recorded in `CHANGELOG.md` and `PUBLIC_API.md`.
+
+Two further items were settled by measurement during implementation and review:
+
+- **§8's pino risk was real.** `PinoLogger` called `pino.error(message, metadata)` while pino's
+  signature is `(obj, msg)`, so **every** structured metadata object was dropped on the pino path.
+  Fixed; the guarded real-import test is the gate. A follow-on check confirmed real pino handles the
+  resulting `(undefined, msg)` call for a metadata-less log correctly, so no message is lost.
+- **§3.1's rejected alternative was re-confirmed, and the plan's premise about `add()` was stronger
+  than stated.** `MiddlewarePipeline.add()` throws after `compile()`, so an `errorHandler`
+  registered after `start()` is impossible — the kernel's startup-cached responder can never go
+  stale.

@@ -17,6 +17,7 @@ import { expect } from '@std/expect';
 
 import { createErrorResponder } from '../../src/middleware/error-responder-impl.ts';
 import { rfc9457Formatter } from '../../src/formatters/rfc9457-formatter.ts';
+import { HttpError } from '../../src/errors/http-error.ts';
 import { createFakeContext } from '../fixtures/fake-runtime.ts';
 
 describe('createErrorResponder', () => {
@@ -80,5 +81,56 @@ describe('createErrorResponder', () => {
     const snap = responseSnapshot();
     expect(snap.status).toBe(503);
     expect(snap.headers.get('content-type')).toBe('application/json; charset=utf-8');
+  });
+});
+
+describe('a thrown error carrying its own `details.detail` key (code review, finding 4)', () => {
+  /** Decodes the byte body a responder wrote. */
+  function bodyOf(snap: { body: unknown }): Record<string, unknown> {
+    return JSON.parse(new TextDecoder().decode(snap.body as Uint8Array)) as Record<string, unknown>;
+  }
+
+  it('keeps `detail: <message>` — the responder marker, not the key name, gates promotion', () => {
+    // `HttpError.details` is a free-form bag an application also writes into.
+    // Promoting any `details.detail` would silently change this body's `detail`
+    // from the message to the application's own value, a released-behaviour
+    // change for every application that happens to use that key name.
+    const thrown = new HttpError(400, 'Invalid payload', {
+      detail: 'internal-code-7',
+      field: 'email',
+    });
+
+    const body = rfc9457Formatter(thrown);
+
+    expect(body.detail).toBe('Invalid payload');
+    expect(body.title).toBe('Bad Request');
+    expect(body.status).toBe(400);
+  });
+
+  it('still promotes the disclosure for an error the responder built', () => {
+    const responder = createErrorResponder(rfc9457Formatter, 'application/problem+json');
+    const { ctx, responseSnapshot } = createFakeContext({ request: { path: '/tenants' } });
+
+    responder.respond(ctx, {
+      status: 400,
+      title: 'Tenant Required',
+      detail: 'No tenant could be resolved for this request',
+      // An application-shaped `details` bag alongside the disclosure.
+      details: { field: 'tenant' },
+    });
+
+    expect(bodyOf(responseSnapshot()).detail).toBe(
+      'No tenant could be resolved for this request',
+    );
+  });
+
+  it('never serializes the internal marker into the body', () => {
+    const responder = createErrorResponder(rfc9457Formatter, 'application/problem+json');
+    const { ctx, responseSnapshot } = createFakeContext({ request: { path: '/x' } });
+
+    responder.respond(ctx, { status: 403, title: 'Forbidden', detail: 'nope' });
+
+    const snap = responseSnapshot();
+    expect(new TextDecoder().decode(snap.body as Uint8Array)).not.toContain('responder-detail');
   });
 });
