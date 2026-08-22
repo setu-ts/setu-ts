@@ -5150,8 +5150,10 @@ auto-`unimplemented` surface.
 
 **Deliverables**
 
-- [x] `common` — `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`,
-      `RpcFetchHandler`; `CAPABILITIES.GRPC`; the optional `IHttpAdapter.setRpcHandler?` widening.
+- [x] `common` — `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl` (removed in M70f, which
+      widened `addService`'s `implementation` to `unknown` and left it with no reader),
+      `GrpcServingStatus`, `RpcFetchHandler`; `CAPABILITIES.GRPC`; the optional
+      `IHttpAdapter.setRpcHandler?` widening.
 - [x] `runtime` — `RpcInterceptorStore` plus the consult wired into all four HTTP adapters.
 - [x] `grpc-plugin` — `GrpcPlugin`, `GrpcService`, the Connect loader (`adaptConnectModule` /
       `loadConnectModule` over four npm specifiers), the router builder, the prefix dispatcher, the

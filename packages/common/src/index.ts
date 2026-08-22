@@ -301,7 +301,6 @@ export type {
   GrpcServingStatus,
   IGrpcService,
   RpcFetchHandler,
-  ServiceImpl,
 } from './services/grpc.ts';
 
 // GraphQL contracts
