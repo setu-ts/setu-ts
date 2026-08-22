@@ -126,17 +126,12 @@ milestone's `feat/…` branch and hand back the exact command to run.
 
 ## Answering automated review comments
 
-**Reply to each finding in its own thread — never one bundled comment on the PR.** CodeRabbit and
-the code-quality bot anchor findings to specific lines, and the resolution belongs where the next
-reader will look for it; a summary comment leaves every thread visibly unanswered.
+**Reply to each finding in its own thread — never one bundled comment on the PR.**
 
 ```bash
 gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment-id>/replies -f body='…'
 ```
 
-Verify before you agree — an automated finding is a hypothesis. Reproduce it with a probe, a failing
-test, or a source trace, and say which in the reply. Say plainly when one is wrong, with the
-evidence, rather than making a change you cannot justify just to clear a comment. Each reply states
-the outcome: fixed (with the commit), refuted (with the evidence), or deferred (with the reason).
-
-`AI_GUIDELINES.md` §16.5 is canonical; this is the pointer.
+`AI_GUIDELINES.md` **§16.5** is the rule, in full: verify before you agree, say plainly when a
+finding is wrong, and state the outcome in each reply. Read it there — this heading exists so you
+know the rule applies to you, not to restate it.
