@@ -215,4 +215,135 @@ describe('kernel pre-pipeline sites answer in the configured format', () => {
       await app.stop();
     });
   });
+
+  // ---- Finding 1 (round 2): a malformed request URL returns the configured 400 ----
+
+  describe('finding 1 (round 2) — a malformed request URL returns the configured 400', () => {
+    it('answers rfc9457 for a malformed URL without throwing and without an instance', async () => {
+      // `new URL('not-a-valid-url')` throws inside createRequestContext. Before the
+      // round-2 fix the synthetic request kept a throwing `path` getter, and the
+      // RFC 9457 formatter read `ctx.request.path` for `instance` and threw the URL
+      // parser error again — the caller saw `TypeError: Invalid URL` instead of a
+      // 400. Now the responder receives no unsafe path, so it answers the
+      // configured 400 and simply omits the `instance` member.
+      const { app } = appWith('rfc9457');
+      await app.start();
+
+      const res = await app.inject({ method: 'GET', url: 'not-a-valid-url' });
+      expect(res.statusCode).toBe(400);
+      expect(res.headers.get('content-type')).toBe('application/problem+json');
+      const body = JSON.parse(res.body as string) as Record<string, unknown>;
+      expect(body.type).toBe('about:blank');
+      expect(body.title).toBe('Bad Request');
+      expect(body.status).toBe(400);
+      expect(body.detail).toBe('Bad Request');
+      expect(body.instance).toBeUndefined();
+      await app.stop();
+    });
+
+    it('answers the configured default format for a malformed URL', async () => {
+      const { app } = appWith('default');
+      await app.start();
+
+      const res = await app.inject({ method: 'GET', url: 'not-a-valid-url' });
+      expect(res.statusCode).toBe(400);
+      expect(res.headers.get('content-type')).toBe('application/json; charset=utf-8');
+      const body = JSON.parse(res.body as string) as Record<string, unknown>;
+      expect(body).toEqual({ statusCode: 400, message: 'Bad Request' });
+      await app.stop();
+    });
+
+    it('answers a custom formatter for a malformed URL without throwing', async () => {
+      const custom: ErrorHandlerFormatter = (error) => ({
+        marker: 'custom-malformed',
+        detail: error.message,
+      });
+      const { app } = appWith(custom);
+      await app.start();
+
+      const res = await app.inject({ method: 'GET', url: 'not-a-valid-url' });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body as string) as Record<string, unknown>;
+      expect(body.marker).toBe('custom-malformed');
+      expect(body.detail).toBe('Bad Request');
+      await app.stop();
+    });
+
+    it('answers rfc9457 with the safe instance for a malformed percent-escape', async () => {
+      // A malformed percent-escape (e.g. `/%zz`) parses as a URL — only
+      // `decodeURIComponent` fails — so the request path IS readable and the
+      // Problem Details `instance` member carries it.
+      const { app } = appWith('rfc9457');
+      await app.start();
+
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/%zz' });
+      expect(res.statusCode).toBe(400);
+      expect(res.headers.get('content-type')).toBe('application/problem+json');
+      const body = JSON.parse(res.body as string) as Record<string, unknown>;
+      expect(body.status).toBe(400);
+      expect(body.title).toBe('Bad Request');
+      expect(body.instance).toBe('/%zz');
+      await app.stop();
+    });
+  });
+
+  // ---- Finding 2 (round 2): pre-pipeline formatters receive an honest context ----
+
+  describe('finding 2 (round 2) — a pre-pipeline formatter may read documented context members', () => {
+    it('does not throw when a drain formatter reads a documented context member', async () => {
+      // Before the round-2 fix the responder cast every bare target to a full
+      // IRequestContext, so a custom formatter reading a documented member that
+      // is absent on the partial (e.g. `ctx.request.path`) during a real drain
+      // threw `TypeError: Cannot read properties of undefined`, replacing the
+      // configured 503 with an unhandled exception. Now the formatter receives
+      // `undefined` (the value its optional `ctx` parameter already declares)
+      // at the pre-pipeline sites, so the read short-circuits and the
+      // configured 503 stands. This test FAILS without the fix (the partial
+      // object has no `request` member, so `ctx.request.path` throws).
+      const custom: ErrorHandlerFormatter = (error, ctx) => ({
+        marker: 'custom-drain-ctx',
+        detail: error.message,
+        // A documented context member: present on a full context, absent on the
+        // pre-pipeline partial. `ctx?.request.path` is `undefined` when `ctx`
+        // is `undefined` (the post-fix value) but THROWS when `ctx` is the
+        // pre-fix partial (no `request` member).
+        path: ctx?.request.path,
+      });
+      const { app, fake } = appWith(custom);
+      await app.start();
+
+      const stopping = app.stop();
+      const res = await app.inject({ method: 'GET', url: 'http://localhost/drain-test' });
+      fake.tick(20_000);
+      await stopping;
+
+      expect(res.statusCode).toBe(503);
+      const body = JSON.parse(res.body as string) as Record<string, unknown>;
+      expect(body.marker).toBe('custom-drain-ctx');
+      expect(body.detail).toBe('Service Unavailable');
+      // The formatter's optional-ctx read succeeded (no throw) and reported
+      // the member absent, exactly as its documented contract allows.
+      expect(body.path).toBeUndefined();
+    });
+
+    it('does not throw when a malformed-request formatter reads a documented context member', async () => {
+      const custom: ErrorHandlerFormatter = (error, ctx) => ({
+        marker: 'custom-malformed-ctx',
+        detail: error.message,
+        // Absent on the pre-pipeline partial; `ctx?.request.path` throws
+        // without the fix and is `undefined` with it.
+        path: ctx?.request.path,
+      });
+      const { app } = appWith(custom);
+      await app.start();
+
+      const res = await app.inject({ method: 'GET', url: 'not-a-valid-url' });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body as string) as Record<string, unknown>;
+      expect(body.marker).toBe('custom-malformed-ctx');
+      expect(body.detail).toBe('Bad Request');
+      expect(body.path).toBeUndefined();
+      await app.stop();
+    });
+  });
 });

@@ -71,4 +71,16 @@ describe('normalizeMetadata', () => {
     expect(result.error).not.toBe(err);
     expect(result.keep).toBe(1);
   });
+
+  it('returns a fresh copy even when no Error is present', () => {
+    // The documented contract (M70f re-review round 2, finding 6): the
+    // implementation always returns a shallow copy, so a caller that memoizes
+    // on the metadata reference cannot accidentally alias the normalized
+    // object with its own.
+    const input = { count: 3, label: 'x' };
+    const result = normalizeMetadata(input);
+
+    expect(result).toEqual(input);
+    expect(result).not.toBe(input);
+  });
 });

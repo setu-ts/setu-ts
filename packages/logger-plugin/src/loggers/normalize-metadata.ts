@@ -26,8 +26,14 @@ import { serializeError } from '@setu-ts/common';
  * values — including nested objects and arrays — are left untouched; only a
  * top-level `Error` value is the class this milestone closes.
  *
+ * A fresh shallow copy is returned on every call — including when no `Error`
+ * is present — so the caller's object is never mutated and a later write to
+ * either object cannot alias the other. Callers that rely on object identity
+ * (e.g. memoizing on the metadata reference) should not use the return value
+ * as a cache key.
+ *
  * @param metadata - The merged metadata to normalize
- * @returns A normalized copy (the same object when no `Error` is present)
+ * @returns A normalized shallow copy of the input (never the input itself)
  * @since 0.1.0
  */
 export function normalizeMetadata(metadata: LogMetadata): Record<string, unknown> {
