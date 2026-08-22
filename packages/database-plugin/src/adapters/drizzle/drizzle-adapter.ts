@@ -9,6 +9,7 @@
  */
 import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
+import { bindRawStatement, type RawStatementTag } from '../../query/raw-statement.ts';
 import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import {
@@ -118,7 +119,16 @@ export type DrizzleOperators = {
    * `%` and `_` a caller searches for stay wildcards on SQLite (which has no
    * default escape character) — a literal search then matches nothing.
    */
-  sql?: (strings: TemplateStringsArray, ...values: unknown[]) => unknown;
+  sql?:
+    & ((strings: TemplateStringsArray, ...values: unknown[]) => unknown)
+    & RawStatementTag;
+  /**
+   * Drizzle's `SQL` constructor. `rawQuery` needs it because `execute()` takes
+   * an `SQLWrapper` — an object carrying `getSQL()` — and a chunk list is the
+   * only way to emit a caller's statement text while binding its parameters
+   * rather than interpolating them.
+   */
+  sqlClass?: new (chunks: readonly unknown[]) => unknown;
   asc: (col: unknown) => unknown;
   desc: (col: unknown) => unknown;
   /**
@@ -177,7 +187,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         lte: ns.lte as (col: unknown, val: unknown) => unknown,
         inArray: ns.inArray as (col: unknown, values: readonly unknown[]) => unknown,
         isNull: ns.isNull as (col: unknown) => unknown,
-        sql: ns.sql as (strings: TemplateStringsArray, ...values: unknown[]) => unknown,
+        sql: ns.sql as NonNullable<DrizzleOperators['sql']>,
+        sqlClass: ns.SQL as NonNullable<DrizzleOperators['sqlClass']>,
         asc: ns.asc as (col: unknown) => unknown,
         desc: ns.desc as (col: unknown) => unknown,
         count: ns.count as () => unknown,
@@ -193,6 +204,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         typeof operators.inArray !== 'function' ||
         typeof operators.isNull !== 'function' ||
         typeof operators.sql !== 'function' ||
+        typeof operators.sql.raw !== 'function' ||
+        typeof operators.sql.param !== 'function' ||
+        typeof operators.sqlClass !== 'function' ||
         typeof operators.asc !== 'function' ||
         typeof operators.desc !== 'function' ||
         typeof operators.count !== 'function'
@@ -218,10 +232,17 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         'DrizzleAdapter requires options.drizzleTables with at least one real Drizzle table definition.',
       );
     }
+    // The `id` column is a REPOSITORY precondition, not a registry one:
+    // `IRepository.findById`/`update`/`delete` are single-key by contract, but
+    // a composite-key table registered only so the typed query builder can
+    // reach it needs no such column. Enforcing it here made the registry
+    // all-or-nothing and locked ordinary join and per-tenant tables out of the
+    // whole schema. `createDrizzleDataSourceInner` refuses the same table by
+    // name at the moment a repository is actually asked for.
     for (const [name, table] of Object.entries(tables)) {
-      if (table == null || typeof table !== 'object' || !hasColumn(table, 'id')) {
+      if (table == null || typeof table !== 'object') {
         throw new Error(
-          `Drizzle table '${name}' must be a table definition with an 'id' column; ` +
+          `Drizzle table '${name}' must be a table definition; ` +
             'provide a proper Drizzle table definition in options.drizzleTables.',
         );
       }
@@ -323,11 +344,27 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     }
     const execute = this._db!.execute;
     if (typeof execute !== 'function') {
+      // SQLite Proxy and libsql-shaped instances expose `all()` instead, but
+      // its raw-statement rows come back POSITIONAL (`[['a', 1]]`) because the
+      // proxy protocol returns array rows and Drizzle has no field map for a
+      // statement it did not build. `query<T>()` promises row objects, which
+      // Prisma and D1 both return, so routing through `all()` would trade a
+      // loud refusal for a silent shape divergence.
       throw new Error(
         "Configured Drizzle instance does not support raw execute(); use Drizzle's typed query builder for this driver.",
       );
     }
-    const result = await execute.call(this._db, { sql, params: params ?? [] });
+    // Both are non-null because `isReady()` above implies `connect()` ran, and
+    // `connect()` refuses a namespace missing either — so a guard here would be
+    // a branch no input can reach.
+    const { sql: tag, sqlClass } = this._operators as Required<
+      Pick<DrizzleOperators, 'sql' | 'sqlClass'>
+    >;
+    // `execute()` takes an SQLWrapper. Passing `{ sql, params }` — which this
+    // adapter used to do — fails inside Drizzle with `query.getSQL is not a
+    // function`, so `query()` could never work on any driver.
+    const statement = new sqlClass(bindRawStatement(sql, params ?? [], tag));
+    const result = await execute.call(this._db, statement);
     return (result as { rows?: T[] }).rows ?? result as T[];
   }
 

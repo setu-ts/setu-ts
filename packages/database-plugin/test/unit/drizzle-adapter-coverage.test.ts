@@ -172,11 +172,15 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
   });
 
   describe('rawQuery', () => {
-    it('delegates to db.execute', async () => {
+    it('delegates to db.execute with an SQLWrapper, never a plain options bag', async () => {
       await adapter.connect();
       const result = await adapter.rawQuery('SELECT ?', [1]);
       const call = fakeDb.recordedCalls.find((c) => c.action === 'execute');
-      expect(call?.args.values).toEqual({ sql: 'SELECT ?', params: [1] });
+      const passed = call?.args.values as { getSQL?: unknown };
+      // The wire-level assertion (statement text and bound parameters) lives in
+      // the real-driver integration tests, which own a dialect that can render
+      // this object. Here the contract is only that an SQLWrapper arrives.
+      expect(typeof passed.getSQL).toBe('function');
       expect(result).toEqual([]);
     });
   });

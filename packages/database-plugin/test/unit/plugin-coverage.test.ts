@@ -170,6 +170,9 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const ctx = createFakeContext();
       const plugin = DatabasePlugin({
         type: 'prisma',
+        // @ts-expect-error M70j (D7): `prismaClient` is now required by the
+        // union. The runtime guard is asserted below because a JavaScript
+        // caller still reaches it.
         options: { url: 'postgresql://localhost/test' },
       });
       await expect(plugin.register!(ctx)).rejects.toThrow('requires options.prismaClient');
@@ -199,6 +202,9 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const ctx = createFakeContext();
       const plugin = DatabasePlugin({
         type: 'drizzle',
+        // @ts-expect-error M70j (D7): `drizzleInstance` is now required by the
+        // union. The runtime guard is asserted below because a JavaScript
+        // caller still reaches it.
         options: {
           url: 'postgresql://localhost/test',
           drizzleTables: { user: createFakeDrizzleTable('user') },

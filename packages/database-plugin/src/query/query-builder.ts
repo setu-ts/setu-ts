@@ -191,3 +191,80 @@ export function projectFields<Entity extends Record<string, unknown>>(
   }
   return projected;
 }
+
+/**
+ * The columns an in-memory entity store has actually been shown — the union of
+ * own keys across every row it currently holds.
+ *
+ * This is the only schema an adapter that was never given one can have. It is
+ * a union rather than the first row's keys because a sparse optional column
+ * appears on some rows and not others, and treating the first row as
+ * authoritative would reject a real column.
+ *
+ * Not exported: {@linkcode unknownColumnError} is its only caller, and an
+ * export whose sole other reader is its own test is dead surface.
+ *
+ * @param rows - The rows currently visible for the entity
+ * @returns Every key seen on at least one row
+ * @since 0.2.0
+ */
+function observedColumns(
+  rows: readonly Record<string, unknown>[],
+): ReadonlySet<string> {
+  const columns = new Set<string>();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      columns.add(key);
+    }
+  }
+  return columns;
+}
+
+/**
+ * Report a `select` or `orderBy` field that no stored row carries.
+ *
+ * The Drizzle and Prisma adapters reject an unknown column by name; the memory
+ * adapter used to accept one silently, so a projection quietly lost a field
+ * and a sort quietly returned rows unordered — a 200 in development and a 500
+ * on the same call in production. Only `select` and `orderBy` are checked:
+ * both are meaningless against a column no row has, whereas a `where` or
+ * `filter` on one is an ordinary "no row matches" query, and the memory
+ * adapter cannot tell an unknown column from one that is absent everywhere.
+ *
+ * An entity holding **no rows at all** is skipped. There is nothing to observe
+ * and nothing to return, so the check could only produce a false refusal.
+ *
+ * This RETURNS the error rather than throwing it, because every caller sits
+ * behind a `Promise`-returning data-source method: a synchronous throw there
+ * bypasses a caller using `.catch()`, which is a defect this repository has
+ * shipped more than once.
+ *
+ * @param entity - Entity name, quoted in the diagnostic
+ * @param rows - The rows currently visible for the entity
+ * @param query - The normalized query whose `select` and `orderBy` are checked
+ * @returns The error naming the entity, the clause and the offending field, or
+ * `undefined` when every named field is known
+ * @since 0.2.0
+ */
+export function unknownColumnError(
+  entity: string,
+  rows: readonly Record<string, unknown>[],
+  query: Pick<NormalizedQuery, 'orderBy' | 'select'>,
+): Error | undefined {
+  const fields = [
+    ...query.select.map((field) => ['select', field] as const),
+    ...Object.keys(query.orderBy).map((field) => ['orderBy', field] as const),
+  ];
+  if (fields.length === 0 || rows.length === 0) return undefined;
+
+  const known = observedColumns(rows);
+  for (const [clause, field] of fields) {
+    if (!known.has(field)) {
+      return new Error(
+        `Memory adapter: entity '${entity}' has no '${field}' column for ${clause}. ` +
+          `Known columns: ${[...known].sort().join(', ')}.`,
+      );
+    }
+  }
+  return undefined;
+}
