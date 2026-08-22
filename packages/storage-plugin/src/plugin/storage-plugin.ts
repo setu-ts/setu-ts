@@ -12,18 +12,7 @@ import type {
   IStorage,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
-import type {
-  AzureBlobProviderOptions,
-  GcsProviderOptions,
-  IAwsS3Client,
-  IAzureBlobClient,
-  IGcsClient,
-  LocalStorageProviderOptions,
-  S3ProviderOptions,
-  StoragePluginOptions,
-  StorageProviderOptions,
-  StorageProviderType,
-} from '../interfaces/index.ts';
+import type { StoragePluginOptions, StorageProviderType } from '../interfaces/index.ts';
 import type { StorageProvider } from '../interfaces/index.ts';
 import { StorageService } from '../services/storage-service.ts';
 import { MemoryProvider } from '../providers/memory-provider.ts';
@@ -42,45 +31,47 @@ const DEFAULT_PROVIDER: StorageProviderType = 'memory';
 /**
  * Builds the provider adapter for the configured backend.
  *
- * @param type - The provider backend id
- * @param options - Provider-specific options
+ * Takes the whole discriminated {@linkcode StoragePluginOptions} rather than a
+ * loose `(type, options)` pair, so each arm reads its own option shape directly
+ * — the five `options as XProviderOptions` casts this used to carry existed
+ * only because the union could not be narrowed.
+ *
+ * @param config - The plugin configuration, narrowed per arm
  * @param runtime - The runtime environment services (for `LocalStorageProvider`)
  * @returns The provider adapter
  * @throws {Error} If the provider type is unsupported
  */
 export function createProvider(
-  type: StorageProviderType,
-  options: StorageProviderOptions,
+  config: StoragePluginOptions,
   runtime: IRuntimeServices,
-): unknown {
+): StorageProvider {
   // Wall-clock source for providers that compute signed-URL expiry. `runtime.now()`
   // is the only sanctioned clock outside `packages/runtime` (no direct platform clock).
   const now = (): number => runtime.now();
 
-  switch (type) {
+  switch (config.provider) {
+    case undefined:
     case 'memory':
       return new MemoryProvider(now);
 
-    case 'local': {
-      const localOpts = options as LocalStorageProviderOptions;
-      return new LocalStorageProvider(runtime.fs, localOpts);
-    }
+    case 'local':
+      return new LocalStorageProvider(runtime.fs, config.options);
 
     case 's3': {
-      const s3Opts = options as S3ProviderOptions;
+      const s3Opts = config.options;
       return new S3Provider({
         region: s3Opts.region,
         bucket: s3Opts.bucket,
         accessKeyId: s3Opts.accessKeyId,
         secretAccessKey: s3Opts.secretAccessKey,
         endpoint: s3Opts.endpoint,
-        client: s3Opts.client as IAwsS3Client | undefined,
+        client: s3Opts.client,
       });
     }
 
     case 'b2': {
       // Backblaze B2: first-class S3-compatible preset.
-      const b2Opts = options as S3ProviderOptions;
+      const b2Opts = config.options;
       const region = b2Opts.region ?? 'us-east-1';
       const endpoint = b2Opts.endpoint ?? `https://s3.${region}.backblazeb2.com`;
       return new S3Provider({
@@ -89,32 +80,32 @@ export function createProvider(
         accessKeyId: b2Opts.accessKeyId,
         secretAccessKey: b2Opts.secretAccessKey,
         endpoint,
-        client: b2Opts.client as IAwsS3Client | undefined,
+        client: b2Opts.client,
       });
     }
 
-    case 'gcs': {
-      const gcsOpts = options as GcsProviderOptions;
+    case 'gcs':
       return new GcsProvider({
-        projectId: gcsOpts.projectId,
-        bucket: gcsOpts.bucket,
-        client: gcsOpts.client as IGcsClient | undefined,
+        projectId: config.options.projectId,
+        bucket: config.options.bucket,
+        client: config.options.client,
       }, now);
-    }
 
-    case 'azure': {
-      const azureOpts = options as AzureBlobProviderOptions;
+    case 'azure':
       return new AzureBlobProvider({
-        connectionString: azureOpts.connectionString,
-        accountName: azureOpts.accountName,
-        accountKey: azureOpts.accountKey,
-        containerName: azureOpts.containerName,
-        client: azureOpts.client as IAzureBlobClient | undefined,
+        connectionString: config.options.connectionString,
+        accountName: config.options.accountName,
+        accountKey: config.options.accountKey,
+        containerName: config.options.containerName,
+        client: config.options.client,
       }, now);
-    }
 
-    default:
-      throw new Error(`Unsupported storage provider: ${type as string}`);
+    default: {
+      // Unreachable through the typed surface; reached only when a JavaScript
+      // caller passes a provider name the union does not carry.
+      const unknownProvider: string = (config as { provider: string }).provider;
+      throw new Error(`Unsupported storage provider: ${unknownProvider}`);
+    }
   }
 }
 
@@ -141,8 +132,8 @@ export function createProvider(
  * @returns The plugin instance
  */
 export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
-  const providerType = options?.provider ?? DEFAULT_PROVIDER;
-  const providerOptions = options?.options ?? {};
+  const config: StoragePluginOptions = options ?? {};
+  const providerType = config.provider ?? DEFAULT_PROVIDER;
 
   return {
     name: PLUGIN_NAME,
@@ -152,8 +143,7 @@ export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
-      const rawProvider = createProvider(providerType, providerOptions, ctx.runtime);
-      const provider = rawProvider as StorageProvider;
+      const provider = createProvider(config, ctx.runtime);
       await provider.connect();
 
       const service = new StorageService(provider);

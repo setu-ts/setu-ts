@@ -8,7 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createProvider, StoragePlugin } from '../../src/plugin/storage-plugin.ts';
 import { MemoryProvider } from '../../src/providers/memory-provider.ts';
-import type { StorageProvider } from '../../src/interfaces/index.ts';
+import type { StoragePluginOptions } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createFakeContext } from '../fixtures/fake-context.ts';
@@ -39,13 +39,13 @@ describe('createProvider', () => {
   const fakeRuntime = makeFakeRuntime();
 
   it('defaults to memory provider when type is memory', () => {
-    const p = createProvider('memory', {}, fakeRuntime);
+    const p = createProvider({ provider: 'memory' }, fakeRuntime);
     expect(p).toBeInstanceOf(MemoryProvider);
   });
 
   it('injects runtime.now() as the provider clock (getSignedUrl expiry uses it, not Date.now)', async () => {
     const rt = { ...makeFakeRuntime(), now: (): number => 1_700_000_000_000 } as IRuntimeServices;
-    const p = createProvider('memory', {}, rt) as StorageProvider;
+    const p = createProvider({ provider: 'memory' }, rt);
     await p.connect();
     const url = await p.getSignedUrl('k.txt', { expiresIn: 60 });
     // 1_700_000_000_000 ms → 1_700_000_000 s + 60 = 1700000060
@@ -53,31 +53,35 @@ describe('createProvider', () => {
   });
 
   it('unknown provider type throws', () => {
+    // Unreachable through the typed surface now that the options are
+    // discriminated, so the cast stands in for a JavaScript caller.
     expect(() =>
       createProvider(
-        'invalid' as StorageProvider['connect'] extends () => Promise<void> ? 'memory' : 'invalid',
-        {},
+        { provider: 'invalid' } as unknown as StoragePluginOptions,
         fakeRuntime,
       )
     ).toThrow('Unsupported storage provider');
   });
 
   it('b2 type builds S3Provider with derived B2 endpoint', () => {
-    const p = createProvider('b2', {
-      bucket: 'mybucket',
-      region: 'us-west-1',
-      accessKeyId: 'keyid',
-      secretAccessKey: 'secret',
-    }, fakeRuntime) as StorageProvider;
+    const p = createProvider({
+      provider: 'b2',
+      options: {
+        bucket: 'mybucket',
+        region: 'us-west-1',
+        accessKeyId: 'keyid',
+        secretAccessKey: 'secret',
+      },
+    }, fakeRuntime);
     expect(p.isReady()).toBe(false);
   });
 
   it('b2 honors explicit endpoint override', () => {
     const customEndpoint = 'https://custom.endpoint.com';
-    const p = createProvider('b2', {
-      bucket: 'mybucket',
-      endpoint: customEndpoint,
-    }, fakeRuntime) as StorageProvider;
+    const p = createProvider({
+      provider: 'b2',
+      options: { bucket: 'mybucket', endpoint: customEndpoint },
+    }, fakeRuntime);
     expect(p.isReady()).toBe(false);
   });
 });
@@ -118,36 +122,40 @@ describe('StoragePlugin', () => {
 
   it('unknown provider type at registration throws', async () => {
     const { ctx } = createFakeContext();
-    const plugin = StoragePlugin({
-      provider:
-        'nonexistent' as unknown as import('../../src/interfaces/index.ts').StorageProviderType,
-    });
+    const plugin = StoragePlugin(
+      { provider: 'nonexistent' } as unknown as StoragePluginOptions,
+    );
     await expect(plugin.register!(ctx)).rejects.toThrow('Unsupported storage provider');
   });
 
   it('s3 provider can be wired', () => {
     const fakeRuntime = makeFakeRuntime();
     const provider = createProvider(
-      's3',
-      { bucket: 'test-bucket', region: 'us-east-1' },
+      { provider: 's3', options: { bucket: 'test-bucket', region: 'us-east-1' } },
       fakeRuntime,
-    ) as StorageProvider;
+    );
     expect(provider.isReady()).toBe(false);
   });
 
   it('azure provider can be wired', () => {
     const fakeRuntime = makeFakeRuntime();
-    const provider = createProvider('azure', {
-      containerName: 'mycontainer',
-      accountName: 'fakeaccount',
-      accountKey: 'dGVzdGtleQ==',
-    }, fakeRuntime) as StorageProvider;
+    const provider = createProvider({
+      provider: 'azure',
+      options: {
+        containerName: 'mycontainer',
+        accountName: 'fakeaccount',
+        accountKey: 'dGVzdGtleQ==',
+      },
+    }, fakeRuntime);
     expect(provider.isReady()).toBe(false);
   });
 
   it('gcs provider can be wired', () => {
     const fakeRuntime = makeFakeRuntime();
-    const provider = createProvider('gcs', { bucket: 'my-bucket' }, fakeRuntime) as StorageProvider;
+    const provider = createProvider(
+      { provider: 'gcs', options: { bucket: 'my-bucket' } },
+      fakeRuntime,
+    );
     expect(provider.isReady()).toBe(false);
   });
 });

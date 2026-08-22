@@ -8,6 +8,8 @@
  * @module
  */
 
+import type { PutObjectOptions } from '@setu-ts/common';
+
 // ── Provider type discriminant ────────────────────────────────────────────
 
 /** Supported storage back-ends. */
@@ -22,31 +24,97 @@ export type StorageProviderType =
 // ── Plugin / provider options ─────────────────────────────────────────────
 
 /**
- * Top-level options passed to {@linkcode StoragePlugin}.
+ * Top-level options passed to {@linkcode StoragePlugin}: a union discriminated
+ * on `provider`, so each backend's `options` are checked against that backend's
+ * own shape.
+ *
+ * The memory arm keeps `provider` OPTIONAL, so an omitted provider still means
+ * `'memory'` and `StoragePlugin()` is unchanged.
+ *
+ * Before this was discriminated, one unknown key made the compiler report EVERY
+ * property of the literal as `not assignable to type 'never'` and never named
+ * the offending one — the union's first member was `Record<string, never>`,
+ * which accepts any object shape while requiring every property to be `never`,
+ * so a literal matching no other member bound to it. Discriminating also makes
+ * a missing `bucket` or `containerName` a compile error under the arm that
+ * requires it, rather than something only the running backend notices.
  *
  * @since 0.1.0
  */
-export interface StoragePluginOptions {
-  /** Provider backend (default `'memory'`). */
-  provider?: StorageProviderType;
-  /** Provider-specific options. */
-  options?: StorageProviderOptions;
+export type StoragePluginOptions =
+  | MemoryStorageOptions
+  | LocalStorageOptions
+  | S3StorageOptions
+  | GcsStorageOptions
+  | AzureStorageOptions;
+
+/**
+ * The default arm: in-memory storage, which takes no configuration.
+ *
+ * It deliberately declares NO `options` member. The previous
+ * `MemoryProviderOptions = Record<string, never>` is what produced X8-11's
+ * symptom, and discriminating the outer union alone did NOT remove it —
+ * measured: with that member present, one unknown key inside an `'s3'` literal
+ * still reported `bucket` and `region` as `not assignable to type 'never'`,
+ * because the compiler keeps every arm's `options` type as a candidate for the
+ * nested literal once the direct match fails. Without it there is exactly one
+ * error, and it names the offending key.
+ */
+export interface MemoryStorageOptions {
+  /** Selects the memory backend. Optional — an omitted provider means memory. */
+  readonly provider?: 'memory';
+}
+
+/** The local-filesystem arm. */
+export interface LocalStorageOptions {
+  /** Selects the local-filesystem backend. */
+  readonly provider: 'local';
+  /** Root directory configuration. */
+  readonly options?: LocalStorageProviderOptions;
 }
 
 /**
- * Union of per-provider option shapes, keyed by which fields are present.
+ * The S3 arm, shared by `'s3'` and the `'b2'` (Backblaze) preset, which reaches
+ * the same provider over B2's S3-compatible endpoint.
+ */
+export interface S3StorageOptions {
+  /** Selects the S3 backend, or the Backblaze B2 preset over it. */
+  readonly provider: 's3' | 'b2';
+  /** Bucket and credentials; `bucket` is required. */
+  readonly options: S3ProviderOptions;
+}
+
+/** The Google Cloud Storage arm. */
+export interface GcsStorageOptions {
+  /** Selects the GCS backend. */
+  readonly provider: 'gcs';
+  /** Bucket and project; `bucket` is required. */
+  readonly options: GcsProviderOptions;
+}
+
+/** The Azure Blob Storage arm. */
+export interface AzureStorageOptions {
+  /** Selects the Azure Blob backend. */
+  readonly provider: 'azure';
+  /** Container and credentials; `containerName` is required. */
+  readonly options: AzureBlobProviderOptions;
+}
+
+/**
+ * Union of per-provider option shapes.
+ *
+ * Retained as a named type because it is the parameter type of the internal
+ * provider factory and appears in the package's documented surface; the arm a
+ * configuration takes is selected by {@linkcode StoragePluginOptions}, never by
+ * matching against this union.
  *
  * @since 0.1.0
  */
 export type StorageProviderOptions =
-  | MemoryProviderOptions
   | LocalStorageProviderOptions
   | S3ProviderOptions
   | GcsProviderOptions
   | AzureBlobProviderOptions;
-
-/** Options for {@linkcode MemoryProvider}. */
-export type MemoryProviderOptions = Record<string, never>;
 
 /** Options for {@linkcode LocalStorageProvider}. */
 export interface LocalStorageProviderOptions {
@@ -103,7 +171,7 @@ export interface AzureBlobProviderOptions {
  * @since 0.1.0
  */
 export interface IAwsS3Client {
-  put(path: string, data: Uint8Array): Promise<void>;
+  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
   get(path: string): Promise<Uint8Array | null>;
   delete(path: string): Promise<boolean>;
   head(path: string): Promise<boolean>;
@@ -206,8 +274,11 @@ export interface StorageProvider {
    *
    * @param path - Object path/key
    * @param data - Object bytes
+   * @param options - Object attributes to record with the bytes. Providers that
+   * cannot persist them accept and ignore them; see the README's per-provider
+   * table.
    */
-  put(path: string, data: Uint8Array): Promise<void>;
+  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
   /**
    * Retrieves an object; `null` when absent.
    *

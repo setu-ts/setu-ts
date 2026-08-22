@@ -7,6 +7,7 @@
  *
  * @module
  */
+import type { PutObjectOptions } from '@setu-ts/common';
 import type { IAwsS3Client, StorageProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -130,8 +131,20 @@ export function adaptAwsS3Module(
   const client = new s3Mod.S3Client(buildS3Config(options));
 
   return {
-    async put(path: string, data: Uint8Array): Promise<void> {
-      await client.send(new s3Mod.PutObjectCommand({ Bucket: bucket, Key: path, Body: data }));
+    async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+      // `ContentType`/`Metadata` are omitted rather than sent as `undefined`:
+      // the SDK serializes a present-but-undefined key differently from an
+      // absent one on some commands, and an object stored with no explicit
+      // content type keeps S3's own default.
+      await client.send(
+        new s3Mod.PutObjectCommand({
+          Bucket: bucket,
+          Key: path,
+          Body: data,
+          ...(options?.contentType === undefined ? {} : { ContentType: options.contentType }),
+          ...(options?.metadata === undefined ? {} : { Metadata: options.metadata }),
+        }),
+      );
     },
     async get(path: string): Promise<Uint8Array | null> {
       try {
@@ -295,14 +308,21 @@ export class S3Provider implements StorageProvider {
   }
 
   /**
-   * Stores an object in S3.
+   * Stores an object in S3, recording any content type and user metadata on the
+   * object itself — which is what makes a presigned URL render in a browser
+   * instead of downloading as `application/octet-stream`.
    *
    * @param path - Object key
    * @param data - Object bytes
+   * @param options - Object attributes to record with the bytes
    */
-  async put(path: string, data: Uint8Array): Promise<void> {
+  async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
     this.#assertConnected();
-    await this.#client!.put(path, data);
+    if (options === undefined) {
+      await this.#client!.put(path, data);
+      return;
+    }
+    await this.#client!.put(path, data, options);
   }
 
   /**
