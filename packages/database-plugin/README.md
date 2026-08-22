@@ -19,9 +19,12 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { DatabasePlugin, type IDatabaseService } from '@setu-ts/database-plugin';
 import { CAPABILITIES } from '@setu-ts/common';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from './generated/prisma/client.ts';
 
-const prismaClient = new PrismaClient();
+const prismaClient = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: Deno.env.get('DATABASE_URL')! }),
+});
 
 const app = createApplication({
   plugins: [
@@ -59,15 +62,43 @@ await db.transaction(async (uow) => {
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
 
-For Prisma v7, generate and construct the client in the application, then pass it as
-`options.prismaClient`. A framework package cannot locate an application's generated-client output.
+`options` is a `DatabaseAdapterOptions`, and the arms narrow it: `type: 'prisma'` requires
+`prismaClient`, `type: 'drizzle'` requires both `drizzleInstance` and `drizzleTables`. Those are
+required **by the union**, so omitting one is a compile error rather than a startup throw.
+
+| `options` field      | Type                      | Default | Read by                                                                                                                                      |
+| -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `logQueries`         | `boolean`                 | `false` | The database **service**, so it applies to every adapter including `'custom'` — logs entity, operation and monotonic duration.               |
+| `prismaClient`       | `unknown`                 | —       | Prisma. Required.                                                                                                                            |
+| `provider`           | `PrismaSqlProvider`       | derived | Prisma. Names the connector when it cannot be detected; see `contains` below.                                                                |
+| `drizzleInstance`    | `DrizzleDatabaseIdentity` | —       | Drizzle. Required; created by `createDrizzleDatabase()`.                                                                                     |
+| `drizzleTables`      | `Record<string, unknown>` | —       | Drizzle. Required; entity name → real table definition.                                                                                      |
+| `transactionTimeout` | `number` (ms)             | `30000` | Prisma only. Raises Prisma's ~5 s interactive-transaction default, which is too short for a full Unit of Work. Unread by Memory and Drizzle. |
+| `url`                | `string`                  | —       | **Deprecated and unread.** A Prisma v7 client carries its own connection configuration; see below.                                           |
+
+### Prisma 7 setup
+
+Generate and construct the client in the application, then pass it as `options.prismaClient`: a
+framework package cannot locate an application-selected generated-client output path. Three
+prerequisites are easy to miss, and none of them is this package's to supply:
+
+1. **A driver adapter is required.** Prisma 7 removed the Rust query engine, so `new PrismaClient()`
+   with no argument does not compile — install the adapter for your connector (`@prisma/adapter-pg`,
+   `@prisma/adapter-mariadb`, …) and pass it as `adapter`.
+2. **`schema.prisma` may no longer carry `url`.** Prisma 7 answers
+   `P1012: The datasource property
+   'url' is no longer supported in schema files`; the connection
+   string moves to a `prisma.config.ts`.
+3. **A non-`public` PostgreSQL schema must be named on the adapter.** `?schema=…` in the URL is read
+   by Prisma Migrate only, so the driver adapter needs
+   `new PrismaPg({ connectionString }, { schema })`. Without it every query resolves against
+   `public` and fails with `The table 'public.<Model>' does not exist`.
 
 For Drizzle, wrap a configured Promise-aware driver and explicit transaction bridge with
-`createDrizzleDatabase()` and pass that opaque configuration beside a table registry. The table
-objects must expose an `id` column, and every field supplied to repository `where`, `orderBy`, or
-`select` must be a real column on that table. Its `create`, `update`, and `delete` operations
-require a dialect that supports `RETURNING`, so the adapter can return the actual persisted row
-instead of guessing:
+`createDrizzleDatabase()` and pass that opaque configuration beside a table registry. Every field
+supplied to repository `where`, `orderBy`, or `select` must be a real column on that table. Its
+`create`, `update`, and `delete` operations require a dialect that supports `RETURNING`, so the
+adapter can return the actual persisted row instead of guessing:
 
 ```typescript
 const drizzleDatabase = createDrizzleDatabase(
@@ -84,9 +115,30 @@ DatabasePlugin({
 });
 ```
 
+The registry accepts **any** table, including one with a composite primary key. The `id` column is a
+repository precondition rather than a registry one — `IRepository.findById`/`update`/`delete` are
+single-key by contract — so `getRepository('TenantFlag')` on an `id`-less table is refused by name
+while the typed query builder reaches the whole schema. Registering a join or per-tenant table so a
+native join can name it therefore no longer locks every other table out.
+
 Promise-aware SQLite Proxy/libsql-shaped Drizzle instances are accepted even when they do not expose
 `execute()`. Repositories, transactions, and typed builders remain available; only
-`IDatabaseService.query()` rejects, with guidance to use the typed builder instead.
+`IDatabaseService.query()` rejects, with guidance to use the typed builder instead. That refusal is
+a contract requirement rather than an unfinished feature: those drivers do expose `all()`, but on a
+raw statement the proxy protocol answers with **positional** rows (`[['a', 1]]`) because Drizzle has
+no field map for a statement it did not build, while `query<T>(): Promise<T[]>` promises row objects
+— as Prisma and D1 both return.
+
+`IDatabaseService.query(sql, params)` binds every parameter, never interpolating it. The statement
+carries the connector's own placeholders (`$1…` on PostgreSQL, `?` on MySQL and SQLite) and is
+emitted verbatim for an ascending-placeholder statement. A placeholder count that disagrees with the
+parameter list, a gap in the `$N` sequence, or both styles in one statement is refused before the
+statement reaches the driver — a mis-bound parameter is silent, so guessing is not an option.
+
+On PostgreSQL, `?`, `?|` and `?&` are also **jsonb key-containment operators**, and no scanner can
+tell one from a placeholder. Such a statement is refused here (its token count disagrees with the
+parameter list) or fails at the database as a syntax error — never mis-bound. Write it with `$N`
+placeholders, which are unambiguous on that connector.
 
 Synchronous callback drivers such as `better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite are
 not supported by this adapter. Their transaction callbacks return before awaited Unit-of-Work work
@@ -187,6 +239,36 @@ effective escape character is the connector's own default:
 When the connector cannot be determined the same error is thrown naming the `provider` option; pass
 `provider` (e.g. `provider: 'postgresql'`) in the adapter options to name it explicitly.
 
+## The Memory adapter's guarantees
+
+`MemoryAdapter` is the default because it needs no driver, not because it is a stand-in for one. It
+is **never given a schema**, so what it can and cannot enforce follows from that, and the difference
+matters most to the people it is aimed at: develop against the default, deploy against Prisma or
+Drizzle, and an unenforced rule becomes a 500 in production.
+
+| Behaviour                           | Memory                                        | Prisma / Drizzle |
+| ----------------------------------- | --------------------------------------------- | ---------------- |
+| Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name  |
+| Unknown `where` / `filter` field    | Matches nothing                               | Refused          |
+| Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced         |
+| Column types                        | Not enforced — a string into an Int is stored | Enforced         |
+| Foreign keys, checks, defaults      | Not enforced                                  | Enforced         |
+
+Only the first row is something this adapter can decide, and it does: a `select` or `orderBy` field
+that **no stored row carries** is refused with the entity, the clause and the observed column list,
+matching what Drizzle answers for the same call. Two consequences of measuring rather than declaring
+are worth knowing: a field carried by at least one row counts as known (so a sparse optional column
+works), and an entity holding no rows at all accepts anything, because there is nothing to observe
+and nothing to return.
+
+`where` and `filter` are deliberately **not** checked. Without a schema this adapter cannot tell an
+unknown column from one that is absent on every row, and returning no rows is a defensible answer to
+the second — whereas ordering by a column no row has returns rows in an arbitrary order and
+projecting one silently changes the response shape.
+
+Uniqueness and types are outside what any schema-less store can do. **Use the Memory adapter for
+development and tests, and run integration tests against the backend you deploy on.**
+
 ## Transactions
 
 `IUnitOfWork` groups repository work into one transaction. Prisma exposes only callback-style
@@ -212,13 +294,14 @@ imperative begin/commit.
 | `PrismaRepository`               | class     |
 | `UnitOfWork`                     | class     |
 | `UnsupportedFilterOperatorError` | class     |
-| `BuiltInDatabaseOptions`         | interface |
 | `CountOptions`                   | interface |
 | `CustomDatabaseOptions`          | interface |
 | `DatabaseAdapterOptions`         | interface |
 | `DatabaseConnectionOptions`      | interface |
+| `DrizzleAdapterOptions`          | interface |
 | `DrizzleDatabase`                | interface |
 | `DrizzleDatabaseIdentity`        | interface |
+| `DrizzleDatabaseOptions`         | interface |
 | `FindOptions`                    | interface |
 | `IAdapterTransaction`            | interface |
 | `IDatabaseAdapter`               | interface |
@@ -226,7 +309,11 @@ imperative begin/commit.
 | `IDataSource`                    | interface |
 | `IRepository`                    | interface |
 | `IUnitOfWork`                    | interface |
+| `MemoryDatabaseOptions`          | interface |
 | `NormalizedQuery`                | interface |
+| `PrismaAdapterOptions`           | interface |
+| `PrismaDatabaseOptions`          | interface |
+| `BuiltInDatabaseOptions`         | type      |
 | `DatabaseAdapterType`            | type      |
 | `DatabasePluginOptions`          | type      |
 | `DataSource`                     | type      |

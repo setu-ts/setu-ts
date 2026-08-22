@@ -2823,6 +2823,68 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   run fails with `RequestTimeoutError`, contradicting the doc's "repeated runs never share state"),
   so the container is restarted between runs. Both suites now pass under the project's own
   permission model — 7 steps, verified in this worktree.) — complete (PR #175)
+- **Milestone 70j** (`packages/database-plugin` — database adapter correctness) — complete (PR
+  #177). Six register rows with one shape: an adapter reporting success while doing something other
+  than what its contract says. **X12-2** `IDatabaseService.query()` could not work at all on the
+  Drizzle adapter, which called `execute({ sql, params })` — a shape no Drizzle driver accepts,
+  failing with the internal `TypeError: query.getSQL is not a function`. The fix is a **binder**,
+  not a call-shape swap: Prisma (`$queryRawUnsafe(sql, ...params)`) and D1
+  (`prepare(sql).bind(...)`) both forward the statement **verbatim** and bind natively, so that is
+  the contract, and passing the bare string — which the driver DOES accept, probed — would silently
+  drop `params`, which is worse than the current failure. A pure internal scanner splits the
+  statement at its placeholders, skipping string literals, quoted identifiers, `--` and nested
+  `/* */` comments and PostgreSQL `$tag$` bodies so a `?` inside `'text?'` is never one, and
+  interleaves `sql.param(value)`. Measured against the real generator on three dialects: Drizzle
+  numbers `Param` chunks in encounter order and renders them dialect-natively, so an
+  ascending-placeholder statement round-trips **byte-identically**. Any disagreement between
+  statement and parameter list — wrong count, a gap in the `$N` sequence, both styles at once — is
+  refused before the driver is reached, because a mis-bound parameter is silent.
+
+  **One boundary was measured rather than assumed, and the measurement reversed the obvious move.**
+  A `sqlite-proxy` instance has no `execute` but does have `all()`, which looked like a free lift of
+  the documented "only `query()` rejects" limitation. It is not: `all()` on a raw statement returns
+  **positional** rows (`[["a", 1]]`), because the proxy protocol returns array rows and Drizzle has
+  no field map for a statement it did not build, while `query<T>(): Promise<T[]>` promises objects —
+  as Prisma and D1 return. Routing through `all()` would have traded a loud failure for a silent
+  shape divergence, the exact defect class this milestone closes. The refusal stays, and README +
+  `PUBLIC_API.md` now state the reason so it is not re-opened as an oversight.
+
+  **X12-5** the default Memory adapter is closed for the two divergences the register calls worth
+  fixing and DOCUMENTED for the two it does not. An unknown `select`/`orderBy` field is refused by
+  name against the entity's **observed** column set — the union of keys over the rows the store
+  holds — while `where`/`filter` are deliberately left alone: with no schema this adapter cannot
+  distinguish an unknown column from one absent on every row, and matching nothing is a defensible
+  answer, whereas ordering by a column no row has returns rows arbitrarily and projecting one
+  silently changes the response shape. An entity holding **no rows** skips the check entirely (there
+  is nothing to observe and nothing to return). Uniqueness and column types get a stated guarantee
+  table instead, since no schema-less store can enforce them. **X4-9** needed no new code path:
+  `createDrizzleDataSourceInner` already refuses an `id`-less table by name, so the fix is deleting
+  the eager check from `connect()` — the registry was enforcing the REPOSITORY's precondition on
+  tables only the typed query builder reads, which made it all-or-nothing.
+
+  **D7** makes each built-in arm name what its adapter cannot run without, the guarantee the
+  `'custom'` arm has had since M52c. **Prisma is included with Drizzle**, because M66 made
+  `prismaClient` required at runtime and it is the identical defect — and that is what turned six
+  stale doc sites from silent lies into checked ones (**X12-4**), since
+  `DatabasePlugin({ type: 'prisma' })` and `options: { url }` appear in the root README,
+  `PUBLIC_API.md`, `ROADMAP.md`, a starter README and `AI_GUIDELINES.md` §12.2 while the adapter has
+  thrown on all of them since M66; the published Prisma snippet was also the **v6** constructor,
+  which does not compile against a real v7 client, so the three undocumented prerequisites (driver
+  adapter, `prisma.config.ts`, the adapter's `schema` option) are now a named setup section.
+  `packages/starters` needed no `src` change — `RestStarterOptions.database` is a pass-through
+  `DatabasePluginOptions` — and `BuiltInDatabaseOptions` keeps its published name as the union of
+  the three new arms, so an existing annotation carrying a memory configuration still compiles.
+  **X12-6** `transactionTimeout` is documented in both the README options table and `PUBLIC_API.md`.
+
+  **Two defects outside the register.** One was found by reading the source: with `logQueries: true`
+  the service's logging wrapper declared `count(where)` and called `ds.count(where)`, dropping the
+  `filter` argument `IDataSource.count(where, filter?)` defines — so `repo.count({ filter })`
+  answered a different number with logging on than off, and every existing test built the service
+  without logging. The other was **introduced by this milestone and caught by its own test**: the
+  new column refusal threw SYNCHRONOUSLY from a method typed `Promise<…>`, bypassing any caller
+  using `.catch()` — the M52b/M52c class — so the check now returns its error and the adapter
+  rejects with it. The X12-2 negative control reproduced the register's message verbatim across five
+  tests, and the `count`-filter control failed both new steps.
 - **Next milestone** — **M70i** (gRPC and GraphQL viability). The repair-versus-withdraw decision
   for `grpc-plugin`, plus the documented-API-does-not-exist rows both packages carry: every gRPC
   registration snippet in README and `PUBLIC_API.md` throws because it resolves the capability

@@ -325,6 +325,10 @@ describe('DatabasePlugin integration', () => {
     const ctx = createFakeContext();
     const plugin = DatabasePlugin({
       type: 'drizzle',
+      // @ts-expect-error M70j (D7): `drizzleTables` is now required by the
+      // union, so this configuration no longer compiles. The runtime guard
+      // stays and is asserted below, because a JavaScript caller and a caller
+      // who suppresses the error both still reach it.
       options: {
         drizzleInstance: createDrizzleDatabase(
           fakeDrizzle,

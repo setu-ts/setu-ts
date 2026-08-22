@@ -857,9 +857,14 @@ Provides database access with repository pattern and unit of work.
 
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from './generated/prisma/client.ts';
 
-const prismaClient = new PrismaClient();
+// Prisma 7 removed the Rust query engine, so a driver adapter is REQUIRED —
+// `new PrismaClient()` with no argument does not compile.
+const prismaClient = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: config.getOrThrow('DATABASE_URL') }),
+});
 
 app.register(DatabasePlugin({
   type: 'prisma',
@@ -869,6 +874,25 @@ app.register(DatabasePlugin({
   },
 }));
 ```
+
+`DatabasePluginOptions` is a union discriminated on `type`, and each arm names the options its
+adapter cannot run without: `'prisma'` requires `options.prismaClient`, `'drizzle'` requires both
+`options.drizzleInstance` and `options.drizzleTables`, and `'custom'` requires `adapter`. Omitting
+one is a **compile error** rather than a startup throw. The exported arms are
+`MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions` and
+`CustomDatabaseOptions`; `BuiltInDatabaseOptions` is the union of the first three and keeps its
+published name, so an existing annotation carrying a memory configuration still compiles.
+`PrismaAdapterOptions` and `DrizzleAdapterOptions` are `DatabaseAdapterOptions` narrowed for their
+arm.
+
+Three Prisma 7 prerequisites are the application's to supply and are documented in the package
+README: the driver-adapter package, a `prisma.config.ts` (Prisma 7 rejects `url` in
+`schema.prisma`), and `new PrismaPg({ connectionString }, { schema })` for a non-`public` PostgreSQL
+schema.
+
+`DatabaseAdapterOptions.transactionTimeout` (ms, default `30000`) raises Prisma's ~5 s
+interactive-transaction default, which is too short for a full Unit of Work. It is read by the
+Prisma adapter only; Memory and Drizzle ignore it.
 
 Prisma v7 clients are generated into an application-selected output path, so the Prisma adapter
 requires an application-created `options.prismaClient`; it never imports or constructs that client.
@@ -888,7 +912,9 @@ column and the adapter translates every repository field to a real Drizzle colum
 rows; an unsupported dialect throws a descriptive error. Promise-aware SQLite Proxy and
 libsql-shaped Drizzle instances without `execute()` are accepted for repository, transaction, and
 typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects with guidance to
-use Drizzle's typed query builder.
+use Drizzle's typed query builder. That refusal is permanent rather than pending: those drivers do
+expose `all()`, but on a raw statement the proxy protocol answers with **positional** rows, because
+Drizzle has no field map for a statement it did not build — and `query<T>()` promises row objects.
 
 Synchronous callback drivers (`better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite) are
 unsupported: their native transaction closes when the callback returns, before awaited UoW work can
@@ -1068,8 +1094,17 @@ interface IRepository<Entity> {
 
 `query()` is the existing backend-specific raw-SQL escape hatch. It requires a configured Drizzle
 instance with `execute()`; typed builders obtained through the Drizzle accessors do not.
-Programmatic `migrate()` is unsupported by all current adapters and rejects because each ORM owns
-migrations through its CLI.
+
+Every adapter binds `params` and never interpolates them, and the statement carries the connector's
+own placeholders — `$1…` on PostgreSQL, `?` on MySQL and SQLite. Prisma and D1 forward the text
+verbatim; the Drizzle adapter splits it at its placeholders and rebuilds it through Drizzle's own
+`SQL` chunks, which emits an ascending-placeholder statement byte-identically. A placeholder count
+that disagrees with `params`, a gap in the `$N` sequence, or both placeholder styles in one
+statement is refused before the driver is reached, because a mis-bound parameter is silent. On
+PostgreSQL, `?`, `?|` and `?&` are also jsonb key-containment operators that no scanner can tell
+from a placeholder; such a statement is refused or fails at the database, never mis-bound — write it
+with `$N` placeholders. Programmatic `migrate()` is unsupported by all current adapters and rejects
+because each ORM owns migrations through its CLI.
 
 `FindOptions.filter` and `CountOptions.filter` accept a portable expression tree in addition to the
 existing equality-only `where` map. `where` and `filter` are conjoined, and every built-in adapter
@@ -1105,6 +1140,20 @@ filter API (Prisma emits no `ESCAPE` clause and SQLite has no default escape cha
 query, or use the Memory/Drizzle adapter (both honour `contains` as a literal substring). When the
 adapter cannot determine the connector it throws the same error naming the `provider` option; pass
 `provider` (e.g. `provider: 'postgresql'`) in the adapter options to name it explicitly.
+
+### The Memory adapter's guarantees
+
+`MemoryAdapter` is the default and is never given a schema, which fixes what it can enforce. An
+unknown `select` or `orderBy` field — one that **no stored row carries** — is refused by name,
+matching what Drizzle answers for the same call; a field present on at least one row counts as
+known, and an entity holding no rows accepts anything, since there is nothing to observe and nothing
+to return. An unknown `where` or `filter` field is **not** refused: without a schema the adapter
+cannot tell an unknown column from one absent on every row, and matching nothing is a defensible
+answer.
+
+Uniqueness, column types, foreign keys, checks and defaults are **not enforced** and cannot be by a
+schema-less store. Use this adapter for development and tests, and run integration tests against the
+backend you deploy on.
 
 ### Custom Adapters (external backends)
 
@@ -1168,6 +1217,8 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 | `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                             |
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                        |
 | `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                             |
+| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`                                                  | interfaces                        |
+| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                        |
 | `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                             |
 | `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                             |
 | `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`          |
@@ -1182,16 +1233,19 @@ the promoted `IDataSource` (the same type), and will be removed in the next majo
 ### Multiple Databases
 
 ```typescript
+// Each named connection injects its own application-generated Prisma client;
+// `options.url` is deprecated and unread — a v7 client carries its own
+// connection configuration.
 app.register(DatabasePlugin({
   type: 'prisma',
   name: 'primary',
-  options: { url: config.get('PRIMARY_DATABASE_URL') },
+  options: { prismaClient: primaryPrismaClient },
 }));
 
 app.register(DatabasePlugin({
   type: 'prisma',
   name: 'analytics',
-  options: { url: config.get('ANALYTICS_DATABASE_URL') },
+  options: { prismaClient: analyticsPrismaClient },
 }));
 
 // Access by name
@@ -6097,7 +6151,9 @@ Notes:
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
-  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  // A Prisma v7 client is generated and constructed by the application; the
+  // adapter never builds one, so `url` is not a database option.
+  database: { type: 'prisma', options: { prismaClient } },
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
 }), { config: { envFilePath: ['.env.local', '.env'] } });
 
@@ -6147,9 +6203,10 @@ const app = createRestApp({
     }),
   },
   database: {
+    // The v7 client is generated and constructed by the application and
+    // carries its own connection configuration.
     type: 'prisma',
-    // Illustrative: in production, resolve via IConfig or similar
-    options: { url: process.env.DATABASE_URL },
+    options: { prismaClient },
   },
   auth: {
     jwt: {
@@ -6235,9 +6292,10 @@ import { createMicroserviceApp } from '@setu-ts/microservice-starter';
 
 const app = createMicroserviceApp({
   database: {
+    // The v7 client is generated and constructed by the application and
+    // carries its own connection configuration.
     type: 'prisma',
-    // Illustrative: in production, resolve via IConfig or similar
-    options: { url: process.env.DATABASE_URL },
+    options: { prismaClient },
   },
   messaging: {
     broker: 'rabbitmq',
@@ -6331,7 +6389,9 @@ const app = createApplication({
     RuntimePlugin(),
     LoggerPlugin({ level: 'info' }),
     ConfigPlugin({ validationSchema: AppConfigSchema }),
-    DatabasePlugin({ type: 'prisma' }), // reads DATABASE_URL via the config capability
+    // A Prisma v7 client is application-generated, so the adapter is handed one
+    // rather than reading a connection URL of its own.
+    DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
     EventsPlugin(),
     CqrsPlugin(), // add cross-cutting behaviors via `behaviors: [myBehavior]` (typed IPipelineBehavior[])
     OpenApiPlugin({ title: 'CQRS API', version: '1.0.0' }),

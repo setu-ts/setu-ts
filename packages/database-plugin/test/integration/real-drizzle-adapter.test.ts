@@ -200,4 +200,78 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     // `%_` wildcard pattern would also return.
     expect(found.map((row) => row.id)).toEqual(['u1']);
   });
+
+  it('runs IDatabaseService.query() through the real PostgreSQL SQL generator', async () => {
+    // X12-2: the adapter used to call `execute({ sql, params })`, a shape no
+    // Drizzle driver accepts — every `query()` failed with `query.getSQL is
+    // not a function`. The unit fake accepted any argument, so the method had
+    // a green test and no working path. This drives the REAL generator, so the
+    // statement text and the bound parameters are observed on the wire.
+    const seen: Array<{ sql: string; params: readonly unknown[] }> = [];
+    const database = drizzle((sql, params) => {
+      seen.push({ sql, params });
+      return Promise.resolve({ rows: [{ id: 'u1', name: 'Ada' }] });
+    });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        database,
+        (configured, work) => configured.transaction(work),
+      ),
+      drizzleTables: { User: users },
+    });
+    await adapter.connect();
+
+    const rows = await adapter.rawQuery<{ id: string; name: string }>(
+      'select id, name from users where role = $1 and name <> $2',
+      ['admin', 'Bob'],
+    );
+
+    // The caller's placeholders survive verbatim, because Drizzle numbers its
+    // `Param` chunks in encounter order and this statement is ascending.
+    expect(seen[0]?.sql).toBe('select id, name from users where role = $1 and name <> $2');
+    expect(seen[0]?.params).toEqual(['admin', 'Bob']);
+    // Rows come back as OBJECTS, which is what `query<T>(): Promise<T[]>` promises.
+    expect(rows).toEqual([{ id: 'u1', name: 'Ada' }]);
+  });
+
+  it('emits a parameter-free statement verbatim through the real generator', async () => {
+    const seen: string[] = [];
+    const database = drizzle((sql) => {
+      seen.push(sql);
+      return Promise.resolve({ rows: [] });
+    });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        database,
+        (configured, work) => configured.transaction(work),
+      ),
+      drizzleTables: { User: users },
+    });
+    await adapter.connect();
+
+    await adapter.rawQuery('select count(*) from users -- a comment with a ?');
+    expect(seen[0]).toBe('select count(*) from users -- a comment with a ?');
+  });
+
+  it('never lets a parameter value reach the statement text', async () => {
+    const seen: Array<{ sql: string; params: readonly unknown[] }> = [];
+    const database = drizzle((sql, params) => {
+      seen.push({ sql, params });
+      return Promise.resolve({ rows: [] });
+    });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        database,
+        (configured, work) => configured.transaction(work),
+      ),
+      drizzleTables: { User: users },
+    });
+    await adapter.connect();
+
+    const hostile = "x'; drop table users; --";
+    await adapter.rawQuery('select * from users where name = $1', [hostile]);
+    expect(seen[0]?.sql).toBe('select * from users where name = $1');
+    expect(seen[0]?.sql).not.toContain('drop table');
+    expect(seen[0]?.params).toEqual([hostile]);
+  });
 });
