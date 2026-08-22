@@ -6962,16 +6962,16 @@ Ordered by the sequence they should be worked, not by severity alone.
   M24b's auto-instrumentation enabled on no runtime (X7-3). Same family as this repo's most-repeated
   root cause, one level up. General fix: **construct the default and drive it once**, as `runtime`'s
   `read-stream-real.test.ts` already does for `IFileSystem`.
-- ✅ **M70f — Error format and error visibility** (`storage-plugin`, `kernel`, `exceptions`,
-  `multi-tenancy-plugin`, `session-plugin`, `grpc-plugin`, `logger-plugin`, `notification-plugin`,
-  `events-plugin`, `cli`, `common`, `testing`, `auth-plugin`, `http-security-plugin`,
-  `feature-flags-plugin`, `starters`). Errors either bypass the configured RFC 9457 format or vanish
-  entirely: `createUploadMiddleware` reports every downstream failure as a malformed body (X8-1),
-  the kernel's own 404 and fallback 500 answer `{error}` JSON and log **nothing even with
-  `LoggerPlugin` registered** (X9-6, X11-2), short-circuiting middleware emits `{error, message}`
-  (X4-8/C3), a gRPC handler error is logged nowhere (X7-5), and a raw `Error` in log metadata
-  serializes to `{}` (X2-5, X8-12). **The package list was corrected from the eight above at plan
-  time** (mirroring the M70b/M70h precedent): `common` carries the responder seam and
+- ✅ **M70f — Error format and error visibility** — complete (PR #176) (`storage-plugin`, `kernel`,
+  `exceptions`, `multi-tenancy-plugin`, `session-plugin`, `grpc-plugin`, `logger-plugin`,
+  `notification-plugin`, `events-plugin`, `cli`, `common`, `testing`, `auth-plugin`,
+  `http-security-plugin`, `feature-flags-plugin`, `starters`). Errors either bypass the configured
+  RFC 9457 format or vanish entirely: `createUploadMiddleware` reports every downstream failure as a
+  malformed body (X8-1), the kernel's own 404 and fallback 500 answer `{error}` JSON and log
+  **nothing even with `LoggerPlugin` registered** (X9-6, X11-2), short-circuiting middleware emits
+  `{error, message}` (X4-8/C3), a gRPC handler error is logged nowhere (X7-5), and a raw `Error` in
+  log metadata serializes to `{}` (X2-5, X8-12). **The package list was corrected from the eight
+  above at plan time** (mirroring the M70b/M70h precedent): `common` carries the responder seam and
   `serializeError` every other fix depends on (no plugin may import `exceptions`), `events-plugin`
   is X2-5's actual call site, `cli` and `starters` are C3's fix sites, `testing` carries X11-2's
   third option, and the X4-8 sweep reaches `auth-plugin`, `http-security-plugin`, and

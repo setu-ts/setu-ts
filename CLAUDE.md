@@ -2763,7 +2763,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   CLI/rest-starter default pairs `ValidationPlugin({ errorFormat: 'rfc9457' })` with the handler's
   format so a validation failure and a thrown error answer in the same shape (C3). The
   no-`errorHandler` fallback converges `{ error, message }` → `{ error, detail? }` (CHANGELOG
-  migration note). All `src` files ≥90% branch/function/line) — complete (PR pending)
+  migration note). All `src` files ≥90% branch/function/line) — complete (PR #176)
 - **Milestone 70g** (`kernel` + `cli` — routing collisions; docs in `react-router-plugin` and
   `static-plugin`, and the end-to-end gate in `apps/full-stack`. Developed in an isolated worktree
   off `main`, in parallel with M70f, which it does not depend on). Four register rows with one
