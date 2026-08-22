@@ -7058,7 +7058,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   registration API uses a `new Application()` / `app.use()` the kernel does not export (X6-2). Also
   X7-2, X7-4, X6-3 (the code-first arm does not type-check against the real `graphql` package),
   X6-4, X6-5, X6-6, X6-7.
-- ✅ **M70j — Database adapter correctness** (`database-plugin`) — complete (PR pending).
+- ✅ **M70j — Database adapter correctness** (`database-plugin`) — complete (PR #177).
   `IDatabaseService.query()` was inoperative on the Drizzle adapter — it called
   `execute({ sql, params })`, a shape no Drizzle driver accepts, so the method failed with the
   internal `TypeError: query.getSQL is not a function` on every call (X12-2) — and the **default**
