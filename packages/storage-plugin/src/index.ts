@@ -31,12 +31,17 @@ export { createUploadMiddleware, getUploadedFile } from './middleware/upload-mid
 
 export type {
   AzureBlobProviderOptions,
+  AzureStorageOptions,
   GcsProviderOptions,
+  GcsStorageOptions,
   IAwsS3Client,
   IAzureBlobClient,
   IGcsClient,
+  LocalStorageOptions,
   LocalStorageProviderOptions,
+  MemoryStorageOptions,
   S3ProviderOptions,
+  S3StorageOptions,
   StoragePluginOptions,
   StorageProviderOptions,
   StorageProviderType,

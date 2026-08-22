@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { IFileSystem } from '@setu-ts/common';
+import type { IFileSystem, PutObjectOptions } from '@setu-ts/common';
 import type { StorageProvider } from '../interfaces/index.ts';
 
 /**
@@ -123,10 +123,16 @@ export class LocalStorageProvider implements StorageProvider {
   /**
    * Stores an object on disk.
    *
+   * Object attributes are ACCEPTED AND NOT PERSISTED: a file system stores
+   * bytes and has nowhere to record a content type, and this provider's
+   * `getSignedUrl` throws, so nothing could ever read one back. Documented per
+   * provider in the package README rather than silently dropped.
+   *
    * @param path - Object path/key
    * @param data - Object bytes
+   * @param _options - Accepted for interface parity; see above
    */
-  async put(path: string, data: Uint8Array): Promise<void> {
+  async put(path: string, data: Uint8Array, _options?: PutObjectOptions): Promise<void> {
     const resolved = await this.#resolvePath(path);
     // Ensure parent directory exists for nested keys (e.g. "a/b/c.txt").
     const slashIdx = resolved.lastIndexOf('/');
