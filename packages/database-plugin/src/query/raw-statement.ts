@@ -157,6 +157,16 @@ function assertBindable(
  * placeholder-count refusal rather than a mis-bind; double the quote or use
  * the typed query builder.
  *
+ * A `?` that is an OPERATOR rather than a placeholder is not recognised
+ * either. PostgreSQL spells jsonb key containment `?`, `?|` and `?&`, and this
+ * scanner reads each as a placeholder. It cannot resolve that ambiguity — `?`
+ * means both things in one dialect — so it never guesses: with a parameter
+ * list the tokens do not match, the statement is refused here; with one that
+ * does, the operator is consumed and the database answers a syntax error.
+ * Neither outcome mis-binds a value. Write such a statement with `$N`
+ * placeholders instead, which are unambiguous on PostgreSQL; mixing the two
+ * styles is itself refused, so the two can never silently combine.
+ *
  * @param statement - The raw SQL to scan
  * @returns The tokens in the order they appear
  */

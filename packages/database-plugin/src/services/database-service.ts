@@ -174,6 +174,17 @@ export class DatabaseService implements IDatabaseService {
     const now = this._now;
 
     return {
+      // Spread FIRST, so a member `IDataSource` does not REQUIRE — an optional
+      // method added to the contract later, or an adapter-specific extra —
+      // passes through instead of being silently dropped. The six required
+      // methods then override it below.
+      //
+      // Hand-listing every member is what let the `count` filter go missing:
+      // an object literal satisfies `DataSource` with each optional member
+      // absent, so the type checker cannot see the omission and the wrapper
+      // only diverges when logging is on. This closes that class, not just
+      // the one instance.
+      ...ds,
       async findAll(query) {
         const start = now();
         const result = await ds.findAll(query);

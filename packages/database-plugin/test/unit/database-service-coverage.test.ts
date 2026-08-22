@@ -11,6 +11,7 @@ import { createMemoryDataSource, DatabaseService } from '../../src/services/data
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { IUnitOfWork } from '../../src/interfaces/index.ts';
+import type { DataSource } from '../../src/repositories/base-repository.ts';
 
 describe('DatabaseService — CRUD read-back and logging coverage', () => {
   let adapter: MemoryAdapter;
@@ -190,6 +191,35 @@ describe('DatabaseService — CRUD read-back and logging coverage', () => {
       expect(await loud.getRepository('Gadget').count({ filter })).toBe(
         await quiet.getRepository('Gadget').count({ filter }),
       );
+    });
+
+    it('passes through a member the required contract does not name', () => {
+      // The class behind the `count` defect, not just the instance: the wrapper
+      // is an object literal, and a literal satisfies `DataSource` with every
+      // OPTIONAL member absent — so the type checker cannot see one going
+      // missing. An optional method added to `IDataSource` in `common` would be
+      // silently dropped whenever `logQueries: true`, exactly as the `filter`
+      // argument was. Spreading the wrapped source makes it total.
+      const base = createMemoryDataSource(adapter, 'Extra');
+      const extended = Object.assign(Object.create(null) as Record<string, unknown>, base, {
+        describeShape: () => 'adapter-specific extra',
+      });
+      const logging = new DatabaseService(
+        adapter as unknown as IDatabaseAdapter,
+        () => extended as unknown as DataSource,
+        'memory',
+        { logQueries: true },
+        { debug: () => {} },
+      );
+      const wrapped = (logging.getRepository('Extra') as unknown as {
+        _dataSource: { describeShape?: () => string };
+      })._dataSource;
+
+      expect(typeof wrapped.describeShape).toBe('function');
+      expect(wrapped.describeShape?.()).toBe('adapter-specific extra');
+      // The required members still route through the logging wrapper rather
+      // than being handed straight back, so the spread has not bypassed it.
+      expect(wrapped).not.toBe(extended);
     });
   });
 });
