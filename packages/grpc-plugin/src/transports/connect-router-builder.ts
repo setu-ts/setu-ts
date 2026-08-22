@@ -319,7 +319,15 @@ function guardProcedure(
       reportAndRethrow(error);
     }
     if (isThenable(result)) {
-      return result.catch((error) => reportAndRethrow(error));
+      // Assimilate with a native Promise before attaching the rejection
+      // handler: `isThenable` accepts any object with a callable `then`, and a
+      // non-native thenable may expose no `catch` of its own — calling
+      // `result.catch(...)` directly would throw a replacement `TypeError` and
+      // swallow the original rejection (M70f re-review round 2, finding 2).
+      // `Promise.resolve` invokes the thenable's `then` and yields a native
+      // promise, so the rejection handler below is reached for native and
+      // custom thenables alike.
+      return Promise.resolve(result).catch((error) => reportAndRethrow(error));
     }
     if (isAsyncIterable(result)) {
       return withErrorLoggingIterable(result, (error) => reportAndRethrow(error));

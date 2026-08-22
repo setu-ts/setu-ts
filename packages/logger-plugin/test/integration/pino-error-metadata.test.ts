@@ -19,6 +19,7 @@ import { expect } from '@std/expect';
 
 import { PinoLogger } from '../../src/loggers/pino-logger.ts';
 import type { PinoFactory } from '../../src/loggers/pino-logger.ts';
+import type { LogMetadata } from '@setu-ts/common';
 
 /** A real `Writable` that captures the lines Pino writes to it. */
 function captureStream(): { lines: string[]; stream: Writable } {
@@ -63,5 +64,103 @@ describe('PinoLogger — raw Error metadata reaches a real Pino sink (X2-5)', ()
     // that the raw Error was normalized rather than flattened to {}.
     expect(output).toContain('the pino metadata message');
     expect(output).toContain('something failed');
+  });
+});
+
+/**
+ * Regression tests for M70f re-review finding 1: an `Error` supplied as a BASE
+ * binding (via the `bindings` option) or a CHILD binding (via `child()`) must be
+ * preserved in the emitted record — normalized to its serializable shape — and
+ * not collapsed to `{}` by Pino's `JSON.stringify`. These drive a REAL Pino
+ * logger (the guarded `npm:pino` probe) end to end.
+ */
+describe('PinoLogger — Error-valued base and child bindings survive (X2-5, finding 1)', () => {
+  /** Parses each captured line into its JSON record. */
+  function records(lines: string[]): Record<string, unknown>[] {
+    return lines
+      .filter((line) => line.trim() !== '')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  }
+
+  /** Finds the record whose `msg` matches, if any. */
+  function findRecord(
+    all: Record<string, unknown>[],
+    msg: string,
+  ): Record<string, unknown> | undefined {
+    return all.find((record) => record.msg === msg);
+  }
+
+  /**
+   * Builds a real Pino logger writing to a fresh capturing stream, optionally
+   * with base `bindings`. Returns `undefined` when real Pino is unavailable
+   * (skip rather than fail, the M4 precedent).
+   */
+  async function realLogger(
+    bindings?: LogMetadata,
+  ): Promise<{ logger: PinoLogger; lines: string[] } | undefined> {
+    let pino: (options?: Record<string, unknown>, destination?: unknown) => unknown;
+    try {
+      // pino is an OPTIONAL heavy dep, lazily loaded (AI_GUIDELINES §12.2)
+      const mod = await import('npm:pino@10.x');
+      pino = (mod as { default: typeof pino }).default;
+    } catch {
+      return undefined;
+    }
+    const { lines, stream } = captureStream();
+    // Forward the FULL options object as Pino's FIRST argument: the wrapper's
+    // `#buildPino` calls `factory(pinoOptions)` and pino's args normalizer
+    // treats arg 1 as options and arg 2 as the destination — passing the stream
+    // first would make pino read it as options and discard the real options
+    // (including `base`), so the base bindings would never reach the sink.
+    const factory: PinoFactory = (opts) => pino(opts, stream) as any;
+    // `exactOptionalPropertyTypes` is on: omit `bindings` rather than passing
+    // undefined.
+    const logger = await PinoLogger.create({
+      level: 'info',
+      pinoFactory: factory,
+      ...(bindings === undefined ? {} : { bindings }),
+    });
+    return { logger, lines };
+  }
+
+  it('preserves an Error supplied as a BASE binding in the emitted record', async () => {
+    const built = await realLogger({ error: new Error('base binding error message') });
+    if (built === undefined) {
+      return;
+    }
+    built.logger.info('base binding logged');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const record = findRecord(records(built.lines), 'base binding logged');
+    expect(record).toBeDefined();
+    // The base error binding is present and carries the serialized Error shape
+    // (name, message, stack) — NOT flattened to {}.
+    const error = (record as { error?: Record<string, unknown> }).error;
+    expect(error).toBeDefined();
+    expect(error?.message).toBe('base binding error message');
+    expect(error?.name).toBe('Error');
+    expect(typeof error?.stack).toBe('string');
+    expect(Object.keys(error ?? {}).length).toBeGreaterThan(0);
+  });
+
+  it('preserves an Error supplied as a CHILD binding in the emitted record', async () => {
+    const built = await realLogger();
+    if (built === undefined) {
+      return;
+    }
+    const child = built.logger.child({ error: new Error('child binding error message') });
+    child.info('child binding logged');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const record = findRecord(records(built.lines), 'child binding logged');
+    expect(record).toBeDefined();
+    // The child error binding is present and carries the serialized Error shape
+    // (name, message, stack) — NOT flattened to {}.
+    const error = (record as { error?: Record<string, unknown> }).error;
+    expect(error).toBeDefined();
+    expect(error?.message).toBe('child binding error message');
+    expect(error?.name).toBe('Error');
+    expect(typeof error?.stack).toBe('string');
+    expect(Object.keys(error ?? {}).length).toBeGreaterThan(0);
   });
 });
