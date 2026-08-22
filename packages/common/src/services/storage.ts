@@ -16,6 +16,37 @@ export interface SignedUrlOptions {
 }
 
 /**
+ * Object attributes accepted alongside the bytes when storing an object.
+ *
+ * Without these every stored object is `application/octet-stream`, so a signed
+ * URL handed to a browser downloads the object instead of rendering it —
+ * defeating the purpose of the feature that produces the URL.
+ *
+ * Providers differ in what they can persist, and that difference is a fact
+ * about the backend rather than a gap: S3, GCS and Azure carry both fields to
+ * the stored object, while the memory and local-filesystem providers accept and
+ * do not persist them — neither backend has a reader for an object attribute
+ * ({@linkcode IStorage.get} returns bytes, the local provider's
+ * `getSignedUrl` throws, and the memory provider's URL is synthetic).
+ *
+ * @since 0.3.0
+ */
+export interface PutObjectOptions {
+  /**
+   * MIME type recorded on the stored object (e.g. `'image/png'`). Omitted
+   * leaves the backend's own default, which is `application/octet-stream` on
+   * every provider that supports the field.
+   */
+  readonly contentType?: string;
+  /**
+   * Arbitrary user metadata recorded alongside the object. Keys and values are
+   * passed through to the backend unmodified; backends impose their own limits
+   * on size and on which characters a key may contain.
+   */
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
+/**
  * Object storage abstraction.
  *
  * @example
@@ -32,8 +63,11 @@ export interface IStorage {
    *
    * @param path - Object path/key
    * @param data - Object bytes
+   * @param options - Object attributes to record with the bytes. Optional, so
+   * an existing two-argument call is unchanged; see {@linkcode PutObjectOptions}
+   * for which providers persist them.
    */
-  put(path: string, data: Uint8Array): Promise<void>;
+  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
   /**
    * Retrieves an object.
    *

@@ -24,14 +24,40 @@ export class FakeHandle implements IWorkerHandle {
   terminated = false;
   private messageListener: ((message: unknown) => void) | null = null;
   private errorListener: ((error: Error) => void) | null = null;
+  private exitListener: ((code: number | null) => void) | null = null;
 
   /**
    * @param onPostMessage - Inspected before the request is recorded. Throwing
    * from it reproduces a real `postMessage` refusing a non-cloneable input:
    * the throw propagates to the caller AND the worker never sees the request,
    * which is what makes the X8-2 path testable.
+   * @param reportsExit - When `false`, `onExit` is ABSENT on this handle, which
+   * is what Deno's web-worker host produces; the pool must then behave exactly
+   * as it did before X8-7.
    */
-  constructor(private readonly onPostMessage?: (request: WorkerTaskRequest) => void) {}
+  constructor(
+    private readonly onPostMessage?: (request: WorkerTaskRequest) => void,
+    readonly reportsExit = false,
+  ) {
+    if (reportsExit) {
+      // Assigned rather than declared as a method so the member is genuinely
+      // absent (`'onExit' in handle === false`) on a non-reporting handle,
+      // matching how the web host omits it.
+      this.onExit = (listener: (code: number | null) => void): void => {
+        this.exitListener = listener;
+      };
+    }
+  }
+
+  /**
+   * Present only on a reporting handle; see the constructor.
+   *
+   * `declare` so the field emits NOTHING: a plain optional declaration is
+   * defined on every instance as `undefined` under `useDefineForClassFields`,
+   * which would make `'onExit' in handle` true on a Deno-shaped handle and
+   * misrepresent the one thing this fake exists to distinguish.
+   */
+  declare onExit?: (listener: (code: number | null) => void) => void;
 
   postMessage(message: unknown): void {
     if (isWorkerTaskRequest(message)) {
@@ -50,6 +76,12 @@ export class FakeHandle implements IWorkerHandle {
 
   terminate(): Promise<void> {
     this.terminated = true;
+    // A real reporting runtime raises its exit event for a host-requested
+    // terminate too — Bun emits `close` with code 0 after `terminate()`
+    // (measured). Reproducing that here is what actually exercises the pool's
+    // intentional-termination guard; a fake that stayed silent would let a
+    // missing guard pass.
+    this.exitListener?.(0);
     return Promise.resolve();
   }
 
@@ -79,6 +111,11 @@ export class FakeHandle implements IWorkerHandle {
   emitWorkerError(error: Error): void {
     this.errorListener?.(error);
   }
+
+  /** Simulates the worker's thread ending on its own (no error precedes it). */
+  emitExit(code: number | null = 0): void {
+    this.exitListener?.(code);
+  }
 }
 
 /** Worker host fake recording every spawn. */
@@ -94,10 +131,25 @@ export class FakeHost implements IWorkerHost {
   constructor(
     private readonly parallelism = 2,
     private readonly onPostMessage?: (request: WorkerTaskRequest) => void,
-  ) {}
+    /**
+     * Whether the handles this host spawns implement `onExit`. Mirrors the real
+     * split: `true` is the Node/Bun hosts, `false` is Deno's.
+     */
+    private readonly exitReporting = false,
+  ) {
+    if (exitReporting) {
+      this.reportsExit = (): boolean => true;
+    }
+  }
+
+  /**
+   * Present only on a reporting host, matching the real hosts' shape.
+   * `declare` for the same reason as {@linkcode FakeHandle.onExit}.
+   */
+  declare reportsExit?: () => boolean;
 
   spawn(specifier: string): IWorkerHandle {
-    const handle = new FakeHandle(this.onPostMessage);
+    const handle = new FakeHandle(this.onPostMessage, this.exitReporting);
     this.handles.push(handle);
     this.spawnedSpecifiers.push(specifier);
     return handle;

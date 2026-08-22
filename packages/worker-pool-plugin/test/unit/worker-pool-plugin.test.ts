@@ -57,7 +57,7 @@ describe('WorkerPoolPlugin — register', () => {
     expect(indicator).toBeDefined();
     const result = await indicator?.();
     expect(result?.status).toBe('up');
-    expect(result?.data).toEqual({ available: true, pools: [] });
+    expect(result?.data).toEqual({ available: true, exitDetection: false, pools: [] });
 
     // Stats appear once a pool exists.
     const pool = fake.registered.get(CAPABILITIES.WORKER_POOL) as IWorkerPool;
@@ -71,7 +71,7 @@ describe('WorkerPoolPlugin — register', () => {
     WorkerPoolPlugin().register(fake.ctx);
     const result = await fake.healthIndicators.get('worker-pool')?.();
     expect(result?.status).toBe('up');
-    expect(result?.data).toEqual({ available: false, pools: [] });
+    expect(result?.data).toEqual({ available: false, exitDetection: false, pools: [] });
   });
 
   it('should shut the service down via the onClose handler', async () => {
