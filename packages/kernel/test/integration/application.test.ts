@@ -200,7 +200,11 @@ describe('Application integration', () => {
     });
     app.router.get('/shared-route', (c) => c.response.json({ source: 'application' }));
 
-    await expect(app.start()).rejects.toThrow("Route 'GET /shared-route' is already registered.");
+    // The application registered it first, so the refusal names the application —
+    // not the plugin whose `register()` is on the stack (M70g/X4-4 fix 3).
+    await expect(app.start()).rejects.toThrow(
+      "Route 'GET /shared-route' is already registered by the application.",
+    );
 
     app.router.get('/after-failure', (c) => c.response.json({ source: 'application' }));
     expect(app.router.listRoutes()).toEqual([

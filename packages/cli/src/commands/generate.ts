@@ -277,6 +277,32 @@ export async function runGenerateCommand(
     );
   }
 
+  // X4-4/F2: the barrel just claimed a file the CLI did not write. Reported once —
+  // the next scan sees it in the barrel and stays quiet — because the alternative,
+  // requiring a provenance marker in the artifact, would un-wire every artifact in
+  // every project generated before this release.
+  for (const claim of scan.adopted) {
+    deps.error(
+      `Adopted ${claim.path} into ${claim.barrel}: it matches this family's naming ` +
+        `convention, so it is now registered by the generated barrel.`,
+    );
+    deps.error(`  Remove any manual registration of it, or rename the file.`);
+  }
+
+  // The half that breaks the boot: adopted AND already registered by hand is a
+  // duplicate `METHOD path`, which the kernel has refused since M68. The developer's
+  // own wiring wins and the barrel steps aside, rather than the command reporting
+  // success and leaving the application unable to start.
+  for (const wired of scan.manual) {
+    deps.error(
+      `Skipped ${wired.path}: ${wired.symbol} is already registered by hand in ` +
+        `${wired.wiredIn}, so listing it in the generated barrel would register it twice.`,
+    );
+    deps.error(
+      `  Remove the manual registration to let the barrel own it, or leave it as it is.`,
+    );
+  }
+
   // E8 merged `src/routes/` into `src/controllers/`, and a project that predates the
   // merge is invisible to every other check here: the scan above reads the NEW
   // directory, so a file in the old one is never scanned and never skipped, and
@@ -300,10 +326,10 @@ export async function runGenerateCommand(
   if (conflict !== undefined) {
     deps.error(
       `Cannot generate ${schematicName} "${names.kebab}": ${conflict.resource} is already ` +
-        `claimed by the ${conflict.schematic} of the same name.`,
+        `claimed by ${conflict.claimedBy}.`,
     );
     deps.error(`If both existed, ${conflict.consequence}.`);
-    deps.error(`Choose a different name, or remove the existing ${conflict.schematic}.`);
+    deps.error(`Choose a different name, or ${conflict.remedy}.`);
     return EXIT_ERROR;
   }
 
