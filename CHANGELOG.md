@@ -246,6 +246,48 @@ All notable changes to this project are documented here. The format follows
   `interceptors?: readonly unknown[]`, threaded into `createConnectRouter` (which previously dropped
   the argument its own facade declared).
 
+- **Breaking (behaviour): a route that names its path now beats a catch-all, in either registration
+  order** (M70g, X5-1/F1). The kernel's tie-break ranked candidates by static-segment count, and a
+  `*` segment was COUNTED AS STATIC — so `GET /*` tied with `GET /openapi.json` and whichever
+  registered first simply won. `ReactRouterPlugin` mounts its SSR catch-all at
+  `PLUGIN_PRIORITY.NORMAL` (500) while `OpenApiPlugin` registers at `OPENAPI` (700), deliberately
+  last so it can document every route, so **every full-stack application silently lost
+  `/openapi.json` and `/docs`** to an SSR 404 page, with no error anywhere; the same shape removed
+  those endpoints under a root-mounted `StaticPlugin`. `*` is now its own segment kind and the
+  ranking is: more static segments, then FEWER wildcards, then earliest registration. That also
+  corrects an inversion — `/a/*` outranked `/a/:id` in both orders. **Migration:** an application
+  relying on a catch-all registered first to shadow a later single-segment route now serves the
+  later route. The shadowed route was unreachable by accident rather than by configuration, so the
+  change is toward what the developer wrote; a route that must not be reachable should not be
+  registered. Known limit: the rule compares counts rather than positions, so `/a/*` loses to
+  `/:x/b` on `/a/b`.
+- **Breaking (message): the duplicate-route refusal now names the plugin that registered the route
+  first** (M70g, X5-6/X4-4). `Route 'GET /*' is already registered.` became
+  `Route 'GET /*' is already registered by plugin 'react-router'.`, or `… by the application.` for a
+  route the application registered itself. The old message named the pattern and the SECOND
+  claimant, which the stack trace already carried; the missing half was who held it. **Migration:**
+  a test asserting the exact old string needs the suffix; the message is otherwise unchanged.
+- **Breaking (behaviour): `setu generate` no longer lists a hand-registered module in the generated
+  barrel** (M70g, X4-4/F2). The seam scanner admits any file matching a family's suffix and exports,
+  so a developer's own `src/controllers/admin.routes.ts`, wired by hand from `setu.config.ts`, was
+  swept into the CLI-owned barrel by an UNRELATED `setu generate route report` — and since M68
+  refuses a duplicate `METHOD path`, the application stopped booting, with an error naming two files
+  the developer had not touched, from a command that reported success. A candidate whose symbol
+  already appears in `setu.config.ts` is now left out of the barrel and reported — for a barrel that
+  registers something, which excludes the functional `src/services/index.ts` re-export, where that
+  symbol is the developer consuming the barrel exactly as its header documents. A file the barrel
+  claims for the first time is reported as adopted, once, at the moment it happens. **Migration:**
+  none for generated artifacts, whose symbols never appear in `setu.config.ts`. A project that
+  deliberately wired a conventionally-named module by hand AND relied on the barrel registering it
+  too was already failing to boot.
+- **Breaking (behaviour): `setu generate health-indicator` refuses a name an installed plugin
+  claims** (M70g, A1). `setu g health-indicator database` in a project with `DatabasePlugin` wrote a
+  file, type-checked, and then threw `Duplicate health indicator name: "database"` at `app.start()`.
+  Every plugin that registers an indicator claims a name, and fifteen of them claim exactly the ones
+  reached for first — `database`, `cache`, `storage`, `session`, `events`, `mail`, `audit`, and
+  more. The command now refuses before writing, naming the plugin. **Migration:** choose a qualified
+  name (`billing-schema` rather than `database`), or remove the plugin.
+
 - **Breaking (behaviour): the gRPC health bridge maps `degraded → NOT_SERVING`** (M70c, X7-8). It
   previously mapped `degraded → SERVING`, so a degraded process answered `SERVING` on
   `grpc.health.v1.Health/Check` while the health plugin's `/ready` already returned `503` — the two

@@ -2377,11 +2377,14 @@ register SSR routes. The plugin owns all HTTP verbs at the configured `basename`
 import { CAPABILITIES, ISsrService } from '@setu-ts/common';
 
 // The plugin handles SSR automatically at the catch-all.
-// Custom routes take precedence based on static segment count:
-// a custom route with MORE static segments wins over /* (e.g. /api/users/:id has 2, beats 1).
-// Single-segment routes (e.g. /login, /health) registered AFTER ReactRouterPlugin
-// tie with /* (both have 1 static segment) and are silently shadowed by SSR.
-// Register single-segment routes BEFORE ReactRouterPlugin or use more-static routes.
+// Any route that NAMES its path beats the catch-all, in either registration order:
+// the kernel ranks candidates by static segments (descending), then wildcards
+// (ascending), then registration index. So /login, /openapi.json and /api/users/:id
+// all win over /*, and registration order does not enter into it.
+// Known limit: the ranking compares COUNTS, so /a/* loses to /:x/b on /a/b.
+// Before M70g a `*` counted as a static segment, so single-segment routes TIED with
+// /* and whichever registered first won — which silently removed /openapi.json and
+// /docs from every full-stack application.
 app.router.get('/api/health', (ctx) => {
   return ctx.response.json({ status: 'ok' });
 });
@@ -5885,8 +5888,9 @@ Notes:
 
 - **The generated factory is `async`.** `setu` awaits it during command discovery, and `main.ts`
   awaits it too, so nothing else changes.
-- **No hello-world route.** An exact `/` handler would take precedence over the SSR catch-all and
-  shadow the application's own index route.
+- **No hello-world route.** An exact `/` handler takes precedence over the SSR catch-all under the
+  M70g specificity rule (a wildcard ranks below any route naming its path, in either registration
+  order), so it would shadow the application's own index route.
 - **Every runtime target is supported.** Cloudflare Workers omits `assetsDir` and `envFilePath`:
   with no filesystem the asset handler would answer 404 for every asset, and a dotenv path would
   make ConfigPlugin throw. Static assets come from the platform binding and configuration from the
@@ -9187,6 +9191,12 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
 ### Notes
 
 - Mounts routes on both `GET` and `HEAD`
+- **A root `urlPrefix` claims `GET /*` and `HEAD /*`, which no second plugin can share.** The plugin
+  registers `<urlPrefix>/*`, so `urlPrefix: '/'` mounts the bare wildcard — and the kernel refuses a
+  duplicate `METHOD path`, naming the plugin that registered it first
+  (`Route 'GET /*' is already registered by plugin 'react-router'.`). An application serving SSR at
+  the root therefore cannot also mount static files there: give the static files their own prefix
+  (`urlPrefix: '/assets'`), which is the arrangement content-hashed assets want anyway
 - Conditional requests: `ETag`, `If-None-Match`, `If-Modified-Since` → `304`
 - Range requests: `206` with `Content-Range`, `416` for unsatisfiable
 - The `ETag` is **strong** (`"<size>-<mtimeMs>"`) when the runtime reports an `mtime`, and degrades

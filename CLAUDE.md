@@ -2764,13 +2764,72 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   format so a validation failure and a thrown error answer in the same shape (C3). The
   no-`errorHandler` fallback converges `{ error, message }` → `{ error, detail? }` (CHANGELOG
   migration note). All `src` files ≥90% branch/function/line) — complete (PR pending)
-- **Next milestone** — **M70g** (routing collisions). The kernel's static-segment tie-break covers
-  `:param` but not `/*`, so against a wildcard **registration order alone decides** — which silently
-  removes `/openapi.json` and `/docs` from every full-stack app with no user error (X5-1/F1, F1),
-  while `StaticPlugin` at the root instead collides loudly with an error naming neither the owning
-  plugin nor an alternative (X5-6). Plus the seam scanner adopting hand-written files into a
-  CLI-owned barrel, which since M68's duplicate-route refusal now **stops the app booting**
-  (X4-4/F2), and generated indicator names colliding with the 15 plugins claim (A1).
+- **Milestone 70g** (`kernel` + `cli` — routing collisions; docs in `react-router-plugin` and
+  `static-plugin`, and the end-to-end gate in `apps/full-stack`. Developed in an isolated worktree
+  off `main`, in parallel with M70f, which it does not depend on). Four register rows with one
+  shape: two claimants for one name, resolved by an accident of ordering and reported by a
+  diagnostic naming the wrong party. **X5-1/F1:** the kernel's tie-break ranked candidates by
+  static-segment count, and `parsePattern` classified `*` as a STATIC segment — so `GET /*` tied
+  with `GET /openapi.json` and registration order alone decided. `ReactRouterPlugin` mounts its SSR
+  catch-all at `PLUGIN_PRIORITY.NORMAL` (500) while `OpenApiPlugin` registers at `OPENAPI` (700)
+  deliberately last, so **every full-stack application silently lost `/openapi.json` and `/docs`**
+  to an SSR 404 page. `*` is now its own segment kind and the ranking is statics descending,
+  wildcards ascending, registration index — which also corrects an inversion a probe found and the
+  register had not recorded: `/a/*` counted TWO statics against `/a/:id`'s one and beat the param in
+  **both** orders. The rule compares counts rather than positions, so `/a/*` loses to `/:x/b` on
+  `/a/b`; that limit is in `Router.match`'s JSDoc, in `PUBLIC_API.md` and in a test, so a later move
+  to per-segment ranking is deliberate rather than accidental. **X5-6/X4-4:** the duplicate-route
+  refusal now names the FIRST claimant, reading the `owner` `RouteInfo` has carried since M68 —
+  `Route 'GET /*' is already registered by plugin 'react-router'.` The kernel deliberately offers no
+  ALTERNATIVE (the second half of X5-6's ask): it cannot know that `static-plugin`'s is a
+  sub-prefix, so that goes in the plugin's own README and PUBLIC_API section instead. **X4-4/F2:**
+  requiring a provenance marker in generated artifacts was **rejected** — no artifact the CLI has
+  ever emitted carries one, so the requirement would un-wire every artifact in every existing
+  project. Barrel membership is the ownership signal that needs no migration and reports exactly
+  once, at the moment of claiming; and the precise detector for the case that breaks the boot is
+  separate — a candidate whose symbol already appears in `setu.config.ts` is left OUT of the barrel,
+  so the developer's own registration keeps working and nothing registers twice. **A1:** a static
+  claim table, because `generate` may not boot the target project (M34b) and a zero-dependency CLI
+  cannot import a plugin to ask it, kept honest by a root drift gate that reads every
+  `ctx.health.register` site in the package sources and fails on a missing name, with each
+  derived-name site listed explicitly so it cannot pass vacuously.
+
+  **The package list was corrected from the ROADMAP's five** (`kernel`, `react-router-plugin`,
+  `openapi-plugin`, `static-plugin`, `cli`) to `kernel` + `cli`, mirroring the M70b and M70h
+  corrections: the fix the register itself prefers is in the KERNEL, and the two per-plugin
+  alternatives are narrower restatements of one kernel rule, so none of the three plugins needs a
+  `src` change. No package's `src/index.ts` changes either, pinned by a new kernel
+  `barrel-exports.test.ts` (the M56 defect class). **The end-to-end gate is the request no gate ever
+  made**: `apps/full-stack/smoke.ts` asked for `/products`, `/` and `/login` and never
+  `/openapi.json`, which is precisely why this shipped — it now asserts both endpoints under their
+  real content types, in the real composition, on every CI run.
+
+  **Carries one change unrelated to routing, folded in at the maintainer's direction** (the M58
+  `g controller` / M59 `detectRuntime` precedent, recorded rather than silent): the GCP Pub/Sub and
+  Azure Service Bus emulator e2e suites could not pass under `deno task test` at all.
+  `packages/messaging-plugin/deno.json` scoped `test.permissions.net` to Redis and RabbitMQ only,
+  and a CLI `--allow-net` REPLACES that block rather than unioning with it (the M53 lesson), so with
+  both emulators running and their env vars set the suites still failed — Service Bus with
+  `getaddrinfo EPERM`, Pub/Sub with gRPC `14 UNAVAILABLE: Name resolution failed`.
+  `docs/messaging-emulators.md` hid it by telling the reader to run each file with `--allow-all`,
+  where it works. The allowlist gains the two emulator ports, and the doc gains three corrections
+  each established by measurement: the Service Bus emulator's own AMQP port is **5672, which
+  RabbitMQ already holds**, so it is published on 5673 and the port goes in the endpoint
+  (`UseDevelopmentEmulator=true` accepts one — undocumented); the Pub/Sub emulator must be addressed
+  as `127.0.0.1:8085` rather than `localhost:8085`, because `grpc-js` resolves a hostname through
+  DNS and a `host:port` grant does not authorize that lookup, while an IP literal skips resolution —
+  which is what keeps the grant endpoint-scoped instead of forcing the loopback-wide widening M53
+  rejected; and the suite is **not repeatable** against a persistent emulator (a second consecutive
+  run fails with `RequestTimeoutError`, contradicting the doc's "repeated runs never share state"),
+  so the container is restarted between runs. Both suites now pass under the project's own
+  permission model — 7 steps, verified in this worktree.) — complete (PR #175)
+- **Next milestone** — **M70i** (gRPC and GraphQL viability). The repair-versus-withdraw decision
+  for `grpc-plugin`, plus the documented-API-does-not-exist rows both packages carry: every gRPC
+  registration snippet in README and `PUBLIC_API.md` throws because it resolves the capability
+  before `app.start()` (X7-1), and `graphql-plugin`'s only documented registration API uses a
+  `new Application()` / `app.use()` the kernel does not export (X6-2). Also X7-2, X7-4, X6-3 (the
+  code-first arm does not type-check against the real `graphql` package), X6-4, X6-5, X6-6, X6-7.
+  M70e closed X7-3 first, so the viability decision is taken against a package that loads.
 
 ## Verification (run before declaring any work done)
 

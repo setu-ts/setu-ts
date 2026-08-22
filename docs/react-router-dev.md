@@ -165,10 +165,15 @@ app.router.get(`${BASE}*`, async (ctx) => {
 await app.start({ port: 5299 });
 ```
 
-`/__vite/*` carries one static segment, so it outranks the plugin's `/*` catch-all under the
-precedence rules in PUBLIC_API.md — registering it _after_ `ReactRouterPlugin` works, which is how
-the verification above was run. Keep at least one static segment in the prefix: a bare `/*`-adjacent
-pattern would tie with the catch-all and be silently shadowed.
+`/__vite/*` carries one static segment while the plugin's `/*` catch-all carries none, so it
+outranks it under the precedence rules in PUBLIC_API.md — registering it _after_ `ReactRouterPlugin`
+works, which is how the verification above was run.
+
+Registration order does not enter into it. Before M70g a `*` counted as a static segment, so a
+single-segment route tied with the catch-all and whichever registered first won; the ranking is now
+static segments descending, then wildcards ascending, then registration index, and a route naming
+its own path always outranks a wildcard. A second bare `/*` is not shadowed either — the kernel
+refuses a duplicate `METHOD path`, naming the plugin that registered it first.
 
 ## The HMR WebSocket needs nothing from you
 
