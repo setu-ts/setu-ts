@@ -44,4 +44,13 @@ export interface GrpcPluginOptions {
    * Used by tests to avoid network dependencies.
    */
   connectModule?: ConnectRuntime;
+
+  /**
+   * Application-supplied Connect interceptors, threaded into
+   * `createConnectRouter({ interceptors })` (M70f §3.7). The plugin's built-in
+   * handler-error logging wraps each application service's implementation
+   * (innermost), so a handler throw is logged before an application interceptor
+   * observes it. Absent: no application interceptors are installed.
+   */
+  interceptors?: readonly unknown[];
 }

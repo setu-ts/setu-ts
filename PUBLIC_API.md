@@ -7222,6 +7222,12 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `serializeError(value)`       | function | Serializes any thrown value into a plain `SerializedError` (`{ name, message, stack?, cause? }`) with the `cause` chain followed to a bounded depth; a non-`Error` value yields `{ name: 'Error', message: String(value) }`. Pure — no runtime-specific APIs. Here so the logger plugin (metadata normalization), the kernel (fallback-500 logging), `exceptions`, `grpc-plugin`, and `notification-plugin` can all serialize without importing one another.          |
+| `respondWithError(ctx, init)` | function | Writes an error response through the request's published `IErrorResponder` (the application's configured format), falling back to `{ error, detail? }` when `errorHandler` has not published one. The seam that lets a package that produces error responses but may not import `@setu-ts/exceptions` answer in the configured format (M70f).                                                                                                                         |
+| `ERROR_RESPONDER_STATE_KEY`   | const    | The `ctx.state` key under which `errorHandler` publishes its `IErrorResponder`                                                                                                                                                                                                                                                                                                                                                                                        |
+| `brandErrorResponder(fn, r)`  | function | Attaches `errorHandler`'s resolved `IErrorResponder` to its middleware function under `ERROR_RESPONDER_BRAND`, so the kernel — which runs the drain `503`, the malformed-request `400`, and the request hooks BEFORE the pipeline — can read the same responder at startup (M70f re-review)                                                                                                                                                                           |
+| `errorResponderOf(fn)`        | function | Reads the brand off a middleware function, returning the attached `IErrorResponder` (or `undefined`). The kernel's only route to the resolved formatter for the pre-pipeline sites                                                                                                                                                                                                                                                                                    |
+| `ERROR_RESPONDER_BRAND`       | const    | A `Symbol.for` brand pairing with the two functions above; `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                             |
 
 ### Types
 
@@ -7253,7 +7259,8 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                       |
 | Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                            |
 | Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                                                                                                                                                                                                        |
+| Notifications       | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                    |
+| Errors              | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError` — the request-scoped error responder seam and the pure error serializer (M70f)                                                                                                                                                                                                                                                          |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                            |
 | Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                 |
 | SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -7264,7 +7271,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                         |
 | Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                            |
 | DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                               |
-| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                            |
+| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                           |
 | Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Contract notes:
@@ -7405,11 +7412,16 @@ Contract notes:
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.
-- The kernel emits only **bare status JSON** (`{ error: 'Bad Request' }` for a malformed request URL
-  or malformed percent-escape in the path → `400`; `{ error: 'Not Found' }` → `404`;
-  `{ error: 'Internal Server Error' }` → `500`; `{ error: 'Service Unavailable' }` for a request
-  arriving while `stop()` is draining → `503`). Error formatting belongs to the exceptions package,
-  not the kernel.
+- The kernel's own error responses (malformed request URL or malformed percent-escape in the path →
+  `400`; unmatched path → `404`; unhandled error → `500`; a request arriving while `stop()` is
+  draining → `503`) are written through the **error responder seam** (`respondWithError` in
+  `@setu-ts/common`). With `errorHandler` registered they answer in the application's configured
+  format; with **no** `errorHandler` registered they fall back to the no-handler shape
+  `{ error, detail? }` — which is **not** the same as the `default` formatter's
+  `{ statusCode, message, details? }` body (see the exceptions contract notes). Error **formatting**
+  belongs to the exceptions package, not the kernel; the kernel only supplies the status and
+  message. The unhandled-error `500` additionally logs the error through `CAPABILITIES.LOGGER` when
+  a logger is registered.
 - **`inject()` body semantics.** `InjectResponse.body` is text: a byte body written with
   `response.send(bytes)` is UTF-8 decoded rather than reported as `null`, and `json()` parses it. A
   **streaming** response cannot be presented as text without draining the live stream, so `inject()`
@@ -7681,7 +7693,23 @@ Contract notes:
   returns an `HttpError` with a pre-set `statusCode` — no `BadRequestError extends HttpError`
   hierarchy.
 - **`cause` chaining**: `internalServerError(message, cause)` forwards `cause` to the ES2022 `Error`
-  cause chain. The error handler logs it when a logger is registered.
+  cause chain. The error handler logs it when a logger is registered (the logged `cause` is
+  serialized through `serializeError`, so a nested `Error` never renders as `{}`).
+- **Error format is the framework's error-body contract**: `errorHandler` is the single place an
+  application configures how **every** error body is written. It publishes a request-scoped
+  `IErrorResponder` (via `respondWithError` in `@setu-ts/common`) before `next()`, and every
+  short-circuiting site — the kernel's own 404/400/500/503 terminals, the storage, multi-tenancy,
+  session, auth, http-security, and feature-flags middleware — answers through it. So with
+  `errorHandler({ format: 'rfc9457' })` registered, every error those sites produce is RFC 9457.
+  **`validation-plugin` is the deliberate exception**: it formats validation failures itself and
+  takes its own `errorFormat` option, so an application configures the two to agree — the CLI
+  templates and `rest-starter` pair `ValidationPlugin({ errorFormat: 'rfc9457' })` with the handler
+  for exactly that reason. With **no** `errorHandler` registered, every responder site falls back to
+  the no-handler shape `{ error, detail? }` — a site cannot answer in its own ad-hoc shape. That
+  fallback is a **different** body from the `default` formatter's
+  `{ statusCode, message, details? }`: it is the framework's pre-formatter shape, written directly
+  by `respondWithError`, and it is what an application without `errorHandler` keeps receiving
+  byte-for-byte.
 - **RFC 9457 compliance**: when `format: 'rfc9457'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (Problem
@@ -8370,6 +8398,7 @@ app.register(GrpcPlugin({
   health: true, // default — grpc.health.v1.Health (bridged to M20)
   services: [], // initial service definitions
   connectModule: undefined, // inject for testing; otherwise lazy-loaded
+  interceptors: [], // default — application Connect interceptors
 }));
 ```
 
@@ -8385,13 +8414,14 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 
 ### Options
 
-| Option          | Type                                     | Default | Description                                                                                           |
-| --------------- | ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
-| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.            |
-| `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch. |
-| `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                    |
-| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                              |
-| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.          |
+| Option          | Type                                     | Default | Description                                                                                                                                                                                                                                                                  |
+| --------------- | ---------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.                                                                                                                                                                                   |
+| `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch.                                                                                                                                                                        |
+| `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                                                                                                                                                                                           |
+| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                                                                                                                                                                                                     |
+| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.                                                                                                                                                                                 |
+| `interceptors`  | `readonly unknown[]`                     | `[]`    | Application Connect interceptors, forwarded to Connect router construction (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a handler throw is logged before an application interceptor observes it. Absent: none installed. |
 
 ### Exports
 

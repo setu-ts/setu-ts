@@ -123,3 +123,15 @@ Passing gates is necessary but not sufficient. Before reporting anything done:
 
 Do not `git push` or open a PR unless the human explicitly asks in that turn. Commit on the
 milestone's `feat/…` branch and hand back the exact command to run.
+
+## Answering automated review comments
+
+**Reply to each finding in its own thread — never one bundled comment on the PR.**
+
+```bash
+gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment-id>/replies -f body='…'
+```
+
+`AI_GUIDELINES.md` **§16.5** is the rule, in full: verify before you agree, say plainly when a
+finding is wrong, and state the outcome in each reply. Read it there — this heading exists so you
+know the rule applies to you, not to restate it.

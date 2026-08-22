@@ -5150,8 +5150,10 @@ auto-`unimplemented` surface.
 
 **Deliverables**
 
-- [x] `common` — `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`,
-      `RpcFetchHandler`; `CAPABILITIES.GRPC`; the optional `IHttpAdapter.setRpcHandler?` widening.
+- [x] `common` — `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl` (removed in M70f, which
+      widened `addService`'s `implementation` to `unknown` and left it with no reader),
+      `GrpcServingStatus`, `RpcFetchHandler`; `CAPABILITIES.GRPC`; the optional
+      `IHttpAdapter.setRpcHandler?` widening.
 - [x] `runtime` — `RpcInterceptorStore` plus the consult wired into all four HTTP adapters.
 - [x] `grpc-plugin` — `GrpcPlugin`, `GrpcService`, the Connect loader (`adaptConnectModule` /
       `loadConnectModule` over four npm specifiers), the router builder, the prefix dispatcher, the
@@ -6960,13 +6962,20 @@ Ordered by the sequence they should be worked, not by severity alone.
   M24b's auto-instrumentation enabled on no runtime (X7-3). Same family as this repo's most-repeated
   root cause, one level up. General fix: **construct the default and drive it once**, as `runtime`'s
   `read-stream-real.test.ts` already does for `IFileSystem`.
-- ⬜ **M70f — Error format and error visibility** (`storage-plugin`, `kernel`, `exceptions`,
-  `multi-tenancy-plugin`, `session-plugin`, `grpc-plugin`, `logger-plugin`, `notification-plugin`).
-  Errors either bypass the configured RFC 9457 format or vanish entirely: `createUploadMiddleware`
-  reports every downstream failure as a malformed body (X8-1), the kernel's own 404 and fallback 500
-  answer `{error}` JSON and log **nothing even with `LoggerPlugin` registered** (X9-6, X11-2),
-  short-circuiting middleware emits `{error, message}` (X4-8/C3), a gRPC handler error is logged
-  nowhere (X7-5), and a raw `Error` in log metadata serializes to `{}` (X2-5, X8-12).
+- ✅ **M70f — Error format and error visibility** — complete (PR #176) (`storage-plugin`, `kernel`,
+  `exceptions`, `multi-tenancy-plugin`, `session-plugin`, `grpc-plugin`, `logger-plugin`,
+  `notification-plugin`, `events-plugin`, `cli`, `common`, `testing`, `auth-plugin`,
+  `http-security-plugin`, `feature-flags-plugin`, `starters`). Errors either bypass the configured
+  RFC 9457 format or vanish entirely: `createUploadMiddleware` reports every downstream failure as a
+  malformed body (X8-1), the kernel's own 404 and fallback 500 answer `{error}` JSON and log
+  **nothing even with `LoggerPlugin` registered** (X9-6, X11-2), short-circuiting middleware emits
+  `{error, message}` (X4-8/C3), a gRPC handler error is logged nowhere (X7-5), and a raw `Error` in
+  log metadata serializes to `{}` (X2-5, X8-12). **The package list was corrected from the eight
+  above at plan time** (mirroring the M70b/M70h precedent): `common` carries the responder seam and
+  `serializeError` every other fix depends on (no plugin may import `exceptions`), `events-plugin`
+  is X2-5's actual call site, `cli` and `starters` are C3's fix sites, `testing` carries X11-2's
+  third option, and the X4-8 sweep reaches `auth-plugin`, `http-security-plugin`, and
+  `feature-flags-plugin`.
 - ✅ **M70g — Routing collisions** (`kernel`, `cli`; docs in `react-router-plugin`, `static-plugin`;
   the end-to-end gate in `apps/full-stack`) — complete (PR #175). The kernel's static-segment
   tie-break covered `:param` but not `/*`, so against a wildcard **registration order alone
@@ -7201,7 +7210,7 @@ branch during a version bump.
 | 70c       | ✅     | health-signal sweep (6 packages)      |
 | 70d       | ✅     | no-argument registration seams        |
 | 70e       | ✅     | default branches of injectable seams  |
-| 70f       | ⬜     | error format and error visibility     |
+| 70f       | ✅     | error format and error visibility     |
 | 70g       | ✅     | routing collisions                    |
 | 70h       | ✅     | cli scaffold batch                    |
 | 70i       | ⬜     | grpc and graphql viability            |

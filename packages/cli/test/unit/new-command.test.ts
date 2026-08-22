@@ -453,8 +453,13 @@ describe('runNewCommand', () => {
           'OpenApiPlugin',
         ]
       ) {
-        expect(config).toContain(`${symbol}()`);
+        if (symbol !== 'ValidationPlugin') {
+          expect(config).toContain(`${symbol}()`);
+        }
       }
+      // M70f (C3): validation answers in the same Problem Details shape the
+      // `errorHandler` emits for thrown errors, so it is NOT argument-free.
+      expect(config).toContain("ValidationPlugin({ errorFormat: 'rfc9457' })");
       expect(config).toContain("ConfigPlugin({ envFilePath: '.env', envFileOptional: true })");
       // Three plugins take a generated-artifact seam, so they are NOT argument-free.
       // Asserted by their actual call so a dropped seam shows up here rather than only

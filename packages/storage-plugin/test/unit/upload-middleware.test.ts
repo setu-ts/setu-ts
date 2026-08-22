@@ -162,12 +162,14 @@ describe('createUploadMiddleware', () => {
     ctx.request.bytes = () => Promise.resolve(body);
     const mw = createUploadMiddleware({ maxFiles: 2 });
     let nextCalled = false;
-    const result = await mw(ctx, (): Promise<void> => {
+    await mw(ctx, (): Promise<void> => {
       nextCalled = true;
       return Promise.resolve();
     });
     expect(nextCalled).toBe(false);
-    expect(result).toBeDefined();
+    // M70f: the rejection goes through the responder seam, which returns void
+    // and short-circuits by ending the response — the status is what matters.
+    expect((ctx.response as unknown as { _lastStatus: number })._lastStatus).toBe(400);
   });
   it('missing field returns undefined from helper', () => {
     const ctx = makeCtx();

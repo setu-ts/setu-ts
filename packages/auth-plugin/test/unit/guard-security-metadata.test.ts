@@ -39,6 +39,9 @@ function makeProbe(user?: IPrincipal, authorized = true): Probe {
   const ctx = {
     ...(user !== undefined ? { request: { user } } : { request: {} }),
     response,
+    // `respondWithError` reads the responder from `ctx.state`; a real
+    // `IRequestContext` always carries one, so the fake must too.
+    state: new Map<string, unknown>(),
     services: {
       get: () => ({
         hasRole: () => authorized,

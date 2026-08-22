@@ -45,6 +45,14 @@ export interface MessageDescriptorLike {
 export interface MethodDescriptorLike {
   /** The proto method name, e.g. `Check` (not the camelCase `localName`). */
   readonly name: string;
+  /**
+   * The camelCase property name Connect looks up on the implementation
+   * (`impl[method.localName]` in `@connectrpc/connect`'s
+   * `createServiceImplSpec`), e.g. `check`. Real `DescMethod`s always carry it;
+   * it is optional on this facade so hand-built test descriptors may omit it,
+   * in which case the router builder falls back to `name`.
+   */
+  readonly localName?: string;
 }
 
 /**
@@ -111,8 +119,14 @@ export interface ConnectRouterLike {
  * downstream of the loader consumes this port.
  */
 export interface ConnectRuntime {
-  /** Creates a new `ConnectRouter` for registering services. */
-  createConnectRouter(): ConnectRouterLike;
+  /**
+   * Creates a new `ConnectRouter` for registering services.
+   *
+   * @param options - Options forwarded to `@connectrpc/connect`'s
+   *   `createConnectRouter` (e.g. `{ interceptors }`); omitted when there are
+   *   none.
+   */
+  createConnectRouter(options?: Record<string, unknown>): ConnectRouterLike;
 
   /**
    * Adapts a Connect `UniversalHandler` into a fetch handler. The result

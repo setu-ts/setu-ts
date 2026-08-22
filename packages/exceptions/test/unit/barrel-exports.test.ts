@@ -47,7 +47,16 @@ describe('exceptions barrel exports', () => {
     // the two formatters share, not public surface, and are absent from
     // PUBLIC_API.md. Exporting one by accident would silently widen the
     // published API.
-    const internal = ['buildProblemDetails', 'VALIDATION_TYPE', 'ABOUT_BLANK'] as const;
+    // `createErrorResponder` is the exceptions implementation of the request-
+    // scoped responder seam (M70f). The interface it satisfies lives in
+    // `@setu-ts/common`; exporting the implementation would give one concept two
+    // public names, so it stays out of the barrel (plan §4, §6).
+    const internal = [
+      'buildProblemDetails',
+      'VALIDATION_TYPE',
+      'ABOUT_BLANK',
+      'createErrorResponder',
+    ] as const;
 
     for (const name of internal) {
       expect((api as Record<string, unknown>)[name]).toBe(undefined);

@@ -7,7 +7,13 @@
  * @module
  */
 
-import type { IGrpcService, IHealthService, IPlugin, IPluginContext } from '@setu-ts/common';
+import type {
+  IGrpcService,
+  IHealthService,
+  ILogger,
+  IPlugin,
+  IPluginContext,
+} from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { GrpcService } from '../services/grpc-service.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
@@ -46,11 +52,26 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
         // No health plugin registered — the bridge answers SERVING.
       }
 
+      // The logger is resolved at RPC-call time, not captured here (M52b): a
+      // logger registered by a plugin that registers after gRPC is still seen,
+      // and a logger that is removed is not. Guarded so a broken registry
+      // degrades to "no logging" rather than a failed registration.
+      const resolveLogger = (): ILogger | undefined => {
+        try {
+          return ctx.services.has(CAPABILITIES.LOGGER)
+            ? ctx.services.get<ILogger>(CAPABILITIES.LOGGER)
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+
       const grpcService = new GrpcService({
         connectRuntime,
         embeddedDescriptors: EmbeddedDescriptors,
         options,
         healthService,
+        resolveLogger,
       });
 
       ctx.services.register<IGrpcService>(CAPABILITIES.GRPC, grpcService);
