@@ -540,3 +540,79 @@ describe('gRPC handler wrapper — custom thenable assimilation (M70f re-review 
     expect(errors[0].metadata?.message).toBe('custom thenable rejected');
   });
 });
+
+describe('gRPC handler wrapper — callable thenables and throwing `then` getters (M70f code review)', () => {
+  it('assimilates and logs the rejection of a CALLABLE (function) thenable', async () => {
+    // A JavaScript thenable may be a function, not only an object. Before the
+    // fix `isThenable` recognized only `object` candidates, so a callable
+    // rejecting thenable was returned UNCHANGED — its rejection never reached
+    // the logging path (logCount 0). The discriminating assertion is the log
+    // count: awaiting a thenable rejects either way, but only assimilation
+    // attaches the rejection handler that logs.
+    const handlerError = new Error('callable thenable rejected');
+    const callableThenable = Object.assign(
+      () => undefined,
+      {
+        then(_resolve: (v: unknown) => void, reject: (e: unknown) => void) {
+          queueMicrotask(() => reject(handlerError));
+        },
+      },
+    );
+    const { logger, errors } = makeCapturingLogger();
+    const runtime = buildStreamService(
+      {
+        serverStream: () => callableThenable,
+      },
+      () => logger,
+    );
+    const wrapped = runtime.registered[0].implementation as Record<string, unknown>;
+    let thrown: unknown;
+    try {
+      await (wrapped.serverStream as (r: unknown) => Promise<unknown>)({});
+    } catch (error) {
+      thrown = error;
+    }
+    // The ORIGINAL rejection propagates...
+    expect(thrown).toBe(handlerError);
+    // ...and it is logged, naming the procedure and the real message.
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('gRPC handler failed');
+    expect(errors[0].metadata?.procedure).toBe('example.Stream/serverStream');
+    expect(errors[0].metadata?.message).toBe('callable thenable rejected');
+  });
+
+  it('logs and rethrows a throwing `then` getter instead of letting it escape unlogged', () => {
+    // The wrapper inspects `result.then` AFTER the handler invocation's
+    // protected `try` has ended. A `then` accessor whose getter throws would
+    // otherwise escape synchronously without reaching the logging path
+    // (logCount 0). The guard routes the getter failure through the same
+    // protected reporting path: the ORIGINAL getter error propagates and is
+    // logged. The discriminating assertion is the log count.
+    const getterError = new Error('then getter threw');
+    const { logger, errors } = makeCapturingLogger();
+    const runtime = buildStreamService(
+      {
+        serverStream: () => ({
+          get then() {
+            throw getterError;
+          },
+        }),
+      },
+      () => logger,
+    );
+    const wrapped = runtime.registered[0].implementation as Record<string, unknown>;
+    let thrown: unknown;
+    try {
+      (wrapped.serverStream as (r: unknown) => unknown)({});
+    } catch (error) {
+      thrown = error;
+    }
+    // The getter's OWN error propagates (not an unlogged escape)...
+    expect(thrown).toBe(getterError);
+    // ...and it is logged, naming the procedure and the real message.
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('gRPC handler failed');
+    expect(errors[0].metadata?.procedure).toBe('example.Stream/serverStream');
+    expect(errors[0].metadata?.message).toBe('then getter threw');
+  });
+});

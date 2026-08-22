@@ -235,11 +235,19 @@ function withErrorLogging(
   return out ?? implementation;
 }
 
-/** True when a value settles like a Promise (has a callable `.then`). */
+/**
+ * True when a value settles like a Promise (has a callable `.then`).
+ *
+ * A JavaScript thenable may be an object OR a function (a callable object is
+ * a legal thenable — `Promise.resolve(fn)` invokes `fn.then`). Recognizing
+ * only `object` candidates let a callable rejecting thenable skip assimilation
+ * and be returned unchanged, so its rejection never reached the logging path
+ * (M70f code review, finding 1).
+ */
 function isThenable(value: unknown): value is Promise<unknown> {
   return (
     value !== null &&
-    typeof value === 'object' &&
+    (typeof value === 'object' || typeof value === 'function') &&
     typeof (value as { then?: unknown }).then === 'function'
   );
 }
@@ -274,6 +282,14 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
  *   re-review, finding 3).
  *
  * A non-thenable, non-iterable result (a unary value) is returned unchanged.
+ *
+ * The thenable/iterable inspection is itself guarded (M70f code review,
+ * finding 2): it reads `result.then` and `result[Symbol.asyncIterator]`,
+ * property accesses that can throw when the property is a throwing accessor.
+ * That happens after the handler invocation's protected `try` has ended, so
+ * an unguarded read would let a throwing `then` getter escape synchronously
+ * without ever reaching the logging path. Any inspection failure is a
+ * handler failure and is logged and rethrown like a synchronous throw.
  */
 function guardProcedure(
   typeName: string,
@@ -318,19 +334,31 @@ function guardProcedure(
     } catch (error) {
       reportAndRethrow(error);
     }
-    if (isThenable(result)) {
-      // Assimilate with a native Promise before attaching the rejection
-      // handler: `isThenable` accepts any object with a callable `then`, and a
-      // non-native thenable may expose no `catch` of its own — calling
-      // `result.catch(...)` directly would throw a replacement `TypeError` and
-      // swallow the original rejection (M70f re-review round 2, finding 2).
-      // `Promise.resolve` invokes the thenable's `then` and yields a native
-      // promise, so the rejection handler below is reached for native and
-      // custom thenables alike.
-      return Promise.resolve(result).catch((error) => reportAndRethrow(error));
-    }
-    if (isAsyncIterable(result)) {
-      return withErrorLoggingIterable(result, (error) => reportAndRethrow(error));
+    // The inspection below reads `result.then` and
+    // `result[Symbol.asyncIterator]` — property accesses that can themselves
+    // throw (an accessor whose getter throws). They run AFTER the handler
+    // invocation's protected `try` has ended, so without this guard a
+    // throwing `then` getter would escape synchronously without ever
+    // reaching `reportAndRethrow` (M70f code review, finding 2). The guard
+    // routes any inspection failure through the same protected path and
+    // rethrows the ORIGINAL error.
+    try {
+      if (isThenable(result)) {
+        // Assimilate with a native Promise before attaching the rejection
+        // handler: `isThenable` accepts any object or function with a
+        // callable `then`, and a non-native thenable may expose no `catch` of
+        // its own — calling `result.catch(...)` directly would throw a
+        // replacement `TypeError` and swallow the original rejection (M70f
+        // re-review round 2, finding 2). `Promise.resolve` invokes the
+        // thenable's `then` and yields a native promise, so the rejection
+        // handler below is reached for native and custom thenables alike.
+        return Promise.resolve(result).catch((error) => reportAndRethrow(error));
+      }
+      if (isAsyncIterable(result)) {
+        return withErrorLoggingIterable(result, (error) => reportAndRethrow(error));
+      }
+    } catch (error) {
+      reportAndRethrow(error);
     }
     return result;
   };
