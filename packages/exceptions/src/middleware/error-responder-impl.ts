@@ -18,6 +18,7 @@ import type {
 } from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
+import { RESPONDER_DETAIL } from '../formatters/problem-details.ts';
 import type { ErrorHandlerFormatter } from '../formatters/error-formatter.ts';
 
 /**
@@ -94,6 +95,22 @@ export function createErrorResponder(
         ? { ...init.details, detail: init.detail }
         : init.details;
       const error = new HttpError(init.status, init.title, details);
+      // Mark the error as responder-built and carry the disclosure on a
+      // module-private symbol, which is what `buildProblemDetails` promotes to
+      // the Problem Details `detail` member. The `details.detail` key above is
+      // what the `default` formatter emits (it serializes `details` verbatim);
+      // the Problem Details formatters read the symbol instead, so a THROWN
+      // error that happens to carry a `details.detail` key of its own keeps
+      // `detail: <message>` (M70f code review, finding 4). Non-enumerable so
+      // it never reaches a serialized body.
+      if (init.detail !== undefined) {
+        Object.defineProperty(error, RESPONDER_DETAIL, {
+          value: init.detail,
+          enumerable: false,
+          writable: false,
+          configurable: true,
+        });
+      }
       // The formatter's `ctx` parameter is a FULL `IRequestContext` by its
       // contract (M70f re-review round 2, finding 2). The target is a full
       // context only at the in-pipeline sites; the kernel's pre-pipeline sites

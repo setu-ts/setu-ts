@@ -71,6 +71,16 @@ export type GrpcServingStatus = 'unknown' | 'serving' | 'not-serving' | 'service
  * maps to a function implementing that procedure. This is a structural type
  * satisfied by generated descriptor objects from {@linkcode @bufbuild/protobuf}.
  *
+ * @deprecated Since M70f this type has no reader. It was the parameter type of
+ * {@linkcode IGrpcService.addService}'s `implementation`, which is now
+ * `unknown`: an index-signature type rejects a **class instance**, whose
+ * methods live on the prototype rather than as own properties, and Connect
+ * accepts a class instance as an implementation. Nothing in the framework
+ * consumes this type any more; it is retained only because removing a
+ * published export is a breaking change (AI_GUIDELINES §9.2) and will be
+ * dropped in a later release. Pass the implementation directly — no cast and
+ * no annotation is needed.
+ *
  * @since 0.3.0
  */
 export interface ServiceImpl<TMethod = unknown> {

@@ -54,11 +54,14 @@ All notable changes to this project are documented here. The format follows
   response — but may not import `@setu-ts/exceptions`, where every formatter lives — answer in the
   application's configured format. `errorHandler` publishes a responder (built from the formatter
   and content type it already resolved at factory time) into `ctx.state` before `next()`; every
-  short-circuiting site in the kernel, the storage, multi-tenancy, session, auth, http-security,
-  feature-flags, and validation paths now delegates to it, so one
-  `errorHandler({ format: 'rfc9457' })` governs every error body an application can produce.
-  `@setu-ts/common` also gains `serializeError` / `SerializedError`, a pure serializer that turns
-  any thrown value into a plain object with a bounded `cause` chain.
+  short-circuiting site in the kernel and in the storage, multi-tenancy, session, auth,
+  http-security and feature-flags middleware now delegates to it, so one
+  `errorHandler({ format: 'rfc9457' })` governs every error body those sites produce.
+  `validation-plugin` is deliberately **not** part of the seam — it owns its own `errorFormat`
+  option and formats validation failures itself — so an application configures the two together; the
+  CLI templates and `rest-starter` now do (C3). `@setu-ts/common` also gains `serializeError` /
+  `SerializedError`, a pure serializer that turns any thrown value into a plain object with a
+  bounded `cause` chain.
 - **`INotifier.sendSettled?` and `ChannelSendResult` in `@setu-ts/common`** (M70f, X8-12). An
   optional, non-throwing twin of `send` that reports one `{ channel, ok }` result per requested
   channel (a failure carrying its serialized error), so a caller behind a retrying queue can retry
@@ -199,12 +202,34 @@ All notable changes to this project are documented here. The format follows
   short-circuiting site — the kernel's 404/400/503/500 terminals, `createUploadMiddleware`'s
   rejections, the multi-tenancy `400`, the session tenant-mismatch and form-CSRF `403`s, the auth
   guards, the http-security `413`/`403`s, and the feature-flag guard — now writes its body through
-  the responder seam, so an `errorHandler({ format: 'rfc9457' })` governs them all. **Migration:**
-  sites that previously answered `{ error, message }` now answer `{ error, detail }` in the
-  no-`errorHandler` fallback (the disclosure moves from the non-standard `message` key to the RFC
+  the responder seam, so an `errorHandler({ format: 'rfc9457' })` governs them all.
+
+  **Migration — with `errorHandler` registered (every CLI template and starter).** This is the case
+  that changes, and it changes for every one of these sites: they previously bypassed the configured
+  format and answered their own `application/json` body, and they now answer in it. Under
+  `format: 'rfc9457'` a rejection that was
+  `{"error":"Too many files","detail":"Maximum 3 file(s) allowed"}` (`application/json`) becomes
+  `{"type":"about:blank","title":"Bad Request","status":400,"detail":"Maximum 3 file(s) allowed","instance":"/upload"}`
+  (`application/problem+json`). **A client that branched on the `error` member must read `detail`
+  instead** — the site-specific label (`Too many files`, `Tenant Required`, `Tenant Mismatch`,
+  `Invalid MIME type`) is no longer a body member, because RFC 9457 §4.2 requires `title` to be the
+  status title for the `about:blank` problem type. Under `format: 'default'` the label is the
+  `message` member and the disclosure is `details.detail`. There is no option that restores the
+  pre-M70f ad-hoc bodies; answering in the configured format is the defect being fixed (X4-8).
+
+  **Migration — with no `errorHandler` registered.** Sites that answered `{ error, message }` now
+  answer `{ error, detail }` (the disclosure moves from the non-standard `message` key to the RFC
   9457 `detail` key), and the feature-flag guard's bare `text/plain` `Not Found` is now the JSON
-  fallback `{"error":"Not Found"}`. With `errorHandler` registered, every site answers in its
-  configured format as before.
+  fallback `{"error":"Not Found"}`.
+- **`IGrpcService.addService`'s `implementation` parameter is now `unknown`** (M70f). It was
+  `Partial<ServiceImpl>`, an index-signature type that **rejects a class instance** — whose methods
+  live on the prototype rather than as own properties — although Connect accepts one, so a
+  class-based service implementation could not be passed without a cast. Widening is
+  source-compatible for callers: an implementation that type-checked before still does.
+  `ServiceImpl` is consequently **deprecated** — it now has no reader anywhere in the framework —
+  and is retained only because removing a published export is breaking (AI_GUIDELINES §9.2).
+  **Migration:** drop any `as Partial<ServiceImpl>` cast or `ServiceImpl` annotation at an
+  `addService` call site and pass the implementation directly.
 - **An unhandled request error is now logged by the kernel (X11-2)** (M70f). The fallback `500` path
   previously discarded the error and logged nothing even with `LoggerPlugin` registered; it now
   reports the message and stack through `CAPABILITIES.LOGGER` (guarded so a missing or broken logger
