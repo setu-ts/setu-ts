@@ -44,7 +44,9 @@ const PLUGIN_NAME = 'database-plugin';
  * // Memory adapter (default, zero deps)
  * app.register(DatabasePlugin());
  *
- * // Prisma adapter with an application-generated Prisma v7 client
+ * // Prisma adapter with an application-generated Prisma v7 client. A v7 client
+ * // needs a driver adapter:
+ * //   new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
  * app.register(DatabasePlugin({
  *   type: 'prisma',
  *   options: {
@@ -192,8 +194,8 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   if (opts?.drizzleTables !== undefined) {
     result.drizzleTables = opts.drizzleTables;
   }
-  if ((opts as Record<string, unknown>)?.transactionTimeout !== undefined) {
-    result.transactionTimeout = (opts as Record<string, unknown>).transactionTimeout;
+  if (opts?.transactionTimeout !== undefined) {
+    result.transactionTimeout = opts.transactionTimeout;
   }
   return result as DatabaseAdapterOptions;
 }

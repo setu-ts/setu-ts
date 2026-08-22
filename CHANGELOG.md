@@ -47,6 +47,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Per-adapter option arms on `DatabasePluginOptions`** (M70j, D7). `MemoryDatabaseOptions`,
+  `PrismaDatabaseOptions` and `DrizzleDatabaseOptions` join the exported `CustomDatabaseOptions`,
+  and `BuiltInDatabaseOptions` becomes the union of the first three, keeping its published name.
+  `PrismaAdapterOptions` and `DrizzleAdapterOptions` narrow `DatabaseAdapterOptions` for their arm.
+  See **Changed** for the compile-time requirement this introduces.
+
 - **A request-scoped error responder seam in `@setu-ts/common`** (M70f).
   `respondWithError(ctx,
   { status, title, detail?, details? })` and the `IErrorResponder` /
@@ -197,6 +203,51 @@ All notable changes to this project are documented here. The format follows
   variable that JSR's static npm-compat rewrite cannot reach) cannot re-enter the source tree.
 
 ### Changed
+
+- **BREAKING (types only): a `'prisma'` or `'drizzle'` registration must now name the options its
+  adapter cannot run without** (M70j, D7). `DatabasePluginOptions` is a union discriminated on
+  `type`, and its built-in arm made every adapter-specific field optional on a nested bag, so
+  omitting one was a runtime throw at `connect()` rather than a compile error — unlike the
+  `'custom'` arm, which has required `adapter` since M52c. `type: 'prisma'` now requires
+  `options.prismaClient` and `type: 'drizzle'` requires both `options.drizzleInstance` and
+  `options.drizzleTables`. **Only a registration that already failed at startup stops compiling**,
+  and the runtime guards are unchanged, so a JavaScript caller sees exactly what it saw before.
+
+  ```typescript
+  // Before — compiled, then threw at app.start()
+  DatabasePlugin({ type: 'prisma' });
+  DatabasePlugin({ type: 'drizzle', options: { drizzleTables: { User: users } } });
+
+  // After
+  DatabasePlugin({ type: 'prisma', options: { prismaClient } });
+  DatabasePlugin({
+    type: 'drizzle',
+    options: {
+      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleTables: { User: users },
+    },
+  });
+  ```
+
+- **BREAKING (behaviour): the Memory adapter refuses an unknown `select` or `orderBy` column**
+  (M70j, X12-5). The **default** adapter used to accept both silently — a projection quietly lost
+  the field and a sort quietly returned rows in insertion order — while Prisma and Drizzle answered
+  `500` for the identical call, so a rule proved in development became a production failure. A field
+  that **no stored row carries** is now refused with the entity, the clause and the observed column
+  list, matching Drizzle's message. A field present on at least one row counts as known, and an
+  entity holding no rows accepts anything. `where` and `filter` are deliberately unchanged: with no
+  schema this adapter cannot tell an unknown column from one absent everywhere, and matching nothing
+  is a defensible answer. If a projection over a column that has never been written is intentional,
+  write the column (even as `null`) on one row, or list only fields the store has seen. Uniqueness
+  and column types remain unenforced and cannot be enforced by a schema-less store — the package
+  README now states that plainly.
+
+- **The Drizzle table registry validates `id` lazily** (M70j, X4-9). `connect()` refused **every**
+  registered table without an `id` column, so a composite-key join or per-tenant table registered
+  only for the typed query builder made the whole registry unusable. The registry now accepts any
+  table definition; a repository for an `id`-less table is refused by name at `getRepository()`,
+  where `IRepository`'s single-key contract actually applies. Strictly widening — no configuration
+  that worked before changes.
 
 - **Error bodies now answer in the application's configured format (X4-8, C3)** (M70f). Every
   short-circuiting site — the kernel's 404/400/503/500 terminals, `createUploadMiddleware`'s
@@ -417,6 +468,22 @@ All notable changes to this project are documented here. The format follows
   produced (`404` for a path with no WebSocket route) rather than a fixed `400`.
 
 ### Fixed
+
+- **`IDatabaseService.query()` was inoperative on the Drizzle adapter** (M70j, X12-2). The adapter
+  called `execute({ sql, params })`, a shape no Drizzle driver accepts, so every raw query failed
+  with the internal `TypeError: query.getSQL is not a function` — a method on the capability's own
+  interface with no working path on that adapter at all. It now builds a real Drizzle `SQL` from the
+  statement and its parameters: the text is emitted verbatim for an ascending-placeholder statement
+  (`$1…` on PostgreSQL, `?` on MySQL and SQLite) and every value is bound, never interpolated. A
+  placeholder count that disagrees with `params`, a gap in the `$N` sequence, or both placeholder
+  styles in one statement is refused before the driver is reached, because a mis-bound parameter is
+  silent. The defect survived because the unit fake accepted any argument; the proof is now the real
+  Drizzle SQL generator, and that fake refuses a non-`SQLWrapper` exactly as a driver does.
+- **`logQueries: true` silently dropped a portable `count` filter** (M70j). The service's logging
+  wrapper declared `count(where)` and called `ds.count(where)`, discarding the second parameter
+  `IDataSource.count(where, filter?)` defines — so `repo.count({ filter })` answered a different
+  number with query logging on than with it off. Every existing test built the service without
+  logging, which is why it survived.
 
 - **X10-3 — a service-discovery indicator that never reached its backend reported `up`** (M70c). See
   Changed.

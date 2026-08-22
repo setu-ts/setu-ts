@@ -204,9 +204,12 @@ export class DatabaseService implements IDatabaseService {
         logger.debug(`[${entity}] delete`, { operation: 'delete', durationMs: now() - start });
         return result;
       },
-      async count(where) {
+      // BOTH parameters are forwarded. Taking only `where` dropped the
+      // portable `filter` argument, so `repo.count({ filter })` answered a
+      // different number with `logQueries: true` than with it off.
+      async count(where, filter) {
         const start = now();
-        const result = await ds.count(where);
+        const result = await ds.count(where, filter);
         logger.debug(`[${entity}] count`, { operation: 'count', durationMs: now() - start });
         return result;
       },

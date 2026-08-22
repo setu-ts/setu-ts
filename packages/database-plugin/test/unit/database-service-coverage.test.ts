@@ -150,4 +150,46 @@ describe('DatabaseService — CRUD read-back and logging coverage', () => {
       expect(found).toBeNull();
     });
   });
+
+  describe('the logging wrapper forwards every data-source argument', () => {
+    it('honours a portable filter on count with logQueries on', async () => {
+      // `IDataSource.count(where, filter?)` takes TWO parameters. The wrapper
+      // declared `count(where)` and called `ds.count(where)`, so the filter was
+      // dropped and `logQueries: true` silently changed the answer. Every
+      // existing test built the service without logging, which is why it
+      // survived.
+      const repo = service.getRepository<{ id: string; qty: number }>('Widget');
+      await repo.create({ id: 'w1', qty: 1 });
+      await repo.create({ id: 'w2', qty: 9 });
+
+      const logged = await repo.count({
+        filter: { type: 'comparison', field: 'qty', operator: 'gte', value: 5 },
+      });
+      expect(logged).toBe(1);
+      expect(logs.some((entry) => entry.msg === '[Widget] count')).toBe(true);
+    });
+
+    it('answers identically with logging on and off', async () => {
+      const quiet = new DatabaseService(
+        adapter as unknown as IDatabaseAdapter,
+        (entity) => createMemoryDataSource(adapter, entity),
+        'memory',
+      );
+      const loud = service;
+      for (const target of [quiet, loud]) {
+        const repo = target.getRepository<{ id: string; qty: number }>('Gadget');
+        await repo.create({ id: `${target === quiet ? 'q' : 'l'}1`, qty: 1 });
+        await repo.create({ id: `${target === quiet ? 'q' : 'l'}2`, qty: 9 });
+      }
+      const filter = {
+        type: 'comparison',
+        field: 'qty',
+        operator: 'gte',
+        value: 5,
+      } as const;
+      expect(await loud.getRepository('Gadget').count({ filter })).toBe(
+        await quiet.getRepository('Gadget').count({ filter }),
+      );
+    });
+  });
 });
