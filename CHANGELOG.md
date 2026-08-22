@@ -477,13 +477,18 @@ All notable changes to this project are documented here. The format follows
   (`$1…` on PostgreSQL, `?` on MySQL and SQLite) and every value is bound, never interpolated. A
   placeholder count that disagrees with `params`, a gap in the `$N` sequence, or both placeholder
   styles in one statement is refused before the driver is reached, because a mis-bound parameter is
-  silent. The defect survived because the unit fake accepted any argument; the proof is now the real
-  Drizzle SQL generator, and that fake refuses a non-`SQLWrapper` exactly as a driver does.
+  silent. On PostgreSQL a jsonb `?`/`?|`/`?&` operator is indistinguishable from a placeholder, so
+  such a statement is refused or fails at the database rather than being mis-bound — write it with
+  `$N` placeholders. The defect survived because the unit fake accepted any argument; the proof is
+  now the real Drizzle SQL generator, and that fake refuses a non-`SQLWrapper` exactly as a driver
+  does.
 - **`logQueries: true` silently dropped a portable `count` filter** (M70j). The service's logging
   wrapper declared `count(where)` and called `ds.count(where)`, discarding the second parameter
   `IDataSource.count(where, filter?)` defines — so `repo.count({ filter })` answered a different
   number with query logging on than with it off. Every existing test built the service without
-  logging, which is why it survived.
+  logging, which is why it survived. The wrapper now spreads the data source it wraps before
+  overriding the six required methods, so a member the contract does not require cannot be dropped
+  the same way again.
 
 - **X10-3 — a service-discovery indicator that never reached its backend reported `up`** (M70c). See
   Changed.

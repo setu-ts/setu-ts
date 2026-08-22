@@ -68,7 +68,7 @@ required **by the union**, so omitting one is a compile error rather than a star
 
 | `options` field      | Type                      | Default | Read by                                                                                                                                      |
 | -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `logQueries`         | `boolean`                 | `false` | Every adapter — logs entity, operation and monotonic duration to the resolved logger.                                                        |
+| `logQueries`         | `boolean`                 | `false` | The database **service**, so it applies to every adapter including `'custom'` — logs entity, operation and monotonic duration.               |
 | `prismaClient`       | `unknown`                 | —       | Prisma. Required.                                                                                                                            |
 | `provider`           | `PrismaSqlProvider`       | derived | Prisma. Names the connector when it cannot be detected; see `contains` below.                                                                |
 | `drizzleInstance`    | `DrizzleDatabaseIdentity` | —       | Drizzle. Required; created by `createDrizzleDatabase()`.                                                                                     |
@@ -134,6 +134,11 @@ carries the connector's own placeholders (`$1…` on PostgreSQL, `?` on MySQL an
 emitted verbatim for an ascending-placeholder statement. A placeholder count that disagrees with the
 parameter list, a gap in the `$N` sequence, or both styles in one statement is refused before the
 statement reaches the driver — a mis-bound parameter is silent, so guessing is not an option.
+
+On PostgreSQL, `?`, `?|` and `?&` are also **jsonb key-containment operators**, and no scanner can
+tell one from a placeholder. Such a statement is refused here (its token count disagrees with the
+parameter list) or fails at the database as a syntax error — never mis-bound. Write it with `$N`
+placeholders, which are unambiguous on that connector.
 
 Synchronous callback drivers such as `better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite are
 not supported by this adapter. Their transaction callbacks return before awaited Unit-of-Work work

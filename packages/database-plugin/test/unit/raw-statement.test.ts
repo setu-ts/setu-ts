@@ -229,6 +229,24 @@ describe('bindRawStatement', () => {
       );
     });
 
+    it("refuses rather than mis-binds when a '?' is PostgreSQL's jsonb operator", () => {
+      // `?`, `?|` and `?&` are jsonb key-containment operators on PostgreSQL, and
+      // this scanner cannot tell one from a placeholder. It never guesses: the
+      // token count disagrees with the parameter list and the statement is
+      // refused, so no value is ever bound into an operator's position.
+      expect(() =>
+        bindRawStatement("select * from t where data ?| array['a'] and id = ?", ['id1'], tag)
+      ).toThrow("Raw query has 2 '?' placeholder(s) but received 1 parameter(s)");
+    });
+
+    it("refuses a jsonb '?' operator combined with $N placeholders", () => {
+      // The recommended form for such a statement is `$N` throughout; reaching
+      // for it halfway is refused by the mixed-style rule, so the two spellings
+      // can never silently combine.
+      expect(() => bindRawStatement("select * from t where data ? 'k' and id = $1", ['id1'], tag))
+        .toThrow("Raw query mixes '?' and '$N' placeholders in one statement");
+    });
+
     it('never puts a parameter value into a refusal message', () => {
       let message = '';
       try {

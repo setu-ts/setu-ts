@@ -1100,9 +1100,11 @@ own placeholders — `$1…` on PostgreSQL, `?` on MySQL and SQLite. Prisma and 
 verbatim; the Drizzle adapter splits it at its placeholders and rebuilds it through Drizzle's own
 `SQL` chunks, which emits an ascending-placeholder statement byte-identically. A placeholder count
 that disagrees with `params`, a gap in the `$N` sequence, or both placeholder styles in one
-statement is refused before the driver is reached, because a mis-bound parameter is silent.
-Programmatic `migrate()` is unsupported by all current adapters and rejects because each ORM owns
-migrations through its CLI.
+statement is refused before the driver is reached, because a mis-bound parameter is silent. On
+PostgreSQL, `?`, `?|` and `?&` are also jsonb key-containment operators that no scanner can tell
+from a placeholder; such a statement is refused or fails at the database, never mis-bound — write it
+with `$N` placeholders. Programmatic `migrate()` is unsupported by all current adapters and rejects
+because each ORM owns migrations through its CLI.
 
 `FindOptions.filter` and `CountOptions.filter` accept a portable expression tree in addition to the
 existing equality-only `where` map. `where` and `filter` are conjoined, and every built-in adapter
