@@ -1,10 +1,11 @@
 /**
- * Unit tests for the gRPC handler-error logging wrapper's DEFERRED-failure and
- * broken-logger paths (M70f re-review, findings 3 & 4).
+ * Unit tests for the gRPC handler-error logging wrapper's DEFERRED-failure,
+ * broken-logger, and custom-thenable assimilation paths (M70f re-review,
+ * findings 2, 3 & 4).
  *
  * The e2e suite proves the wrapper through the real Connect transport for a
  * server-streaming RPC. These unit tests drive the wrapped implementation
- * directly (via the fake runtime's registered implementation) to cover the two
+ * directly (via the fake runtime's registered implementation) to cover the
  * paths the e2e fixture cannot reach:
  *
  * - **Finding 3 — bidi / async-iterable failures.** A bidi handler returns an
@@ -16,6 +17,11 @@
  * - **Finding 4 — a broken logger.** If the logger's `error()` (or its
  *   resolution) throws, the wrapper must degrade silently and rethrow the
  *   ORIGINAL handler error — the logger failure must not replace it.
+ * - **Finding 2 — a custom thenable.** A unary handler may return a thenable
+ *   that is not a native promise and exposes no `catch` method. The wrapper
+ *   must assimilate it with a native `Promise` (invoking its `then`) rather
+ *   than call a `.catch` it does not have — a direct `.catch` call would throw
+ *   a replacement `TypeError` and swallow the original value.
  *
  * @module
  */
@@ -456,5 +462,81 @@ describe('gRPC handler wrapper — a broken logger does not replace the handler 
       thrown = error;
     }
     expect(thrown).toBe(handlerError);
+  });
+});
+
+describe('gRPC handler wrapper — custom thenable assimilation (M70f re-review round 2, finding 2)', () => {
+  /**
+   * A thenable that is NOT a native promise and exposes NO `catch` method. Its
+   * `then` resolves to `value`, so `Promise.resolve(thenable)` must invoke `then`
+   * and settle with the sentinel. A direct `.catch` call on it would throw
+   * `TypeError: result.catch is not a function` before the value is ever
+   * observed.
+   */
+  function customThenable(value: unknown): { then: (resolve: (v: unknown) => void) => void } {
+    return {
+      then(resolve: (v: unknown) => void) {
+        queueMicrotask(() => resolve(value));
+      },
+    };
+  }
+
+  it('assimilates a resolving custom thenable to its value without a replacement TypeError', async () => {
+    // A unary handler that returns a custom thenable (no `catch`) must have its
+    // resolution value observed unchanged. Without assimilation, the wrapper's
+    // `.catch` call throws a replacement TypeError and the sentinel is lost.
+    const sentinel = { response: 'custom-thenable-value' };
+    const { logger, errors } = makeCapturingLogger();
+    const runtime = buildStreamService(
+      {
+        // A custom thenable exercises the thenable path (a unary Promise shape)
+        // without being a native promise.
+        serverStream: () => customThenable(sentinel),
+      },
+      () => logger,
+    );
+    const wrapped = runtime.registered[0].implementation as Record<string, unknown>;
+    // The wrapper returns a native promise (the assimilated thenable). Awaiting
+    // it must yield the ORIGINAL sentinel — proving no replacement TypeError
+    // was thrown and the value was not swallowed.
+    const result = await (wrapped.serverStream as (r: unknown) => Promise<unknown>)({});
+    expect(result).toBe(sentinel);
+    // No handler error occurred, so nothing was logged.
+    expect(errors).toHaveLength(0);
+  });
+
+  it('logs and rethrows the original rejection of a custom thenable', async () => {
+    // The assimilation must also preserve a custom thenable's REJECTION: the
+    // wrapper's rejection handler (attached to the native promise) logs and
+    // rethrows the ORIGINAL error rather than a replacement TypeError.
+    const handlerError = new Error('custom thenable rejected');
+    const rejectingThenable: {
+      then: (resolve: (v: unknown) => void, reject: (e: unknown) => void) => void;
+    } = {
+      then(_resolve: (v: unknown) => void, reject: (e: unknown) => void) {
+        queueMicrotask(() => reject(handlerError));
+      },
+    };
+    const { logger, errors } = makeCapturingLogger();
+    const runtime = buildStreamService(
+      {
+        serverStream: () => rejectingThenable,
+      },
+      () => logger,
+    );
+    const wrapped = runtime.registered[0].implementation as Record<string, unknown>;
+    let thrown: unknown;
+    try {
+      await (wrapped.serverStream as (r: unknown) => Promise<unknown>)({});
+    } catch (error) {
+      thrown = error;
+    }
+    // The ORIGINAL rejection propagates (not a replacement TypeError)...
+    expect(thrown).toBe(handlerError);
+    // ...and it is logged, naming the procedure and the real message.
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('gRPC handler failed');
+    expect(errors[0].metadata?.procedure).toBe('example.Stream/serverStream');
+    expect(errors[0].metadata?.message).toBe('custom thenable rejected');
   });
 });

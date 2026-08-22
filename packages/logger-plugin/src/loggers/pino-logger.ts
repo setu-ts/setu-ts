@@ -182,7 +182,9 @@ export class PinoLogger implements ILogger {
    * @returns A new child logger
    */
   child(bindings: LogMetadata): ILogger {
-    const childPino = this.#pino.child(bindings);
+    // Normalize before hand-off so an Error-valued binding survives Pino's
+    // serialization instead of collapsing to {} (X2-5, M70f re-review finding 1).
+    const childPino = this.#pino.child(normalizeMetadata(bindings));
     return new PinoLoggerAdapter(this.level, childPino);
   }
 
@@ -208,7 +210,10 @@ export class PinoLogger implements ILogger {
       pinoOptions.redact = options.redact;
     }
     if (options?.bindings !== undefined) {
-      pinoOptions.base = options.bindings as Record<string, unknown>;
+      // Normalize the base bindings too, so an Error supplied as a base binding
+      // is preserved in every emitted record rather than flattened to {} (X2-5,
+      // M70f re-review finding 1).
+      pinoOptions.base = normalizeMetadata(options.bindings);
     }
     return factory(pinoOptions);
   }
@@ -268,7 +273,9 @@ class PinoLoggerAdapter implements ILogger {
     this.#pino.trace(normalize(metadata), message);
   }
   child(bindings: LogMetadata): ILogger {
-    return new PinoLoggerAdapter(this.level, this.#pino.child(bindings));
+    // Normalize before hand-off so an Error-valued binding survives Pino's
+    // serialization instead of collapsing to {} (X2-5, M70f re-review finding 1).
+    return new PinoLoggerAdapter(this.level, this.#pino.child(normalizeMetadata(bindings)));
   }
 }
 
