@@ -2824,9 +2824,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   so the container is restarted between runs. Both suites now pass under the project's own
   permission model — 7 steps, verified in this worktree.) — complete (PR #175)
 - **Milestone 70j** (`packages/database-plugin` — database adapter correctness) — complete (PR
-  pending). Six register rows with one shape: an adapter reporting success while doing something
-  other than what its contract says. **X12-2** `IDatabaseService.query()` could not work at all on
-  the Drizzle adapter, which called `execute({ sql, params })` — a shape no Drizzle driver accepts,
+  #177). Six register rows with one shape: an adapter reporting success while doing something other
+  than what its contract says. **X12-2** `IDatabaseService.query()` could not work at all on the
+  Drizzle adapter, which called `execute({ sql, params })` — a shape no Drizzle driver accepts,
   failing with the internal `TypeError: query.getSQL is not a function`. The fix is a **binder**,
   not a call-shape swap: Prisma (`$queryRawUnsafe(sql, ...params)`) and D1
   (`prepare(sql).bind(...)`) both forward the statement **verbatim** and bind natively, so that is
