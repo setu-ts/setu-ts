@@ -12,7 +12,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { z } from 'npm:zod@^3.24.0';
 import type { MiddlewareFunction, RouteInfo, ValidationTarget } from '@setu-ts/common';
-import { withValidationMetadata } from '@setu-ts/common';
+import { VALIDATION_METADATA, withValidationMetadata } from '@setu-ts/common';
 
 import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';
 
@@ -239,5 +239,60 @@ describe('excludeOwners', () => {
       ]);
 
     expect(Object.keys(doc.paths)).toEqual(['/health']);
+  });
+});
+
+/**
+ * Findings from the automated review of PR #181.
+ */
+describe('review findings (PR #181)', () => {
+  it('ignores a brand carrying a target but no schema', () => {
+    // A foreign value under the same `Symbol.for` key read back as valid
+    // metadata, and the generator counted it as a derivation — adding a `400`
+    // to an operation from which nothing was derived.
+    const forged: MiddlewareFunction = async (_ctx, next) => {
+      await next();
+    };
+    Object.defineProperty(forged, VALIDATION_METADATA, { value: { target: 'body' } });
+
+    const doc = new OpenApiGenerator({ title: 'T', version: '1' })
+      .generate([route('POST', '/a', { middleware: [forged] })]);
+    const op = doc.paths?.['/a']?.post;
+
+    expect(op?.requestBody).toBeUndefined();
+    expect(Object.keys(op?.responses ?? {})).toEqual(['200']);
+  });
+
+  it('derives nothing from a brand whose schema is explicitly undefined', () => {
+    // `schema` is typed `unknown`, so `undefined` is a legal value and the
+    // `'schema' in value` guard accepts it. Assigning it still created an own
+    // key, which counted as a derivation and added a `400`.
+    const doc = new OpenApiGenerator({ title: 'T', version: '1' })
+      .generate([route('POST', '/u', { middleware: [branded('body', undefined)] })]);
+    const op = doc.paths?.['/u']?.post;
+
+    expect(op?.requestBody).toBeUndefined();
+    expect(Object.keys(op?.responses ?? {})).toEqual(['200']);
+  });
+
+  it('suffixes an operationId that a literal path segment collides with', () => {
+    // Unwrapping `{id}` to `by-id` costs injectivity: a literal `by-id` segment
+    // slugs identically. A duplicate `operationId` is invalid per the
+    // specification and makes a generated client emit two methods with one name.
+    const doc = new OpenApiGenerator({ title: 'T', version: '1' })
+      .generate([route('GET', '/users/:id'), route('GET', '/users/by-id')]);
+
+    expect(doc.paths?.['/users/{id}']?.get?.operationId).toBe('get-users-by-id');
+    expect(doc.paths?.['/users/by-id']?.get?.operationId).toBe('get-users-by-id-2');
+  });
+
+  it('does not let the counting pass consume operation ids', () => {
+    // The counting pass runs the same derivation, so claiming there would
+    // suffix every id in a document that has no collision at all.
+    const doc = new OpenApiGenerator({ title: 'T', version: '1' }).generate([
+      route('POST', '/orders', { middleware: [branded('body', z.object({ a: z.string() }))] }),
+    ]);
+
+    expect(doc.paths?.['/orders']?.post?.operationId).toBe('post-orders');
   });
 });

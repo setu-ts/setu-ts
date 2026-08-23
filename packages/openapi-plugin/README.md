@@ -3,9 +3,15 @@
 OpenAPI 3.1 generation from registered routes, plus Swagger UI. Registers an `IOpenApiService` under
 `CAPABILITIES.OPENAPI` (`'openapi'`).
 
-Zod schemas are transformed to OpenAPI schema objects, and identical schemas — including ones nested
-inside another — are deduplicated into `components`, referenced by `$ref` from every site that uses
-them.
+Zod schemas are transformed to OpenAPI schema objects, and a schema reused across request and
+response bodies — including one nested inside another — is hoisted into `components` and referenced
+by `$ref` from each of those sites.
+
+Reuse means the **same schema object**, not an equal one: two separately constructed but
+structurally identical schemas are two schemas and each stays where it is. Only object, array,
+composition and enum shapes are hoisted — a reused primitive is smaller inline than as a `$ref`.
+Parameter schemas are never hoisted, because a parameter list is built by destructuring the
+transformed object's `properties`, and a `$ref` has none.
 
 A route's schemas come from its declared `schema` field **or** are derived from the validation
 middleware guarding it, so a route already carrying `validateBody(...)` does not repeat itself.

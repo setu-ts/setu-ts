@@ -6386,7 +6386,9 @@ app.router.get('/users', {
 });
 
 app.router.post('/users', {
-  middleware: [app.services.auth.requireAuth()],
+  // `schema.body` DOCUMENTS the route; `validateBody` is what enforces it and
+  // writes `validated:body`. Declaring the schema alone leaves that key unset.
+  middleware: [app.services.auth.requireAuth(), validateBody(CreateUserSchema)],
   schema: {
     body: CreateUserSchema,
     response: { 201: UserSchema, 400: z.object({ error: z.string() }) },

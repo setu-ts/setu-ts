@@ -1,7 +1,6 @@
 # Milestone 70m — SDK and OpenAPI (`@setu-ts/sdk`, `@setu-ts/openapi-plugin`)
 
-> **Status:** Planning. Branch: `feat/m70m-sdk-openapi`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #181). Archived on completion. Branch: `feat/m70m-sdk-openapi`.
 
 ## 0. Objective & scope
 

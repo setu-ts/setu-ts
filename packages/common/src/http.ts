@@ -723,6 +723,12 @@ export function validationMetadataOf(
  */
 function isRouteValidationMetadata(value: unknown): value is RouteValidationMetadata {
   if (typeof value !== 'object' || value === null) return false;
+  // `schema` must be PRESENT, not merely declared by the type. A foreign value
+  // branded under the same `Symbol.for` key with only a `target` otherwise read
+  // back as valid metadata, and the OpenAPI generator counted that as a
+  // derivation — adding a `400` response to an operation from which nothing was
+  // actually derived.
+  if (!('schema' in value)) return false;
   const target = (value as { target?: unknown }).target;
   return target === 'body' || target === 'query' || target === 'params' ||
     target === 'headers' || target === 'cookies';
