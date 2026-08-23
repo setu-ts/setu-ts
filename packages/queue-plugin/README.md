@@ -164,6 +164,13 @@ reported as zeros) on RabbitMQ and SQS, whose counts need a management API.
 lifetime of the deployment — the retention exists for debugging, so dropping it by default would
 remove the value it is there for.
 
+Retention is enforced **per payload**: each dead-letter sweeps the dead set — which is scored by
+dead-letter time — and deletes every entry older than the TTL along with its payload. A key-level
+`EXPIRE` alone would not do this, because each new dead-letter renews it, so a queue that keeps
+failing would retain its oldest payloads forever. The key-level expiry is kept beside the sweep as
+the backstop for the case the sweep cannot reach: a queue that dead-letters once and then goes quiet
+never runs another sweep.
+
 Setting it MOVES a dead job's payload from `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and
 the expiry is applied to that key and the dead set. It is never applied to the live jobs hash: that
 key holds the payload of **every** job for the name, Redis keeps a key's TTL across later writes,

@@ -102,11 +102,13 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
   in-flight task, drops the worker, and re-dispatches its queued work to survivors.
 - **Timeout.** A task exceeding its timeout rejects with `WorkerTaskTimeoutError`; the worker is
   terminated and replaced (in-flight JavaScript cannot be cancelled).
-- **A worker that ends its own thread** — `process.exit()` inside the handler, or `self.close()` on
-  Deno — settles its in-flight task with `WorkerExitError` and frees the slot, independently of the
-  task timeout. This is what the "worker crash" line above always promised; before M70k the only
-  thing that settled such a task was the timeout, so `taskTimeoutMs: 0` left `run()` pending forever
-  and wedged the pool permanently (smoke finding X8-7).
+- **A worker that ends its own thread** — `process.exit()` inside the handler — settles its
+  in-flight task with `WorkerExitError` and frees the slot, independently of the task timeout, **on
+  Node and Bun**. On Deno nothing is emitted, so the task is settled only by
+  `WorkerTaskTimeoutError` when a timeout is configured; see the table below. This is what the
+  "worker crash" line above always promised; before M70k the only thing that settled such a task was
+  the timeout, so `taskTimeoutMs: 0` left `run()` pending forever and wedged the pool permanently
+  (smoke finding X8-7).
 
   **Whether it is detected depends on the runtime, and the pool tells you which you have.** The
   `worker-pool` health payload reports `exitDetection`, and `register()` warns once when
@@ -119,10 +121,12 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
   | Deno               | web `Worker`          | **no**         | nothing is emitted at all        |
   | Cloudflare Workers | none                  | n/a            | `run()` throws; no worker spawns |
 
-  Deno's web `Worker` emits no host-side event when a worker calls `self.close()` — not `close`,
-  `exit`, `error` or `messageerror` — and a later `postMessage` still resolves, so the death is
-  undetectable. Keep a task timeout on any Deno pool whose task module can terminate itself; it
-  remains the only backstop there.
+  Deno's web `Worker` emits no host-side event when a worker ends its thread — not `close`, `exit`,
+  `error` or `messageerror` — and a later `postMessage` still resolves, so the death is
+  undetectable. (`self.close()` is named here only because it is the web spelling; on Bun
+  `self.close` is `undefined` altogether, so `process.exit()` is the portable way to do this.) Keep
+  a task timeout on any Deno pool whose task module can terminate itself; it remains the only
+  backstop there.
 - **Overload.** When the pending queue is at its bound, `run()` rejects with `WorkerQueueFullError`
   instead of growing memory without limit.
 - **Shutdown.** The plugin's `onClose` hook terminates every worker and rejects pending tasks.

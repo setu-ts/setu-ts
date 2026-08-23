@@ -43,13 +43,40 @@ const MULTIPART_FRAMING_ALLOWANCE = 8 * 1024;
  * `Math.min` against the ceiling is the whole fix: the bound follows `maxSize`
  * upward only until it reaches the ceiling the option documents.
  *
+ * Both inputs are validated, because `NaN` propagates through `Math.min` and
+ * every later `>` comparison against it is `false` — so a single
+ * `maxSize: Number(process.env.MAX)` with an unset variable would silently
+ * disable BOTH the body bound and the per-file limit, leaving the middleware
+ * parsing an unbounded multipart body. Failing here surfaces it at route setup
+ * with the option named, which is this repo's rule for a bad configuration.
+ *
  * @param maxSize - Per-file limit in bytes
  * @param maxBodyBytes - Configured ceiling, or `undefined` for the default
  * @returns The effective bound in bytes
+ * @throws {RangeError} If either value is not a finite, non-negative number
  */
 export function resolveMaxBodyBytes(maxSize: number, maxBodyBytes?: number): number {
+  assertByteLimit('maxSize', maxSize);
+  if (maxBodyBytes !== undefined) {
+    assertByteLimit('maxBodyBytes', maxBodyBytes);
+  }
   const ceiling = maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   return Math.min(maxSize * 2 + MULTIPART_FRAMING_ALLOWANCE, ceiling);
+}
+
+/**
+ * Refuses a byte limit that cannot bound anything.
+ *
+ * @param option - The option's name, so the message names what to fix
+ * @param value - The configured value
+ * @throws {RangeError} If the value is not a finite, non-negative number
+ */
+function assertByteLimit(option: string, value: number): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(
+      `createUploadMiddleware: ${option} must be a finite, non-negative number (received ${value})`,
+    );
+  }
 }
 
 /**

@@ -1,7 +1,8 @@
 # Milestone 70k — Storage, queue and worker operability (`@setu-ts/storage-plugin`, `@setu-ts/queue-plugin`, `@setu-ts/worker-pool-plugin`)
 
-> **Status:** Planning. Branch: `feat/m70k-storage-queue-worker-operability`. `main` is protected —
-> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #178). Archived on completion. Branch:
+> `feat/m70k-storage-queue-worker-operability`. `main` is protected — all work (implementation +
+> fixes) stayed on this one branch until it merged via a single PR.
 
 ## 0. Objective & scope
 
@@ -343,8 +344,13 @@ Every one of these was measured on this machine during planning; each changed a 
 | `StoragePluginOptions` (reshaped)             | type  | `StoragePlugin` factory parameter; `createProvider` now narrows on it instead of casting.                                                       |
 | `MemoryStorageOptions` / per-arm option types | types | Members of the reshaped union; each is the `options` type of exactly one arm and is read by that arm of `createProvider`.                       |
 
-No symbol is removed from a barrel except `IAwsS3Client`, which is renamed (§9 prerelease rule:
-deleted rather than aliased, with a CHANGELOG migration line).
+No symbol is removed from a barrel. `IAwsS3Client` is renamed to `IS3Backend` and **retained as a
+deprecated alias** of it, with a CHANGELOG migration line. (This plan first specified deleting it
+outright; code review corrected that — AI_GUIDELINES §9.2 governs a published export and the
+replacement is an identical working shape, so a rename does not need to be a compile error. The M14d
+`MessagingNotSupportedError` precedent, not the M30b `serverKey` one, which applied only because its
+replacement path was dead. `packages/storage-plugin/test/unit/barrel-exports.test.ts` pins the alias
+at compile time.)
 
 ### 4.1 Options — every option names its consumer
 

@@ -197,3 +197,33 @@ describe('createUploadMiddleware — the register probe matrix (X8-3)', () => {
     expect(refusal).toEqual({ status: 400, title: 'Too many files' });
   });
 });
+
+describe('createUploadMiddleware — a limit that cannot bound anything (review)', () => {
+  /**
+   * `NaN` propagates through `Math.min`, and every later `>` comparison against
+   * `NaN` is `false` — so one `maxSize: Number(env.MAX)` with an unset variable
+   * would silently disable BOTH the body bound and the per-file limit, leaving
+   * the middleware parsing an unbounded multipart body. It fails at route setup
+   * instead, naming the option.
+   */
+  it('should refuse NaN rather than silently removing every limit', () => {
+    expect(() => resolveMaxBodyBytes(Number('not a number'))).toThrow(RangeError);
+    expect(() => resolveMaxBodyBytes(1024, Number.NaN)).toThrow(/maxBodyBytes/);
+  });
+
+  it('should refuse a negative or infinite limit', () => {
+    expect(() => resolveMaxBodyBytes(-1)).toThrow(/maxSize/);
+    expect(() => resolveMaxBodyBytes(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+    expect(() => resolveMaxBodyBytes(1024, -5)).toThrow(/maxBodyBytes/);
+  });
+
+  it('should accept zero, which is a real choice — refuse every upload', () => {
+    // Distinct from the invalid values above: `0` bounds, it just bounds at
+    // nothing, and refusing it would remove a legitimate configuration.
+    expect(resolveMaxBodyBytes(0, 0)).toBe(0);
+  });
+
+  it('should surface the refusal when the middleware is constructed', () => {
+    expect(() => createUploadMiddleware({ maxSize: Number.NaN })).toThrow(RangeError);
+  });
+});
