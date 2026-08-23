@@ -2885,6 +2885,115 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   using `.catch()` — the M52b/M52c class — so the check now returns its error and the adapter
   rejects with it. The X12-2 negative control reproduced the register's message verbatim across five
   tests, and the `count`-filter control failed both new steps.
+- **Milestone 70k** (`storage-plugin` + `queue-plugin` + `worker-pool-plugin` + `common` +
+  `runtime` + `cli` + `cloudflare-plugin` — storage, queue and worker operability). Eight X8 rows
+  with one shape: the capability does the work and then cannot tell an operator what it did. **The
+  package list is corrected from the ROADMAP's three** (the M70b/M70g/M70h precedent): `common`,
+  `runtime` and `cli` are needed by rows the row itself assigns, and `cloudflare-plugin` joined at
+  implementation time because `R2Storage` is the other in-repo `IStorage` implementor.
+
+  **X8-7 is the one the ROADMAP deferred here from M45b, and its design was decided by probing four
+  runtimes rather than by reading docs.** A worker that ends its own thread raises no error, so the
+  task timeout was the ONLY thing that ever settled its task — and `taskTimeoutMs: 0`, a documented
+  and reasonable choice for long CPU-bound work, removed it, wedging a `size: 1` pool forever.
+  Measured: **Node** reports `'exit'` (also under Deno's `node:` compat layer); **Bun** reports its
+  non-standard `'close'` — and `self.close` is `undefined` there, so an earlier probe that appeared
+  to show a Bun self-close was actually an uncaught `TypeError`; **Deno emits NOTHING** — not
+  `close`, `exit`, `error` or `messageerror` — and a later `postMessage` still resolves, so a
+  self-terminated Deno worker is undetectable. Hence optional `IWorkerHandle.onExit?` plus
+  `IWorkerHost.reportsExit?`, **omitted rather than shipped as a silent no-op** on Deno (the M70h
+  `onSignal` precedent): absence means "this runtime cannot tell me a worker died", never "no worker
+  has died". `TaskPool` settles with a new `WorkerExitError`, the health payload carries
+  `exitDetection`, and `register()` warns once on the undetectable pairing — a warning rather than a
+  throw, because refusing `0` would remove a released capability to fix an observability gap. **Deno
+  CAN spawn through `node:worker_threads`** (probed, including a `.ts` module, with both channels
+  present so `resolveTaskPort`'s web-first preference still holds), which would give it real
+  detection; that is recorded in the plan as an evidenced option rather than taken, since it changes
+  the primary runtime's worker implementation wholesale.
+
+  **Two of the plan's own claims did not survive their negative controls, and both are corrected in
+  the plan rather than left standing.** The `terminating` guard was planned as load-bearing against
+  a live defect; removing it changes NO observable behaviour today, because `shutdown()` drains
+  `pending` before it terminates anything and `onTimeout` nulls the slot's task first. What it
+  actually buys is a LOCAL invariant instead of one spread across two other methods — probed, with
+  the guard gone AND `shutdown()`'s drain moved after its `terminate()` calls, two queued tasks
+  reject with `WorkerExitError` instead of the shutdown error. And X8-11's fix is NOT the
+  discriminated union the register names: discriminating alone still reported `bucket` and `region`
+  as `not assignable to type 'never'`, because the compiler keeps every arm's `options` type as a
+  candidate for the nested literal once the direct match fails. Removing the memory arm's
+  `Record<string, never>` is what yields exactly one error naming the offending key.
+
+  **X8-3's suggested fix was partly unimplementable and is stated rather than faked.**
+  `mapWebRequestToFrameworkRequest` calls `arrayBuffer()` on every request and `IRequest` exposes no
+  body stream, so no middleware in this package can decline to read. What IS in its hands was
+  inverted: `Math.max(maxSize * 2, 50 MB)` under a comment reading "cap at 50 MB" made 50 MB a
+  FLOOR, so a 100 MB per-file limit raised the bound to 200 MB. It is now a real `Math.min` cap with
+  an explicit `maxBodyBytes`, both size refusals answer **413**, and the README and `PUBLIC_API.md`
+  say the bound covers parsing and not the read.
+
+  **X8-4** ships three surfaces answering three different questions: `ProcessOptions.onFailed`
+  (once, on the final attempt, before the dead-letter, guarded so a throwing callback cannot lose
+  the job), `queue_jobs_total{name,outcome}` behind an OPTIONAL `CAPABILITIES.METRICS` (the M45b
+  shape), and per-name `{ ready, processing, dead }` depths in the health payload — the durable view
+  a per-process counter cannot give after a restart, implemented where the count is one cheap call
+  and **omitted, never zeroed**, on RabbitMQ and SQS. Proven through a REAL kernel application with
+  the real `MetricsPlugin` and `HealthPlugin`, not a recording double.
+
+  **X8-9 became a startup failure rather than the documentation the register settled for**, because
+  M70h landed the `setu add` the register said would be the right home: `LocalStorageProvider`
+  proves its root writable at `connect()` and names `--allow-write` on Deno, its health probe stops
+  reporting `up` for a root it can only READ, and `setu add storage` prints the note. The flag is
+  NOT added to `denoPermissions` automatically — only the `local` provider needs it, and granting
+  filesystem write to every project installing an S3-backed capability would trade a security
+  regression for an ergonomics one.
+
+  **X8-8's recurrence gate found two more doc defects than the row named.** The doc-fence gate
+  covered ten `docs/` guides and no package README, which is why the storage Uploads example shipped
+  broken three ways at once; extending it to the three READMEs this milestone rewrote immediately
+  failed on the queue README's `queues: { default: 'tasks' }` — an option that does not exist — and
+  its options table listed `region` and `queues`, neither of which is in `QueuePluginOptions`. The
+  gate reproduces X8-8's exact compiler error (`Did you mean to write 'maxFiles'?`) when the defect
+  is reintroduced.
+
+  Contract-violating doubles were the recurring obstacle, as ever: the GCS fake spoke a two-argument
+  `save` the real SDK does not have, the local-fs fake reported ENOENT for every directory, the
+  worker fake materialized `onExit` as `undefined` on a handle that must OMIT it (fixed with a
+  `declare` field), and `Object.create` could not stand in for a client missing a command because
+  the fake's methods read private fields. Four negative controls were each observed failing and
+  reverted; a fifth PASSED and is what produced the `terminating` correction above.
+
+  **Verification and code review then found five defects that all four gates, both publish gates and
+  the per-file bar had passed, and the two worst were introduced by this milestone.** (1) The X8-7
+  exit handler double-disposed a crash: Node emits `'error'` and THEN `'exit'` for a worker that
+  dies from an uncaught exception — a task module that throws at import, the commonest worker
+  failure — and Bun's `'close'` follows its error the same way, so the handler re-ran the
+  startup-failure branch `onWorkerError` had just run and ONE crashing worker rejected TWO queued
+  tasks: the one it was starting for, and a bystander never dispatched anywhere, whose rejection
+  named an exit code and so pointed at the wrong cause. Every pre-existing exit test emitted an exit
+  in ISOLATION, which no runtime does after an error. `dropSlot` now reports whether the pool still
+  owned the slot. (2) `deadLetterTtlMs` armed its `EXPIRE` on `queue:<name>:jobs` — the hash holding
+  the payload of EVERY job for that name, not only dead ones. Measured against a real Redis 7: a
+  key's TTL SURVIVES later `HSET`s, so every job enqueued after the first dead-letter inherited the
+  countdown, and `reserve` moves a job whose payload is missing into the processing set and returns
+  nothing — silent, permanent loss of queued work, caused by an option whose purpose is bounding
+  DEAD payloads. The payload is now MOVED into `queue:<name>:dead:jobs` and only that key and the
+  dead set are expired; the test that shipped asserted the defect by name ("TTL to BOTH the dead set
+  and the jobs hash"). (3) The X8-9 write probe used a FIXED filename, so two replicas sharing one
+  root — a ReadWriteMany volume, the ordinary deployment for this provider — raced, and whichever
+  `rm` ran second failed with ENOENT and refused to boot a process whose root was perfectly
+  writable; the name is now unique per connect and cleanup is best-effort, since the WRITE is what
+  proves writability. (4) Depths were collected BEFORE the reachability check, so an outage cost one
+  failing round trip per registered name on every probe interval, each one logged, saying nothing
+  `reachable: false` did not. (5) `IAwsS3Client` was REMOVED rather than deprecated, though the
+  replacement is an identical working shape — §9.2, the M14d precedent — so it is restored as a
+  deprecated alias. Four plan claims were also corrected against the code rather than left stale:
+  the depth member is `depths?`/`processing`, not the planned `stats?`/`delayed`; it does NOT ride
+  `createCachedProbe` (that helper caches a `Promise<boolean>`, a different key and return type);
+  `queue_jobs_in_flight` was planned and deliberately not shipped (the durable `processing` depth
+  answers the same question cluster-wide); and the plan's type-level `runtime-contracts.test.ts`
+  deliverable was unwritten — now four cases beside M55's `readStream` precedent. The storage
+  barrel's type exports were pinned at compile time for the same reason M56 gives: dropping one left
+  every runtime assertion in that file green — complete (PR #178)
 - **Next milestone** — **M70i** (gRPC and GraphQL viability). The repair-versus-withdraw decision
   for `grpc-plugin`, plus the documented-API-does-not-exist rows both packages carry: every gRPC
   registration snippet in README and `PUBLIC_API.md` throws because it resolves the capability

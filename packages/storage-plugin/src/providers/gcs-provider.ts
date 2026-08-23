@@ -6,6 +6,7 @@
  *
  * @module
  */
+import type { PutObjectOptions } from '@setu-ts/common';
 import type { IGcsClient, StorageProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -31,7 +32,7 @@ export interface GcsBucket {
 export interface GcsFacadeFile {
   getMetadata(): Promise<[Record<string, unknown>]>;
   download(): Promise<{ body: Uint8Array | ArrayLike<number> }>;
-  save(data: Uint8Array, cb: (error: Error | null) => void): void;
+  save(data: Uint8Array, options: Record<string, unknown>, cb: (error: Error | null) => void): void;
   delete(): Promise<boolean>;
   getSignedUrl(config: { action: string; expires: number }): Promise<[string]>;
   createReadStream(): NodeJS.ReadableStream;
@@ -58,7 +59,11 @@ export interface GcsFacadeBucket {
 export interface GcsFile {
   getMetadata(): Promise<[Record<string, unknown>]>;
   download(): Promise<{ body: Uint8Array | NodeJS.ReadableStream }>;
-  save(data: Uint8Array, callback: (error: Error | null) => void): void;
+  save(
+    data: Uint8Array,
+    options: Record<string, unknown>,
+    callback: (error: Error | null) => void,
+  ): void;
   delete(callback: (error: Error | null) => void): void;
   getSignedUrl(config: { action: 'read'; expires: number }): Promise<[string]>;
   createReadStream(): NodeJS.ReadableStream;
@@ -161,11 +166,19 @@ export function adaptGcsModule(
                 },
               );
             },
-            save(data: Uint8Array, cb: (error: Error | null) => void) {
+            save(
+              data: Uint8Array,
+              options: Record<string, unknown>,
+              cb: (error: Error | null) => void,
+            ) {
               const fileHandle = b.file(name);
               (fileHandle as {
-                save: (data: Uint8Array, cb: (error: Error | null) => void) => void;
-              }).save(data, cb);
+                save: (
+                  data: Uint8Array,
+                  options: Record<string, unknown>,
+                  cb: (error: Error | null) => void,
+                ) => void;
+              }).save(data, options, cb);
             },
             delete() {
               // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -304,16 +317,32 @@ export class GcsProvider implements StorageProvider {
   }
 
   /**
-   * Stores an object in GCS.
+   * Stores an object in GCS, recording any content type and user metadata on
+   * the object itself so a signed URL serves it under the right type.
    *
    * @param path - Object key
    * @param data - Object bytes
+   * @param options - Object attributes to record with the bytes
    */
-  put(path: string, data: Uint8Array): Promise<void> {
+  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
     this.#assertConnected();
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // `save(data, opts, cb)` is the SDK's three-argument overload; the bag is
+    // always passed (empty when the caller supplied nothing) so this package
+    // has ONE call shape rather than two that can drift.
+    //
+    // The nesting is NOT redundant, and reading the shipped types rather than
+    // the field name is what showed it: `SaveOptions.metadata` is typed
+    // `ConfigMetadata` — the GCS object RESOURCE, whose own `metadata` sub-key
+    // holds user key/value pairs. Passing the custom map at the top level would
+    // overwrite the resource instead of setting custom metadata on it.
+    // `contentType` is different: it is a first-class member of
+    // `CreateWriteStreamOptions`, so it stays where the SDK declares it.
+    const saveOptions: Record<string, unknown> = {
+      ...(options?.contentType === undefined ? {} : { contentType: options.contentType }),
+      ...(options?.metadata === undefined ? {} : { metadata: { metadata: options.metadata } }),
+    };
     return new Promise<void>((resolve, reject) => {
-      this.#getFile(path).save(data, (err: Error | null) => {
+      this.#getFile(path).save(data, saveOptions, (err: Error | null) => {
         if (err) reject(err);
         else resolve();
       });

@@ -298,7 +298,7 @@ describe('createUploadMiddleware', () => {
     expect(uploads[0].name).toBe('file');
   });
 
-  it('A2: oversized body rejected (400) before parsing via Content-Length header', async () => {
+  it('A2: oversized body rejected (413) before parsing via Content-Length header', async () => {
     const ctx = makeCtx();
     const response = ctx.response as unknown as {
       _lastStatus: number;
@@ -317,10 +317,10 @@ describe('createUploadMiddleware', () => {
       return Promise.resolve();
     });
     expect(nextCalled).toBe(false);
-    expect(response._lastStatus).toBe(400);
+    expect(response._lastStatus).toBe(413);
   });
 
-  it('A2: oversized body rejected (400) even without Content-Length (buffer cap)', async () => {
+  it('A2: oversized body rejected (413) even without Content-Length (buffer cap)', async () => {
     const ctx = makeCtx();
     const response = ctx.response as unknown as { _lastStatus: number };
     ctx.request.headers.set('content-type', 'multipart/form-data; boundary=b');
@@ -335,7 +335,7 @@ describe('createUploadMiddleware', () => {
       return Promise.resolve();
     });
     expect(nextCalled).toBe(false);
-    expect(response._lastStatus).toBe(400);
+    expect(response._lastStatus).toBe(413);
   });
 });
 describe('getUploadedFile', () => {

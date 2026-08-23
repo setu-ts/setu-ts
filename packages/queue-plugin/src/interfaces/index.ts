@@ -32,6 +32,22 @@ export interface IRedisQueueClient {
   hdel(key: string, ...fields: string[]): Promise<number>;
   /** Delete a key. */
   del(...keys: string[]): Promise<number>;
+  /**
+   * Number of members in a sorted set. OPTIONAL so an existing injected fake
+   * still type-checks; an adapter whose client omits it reports no depths
+   * rather than reporting zero.
+   *
+   * @since 0.3.0
+   */
+  zcard?(key: string): Promise<number>;
+  /**
+   * Sets a key's time-to-live in seconds. OPTIONAL for the same reason as
+   * {@link zcard}; without it a configured `deadLetterTtlMs` cannot be applied
+   * and the retained payload keeps today's unbounded lifetime.
+   *
+   * @since 0.3.0
+   */
+  expire?(key: string, seconds: number): Promise<number>;
   /** Connect to Redis (optional). */
   connect?(): Promise<void>;
   /**
@@ -173,6 +189,32 @@ export interface QueuePluginOptions {
   pollIntervalMs?: number;
   /** Queue name prefix for RabbitMQ adapter (default 'he.queue'). */
   prefix?: string;
+  /**
+   * How long a dead-lettered job's payload is retained, in milliseconds.
+   *
+   * Omitted (the default) keeps today's behaviour: the payload is retained
+   * indefinitely "for debugging", so the jobs hash grows without bound for the
+   * lifetime of the deployment (X8-4). Applied only by the Redis adapter, and
+   * only when the injected client exposes `expire`.
+   *
+   * Enforced PER PAYLOAD: each dead-letter sweeps the dead set — scored by
+   * dead-letter time — and deletes every entry older than this, so a queue that
+   * keeps failing still drops its oldest payloads. Setting it also relocates a
+   * dead job's payload from `queue:<name>:jobs`, which holds every queued job's
+   * payload for that name, into `queue:<name>:dead:jobs`.
+   *
+   * The retention it delivers is a bound rather than a deadline: AT LEAST this
+   * long, and AT MOST this long past the LAST dead-letter on the queue — so a
+   * payload that dies just before a short burst can live for just under twice
+   * this value. The sweep runs only when a dead-letter arrives, and the
+   * key-level backstop beside it carries one deadline for a shared key, which
+   * must be the newest or it would take newer payloads with it. It errs late
+   * deliberately: dropping a payload early discards the debugging data this
+   * option exists to keep.
+   *
+   * @since 0.3.0
+   */
+  deadLetterTtlMs?: number;
   /** SQS-specific options (required when adapter is 'sqs'). */
   sqs?: import('../adapters/sqs-queue.ts').SqsQueueOptions;
 }
@@ -185,6 +227,13 @@ export interface RedisQueueOptions {
   url?: string;
   /** Injected Redis client (bypasses lazy import). */
   client?: IRedisQueueClient;
+  /**
+   * How long a dead-lettered job's payload is retained, in milliseconds; see
+   * {@link QueuePluginOptions.deadLetterTtlMs}.
+   *
+   * @since 0.3.0
+   */
+  deadLetterTtlMs?: number;
 }
 
 /**

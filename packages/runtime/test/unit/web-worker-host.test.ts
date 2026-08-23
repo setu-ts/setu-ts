@@ -18,6 +18,8 @@ class FakeWebWorker implements WebWorkerLike {
   terminated = false;
   onmessage: ((event: { data: unknown }) => void) | null = null;
   onerror: ((event: unknown) => void) | null = null;
+  /** Listeners registered through `addEventListener`, keyed by event type. */
+  readonly listeners = new Map<string, ((event: unknown) => void)[]>();
 
   constructor(readonly specifier: string, readonly options: { type: 'module' }) {
     FakeWebWorker.instances.push(this);
@@ -25,6 +27,19 @@ class FakeWebWorker implements WebWorkerLike {
 
   postMessage(message: unknown): void {
     this.posted.push(message);
+  }
+
+  addEventListener(type: string, listener: (event: unknown) => void): void {
+    const existing = this.listeners.get(type) ?? [];
+    existing.push(listener);
+    this.listeners.set(type, existing);
+  }
+
+  /** Test helper — dispatches to the listeners a real `Worker` would call. */
+  emit(type: string, event: unknown): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
   }
 
   terminate(): void {
@@ -145,5 +160,63 @@ describe('readWebWorkerGlobals', () => {
   it('should read the real globalThis by default (Deno has both members)', () => {
     const globals = readWebWorkerGlobals();
     expect(globals.Worker).toBeDefined();
+  });
+});
+
+describe('createWebWorkerHost — exit signal (X8-7)', () => {
+  function hostWithExit(exitEventName?: string) {
+    FakeWebWorker.instances = [];
+    return createWebWorkerHost(
+      { Worker: FakeWebWorker, hardwareConcurrency: 2 },
+      exitEventName === undefined ? {} : { exitEventName },
+    );
+  }
+
+  it('should report no exit detection when the runtime names no event (Deno)', () => {
+    const host = hostWithExit();
+    expect(host.reportsExit?.()).toBe(false);
+  });
+
+  it('should OMIT onExit entirely when the runtime names no event (Deno)', () => {
+    // Omitted rather than present-and-silent: a consumer must be able to tell
+    // "this runtime cannot report a dead worker" from "no worker has died".
+    const handle = hostWithExit().spawn('file:///task.ts');
+    expect('onExit' in handle).toBe(false);
+  });
+
+  it('should report exit detection when the runtime names an event (Bun)', () => {
+    const host = hostWithExit('close');
+    expect(host.reportsExit?.()).toBe(true);
+  });
+
+  it('should forward the exit code from the named event (Bun close)', () => {
+    const handle = hostWithExit('close').spawn('file:///task.ts');
+    const codes: (number | null)[] = [];
+    handle.onExit?.((code) => codes.push(code));
+
+    const worker = FakeWebWorker.instances[0]!;
+    // Bun's `close` event carries a numeric `code` — measured, not assumed.
+    worker.emit('close', { code: 0 });
+
+    expect(codes).toEqual([0]);
+  });
+
+  it('should report null when the event carries no numeric code', () => {
+    const handle = hostWithExit('close').spawn('file:///task.ts');
+    const codes: (number | null)[] = [];
+    handle.onExit?.((code) => codes.push(code));
+
+    FakeWebWorker.instances[0]!.emit('close', {});
+
+    expect(codes).toEqual([null]);
+  });
+
+  it('should register the listener under the runtime-specific event name only', () => {
+    const handle = hostWithExit('close').spawn('file:///task.ts');
+    handle.onExit?.(() => {});
+
+    const worker = FakeWebWorker.instances[0]!;
+    expect(worker.listeners.has('close')).toBe(true);
+    expect(worker.listeners.has('exit')).toBe(false);
   });
 });

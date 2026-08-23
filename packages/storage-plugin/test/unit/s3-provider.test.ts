@@ -8,7 +8,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IAwsS3Client } from '../../src/interfaces/index.ts';
+import type { IS3Backend } from '../../src/interfaces/index.ts';
 import {
   adaptAwsS3Module,
   loadAwsS3Module,
@@ -841,7 +841,7 @@ describe('adaptAwsS3Module', () => {
 
 describe('S3Provider', () => {
   it('connect with injected client succeeds', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put(): Promise<void> {
         return Promise.resolve();
       },
@@ -869,7 +869,7 @@ describe('S3Provider', () => {
   it('connect with invalid injected client throws', async () => {
     const provider = new S3Provider({
       bucket: 'b',
-      client: { send: 'bad' } as unknown as IAwsS3Client,
+      client: { send: 'bad' } as unknown as IS3Backend,
     });
     await expect(provider.connect()).rejects.toThrow(
       'Injected S3 client is missing required methods',
@@ -882,7 +882,7 @@ describe('S3Provider', () => {
   });
 
   it('disconnect sets ready to false', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {},
       get: async () => null,
       delete: async () => true,
@@ -897,7 +897,7 @@ describe('S3Provider', () => {
   });
 
   it('operations reject after disconnect', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {},
       get: async () => null,
       delete: async () => true,
@@ -923,7 +923,7 @@ describe('S3Provider', () => {
 
   it('put delegates to injected client', async () => {
     let called = false;
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {
         called = true;
       },
@@ -940,7 +940,7 @@ describe('S3Provider', () => {
   });
 
   it('get delegates to injected client', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {},
       get: async () => new Uint8Array([10, 20]),
       delete: async () => true,
@@ -955,7 +955,7 @@ describe('S3Provider', () => {
   });
 
   it('delete delegates to injected client', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {},
       get: async () => null,
       delete: async () => true,
@@ -970,7 +970,7 @@ describe('S3Provider', () => {
   });
 
   it('exists delegates to injected client', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {},
       get: async () => null,
       delete: async () => true,
@@ -985,7 +985,7 @@ describe('S3Provider', () => {
   });
 
   it('getSignedUrl delegates to injected client', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {},
       get: async () => null,
       delete: async () => true,
@@ -1000,7 +1000,7 @@ describe('S3Provider', () => {
   });
 
   it('getStream delegates to injected client', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {},
       get: async () => null,
       delete: async () => true,
@@ -1175,7 +1175,7 @@ describe('S3Provider', () => {
   });
 
   it('S3Provider connect returns immediately when already connected (early-return)', async () => {
-    const fakeClient: IAwsS3Client = {
+    const fakeClient: IS3Backend = {
       put: async () => {},
       get: async () => null,
       delete: async () => true,
