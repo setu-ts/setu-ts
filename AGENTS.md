@@ -102,9 +102,11 @@ These are plain markdown and tool-agnostic; read and follow them directly.
   the tracking-table checks. It defers to `CLAUDE.md` as source of truth and is the step-by-step
   procedure. `.roo/rules-verify-milestone/01-verify-only.md` adds the policy that goes with it:
   verify the committed tree, report every defect as a finding, and never fix what you are verifying.
-- **Review before merge:** `.roo/rules-code-review/01-review-only.md` for the policy. Scope is
-  `git diff main...HEAD` on the milestone's `feat/…` branch. Correctness findings block the merge;
-  reuse / simplification / efficiency cleanups are advisory.
+- **Review before merge:** `.roo/rules-code-review/01-review-only.md` for the policy. Scope starts
+  at `git diff main...HEAD` on the milestone's `feat/…` branch and deliberately reads past it — that
+  file names the seams. Correctness findings block the merge; reuse / simplification / efficiency
+  cleanups are advisory. On any pass after the first, the previous round's fixes are the part you
+  have not reviewed.
 - **Commit before reporting done:** `.roo/rules-code/01-commit-before-done.md`.
 
 ## Evidence, not vibes
