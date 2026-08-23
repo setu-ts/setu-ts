@@ -28,31 +28,47 @@ export type ResolverMap = Record<string, TypeResolverMap | GraphqlScalarResolver
  * `Subscription` root type — to a {@linkcode SubscriptionResolver} carrying the
  * event source.
  *
- * The `FieldResolver` binding is instantiated at `never` (X6-4): a map stores
- * resolvers it never calls itself — graphql does, with values only it knows —
- * so the entry type must accept ANY resolver instantiation. Under
- * `strictFunctionTypes` the bare all-`unknown` `FieldResolver` cannot: a
- * narrowly annotated resolver (`FieldResolver<IssueRow,
- * DefaultGraphqlContext, { id: string }>`) has narrower parameters, which is a
- * contravariance error against `unknown`. With `never` parameters every
- * resolver assigns — target parameter `never` is assignable to any source
- * parameter — while nothing weakens inside the stored function: the map hands
- * entries to graphql untouched.
- *
- * The trade-off is at the ENTRY level and is deliberate: because every source
- * parameter is accepted, a function that is not a resolver at all (say
- * `(a: string, b: number) => number`) also assigns, where the old all-`unknown`
- * type rejected it. graphql-js makes the same trade with
- * `GraphQLFieldResolver<any, any>`; `any` is banned here (AI_GUIDELINES §5.2),
- * so `never` is the equivalent. Annotate a resolver with
- * {@linkcode FieldResolver} explicitly to get its parameters checked.
+ * The field entry is {@linkcode AnyFieldResolver} (X6-4): a map stores resolvers
+ * it never calls itself — graphql does, with values only it knows — so the entry
+ * type must accept ANY resolver instantiation. Under `strictFunctionTypes` the
+ * bare all-`unknown` `FieldResolver` cannot: a narrowly annotated resolver
+ * (`FieldResolver<IssueRow, DefaultGraphqlContext, { id: string }>`) has
+ * narrower parameters, which is a contravariance error against `unknown`.
  */
 export type TypeResolverMap = Record<
   string,
-  | FieldResolver<never, never, never>
+  | AnyFieldResolver
   | SubscriptionResolver
   | (() => unknown) // __resolveType for interfaces
 >;
+
+/**
+ * The entry type for a field resolver stored in a {@linkcode TypeResolverMap}.
+ *
+ * Declared with **method syntax**, which TypeScript compares **bivariantly**
+ * even under `strictFunctionTypes` — the documented escape hatch for exactly
+ * this case. That buys both halves at once, and both are load-bearing:
+ *
+ * 1. A narrowly annotated resolver assigns (`(parent: IssueRow) => parent.title`),
+ *    which is X6-4's goal and what the all-`unknown` `FieldResolver` rejected.
+ * 2. An UNANNOTATED resolver still receives these declared parameter types
+ *    contextually, so `(_source, args) => rows.find((r) => r.id === args.id)`
+ *    infers `args` as `Record<string, unknown>` and compiles.
+ *
+ * Instantiating `FieldResolver` at `never` buys only (1). It makes every
+ * parameter of an unannotated resolver infer `never`, so `args.id` becomes
+ * `Property 'id' does not exist on type 'never'` — which broke `apps/graphql-demo`,
+ * whose resolvers are written the ordinary unannotated way. Bivariance is the
+ * only form that serves both authoring styles.
+ */
+export type AnyFieldResolver = {
+  resolver(
+    source: unknown,
+    args: Record<string, unknown>,
+    context: unknown,
+    info: unknown,
+  ): unknown;
+}['resolver'];
 
 /**
  * A field resolver function.
