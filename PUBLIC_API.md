@@ -717,12 +717,12 @@ app.router.post('/users', {
         return ctx.response.status(400).json({ errors: result.error });
       }
 
-      ctx.state.set('validatedBody', result.value);
+      ctx.state.set('validated:body', result.value);
       await next();
     },
   ],
   handler: async (ctx) => {
-    const body = ctx.state.get<z.infer<typeof CreateUserSchema>>('validatedBody');
+    const body = ctx.state.get<z.infer<typeof CreateUserSchema>>('validated:body');
     // body is fully typed and validated
     const user = await createUser(body);
     return ctx.response.status(201).json(user);
@@ -748,7 +748,7 @@ import {
 app.router.get('/users', {
   middleware: [validateQuery(ListUsersQuerySchema)],
   handler: async (ctx) => {
-    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>('validatedQuery');
+    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>('validated:query');
     // query is validated
   },
 });
@@ -759,8 +759,8 @@ app.router.put('/users/:id', {
     validateBody(UpdateUserSchema),
   ],
   handler: async (ctx) => {
-    const params = ctx.state.get('validatedParams');
-    const body = ctx.state.get('validatedBody');
+    const params = ctx.state.get('validated:params');
+    const body = ctx.state.get('validated:body');
     // both are validated
   },
 });
@@ -1630,9 +1630,19 @@ app.register(HttpSecurityPlugin({
 
 Origin matching via `origin` (boolean/string/array/function). Preflight (`OPTIONS` + `Origin` +
 `Access-Control-Request-Method`) → 204 short-circuit with `Access-Control-Allow-Origin`,
-`Access-Control-Allow-Methods`, and (when configured) `Access-Control-Allow-Headers` /
+`Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, and (when configured)
 `Access-Control-Max-Age`. Credentials reflect specific origin (never `*`). Non-preflight disallowed
 origins call `next()` without CORS headers (browser enforces block).
+
+`Access-Control-Allow-Headers` follows `allowedHeaders`, and omitting it is NOT the same as passing
+`[]`. Omitted, an allowed origin's preflight is answered by **echoing** that request's own
+`Access-Control-Request-Headers`, and the response also carries
+`Vary: Access-Control-Request-Headers` — mandatory rather than cosmetic, since the answer now
+depends on a request header and a shared cache would otherwise serve one caller's preflight to a
+caller asking for different headers. An explicit list allows exactly those headers; an explicit `[]`
+allows none. A denied origin echoes nothing. Echoing is the default because the previous empty-list
+default advertised every standard method and then refused `content-type`, so every browser blocked
+every JSON request; it does not widen the boundary, which the `origin` allowlist alone decides.
 
 `Vary: Origin` is appended to **every** response for a request carrying an `Origin` header —
 including a denied one — so a shared cache cannot serve an allowed origin's response to a denied
@@ -5254,7 +5264,9 @@ Rules and limits, stated rather than left to discovery:
 - **A derived route gains `400: { description: 'Bad request' }`** unless it declares its own. The
   status is real; no body schema is emitted, because the shape depends on the plugin's configured
   `errorFormat`, which the generator cannot see.
-- **`deriveRequestSchemas: false`** reproduces the pre-0.3.0 document exactly.
+- **`deriveRequestSchemas: false`** disables derivation only. Owner exclusion, the `operationId`
+  format and schema deduplication are unconditional, so this does not restore the whole pre-0.3.0
+  document; pass `excludeOwners: []` to document the operational routes again.
 
 Unlike `deriveSecurity` this is ON by default, because nothing has to be configured for it: a
 security requirement names a scheme that cannot be inferred from a guard, while the schema on the
@@ -6384,7 +6396,7 @@ app.router.post('/users', {
   },
   handler: async (ctx) => {
     const db = ctx.services.get('database');
-    const user = await db.getRepository('User').create(ctx.state.get('validatedBody'));
+    const user = await db.getRepository('User').create(ctx.state.get('validated:body'));
     return ctx.response.status(201).json(user);
   },
 });
@@ -7119,7 +7131,7 @@ app.router.post('/users', {
   schema: { body: CreateUserSchema, response: { 201: UserSchema } },
   handler: async (ctx) => {
     const userService = ctx.services.get('userService');
-    const user = await userService.create(ctx.state.get('validatedBody'));
+    const user = await userService.create(ctx.state.get('validated:body'));
     return ctx.response.status(201).json(user);
   },
 });
@@ -8552,8 +8564,20 @@ interface OpenApiCodegenOptions {
 | Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                  |
 | Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx response                  |
 | Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                     |
+| Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                      |
+| Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                             |
+| Parameter alias          | PascalCase from `operationId` plus the parameter name plus `Param`, emitted only when the parameter schema is inline and spans lines        |
 | Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                                    |
 | Duplicate derived name   | throws `OpenApiCodegenError` naming both originals — component schemas, `*Args`, `*Error*` and the client interface share ONE name registry |
+
+**No multi-line type is written at a use site.** An inline (non-`$ref`) request body, parameter or
+success response is hoisted into an exported alias, so every reference to it is a single-line name.
+This is not cosmetic: a rendered type lands at several indentation levels, and a success type lands
+at two of them at once — the client interface's signature and the `client.request<…>` type argument
+— so no single indentation is correct for a multi-line object literal, and `deno fmt` reindents
+whatever is emitted. Hoisting also makes the shape nameable by a consumer. A schema that
+`@setu-ts/openapi-plugin` derived from validation middleware and used once is inline, so this is the
+ordinary case rather than an exotic one.
 
 **The factory has a written-out return type.** `createApi(client: IHttpClient): Api`, with
 `export interface Api { … }` listing every operation's signature. An inferred return type is a JSR

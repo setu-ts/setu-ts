@@ -333,10 +333,16 @@ publish or format it has nowhere to go.
   means what it always did. The union is discriminated on `status` because
   `HttpClientError<A> | HttpClientError<B>` is not — `status` is `number` on both arms. A `default`
   response and range codes such as `4XX` are skipped: they name no single status.
-- **Formatting matches `deno fmt`.** Two-space indentation, nested inline object types indented, a
-  signature past 100 columns wrapped one parameter per line, and a path template too long for one
-  line emitted as an equivalent `[…].join('')` — a template literal is not usable there, because
-  `deno fmt` rewraps a long one at whichever `${` happens to fit, which no generator can predict.
+- **Formatting matches `deno fmt`.** Two-space indentation, a signature past 100 columns wrapped one
+  parameter per line, and a path template too long for one line emitted as an equivalent
+  `[…].join('')` — a template literal is not usable there, because `deno fmt` rewraps a long one at
+  whichever `${` happens to fit, which no generator can predict.
+- **No multi-line type is written at a use site.** An inline (non-`$ref`) body, parameter or success
+  response is hoisted into an exported alias. A rendered type lands at several indentation levels,
+  and a success type lands at two at once — the client interface's signature and the
+  `client.request<…>` type argument — so no single indentation is correct for a multi-line object
+  literal and `deno fmt` reindents whatever is emitted. A schema that `@setu-ts/openapi-plugin`
+  derived from `validateBody` and used once arrives inline, so this is the ordinary case.
 - **No lint pragma.** An empty-object schema emits `Record<PropertyKey, never>` rather than `{}`,
   which is both what the schema means and what `deno lint`'s `ban-types` accepts. A narrowed pragma
   could not be emitted unconditionally either: an ignore matching nothing is itself reported as

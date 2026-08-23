@@ -4,6 +4,7 @@ import { generateOpenApiClient, sanitizeIdentifier } from '../../src/codegen/ope
 import { OpenApiCodegenError } from '../../src/errors.ts';
 import { paramsDocument } from '../fixtures/params-document.ts';
 import { usersDocument } from '../fixtures/users-document.ts';
+import { inlineShapesDocument } from '../fixtures/inline-shapes-document.ts';
 import type {
   SdkOpenApiDocument,
   SdkOpenApiOperation,
@@ -751,6 +752,80 @@ describe('component schemas', () => {
       },
     }));
     expect(out).toContain('string | number');
+  });
+});
+
+/**
+ * Inline (non-`$ref`) schemas are hoisted, so no use site carries a multi-line
+ * object literal (M70m/X11-9, found in verification).
+ *
+ * A rendered type lands at several indentation levels, and a success type lands
+ * at TWO of them at once — the `Api` signature and the `client.request<…>`
+ * argument — so no single indent is correct for a multi-line object and
+ * `deno fmt` reindented whatever was emitted. Both committed fixtures name
+ * every schema through `$ref`, which is why neither could show it.
+ */
+describe('inline schemas are hoisted (X11-9)', () => {
+  it('emits the committed inline-shapes fixture byte-for-byte', () => {
+    const generated = generateOpenApiClient(inlineShapesDocument, {
+      sdkImport: '../../src/index.ts',
+    });
+    const fixture = Deno.readTextFileSync(
+      new URL('../fixtures/inline-shapes-client.ts', import.meta.url),
+    );
+    expect(generated).toBe(fixture);
+  });
+
+  it('hoists an inline request body out of the Args interface', () => {
+    const out = generateOpenApiClient(inlineShapesDocument, {});
+    expect(out).toContain('export type PlaceOrderBody = {');
+    expect(out).toContain('  body: PlaceOrderBody;');
+  });
+
+  it('hoists an inline 2xx response, which is used at two indent levels', () => {
+    const out = generateOpenApiClient(inlineShapesDocument, {});
+    expect(out).toContain('export type PlaceOrderResponse201 = {');
+    expect(out).toContain('Promise<ClientResponse<PlaceOrderResponse201>>');
+    expect(out).toContain('client.request<PlaceOrderResponse201>(');
+  });
+
+  it('hoists an inline parameter schema', () => {
+    const doc = {
+      openapi: '3.1.0',
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'run-search',
+            parameters: [{
+              name: 'filter',
+              in: 'query',
+              schema: {
+                type: 'object',
+                properties: { a: { type: 'string' } },
+                required: ['a'],
+              },
+            }],
+            responses: { '200': { description: 'ok' } },
+          },
+        },
+      },
+    } as const;
+    const out = generateOpenApiClient(doc as unknown as SdkOpenApiDocument, {});
+    expect(out).toContain('export type RunSearchFilterParam = {');
+    expect(out).toContain('  filter?: RunSearchFilterParam;');
+  });
+
+  /**
+   * The property that makes the three cases above one rule rather than three
+   * patches: after hoisting, NO emitted use site opens an object literal, so
+   * there is no indentation for `deno fmt` to disagree with. A declaration
+   * opens one with `= {`, never `: {`.
+   */
+  it('leaves no use site opening a multi-line object literal', () => {
+    for (const doc of [inlineShapesDocument, usersDocument, paramsDocument]) {
+      const out = generateOpenApiClient(doc, {});
+      expect(out).not.toMatch(/: \{\n/);
+    }
   });
 });
 

@@ -55,10 +55,12 @@ All notable changes to this project are documented here. The format follows
   applied to request shape — every `@setu-ts/validation-plugin` helper AND
   `IValidationService.middleware(...)` brand what they validate, and `@setu-ts/openapi-plugin` reads
   the brand to fill `requestBody` and `parameters`. **On by default**; a declared `schema` field
-  still wins per field, and `OpenApiPlugin({ deriveRequestSchemas: false })` reproduces the previous
-  document exactly. A `cookies` brand derives nothing, with cause: `RouteSchema` has no `cookies`
-  field and `@setu-ts/sdk` refuses an `in: 'cookie'` parameter, so emitting one would turn a working
-  document into a codegen failure.
+  still wins per field, and `OpenApiPlugin({ deriveRequestSchemas: false })` turns derivation off.
+  That flag disables derivation ONLY — the owner exclusion, `operationId` format and schema
+  deduplication changes below are unconditional, so it does not restore the previous document. See
+  **Changed** for the compatibility note. A `cookies` brand derives nothing, with cause:
+  `RouteSchema` has no `cookies` field and `@setu-ts/sdk` refuses an `in: 'cookie'` parameter, so
+  emitting one would turn a working document into a codegen failure.
 - **A derived route is documented as answering `400`** (M70m). The validation middleware genuinely
   answers it, and an operation carrying no `4XX` is flagged by every strict linter. Description
   only, no body schema — that shape depends on the validation plugin's configured `errorFormat`,
@@ -67,7 +69,8 @@ All notable changes to this project are documented here. The format follows
   `['health-plugin', 'metrics-plugin']`. `/health`, `/live`, `/ready` and `/metrics` were documented
   by default, so every generated client shipped the application's operational surface. Exclusion is
   by `RouteInfo.owner` rather than by path because those paths are configuration — a static path
-  list stops working the moment an endpoint is renamed. Pass `[]` to document them again.
+  list stops working the moment an endpoint is renamed. Pass `[]` to document them again. See
+  **Changed** for the compatibility note — a regenerated client loses `getHealth` and friends.
 - **The generated SDK client can be published to JSR** (M70m, X11-4). `createApi` had an inferred
   return type, which JSR rejects as a slow type — so a consumer had to hand-edit a file whose own
   header says "Do not edit manually", or lose `.d.ts` generation for their whole package. The
@@ -294,9 +297,21 @@ All notable changes to this project are documented here. The format follows
   tool that puts an `operationId` in an anchor, a filename or a URL. It is now `get-orders-by-id`.
   **This renames generated client methods** — `getOrdersId` becomes `getOrdersById` — so regenerate
   clients and update call sites. Nothing else reads an `operationId`.
-- **CORS no longer refuses `content-type` while advertising `POST`** (M70m, X11-3).
-  `CorsOptions.allowedHeaders` defaulted to `[]` while `methods` defaulted to every standard verb,
-  so a preflight offered `POST`/`PUT`/`PATCH`/`DELETE` and then carried no
+- **Breaking (behaviour): an operation's `requestBody` and `parameters` are now derived from its
+  validation middleware** (M70m, X11-5). Derivation is ON by default, so the document emitted for
+  any application whose routes carry `validateBody`/`validateQuery`/`validateParams`/
+  `validateHeaders` changes without a configuration change, and a derived route also gains a `400`.
+  Regenerate any committed client. `OpenApiPlugin({ deriveRequestSchemas: false })` restores the
+  previous request shape — and nothing else; see the two entries below.
+- **Breaking (behaviour): operational routes are no longer documented** (M70m, X11-8). `/health`,
+  `/live`, `/ready` and `/metrics` are excluded by default via the new `excludeOwners`. A
+  regenerated client therefore NO LONGER declares `getHealth`, `getLive`, `getReady` or
+  `getMetrics`, so any call site using one stops compiling — that is the intended correction, since
+  those operations were the application's operational surface rather than its API. Pass
+  `excludeOwners: []` to document them again.
+- **Breaking (behaviour): CORS no longer refuses `content-type` while advertising `POST`** (M70m,
+  X11-3). `CorsOptions.allowedHeaders` defaulted to `[]` while `methods` defaulted to every standard
+  verb, so a preflight offered `POST`/`PUT`/`PATCH`/`DELETE` and then carried no
   `Access-Control-Allow-Headers` — every browser blocked every JSON request made against the
   configuration the README itself showed. Omitting the option now ECHOES the preflight's
   `Access-Control-Request-Headers` for an allowed origin and adds
@@ -313,7 +328,13 @@ All notable changes to this project are documented here. The format follows
   `[…].join('')`, an empty-object schema emits `Record<PropertyKey, never>` rather than the
   `ban-types`-rejected `{}`, and no pragma is emitted at all. The two committed generator-output
   fixtures were removed from `deno.json`'s `fmt.exclude`, so the repository's own `fmt` and `lint`
-  gates now enforce this permanently.
+  gates now enforce this permanently. Every multi-line type is also **hoisted into an exported
+  alias** rather than written inline at a use site — an inline (non-`$ref`) request body, parameter
+  or success response was emitted at whatever indentation its use site sat at, and a success type is
+  written at TWO indentation levels at once, so no single indent could be correct. Both original
+  fixtures name every schema through `$ref` and so could not show it, while a schema derived from
+  validation middleware and used once arrives inline; a third fixture generated from an
+  inline-schema document now covers the case.
 - **`GrpcPlugin`'s `basePath` now defaults to `/` (the root), and native gRPC-binary requests are
   refused with `UNIMPLEMENTED`** (M70i, X7-2 / X7-4). The old default `'/grpc'` was unreachable by
   every native client — a gRPC path comes from the method name alone, and no client has a prefix
@@ -650,6 +671,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Every documented example of reading a validated request read the WRONG `ctx.state` key** (M70m,
+  found in verification). `validateBody` and friends store under `validated:${target}` —
+  `validated:body`, `validated:query`, … — while `packages/validation-plugin/README.md`, that
+  package's module JSDoc (which is what jsr.io renders as its package page), `ARCHITECTURE.md` and
+  five `PUBLIC_API.md` examples all wrote `validatedBody`/`validatedQuery`/`validatedParams`. A
+  route following any of them received `undefined` and answered with an empty body — validation
+  itself worked, so nothing failed loudly. 11 sites corrected; the code's key is released behaviour
+  and is unchanged. Every test in the package already used the real key, which is exactly why no
+  gate could see it.
 - **An upload's `maxSize` did not bound what the middleware parsed** (M70k, X8-3). The buffering
   bound was `Math.max(maxSize * 2, 50 MB)` under a comment reading "cap at 50 MB", which made 50 MB
   a **floor**: a 1 KB per-file limit multipart-parsed a 40 MB body before rejecting it, and a 100 MB

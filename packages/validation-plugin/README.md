@@ -24,7 +24,7 @@ app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
 app.router.post('/users', {
   middleware: [validateBody(CreateUser)],
   handler: async (ctx) => {
-    const body = ctx.state.get('validatedBody');
+    const body = ctx.state.get('validated:body');
     return ctx.response.json(body);
   },
 });

@@ -15,15 +15,16 @@ export type NotFound = {
   'detail'?: string;
 };
 
+export type GetUserByIdError409Body = {
+  'conflictingId': string;
+};
+
 export interface ListUsersArgs {
   page?: number;
   limit?: number;
   xAPIKey?: string;
 }
 
-export type GetUserByIdError409Body = {
-  'conflictingId': string;
-};
 export type GetUserByIdError =
   | (HttpClientError<NotFound> & { readonly status: 404 })
   | (HttpClientError<GetUserByIdError409Body> & { readonly status: 409 });

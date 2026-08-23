@@ -6,6 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as openapiPlugin from '../../src/index.ts';
+import type { OpenApiSchemaObject, SchemaNodeHook } from '../../src/index.ts';
 
 describe('Barrel exports', () => {
   it('should export OpenApiPlugin', () => {
@@ -41,5 +42,15 @@ describe('Barrel exports', () => {
   it('should export IOpenApiService type', () => {
     // Types are erased at runtime, but we can verify the module exports correctly
     expect(openapiPlugin).toBeDefined();
+  });
+  it('exports the SchemaNodeHook type (declared against the barrel)', () => {
+    // Compile-time. This export was previously pinned by NOTHING but the
+    // README exports-table drift check: removing it left the whole suite and
+    // `deno check` green (M56 defect class).
+    const hook: SchemaNodeHook = (schema: unknown): OpenApiSchemaObject | undefined =>
+      schema === undefined ? undefined : { type: 'object' };
+
+    expect(hook({})).toEqual({ type: 'object' });
+    expect(hook(undefined)).toBeUndefined();
   });
 });
