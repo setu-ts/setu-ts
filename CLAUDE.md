@@ -3062,6 +3062,82 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   X6-4 is a `common` widening did not survive source-checking — both types are plugin-local — so
   alpha.9 carries one fewer breaking `common` change than stated. `DOC_LINT_BASELINE` 775 → 760) —
   complete (PR #180)
+- **Milestone 70m** (`common` + `validation-plugin` + `openapi-plugin` + `sdk` +
+  `http-security-plugin` — SDK and OpenAPI, closing X11-3 through X11-9. **The package list is
+  corrected from the ROADMAP's three** (the M70b/M70g/M70h/M70k precedent): `common` carries the
+  cross-plugin brand without which X11-5 is unimplementable at all under §2.2, and
+  `http-security-plugin` is the package X11-3's own row assigns.
+
+  **X11-5 is the headline, and it made the generated client useless for writes**: a route carrying
+  `validateBody(schema)` contributed nothing to the document, so the generated client for the API's
+  only write took **no argument** and 400'd against the live server — while the Zod schema was
+  already on the route. Fixed the way M57 fixed the identical shape for auth guards: a
+  `Symbol.for`-keyed `VALIDATION_METADATA` + `RouteValidationMetadata` +
+  `withValidationMetadata`/`validationMetadataOf` in `common`, which is the entire channel, since
+  neither plugin may import the other. `Symbol.for` deliberately — a locally-created symbol misses
+  on every read when two copies of `common` share a process. **Both entry points brand**, and
+  branding only `createValidationMiddleware` is not enough: the five `validateXxx` helpers return a
+  closure that resolves the service at REQUEST time, so the function a route actually holds is the
+  helper's — a negative control confirms that half alone fails both suites. Derivation is **ON by
+  default**, unlike `deriveSecurity`, because `ZodToOpenApi.transform` never throws and there is
+  nothing for a caller to name; `deriveRequestSchemas: false` reproduces the previous document
+  exactly. A **declared** value wins per field, the first brand per target wins, the derived `400`
+  carries a description and no schema (the body shape depends on the validation plugin's
+  `errorFormat`, which this plugin cannot see), and a `cookies` brand derives **nothing** for two
+  independent source-verified reasons: `RouteSchema` has no `cookies` field, and `@setu-ts/sdk`'s
+  generator refuses an `in: 'cookie'` parameter outright, so emitting one would turn a working
+  document into a codegen failure for its consumers.
+
+  **X11-6:** dedup was asymmetric — the FIRST use of a reused schema was inlined and never
+  rewritten, so one shape appeared both inline AND as a `$ref` to a meaningless `Schema1`, and
+  nested schemas were never counted at all. Now a counting pass and an emit pass share one additive
+  `SchemaNodeHook` on `ZodToOpenApi`; every internal recursion already went through
+  `this.transform`, so one hook reaches every node. Stopping descent on a re-sighting is
+  load-bearing rather than an optimization: without it a nested primitive was hoisted and stole its
+  parent's component name (probed — `GetOrdersByIdResponse4042`), so a structural-shape filter
+  rejects primitives as well. **X11-8:** an `operationId` no longer carries the path's braces
+  (`get-orders-by-id`), and operational routes are excluded by **owner**, not by path, because those
+  paths are configuration — `HealthPlugin({ endpoints })` and `MetricsPlugin({ endpoint })` both
+  take one, so a static list silently stops excluding a renamed endpoint. The integration test
+  therefore RENAMES them, and the control proves it discriminates: a path list leaks four `/_ops/*`
+  operations while the default-path case still passes.
+
+  **X11-4** was this repository's own M51 lesson pointed back at itself:
+  `export function createApi(...)` had an inferred return type — a JSR slow type that blocks `.d.ts`
+  generation — in a file whose own header says "Do not edit manually". It now emits a named `Api`
+  interface, claimed from ONE `TypeNameRegistry` alongside the component, `*Args` and `*Error`
+  names, so a document cannot collide with a generated one. **X11-7:** `HttpClientError` gained
+  `<TBody = unknown>`, so the bare name keeps meaning exactly what it did and every existing
+  `instanceof` is unaffected, while a generated client narrows through its own per-operation guard —
+  the throw site cannot know which operation it is serving.
+
+  **X11-9's fix is two deletions, and those deletions ARE the recurrence gate**: the SDK fixtures
+  were listed in `deno.json`'s `fmt.exclude`, which is the only reason generated output failing
+  `deno fmt --check` was invisible. Making them pass forced the emitter to be written against what
+  `deno fmt` actually produces, verified by round-tripping the committed fixtures: one
+  `renderSignature` shared by the interface pass and the factory pass (the M70h `renderList` lesson
+  — derive the prefix from the name you already have, never guess a width); multi-line error bodies
+  hoisted to named aliases, because fmt rewrites a multi-line intersection into a leading-`&` block;
+  a single-arm union emitted with neither `|` nor parens (probed — fmt strips both); and a long path
+  emitted as `[…].join('')`, because fmt rewraps a long template literal unpredictably.
+
+  **X11-3:** the `http-security-plugin` README's own CORS example blocked every JSON request.
+  `allowedHeaders` defaulted to `[]` while `methods` defaulted to every standard verb, so the
+  preflight advertised POST/PUT/PATCH/DELETE and then refused `content-type` — the one header a JSON
+  body needs. Omitted now ECHOES the preflight's `Access-Control-Request-Headers`, and
+  `undefined ≠ []`, so an explicit `[]` still allows none. It does not widen the security boundary:
+  the ORIGIN allowlist is what decides, it is unchanged, a caller reaching that branch has already
+  been admitted while asking for a header it is already sending, and a denied origin echoes nothing.
+  The `Vary: Access-Control-Request-Headers` append is mandatory rather than decorative — the answer
+  now depends on a request header, so without it a shared cache serves one caller's preflight
+  response to a caller asking for different headers; dropping it fails exactly that assertion while
+  the echo assertion and all 38 other steps pass.
+
+  Six negative controls were each observed failing and reverted. The first records an honest nuance:
+  swapping `Symbol.for` for `Symbol()` fails only the cross-copy unit test, because both plugins
+  share one `common` instance in-process, so the integration test would have passed either way —
+  which is precisely why that unit test exists. Developed in an isolated worktree, in parallel with
+  M70l) — complete (PR pending)
 - **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
   `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
   CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per

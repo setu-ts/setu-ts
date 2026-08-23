@@ -18,7 +18,7 @@ import type {
   ValidationIssue,
   ValidationTarget,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, withValidationMetadata } from '@setu-ts/common';
 
 import type {
   FormatValidationErrors,
@@ -142,7 +142,17 @@ export function createValidationMiddleware(
   // test without a second entry.
   const isProblemJson = PROBLEM_DETAILS_FORMATTERS.has(formatter);
 
-  return async (ctx, next) => {
+  // Branded so `@setu-ts/openapi-plugin` can DESCRIBE what this route
+  // validates without importing this package (AI_GUIDELINES §2.2). The brand
+  // is a description only — removing it changes no runtime behaviour here.
+  //
+  // Both entry points brand: this one covers `IValidationService.middleware()`,
+  // and `bindHelper` below covers the five `validateXxx` helpers. Branding only
+  // one would leave the same capability reachable two ways with two behaviours,
+  // because a helper resolves the service at REQUEST time inside its own
+  // closure — so the closure a route actually carries is the helper's, not this
+  // one.
+  return withValidationMetadata(async (ctx, next) => {
     let rawData: unknown;
     try {
       rawData = await extractTarget(ctx, target);
@@ -165,7 +175,7 @@ export function createValidationMiddleware(
     }
 
     return respond(ctx, formatter(result.error, ctx), isProblemJson);
-  };
+  }, { target, schema });
 }
 
 /**
@@ -279,8 +289,11 @@ export function validateCookies(schema: unknown): MiddlewareFunction {
  * @returns A middleware function
  */
 function bindHelper(target: ValidationTarget, schema: unknown): MiddlewareFunction {
-  return async (ctx, next) => {
+  // Branded here as well as in `createValidationMiddleware`: this closure is
+  // the one a route's `middleware` array holds, and the inner middleware it
+  // delegates to does not exist until the request runs.
+  return withValidationMetadata(async (ctx, next) => {
     const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
     await service.middleware(schema, target)(ctx, next);
-  };
+  }, { target, schema });
 }

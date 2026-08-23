@@ -47,6 +47,40 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The OpenAPI document is derived from validation middleware** (M70m, X11-5). A route carrying
+  `validateBody(schema)` contributed **nothing** to the document, so the generated client for an
+  API's only write took no argument and answered `400` against the live server, and every response
+  was typed `void`. `@setu-ts/common` gains `VALIDATION_METADATA`, `RouteValidationMetadata`,
+  `withValidationMetadata` and `validationMetadataOf` — the `RouteSecurityMetadata` mechanism
+  applied to request shape — every `@setu-ts/validation-plugin` helper AND
+  `IValidationService.middleware(...)` brand what they validate, and `@setu-ts/openapi-plugin` reads
+  the brand to fill `requestBody` and `parameters`. **On by default**; a declared `schema` field
+  still wins per field, and `OpenApiPlugin({ deriveRequestSchemas: false })` reproduces the previous
+  document exactly. A `cookies` brand derives nothing, with cause: `RouteSchema` has no `cookies`
+  field and `@setu-ts/sdk` refuses an `in: 'cookie'` parameter, so emitting one would turn a working
+  document into a codegen failure.
+- **A derived route is documented as answering `400`** (M70m). The validation middleware genuinely
+  answers it, and an operation carrying no `4XX` is flagged by every strict linter. Description
+  only, no body schema — that shape depends on the validation plugin's configured `errorFormat`,
+  which the generator cannot see. A route declaring its own `400` is left alone.
+- **`OpenApiPlugin({ excludeOwners })`** (M70m, X11-8), defaulting to
+  `['health-plugin', 'metrics-plugin']`. `/health`, `/live`, `/ready` and `/metrics` were documented
+  by default, so every generated client shipped the application's operational surface. Exclusion is
+  by `RouteInfo.owner` rather than by path because those paths are configuration — a static path
+  list stops working the moment an endpoint is renamed. Pass `[]` to document them again.
+- **The generated SDK client can be published to JSR** (M70m, X11-4). `createApi` had an inferred
+  return type, which JSR rejects as a slow type — so a consumer had to hand-edit a file whose own
+  header says "Do not edit manually", or lose `.d.ts` generation for their whole package. The
+  generator now emits `export interface Api { … }` and `createApi(client): Api`, renameable with the
+  new `OpenApiCodegenOptions.apiTypeName`.
+- **Declared error responses are typed in the generated client** (M70m, X11-7). An operation
+  declaring a non-2xx response now emits a `status`-discriminated union and an `is<Operation>Error`
+  narrowing guard, so a document's 4xx schemas finally type something. `HttpClientError` is generic
+  in its body (`HttpClientError<TBody = unknown>`), which is source-compatible: the bare name still
+  means `HttpClientError<unknown>`.
+- **`ZodToOpenApi` accepts an optional `onSchema` hook** (M70m), consulted at every node it
+  transforms. Additive — `new ZodToOpenApi()` is unchanged — and it is what lets the document
+  generator deduplicate a schema nested inside another.
 - **`IStorage.put` takes object metadata** (M70k, X8-6). `put(path, data, options?)` accepts a new
   `PutObjectOptions` carrying `contentType` and `metadata`. Optional, so every existing two-argument
   call is unchanged. Without it every stored object was `application/octet-stream`, so a presigned
@@ -246,6 +280,40 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Reused OpenAPI schemas are deduplicated symmetrically, and named from their first use** (M70m,
+  X11-6). The first use of a reused schema was inlined and never rewritten, so one shape appeared
+  **both inline and as a `$ref`** in one document, under the meaningless name `Schema1`; and a
+  schema nested inside another was not counted at all, so two structurally identical cases behaved
+  differently. Every site of a reused schema now carries a `$ref`, nested schemas are deduplicated
+  too, and a hoisted component is named from the site that first reached it
+  (`GetOrdersByIdResponse404`). **A generated client's component type names change accordingly** —
+  regenerate it. A reused primitive stays inline: a `$ref` to `{"type":"string"}` is larger than the
+  schema it replaces.
+- **`operationId` no longer carries path braces** (M70m, X11-8). `GET /orders/{id}` derived
+  `get-orders-{id}`, which Redocly's recommended ruleset flags as URL-unsafe and which breaks any
+  tool that puts an `operationId` in an anchor, a filename or a URL. It is now `get-orders-by-id`.
+  **This renames generated client methods** — `getOrdersId` becomes `getOrdersById` — so regenerate
+  clients and update call sites. Nothing else reads an `operationId`.
+- **CORS no longer refuses `content-type` while advertising `POST`** (M70m, X11-3).
+  `CorsOptions.allowedHeaders` defaulted to `[]` while `methods` defaulted to every standard verb,
+  so a preflight offered `POST`/`PUT`/`PATCH`/`DELETE` and then carried no
+  `Access-Control-Allow-Headers` — every browser blocked every JSON request made against the
+  configuration the README itself showed. Omitting the option now ECHOES the preflight's
+  `Access-Control-Request-Headers` for an allowed origin and adds
+  `Vary: Access-Control-Request-Headers`. An explicit list still allows only those headers, and an
+  explicit `[]` still allows none, so any application that configured the option is unaffected. The
+  origin allowlist — the actual security boundary — is unchanged, and a denied origin echoes
+  nothing.
+- **Generated SDK client source is `deno fmt`- and `deno lint`-clean** (M70m, X11-9). It emitted
+  4-space indentation against the 2-space config every scaffolded project ships, left nested inline
+  object types unindented, and opened with a blanket `deno-lint-ignore-file` carrying no rule list —
+  so codegen output could not be committed to a scaffolded project without formatting a file whose
+  header forbids editing it. Output is now 2-space and depth-indented, signatures past 100 columns
+  wrap one parameter per line, a path template too long for one line is emitted as an equivalent
+  `[…].join('')`, an empty-object schema emits `Record<PropertyKey, never>` rather than the
+  `ban-types`-rejected `{}`, and no pragma is emitted at all. The two committed generator-output
+  fixtures were removed from `deno.json`'s `fmt.exclude`, so the repository's own `fmt` and `lint`
+  gates now enforce this permanently.
 - **`GrpcPlugin`'s `basePath` now defaults to `/` (the root), and native gRPC-binary requests are
   refused with `UNIMPLEMENTED`** (M70i, X7-2 / X7-4). The old default `'/grpc'` was unreachable by
   every native client — a gRPC path comes from the method name alone, and no client has a prefix

@@ -41,6 +41,9 @@ app.register(HttpSecurityPlugin({
     origin: 'https://example.com',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    // Omit `allowedHeaders` and an allowed origin's preflight echoes whatever
+    // the browser asked for. List them here to allow only those.
+    allowedHeaders: ['content-type', 'authorization'],
     maxAge: 86400,
   },
   // Security headers — ON by default; customize here
@@ -129,9 +132,20 @@ app.router.post('/api/data', {
 | `origin?`         | `boolean \| string \| string[] \| fn` | `[]` (deny all)      | Origin matching configuration     |
 | `credentials?`    | `boolean`                             | `false`              | Allow credentials                 |
 | `methods?`        | `string[]`                            | all standard methods | Allowed methods for preflight     |
-| `allowedHeaders?` | `string[]`                            | `[]`                 | Allowed headers for preflight     |
+| `allowedHeaders?` | `string[]`                            | echo the request     | Allowed headers for preflight     |
 | `exposedHeaders?` | `string[]`                            | `[]`                 | Exposed response headers          |
 | `maxAge?`         | `number`                              | —                    | Preflight cache max age (seconds) |
+
+**`allowedHeaders` omitted vs `[]`.** Omitting it echoes the preflight's own
+`Access-Control-Request-Headers` back and adds `Vary: Access-Control-Request-Headers`; an explicit
+list allows only those headers, and an explicit `[]` allows none.
+
+Echoing is the default because the alternative was incoherent: `methods` defaults to every standard
+verb, so the preflight advertised `POST`/`PUT`/`PATCH`/`DELETE` and then refused `content-type` —
+the one header a JSON body needs — and every browser blocked every JSON request. It does not widen
+the security boundary: the ORIGIN allowlist is what decides, it is unchanged, and a caller reaching
+this branch has already been admitted while asking for a header it is already sending. A denied
+origin echoes nothing.
 
 ### CsrfOptions
 

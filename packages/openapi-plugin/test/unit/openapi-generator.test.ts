@@ -94,7 +94,10 @@ describe('OpenApiGenerator', () => {
 
       const result = generator.generate(routes);
 
-      expect(result.paths['/users/{id}']?.get?.operationId).toBe('get-users-{id}');
+      // M70m/X11-8: a path placeholder is unwrapped rather than carried into
+      // the id verbatim — braces are URL-unsafe and Redocly's recommended
+      // ruleset flags them.
+      expect(result.paths['/users/{id}']?.get?.operationId).toBe('get-users-by-id');
     });
 
     it('should include summary from RouteSchema', () => {
@@ -469,8 +472,12 @@ describe('OpenApiGenerator', () => {
 
       const result = generator.generate(routes);
 
-      // Per plan §3.4: schemas used more than once get Schema<n> names and are hoisted
-      expect(result.components?.schemas).toHaveProperty('Schema1');
+      // M70m/X11-6: a hoisted component is named from the site that first
+      // reached it — here the GET route, which is listed first — rather than
+      // the meaningless `Schema1`. Exactly one component, not one per site.
+      expect(Object.keys(result.components?.schemas ?? {})).toEqual([
+        'GetUsersByIdResponse200',
+      ]);
     });
 
     it('should use $ref for deduplicated schemas', () => {
@@ -516,12 +523,24 @@ describe('OpenApiGenerator', () => {
 
       const result = generator.generate(routes);
 
+      // M70m/X11-6: EVERY site of a reused schema carries the `$ref`,
+      // including the first. Before this the first use was inlined and never
+      // rewritten, so one shape appeared in two forms in one document.
+      const ref = { $ref: '#/components/schemas/PostUsersBody' };
       const responseSchema = result.paths['/users/{id}']?.get?.responses['200']?.content
         ?.['application/json']?.schema;
-      // Per plan §3.4: reused schemas get $ref with Schema<n> name
-      expect(responseSchema).toEqual({
-        $ref: '#/components/schemas/Schema1',
-      });
+      expect(responseSchema).toEqual(ref);
+
+      const bodySchema = result.paths['/users']?.post?.requestBody?.content['application/json']
+        ?.schema;
+      expect(bodySchema).toEqual(ref);
+
+      const createdSchema = result.paths['/users']?.post?.responses['201']?.content
+        ?.['application/json']?.schema;
+      expect(createdSchema).toEqual(ref);
+
+      // Exactly one component, not one per site.
+      expect(Object.keys(result.components?.schemas ?? {})).toEqual(['PostUsersBody']);
     });
 
     it('should include servers when provided', () => {
