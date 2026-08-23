@@ -7054,15 +7054,19 @@ Ordered by the sequence they should be worked, not by severity alone.
   branch. **E8 moved here from M70n** (see that row). And **D3 was built rather than deferred**:
   `setu add <plugin>` now exists, so every gate that named a package to install names a command that
   installs it.
-- ✅ **M70i — gRPC and GraphQL viability** (`grpc-plugin`, `graphql-plugin`). The
-  repair-versus-withdraw decision named above, plus the documented-API-does-not-exist rows both
-  packages carry: every gRPC registration snippet in README and `PUBLIC_API.md` throws because it
-  resolves the capability before `app.start()` (X7-1), and `graphql-plugin`'s only documented
-  registration API uses a `new Application()` / `app.use()` the kernel does not export (X6-2). Also
-  X7-2, X7-4, X6-3 (the code-first arm does not type-check against the real `graphql` package),
-  X6-4, X6-5, X6-6, X6-7. Decision recorded: REPAIR with withdraw of the native-gRPC claim —
-  `basePath` defaults to the root, native `application/grpc` requests are refused with a
-  Trailers-Only `UNIMPLEMENTED`, Connect and gRPC-Web remain fully supported.
+- ✅ **M70i — gRPC and GraphQL viability** (`grpc-plugin`, `graphql-plugin`, `websocket-plugin`) —
+  complete (PR #180). The package list was corrected at plan time: X6-5's register row names
+  `websocket-plugin` (docs) and `cli`, and the fix is a README change there, while `cli` was dropped
+  because the `ws-route` schematic was declined with reason (the M70b / M70h list-correction
+  precedent). The repair-versus-withdraw decision named above, plus the
+  documented-API-does-not-exist rows both packages carry: every gRPC registration snippet in README
+  and `PUBLIC_API.md` throws because it resolves the capability before `app.start()` (X7-1), and
+  `graphql-plugin`'s only documented registration API uses a `new Application()` / `app.use()` the
+  kernel does not export (X6-2). Also X7-2, X7-4, X6-3 (the code-first arm does not type-check
+  against the real `graphql` package), X6-4, X6-5, X6-6, X6-7. Decision recorded: REPAIR with
+  withdraw of the native-gRPC claim — `basePath` defaults to the root, native `application/grpc`
+  requests are refused with a Trailers-Only `UNIMPLEMENTED`, Connect and gRPC-Web remain fully
+  supported.
 - ✅ **M70j — Database adapter correctness** (`database-plugin`) — complete (PR #177).
   `IDatabaseService.query()` was inoperative on the Drizzle adapter — it called
   `execute({ sql, params })`, a shape no Drizzle driver accepts, so the method failed with the
