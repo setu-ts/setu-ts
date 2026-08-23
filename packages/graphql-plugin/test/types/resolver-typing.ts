@@ -167,8 +167,8 @@ const typedSubscription: ResolverMap = {
     bookAdded: {
       subscribe: (): AsyncIterable<Book> =>
         (async function* () {
-          await Promise.resolve();
-        })() as AsyncIterable<Book>,
+          yield { id: '1', title: 'Piranesi' };
+        })(),
       resolve: (payload: Book) => payload.title,
     },
   },
