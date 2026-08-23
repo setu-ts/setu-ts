@@ -3050,13 +3050,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   README leads with the plugin-based form and names `setu generate plugin`; the `ws-route` schematic
   was declined with reason, so `cli` was dropped from the package list while `websocket-plugin` was
   added — the M70b/M70h list-correction precedent. The recurrence gate is two layers, because one
-  alone would be wrong: `test/readme-fence-compiler.test.ts` compiles every copyable fence in the
-  two owned READMEs with pinned counts, and `docs-gate` rejects the nonexistent kernel API repo-wide
-  — scoped to package READMEs and `PUBLIC_API.md` rather than a naive grep, since
-  `docs/migration-{fastify,nestjs}.md` legitimately show `app.use(` as foreign-framework code the
-  reader is migrating from. Also recorded: the ROADMAP's claim that X6-4 is a `common` widening did
-  not survive source-checking — both types are plugin-local — so alpha.9 carries one fewer breaking
-  `common` change than stated. `DOC_LINT_BASELINE` 775 → 760) — complete (PR pending)
+  alone would be wrong: the two owned READMEs were folded into M70k's
+  `test/package-readme-fence-compiler.test.ts` rather than shipping the second gate this plan
+  specified — §11.1, and M70k's own header warns against a second classifier. The fold was strictly
+  stronger, not merely tidier: M70i's gate pinned 1 compilable fence in the gRPC README and 3 in
+  GraphQL where the shared engine finds **2 and 6**, and **four** fences it never reached did not
+  compile — including the `## Options` fence for the very plugin this milestone repairs. `docs-gate`
+  rejects the nonexistent kernel API repo-wide — scoped to package READMEs and `PUBLIC_API.md`
+  rather than a naive grep, since `docs/migration-{fastify,nestjs}.md` legitimately show `app.use(`
+  as foreign-framework code the reader is migrating from. Also recorded: the ROADMAP's claim that
+  X6-4 is a `common` widening did not survive source-checking — both types are plugin-local — so
+  alpha.9 carries one fewer breaking `common` change than stated. `DOC_LINT_BASELINE` 775 → 760) —
+  complete (PR pending)
 - **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
   `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
   CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per
