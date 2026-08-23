@@ -276,6 +276,19 @@ All notable changes to this project are documented here. The format follows
   reports first. An application that wants the old fire-and-forget behaviour wraps its own handlers
   in `try`.
 
+- **The generated Cloudflare Workers `fetch` export no longer propagates a failed boot** (M70l,
+  X9-8). A boot error (a mistyped binding, a broker briefly down at cold start) is now logged to the
+  platform's console and answered with a generic `503 Service Unavailable` — the stack never reaches
+  the client. The failed boot promise is cleared, so the next request re-attempts the boot rather
+  than being pinned to the failure for the isolate's life. An application that wants the error body
+  can wrap its own handler around `app.fetch`.
+
+- **The generated Dockerfile folds `chown -R` into the dependency-cache layer** (M70l, X10-5). A
+  standalone `chown -R` rewrites metadata on every file the cache layer created, so overlayfs copied
+  the ENTIRE Deno module cache into a second layer — measured at 563 MB vs 362 MB with the fold,
+  paid on every push and every node pull. Image contents are unchanged; only the layer layout
+  differs, so existing deployments need no action beyond the next rebuild.
+
 - **`every` jobs arm on an absolute epoch grid** (M70l, X10-2). The first fire lands on
   `(floor(now / interval) + 1) * interval` rather than a full interval after registration, at
   registration, re-arm, and resume alike. The period is unchanged; only the phase moves, and the
@@ -284,12 +297,27 @@ All notable changes to this project are documented here. The format follows
   started at different instants agree on distributed-lock slot keys.
 
 - **`RabbitMqBroker` declares its queues with the shape their subscription implies** (M70l, X10-1).
-  A caller-supplied queue name (a consumer group) is declared `{ durable: true }` — it survives a
-  broker restart, which is what `queue` documents; the private per-subscriber queue and the RPC
-  reply inbox are declared `{ exclusive: true, autoDelete: true }`. The previous unconditional
-  `{ durable: false }` named non-exclusive form is refused by RabbitMQ 4 outright
+  **Breaking.** A caller-supplied queue name (a consumer group) is declared `{ durable: true }` — it
+  survives a broker restart, which is what `queue` documents; the private per-subscriber queue and
+  the RPC reply inbox are declared `{ exclusive: true, autoDelete: true }`. The previous
+  unconditional `{ durable: false }` named non-exclusive form is refused by RabbitMQ 4 outright
   (`541 INTERNAL-ERROR … transient_nonexcl_queues`). CI's RabbitMQ service moves to major version 4
   with this change.
+
+  **Migration — deployments upgrading against an EXISTING broker.** A named consumer-group queue
+  that the old client created as `{ durable: false }` cannot be re-declared `{ durable: true }`:
+  RabbitMQ answers `406 PRECONDITION_FAILED` and closes the channel, so every subscriber on that
+  queue stops until the queue is redeclared. To restore service, delete the existing non-durable
+  queue (drain it first if in-flight messages must be preserved — a non-durable queue's contents are
+  lost on broker restart anyway) and let the new client re-declare it as durable:
+
+  ```bash
+  rabbitmqadmin delete queue name=<consumer-group-queue>
+  ```
+
+  Deployments whose brokers are provisioned fresh (or whose queues were already declared durable)
+  see no change. Private per-subscriber queues and the RPC reply inbox are exclusive/auto-delete and
+  are recreated per connection; they never carry this problem.
 
 - **`GrpcPlugin`'s `basePath` now defaults to `/` (the root), and native gRPC-binary requests are
   refused with `UNIMPLEMENTED`** (M70i, X7-2 / X7-4). The old default `'/grpc'` was unreachable by
