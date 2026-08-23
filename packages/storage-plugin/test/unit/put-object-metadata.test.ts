@@ -173,14 +173,21 @@ describe('GcsProvider.put — the provider, not just the adapted facade (X8-6)',
     return { client, saves };
   }
 
-  it('should hand save both attributes when given them', async () => {
+  it('should nest custom metadata inside the object resource, not beside it', async () => {
+    // `SaveOptions.metadata` is the GCS object RESOURCE (`ConfigMetadata`),
+    // whose own `metadata` sub-key holds user pairs — verified from the shipped
+    // `@google-cloud/storage` types, not from the field name. Passing the
+    // custom map at the top level would overwrite the resource instead.
     const { client, saves } = fakeGcsClient();
     const provider = new GcsProvider({ bucket: 'b', client });
     await provider.connect();
 
     await provider.put('avatars/ada.png', BYTES, PNG);
 
-    expect(saves[0]).toEqual({ contentType: 'image/png', metadata: { owner: 'ada' } });
+    expect(saves[0]).toEqual({
+      contentType: 'image/png',
+      metadata: { metadata: { owner: 'ada' } },
+    });
   });
 
   it('should hand save an EMPTY bag when given no attributes', async () => {
@@ -204,7 +211,7 @@ describe('GcsProvider.put — the provider, not just the adapted facade (X8-6)',
     await provider.put('b', BYTES, { metadata: { k: 'v' } });
 
     expect(saves[0]).toEqual({ contentType: 'text/plain' });
-    expect(saves[1]).toEqual({ metadata: { k: 'v' } });
+    expect(saves[1]).toEqual({ metadata: { metadata: { k: 'v' } } });
   });
 
   it('should reject when the SDK reports a save failure', async () => {

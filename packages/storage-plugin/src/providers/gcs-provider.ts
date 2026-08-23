@@ -329,9 +329,17 @@ export class GcsProvider implements StorageProvider {
     // `save(data, opts, cb)` is the SDK's three-argument overload; the bag is
     // always passed (empty when the caller supplied nothing) so this package
     // has ONE call shape rather than two that can drift.
+    //
+    // The nesting is NOT redundant, and reading the shipped types rather than
+    // the field name is what showed it: `SaveOptions.metadata` is typed
+    // `ConfigMetadata` — the GCS object RESOURCE, whose own `metadata` sub-key
+    // holds user key/value pairs. Passing the custom map at the top level would
+    // overwrite the resource instead of setting custom metadata on it.
+    // `contentType` is different: it is a first-class member of
+    // `CreateWriteStreamOptions`, so it stays where the SDK declares it.
     const saveOptions: Record<string, unknown> = {
       ...(options?.contentType === undefined ? {} : { contentType: options.contentType }),
-      ...(options?.metadata === undefined ? {} : { metadata: options.metadata }),
+      ...(options?.metadata === undefined ? {} : { metadata: { metadata: options.metadata } }),
     };
     return new Promise<void>((resolve, reject) => {
       this.#getFile(path).save(data, saveOptions, (err: Error | null) => {
