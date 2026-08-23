@@ -125,6 +125,62 @@ describe('GraphQL plugin integration', () => {
     await app.stop();
   });
 
+  it('gives a resolver the live registry when execute() is called with no request context', async () => {
+    // `IGraphqlService.execute(params, requestContext?)` takes the request
+    // context OPTIONALLY — an application calling it server-side (a scheduled
+    // job, a seed script) passes only `params`. X6-4 types
+    // `DefaultGraphqlContext.services` as `IServiceRegistry` so a resolver may
+    // call `.get()` with no cast, so that promise has to hold on this path too.
+    let seen: DefaultGraphqlContext | undefined;
+    const app = createApp({
+      resolvers: {
+        Query: {
+          whoami: (_s: unknown, _a: unknown, ctx: DefaultGraphqlContext) => {
+            seen = ctx;
+            return typeof ctx.services.get(CAPABILITIES.RUNTIME) === 'object' ? 'reached' : 'no';
+          },
+        },
+      } as never,
+    });
+    await app.start();
+
+    const service = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+    const outcome = await service.execute({ query: '{ whoami }' });
+
+    expect(outcome.result.errors).toBeUndefined();
+    expect(outcome.result.data).toEqual({ whoami: 'reached' });
+    expect(typeof (seen!.services as { get?: unknown }).get).toBe('function');
+    // No request context on this path, so the member is ABSENT — the same
+    // per-transport rule X6-6 documents, not a `{}` stand-in for the registry.
+    expect(Object.keys(seen!).sort()).toEqual(['services']);
+
+    await app.stop();
+  });
+
+  it('gives a resolver the live registry when subscribe() is called with no context', async () => {
+    let seen: DefaultGraphqlContext | undefined;
+    const app = createApp({
+      resolvers: {
+        Query: {
+          whoami: (_s: unknown, _a: unknown, ctx: DefaultGraphqlContext) => {
+            seen = ctx;
+            return typeof ctx.services.get(CAPABILITIES.RUNTIME) === 'object' ? 'reached' : 'no';
+          },
+        },
+      } as never,
+    });
+    await app.start();
+
+    const service = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+    // A query through subscribe() resolves as a 'single' outcome.
+    const outcome = await service.subscribe({ query: '{ whoami }' });
+
+    expect(outcome.kind).toBe('single');
+    expect(typeof (seen!.services as { get?: unknown }).get).toBe('function');
+
+    await app.stop();
+  });
+
   it('drives execute() and the HTTP route to identical results under a NON-default config', async () => {
     // One capability, one implementation: the route handler must not own any
     // execution behaviour the service entry point lacks. Driven under

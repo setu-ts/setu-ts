@@ -38,6 +38,14 @@ export type ResolverMap = Record<string, TypeResolverMap | GraphqlScalarResolver
  * resolver assigns — target parameter `never` is assignable to any source
  * parameter — while nothing weakens inside the stored function: the map hands
  * entries to graphql untouched.
+ *
+ * The trade-off is at the ENTRY level and is deliberate: because every source
+ * parameter is accepted, a function that is not a resolver at all (say
+ * `(a: string, b: number) => number`) also assigns, where the old all-`unknown`
+ * type rejected it. graphql-js makes the same trade with
+ * `GraphQLFieldResolver<any, any>`; `any` is banned here (AI_GUIDELINES §5.2),
+ * so `never` is the equivalent. Annotate a resolver with
+ * {@linkcode FieldResolver} explicitly to get its parameters checked.
  */
 export type TypeResolverMap = Record<
   string,

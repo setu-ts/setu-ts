@@ -127,11 +127,8 @@ deno run --allow-env --allow-net main.ts
 Enable `nodejs_compat` in your `wrangler.toml`:
 
 ```toml
-[build]
-command = ""
-
-[compatibility_flags]
-nodejs_compat = true
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
 ```
 
 ## Subscriptions

@@ -162,10 +162,18 @@ export class GraphqlService implements IGraphqlService {
   ): GraphqlContextInput {
     // C4: `??` binds tighter than `?:`, so the original expression parsed as
     // `(requestContext?.services ?? connection) ? serviceRegistry : {}`.
-    // Fix precedence so HTTP uses request-scoped services, WS uses the plugin
-    // registry, and neither falls back to `{}`.
-    const services = context.requestContext?.services ??
-      (context.connection ? this.#serviceRegistry : {});
+    // Fix precedence so HTTP uses request-scoped services and WS uses the
+    // plugin registry.
+    //
+    // The final fallback is the plugin registry, NOT `{}`: `execute()` and
+    // `subscribe()` both take their context OPTIONALLY, so a server-side call
+    // passing only `params` reaches this branch. `DefaultGraphqlContext.services`
+    // is typed `IServiceRegistry` (X6-4) precisely so a resolver may call
+    // `.get()` without a cast, and handing out `{}` there made that call throw
+    // a `TypeError` that the error mask then reported as "Internal server
+    // error". The plugin-level registry is always present — the plugin passes
+    // `ctx.services` at registration — so there is no case needing `{}`.
+    const services = context.requestContext?.services ?? this.#serviceRegistry;
     const request = context.requestContext?.request;
     const connection = context.connection;
     const input: GraphqlContextInput = { services, request };

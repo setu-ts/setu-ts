@@ -275,6 +275,12 @@ All notable changes to this project are documented here. The format follows
   request's headers/query live on `connection.headers`/`.query`. `requestContext` is therefore typed
   optional; code that dereferenced it must narrow first.
 
+  A resolver's `ctx.services` is now the live registry on **every** entry point. `execute()` and
+  `subscribe()` take their request context optionally, and a call passing only `params` previously
+  received `{}` there — so `ctx.services.get(...)`, which `services: IServiceRegistry` now invites
+  without a cast, threw a `TypeError` that error masking reported as `Internal server error`. The
+  fallback is the plugin-level registry instead.
+
   APQ refusals now follow the documented media-type watershed from one owner: under
   `application/json` an APQ miss answers `200` with `PersistedQueryNotFound` in the body (the one
   error a client must read and retry); under `application/graphql-response+json` it carries the
