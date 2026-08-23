@@ -257,18 +257,79 @@ export interface DatabaseConnectionOptions {
 }
 
 /**
- * The arm selecting one of the adapters this package ships.
+ * The arm selecting the zero-dependency in-memory adapter, which is also what
+ * an omitted `type` means.
  *
  * @since 0.2.0
  */
-export interface BuiltInDatabaseOptions extends DatabaseConnectionOptions {
+export interface MemoryDatabaseOptions extends DatabaseConnectionOptions {
   /**
    * ORM adapter type. Defaults to `'memory'`.
    *
    * @since 0.1.0
    */
-  readonly type?: 'prisma' | 'drizzle' | 'memory';
+  readonly type?: 'memory';
 }
+
+/**
+ * The arm selecting the Prisma adapter.
+ *
+ * `options.prismaClient` is required by the union rather than optional on a
+ * nested bag, so a registration that forgets it is a compile error instead of
+ * a `connect()` throw — the same guarantee the `'custom'` arm gives `adapter`.
+ *
+ * @example
+ * ```typescript
+ * import { PrismaPg } from '@prisma/adapter-pg';
+ * import { PrismaClient } from './generated/prisma/client.ts';
+ *
+ * DatabasePlugin({
+ *   type: 'prisma',
+ *   options: {
+ *     prismaClient: new PrismaClient({
+ *       adapter: new PrismaPg({ connectionString: config.getOrThrow('DATABASE_URL') }),
+ *     }),
+ *   },
+ * });
+ * ```
+ * @since 0.2.0
+ */
+export interface PrismaDatabaseOptions extends DatabaseConnectionOptions {
+  /** Selects the Prisma arm. */
+  readonly type: 'prisma';
+  /** Prisma adapter configuration; `prismaClient` is required. */
+  readonly options: PrismaAdapterOptions;
+}
+
+/**
+ * The arm selecting the Drizzle adapter.
+ *
+ * Both `options.drizzleInstance` and `options.drizzleTables` are required by
+ * the union, so omitting either is a compile error rather than a `connect()`
+ * throw.
+ *
+ * @since 0.2.0
+ */
+export interface DrizzleDatabaseOptions extends DatabaseConnectionOptions {
+  /** Selects the Drizzle arm. */
+  readonly type: 'drizzle';
+  /** Drizzle adapter configuration; the instance and table registry are required. */
+  readonly options: DrizzleAdapterOptions;
+}
+
+/**
+ * The arm selecting one of the adapters this package ships.
+ *
+ * A union of the three built-in arms: each names the options its adapter
+ * cannot run without, so the compiler rejects a configuration the adapter
+ * would only reject at startup.
+ *
+ * @since 0.2.0
+ */
+export type BuiltInDatabaseOptions =
+  | MemoryDatabaseOptions
+  | PrismaDatabaseOptions
+  | DrizzleDatabaseOptions;
 
 /**
  * The arm supplying an externally-implemented backend.
@@ -340,7 +401,13 @@ export interface DatabaseAdapterOptions {
   /**
    * Inject an application-generated Prisma v7 client. This is required for
    * the Prisma adapter because generated-client output belongs to the
-   * application rather than this package.
+   * application rather than this package — see
+   * {@linkcode PrismaAdapterOptions}, which makes that a compile error rather
+   * than a startup throw.
+   *
+   * A Prisma 7 client needs a driver adapter of its own
+   * (`new PrismaClient({ adapter: new PrismaPg({ connectionString }) })`); the
+   * engine-bundled `new PrismaClient()` constructor was removed in v7.
    *
    * @since 0.1.0
    */
@@ -361,8 +428,14 @@ export interface DatabaseAdapterOptions {
 
   /**
    * Registry mapping entity name → a real Drizzle table definition. Required
-   * when `type: 'drizzle'`; the adapter validates each table has an `id`
-   * column and resolves all repository fields from it.
+   * when `type: 'drizzle'` — see {@linkcode DrizzleAdapterOptions}, which makes
+   * that a compile error rather than a startup throw.
+   *
+   * The registry accepts any table definition, including one with a composite
+   * primary key. An `id` column is a REPOSITORY precondition (`findById`,
+   * `update` and `delete` are single-key by contract), so it is checked when a
+   * repository is asked for rather than at `connect()` — a table registered
+   * only so the typed query builder can name it needs none.
    *
    * @since 0.1.0
    */
@@ -372,6 +445,8 @@ export interface DatabaseAdapterOptions {
    * Timeout (ms) for Prisma interactive transactions. Defaults to 30_000.
    * Prisma's default is ~5s which is too short for a full Unit of Work.
    *
+   * Read by the Prisma adapter only; Memory and Drizzle ignore it.
+   *
    * @since 0.1.0
    */
   readonly transactionTimeout?: number;
@@ -379,11 +454,53 @@ export interface DatabaseAdapterOptions {
   /**
    * Inject the application's opaque configured Drizzle database, created by
    * `createDrizzleDatabase(database, transactionBridge)`. Required when
-   * `type: 'drizzle'`; the explicit bridge positively guarantees Promise-aware
-   * native callback semantics instead of inferring them from a structural
-   * transaction method.
+   * `type: 'drizzle'` — see {@linkcode DrizzleAdapterOptions}, which makes that
+   * a compile error rather than a startup throw. The explicit bridge positively
+   * guarantees Promise-aware native callback semantics instead of inferring
+   * them from a structural transaction method.
    *
    * @since 0.1.0
    */
   readonly drizzleInstance?: DrizzleDatabaseIdentity;
+}
+
+/**
+ * {@linkcode DatabaseAdapterOptions} narrowed for the Prisma arm: the injected
+ * client is required.
+ *
+ * @since 0.2.0
+ */
+export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
+  /**
+   * The application-generated Prisma v7 client. Required — a framework package
+   * cannot locate an application-selected generated-client output path, and
+   * `PrismaAdapter.connect()` rejects without it.
+   *
+   * @since 0.2.0
+   */
+  readonly prismaClient: unknown;
+}
+
+/**
+ * {@linkcode DatabaseAdapterOptions} narrowed for the Drizzle arm: the
+ * configured instance and the table registry are both required.
+ *
+ * @since 0.2.0
+ */
+export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
+  /**
+   * The opaque configuration returned by
+   * `createDrizzleDatabase(database, transactionBridge)`. Required.
+   *
+   * @since 0.2.0
+   */
+  readonly drizzleInstance: DrizzleDatabaseIdentity;
+
+  /**
+   * Entity name → real Drizzle table definition. Required, and must hold at
+   * least one entry.
+   *
+   * @since 0.2.0
+   */
+  readonly drizzleTables: Record<string, unknown>;
 }

@@ -36,7 +36,7 @@ import {
 import { hostname as osHostname } from 'node:os';
 import process from 'node:process';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
-import { createWebWorkerHost } from '../shared/web-worker-host.ts';
+import { createWebWorkerHost, readWebWorkerGlobals } from '../shared/web-worker-host.ts';
 import { createNodeDnsResolver } from '../shared/node-dns-resolver.ts';
 
 /**
@@ -103,7 +103,10 @@ export interface BunFileInfo {
  */
 export function createBunRuntimeServices(
   host: BunHost = buildBunHost(),
-  workers: IWorkerHost = createWebWorkerHost(),
+  // Bun emits a non-standard `'close'` event on a `Worker` when the thread
+  // ends, so worker-death detection is available here and the pool no longer
+  // depends on a task timeout to notice one.
+  workers: IWorkerHost = createWebWorkerHost(readWebWorkerGlobals(), { exitEventName: 'close' }),
   dns: IDnsResolver = createNodeDnsResolver(),
 ): IRuntimeServices {
   const fs: IFileSystem = {

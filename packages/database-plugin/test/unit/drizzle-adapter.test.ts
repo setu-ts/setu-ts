@@ -41,7 +41,20 @@ const OPERATORS: DrizzleOperators = {
   lte: (col, val) => ({ op: 'lte', col, val }),
   inArray: (col, values) => ({ op: 'inArray', col, values }),
   isNull: (col) => ({ op: 'isNull', col }),
-  sql: (strings, ...values) => ({ op: 'sql', text: [...strings], values }),
+  sql: Object.assign(
+    (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      op: 'sql',
+      text: [...strings],
+      values,
+    }),
+    {
+      // The real Drizzle tag carries these; a fake without them would let a
+      // `sql.raw`/`sql.param` call ship untested (the contract-violating-double
+      // class this repository keeps hitting).
+      raw: (text: string) => ({ op: 'raw', text }),
+      param: (value: unknown) => ({ op: 'param', value }),
+    },
+  ),
   asc: (col) => ({ op: 'asc', col }),
   desc: (col) => ({ op: 'desc', col }),
   count: () => ({ op: 'count' }),
@@ -203,11 +216,19 @@ describe('DrizzleAdapter', () => {
       );
     });
 
-    it('preserves raw execute parameters and row results', async () => {
+    it('passes an SQLWrapper to execute and returns its rows', async () => {
       await adapter.connect();
       expect(await adapter.rawQuery('SELECT ?', [1])).toEqual([]);
       const call = fakeDb.recordedCalls.find((entry) => entry.action === 'execute');
-      expect(call?.args.values).toEqual({ sql: 'SELECT ?', params: [1] });
+      const passed = call?.args.values as { getSQL?: unknown };
+      expect(typeof passed.getSQL).toBe('function');
+    });
+
+    it('refuses a statement whose placeholders disagree with the parameters', async () => {
+      await adapter.connect();
+      await expect(adapter.rawQuery('SELECT ?, ?', [1])).rejects.toThrow(
+        "Raw query has 2 '?' placeholder(s) but received 1 parameter(s)",
+      );
     });
   });
 

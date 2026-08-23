@@ -20,6 +20,7 @@ import type {
 } from '@setu-ts/common';
 import { isWorkerReadySignal, isWorkerTaskReply } from '@setu-ts/common';
 import {
+  WorkerExitError,
   WorkerPoolUnavailableError,
   WorkerQueueFullError,
   WorkerTaskError,
@@ -67,6 +68,22 @@ interface WorkerSlot {
   readonly handle: IWorkerHandle;
   ready: boolean;
   task: Task | null;
+  /**
+   * Set before the pool asks this worker to stop, so its exit is recognized as
+   * the answer to that request rather than as a crash. Bun emits its `'close'`
+   * event after a host-requested `terminate()` too (measured), so an exit
+   * handler that trusted every exit would act twice on one worker.
+   *
+   * Measured honestly: removing this flag changes NO observable behaviour
+   * today, because `shutdown()` drains `pending` before it terminates anything
+   * and `onTimeout` nulls the slot's task first — so the exit that follows
+   * finds nothing left to settle. What it does is make that a LOCAL invariant
+   * instead of one spread across two other methods: with the flag gone and
+   * `shutdown()`'s drain moved after its `terminate()` calls (probed), two
+   * queued tasks reject with `WorkerExitError` instead of the shutdown error,
+   * because each not-yet-ready slot's exit takes the startup-failure branch.
+   */
+  terminating: boolean;
 }
 
 /**
@@ -175,6 +192,9 @@ export class TaskPool {
       );
     }
     this.syncMetrics();
+    for (const slot of slots) {
+      slot.terminating = true;
+    }
     await Promise.all(slots.map((slot) => slot.handle.terminate()));
   }
 
@@ -216,9 +236,14 @@ export class TaskPool {
 
   private spawnSlot(): void {
     const handle = this.host.spawn(this.config.specifier);
-    const slot: WorkerSlot = { handle, ready: false, task: null };
+    const slot: WorkerSlot = { handle, ready: false, task: null, terminating: false };
     handle.onMessage((message) => this.onMessage(slot, message));
     handle.onError((error) => this.onWorkerError(slot, error));
+    // Optional: absent on hosts whose runtime reports nothing when a thread
+    // ends (Deno's web `Worker`). Where it IS present, a worker that stops
+    // without erroring settles its task instead of leaving it pending until the
+    // timeout — which `taskTimeoutMs: 0` disables entirely (X8-7).
+    handle.onExit?.((code) => this.onWorkerExit(slot, code));
     this.slots.push(slot);
   }
 
@@ -315,6 +340,44 @@ export class TaskPool {
   }
 
   /**
+   * The worker's thread ended. Disposition mirrors a crash — drop the slot,
+   * fail whatever it was running, re-pump — because from the pool's side the
+   * two are the same event: work was handed to a thread that no longer exists.
+   *
+   * An exit the pool ASKED for is ignored: `shutdown()` and `onTimeout` have
+   * already settled that slot's task and removed it, so acting again would
+   * either double-settle or, on a slot that never became ready, reject an
+   * unrelated queued task.
+   */
+  private onWorkerExit(slot: WorkerSlot, code: number | null): void {
+    // `dropSlot` returning false means another handler already disposed of this
+    // slot, so its death is accounted for. That is the ordinary crash sequence,
+    // not an edge case: Node emits `'error'` and THEN `'exit'` for a worker
+    // that dies from an uncaught exception, and Bun's `'close'` follows its
+    // error the same way. Without this, the startup-failure branch below ran
+    // twice for one crash and rejected a queued task that had never been
+    // dispatched anywhere.
+    if (slot.terminating || !this.dropSlot(slot)) {
+      return;
+    }
+    const task = slot.task;
+    if (task !== null) {
+      slot.task = null;
+      this.rejectTask(task, new WorkerExitError(this.config.specifier, code), 'crash');
+    } else if (!slot.ready) {
+      // A worker that died before signalling ready cannot load its module, so
+      // the oldest waiting task can never run — fail it rather than respawning
+      // into the same failure forever (the `onWorkerError` rule).
+      const waiting = this.pending.shift();
+      if (waiting !== undefined) {
+        this.rejectTask(waiting, new WorkerExitError(this.config.specifier, code), 'crash');
+      }
+    }
+    this.pump();
+    this.syncMetrics();
+  }
+
+  /**
    * The task timeout fired. A task still queued is removed from the pending
    * queue; a task in flight has its worker terminated and replaced (§3.6).
    */
@@ -330,6 +393,7 @@ export class TaskPool {
       if (slot !== undefined) {
         slot.task = null;
         this.dropSlot(slot);
+        slot.terminating = true;
         void slot.handle.terminate();
       }
     }
@@ -392,10 +456,20 @@ export class TaskPool {
     }
   }
 
-  private dropSlot(slot: WorkerSlot): void {
+  /**
+   * Removes a slot from the pool.
+   *
+   * @param slot - The slot to remove
+   * @returns `true` when the pool still owned it, `false` when it had already
+   * been dropped — which is how {@linkcode onWorkerExit} recognizes a death
+   * another handler has already accounted for.
+   */
+  private dropSlot(slot: WorkerSlot): boolean {
     const index = this.slots.indexOf(slot);
-    if (index !== -1) {
-      this.slots.splice(index, 1);
+    if (index === -1) {
+      return false;
     }
+    this.slots.splice(index, 1);
+    return true;
   }
 }

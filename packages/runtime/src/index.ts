@@ -45,7 +45,11 @@ export type { DenoDnsHost, DenoSrvRecord } from './adapters/deno/deno-dns-resolv
 
 // Worker hosts (thread spawning behind IRuntimeServices.workers)
 export { createWebWorkerHost } from './adapters/shared/web-worker-host.ts';
-export type { WebWorkerGlobals, WebWorkerLike } from './adapters/shared/web-worker-host.ts';
+export type {
+  WebWorkerGlobals,
+  WebWorkerHostOptions,
+  WebWorkerLike,
+} from './adapters/shared/web-worker-host.ts';
 
 export { createNodeWorkerHost } from './adapters/node/node-worker-host.ts';
 export type { NodeWorkerLike, NodeWorkerModules } from './adapters/node/node-worker-host.ts';

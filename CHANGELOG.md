@@ -47,6 +47,54 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`IStorage.put` takes object metadata** (M70k, X8-6). `put(path, data, options?)` accepts a new
+  `PutObjectOptions` carrying `contentType` and `metadata`. Optional, so every existing two-argument
+  call is unchanged. Without it every stored object was `application/octet-stream`, so a presigned
+  URL — the entire point of the feature that produces one — downloaded the object instead of
+  rendering it. S3, GCS, Azure Blob and Cloudflare R2 each record both on the object in their own
+  spelling; the memory and local providers accept and do NOT persist them, documented per provider,
+  because neither backend has anything that could read an attribute back.
+- **`ProcessOptions.onFailed`** (M70k, X8-4). Invoked once when a job has exhausted its attempts,
+  immediately before it is dead-lettered — the first programmatic notice that work was permanently
+  abandoned. `IQueue` has no `getJob` and no dead-letter accessor, so before this the only way to
+  find a dead job was to open a Redis client. A callback that throws or rejects is reported and
+  swallowed; the dead-letter still happens.
+- **Queue metrics** (M70k, X8-4). With `@setu-ts/metrics-plugin` registered, the queue publishes
+  `queue_jobs_total{name,outcome}` where `outcome` is `completed`, `retried` or `dead_lettered`.
+  Absent the metrics capability no collector is built and behaviour is unchanged.
+- **Per-name queue depths in the `queue` health payload** (M70k, X8-4). `data.queues` reports
+  `{ ready, processing, dead }` per job name for the memory and Redis adapters — the durable view a
+  per-process counter cannot give after a restart. OMITTED, never reported as zeros, on RabbitMQ and
+  SQS: "this adapter cannot tell you" and "there is nothing there" are different answers.
+- **`QueuePluginOptions.deadLetterTtlMs`** (M70k, X8-4). Bounds how long a dead-lettered job's
+  payload is retained (Redis). Without it the jobs hash grows for the lifetime of the deployment;
+  opt-in, because the retention exists for debugging. Configuring it MOVES a dead job's payload out
+  of `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and only that key and the dead set carry the
+  expiry — the live hash holds every queued job's payload for that name, so expiring it would
+  destroy work that is merely waiting. Retention is a bound, not a deadline: at least the TTL, and
+  at most the TTL past the last dead-letter, because the sweep runs only when one arrives and the
+  shared key carries a single deadline. It errs late deliberately — dropping a payload early would
+  discard the debugging data the option exists to keep. The payload move is ordered before the
+  dead-set insert so a concurrent dead-letter's sweep cannot delete a member whose payload has not
+  been written and strand it beyond every later sweep.
+- **`UploadMiddlewareOptions.maxBodyBytes`** (M70k, X8-3). An explicit ceiling on the request body
+  the upload middleware will parse, default 50 MB.
+- **`IWorkerHandle.onExit?` and `IWorkerHost.reportsExit?`** (M70k, X8-7). An optional worker-exit
+  signal, implemented over `node:worker_threads`' `'exit'` on Node and Bun's non-standard `'close'`,
+  and **omitted on Deno**, whose web `Worker` emits nothing at all when a worker ends itself.
+  Absence means "this runtime cannot tell me a worker died", never "no worker has died".
+- **`WorkerExitError`** (M70k, X8-7), exported from `@setu-ts/worker-pool-plugin` for `instanceof`
+  handling. Distinct from `WorkerTaskError`, which carries an error the worker managed to report.
+- **`QueueDepths`** is exported from `@setu-ts/queue-plugin`: it appears in the public signature of
+  `MemoryQueue.depths` and `RedisQueue.depths`, and a type a consumer can see but cannot name is a
+  defect (the M52c `NormalizedQuery` class).
+
+- **Per-adapter option arms on `DatabasePluginOptions`** (M70j, D7). `MemoryDatabaseOptions`,
+  `PrismaDatabaseOptions` and `DrizzleDatabaseOptions` join the exported `CustomDatabaseOptions`,
+  and `BuiltInDatabaseOptions` becomes the union of the first three, keeping its published name.
+  `PrismaAdapterOptions` and `DrizzleAdapterOptions` narrow `DatabaseAdapterOptions` for their arm.
+  See **Changed** for the compile-time requirement this introduces.
+
 - **A request-scoped error responder seam in `@setu-ts/common`** (M70f).
   `respondWithError(ctx,
   { status, title, detail?, details? })` and the `IErrorResponder` /
@@ -231,6 +279,82 @@ All notable changes to this project are documented here. The format follows
   `application/json` an APQ miss answers `200` with `PersistedQueryNotFound` in the body (the one
   error a client must read and retry); under `application/graphql-response+json` it carries the
   resolver's own status.
+
+- **BREAKING: `StoragePluginOptions` is now a union discriminated on `provider`** (M70k, X8-11). One
+  unknown key used to make the compiler report EVERY property of the literal as
+  `not assignable to type 'never'` while never naming the offending one, because the union's first
+  member was `MemoryProviderOptions = Record<string, never>` — which accepts any object shape while
+  requiring every property to be `never`. Discriminating the union alone did NOT fix the reporting
+  (measured); removing that member did. **Migration:** `provider` stays optional on the memory arm,
+  so `StoragePlugin()` and `StoragePlugin({ provider: 'memory' })` are unchanged. Every other arm
+  now requires its own `options` and its required fields — `bucket` for `'s3'`/`'b2'`/`'gcs'`,
+  `containerName` for `'azure'` — which were previously runtime failures. `MemoryProviderOptions` is
+  removed; the memory arm takes no `options`, so drop `options: {}` if you passed it.
+- **`IAwsS3Client` is renamed `IS3Backend`, with the old name kept as a deprecated alias** (M70k,
+  X8-10). The old name promised something it never was: `@aws-sdk/client-s3`'s surface is
+  `send(command)`, so injecting a real `S3Client` was refused with
+  `Injected S3 client is missing required methods`. What the type declares is the backend surface
+  this package's own adapter PRODUCES. **Migration:** rename the import; the shape is unchanged, and
+  the alias keeps existing code compiling in the meantime (AI_GUIDELINES §9.2 — the replacement is a
+  working, identical shape, so a rename does not need to be a compile error). There is still no
+  supported way to configure the underlying SDK client.
+- **BREAKING: `WebWorkerLike` requires `addEventListener`** (M70k, X8-7). A real web `Worker` is an
+  `EventTarget`, and the worker-exit signal needs it. **Migration:** an injected fake worker must
+  add the method; a real `Worker` already satisfies it.
+- **Upload size refusals answer `413` rather than `400`** (M70k, X8-3). A body over the parse bound
+  and a file over `maxSize` are now `413 Request entity too large` / `413 File too large`; a
+  malformed body, a disallowed MIME type and too many files remain `400`. Telling a client its
+  request was malformed when it was merely large sent it to the wrong fix.
+- **`LocalStorageProvider.connect()` proves its root is writable and refuses to start otherwise**
+  (M70k, X8-9). It also became a rejection rather than a synchronous throw, so a caller using
+  `.catch()` on this `Promise`-typed method reaches it. **Migration:** none for a working
+  configuration; a root the process cannot write now fails at startup naming the cause — and, on
+  Deno, naming `--allow-write` — instead of failing every upload while `/health` reported `up`.
+
+- **BREAKING (types only): a `'prisma'` or `'drizzle'` registration must now name the options its
+  adapter cannot run without** (M70j, D7). `DatabasePluginOptions` is a union discriminated on
+  `type`, and its built-in arm made every adapter-specific field optional on a nested bag, so
+  omitting one was a runtime throw at `connect()` rather than a compile error — unlike the
+  `'custom'` arm, which has required `adapter` since M52c. `type: 'prisma'` now requires
+  `options.prismaClient` and `type: 'drizzle'` requires both `options.drizzleInstance` and
+  `options.drizzleTables`. **Only a registration that already failed at startup stops compiling**,
+  and the runtime guards are unchanged, so a JavaScript caller sees exactly what it saw before.
+
+  ```typescript
+  // Before — compiled, then threw at app.start()
+  DatabasePlugin({ type: 'prisma' });
+  DatabasePlugin({ type: 'drizzle', options: { drizzleTables: { User: users } } });
+
+  // After
+  DatabasePlugin({ type: 'prisma', options: { prismaClient } });
+  DatabasePlugin({
+    type: 'drizzle',
+    options: {
+      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleTables: { User: users },
+    },
+  });
+  ```
+
+- **BREAKING (behaviour): the Memory adapter refuses an unknown `select` or `orderBy` column**
+  (M70j, X12-5). The **default** adapter used to accept both silently — a projection quietly lost
+  the field and a sort quietly returned rows in insertion order — while Prisma and Drizzle answered
+  `500` for the identical call, so a rule proved in development became a production failure. A field
+  that **no stored row carries** is now refused with the entity, the clause and the observed column
+  list, matching Drizzle's message. A field present on at least one row counts as known, and an
+  entity holding no rows accepts anything. `where` and `filter` are deliberately unchanged: with no
+  schema this adapter cannot tell an unknown column from one absent everywhere, and matching nothing
+  is a defensible answer. If a projection over a column that has never been written is intentional,
+  write the column (even as `null`) on one row, or list only fields the store has seen. Uniqueness
+  and column types remain unenforced and cannot be enforced by a schema-less store — the package
+  README now states that plainly.
+
+- **The Drizzle table registry validates `id` lazily** (M70j, X4-9). `connect()` refused **every**
+  registered table without an `id` column, so a composite-key join or per-tenant table registered
+  only for the typed query builder made the whole registry unusable. The registry now accepts any
+  table definition; a repository for an `id`-less table is refused by name at `getRepository()`,
+  where `IRepository`'s single-key contract actually applies. Strictly widening — no configuration
+  that worked before changes.
 
 - **Error bodies now answer in the application's configured format (X4-8, C3)** (M70f). Every
   short-circuiting site — the kernel's 404/400/503/500 terminals, `createUploadMiddleware`'s
@@ -451,6 +575,60 @@ All notable changes to this project are documented here. The format follows
   produced (`404` for a path with no WebSocket route) rather than a fixed `400`.
 
 ### Fixed
+
+- **An upload's `maxSize` did not bound what the middleware parsed** (M70k, X8-3). The buffering
+  bound was `Math.max(maxSize * 2, 50 MB)` under a comment reading "cap at 50 MB", which made 50 MB
+  a **floor**: a 1 KB per-file limit multipart-parsed a 40 MB body before rejecting it, and a 100 MB
+  limit raised the bound to 200 MB and delivered a 60 MB body to the handler unchecked. It is now
+  `min(maxSize * 2 + framing, maxBodyBytes)` — a real cap. Note what this does and does not do: it
+  bounds the PARSE and the per-part copies, not the initial read, because the HTTP adapter buffers
+  the whole body before any middleware runs and `IRequest` exposes no body stream.
+- **`taskTimeoutMs: 0` leaked a pool slot permanently** (M70k, X8-7). A worker that ended its own
+  thread raised no host event, so the task timeout was the only thing that ever settled its task —
+  and `0`, a documented and reasonable choice for long CPU-bound work, removed it. On a `size: 1`
+  pool one self-terminated worker wedged the pool forever. The pool now settles the task with
+  `WorkerExitError` and frees the slot wherever the runtime reports the exit (Node, Bun). On Deno it
+  cannot, so the pool reports `exitDetection: false` in its health payload and warns once at
+  `register()` rather than leaving the developer to discover the wedge.
+- **A dead-lettered job was invisible through every surface the framework offered** (M70k, X8-4).
+  See the three additions above; together they answer "this job is being abandoned", "how often is
+  this happening", and "how many are sitting there right now".
+- **The `local` storage provider could not work in a scaffolded project** (M70k, X8-9). The
+  generated `start` task requests `--allow-read` and not `--allow-write`, so every upload failed
+  while `/health` reported `storage: up` — the M70c liveness probe calls `stat`, a READ, which the
+  granted permission satisfies. Three defects had to be understood before the one-flag cause was
+  visible. The provider now fails at startup naming the flag, its health probe reflects writability,
+  and `setu add storage` prints the note.
+- **The storage README's Uploads example was broken three ways** (M70k, X8-8) — `maxFileSize` (the
+  option is `maxSize`, and the compiler's suggestion `maxFiles` means something else),
+  `file.contentType` (the field is `mimeType`), and a `getUploadedFile(ctx, 'avatar')` the
+  middleware's own fieldname filter guaranteed would return `undefined`. The same example sat in
+  `PUBLIC_API.md`. None of it was catchable because the doc-fence gate covered ten `docs/` guides
+  and no package README; it now covers the three READMEs this milestone rewrote.
+- **The queue README documented two options that do not exist** (M70k) — `region` and `queues`. SQS
+  configuration lives under `sqs`, and RabbitMQ derives its queue names from `prefix`. Found by the
+  new README fence gate.
+
+- **`IDatabaseService.query()` was inoperative on the Drizzle adapter** (M70j, X12-2). The adapter
+  called `execute({ sql, params })`, a shape no Drizzle driver accepts, so every raw query failed
+  with the internal `TypeError: query.getSQL is not a function` — a method on the capability's own
+  interface with no working path on that adapter at all. It now builds a real Drizzle `SQL` from the
+  statement and its parameters: the text is emitted verbatim for an ascending-placeholder statement
+  (`$1…` on PostgreSQL, `?` on MySQL and SQLite) and every value is bound, never interpolated. A
+  placeholder count that disagrees with `params`, a gap in the `$N` sequence, or both placeholder
+  styles in one statement is refused before the driver is reached, because a mis-bound parameter is
+  silent. On PostgreSQL a jsonb `?`/`?|`/`?&` operator is indistinguishable from a placeholder, so
+  such a statement is refused or fails at the database rather than being mis-bound — write it with
+  `$N` placeholders. The defect survived because the unit fake accepted any argument; the proof is
+  now the real Drizzle SQL generator, and that fake refuses a non-`SQLWrapper` exactly as a driver
+  does.
+- **`logQueries: true` silently dropped a portable `count` filter** (M70j). The service's logging
+  wrapper declared `count(where)` and called `ds.count(where)`, discarding the second parameter
+  `IDataSource.count(where, filter?)` defines — so `repo.count({ filter })` answered a different
+  number with query logging on than with it off. Every existing test built the service without
+  logging, which is why it survived. The wrapper now spreads the data source it wraps before
+  overriding the six required methods, so a member the contract does not require cannot be dropped
+  the same way again.
 
 - **X10-3 — a service-discovery indicator that never reached its backend reported `up`** (M70c). See
   Changed.

@@ -2823,14 +2823,248 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   run fails with `RequestTimeoutError`, contradicting the doc's "repeated runs never share state"),
   so the container is restarted between runs. Both suites now pass under the project's own
   permission model — 7 steps, verified in this worktree.) — complete (PR #175)
-- **Next milestone** — **M70j** (database adapter correctness). M70i is complete: `grpc-plugin` was
-  REPAIRED with an explicit withdrawal of the native-gRPC claim (`basePath` now defaults to the
-  root; native `application/grpc` requests are refused with a Trailers-Only `UNIMPLEMENTED`; Connect
-  and gRPC-Web remain fully supported), and both packages' documented-API-does-not-exist rows are
-  closed — registration snippets resolve capabilities only after `app.start()` and use
-  `createApplication({ plugins })`. M70j closes `IDatabaseService.query()`'s broken Drizzle shape
-  (X12-2) and the Memory adapter that silently accepts invalid writes (X12-5), plus X4-9, X12-4,
-  X12-6, D7.
+- **Milestone 70j** (`packages/database-plugin` — database adapter correctness) — complete (PR
+  #177). Six register rows with one shape: an adapter reporting success while doing something other
+  than what its contract says. **X12-2** `IDatabaseService.query()` could not work at all on the
+  Drizzle adapter, which called `execute({ sql, params })` — a shape no Drizzle driver accepts,
+  failing with the internal `TypeError: query.getSQL is not a function`. The fix is a **binder**,
+  not a call-shape swap: Prisma (`$queryRawUnsafe(sql, ...params)`) and D1
+  (`prepare(sql).bind(...)`) both forward the statement **verbatim** and bind natively, so that is
+  the contract, and passing the bare string — which the driver DOES accept, probed — would silently
+  drop `params`, which is worse than the current failure. A pure internal scanner splits the
+  statement at its placeholders, skipping string literals, quoted identifiers, `--` and nested
+  `/* */` comments and PostgreSQL `$tag$` bodies so a `?` inside `'text?'` is never one, and
+  interleaves `sql.param(value)`. Measured against the real generator on three dialects: Drizzle
+  numbers `Param` chunks in encounter order and renders them dialect-natively, so an
+  ascending-placeholder statement round-trips **byte-identically**. Any disagreement between
+  statement and parameter list — wrong count, a gap in the `$N` sequence, both styles at once — is
+  refused before the driver is reached, because a mis-bound parameter is silent.
+
+  **One boundary was measured rather than assumed, and the measurement reversed the obvious move.**
+  A `sqlite-proxy` instance has no `execute` but does have `all()`, which looked like a free lift of
+  the documented "only `query()` rejects" limitation. It is not: `all()` on a raw statement returns
+  **positional** rows (`[["a", 1]]`), because the proxy protocol returns array rows and Drizzle has
+  no field map for a statement it did not build, while `query<T>(): Promise<T[]>` promises objects —
+  as Prisma and D1 return. Routing through `all()` would have traded a loud failure for a silent
+  shape divergence, the exact defect class this milestone closes. The refusal stays, and README +
+  `PUBLIC_API.md` now state the reason so it is not re-opened as an oversight.
+
+  **X12-5** the default Memory adapter is closed for the two divergences the register calls worth
+  fixing and DOCUMENTED for the two it does not. An unknown `select`/`orderBy` field is refused by
+  name against the entity's **observed** column set — the union of keys over the rows the store
+  holds — while `where`/`filter` are deliberately left alone: with no schema this adapter cannot
+  distinguish an unknown column from one absent on every row, and matching nothing is a defensible
+  answer, whereas ordering by a column no row has returns rows arbitrarily and projecting one
+  silently changes the response shape. An entity holding **no rows** skips the check entirely (there
+  is nothing to observe and nothing to return). Uniqueness and column types get a stated guarantee
+  table instead, since no schema-less store can enforce them. **X4-9** needed no new code path:
+  `createDrizzleDataSourceInner` already refuses an `id`-less table by name, so the fix is deleting
+  the eager check from `connect()` — the registry was enforcing the REPOSITORY's precondition on
+  tables only the typed query builder reads, which made it all-or-nothing.
+
+  **D7** makes each built-in arm name what its adapter cannot run without, the guarantee the
+  `'custom'` arm has had since M52c. **Prisma is included with Drizzle**, because M66 made
+  `prismaClient` required at runtime and it is the identical defect — and that is what turned six
+  stale doc sites from silent lies into checked ones (**X12-4**), since
+  `DatabasePlugin({ type: 'prisma' })` and `options: { url }` appear in the root README,
+  `PUBLIC_API.md`, `ROADMAP.md`, a starter README and `AI_GUIDELINES.md` §12.2 while the adapter has
+  thrown on all of them since M66; the published Prisma snippet was also the **v6** constructor,
+  which does not compile against a real v7 client, so the three undocumented prerequisites (driver
+  adapter, `prisma.config.ts`, the adapter's `schema` option) are now a named setup section.
+  `packages/starters` needed no `src` change — `RestStarterOptions.database` is a pass-through
+  `DatabasePluginOptions` — and `BuiltInDatabaseOptions` keeps its published name as the union of
+  the three new arms, so an existing annotation carrying a memory configuration still compiles.
+  **X12-6** `transactionTimeout` is documented in both the README options table and `PUBLIC_API.md`.
+
+  **Two defects outside the register.** One was found by reading the source: with `logQueries: true`
+  the service's logging wrapper declared `count(where)` and called `ds.count(where)`, dropping the
+  `filter` argument `IDataSource.count(where, filter?)` defines — so `repo.count({ filter })`
+  answered a different number with logging on than off, and every existing test built the service
+  without logging. The other was **introduced by this milestone and caught by its own test**: the
+  new column refusal threw SYNCHRONOUSLY from a method typed `Promise<…>`, bypassing any caller
+  using `.catch()` — the M52b/M52c class — so the check now returns its error and the adapter
+  rejects with it. The X12-2 negative control reproduced the register's message verbatim across five
+  tests, and the `count`-filter control failed both new steps.
+- **Milestone 70k** (`storage-plugin` + `queue-plugin` + `worker-pool-plugin` + `common` +
+  `runtime` + `cli` + `cloudflare-plugin` — storage, queue and worker operability). Eight X8 rows
+  with one shape: the capability does the work and then cannot tell an operator what it did. **The
+  package list is corrected from the ROADMAP's three** (the M70b/M70g/M70h precedent): `common`,
+  `runtime` and `cli` are needed by rows the row itself assigns, and `cloudflare-plugin` joined at
+  implementation time because `R2Storage` is the other in-repo `IStorage` implementor.
+
+  **X8-7 is the one the ROADMAP deferred here from M45b, and its design was decided by probing four
+  runtimes rather than by reading docs.** A worker that ends its own thread raises no error, so the
+  task timeout was the ONLY thing that ever settled its task — and `taskTimeoutMs: 0`, a documented
+  and reasonable choice for long CPU-bound work, removed it, wedging a `size: 1` pool forever.
+  Measured: **Node** reports `'exit'` (also under Deno's `node:` compat layer); **Bun** reports its
+  non-standard `'close'` — and `self.close` is `undefined` there, so an earlier probe that appeared
+  to show a Bun self-close was actually an uncaught `TypeError`; **Deno emits NOTHING** — not
+  `close`, `exit`, `error` or `messageerror` — and a later `postMessage` still resolves, so a
+  self-terminated Deno worker is undetectable. Hence optional `IWorkerHandle.onExit?` plus
+  `IWorkerHost.reportsExit?`, **omitted rather than shipped as a silent no-op** on Deno (the M70h
+  `onSignal` precedent): absence means "this runtime cannot tell me a worker died", never "no worker
+  has died". `TaskPool` settles with a new `WorkerExitError`, the health payload carries
+  `exitDetection`, and `register()` warns once on the undetectable pairing — a warning rather than a
+  throw, because refusing `0` would remove a released capability to fix an observability gap. **Deno
+  CAN spawn through `node:worker_threads`** (probed, including a `.ts` module, with both channels
+  present so `resolveTaskPort`'s web-first preference still holds), which would give it real
+  detection; that is recorded in the plan as an evidenced option rather than taken, since it changes
+  the primary runtime's worker implementation wholesale.
+
+  **Two of the plan's own claims did not survive their negative controls, and both are corrected in
+  the plan rather than left standing.** The `terminating` guard was planned as load-bearing against
+  a live defect; removing it changes NO observable behaviour today, because `shutdown()` drains
+  `pending` before it terminates anything and `onTimeout` nulls the slot's task first. What it
+  actually buys is a LOCAL invariant instead of one spread across two other methods — probed, with
+  the guard gone AND `shutdown()`'s drain moved after its `terminate()` calls, two queued tasks
+  reject with `WorkerExitError` instead of the shutdown error. And X8-11's fix is NOT the
+  discriminated union the register names: discriminating alone still reported `bucket` and `region`
+  as `not assignable to type 'never'`, because the compiler keeps every arm's `options` type as a
+  candidate for the nested literal once the direct match fails. Removing the memory arm's
+  `Record<string, never>` is what yields exactly one error naming the offending key.
+
+  **X8-3's suggested fix was partly unimplementable and is stated rather than faked.**
+  `mapWebRequestToFrameworkRequest` calls `arrayBuffer()` on every request and `IRequest` exposes no
+  body stream, so no middleware in this package can decline to read. What IS in its hands was
+  inverted: `Math.max(maxSize * 2, 50 MB)` under a comment reading "cap at 50 MB" made 50 MB a
+  FLOOR, so a 100 MB per-file limit raised the bound to 200 MB. It is now a real `Math.min` cap with
+  an explicit `maxBodyBytes`, both size refusals answer **413**, and the README and `PUBLIC_API.md`
+  say the bound covers parsing and not the read.
+
+  **X8-4** ships three surfaces answering three different questions: `ProcessOptions.onFailed`
+  (once, on the final attempt, before the dead-letter, guarded so a throwing callback cannot lose
+  the job), `queue_jobs_total{name,outcome}` behind an OPTIONAL `CAPABILITIES.METRICS` (the M45b
+  shape), and per-name `{ ready, processing, dead }` depths in the health payload — the durable view
+  a per-process counter cannot give after a restart, implemented where the count is one cheap call
+  and **omitted, never zeroed**, on RabbitMQ and SQS. Proven through a REAL kernel application with
+  the real `MetricsPlugin` and `HealthPlugin`, not a recording double.
+
+  **X8-9 became a startup failure rather than the documentation the register settled for**, because
+  M70h landed the `setu add` the register said would be the right home: `LocalStorageProvider`
+  proves its root writable at `connect()` and names `--allow-write` on Deno, its health probe stops
+  reporting `up` for a root it can only READ, and `setu add storage` prints the note. The flag is
+  NOT added to `denoPermissions` automatically — only the `local` provider needs it, and granting
+  filesystem write to every project installing an S3-backed capability would trade a security
+  regression for an ergonomics one.
+
+  **X8-8's recurrence gate found two more doc defects than the row named.** The doc-fence gate
+  covered ten `docs/` guides and no package README, which is why the storage Uploads example shipped
+  broken three ways at once; extending it to the three READMEs this milestone rewrote immediately
+  failed on the queue README's `queues: { default: 'tasks' }` — an option that does not exist — and
+  its options table listed `region` and `queues`, neither of which is in `QueuePluginOptions`. The
+  gate reproduces X8-8's exact compiler error (`Did you mean to write 'maxFiles'?`) when the defect
+  is reintroduced.
+
+  Contract-violating doubles were the recurring obstacle, as ever: the GCS fake spoke a two-argument
+  `save` the real SDK does not have, the local-fs fake reported ENOENT for every directory, the
+  worker fake materialized `onExit` as `undefined` on a handle that must OMIT it (fixed with a
+  `declare` field), and `Object.create` could not stand in for a client missing a command because
+  the fake's methods read private fields. Four negative controls were each observed failing and
+  reverted; a fifth PASSED and is what produced the `terminating` correction above.
+
+  **Verification and code review then found five defects that all four gates, both publish gates and
+  the per-file bar had passed, and the two worst were introduced by this milestone.** (1) The X8-7
+  exit handler double-disposed a crash: Node emits `'error'` and THEN `'exit'` for a worker that
+  dies from an uncaught exception — a task module that throws at import, the commonest worker
+  failure — and Bun's `'close'` follows its error the same way, so the handler re-ran the
+  startup-failure branch `onWorkerError` had just run and ONE crashing worker rejected TWO queued
+  tasks: the one it was starting for, and a bystander never dispatched anywhere, whose rejection
+  named an exit code and so pointed at the wrong cause. Every pre-existing exit test emitted an exit
+  in ISOLATION, which no runtime does after an error. `dropSlot` now reports whether the pool still
+  owned the slot. (2) `deadLetterTtlMs` armed its `EXPIRE` on `queue:<name>:jobs` — the hash holding
+  the payload of EVERY job for that name, not only dead ones. Measured against a real Redis 7: a
+  key's TTL SURVIVES later `HSET`s, so every job enqueued after the first dead-letter inherited the
+  countdown, and `reserve` moves a job whose payload is missing into the processing set and returns
+  nothing — silent, permanent loss of queued work, caused by an option whose purpose is bounding
+  DEAD payloads. The payload is now MOVED into `queue:<name>:dead:jobs` and only that key and the
+  dead set are expired; the test that shipped asserted the defect by name ("TTL to BOTH the dead set
+  and the jobs hash"). (3) The X8-9 write probe used a FIXED filename, so two replicas sharing one
+  root — a ReadWriteMany volume, the ordinary deployment for this provider — raced, and whichever
+  `rm` ran second failed with ENOENT and refused to boot a process whose root was perfectly
+  writable; the name is now unique per connect and cleanup is best-effort, since the WRITE is what
+  proves writability. (4) Depths were collected BEFORE the reachability check, so an outage cost one
+  failing round trip per registered name on every probe interval, each one logged, saying nothing
+  `reachable: false` did not. (5) `IAwsS3Client` was REMOVED rather than deprecated, though the
+  replacement is an identical working shape — §9.2, the M14d precedent — so it is restored as a
+  deprecated alias. Four plan claims were also corrected against the code rather than left stale:
+  the depth member is `depths?`/`processing`, not the planned `stats?`/`delayed`; it does NOT ride
+  `createCachedProbe` (that helper caches a `Promise<boolean>`, a different key and return type);
+  `queue_jobs_in_flight` was planned and deliberately not shipped (the durable `processing` depth
+  answers the same question cluster-wide); and the plan's type-level `runtime-contracts.test.ts`
+  deliverable was unwritten — now four cases beside M55's `readStream` precedent. The storage
+  barrel's type exports were pinned at compile time for the same reason M56 gives: dropping one left
+  every runtime assertion in that file green — complete (PR #178)
+- **Milestone 70i** (`packages/grpc-plugin` + `packages/graphql-plugin` +
+  `packages/websocket-plugin` — gRPC and GraphQL viability. The ROADMAP deferred an explicit
+  **repair-versus-withdraw** decision for `grpc-plugin` to this milestone; the answer is **REPAIR,
+  with the native-gRPC claim withdrawn**. Measured evidence: 12 of 15 reference-client checks
+  already passed — Connect and gRPC-Web, on both HTTP/1.1 and HTTP/2, for all three RPC kinds — and
+  exactly one wire format failed. That failure is **architectural, not a bug**: native gRPC signals
+  completion in HTTP/2 **trailers**, the fetch `Response` has no trailer mechanism, and M23
+  deliberately moved the framework onto Hono's `fetch` entry, so "run it on Node or Bun" is not a
+  remedy even now that M70e made the package load there. Withdrawing the package outright would have
+  deleted working capability; a trailer-capable serve path is a `packages/runtime` change and a
+  reversal of M23, so it is named as unowned rather than deferred to a letter. **X7-2:** `basePath`
+  now defaults to the **root**, from one `DEFAULT_BASE_PATH` constant replacing two spellings of
+  `'/grpc'`. A gRPC path comes from the fully-qualified method name alone and no native client —
+  grpcurl, grpcui, `grpc-go`, `grpc-java` — has a prefix option, so the old default made the
+  reflection service the README advertises "for grpcurl, grpcui" unreachable by both tools it names.
+  Root mounting is safe for two independent reasons already in source: `dispatchRequest` falls
+  through on a root miss rather than 404-ing, and post-M70a `claims()` at root reports only
+  registered procedure paths, so the kernel consults it before route matching without shadowing an
+  ordinary route. **X7-4:** a native `application/grpc` request is refused with a **Trailers-Only
+  `UNIMPLEMENTED`** (`grpc-status: 12`) before the handler runs — the protocol's own way to report a
+  status without trailers, since it lives in the header block, which is exactly what a `Response`
+  can carry. Detection is **exact-match**, and that is the milestone's sharpest trap:
+  `'application/grpc-web+proto'.startsWith('application/grpc')` is `true`, so a prefix test would
+  have refused gRPC-Web — the format that carries its trailers in the body and is the standard
+  browser answer — and a negative control pins it. The README's "the plugin correctly forwards
+  `Response.trailers` when available" was **deleted**: `grep -rni trailer` over the plugin and
+  runtime sources returns nothing, and `Response.trailers` is in no runtime's fetch implementation.
+  **X7-1 / X6-2:** both packages' only documented registration APIs did not work. gRPC's README and
+  `PUBLIC_API.md` resolved `CAPABILITIES.GRPC` before `app.start()`, and plugins register during
+  `start()`, so the documented sequence was a hard startup crash; GraphQL's README and
+  `PUBLIC_API.md` used `new Application()` / `app.use()`, and `@setu-ts/kernel` exports one value,
+  `createApplication`. Both corrected, plus a one-sentence `createApplication` note in
+  `PUBLIC_API.md` — the cheap generalization, since X7-1 and X6-5 are the same mistake in two
+  packages and fixing only the READMEs guarantees a third. **X6-3 is where the plan did not survive
+  contact.** It named two widenings — optional `toAST`, `parse` source to `unknown` — and measured
+  against real `graphql@16.14.2` under `strict` + `exactOptionalPropertyTypes` the facades diverged
+  in about **fifteen** members (`Maybe<T>` getters, `ReadonlyArray` plurals, a string-union
+  `locations` rather than `number[]`, nullable `variableValues`), so the two named widenings were
+  necessary and nowhere near sufficient. The committed **static** type fixture is what makes this
+  stick: the package's five existing real-`graphql` tests all use a dynamic `import()` inside a test
+  body, so `deno check` never compared the two type worlds, which is precisely why it shipped.
+  **X6-4:** `FieldResolver` is generic with `unknown` defaults (existing all-`unknown` resolvers
+  stay assignable) and `DefaultGraphqlContext` is typed against `common`, so a resolver no longer
+  needs hand-written casts in a codebase whose guidelines forbid `any`. **X6-6:** `requestContext`
+  is deliberately **not** synthesized over WebSocket. The register's stronger suggestion would hand
+  resolvers a context that is dead by the time they run — M46 records the runtime closing the native
+  request once the handshake response returns — so it is typed optional and absent over WS, with
+  `connection.headers`/`.query` documented as where the upgrade request's data lives; the
+  `Record<string, unknown>` escape that had let an undeclared `connection` member exist is gone.
+  **X6-7:** APQ refusals now follow the documented media-type watershed from one owner, answering
+  `200` under `application/json` — `PUBLIC_API.md` states the rule as "exactly three" exceptions and
+  APQ was a fourth, while the rule's own rationale describes the APQ miss exactly, since
+  `PersistedQueryNotFound` is the one error a client must read and retry. **X6-5:** the websocket
+  README leads with the plugin-based form and names `setu generate plugin`; the `ws-route` schematic
+  was declined with reason, so `cli` was dropped from the package list while `websocket-plugin` was
+  added — the M70b/M70h list-correction precedent. The recurrence gate is two layers, because one
+  alone would be wrong: `test/readme-fence-compiler.test.ts` compiles every copyable fence in the
+  two owned READMEs with pinned counts, and `docs-gate` rejects the nonexistent kernel API repo-wide
+  — scoped to package READMEs and `PUBLIC_API.md` rather than a naive grep, since
+  `docs/migration-{fastify,nestjs}.md` legitimately show `app.use(` as foreign-framework code the
+  reader is migrating from. Also recorded: the ROADMAP's claim that X6-4 is a `common` widening did
+  not survive source-checking — both types are plugin-local — so alpha.9 carries one fewer breaking
+  `common` change than stated. `DOC_LINT_BASELINE` 775 → 760) — complete (PR pending)
+- **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
+  `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
+  CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per
+  replica and `distributedLock` does not stop it, because the lock is released ~0.5 ms after the
+  handler while replica timers sit 0.70 s apart, so they never contend (X10-2); generated manifests
+  carry no `prometheus.io/*` annotations, so a vanilla Prometheus discovers **zero** targets
+  (X10-6); and `/metrics` counts its own scrapes and the health probes with no exclusion option
+  (X10-7). Plus X10-4, X10-5, X9-2, X9-5, X9-8.
 
 ## Verification (run before declaring any work done)
 

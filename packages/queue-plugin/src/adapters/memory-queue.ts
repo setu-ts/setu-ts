@@ -6,7 +6,7 @@
  * @module
  */
 
-import type { QueueAdapter } from './queue-adapter.ts';
+import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 
 /**
@@ -71,6 +71,22 @@ export class MemoryQueue implements QueueAdapter {
    */
   isHealthy(): Promise<boolean> {
     return Promise.resolve(true);
+  }
+
+  /**
+   * M70k (X8-4): counts this name's three states. Free for an in-process store,
+   * so there is no reason to omit it.
+   *
+   * @param name - Job name
+   * @returns The depth of each state
+   * @since 0.3.0
+   */
+  depths(name: string): Promise<QueueDepths> {
+    return Promise.resolve({
+      ready: this.#ready.get(name)?.length ?? 0,
+      processing: this.#processing.get(name)?.size ?? 0,
+      dead: this.#dead.get(name)?.length ?? 0,
+    });
   }
 
   // deno-lint-ignore require-await

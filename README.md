@@ -266,7 +266,9 @@ import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
 app.register(ConfigPlugin({ validationSchema: AppConfigSchema }));
 app.register(ValidationPlugin());
-app.register(DatabasePlugin({ type: 'prisma' }));
+// A Prisma v7 client is generated into an application-owned output path and
+// needs a driver adapter, so the application constructs it and injects it.
+app.register(DatabasePlugin({ type: 'prisma', options: { prismaClient } }));
 // Secrets come from the config capability — never process.env (runtime independence)
 app.register(AuthPlugin({ jwt: { secret: config.get('JWT_SECRET') } }));
 app.register(OpenApiPlugin({ title: 'My API', version: '1.0.0' }));

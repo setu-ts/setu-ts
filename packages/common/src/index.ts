@@ -222,7 +222,7 @@ export type {
   RetryPolicy,
   WrapOptions,
 } from './services/resilience.ts';
-export type { IStorage, SignedUrlOptions } from './services/storage.ts';
+export type { IStorage, PutObjectOptions, SignedUrlOptions } from './services/storage.ts';
 export type { IMailer, MailMessage } from './services/mail.ts';
 export type { ChannelSendResult, INotifier, NotificationMessage } from './services/notification.ts';
 export type { FlagContext, IFeatureFlags } from './services/feature-flags.ts';
