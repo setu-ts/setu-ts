@@ -181,6 +181,13 @@ elapsed. It errs late by construction: dropping a payload early would discard ex
 data the option exists to keep. Exact per-payload expiry is not expressible here — Redis has no
 per-member TTL on a sorted set, and the payloads share one hash.
 
+The payload move is issued **before** the dead-set insert, and that order is load-bearing: no two of
+these commands are atomic, and a sweep starts from the dead set, so a member that became visible
+before its payload was written can be swept by a concurrent `deadLetter` — deleting the member and
+stranding the payload where no later sweep can reach it. Writing first means a sweep either misses
+the id, and a later one collects it, or finds both together. Ordering closes that window; it does
+not make the sequence atomic, so a process that dies mid-sequence can still leave a payload behind.
+
 Setting it MOVES a dead job's payload from `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and
 the expiry is applied to that key and the dead set. It is never applied to the live jobs hash: that
 key holds the payload of **every** job for the name, Redis keeps a key's TTL across later writes,
