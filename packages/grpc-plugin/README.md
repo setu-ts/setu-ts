@@ -15,7 +15,8 @@ drain as every other route. No adapter seam is involved: `GrpcService.available`
 - Native gRPC-binary requests (`application/grpc`, `application/grpc+proto`,
   `application/grpc+json`) are refused with a Trailers-Only `UNIMPLEMENTED` response — see
   [Limitations](#limitations)
-- Server reflection (v1, default ON) for grpcurl, grpcui, and other tools
+- Server reflection (v1, default ON), reachable over Connect and gRPC-Web — **not** from stock
+  `grpcurl`/`grpcui`, which speak native `application/grpc` (see Limitations)
 - gRPC Health v1 service bridged to M20 health plugin (default ON)
 - Zero runtime dependencies in the source — Connect-ES is loaded lazily behind a structural facade
 - Module loading works on Node, Deno, Bun, and Cloudflare Workers without modification
@@ -154,7 +155,10 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   worse than refusing it cleanly: clients see an explicit, well-formed `UNIMPLEMENTED` instead of an
   opaque transport error after a successful handshake. **Use Connect or gRPC-Web instead**; both
   work completely, over HTTP/1.1 and HTTP/2, for all four RPC kinds. Every non-JS gRPC client can
-  speak gRPC-Web (grpcurl: `-format connect` or a web client; Envoy: the `grpc_web` filter).
+  speak Connect or gRPC-Web, but **not through `grpcurl`** — its `-format` flag selects the message
+  encoding (`json`/`text`), not the wire protocol, and it implements native gRPC only. Use
+  `buf curl --protocol connect` (or `--protocol grpcweb`), a generated Connect client, or a web
+  client; for an existing native-gRPC fleet, put Envoy's `grpc_web` filter in front.
 
 ## Health Indicator
 

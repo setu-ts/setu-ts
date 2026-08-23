@@ -625,7 +625,7 @@ describe('GraphqlService', () => {
       expect('connection' in ctx).toBe(false);
     });
 
-    it('defaults services to {} when neither requestContext nor connection is supplied', async () => {
+    it('falls back to the plugin registry when neither requestContext nor connection is supplied', async () => {
       let subscribedContext: unknown;
       const runtime = createSubscribeRuntime({ operation: 'query' });
       (runtime as unknown as { execute: (args: unknown) => Promise<unknown> }).execute = (
@@ -639,7 +639,11 @@ describe('GraphqlService', () => {
 
       await service.subscribe({ query: '{ hello }' });
 
-      expect((subscribedContext as { services: unknown }).services).toEqual({});
+      // NOT `{}`: `subscribe()` takes its context optionally, so a server-side
+      // call passing only `params` lands here, and `DefaultGraphqlContext.services`
+      // is typed `IServiceRegistry` so a resolver may call `.get()` without a
+      // cast. Handing out `{}` made that call throw a masked `TypeError`.
+      expect((subscribedContext as { services: unknown }).services).toBe(mockServiceRegistry);
     });
 
     // C4 regression: HTTP path must use requestContext.services, not the plugin registry.

@@ -40,8 +40,11 @@ interface HandlerOptions {
  * retry. Under `application/graphql-response+json` the APQ result's own
  * status is used verbatim, like every other GraphQL result on that media type.
  *
- * Called from all three refusal sites (batch POST, single POST, GET) so the
- * decision has one owner instead of three spellings.
+ * Called from the two refusal sites that can vary — single POST and GET — so
+ * the decision has one owner instead of two spellings. The batch path does NOT
+ * call it: a batch is refused outright under `graphql-response` (see
+ * `BATCHING_NOT_SUPPORTED` above), so every batch element is already on the
+ * `application/json` side of the watershed and answers `200` unconditionally.
  *
  * @param mediaType - The negotiated response media type.
  * @param apqStatus - The status the APQ resolver reported for the refusal.

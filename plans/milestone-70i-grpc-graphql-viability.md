@@ -255,8 +255,11 @@ the recurrence gates and the four committed docs.
 ### 3.9 X6-7 — APQ refusals follow the documented watershed, from one owner
 
 - **Decision:** a single internal helper decides the refusal status from the negotiated media type —
-  `200` under `application/json`, the APQ result's own status under `graphql-response` — and is
-  called from all **three** refusal sites (batch POST, single POST, GET).
+  `200` under `application/json`, the APQ result's own status under `graphql-response`. It is called
+  from the two sites whose status can vary (single POST, GET). **Corrected at implementation time:**
+  this plan first said "all three refusal sites (batch POST, single POST, GET)". The batch path
+  cannot vary — a batch is refused outright under `graphql-response` before any element is resolved
+  — so it carries no per-element status at all rather than calling the helper with a constant.
 - **Why:** the documented rule is stated as an exhaustive invariant and one of the two is wrong; the
   rule's own rationale ("a client predating the newer media type reads a non-200 as a network
   failure and never reads the `errors` array") describes the APQ miss exactly, since
@@ -366,20 +369,20 @@ disabled arm would be "produce a response no client can interpret", which nothin
 
 ## 5. Implementation files
 
-| File                                                         | Purpose                                                                                                                                             |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/grpc-plugin/src/transports/rpc-dispatcher.ts`      | `DEFAULT_BASE_PATH` constant; `dispatchRequest` consults the native-gRPC refusal before invoking a matched handler.                                 |
-| `packages/grpc-plugin/src/transports/grpc-binary-refusal.ts` | **New.** `isNativeGrpcContentType` (exact match, gRPC-Web excluded) and `trailersOnlyUnimplemented`.                                                |
-| `packages/grpc-plugin/src/services/grpc-service.ts`          | Reads `DEFAULT_BASE_PATH` instead of a second `'/grpc'` literal; JSDoc updated for the root default.                                                |
-| `packages/graphql-plugin/src/interfaces/graphql-runtime.ts`  | `toAST?`; `parse(source: unknown)`.                                                                                                                 |
-| `packages/graphql-plugin/src/interfaces/options.ts`          | Generic `FieldResolver`/`SubscriptionResolver`; `DefaultGraphqlContext` typed against `common` and declaring `connection`.                          |
-| `packages/graphql-plugin/src/services/graphql-service.ts`    | Both context builders annotated `DefaultGraphqlContext`; the `Record<string, unknown>` escape removed.                                              |
-| `packages/graphql-plugin/src/http/graphql-handler.ts`        | One `apqRefusalStatus(mediaType, status)` helper called from all three APQ refusal sites.                                                           |
-| `test/fixtures/snippets/fence-engine.ts`                     | `PACKAGE_READMES` source list beside `GUIDES`; `allFences` parameterized over a file list.                                                          |
-| `test/package-readme-fence-compiler.test.ts`                 | The two owned READMEs folded into M70k's engine-based gate (§3.10.1), with pinned counts.                                                           |
-| `test/fixtures/snippets/fence-engine.ts`                     | `GrpcPlugin`/`GraphqlPlugin` as fragment globals + value imports; `ResolverMap`/`GrpcServiceDefinition` type imports; six placeholder declarations. |
-| `test/fixtures/snippets/deno.json`                           | `@setu-ts/grpc-plugin` added to the snippet import map (it was absent).                                                                             |
-| `test/docs-gate.test.ts`                                     | The nonexistent-kernel-API check over package READMEs + `PUBLIC_API.md`.                                                                            |
+| File                                                         | Purpose                                                                                                                                                   |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/grpc-plugin/src/transports/rpc-dispatcher.ts`      | `DEFAULT_BASE_PATH` constant; `dispatchRequest` consults the native-gRPC refusal before invoking a matched handler.                                       |
+| `packages/grpc-plugin/src/transports/grpc-binary-refusal.ts` | **New.** `isNativeGrpcContentType` (exact match, gRPC-Web excluded) and `trailersOnlyUnimplemented`.                                                      |
+| `packages/grpc-plugin/src/services/grpc-service.ts`          | Reads `DEFAULT_BASE_PATH` instead of a second `'/grpc'` literal; JSDoc updated for the root default.                                                      |
+| `packages/graphql-plugin/src/interfaces/graphql-runtime.ts`  | `toAST?`; `parse(source: unknown)`.                                                                                                                       |
+| `packages/graphql-plugin/src/interfaces/options.ts`          | Generic `FieldResolver`/`SubscriptionResolver`; `DefaultGraphqlContext` typed against `common` and declaring `connection`.                                |
+| `packages/graphql-plugin/src/services/graphql-service.ts`    | Both context builders annotated `DefaultGraphqlContext`; the `Record<string, unknown>` escape removed.                                                    |
+| `packages/graphql-plugin/src/http/graphql-handler.ts`        | One `apqRefusalStatus(mediaType, status)` helper called from the two APQ refusal sites whose status varies; the batch path answers `200` unconditionally. |
+| `test/fixtures/snippets/fence-engine.ts`                     | `PACKAGE_READMES` source list beside `GUIDES`; `allFences` parameterized over a file list.                                                                |
+| `test/package-readme-fence-compiler.test.ts`                 | The two owned READMEs folded into M70k's engine-based gate (§3.10.1), with pinned counts.                                                                 |
+| `test/fixtures/snippets/fence-engine.ts`                     | `GrpcPlugin`/`GraphqlPlugin` as fragment globals + value imports; `ResolverMap`/`GrpcServiceDefinition` type imports; six placeholder declarations.       |
+| `test/fixtures/snippets/deno.json`                           | `@setu-ts/grpc-plugin` added to the snippet import map (it was absent).                                                                                   |
+| `test/docs-gate.test.ts`                                     | The nonexistent-kernel-API check over package READMEs + `PUBLIC_API.md`.                                                                                  |
 
 **Docs (deliverables, not incidental):** `packages/grpc-plugin/README.md`,
 `packages/graphql-plugin/README.md`, `packages/websocket-plugin/README.md`, `PUBLIC_API.md` (§gRPC,
