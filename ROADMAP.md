@@ -6889,8 +6889,9 @@ all merge before the release branch is cut.
 
 - **Several fixes are `common` widenings**, so alpha.9 carries multiple breaking changes: the audit
   read surface (X4-7), storage object metadata (X8-6), the no-argument registration seams (D4),
-  resolver typing (X6-4). Each needs its own CHANGELOG entry with migration text — not one lumped
-  release note.
+  ~~resolver typing (X6-4)~~ (M70i closed X6-4 inside `graphql-plugin` — a generic `FieldResolver`
+  and a typed `DefaultGraphqlContext` needed no `common` change). Each needs its own CHANGELOG entry
+  with migration text — not one lumped release note.
 - **`packages/grpc-plugin` may not be salvageable within this milestone.** X7-2 and X7-4 together
   say the default `basePath` is unreachable by any native client and native gRPC-binary works on no
   runtime it can run on. M70i decides repair-versus-withdraw explicitly rather than inheriting it.
@@ -7049,13 +7050,15 @@ Ordered by the sequence they should be worked, not by severity alone.
   branch. **E8 moved here from M70n** (see that row). And **D3 was built rather than deferred**:
   `setu add <plugin>` now exists, so every gate that named a package to install names a command that
   installs it.
-- ⬜ **M70i — gRPC and GraphQL viability** (`grpc-plugin`, `graphql-plugin`). The
+- ✅ **M70i — gRPC and GraphQL viability** (`grpc-plugin`, `graphql-plugin`). The
   repair-versus-withdraw decision named above, plus the documented-API-does-not-exist rows both
   packages carry: every gRPC registration snippet in README and `PUBLIC_API.md` throws because it
   resolves the capability before `app.start()` (X7-1), and `graphql-plugin`'s only documented
   registration API uses a `new Application()` / `app.use()` the kernel does not export (X6-2). Also
   X7-2, X7-4, X6-3 (the code-first arm does not type-check against the real `graphql` package),
-  X6-4, X6-5, X6-6, X6-7.
+  X6-4, X6-5, X6-6, X6-7. Decision recorded: REPAIR with withdraw of the native-gRPC claim —
+  `basePath` defaults to the root, native `application/grpc` requests are refused with a
+  Trailers-Only `UNIMPLEMENTED`, Connect and gRPC-Web remain fully supported.
 - ⬜ **M70j — Database adapter correctness** (`database-plugin`). `IDatabaseService.query()` is
   inoperative on the Drizzle adapter — it calls `execute({ sql, params })`, a shape no Drizzle
   driver accepts (X12-2) — and the **default** Memory adapter silently accepts what both real
@@ -7213,7 +7216,7 @@ branch during a version bump.
 | 70f       | ✅     | error format and error visibility     |
 | 70g       | ✅     | routing collisions                    |
 | 70h       | ✅     | cli scaffold batch                    |
-| 70i       | ⬜     | grpc and graphql viability            |
+| 70i       | ✅     | grpc and graphql viability            |
 | 70j       | ⬜     | database adapter correctness          |
 | 70k       | ⬜     | storage, queue, worker operability    |
 | 70l       | ⬜     | deployment and operations             |

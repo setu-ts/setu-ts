@@ -465,3 +465,39 @@ And the real-client probe §3.3 mandates: `grpcurl -plaintext 127.0.0.1:<port> l
 - **A gRPC service schematic / `protoc-gen-es` wiring** — the register's "Friction, already known"
   note; unowned CLI work.
 - **`setu add` for gRPC's npm peers** — D3, shipped in **M70h**.
+
+## 9. Implementation deviations — plan claims corrected by measurement
+
+Recorded during the fix-finding pass that completed §3.1–§3.11. Each is a plan claim the
+implementation measured false; the code and tests follow the MEASUREMENT.
+
+1. **§3.9, batch × `graphql-response` matrix cell is unreachable for APQ** (measured). Under
+   `application/graphql-response+json` a batch body is refused `400 BATCHING_NOT_SUPPORTED`
+   (graphql-handler.ts:126) BEFORE per-element APQ resolution runs, so no APQ refusal can ever
+   surface in that cell. The test asserts the measured behavior (`BATCHING_NOT_SUPPORTED`, not an
+   APQ status) and this section records why. The other five cells behave exactly as specified.
+2. **§3.9's "three sites" were three sites with two behaviors**: the GET site already used
+   `apqResult.status` verbatim under BOTH media types. The unified `apqRefusalStatus` helper now
+   decides all three; under `application/json` every APQ refusal is `200` (the watershed), which is
+   a behavior change from the two hardcoded `400`s — existing tests asserting `400` were updated.
+3. **§3.7's fixture cannot assign a narrow resolver to a bare-typed map entry** (measured).
+   `TypeResolverMap` names the bare `FieldResolver` (§4 lists it as unchanged), and under
+   `strictFunctionTypes` a narrow resolver does NOT assign to a bare-typed slot. The fixture
+   (`test/types/resolver-typing.ts`) therefore demonstrates the assignment against a generically
+   typed map entry — the shape a real application writes — and separately pins that the legacy
+   all-`unknown` resolver still assigns to the bare type.
+4. **§3.3's Connect/gRPC-Web integration test needed protocol-correct requests** (measured). Connect
+   unary over `application/connect+json` requires a `Connect-Protocol-Version` header (absent →
+   415); gRPC-Web requires 5-byte envelope framing, not raw JSON. The test uses `application/json`
+   for the Connect leg (a real Connect unary content type) and envelope-framed `grpc-web+json` for
+   the gRPC-Web leg, reading the first envelope via its length prefix.
+5. **§3.10(b) scans code fences only**, not whole files: the corrected READMEs deliberately NAME
+   `new Application()` / `app.use()` in prose ("there is no … API"), which is the correction, not
+   the defect. Fence-scoped matching keeps the gate exact while still catching any fence that uses
+   the nonexistent API. Negative control observed: reintroducing `new Application()` into the
+   graphql README's Usage fence fails the gate; reverted, it passes.
+6. **DOC_LINT_BASELINE ratcheted 764 → 760**: the widened facades and new modules replaced four
+   further diagnostics beyond the X6-3 drop recorded in §3.6.
+7. **§3.11 websocket README**: the plugin-based form leads, naming `setu generate plugin <name>`;
+   the post-`start()` form is kept as the standalone-script variant, per the decision. No schematic
+   added.

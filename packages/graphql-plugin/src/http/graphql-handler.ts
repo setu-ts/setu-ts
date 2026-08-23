@@ -28,6 +28,32 @@ interface HandlerOptions {
 }
 
 /**
+ * The HTTP status for an APQ refusal, decided once from the negotiated media
+ * type (X6-7).
+ *
+ * Under `application/json` the refusal answers **`200`**: the documented
+ * watershed keeps exactly three statuses under `application/json` (415, 400
+ * malformed JSON, 405), and the watershed's own rationale — "a client
+ * predating the newer media type reads a non-200 as a network failure and
+ * never reads the `errors` array" — describes the APQ miss precisely, since
+ * `PersistedQueryNotFound` is the one error a client is REQUIRED to read and
+ * retry. Under `application/graphql-response+json` the APQ result's own
+ * status is used verbatim, like every other GraphQL result on that media type.
+ *
+ * Called from all three refusal sites (batch POST, single POST, GET) so the
+ * decision has one owner instead of three spellings.
+ *
+ * @param mediaType - The negotiated response media type.
+ * @param apqStatus - The status the APQ resolver reported for the refusal.
+ */
+function apqRefusalStatus(
+  mediaType: 'json' | 'graphql-response',
+  apqStatus: number,
+): number {
+  return mediaType === 'graphql-response' ? apqStatus : 200;
+}
+
+/**
  * Create a GraphQL route handler.
  *
  * @param graphqlService - The GraphQL service
@@ -141,7 +167,7 @@ async function handleGraphqlPost(
           const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
           if (!apqResult.ok) {
             return {
-              status: 400,
+              status: apqRefusalStatus(mediaType, apqResult.status),
               result: {
                 errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
               },
@@ -195,7 +221,7 @@ async function handleGraphqlPost(
     }
     const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
     if (!apqResult.ok) {
-      return sendGraphqlError(response, 400, {
+      return sendGraphqlError(response, apqRefusalStatus(mediaType, apqResult.status), {
         message: apqResult.message,
         extensions: { code: apqResult.code },
       }, mediaType);
@@ -302,7 +328,7 @@ async function handleGraphqlGet(
     }
     const apqResult = await apqResolver.resolve(apqParams);
     if (!apqResult.ok) {
-      return sendGraphqlError(response, apqResult.status, {
+      return sendGraphqlError(response, apqRefusalStatus(mediaType, apqResult.status), {
         message: apqResult.message,
         extensions: { code: apqResult.code },
       }, mediaType);

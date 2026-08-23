@@ -10,7 +10,7 @@
  * The ratchet policy (§3.10 of the M38 plan):
  * - Diagnostics are partitioned by owning package path
  * - Any diagnostic in a CLEAN_PACKAGE fails the gate
- * - The total diagnostic count must not exceed DOC_LINT_BASELINE (775)
+ * - The total diagnostic count must not exceed DOC_LINT_BASELINE (760)
  * - If the count is BELOW baseline, the script instructs to lower the constant
  *
  * Usage:
@@ -56,7 +56,7 @@ export const CLEAN_PACKAGES = new Set([
  * `missing-jsdoc`/`private-type-ref` diagnostics on the old narrow facade
  * members with documented, `unknown`-typed ones.
  */
-export const DOC_LINT_BASELINE = 764;
+export const DOC_LINT_BASELINE = 760;
 
 /** One parsed `deno doc --lint` diagnostic. */
 export interface DocLintDiagnostic {

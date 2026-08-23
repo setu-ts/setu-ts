@@ -58,7 +58,8 @@ describe('GraphQL subscriptions integration', () => {
       const query = '{ hello }';
       const hash = await persistedQueryHash(query, subtle);
 
-      // 1. Hash-only miss → 400 PERSISTED_QUERY_NOT_FOUND.
+      // 1. Hash-only miss → 200 with PERSISTED_QUERY_NOT_FOUND in the body
+      //    (application/json watershed, M70i X6-7).
       const miss = await app.inject({
         method: 'POST',
         url: '/graphql',
@@ -67,7 +68,7 @@ describe('GraphQL subscriptions integration', () => {
           extensions: { persistedQuery: { version: 1, sha256Hash: hash } },
         }),
       });
-      expect(miss.statusCode).toBe(400);
+      expect(miss.statusCode).toBe(200);
       const missJson = JSON.parse(miss.body as string) as {
         errors?: Array<{ extensions?: { code?: string } }>;
       };

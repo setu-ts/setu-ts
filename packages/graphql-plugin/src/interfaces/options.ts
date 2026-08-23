@@ -4,7 +4,13 @@
  * @module
  */
 
-import type { GraphqlConnectionInfo } from '@setu-ts/common';
+import type {
+  GraphqlConnectionInfo,
+  IPrincipal,
+  IRequestContext,
+  IServiceRegistry,
+  ITenant,
+} from '@setu-ts/common';
 import type { GraphqlModuleLike, GraphqlSchemaLike } from './graphql-runtime.ts';
 
 /**
@@ -34,12 +40,25 @@ export type TypeResolverMap = Record<
 /**
  * A field resolver function.
  *
- * Matches the graphql@16 field resolver signature.
+ * Generic with `unknown` defaults, matching graphql-js's own
+ * `GraphQLFieldResolver<TSource, TContext, TArgs>` shape. The defaults keep
+ * every existing resolver assignable; a narrow annotation —
+ * `FieldResolver<IssueRow, DefaultGraphqlContext, { id: string }>` — assigns
+ * cleanly too, which under `strictFunctionTypes` was impossible while the
+ * parameters were non-generic `unknown` (X6-4).
+ *
+ * @typeParam TSource - The parent value the field resolves from.
+ * @typeParam TContext - The resolver context (see {@linkcode DefaultGraphqlContext}).
+ * @typeParam TArgs - The field's argument object.
  */
-export type FieldResolver = (
-  source: unknown,
-  args: Record<string, unknown>,
-  context: unknown,
+export type FieldResolver<
+  TSource = unknown,
+  TContext = unknown,
+  TArgs = Record<string, unknown>,
+> = (
+  source: TSource,
+  args: TArgs,
+  context: TContext,
   info: unknown,
 ) => unknown;
 
@@ -57,16 +76,20 @@ export type FieldResolver = (
  *
  * @since 0.3.0
  */
-export interface SubscriptionResolver {
+export interface SubscriptionResolver<
+  TSource = unknown,
+  TContext = unknown,
+  TArgs = Record<string, unknown>,
+> {
   /** Produces the event source for this subscription field. */
   subscribe: (
-    source: unknown,
-    args: Record<string, unknown>,
-    context: unknown,
+    source: TSource,
+    args: TArgs,
+    context: TContext,
     info: unknown,
   ) => AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
   /** Maps each emitted payload to the field value. Optional. */
-  resolve?: FieldResolver;
+  resolve?: FieldResolver<TSource, TContext, TArgs>;
 }
 
 /**
@@ -190,12 +213,29 @@ export interface GraphqlContextInput {
 
 /**
  * Default context shape that resolvers receive.
+ *
+ * Typed against `@setu-ts/common` (X6-4) so a resolver can reach the service
+ * registry and the auth/tenancy principals without hand-written casts.
+ *
+ * The per-transport shape is deliberate (X6-6):
+ * - **HTTP** — `requestContext` is present, `connection` absent.
+ * - **WebSocket** — `connection` is present, `requestContext` **absent** (not
+ *   `undefined`): the runtime closes the upgrade request once the handshake
+ *   response is returned, so a synthesized context would be dead by the time
+ *   a resolver runs. The upgrade request's headers and query live on
+ *   {@linkcode GraphqlConnectionInfo.headers} and `.query`.
  */
 export interface DefaultGraphqlContext {
-  services: unknown;
-  requestContext: unknown;
-  user?: unknown;
-  tenant?: unknown;
+  /** The live service registry (request-scoped over HTTP, plugin-level over WS). */
+  services: IServiceRegistry;
+  /** The HTTP request context. Absent over the WebSocket transport. */
+  requestContext?: IRequestContext;
+  /** The authenticated principal, when the auth middleware published one. */
+  user?: IPrincipal;
+  /** The resolved tenant, when tenancy resolved one. */
+  tenant?: ITenant;
+  /** The WebSocket connection info. Present only over the WS transport. */
+  connection?: GraphqlConnectionInfo;
 }
 
 /**
