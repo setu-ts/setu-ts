@@ -208,7 +208,7 @@ export function prepareDocument(
   // Parse (a cache hit reuses both the document and its validation result).
   const cached = documentCache.get(query);
   let document: GraphqlDocumentNodeLike;
-  let validationErrors: GraphqlGraphQLErrorLike[] | null;
+  let validationErrors: readonly GraphqlGraphQLErrorLike[] | null;
 
   if (cached) {
     document = cached.document;

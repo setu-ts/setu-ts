@@ -10,7 +10,7 @@
  * The ratchet policy (§3.10 of the M38 plan):
  * - Diagnostics are partitioned by owning package path
  * - Any diagnostic in a CLEAN_PACKAGE fails the gate
- * - The total diagnostic count must not exceed DOC_LINT_BASELINE (775)
+ * - The total diagnostic count must not exceed DOC_LINT_BASELINE (760)
  * - If the count is BELOW baseline, the script instructs to lower the constant
  *
  * Usage:
@@ -50,8 +50,13 @@ export const CLEAN_PACKAGES = new Set([
  * tags but no description) and then removed five by writing the descriptions —
  * one of them on a constructor that predates the milestone. The ratchet refused
  * the run in BOTH directions, which is exactly its job.
+ *
+ * M70i (X6-3) lowered the count to 764: widening the GraphQL structural
+ * facades to accept the real `graphql` package replaced a number of
+ * `missing-jsdoc`/`private-type-ref` diagnostics on the old narrow facade
+ * members with documented, `unknown`-typed ones.
  */
-export const DOC_LINT_BASELINE = 775;
+export const DOC_LINT_BASELINE = 760;
 
 /** One parsed `deno doc --lint` diagnostic. */
 export interface DocLintDiagnostic {

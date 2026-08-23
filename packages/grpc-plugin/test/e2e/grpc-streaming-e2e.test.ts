@@ -110,7 +110,7 @@ describe('gRPC Server Streaming E2E', () => {
     const requestBody = JSON.stringify({ prefix: 'item' });
     const envelopedRequest = encodeConnectEnvelope(requestBody);
 
-    const rpcRequest = new Request('http://localhost:0/grpc/example.StreamService/ServerStream', {
+    const rpcRequest = new Request('http://localhost:0/example.StreamService/ServerStream', {
       method: 'POST',
       headers: { 'content-type': 'application/connect+json' },
       body: envelopedRequest as unknown as BodyInit,
@@ -174,7 +174,7 @@ describe('gRPC Server Streaming E2E', () => {
     const requestBody = JSON.stringify({ prefix: 'test' });
     const envelopedRequest = encodeConnectEnvelope(requestBody);
 
-    const rpcRequest = new Request('http://localhost:0/grpc/example.StreamService/ServerStream', {
+    const rpcRequest = new Request('http://localhost:0/example.StreamService/ServerStream', {
       method: 'POST',
       headers: { 'content-type': 'application/connect+json' },
       body: envelopedRequest as unknown as BodyInit,
@@ -243,7 +243,7 @@ describe('gRPC Server Streaming E2E', () => {
 
     const requestBody = JSON.stringify({ prefix: 'item' });
     const envelopedRequest = encodeConnectEnvelope(requestBody);
-    const rpcRequest = new Request('http://localhost:0/grpc/example.StreamService/ServerStream', {
+    const rpcRequest = new Request('http://localhost:0/example.StreamService/ServerStream', {
       method: 'POST',
       headers: { 'content-type': 'application/connect+json' },
       body: envelopedRequest as unknown as BodyInit,

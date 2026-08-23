@@ -163,7 +163,13 @@ describe('attach-resolvers', () => {
     attachResolvers(schema, resolverMap);
 
     const fields = schema.getQueryType()!.getFields();
-    const result = fields.hello.resolve!({}, { name: 'World' }, {}, {});
+    const resolve = fields.hello.resolve as (
+      source: unknown,
+      args: Record<string, unknown>,
+      context: unknown,
+      info: unknown,
+    ) => unknown;
+    const result = resolve({}, { name: 'World' }, {}, {});
 
     expect(result).toBe('Hello');
     expect(receivedArgs).toEqual({ name: 'World' });

@@ -15,7 +15,17 @@
  *
  * Deliberately not all 40+ package READMEs: that surfaces a large pre-existing
  * backlog which belongs to M70n's documentation sweep, and mixing it in here
- * would bury this milestone's own changes. The list is the set M70k rewrote.
+ * would bury a milestone's own changes. The list is the set a milestone
+ * rewrote and therefore owns.
+ *
+ * M70i (X6-2/X7-1) folded `grpc-plugin` and `graphql-plugin` into THIS list
+ * rather than shipping the separate `test/readme-fence-compiler.test.ts` it had
+ * written in parallel. That file re-implemented fence extraction and
+ * classification instead of reusing this engine — the second classifier this
+ * gate's own rationale warns about, and the duplication AI_GUIDELINES §11.1
+ * forbids. It was also measurably weaker: it found 1 compilable fence in the
+ * grpc README and 3 in graphql where the engine finds 2 and 6, and FOUR of the
+ * fences it never reached did not compile. One gate, one classifier, one list.
  *
  * Negative control: reintroducing `maxFileSize` into the storage README's
  * Uploads fence must fail this test.
@@ -46,6 +56,8 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/storage-plugin/README.md': 3,
   'packages/queue-plugin/README.md': 8,
   'packages/worker-pool-plugin/README.md': 3,
+  'packages/grpc-plugin/README.md': 2,
+  'packages/graphql-plugin/README.md': 6,
 };
 
 /** Reads every fence the engine would compile from one README. */
@@ -59,7 +71,7 @@ async function compilableFences(readme: string) {
     );
 }
 
-describe('package README fences compile (X8-8)', () => {
+describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
   it('should carry the expected number of compilable fences per README', async () => {
     const counts: Record<string, number> = {};
     for (const readme of Object.keys(READMES)) {

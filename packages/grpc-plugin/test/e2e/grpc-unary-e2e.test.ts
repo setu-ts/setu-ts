@@ -45,7 +45,7 @@ describe('gRPC Unary E2E', () => {
     const echoService = await reviveEchoService();
     grpc.addService(echoService, echoImpl);
 
-    const rpcRequest = new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+    const rpcRequest = new Request('http://localhost:0/example.EchoService/Echo', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'hello grpc' }),
@@ -86,7 +86,7 @@ describe('gRPC Unary E2E', () => {
 
     // Outside the custom basePath → falls through → 404.
     const outside = await app.fetch(
-      new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+      new Request('http://localhost:0/example.EchoService/Echo', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: '{}',
@@ -108,7 +108,7 @@ describe('gRPC Unary E2E', () => {
 
     // Health endpoint is NOT registered → unknown RPC path → 404.
     const healthResponse = await app.fetch(
-      new Request('http://localhost:0/grpc/grpc.health.v1.Health/Check', {
+      new Request('http://localhost:0/grpc.health.v1.Health/Check', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: '{}',

@@ -14,7 +14,7 @@ import type {
  */
 interface CacheEntry {
   document: GraphqlDocumentNodeLike;
-  validationErrors: GraphqlGraphQLErrorLike[] | null;
+  validationErrors: readonly GraphqlGraphQLErrorLike[] | null;
 }
 
 /**
