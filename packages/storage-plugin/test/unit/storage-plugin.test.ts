@@ -219,3 +219,23 @@ describe('StoragePlugin health indicator (M70c)', () => {
     expect(result.data).toEqual({ provider: 'gcs', reachable: 'unknown' });
   });
 });
+
+describe('StoragePlugin indicator — the lifecycle signal (M70c)', () => {
+  it('should report down once the provider has been disconnected', async () => {
+    // The lifecycle half of the two-signal indicator, distinct from a
+    // connected-but-unreachable backend: after `onClose` runs, the memory
+    // provider's `isReady()` is false, and a scrape landing in that window must
+    // say `down` rather than `up` with a reachable backend.
+    const { ctx, healthIndicators, onCloseHandlers } = createFakeContext();
+    await StoragePlugin({ provider: 'memory' }).register!(ctx);
+
+    const indicator = healthIndicators.get(CAPABILITIES.STORAGE);
+    expect((await indicator!()).status).toBe('up');
+
+    await onCloseHandlers[0]!();
+
+    const afterClose = await indicator!();
+    expect(afterClose.status).toBe('down');
+    expect(afterClose.data).toEqual({ provider: 'memory', reachable: false });
+  });
+});

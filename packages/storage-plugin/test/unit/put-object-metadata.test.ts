@@ -26,7 +26,7 @@ import { StorageService } from '../../src/services/storage-service.ts';
 import { MemoryProvider } from '../../src/providers/memory-provider.ts';
 import { LocalStorageProvider } from '../../src/providers/local-provider.ts';
 import { adaptAwsS3Module } from '../../src/providers/s3-provider.ts';
-import { adaptGcsModule } from '../../src/providers/gcs-provider.ts';
+import { adaptGcsModule, GcsProvider } from '../../src/providers/gcs-provider.ts';
 import { AzureBlobProvider } from '../../src/providers/azure-provider.ts';
 import type { AwsStorageSdkModule } from '../../src/providers/s3-provider.ts';
 import type { GcsSdkModule } from '../../src/providers/gcs-provider.ts';
@@ -149,6 +149,70 @@ describe('GcsProvider — object attributes in the save options bag (X8-6)', () 
       contentType: 'image/png',
       metadata: { owner: 'ada' },
     });
+  });
+});
+
+describe('GcsProvider.put — the provider, not just the adapted facade (X8-6)', () => {
+  /** A GCS client facade recording what `save` was handed, and able to fail. */
+  function fakeGcsClient(failWith?: Error) {
+    const saves: Record<string, unknown>[] = [];
+    const client = {
+      bucket: () => ({
+        file: () => ({
+          save(
+            _data: Uint8Array,
+            options: Record<string, unknown>,
+            cb: (error: Error | null) => void,
+          ) {
+            saves.push(options);
+            cb(failWith ?? null);
+          },
+        }),
+      }),
+    } as unknown as import('../../src/interfaces/index.ts').IGcsClient;
+    return { client, saves };
+  }
+
+  it('should hand save both attributes when given them', async () => {
+    const { client, saves } = fakeGcsClient();
+    const provider = new GcsProvider({ bucket: 'b', client });
+    await provider.connect();
+
+    await provider.put('avatars/ada.png', BYTES, PNG);
+
+    expect(saves[0]).toEqual({ contentType: 'image/png', metadata: { owner: 'ada' } });
+  });
+
+  it('should hand save an EMPTY bag when given no attributes', async () => {
+    // Always the three-argument overload, so this package has one call shape
+    // rather than two that can drift.
+    const { client, saves } = fakeGcsClient();
+    const provider = new GcsProvider({ bucket: 'b', client });
+    await provider.connect();
+
+    await provider.put('raw.bin', BYTES);
+
+    expect(saves[0]).toEqual({});
+  });
+
+  it('should carry one attribute without the other', async () => {
+    const { client, saves } = fakeGcsClient();
+    const provider = new GcsProvider({ bucket: 'b', client });
+    await provider.connect();
+
+    await provider.put('a', BYTES, { contentType: 'text/plain' });
+    await provider.put('b', BYTES, { metadata: { k: 'v' } });
+
+    expect(saves[0]).toEqual({ contentType: 'text/plain' });
+    expect(saves[1]).toEqual({ metadata: { k: 'v' } });
+  });
+
+  it('should reject when the SDK reports a save failure', async () => {
+    const { client } = fakeGcsClient(new Error('quota exceeded'));
+    const provider = new GcsProvider({ bucket: 'b', client });
+    await provider.connect();
+
+    await expect(provider.put('a', BYTES, PNG)).rejects.toThrow('quota exceeded');
   });
 });
 
