@@ -74,7 +74,7 @@ jobs:
       # M70c §3.7: same three real-outage services as ci.yml — the release job
       # re-runs the suite, so the backend environment must agree exactly.
       rabbitmq:
-        image: rabbitmq:3.13-management-alpine
+        image: rabbitmq:4-management-alpine
         ports:
           - 5672:5672
         options: >-

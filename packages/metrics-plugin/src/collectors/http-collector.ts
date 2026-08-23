@@ -32,11 +32,20 @@ export const HTTP_METRICS = {
 } as const;
 
 /**
+ * Paths excluded from HTTP metrics by default, when the plugin is given no
+ * explicit {@linkcode MetricsPluginOptions.excludePaths}: the health plugin's
+ * probe routes. Literals because §2.2 forbids `metrics-plugin` importing
+ * `health-plugin`; an application that moved its probes passes them here.
+ */
+export const DEFAULT_EXCLUDED_PATHS: readonly string[] = ['/health', '/live', '/ready'];
+
+/**
  * HTTP metrics collector — registers and tracks HTTP request metrics.
  */
 export class HttpCollector {
   readonly #metricsService: MetricsService;
   readonly #runtime: IRuntimeServices;
+  readonly #excludedPaths: ReadonlySet<string>;
 
   // Metric instances
   #durationHistogram?: IHistogram;
@@ -67,9 +76,11 @@ export class HttpCollector {
     metricsService: MetricsService,
     runtime: IRuntimeServices,
     durationBuckets: readonly number[],
+    excludedPaths?: readonly string[],
   ) {
     this.#metricsService = metricsService;
     this.#runtime = runtime;
+    this.#excludedPaths = new Set(excludedPaths ?? []);
 
     // HTTP series are labelled by method + status ONLY — never by path
     // (unbounded cardinality). These labels are fixed, not configurable.
@@ -114,6 +125,14 @@ export class HttpCollector {
    * @param next - The next handler
    */
   async middleware(ctx: IRequestContext, next: NextFunction): Promise<void> {
+    // X10-7: skip our own scrape and the health probes BEFORE any instrument
+    // is touched, so an excluded request never perturbs even
+    // `http_active_requests` and `/metrics` does not count its own scrapes.
+    if (this.#excludedPaths.has(ctx.request.path)) {
+      await next();
+      return;
+    }
+
     const start = this.#runtime.hrtime();
     let errorOccurred = false;
 

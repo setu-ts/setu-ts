@@ -73,6 +73,19 @@ export interface MetricsPluginOptions {
   readonly endpoint?: string;
 
   /**
+   * Request paths the HTTP metrics middleware skips entirely — no counter,
+   * histogram, or gauge is touched for them.
+   *
+   * When supplied this list REPLACES the default `['/health', '/live',
+   * '/ready']` set rather than extending it; the plugin's own
+   * {@linkcode endpoint} is always excluded regardless, so `/metrics` can
+   * never count its own scrapes.
+   *
+   * @default ['/health', '/live', '/ready']
+   */
+  readonly excludePaths?: readonly string[];
+
+  /**
    * Enable built-in HTTP metrics.
    *
    * @default true

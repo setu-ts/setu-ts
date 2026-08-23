@@ -244,8 +244,8 @@ describe('workspace scaffolding — end to end', () => {
     // both were generated with `--template microservice`, which reaches
     // HealthPlugin, so both get httpGet probes rather than tcpSocket (X2-7).
     expect(manifest.members).toEqual([
-      { name: 'orders', port: base, healthProbes: true },
-      { name: 'billing', port: base + 1, healthProbes: true },
+      { name: 'orders', port: base, healthProbes: true, metricsEndpoint: true },
+      { name: 'billing', port: base + 1, healthProbes: true, metricsEndpoint: true },
     ]);
   });
 

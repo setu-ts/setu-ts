@@ -9,7 +9,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import { createTopicInbox } from './inbox.ts';
+import { createTopicInbox, TOPIC_INBOX_PREFIX } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { IAmqpConnection, RabbitMqOptions } from '../interfaces/index.ts';
@@ -86,9 +86,27 @@ interface ActiveConsumer {
   topic: string;
   handler: MessageHandler<unknown>;
   queue: string | undefined; // undefined means exclusive server-named queue
+  /**
+   * The `assertQueue` declaration this subscription's shape demands —
+   * durable for a caller-supplied consumer-group queue, transient for a
+   * private per-subscriber one. Carried on the spec so the drive-mode
+   * replay re-asserts the SAME shape on the fresh channel (RabbitMQ 4
+   * refuses a re-declaration that disagrees with the existing queue).
+   */
+  declareOptions: QueueDeclareOptions;
   consumerTag: string;
   channel: unknown;
 }
+
+/**
+ * The two queue shapes this broker declares. RabbitMQ 4 refuses the previous
+ * unconditional `{ durable: false }` for a DURABLE-adjacent named queue and
+ * equally refuses `{ durable: true }` re-applied with different properties,
+ * so the shape is computed once at subscribe time and reused verbatim.
+ */
+type QueueDeclareOptions =
+  | { readonly durable: true }
+  | { readonly exclusive: true; readonly autoDelete: true };
 
 /**
  * RabbitMQ message broker implementation using AMQP 0-9-1 topic exchange.
@@ -315,11 +333,24 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     const queueName = options?.queue ?? `${this.#defaultQueue}-${this.#runtime.uuid()}`;
     const isExclusive = options?.queue === undefined;
 
+    // X10-1: the declaration carries the intent the shape already encodes.
+    // A caller-supplied queue name is a consumer GROUP — durable, so it
+    // survives a broker restart, which is what `queue` documents. An absent
+    // name (the private per-subscriber queue) and the broker's own reply
+    // inbox are both transient: exclusive + autoDelete. RabbitMQ 4 refuses
+    // the old unconditional `{ durable: false }` named non-exclusive form
+    // outright (`541 INTERNAL-ERROR … transient_nonexcl_queues`).
+    const declareOptions: QueueDeclareOptions = isExclusive ||
+        queueName.startsWith(TOPIC_INBOX_PREFIX)
+      ? { exclusive: true, autoDelete: true }
+      : { durable: true };
+
     const subscriptionId = this.#runtime.uuid();
     const { consumerTag, channel } = await this.#consumeOn(
       queueName,
       topic,
       handler as MessageHandler<unknown>,
+      declareOptions,
     );
 
     this.#activeConsumers.set(subscriptionId, {
@@ -327,6 +358,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       topic,
       handler: handler as MessageHandler<unknown>,
       queue: isExclusive ? undefined : queueName,
+      declareOptions,
       consumerTag,
       channel,
     });
@@ -421,6 +453,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     queueName: string,
     topic: string,
     handler: MessageHandler<unknown>,
+    declareOptions: QueueDeclareOptions,
   ): Promise<{ consumerTag: string; channel: unknown }> {
     const realChannel = this.#channel as unknown as {
       assertExchange(exchange: string, type: string, options?: unknown): Promise<void>;
@@ -438,8 +471,9 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     // Assert topic exchange
     await realChannel.assertExchange(this.#exchangeName, 'topic', { durable: true });
 
-    // Assert queue and bind to topic
-    await realChannel.assertQueue(queueName, { durable: false });
+    // Assert queue and bind to topic — with the shape the subscription's
+    // intent demands (X10-1), not a fixed one.
+    await realChannel.assertQueue(queueName, declareOptions);
     await realChannel.bindQueue(queueName, this.#exchangeName, topic);
 
     const result = await realChannel.consume(
@@ -508,6 +542,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
         queueName,
         consumer.topic,
         consumer.handler,
+        consumer.declareOptions,
       );
       consumer.consumerTag = consumerTag;
       consumer.channel = channel;

@@ -326,7 +326,7 @@ describe('runAppCommand', () => {
       };
       expect(manifest.members).toEqual([
         { name: 'orders', port: 3000 },
-        { name: 'billing', port: 4444, healthProbes: false },
+        { name: 'billing', port: 4444, healthProbes: false, metricsEndpoint: false },
       ]);
       // The chosen port has to reach BOTH sides of the one datum: what this
       // member binds, and what its sibling dials.
@@ -366,6 +366,7 @@ describe('runAppCommand', () => {
         name: 'shipping',
         port: 4445,
         healthProbes: false,
+        metricsEndpoint: false,
       });
     });
 
@@ -545,10 +546,16 @@ describe('runAppCommand', () => {
         runtime: 'deno',
         basePort: 3000,
         transport: 'http',
-        // `healthProbes` records whether this member serves /live and /ready,
-        // which the Kubernetes renderer has no other way to know (X2-7). False
-        // here: no `--template`, so no HealthPlugin.
-        members: [{ name: 'orders', port: 3000, healthProbes: false }],
+        // `healthProbes`/`metricsEndpoint` record whether this member serves
+        // /live, /ready and /metrics, which the Kubernetes renderer has no
+        // other way to know (X2-7, X10-6). False here: no `--template`, so no
+        // HealthPlugin and no MetricsPlugin.
+        members: [{
+          name: 'orders',
+          port: 3000,
+          healthProbes: false,
+          metricsEndpoint: false,
+        }],
       });
     });
 
@@ -595,6 +602,7 @@ describe('runAppCommand', () => {
         port: 3002,
         dependsOn: ['orders', 'billing'],
         healthProbes: false,
+        metricsEndpoint: false,
       });
     });
 

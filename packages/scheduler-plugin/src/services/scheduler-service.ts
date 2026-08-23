@@ -145,6 +145,12 @@ export class SchedulerService implements IScheduler {
 
   /**
    * Schedule a recurring job that fires every `intervalMs` milliseconds.
+   *
+   * The first fire is grid-aligned: it lands on the next epoch multiple of
+   * the interval rather than a full interval after registration, so replicas
+   * registered at different instants compute IDENTICAL fire times and agree
+   * on distributed-lock slot keys (M70l). The period is unchanged; only the
+   * phase moves, and never later than `intervalMs` after registration.
    */
   async every<T = unknown>(
     name: string,
@@ -157,7 +163,7 @@ export class SchedulerService implements IScheduler {
     }
 
     const now = this.#runtime.now();
-    const nextRunAtMs = now + intervalMs;
+    const nextRunAtMs = this.#gridAlignedNextRun(now, intervalMs);
 
     const entry: EveryRegistryEntry<unknown> = {
       name,
@@ -241,7 +247,7 @@ export class SchedulerService implements IScheduler {
         nextRunAtMs = cronNextMs(entry.expression, now);
         break;
       case 'every':
-        nextRunAtMs = now + entry.intervalMs;
+        nextRunAtMs = this.#gridAlignedNextRun(now, entry.intervalMs);
         break;
       case 'delay':
         nextRunAtMs = now + entry.delayMs;
@@ -304,7 +310,31 @@ export class SchedulerService implements IScheduler {
   }
 
   /**
-   * Acquire the lock, run the handler, and release — containing every failure.
+   * The next grid-aligned fire time for an `every` job.
+   *
+   * `(floor(now / interval) + 1) * interval` — the first epoch multiple of
+   * the interval strictly after `now`. Two replicas started any distance
+   * apart compute the SAME value in the same tick, which is what makes the
+   * slot key in {@linkcode #fire} collide across replicas (M70l §3.3).
+   *
+   * @param now - The current runtime time in epoch ms
+   * @param intervalMs - The job's fixed interval
+   * @returns The next epoch-multiple fire time
+   */
+  #gridAlignedNextRun(now: number, intervalMs: number): number {
+    return (Math.floor(now / intervalMs) + 1) * intervalMs;
+  }
+
+  /**
+   * Acquire the handler-mutex lock, run the handler, and release — containing
+   * every failure.
+   *
+   * This lock is the OVERLAP mutex: it skips a fire whose predecessor of the
+   * same job is still running. Per-fire dedup across replicas is a separate
+   * guarantee, owned by the never-released slot lock in {@linkcode #fire}
+   * (M70l C3): slot N+1 is a different key from slot N, so this mutex cannot
+   * see it — and dedup cannot see a still-running previous fire. Two locks,
+   * because they answer two different questions.
    *
    * A `null` token (another instance holds the lock) and a rejecting
    * `acquire`/`release` are all skip-this-fire conditions, never
@@ -323,7 +353,9 @@ export class SchedulerService implements IScheduler {
     }
 
     if (token === null) {
-      // Another instance holds the lock — it is running this fire.
+      // Another instance holds the handler mutex — a previous fire of this
+      // same job is still running there. This is overlap protection, NOT
+      // per-fire dedup; that is the slot lock's job (M70l C3).
       this.#logger?.debug(`Job '${entry.name}': lock held elsewhere, skipping this fire`);
       return;
     }
@@ -359,12 +391,46 @@ export class SchedulerService implements IScheduler {
     // C4 FIX: Capture generation at fire START to detect if pause()+resume() fires during await
     const fireGen = entry.generation ?? 0;
 
+    // X10-2 fix 1 — the fire-slot lock. Keyed on the time this fire was
+    // INTENDED for (`nextRunAtMs`, grid-aligned by §3.3), never released, and
+    // expired by the shared ttlMs. Two replicas whose timers land anywhere in
+    // the same intended slot therefore agree that exactly ONE of them runs:
+    // the second `acquire` returns null and the fire is skipped locally while
+    // the local schedule still re-arms below. Keying on the intended instant
+    // rather than `runtime.now()` makes the slot immune to timer jitter —
+    // `#armTimer` uses `Math.max(0, nextRunAtMs - now)`, so a late timer still
+    // computes the slot it was armed for.
+    const slot = entry.kind === 'delay' ? 'once' : String(entry.nextRunAtMs);
+    const slotKey = `scheduler:job:${entry.name}:${slot}`;
+    let slotClaimed = true;
+    try {
+      const slotToken = await this.#lock.acquire(slotKey, this.#ttlMs);
+      if (slotToken === null) {
+        // Another replica claimed this exact fire. Skip the run — but keep
+        // the local re-arm logic below, or this replica would silently stop
+        // scheduling after the first contended tick.
+        this.#logger?.debug(
+          `Job '${entry.name}': fire slot already claimed by another instance, skipping`,
+        );
+        slotClaimed = false;
+      }
+    } catch (error) {
+      // Lock backend unreachable — treat as unclaimed-but-unprovable and skip
+      // the run rather than risk a duplicate; the schedule still re-arms.
+      this.#logger?.error(`Job '${entry.name}': could not claim fire slot`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      slotClaimed = false;
+    }
+
     const lockKey = `scheduler:job:${entry.name}`;
 
     // Skipping a fire must never cancel the schedule: a contended lock is the
     // NORMAL multi-instance path, and a lock backend blip is transient. Every
     // lock failure below is contained here so the re-arm logic still runs.
-    await this.#runWithLock(entry, lockKey);
+    if (slotClaimed) {
+      await this.#runWithLock(entry, lockKey);
+    }
 
     // One-shot delay jobs are removed after firing, regardless of pause state.
     if (entry.kind === 'delay') {
@@ -408,7 +474,7 @@ export class SchedulerService implements IScheduler {
       entry.nextRunAtMs = cronNextMs(entry.expression, this.#runtime.now());
       this.#armTimer(entry);
     } else {
-      entry.nextRunAtMs = this.#runtime.now() + entry.intervalMs;
+      entry.nextRunAtMs = this.#gridAlignedNextRun(this.#runtime.now(), entry.intervalMs);
       this.#armInterval(entry);
     }
   }

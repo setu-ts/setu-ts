@@ -3820,7 +3820,11 @@ schedule until the registering plugin re-creates it. For durable background work
 
 ### Exports
 
-- **`SchedulerPlugin`** — Plugin factory for registering the scheduler service
+- **`SchedulerPlugin`** — Plugin factory for registering the scheduler service; **throws**
+  `SchedulerUnavailableError` at `register()` on Cloudflare Workers, where its timers cannot fire —
+  use `WorkersCron` with `[triggers] crons` there instead
+- **`SchedulerUnavailableError`** — Thrown by `register()` when the runtime platform cannot run the
+  scheduler (Cloudflare Workers); catch it by identity to branch on the refusal
 - **`SchedulerPluginOptions`** — Plugin configuration options (`timezone?`, `distributedLock?`)
 - **`DistributedLockOptions`** — Lock configuration (`enabled?`, `storage?`, `url?`, `client?`,
   `lock?`, `ttlMs?`)
@@ -3861,6 +3865,15 @@ When `distributedLock` is absent or `enabled: false`, a process-local memory loc
 unless you inject one via `client`, or supply your own `IDistributedLock` via `lock` (which takes
 priority over `storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime —
 if the lock expires mid-run, another instance may start the same job.
+
+**Multi-instance deduplication** works across replicas sharing one lock backend: each fire claims a
+never-released _slot_ lock keyed on the fire's intended time (`scheduler:job:<name>:<slot>`), so two
+replicas whose timers land anywhere in the same intended slot run the handler exactly once between
+them; `ttlMs` bounds how long a claimed slot is remembered, so it must exceed the maximum skew
+between replicas. A separate per-handler mutex preserves overlap protection — a second fire of a job
+whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
+(`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
+slot keys; the first fire may come sooner than one full interval after registration.
 
 ### Scheduling Jobs
 
@@ -4941,6 +4954,9 @@ app.register(MetricsPlugin({
   endpoint: '/metrics',
   defaultMetrics: true,
   httpMetrics: true,
+  // Replaces the default ['/health', '/live', '/ready'] exclusion set; the
+  // plugin's own endpoint is always excluded either way.
+  excludePaths: ['/health', '/live', '/ready'],
   customMetrics: [
     { name: 'users_total', help: 'Total users', type: 'counter' },
     { name: 'active_connections', help: 'Active connections', type: 'gauge' },

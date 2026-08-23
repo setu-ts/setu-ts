@@ -28,6 +28,7 @@ import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
+  bootAndProbe,
   bootWithGeneratedPermissions,
   useWorkspacePackages,
 } from '../fixtures/generated-project.ts';
@@ -299,6 +300,67 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       expect(result.bodies['/health']).toContain('"status":"up"');
     });
   }
+});
+
+describe('a scaffolded Workers project retries a failed boot and never leaks the stack', () => {
+  // X9-8: `booted ??= boot(env)` cached the raw promise, so ONE failed boot was
+  // permanent for the isolate's life AND the raw error reached the client. The
+  // generated entry must answer a generic 503 while reporting to the platform
+  // logs, and a later request must re-attempt boot.
+  it('answers 503 without the stack, and the next request re-attempts boot', async () => {
+    expect(await run(['new', 'shop', '--template', 'rest', '--runtime', 'cloudflare-workers']))
+      .toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+
+    // A config whose FIRST construction fails with an error carrying a path
+    // marker — under the old memoisation both requests would replay this
+    // failure and the message would leak into the response body.
+    await Deno.writeTextFile(
+      `${project}/setu.config.ts`,
+      `import type { IApplication } from '@setu-ts/common';\n` +
+        `let calls = 0;\n` +
+        `export function createApp(_env?: Readonly<Record<string, unknown>>): IApplication {\n` +
+        `  calls++;\n` +
+        `  if (calls === 1) {\n` +
+        `    throw new Error('transient cold-start failure at /srv/node_modules/@setu-ts');\n` +
+        `  }\n` +
+        `  return {\n` +
+        `    start: () => Promise.resolve(),\n` +
+        `    stop: () => Promise.resolve(),\n` +
+        `    fetch: () => Promise.resolve(new Response('recovered')),\n` +
+        `  } as unknown as IApplication;\n` +
+        `}\n`,
+    );
+
+    const result = await bootAndProbe(
+      project,
+      `const entry = await import('./src/index.ts');\n` +
+        `const first = await entry.default.fetch(\n` +
+        `  new Request('http://localhost/health'), {},\n` +
+        `);\n` +
+        `const body1 = await first.text();\n` +
+        `const second = await entry.default.fetch(\n` +
+        `  new Request('http://localhost/health'), {},\n` +
+        `);\n` +
+        `const body2 = await second.text();\n` +
+        `console.log('__PROBE_RESULT__' + JSON.stringify({\n` +
+        `  status1: first.status,\n` +
+        `  leakedStack: body1.includes('node_modules') || body1.includes('transient'),\n` +
+        `  status2: second.status,\n` +
+        `  body2,\n` +
+        `}));\n`,
+    );
+
+    // First request after a failed boot: generic 503, no stack.
+    expect(result['status1']).toBe(503);
+    expect(result['leakedStack']).toBe(false);
+
+    // The discriminating assertion: the SECOND request retried the boot and
+    // succeeded. Under `??=` it would have replayed the cached rejection.
+    expect(result['status2']).toBe(200);
+    expect(result['body2']).toBe('recovered');
+  });
 });
 
 describe('a scaffolded project configures itself from a dotenv file', () => {

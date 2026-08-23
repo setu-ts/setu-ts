@@ -79,6 +79,13 @@ export interface DistributedLockOptions {
   /**
    * Lock TTL in milliseconds. Must exceed the job's worst-case runtime.
    *
+   * Bounds TWO distinct guarantees (M70l C3): how long the per-handler
+   * OVERLAP mutex lives after a holder dies without releasing, and how long
+   * a claimed fire SLOT is remembered before a late replica may re-run it —
+   * slot locks are never released, so this value is the replica-skew window.
+   * A value below the maximum skew between replicas lets a slow replica
+   * re-run an already-claimed fire.
+   *
    * @default 30000
    */
   ttlMs?: number;
