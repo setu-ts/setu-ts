@@ -3062,14 +3062,20 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   X6-4 is a `common` widening did not survive source-checking — both types are plugin-local — so
   alpha.9 carries one fewer breaking `common` change than stated. `DOC_LINT_BASELINE` 775 → 760) —
   complete (PR #180)
-- **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
-  `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
-  CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per
-  replica and `distributedLock` does not stop it, because the lock is released ~0.5 ms after the
-  handler while replica timers sit 0.70 s apart, so they never contend (X10-2); generated manifests
-  carry no `prometheus.io/*` annotations, so a vanilla Prometheus discovers **zero** targets
-  (X10-6); and `/metrics` counts its own scrapes and the health probes with no exclusion option
-  (X10-7). Plus X10-4, X10-5, X9-2, X9-5, X9-8.
+- **Milestone 70l** (`cli`, `scheduler-plugin`, `messaging-plugin`, `metrics-plugin`,
+  `cloudflare-plugin` — deployment and operations). `docker compose up` on the CLI-generated stack
+  crash-loops two of three services (X10-1); a scheduled job runs once per replica and
+  `distributedLock` does not stop it, because the lock is released ~0.5 ms after the handler while
+  replica timers sit 0.70 s apart, so they never contend (X10-2); generated manifests carry no
+  `prometheus.io/*` annotations, so a vanilla Prometheus discovers **zero** targets (X10-6); and
+  `/metrics` counts its own scrapes and the health probes with no exclusion option (X10-7). Plus
+  X10-4, X10-5, X9-2, X9-5, X9-8) — complete (PR #TBD)
+- **Next milestone** — **M70m** (SDK and OpenAPI: `sdk`, `openapi-plugin`, `validation-plugin`). A
+  route carrying `validateBody(schema)` contributes nothing to the document, so the generated client
+  for the API's only write took **no argument** and 400'd against the live server (X11-5), and the
+  generated client cannot be published to JSR at all because `createApi` has an inferred return type
+  — a slow type, in a file whose own header claims JSR-readiness (X11-4). Plus X11-3, X11-6, X11-7,
+  X11-8, X11-9.
 
 ## Verification (run before declaring any work done)
 
