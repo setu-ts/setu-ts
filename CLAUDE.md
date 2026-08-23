@@ -3193,7 +3193,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `in: 'cookie'` and a path/template mismatch by name, so refusing this one belongs with them, but
   it is not an X11 row and is left unowned rather than quietly widened into scope.
 
-  Developed in an isolated worktree, in parallel with M70l) — complete (PR pending)
+  Developed in an isolated worktree, in parallel with M70l) — complete (PR #181)
 - **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
   `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
   CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per
