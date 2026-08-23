@@ -29,7 +29,7 @@ export type {
 
 // Transformer
 export { ZodToOpenApi, zodToOpenApi } from './transformers/zod-to-openapi.ts';
-export type { OpenApiSchemaObject } from './transformers/zod-to-openapi.ts';
+export type { OpenApiSchemaObject, SchemaNodeHook } from './transformers/zod-to-openapi.ts';
 
 // UI
 export { swaggerUiHtml } from './ui/swagger-ui.ts';

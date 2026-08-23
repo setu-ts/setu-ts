@@ -9,8 +9,9 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createClient } from '../../src/index.ts';
-import { createApi } from '../fixtures/generated-client.ts';
+import { createClient, HttpClientError } from '../../src/index.ts';
+import { createApi, isGetUserByIdError } from '../fixtures/generated-client.ts';
+import type { NotFound } from '../fixtures/generated-client.ts';
 import { createApi as createParamsApi } from '../fixtures/params-client.ts';
 import type { ClientResponse } from '../../src/index.ts';
 
@@ -150,5 +151,74 @@ describe('generated-client e2e', () => {
     expect(contentType).toBe('application/json');
     expect(JSON.parse(lastBody)).toEqual({ id: 'u1', age: 30 });
     expect(resp.data).toEqual({ id: 'u1' });
+  });
+});
+
+describe('typed error responses (X11-7)', () => {
+  it('narrows a real thrown HttpClientError to its DECLARED body type', async () => {
+    // The types are real, not decorative: `body` is `NotFound` inside the
+    // guard, where before this it was `unknown` for every declared 4xx.
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch(() =>
+        new Response(JSON.stringify({ code: 'gone', detail: 'no such user' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      ),
+    });
+
+    try {
+      await createApi(client).getUserById('1');
+      throw new Error('expected the 404 to throw');
+    } catch (e) {
+      expect(isGetUserByIdError(e)).toBe(true);
+      if (!isGetUserByIdError(e)) return;
+      if (e.status === 404) {
+        // Compile-time: assigning to `NotFound` only type-checks because the
+        // guard narrowed `body` by the literal status.
+        const body: NotFound = e.body;
+        expect(body.code).toBe('gone');
+        expect(body.detail).toBe('no such user');
+      } else {
+        throw new Error(`unexpected status ${e.status}`);
+      }
+    }
+  });
+
+  it('narrows the OTHER arm to its own body shape', async () => {
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch(() =>
+        new Response(JSON.stringify({ conflictingId: 'u2' }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      ),
+    });
+
+    try {
+      await createApi(client).getUserById('1');
+      throw new Error('expected the 409 to throw');
+    } catch (e) {
+      if (!isGetUserByIdError(e) || e.status !== 409) throw new Error('expected a 409 arm');
+      const id: string = e.body.conflictingId;
+      expect(id).toBe('u2');
+    }
+  });
+
+  it('reports false for a status the document does not declare', async () => {
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch(() => new Response('nope', { status: 500 })),
+    });
+
+    try {
+      await createApi(client).getUserById('1');
+      throw new Error('expected the 500 to throw');
+    } catch (e) {
+      expect(e).toBeInstanceOf(HttpClientError);
+      expect(isGetUserByIdError(e)).toBe(false);
+    }
   });
 });

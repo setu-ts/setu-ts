@@ -266,6 +266,98 @@ describe('corsMiddleware', () => {
       expect(response.headers.get('max-age')).toBeUndefined();
     });
 
+    describe('allowedHeaders default — echo (M70m/X11-3)', () => {
+      function preflight(requested?: string) {
+        return createFakeContext({
+          request: {
+            method: 'OPTIONS',
+            headers: {
+              Origin: 'https://example.com',
+              'Access-Control-Request-Method': 'POST',
+              ...(requested === undefined ? {} : { 'Access-Control-Request-Headers': requested }),
+            },
+          },
+        });
+      }
+
+      it('echoes Access-Control-Request-Headers when none is configured', async () => {
+        // The defect: `allowedHeaders` defaulted to `[]` while `methods`
+        // defaulted to every standard verb, so the preflight advertised POST
+        // and then refused `content-type` — every browser blocked every JSON
+        // request made against the README's own example.
+        const { ctx, response } = preflight('content-type');
+        await corsMiddleware({ origin: 'https://example.com' })(ctx, async () => {});
+
+        expect(response.headers.get('access-control-allow-headers')).toBe('content-type');
+      });
+
+      it('echoes a multi-header request verbatim', async () => {
+        const { ctx, response } = preflight('content-type, x-request-id');
+        await corsMiddleware({ origin: 'https://example.com' })(ctx, async () => {});
+
+        expect(response.headers.get('access-control-allow-headers')).toBe(
+          'content-type, x-request-id',
+        );
+      });
+
+      it('appends Vary: Access-Control-Request-Headers when echoing', async () => {
+        // Mandatory, not decorative: the answer now depends on this request
+        // header, so without it a shared cache can serve one caller's
+        // preflight response to a caller asking for different headers.
+        const { ctx, response } = preflight('content-type');
+        await corsMiddleware({ origin: 'https://example.com' })(ctx, async () => {});
+
+        const vary = response.appendedHeaders.get('vary');
+        expect(Array.isArray(vary) && vary.includes('Access-Control-Request-Headers')).toBe(true);
+      });
+
+      it('emits no Allow-Headers when the preflight requests none', async () => {
+        const { ctx, response } = preflight();
+        await corsMiddleware({ origin: 'https://example.com' })(ctx, async () => {});
+
+        expect(response.headers.get('access-control-allow-headers')).toBeUndefined();
+      });
+
+      it('lets an explicit list win and refuse everything outside it', async () => {
+        const { ctx, response } = preflight('content-type, x-secret');
+        await corsMiddleware({
+          origin: 'https://example.com',
+          allowedHeaders: ['content-type'],
+        })(ctx, async () => {});
+
+        expect(response.headers.get('access-control-allow-headers')).toBe('content-type');
+      });
+
+      it('keeps an explicit EMPTY list meaning deny-everything', async () => {
+        // `undefined` and `[]` are different: omitting the option opts into
+        // echoing, while an explicit empty list is a deliberate refusal.
+        const { ctx, response } = preflight('content-type');
+        await corsMiddleware({ origin: 'https://example.com', allowedHeaders: [] })(
+          ctx,
+          async () => {},
+        );
+
+        expect(response.headers.get('access-control-allow-headers')).toBeUndefined();
+      });
+
+      it('echoes nothing for a DENIED origin', async () => {
+        const { ctx, response } = createFakeContext({
+          request: {
+            method: 'OPTIONS',
+            headers: {
+              Origin: 'https://evil.com',
+              'Access-Control-Request-Method': 'POST',
+              'Access-Control-Request-Headers': 'content-type',
+            },
+          },
+        });
+        await corsMiddleware({ origin: 'https://example.com' })(ctx, async () => {});
+
+        expect(response.headers.get('access-control-allow-headers')).toBeUndefined();
+        expect(response.headers.get('access-control-allow-origin')).toBeUndefined();
+      });
+    });
+
     it('disallowed preflight returns 204 with no CORS headers', async () => {
       const { ctx, nextCalled, response } = createFakeContext({
         request: {

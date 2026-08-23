@@ -63,11 +63,41 @@ type ZodSchema = {
 };
 
 /**
+ * Consulted for every schema {@linkcode ZodToOpenApi.transform} is about to
+ * convert — the top-level one AND every sub-schema it recurses into.
+ *
+ * Returning `undefined` means "transform normally". Returning a schema object
+ * REPLACES the transform for that node, which is how a document generator
+ * substitutes a `$ref` to a reusable component without the transformer
+ * knowing anything about components.
+ *
+ * @param schema - The Zod schema about to be transformed
+ * @returns A replacement schema object, or `undefined` to transform normally
+ *
+ * @since 0.3.0
+ */
+export type SchemaNodeHook = (schema: unknown) => OpenApiSchemaObject | undefined;
+
+/**
  * Converts a Zod schema to an OpenAPI 3.1 schema object.
  *
  * @since 0.1.0
  */
 export class ZodToOpenApi {
+  /** Optional per-node hook; see {@linkcode SchemaNodeHook}. */
+  readonly #onSchema: SchemaNodeHook | undefined;
+
+  /**
+   * Creates a transformer.
+   *
+   * @param onSchema - Optional hook consulted for every schema node, so a
+   * caller can substitute a `$ref` for a reused schema at ANY depth rather
+   * than only at the root. Omit it for a plain transform.
+   */
+  constructor(onSchema?: SchemaNodeHook) {
+    this.#onSchema = onSchema;
+  }
+
   /**
    * Transforms a Zod schema into an OpenAPI schema object.
    *
@@ -75,6 +105,12 @@ export class ZodToOpenApi {
    * @returns The OpenAPI schema object representation
    */
   transform(schema: unknown): OpenApiSchemaObject {
+    // Consulted BEFORE the `_def` check, so a hook sees every node the caller
+    // asked about — including one it may want to name even though this
+    // transformer would degrade it to `{}`.
+    const replacement = this.#onSchema?.(schema);
+    if (replacement !== undefined) return replacement;
+
     const zodSchema = schema as ZodSchema | undefined;
 
     // Check if it's a Zod schema by looking for _def

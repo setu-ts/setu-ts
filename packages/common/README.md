@@ -112,7 +112,9 @@ package fits the plugin architecture.
 | `splitWorkerEnv`             | function  |
 | `unwrap`                     | function  |
 | `upgradeIntentOf`            | function  |
+| `validationMetadataOf`       | function  |
 | `withSecurityMetadata`       | function  |
+| `withValidationMetadata`     | function  |
 | `CAPABILITIES`               | const     |
 | `ERROR_RESPONDER_BRAND`      | const     |
 | `ERROR_RESPONDER_STATE_KEY`  | const     |
@@ -120,6 +122,7 @@ package fits the plugin architecture.
 | `SECURITY_METADATA`          | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`   | const     |
 | `UPGRADE_INTENT`             | const     |
+| `VALIDATION_METADATA`        | const     |
 | `AddJobOptions`              | interface |
 | `AuditEntry`                 | interface |
 | `BulkheadPolicy`             | interface |
@@ -263,6 +266,7 @@ package fits the plugin architecture.
 | `RouteInfo`                  | interface |
 | `RouteSchema`                | interface |
 | `RouteSecurityMetadata`      | interface |
+| `RouteValidationMetadata`    | interface |
 | `ScheduledJob`               | interface |
 | `ScheduleOptions`            | interface |
 | `SerializedError`            | interface |
