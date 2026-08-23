@@ -249,6 +249,7 @@ package fits the plugin architecture.
 | `PickOptions`                | interface |
 | `ProcessOptions`             | interface |
 | `ProviderOptions`            | interface |
+| `PutObjectOptions`           | interface |
 | `RbacConfig`                 | interface |
 | `RealtimeFrame`              | interface |
 | `RecurringOptions`           | interface |

@@ -19,12 +19,80 @@ const DEFAULT_MAX_SIZE = 10 * 1024 * 1024;
 const DEFAULT_FIELDNAME = 'file';
 
 /**
+ * Default ceiling on the body this middleware will parse (50 MB).
+ *
+ * A CEILING, not a floor. The expression it replaces was
+ * `Math.max(maxSize * 2, 50 * 1024 * 1024)` under a comment reading "cap at
+ * 50 MB", which made 50 MB the minimum: any `maxSize` above 25 MB raised the
+ * bound without limit, so a 100 MB per-file limit delivered a 60 MB body to the
+ * handler unchecked (X8-3).
+ */
+const DEFAULT_MAX_BODY_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Slack added to `maxSize` for multipart framing — the boundary delimiters,
+ * per-part headers and CRLFs that wrap the file bytes. Generous on purpose: it
+ * must never reject a payload whose FILE is within `maxSize`, because that
+ * would refuse a legitimate upload.
+ */
+const MULTIPART_FRAMING_ALLOWANCE = 8 * 1024;
+
+/**
+ * Resolves the byte ceiling on the body this middleware will parse.
+ *
+ * `Math.min` against the ceiling is the whole fix: the bound follows `maxSize`
+ * upward only until it reaches the ceiling the option documents.
+ *
+ * Both inputs are validated, because `NaN` propagates through `Math.min` and
+ * every later `>` comparison against it is `false` — so a single
+ * `maxSize: Number(process.env.MAX)` with an unset variable would silently
+ * disable BOTH the body bound and the per-file limit, leaving the middleware
+ * parsing an unbounded multipart body. Failing here surfaces it at route setup
+ * with the option named, which is this repo's rule for a bad configuration.
+ *
+ * @param maxSize - Per-file limit in bytes
+ * @param maxBodyBytes - Configured ceiling, or `undefined` for the default
+ * @returns The effective bound in bytes
+ * @throws {RangeError} If either value is not a finite, non-negative number
+ */
+export function resolveMaxBodyBytes(maxSize: number, maxBodyBytes?: number): number {
+  assertByteLimit('maxSize', maxSize);
+  if (maxBodyBytes !== undefined) {
+    assertByteLimit('maxBodyBytes', maxBodyBytes);
+  }
+  const ceiling = maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  return Math.min(maxSize * 2 + MULTIPART_FRAMING_ALLOWANCE, ceiling);
+}
+
+/**
+ * Refuses a byte limit that cannot bound anything.
+ *
+ * @param option - The option's name, so the message names what to fix
+ * @param value - The configured value
+ * @throws {RangeError} If the value is not a finite, non-negative number
+ */
+function assertByteLimit(option: string, value: number): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(
+      `createUploadMiddleware: ${option} must be a finite, non-negative number (received ${value})`,
+    );
+  }
+}
+
+/**
  * Creates an upload middleware factory.
  *
  * Reads the buffered `ctx.request.bytes()`, parses `multipart/form-data`,
  * enforces `maxSize`/`allowedMimeTypes`/`maxFiles`, then stores the result
- * under `'storage-plugin:uploads'` in `ctx.state`.  On validation failure it
- * returns a 400 short-circuit response (never calls `next`).
+ * under `'storage-plugin:uploads'` in `ctx.state`. Every refusal
+ * short-circuits without calling `next`.
+ *
+ * Refusals are answered `413` when something was too large — the request body
+ * against {@linkcode resolveMaxBodyBytes}, or one file against `maxSize` — and
+ * `400` when the request was genuinely malformed or otherwise unacceptable
+ * (too many files, a disallowed MIME type, an unparseable body). Both size
+ * refusals previously answered `400`, which told a client it had sent
+ * something malformed when it had only sent something big.
  *
  * @param options - Middleware configuration
  * @returns A middleware function
@@ -36,8 +104,7 @@ export function createUploadMiddleware(
   const maxSize = options?.maxSize ?? DEFAULT_MAX_SIZE;
   const allowedMimeTypes = options?.allowedMimeTypes;
   const maxFiles = options?.maxFiles;
-  // Upper bound on total buffered body bytes to prevent unbounded memory growth.
-  const maxBodyBytes = Math.max(maxSize * 2, 50 * 1024 * 1024); // at least 2× max per file, cap at 50 MB
+  const maxBodyBytes = resolveMaxBodyBytes(maxSize, options?.maxBodyBytes);
 
   return async (ctx, next) => {
     const ct = ctx.request.headers.get('content-type') ?? '';
@@ -54,7 +121,7 @@ export function createUploadMiddleware(
       const contentLength = parseInt(clHeader, 10);
       if (!isNaN(contentLength) && contentLength > maxBodyBytes) {
         respondWithError(ctx, {
-          status: 400,
+          status: 413,
           title: 'Request entity too large',
           detail: `Request body exceeds the maximum allowed size of ${maxBodyBytes} bytes`,
         });
@@ -72,7 +139,7 @@ export function createUploadMiddleware(
       // Hard cap on buffered bytes — reject without parsing.
       if (body.length > maxBodyBytes) {
         respondWithError(ctx, {
-          status: 400,
+          status: 413,
           title: 'Request entity too large',
           detail: `Request body exceeds the maximum allowed size of ${maxBodyBytes} bytes`,
         });
@@ -99,7 +166,7 @@ export function createUploadMiddleware(
       for (const part of filtered) {
         if (part.data.length > maxSize) {
           respondWithError(ctx, {
-            status: 400,
+            status: 413,
             title: 'File too large',
             detail: `Maximum size is ${maxSize} bytes`,
           });

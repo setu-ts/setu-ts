@@ -16,6 +16,7 @@ import {
   WORKER_POOL_METRICS,
 } from '../../src/metrics/metric-names.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
+import type { LoggedMessage } from '../fixtures/fake-context.ts';
 import { createFakeRuntime, FakeHost, FakeTimers } from '../fixtures/fakes.ts';
 import { RecordingMetrics } from '../fixtures/metrics-fakes.ts';
 import manifest from '../../deno.json' with { type: 'json' };
@@ -57,7 +58,7 @@ describe('WorkerPoolPlugin — register', () => {
     expect(indicator).toBeDefined();
     const result = await indicator?.();
     expect(result?.status).toBe('up');
-    expect(result?.data).toEqual({ available: true, pools: [] });
+    expect(result?.data).toEqual({ available: true, exitDetection: false, pools: [] });
 
     // Stats appear once a pool exists.
     const pool = fake.registered.get(CAPABILITIES.WORKER_POOL) as IWorkerPool;
@@ -71,7 +72,7 @@ describe('WorkerPoolPlugin — register', () => {
     WorkerPoolPlugin().register(fake.ctx);
     const result = await fake.healthIndicators.get('worker-pool')?.();
     expect(result?.status).toBe('up');
-    expect(result?.data).toEqual({ available: false, pools: [] });
+    expect(result?.data).toEqual({ available: false, exitDetection: false, pools: [] });
   });
 
   it('should shut the service down via the onClose handler', async () => {
@@ -193,5 +194,88 @@ describe('WorkerPoolPlugin — optional metrics wiring', () => {
         [REASON_LABEL]: 'unavailable',
       }),
     ).toBe(1);
+  });
+});
+
+describe('WorkerPoolPlugin — the undetectable-death warning (X8-7)', () => {
+  /** Registers the plugin and returns what it logged. */
+  async function register(
+    options: Parameters<typeof WorkerPoolPlugin>[0],
+  ): Promise<LoggedMessage[]> {
+    const timers = new FakeTimers();
+    const { ctx, logged } = createFakeContext(createFakeRuntime(timers));
+    await WorkerPoolPlugin(options).register!(ctx);
+    return logged;
+  }
+
+  /** Reads the pools named by the warning, or `undefined` when none was sent. */
+  function warnedPools(logged: LoggedMessage[]): unknown {
+    return logged.find((entry) => entry.message.includes('taskTimeoutMs is 0'))?.metadata?.pools;
+  }
+
+  it('should warn for the plugin-wide default on a host that cannot report exits', async () => {
+    // Deno's shape: the host spawns workers but its runtime emits nothing when
+    // one ends itself, so `0` removes the only backstop.
+    const logged = await register({ host: new FakeHost(2, undefined, false), taskTimeoutMs: 0 });
+
+    expect(warnedPools(logged)).toEqual(['*']);
+  });
+
+  it('should name a per-pool override even when the default is non-zero', async () => {
+    // A per-pool `0` matters on its own, and a coarser "the default is fine"
+    // check would miss it entirely.
+    const logged = await register({
+      host: new FakeHost(2, undefined, false),
+      taskTimeoutMs: 30_000,
+      pools: { 'file:///tasks/long.ts': { taskTimeoutMs: 0 } },
+    });
+
+    expect(warnedPools(logged)).toEqual(['file:///tasks/long.ts']);
+  });
+
+  it('should name BOTH the default and a per-pool override', async () => {
+    const logged = await register({
+      host: new FakeHost(2, undefined, false),
+      taskTimeoutMs: 0,
+      pools: { 'file:///tasks/long.ts': { taskTimeoutMs: 0 } },
+    });
+
+    expect(warnedPools(logged)).toEqual(['*', 'file:///tasks/long.ts']);
+  });
+
+  it('should stay silent on a host that CAN report exits', async () => {
+    // Node and Bun settle the task from the exit signal, so `0` is safe there
+    // and a warning would be noise.
+    const logged = await register({ host: new FakeHost(2, undefined, true), taskTimeoutMs: 0 });
+
+    expect(warnedPools(logged)).toBeUndefined();
+  });
+
+  it('should stay silent when a timeout is configured', async () => {
+    const logged = await register({
+      host: new FakeHost(2, undefined, false),
+      taskTimeoutMs: 5_000,
+    });
+
+    expect(warnedPools(logged)).toBeUndefined();
+  });
+
+  it('should stay silent when no pool disables its timeout', async () => {
+    const logged = await register({
+      host: new FakeHost(2, undefined, false),
+      pools: { 'file:///tasks/long.ts': { taskTimeoutMs: 1_000 } },
+    });
+
+    expect(warnedPools(logged)).toBeUndefined();
+  });
+
+  it('should stay silent when there is no worker host at all', async () => {
+    // Cloudflare Workers: `run()` already throws, so no worker can be leaked
+    // and the warning would name a hazard that cannot occur.
+    const timers = new FakeTimers();
+    const { ctx, logged } = createFakeContext(createFakeRuntime(timers));
+    await WorkerPoolPlugin({ taskTimeoutMs: 0 }).register!(ctx);
+
+    expect(warnedPools(logged)).toBeUndefined();
   });
 });

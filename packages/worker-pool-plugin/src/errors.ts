@@ -84,3 +84,36 @@ export class WorkerQueueFullError extends Error {
     this.limit = limit;
   }
 }
+
+/**
+ * Thrown into a task's promise when its worker's THREAD ENDED while the task
+ * was in flight — a clean self-termination (`process.exit()` inside the worker,
+ * or `self.close()` on runtimes that report it) as much as an abrupt one.
+ *
+ * Distinct from {@linkcode WorkerTaskError}, which carries an error the worker
+ * managed to report: a thread that simply stops raises nothing, so before the
+ * pool observed exits the only thing that ever settled such a task was the task
+ * timeout — and `taskTimeoutMs: 0` disabled it, leaving the caller's promise
+ * pending and the pool slot claimed forever (X8-7).
+ *
+ * Only raised on runtimes whose worker host reports an exit; where it does not
+ * (see `IWorkerHost.reportsExit`), the timeout remains the only backstop.
+ *
+ * @since 0.3.0
+ */
+export class WorkerExitError extends Error {
+  /** The task-module specifier the abandoned task belonged to. */
+  readonly taskModule: string;
+  /** The exit code the runtime reported, or `null` when it reported none. */
+  readonly code: number | null;
+
+  constructor(taskModule: string, code: number | null) {
+    super(
+      `Worker thread for ${taskModule} exited while its task was in flight ` +
+        `(code ${code === null ? 'unknown' : code})`,
+    );
+    this.name = 'WorkerExitError';
+    this.taskModule = taskModule;
+    this.code = code;
+  }
+}

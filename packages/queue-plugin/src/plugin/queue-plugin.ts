@@ -6,7 +6,14 @@
  * @module
  */
 
-import type { HealthIndicatorFn, ILogger, IPlugin, IPluginContext, IQueue } from '@setu-ts/common';
+import type {
+  HealthIndicatorFn,
+  ILogger,
+  IMetricsService,
+  IPlugin,
+  IPluginContext,
+  IQueue,
+} from '@setu-ts/common';
 import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
 import type { QueueAdapterType, QueuePluginOptions } from '../interfaces/index.ts';
 import { MemoryQueue } from '../adapters/memory-queue.ts';
@@ -17,6 +24,7 @@ import {
 } from '../adapters/rabbitmq-queue.ts';
 import { SqsQueue } from '../adapters/sqs-queue.ts';
 import { QueueService } from '../services/queue-service.ts';
+import { QueueCollector } from '../metrics/queue-collector.ts';
 import type { QueueLogger } from '../services/queue-service.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -53,8 +61,10 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
     version: denoJson.version,
     provides: [token],
     // B5: Declare optional logger dependency so kernel ordering resolves
-    // LoggerPlugin first when installed, but remains optional.
-    optionalDependencies: [CAPABILITIES.LOGGER],
+    // LoggerPlugin first when installed, but remains optional. `METRICS` is
+    // optional for the same reason: absent it, no collector is built and every
+    // call site is optional-chained (X8-4).
+    optionalDependencies: [CAPABILITIES.LOGGER, CAPABILITIES.METRICS],
     priority: 100,
 
     async register(ctx) {
@@ -70,6 +80,9 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
           adapter = new RedisQueue({
             url: options?.url ?? 'redis://localhost:6379',
             ...(client !== undefined && isRedisQueueClient(client) ? { client } : {}),
+            ...(options?.deadLetterTtlMs === undefined
+              ? {}
+              : { deadLetterTtlMs: options.deadLetterTtlMs }),
           });
           break;
         }
@@ -105,10 +118,23 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // or a broken adapter is reported nowhere, which is how the worker loop
       // used to behave unconditionally.
       const logger = resolveLogger(ctx);
+      // Present only when the application registered the metrics capability.
+      const collector = ctx.services.has(CAPABILITIES.METRICS)
+        ? new QueueCollector(
+          ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
+          // Read through `ctx` at CALL time, never captured here: a logger
+          // registered after this plugin would otherwise be missed for the life
+          // of the application (the M52b `waitUntil` lesson).
+          (error: Error): void => {
+            ctx.logger?.warn('queue metrics write failed', { error: error.message });
+          },
+        )
+        : undefined;
       const service = new QueueService(adapter, runtime, {
         defaultMaxAttempts,
         pollIntervalMs,
         ...(logger !== undefined && { logger }),
+        ...(collector === undefined ? {} : { collector }),
       });
 
       // Connect the service

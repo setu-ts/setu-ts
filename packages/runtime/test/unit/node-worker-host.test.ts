@@ -23,7 +23,7 @@ class FakeNodeWorker implements NodeWorkerLike {
     this.posted.push(value);
   }
 
-  on(event: 'message' | 'error', listener: (arg: unknown) => void): this {
+  on(event: 'message' | 'error' | 'exit', listener: (arg: unknown) => void): this {
     this.listeners.set(event, listener);
     return this;
   }
@@ -107,5 +107,37 @@ describe('createNodeWorkerHost', () => {
   it('should default to the real node:worker_threads and node:os modules', () => {
     const host = createNodeWorkerHost();
     expect(host.availableParallelism()).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('createNodeWorkerHost — exit signal (X8-7)', () => {
+  it('should report exit detection (node:worker_threads always emits exit)', () => {
+    expect(makeHost().reportsExit?.()).toBe(true);
+  });
+
+  it('should register an exit listener on the worker', () => {
+    const handle = makeHost().spawn('./x.js');
+    handle.onExit?.(() => {});
+    expect(FakeNodeWorker.instances[0].listeners.has('exit')).toBe(true);
+  });
+
+  it('should forward the numeric exit code', () => {
+    const handle = makeHost().spawn('./x.js');
+    const codes: (number | null)[] = [];
+    handle.onExit?.((code) => codes.push(code));
+
+    FakeNodeWorker.instances[0].listeners.get('exit')?.(0);
+
+    expect(codes).toEqual([0]);
+  });
+
+  it('should report null when the runtime hands over a non-numeric code', () => {
+    const handle = makeHost().spawn('./x.js');
+    const codes: (number | null)[] = [];
+    handle.onExit?.((code) => codes.push(code));
+
+    FakeNodeWorker.instances[0].listeners.get('exit')?.(undefined);
+
+    expect(codes).toEqual([null]);
   });
 });

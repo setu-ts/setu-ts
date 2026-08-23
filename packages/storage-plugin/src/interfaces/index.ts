@@ -2,11 +2,19 @@
  * Internal types and structural facades for the StoragePlugin.
  *
  * The `StorageProvider` port is the internal adapter interface — NOT exported
- * from `src/index.ts`.  Structural client facades (`IAwsS3Client`, etc.) are
- * exported so consumers can inject a fake SDK for testing.
+ * from `src/index.ts`.
+ *
+ * The exported client types are NOT uniform, and the difference is worth
+ * knowing before injecting one: `IGcsClient` and `IAzureBlobClient` mirror
+ * their SDKs, so a real `@google-cloud/storage` `Storage` or
+ * `@azure/storage-blob` client fits structurally. {@linkcode IS3Backend} does
+ * not — it is this package's own backend surface, so supplying it means
+ * implementing the backend rather than handing over an SDK client (X8-10).
  *
  * @module
  */
+
+import type { PutObjectOptions } from '@setu-ts/common';
 
 // ── Provider type discriminant ────────────────────────────────────────────
 
@@ -22,31 +30,97 @@ export type StorageProviderType =
 // ── Plugin / provider options ─────────────────────────────────────────────
 
 /**
- * Top-level options passed to {@linkcode StoragePlugin}.
+ * Top-level options passed to {@linkcode StoragePlugin}: a union discriminated
+ * on `provider`, so each backend's `options` are checked against that backend's
+ * own shape.
+ *
+ * The memory arm keeps `provider` OPTIONAL, so an omitted provider still means
+ * `'memory'` and `StoragePlugin()` is unchanged.
+ *
+ * Before this was discriminated, one unknown key made the compiler report EVERY
+ * property of the literal as `not assignable to type 'never'` and never named
+ * the offending one — the union's first member was `Record<string, never>`,
+ * which accepts any object shape while requiring every property to be `never`,
+ * so a literal matching no other member bound to it. Discriminating also makes
+ * a missing `bucket` or `containerName` a compile error under the arm that
+ * requires it, rather than something only the running backend notices.
  *
  * @since 0.1.0
  */
-export interface StoragePluginOptions {
-  /** Provider backend (default `'memory'`). */
-  provider?: StorageProviderType;
-  /** Provider-specific options. */
-  options?: StorageProviderOptions;
+export type StoragePluginOptions =
+  | MemoryStorageOptions
+  | LocalStorageOptions
+  | S3StorageOptions
+  | GcsStorageOptions
+  | AzureStorageOptions;
+
+/**
+ * The default arm: in-memory storage, which takes no configuration.
+ *
+ * It deliberately declares NO `options` member. The previous
+ * `MemoryProviderOptions = Record<string, never>` is what produced X8-11's
+ * symptom, and discriminating the outer union alone did NOT remove it —
+ * measured: with that member present, one unknown key inside an `'s3'` literal
+ * still reported `bucket` and `region` as `not assignable to type 'never'`,
+ * because the compiler keeps every arm's `options` type as a candidate for the
+ * nested literal once the direct match fails. Without it there is exactly one
+ * error, and it names the offending key.
+ */
+export interface MemoryStorageOptions {
+  /** Selects the memory backend. Optional — an omitted provider means memory. */
+  readonly provider?: 'memory';
+}
+
+/** The local-filesystem arm. */
+export interface LocalStorageOptions {
+  /** Selects the local-filesystem backend. */
+  readonly provider: 'local';
+  /** Root directory configuration. */
+  readonly options?: LocalStorageProviderOptions;
 }
 
 /**
- * Union of per-provider option shapes, keyed by which fields are present.
+ * The S3 arm, shared by `'s3'` and the `'b2'` (Backblaze) preset, which reaches
+ * the same provider over B2's S3-compatible endpoint.
+ */
+export interface S3StorageOptions {
+  /** Selects the S3 backend, or the Backblaze B2 preset over it. */
+  readonly provider: 's3' | 'b2';
+  /** Bucket and credentials; `bucket` is required. */
+  readonly options: S3ProviderOptions;
+}
+
+/** The Google Cloud Storage arm. */
+export interface GcsStorageOptions {
+  /** Selects the GCS backend. */
+  readonly provider: 'gcs';
+  /** Bucket and project; `bucket` is required. */
+  readonly options: GcsProviderOptions;
+}
+
+/** The Azure Blob Storage arm. */
+export interface AzureStorageOptions {
+  /** Selects the Azure Blob backend. */
+  readonly provider: 'azure';
+  /** Container and credentials; `containerName` is required. */
+  readonly options: AzureBlobProviderOptions;
+}
+
+/**
+ * Union of per-provider option shapes.
+ *
+ * Retained as a named type because it is the parameter type of the internal
+ * provider factory and appears in the package's documented surface; the arm a
+ * configuration takes is selected by {@linkcode StoragePluginOptions}, never by
+ * matching against this union.
  *
  * @since 0.1.0
  */
 export type StorageProviderOptions =
-  | MemoryProviderOptions
   | LocalStorageProviderOptions
   | S3ProviderOptions
   | GcsProviderOptions
   | AzureBlobProviderOptions;
-
-/** Options for {@linkcode MemoryProvider}. */
-export type MemoryProviderOptions = Record<string, never>;
 
 /** Options for {@linkcode LocalStorageProvider}. */
 export interface LocalStorageProviderOptions {
@@ -66,8 +140,14 @@ export interface S3ProviderOptions {
   secretAccessKey?: string;
   /** Custom S3-compatible endpoint (R2, MinIO, B2). */
   endpoint?: string;
-  /** Injected structural client (bypasses lazy import). */
-  client?: IAwsS3Client;
+  /**
+   * An implementation of the S3 backend, bypassing the lazy SDK import.
+   *
+   * This is NOT a place to put an `@aws-sdk/client-s3` `S3Client`; see
+   * {@linkcode IS3Backend}. Injecting a real SDK client is refused at
+   * `connect()` with the methods it lacks.
+   */
+  client?: IS3Backend;
 }
 
 /** Options for {@linkcode GcsProvider}. */
@@ -97,13 +177,25 @@ export interface AzureBlobProviderOptions {
 // ── Structural client facades (exported for injection) ────────────────────
 
 /**
- * Minimal S3 client shape for structural injection.
- * Exposes data-methods directly (adaptAwsS3Module builds them from SDK commands).
+ * The S3 BACKEND surface this package drives — not an `@aws-sdk/client-s3`
+ * client.
+ *
+ * Renamed from `IAwsS3Client` because that name, and the docs around it,
+ * promised something it never was: the real SDK's surface is
+ * `send(command)`, so injecting an actual `S3Client` was rejected with
+ * `Injected S3 client is missing required methods` (X8-10). What this declares
+ * is the shape {@linkcode adaptAwsS3Module} PRODUCES from the SDK, so an
+ * application supplying it is implementing the backend, not swapping in a
+ * pre-configured client.
+ *
+ * That makes it useful for a test double or a wholly different backend, and
+ * NOT a way to configure the underlying SDK client — there is no path today for
+ * a custom retry policy, timeout or proxy agent.
  *
  * @since 0.1.0
  */
-export interface IAwsS3Client {
-  put(path: string, data: Uint8Array): Promise<void>;
+export interface IS3Backend {
+  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
   get(path: string): Promise<Uint8Array | null>;
   delete(path: string): Promise<boolean>;
   head(path: string): Promise<boolean>;
@@ -183,6 +275,22 @@ export interface UploadMiddlewareOptions {
   allowedMimeTypes?: readonly string[];
   /** Maximum number of files (default unlimited). */
   maxFiles?: number;
+  /**
+   * Hard ceiling, in bytes, on the request body this middleware will PARSE
+   * (default 50 MB). The effective bound is
+   * `min(maxSize * 2 + framing allowance, maxBodyBytes)`, so raising `maxSize`
+   * raises the bound only up to this ceiling.
+   *
+   * It bounds parsing and the per-part copies the parse produces, NOT the
+   * initial read: the HTTP adapter buffers the whole body into memory before
+   * any middleware runs (`mapWebRequestToFrameworkRequest` calls
+   * `arrayBuffer()`), and `IRequest` exposes no body stream, so no middleware
+   * can decline to read. Bounding the read needs a streaming request body,
+   * which is a framework-level change.
+   *
+   * @since 0.3.0
+   */
+  maxBodyBytes?: number;
 }
 
 // ── Internal provider port (NOT exported from barrel) ─────────────────────
@@ -206,8 +314,11 @@ export interface StorageProvider {
    *
    * @param path - Object path/key
    * @param data - Object bytes
+   * @param options - Object attributes to record with the bytes. Providers that
+   * cannot persist them accept and ignore them; see the README's per-provider
+   * table.
    */
-  put(path: string, data: Uint8Array): Promise<void>;
+  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
   /**
    * Retrieves an object; `null` when absent.
    *

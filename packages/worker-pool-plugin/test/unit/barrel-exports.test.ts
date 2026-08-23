@@ -15,6 +15,7 @@ import * as barrel from '../../src/index.ts';
 
 /** Exactly the value exports M45 shipped. */
 const EXPECTED_EXPORTS = [
+  'WorkerExitError',
   'WorkerPoolPlugin',
   'WorkerPoolService',
   'WorkerPoolUnavailableError',

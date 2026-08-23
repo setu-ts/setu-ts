@@ -6,6 +6,7 @@
  *
  * @module
  */
+import type { PutObjectOptions } from '@setu-ts/common';
 import type { IAzureBlobClient, StorageProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -397,14 +398,25 @@ export class AzureBlobProvider implements StorageProvider {
   }
 
   /**
-   * Stores an object in Azure Blob Storage.
+   * Stores an object in Azure Blob Storage, recording any content type and user
+   * metadata on the blob so a SAS URL serves it under the right type.
+   *
+   * Azure carries the content type inside `blobHTTPHeaders` rather than beside
+   * the metadata, so the two land in different places on the same call.
    *
    * @param path - Object key
    * @param data - Object bytes
+   * @param options - Object attributes to record with the bytes
    */
-  async put(path: string, data: Uint8Array): Promise<void> {
+  async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
     this.#assertConnected();
-    await this.#getBlockBlob(path).uploadData(data);
+    const uploadOptions: Record<string, unknown> = {
+      ...(options?.contentType === undefined
+        ? {}
+        : { blobHTTPHeaders: { blobContentType: options.contentType } }),
+      ...(options?.metadata === undefined ? {} : { metadata: options.metadata }),
+    };
+    await this.#getBlockBlob(path).uploadData(data, uploadOptions);
   }
 
   /**

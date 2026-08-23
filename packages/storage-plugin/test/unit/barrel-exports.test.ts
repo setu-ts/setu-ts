@@ -7,6 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as barrel from '../../src/index.ts';
+import type * as barrelTypes from '../../src/index.ts';
 
 describe('barrel exports', () => {
   it('exports StoragePlugin factory', () => {
@@ -68,5 +69,39 @@ describe('barrel exports', () => {
   it('exports all option types (type-only — verified by compilation)', () => {
     // Types are type-only exports; verified by `deno check`.
     expect(true).toBe(true);
+  });
+});
+
+/**
+ * Compile-time pin for the type-only barrel exports M70k added or renamed.
+ *
+ * The runtime assertions above cannot see a type export at all — dropping one
+ * leaves every test in this file green while breaking every consumer, which is
+ * the M56/M52c defect class. These declarations NAME each type through the
+ * barrel, so removing one fails `deno check`.
+ */
+describe('storage-plugin barrel — type exports M70k added', () => {
+  it('should name each one through the barrel', () => {
+    const memory: barrelTypes.MemoryStorageOptions = { provider: 'memory' };
+    const local: barrelTypes.LocalStorageOptions = {
+      provider: 'local',
+      options: { rootDir: '/tmp' },
+    };
+    const s3: barrelTypes.S3StorageOptions = { provider: 's3', options: { bucket: 'b' } };
+    const gcs: barrelTypes.GcsStorageOptions = { provider: 'gcs', options: { bucket: 'b' } };
+    const azure: barrelTypes.AzureStorageOptions = {
+      provider: 'azure',
+      options: { containerName: 'c' },
+    };
+    const attributes: barrelTypes.PutObjectOptions = { contentType: 'image/png' };
+    // The deprecated alias exists precisely so an existing import keeps
+    // compiling; nothing else in the suite would notice its removal.
+    const legacy: barrelTypes.IAwsS3Client | null = null;
+    const backend: barrelTypes.IS3Backend | null = legacy;
+
+    expect([memory.provider, local.provider, s3.provider, gcs.provider, azure.provider])
+      .toEqual(['memory', 'local', 's3', 'gcs', 'azure']);
+    expect(attributes.contentType).toBe('image/png');
+    expect(backend).toBeNull();
   });
 });

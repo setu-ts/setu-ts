@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { IStorage, SignedUrlOptions } from '@setu-ts/common';
+import type { IStorage, PutObjectOptions, SignedUrlOptions } from '@setu-ts/common';
 import type { StorageProvider } from '../interfaces/index.ts';
 
 /**
@@ -32,9 +32,16 @@ export class StorageService implements IStorage {
    *
    * @param path - Object path/key
    * @param data - Object bytes
+   * @param options - Object attributes to record with the bytes; forwarded to
+   * the provider verbatim, and omitted entirely when the caller omits it, so a
+   * provider can tell "no attributes given" from "empty attributes given"
    */
-  async put(path: string, data: Uint8Array): Promise<void> {
-    await this.#provider.put(path, data);
+  async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+    if (options === undefined) {
+      await this.#provider.put(path, data);
+      return;
+    }
+    await this.#provider.put(path, data, options);
   }
 
   /**

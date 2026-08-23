@@ -524,6 +524,7 @@ MIT
 | `MessagingHandlerOptions`                 | interface |
 | `QueueHandlerOptions`                     | interface |
 | `QueueSendOptions`                        | interface |
+| `R2PutOptions`                            | interface |
 | `R2StorageArm`                            | interface |
 | `R2StorageOptions`                        | interface |
 | `RealtimeBackplaneObjectCoreOptions`      | interface |

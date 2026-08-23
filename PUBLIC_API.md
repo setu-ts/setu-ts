@@ -304,15 +304,30 @@ typed `WorkerPoolUnavailableError` rather than throwing at startup.
 interface IWorkerHost {
   spawn(specifier: string): IWorkerHandle;
   availableParallelism(): number;
+  // Answerable BEFORE a worker exists, which is why it sits on the host: a
+  // consumer that must warn about undetectable worker death needs to know at
+  // registration time. A host that omits it is treated as reporting `false`.
+  reportsExit?(): boolean;
 }
 
 interface IWorkerHandle {
   postMessage(message: unknown): void;
   onMessage(listener: (message: unknown) => void): void;
   onError(listener: (error: Error) => void): void;
+  // The worker's THREAD ENDING, however it ended — a clean self-termination
+  // included, which raises no error at all. `code` is `null` when the runtime
+  // ends the worker without reporting one, and the listener also fires for a
+  // host-requested `terminate()` on runtimes that implement it that way.
+  onExit?(listener: (code: number | null) => void): void;
   terminate(): Promise<void>;
 }
 ```
+
+`onExit`/`reportsExit` are **omitted, not no-ops**, on a runtime that cannot report a worker exit:
+their absence means "this runtime cannot tell me a worker died", never "no worker has died". The
+Node host implements both over `node:worker_threads`' `'exit'`; the shared web-worker host does when
+its runtime names an event that fires, which **Bun does (`'close'`) and Deno does not** — measured,
+Deno's `Worker` emits nothing on `self.close()` and a later `postMessage` still resolves.
 
 `dns` is an **optional** `IDnsResolver` for name resolution. It is implemented by the Node, Deno,
 and Bun runtime adapters and **absent on Cloudflare Workers**, whose network access is `fetch` —
@@ -2713,13 +2728,17 @@ app.router.post('/thumbnail', async (ctx) => {
   instances. A clone failure surfaces as a rejected `run()` on both dispatch paths (immediately, and
   when the task is dispatched later from the queue); the worker is retained and the pool keeps
   serving.
-- **`taskTimeoutMs: 0` disables crash detection for a self-terminated worker.** Worker termination
-  is not delivered as a host event, so the timeout is the only thing that settles the task of a
-  worker that ended itself; with it off, that `run()` never settles and its pool slot is not
-  released. Owned by M70k.
+- **A worker that ends its own thread** settles its in-flight task with `WorkerExitError` and frees
+  the slot, independently of the task timeout — where the runtime reports the exit. It does on Node
+  (`node:worker_threads` `'exit'`) and on Bun (its non-standard `'close'`); it does **not** on Deno,
+  whose web `Worker` emits no host-side event at all when a worker calls `self.close()`, and where a
+  later `postMessage` still resolves. On Deno the task timeout therefore remains the only backstop,
+  so keep one on any pool whose task module can terminate itself. The pool reports which case it is
+  in through `exitDetection` in its health payload, and warns once at `register()` when
+  `taskTimeoutMs` resolves to `0` on a runtime that cannot report an exit.
 - **Node `.ts` task modules** need an app-level loader/build, exactly as the frontend build is the
   app's responsibility (AI_GUIDELINES §12.2); the plugin consumes the module specifier as given.
-- Health indicator `worker-pool` reports `{ available, pools }`.
+- Health indicator `worker-pool` reports `{ available, exitDetection, pools }`.
 - **Metrics (opt-in by capability).** When `CAPABILITIES.METRICS` is registered, the plugin
   publishes six series, all labelled `task_module`: gauges `worker_pool_workers`,
   `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
@@ -3557,6 +3576,8 @@ Provides background job queue with Memory and Redis adapters.
 - **`JobProcessor<T>`** — Job processor type (re-exported)
 - **`AddJobOptions`** — Options for `queue.add()` (re-exported)
 - **`ProcessOptions`** — Options for `queue.process()` (re-exported)
+- **`QueueDepths`** — `{ ready, processing, dead }` per job name, as the health indicator publishes
+  them
 - **`RecurringOptions`** — Options for `queue.addRecurring()` (re-exported)
 - **`QueueLogger`** — Minimal `error`/`warn` logger surface the service reports background failures
   through (structurally compatible with `ILogger`)
@@ -3722,6 +3743,11 @@ interface AddJobOptions {
 // ProcessOptions
 interface ProcessOptions {
   readonly concurrency?: number; // Jobs processed concurrently (default: 1)
+  // Invoked ONCE when a job has exhausted its attempts, immediately before it
+  // is dead-lettered. Does NOT fire on an attempt that will be retried. A
+  // callback that throws or rejects is reported through the logger and
+  // swallowed — the dead-letter still happens.
+  readonly onFailed?: (job: IJob, error: unknown) => void | Promise<void>;
 }
 
 // RecurringOptions
@@ -3756,6 +3782,25 @@ reachability (`isHealthy()`).
 | ------ | ----------------------------------------------------------------------------------------- |
 | `up`   | The adapter is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
 | `down` | The adapter is not connected, or is connected but unreachable.                            |
+
+Since M70k the payload also carries `queues`, keyed by job name, when the adapter can count its
+states cheaply — the memory adapter (in process) and the Redis adapter (`ZCARD`). The key is OMITTED
+rather than reported as zeros on RabbitMQ and SQS, whose counts need a management API or
+`GetQueueAttributes`: "this adapter cannot tell you" and "there is nothing there" are different
+answers, and an operator acting on a dead-letter alert needs to tell them apart.
+
+The counts are read only once the adapter has reported itself reachable, so a `down` payload carries
+`{ adapter, reachable }` and no `queues`. Counting against a backend already known to be unreachable
+would cost a failing round trip per name on every probe interval and tell an operator nothing that
+`reachable: false` does not.
+
+```json
+{
+  "adapter": "RedisQueue",
+  "reachable": true,
+  "queues": { "thumbnail": { "ready": 0, "processing": 0, "dead": 1 } }
+}
+```
 
 `data` reports `{ adapter, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
 the adapter has no liveness check.
@@ -4087,46 +4132,57 @@ plus a typed `getUploadedFile()` helper.
 
 ```typescript
 const uploadMw = createUploadMiddleware({
-  fieldname: 'file',
-  maxSize: 10 * 1024 * 1024,         // 10 MB default
-  allowedMimeTypes?: ['image/jpeg', 'image/png'],  // optional
-  maxFiles?: 5,                      // optional
+  fieldname: 'file', // parts with any other name are dropped
+  maxSize: 10 * 1024 * 1024, // per file; exceeding it answers 413
+  allowedMimeTypes: ['image/jpeg', 'image/png'], // optional
+  maxFiles: 5, // optional; exceeding it answers 400
 });
 
-app.post('/upload', {
+app.router.post('/upload', {
   middleware: [uploadMw],
   handler: async (ctx) => {
+    // `getUploadedFile` returns `UploadedFile | undefined`, and the fieldname
+    // must match the middleware's — it filters parts to that name.
     const file = getUploadedFile(ctx, 'file');
-    if (!file) return ctx.json({ error: 'No file' }, 400);
+    if (!file) return ctx.response.status(400).json({ error: 'No file' });
 
     const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
     // `file.name` is the form field name; `file.filename` is the client's original file name.
-    const key = `uploads/${Date.now()}-${file.filename}`;
-    await storage.put(key, file.data);
+    const key = `uploads/${file.filename}`;
+    // Without `contentType` the object is stored as `application/octet-stream`
+    // and the signed URL below downloads it instead of rendering it.
+    await storage.put(key, file.data, { contentType: file.mimeType });
 
     const url = await storage.getSignedUrl(key, { expiresIn: 3600 });
-    return ctx.json({ url, key });
+    return ctx.response.json({ url, key });
   },
 });
 ```
 
+Refusal statuses: a body or file over its limit answers **413**; a malformed body, a disallowed MIME
+type and too many files answer **400**.
+
+`maxBodyBytes` (default 50 MB) caps the body the middleware will PARSE, with the effective bound
+`min(maxSize * 2 + framing, maxBodyBytes)`. It does not bound the initial read — the HTTP adapter
+buffers the whole body before any middleware runs, and `IRequest` exposes no body stream.
+
 ### Usage — buffered download
 
 ```typescript
-app.get('/files/:key', async (ctx) => {
+app.router.get('/files/:key', async (ctx) => {
   const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
-  const file = await storage.get(ctx.req.param('key'));
-  return ctx.header('content-type', 'application/octet-stream').send(file);
+  const file = await storage.get(ctx.params.key);
+  return ctx.response.header('content-type', 'application/octet-stream').send(file);
 });
 ```
 
 ### Usage — streaming download (`getStream?`)
 
 ```typescript
-app.get('/files/stream/:key', async (ctx) => {
+app.router.get('/files/stream/:key', async (ctx) => {
   const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
-  const stream = await storage.getStream!(ctx.req.param('key'));
-  return ctx.header('content-type', 'application/octet-stream').stream(stream);
+  const stream = await storage.getStream!(ctx.params.key);
+  return ctx.response.header('content-type', 'application/octet-stream').stream(stream);
 });
 ```
 
@@ -4143,19 +4199,32 @@ The plugin ships five named providers plus a first-class B2 preset that reuses S
 | `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?` | Lazy `npm:@azure/storage-blob@^12`           | SAS requires `accountKey`. No `@azure/identity` needed.                        |
 | B2 preset              | `'b2'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`                | Same as S3 (reuses `S3Provider`)             | Endpoint defaults to `https://s3.<region>.backblazeb2.com`. No separate class. |
 
-All cloud providers support an injectable `client` option (`IAwsS3Client` / `IGcsClient` /
-`IAzureBlobClient`) that bypasses the lazy import for testing.
+All cloud providers support an injectable `client` option that bypasses the lazy import, but the
+three types are NOT alike and the difference decides what you can pass:
+
+| Option type        | Mirrors its SDK? | What injecting it means                                                               |
+| ------------------ | ---------------- | ------------------------------------------------------------------------------------- |
+| `IGcsClient`       | yes              | A real `@google-cloud/storage` client fits structurally.                              |
+| `IAzureBlobClient` | yes              | A real `@azure/storage-blob` client fits structurally.                                |
+| `IS3Backend`       | **no**           | This package's own backend surface — implementing it, not handing over an `S3Client`. |
+
+`IS3Backend` was named `IAwsS3Client` before the alpha.9 release, which promised something it never
+was: `@aws-sdk/client-s3`'s surface is `send(command)`, so a real `S3Client` was refused with
+`Injected S3 client is missing required methods`. There is consequently no supported way to
+configure the underlying SDK client (custom retry policy, timeout, proxy agent). The old name is
+still exported as a deprecated alias of the same type (AI_GUIDELINES §9.2), so existing imports keep
+compiling; new code should use `IS3Backend`.
 
 ### IStorage methods
 
-| Method                                                                   | Description                                                                                                                                                                                      |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `put(path: string, data: Uint8Array): Promise<void>`                     | Stores an object.                                                                                                                                                                                |
-| `get(path: string): Promise<Uint8Array>`                                 | Retrieves an object. **Throws** if absent.                                                                                                                                                       |
-| `delete(path: string): Promise<boolean>`                                 | Deletes an object. Returns `true` if present.                                                                                                                                                    |
-| `exists(path: string): Promise<boolean>`                                 | Checks existence.                                                                                                                                                                                |
-| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → throws; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`). |
-| `getStream?(path: string): Promise<ReadableStream<Uint8Array>>`          | **Optional.** Streams an object for zero-copy downloads. Native on S3/GCS/Azure; Memory/Local fall back to wrapping `get(path)` in a one-chunk stream. Absent objects throw.                     |
+| Method                                                                   | Description                                                                                                                                                                                        |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `put(path, data, options?: PutObjectOptions): Promise<void>`             | Stores an object. `options` carries `contentType` and `metadata`; S3, GCS, Azure and Cloudflare R2 record them on the object, while the memory and local providers accept and do not persist them. |
+| `get(path: string): Promise<Uint8Array>`                                 | Retrieves an object. **Throws** if absent.                                                                                                                                                         |
+| `delete(path: string): Promise<boolean>`                                 | Deletes an object. Returns `true` if present.                                                                                                                                                      |
+| `exists(path: string): Promise<boolean>`                                 | Checks existence.                                                                                                                                                                                  |
+| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → throws; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`).   |
+| `getStream?(path: string): Promise<ReadableStream<Uint8Array>>`          | **Optional.** Streams an object for zero-copy downloads. Native on S3/GCS/Azure; Memory/Local fall back to wrapping `get(path)` in a one-chunk stream. Absent objects throw.                       |
 
 ### Per-provider `getSignedUrl` behavior
 
