@@ -571,7 +571,7 @@ const app = createApplication({
     LoggerPlugin({ level: 'info' }),
     ConfigPlugin({ envFilePath: '.env' }),
     ValidationPlugin(),
-    DatabasePlugin({ type: 'prisma' }),
+    DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
     AuthPlugin({ jwt: { secret: '...' } }),
   ],
 });
@@ -1311,7 +1311,9 @@ interface RouteMetadata {
 app.register(DatabasePlugin({
   type: 'prisma',
   options: {
-    url: config.get('DATABASE_URL'),
+    // A Prisma v7 client is application-generated and carries its own
+    // connection configuration; `url` is deprecated and unread.
+    prismaClient,
     logQueries: true,
   },
 }));
@@ -4585,7 +4587,9 @@ M70k**: its named fix needs a worker exit signal that `IWorkerHandle`
 (`packages/common/src/runtime.ts:149`) does not have, so it is an optional `common` widening plus
 per-runtime implementations — M70k's kind of work, not an observability milestone's. The limitation
 is documented in the package README and `PUBLIC_API.md` instead of being left to discovery. M70k's
-row is amended to keep X8-7 and drop X8-2.
+row is amended to keep X8-7 and drop X8-2. **M70k then closed X8-7** with exactly that widening —
+optional `IWorkerHandle.onExit?` plus `IWorkerHost.reportsExit?`, implemented on Node and Bun and
+omitted on Deno, whose web `Worker` emits nothing at all when a worker ends itself (measured).
 
 ### Implementation Files
 
@@ -5805,7 +5809,7 @@ import { CAPABILITIES, type IDatabase } from '@setu-ts/common';
 import { requireAuth } from '@setu-ts/auth-plugin';
 
 const app = createRestApp({
-  database: { type: 'prisma', url: Deno.env.get('DATABASE_URL')! },
+  database: { type: 'prisma', options: { prismaClient } },
 });
 
 app.router.get('/users', async (ctx) => {
@@ -5827,7 +5831,7 @@ closes the ordering gap once, for every option:
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
-  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  database: { type: 'prisma', options: { prismaClient } },
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
 }), { config: { envFilePath: ['.env.local', '.env'] } });
 
@@ -7059,20 +7063,82 @@ Ordered by the sequence they should be worked, not by severity alone.
   X6-4, X6-5, X6-6, X6-7. Decision recorded: REPAIR with withdraw of the native-gRPC claim —
   `basePath` defaults to the root, native `application/grpc` requests are refused with a
   Trailers-Only `UNIMPLEMENTED`, Connect and gRPC-Web remain fully supported.
-- ⬜ **M70j — Database adapter correctness** (`database-plugin`). `IDatabaseService.query()` is
-  inoperative on the Drizzle adapter — it calls `execute({ sql, params })`, a shape no Drizzle
-  driver accepts (X12-2) — and the **default** Memory adapter silently accepts what both real
-  backends reject: a duplicate unique value, a string into an Int column, an unknown `select` column
-  (X12-5), which makes it a test double that lies in the M55/M53 sense. Plus X4-9, X12-4, X12-6, D7.
-- ⬜ **M70k — Storage, queue and worker operability** (`storage-plugin`, `queue-plugin`,
-  `worker-pool-plugin`). Upload `maxSize` does not bound what is buffered, so a 1 KB limit
-  multipart-parses a 40 MB body first (X8-3); `taskTimeoutMs: 0` leaks a pool slot permanently (X8-7
-  — its fix needs a worker exit signal on `IWorkerHandle`, which `common` does not have; X8-2 was
-  fixed in M45b, whose branch already touched that file); a job exhausting its retries is invisible
-  through every surface (X8-4); `IStorage.put` takes no metadata, so every object is
-  `application/octet-stream` (X8-6); and the `local` provider cannot work in a scaffolded project at
-  all (X8-9). Plus X8-8, X8-10, X8-11. M45b shipped ahead of this row: it closed X8-2 itself and
-  documented X8-7's limitation, so this row no longer blocks it.
+- ✅ **M70j — Database adapter correctness** (`database-plugin`) — complete (PR #177).
+  `IDatabaseService.query()` was inoperative on the Drizzle adapter — it called
+  `execute({ sql, params })`, a shape no Drizzle driver accepts, so the method failed with the
+  internal `TypeError: query.getSQL is not a function` on every call (X12-2) — and the **default**
+  Memory adapter silently accepted what both real backends reject (X12-5), which made it a test
+  double that lies in the M55/M53 sense. Plus X4-9, X12-4, X12-6, D7.
+
+  **The `query()` fix is a binder, not a call-shape swap.** Prisma
+  (`$queryRawUnsafe(sql, ...params)`) and D1 (`prepare(sql).bind(...)`) both forward the statement
+  **verbatim** and bind natively, so that is the contract; Drizzle's `execute()` takes an
+  `SQLWrapper`, and passing the bare string — which the driver does accept — would have silently
+  dropped `params`, which is worse than the current failure. A pure internal scanner splits the
+  statement at its placeholders (skipping string literals, quoted identifiers, comments and
+  PostgreSQL dollar-quoted bodies, so a `?` inside `'text?'` is never a placeholder) and interleaves
+  `sql.param(value)`. Probed against the real generator: Drizzle numbers `Param` chunks in encounter
+  order and renders them dialect-natively, so an ascending-placeholder statement round-trips
+  byte-identically on all three dialects. Any disagreement between the statement and the parameter
+  list — a wrong count, a gap in the `$N` sequence, both styles at once — is refused before the
+  driver is reached, because a mis-bound parameter is silent.
+
+  **One boundary was measured rather than assumed, and the measurement reversed the obvious move.**
+  A `sqlite-proxy` instance has no `execute` but does have `all()`, which looked like a free lift of
+  the documented "only `query()` rejects" limitation. It is not: `all()` on a raw statement returns
+  **positional** rows (`[["a", 1]]`), because the proxy protocol returns array rows and Drizzle has
+  no field map for a statement it did not build, while `query<T>(): Promise<T[]>` promises objects —
+  as Prisma and D1 return. Routing through `all()` would have traded a loud failure for a silent
+  shape divergence, which is the defect class this row exists to close. The refusal stays, and the
+  README and `PUBLIC_API.md` now state the reason so it is not re-opened.
+
+  X12-5 is closed for the two divergences the register calls worth fixing and **documented** for the
+  two it does not: an unknown `select`/`orderBy` field is refused by name against the entity's
+  **observed** column set (the union of keys over the rows the store holds), while `where`/`filter`
+  are deliberately left alone — with no schema this adapter cannot distinguish an unknown column
+  from one absent on every row, and matching nothing is a defensible answer, whereas ordering by a
+  column no row has returns rows arbitrarily and projecting one silently changes the response shape.
+  An entity holding **no rows** skips the check entirely, since there is nothing to observe and
+  nothing to return. Uniqueness and column types get a stated guarantee table instead, because no
+  schema-less store can enforce them.
+
+  X4-9 needed no new code path: `createDrizzleDataSourceInner` already refuses an `id`-less table by
+  name, so the fix is deleting the eager check from `connect()` — the registry was enforcing the
+  **repository's** precondition on tables only the typed query builder reads.
+
+  D7 makes each built-in arm name what its adapter cannot run without, the guarantee the `'custom'`
+  arm has had since M52c. **Prisma is included with Drizzle**, because M66 made `prismaClient`
+  required at runtime and it is the identical defect — and that is what turned six stale doc sites
+  from silent lies into checked ones, since `DatabasePlugin({ type: 'prisma' })` and
+  `options: { url }` appear in the root README, `PUBLIC_API.md`, `ROADMAP.md`, a starter README and
+  `AI_GUIDELINES.md` §12.2 while the adapter has thrown on all of them since M66.
+  `packages/starters` needed no `src` change: `RestStarterOptions.database` is a pass-through
+  `DatabasePluginOptions`.
+
+  **One defect outside the register was found while reading the source and fixed with it**: with
+  `logQueries: true` the service's logging wrapper declared `count(where)` and called
+  `ds.count(where)`, dropping the `filter` argument `IDataSource.count(where, filter?)` defines — so
+  `repo.count({ filter })` answered a different number with logging on than off. Every existing test
+  built the service without logging. **A second was introduced and caught by its own test**: the new
+  column refusal threw **synchronously** from a method typed `Promise<…>`, bypassing any caller
+  using `.catch()` — the M52b/M52c class — so the check returns its error and the adapter rejects
+  with it.
+- ✅ **M70k — Storage, queue and worker operability** (`storage-plugin`, `queue-plugin`,
+  `worker-pool-plugin`, plus `common`, `runtime` and `cli`). Upload `maxSize` did not bound what is
+  buffered, so a 1 KB limit multipart-parsed a 40 MB body first (X8-3); `taskTimeoutMs: 0` leaked a
+  pool slot permanently (X8-7 — its fix needs a worker exit signal on `IWorkerHandle`, which
+  `common` did not have; X8-2 was fixed in M45b, whose branch already touched that file); a job
+  exhausting its retries was invisible through every surface (X8-4); `IStorage.put` took no
+  metadata, so every object was `application/octet-stream` (X8-6); and the `local` provider could
+  not work in a scaffolded project at all (X8-9). Plus X8-8, X8-10, X8-11. M45b shipped ahead of
+  this row: it closed X8-2 itself and documented X8-7's limitation, so this row did not block it.
+
+  **The package list is corrected from the row's original three**, mirroring the M70b, M70g and M70h
+  corrections: the rows the row itself assigns need `common` (X8-4's `ProcessOptions.onFailed`,
+  X8-6's `PutObjectOptions`, X8-7's `IWorkerHandle.onExit?`), `runtime` (X8-7's per-runtime exit
+  signal — the row's own text calls for "per-runtime implementations"), and `cli` (X8-9's assigned
+  package). `cloudflare-plugin` also changes, because `R2Storage` is the other in-repo `IStorage`
+  implementor and R2 can genuinely carry the metadata X8-6 adds. **Complete (PR #178).**
 - ⬜ **M70l — Deployment and operations** (`cli`, `scheduler-plugin`, `messaging-plugin`,
   `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the CLI-generated stack crash-loops
   two of three services (X10-1); a scheduled job runs once per replica and `distributedLock` does
@@ -7217,8 +7283,8 @@ branch during a version bump.
 | 70g       | ✅     | routing collisions                    |
 | 70h       | ✅     | cli scaffold batch                    |
 | 70i       | ✅     | grpc and graphql viability            |
-| 70j       | ⬜     | database adapter correctness          |
-| 70k       | ⬜     | storage, queue, worker operability    |
+| 70j       | ✅     | database adapter correctness          |
+| 70k       | ✅     | storage, queue, worker operability    |
 | 70l       | ⬜     | deployment and operations             |
 | 70m       | ⬜     | sdk and openapi                       |
 | 70n       | ⬜     | decorators, di, docs sweep            |

@@ -20,6 +20,7 @@ import type {
   KvListResult,
   KvPutOptions,
   QueueSendOptions,
+  R2PutOptions,
 } from '../src/index.ts';
 import type { ILogger } from '@setu-ts/common';
 
@@ -142,11 +143,19 @@ export class FakeR2 implements IR2Bucket {
     });
   }
 
-  put(key: string, value: ArrayBuffer | ArrayBufferView): Promise<IR2Object | null> {
+  /** The put options each key was written with, so a test can assert them. */
+  readonly putOptions = new Map<string, R2PutOptions | undefined>();
+
+  put(
+    key: string,
+    value: ArrayBuffer | ArrayBufferView,
+    options?: R2PutOptions,
+  ): Promise<IR2Object | null> {
     const bytes = value instanceof ArrayBuffer
       ? new Uint8Array(value)
       : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
     this.objects.set(key, bytes);
+    this.putOptions.set(key, options);
     return Promise.resolve(meta(key, bytes));
   }
 

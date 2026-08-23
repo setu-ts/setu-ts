@@ -7,6 +7,11 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
+import { createDrizzleDatabase } from '../../src/index.ts';
+import {
+  createFakeDrizzleInstance,
+  createFakeDrizzleTable,
+} from '../fixtures/fake-drizzle-instance.ts';
 import manifest from '../../deno.json' with { type: 'json' };
 
 describe('DatabasePlugin', () => {
@@ -65,12 +70,24 @@ describe('DatabasePlugin', () => {
     });
 
     it('accepts prisma type', () => {
-      const plugin = DatabasePlugin({ type: 'prisma' });
+      const plugin = DatabasePlugin({
+        type: 'prisma',
+        options: { prismaClient: {} },
+      });
       expect(plugin.name).toBe('database-plugin');
     });
 
     it('accepts drizzle type', () => {
-      const plugin = DatabasePlugin({ type: 'drizzle' });
+      const plugin = DatabasePlugin({
+        type: 'drizzle',
+        options: {
+          drizzleInstance: createDrizzleDatabase(
+            createFakeDrizzleInstance(),
+            (database, work) => database.transaction(work),
+          ),
+          drizzleTables: { user: createFakeDrizzleTable('user') },
+        },
+      });
       expect(plugin.name).toBe('database-plugin');
     });
   });

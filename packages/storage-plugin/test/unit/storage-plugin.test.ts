@@ -8,7 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createProvider, StoragePlugin } from '../../src/plugin/storage-plugin.ts';
 import { MemoryProvider } from '../../src/providers/memory-provider.ts';
-import type { StorageProvider } from '../../src/interfaces/index.ts';
+import type { StoragePluginOptions } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createFakeContext } from '../fixtures/fake-context.ts';
@@ -39,13 +39,13 @@ describe('createProvider', () => {
   const fakeRuntime = makeFakeRuntime();
 
   it('defaults to memory provider when type is memory', () => {
-    const p = createProvider('memory', {}, fakeRuntime);
+    const p = createProvider({ provider: 'memory' }, fakeRuntime);
     expect(p).toBeInstanceOf(MemoryProvider);
   });
 
   it('injects runtime.now() as the provider clock (getSignedUrl expiry uses it, not Date.now)', async () => {
     const rt = { ...makeFakeRuntime(), now: (): number => 1_700_000_000_000 } as IRuntimeServices;
-    const p = createProvider('memory', {}, rt) as StorageProvider;
+    const p = createProvider({ provider: 'memory' }, rt);
     await p.connect();
     const url = await p.getSignedUrl('k.txt', { expiresIn: 60 });
     // 1_700_000_000_000 ms → 1_700_000_000 s + 60 = 1700000060
@@ -53,31 +53,35 @@ describe('createProvider', () => {
   });
 
   it('unknown provider type throws', () => {
+    // Unreachable through the typed surface now that the options are
+    // discriminated, so the cast stands in for a JavaScript caller.
     expect(() =>
       createProvider(
-        'invalid' as StorageProvider['connect'] extends () => Promise<void> ? 'memory' : 'invalid',
-        {},
+        { provider: 'invalid' } as unknown as StoragePluginOptions,
         fakeRuntime,
       )
     ).toThrow('Unsupported storage provider');
   });
 
   it('b2 type builds S3Provider with derived B2 endpoint', () => {
-    const p = createProvider('b2', {
-      bucket: 'mybucket',
-      region: 'us-west-1',
-      accessKeyId: 'keyid',
-      secretAccessKey: 'secret',
-    }, fakeRuntime) as StorageProvider;
+    const p = createProvider({
+      provider: 'b2',
+      options: {
+        bucket: 'mybucket',
+        region: 'us-west-1',
+        accessKeyId: 'keyid',
+        secretAccessKey: 'secret',
+      },
+    }, fakeRuntime);
     expect(p.isReady()).toBe(false);
   });
 
   it('b2 honors explicit endpoint override', () => {
     const customEndpoint = 'https://custom.endpoint.com';
-    const p = createProvider('b2', {
-      bucket: 'mybucket',
-      endpoint: customEndpoint,
-    }, fakeRuntime) as StorageProvider;
+    const p = createProvider({
+      provider: 'b2',
+      options: { bucket: 'mybucket', endpoint: customEndpoint },
+    }, fakeRuntime);
     expect(p.isReady()).toBe(false);
   });
 });
@@ -118,45 +122,57 @@ describe('StoragePlugin', () => {
 
   it('unknown provider type at registration throws', async () => {
     const { ctx } = createFakeContext();
-    const plugin = StoragePlugin({
-      provider:
-        'nonexistent' as unknown as import('../../src/interfaces/index.ts').StorageProviderType,
-    });
+    const plugin = StoragePlugin(
+      { provider: 'nonexistent' } as unknown as StoragePluginOptions,
+    );
     await expect(plugin.register!(ctx)).rejects.toThrow('Unsupported storage provider');
   });
 
   it('s3 provider can be wired', () => {
     const fakeRuntime = makeFakeRuntime();
     const provider = createProvider(
-      's3',
-      { bucket: 'test-bucket', region: 'us-east-1' },
+      { provider: 's3', options: { bucket: 'test-bucket', region: 'us-east-1' } },
       fakeRuntime,
-    ) as StorageProvider;
+    );
     expect(provider.isReady()).toBe(false);
   });
 
   it('azure provider can be wired', () => {
     const fakeRuntime = makeFakeRuntime();
-    const provider = createProvider('azure', {
-      containerName: 'mycontainer',
-      accountName: 'fakeaccount',
-      accountKey: 'dGVzdGtleQ==',
-    }, fakeRuntime) as StorageProvider;
+    const provider = createProvider({
+      provider: 'azure',
+      options: {
+        containerName: 'mycontainer',
+        accountName: 'fakeaccount',
+        accountKey: 'dGVzdGtleQ==',
+      },
+    }, fakeRuntime);
     expect(provider.isReady()).toBe(false);
   });
 
   it('gcs provider can be wired', () => {
     const fakeRuntime = makeFakeRuntime();
-    const provider = createProvider('gcs', { bucket: 'my-bucket' }, fakeRuntime) as StorageProvider;
+    const provider = createProvider(
+      { provider: 'gcs', options: { bucket: 'my-bucket' } },
+      fakeRuntime,
+    );
     expect(provider.isReady()).toBe(false);
   });
 });
 
 describe('StoragePlugin health indicator (M70c)', () => {
+  /**
+   * A file system whose ROOT may be present or gone. It implements the write
+   * path too, because `LocalStorageProvider.connect()` now proves the root is
+   * writable (X8-9) — a fake offering only `stat` would fail to connect at all.
+   */
   function makeFs(rootPresent: boolean): import('@setu-ts/common').IFileSystem {
     const fs: Record<string, unknown> = {
       stat: (path: string) =>
         rootPresent ? Promise.resolve({ size: 0 }) : Promise.reject(new Error(`ENOENT: ${path}`)),
+      mkdir: () => Promise.resolve(),
+      writeFile: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
     };
     return fs as unknown as import('@setu-ts/common').IFileSystem;
   }
@@ -201,5 +217,64 @@ describe('StoragePlugin health indicator (M70c)', () => {
     const result = await indicator!();
     expect(result.status).toBe('up');
     expect(result.data).toEqual({ provider: 'gcs', reachable: 'unknown' });
+  });
+});
+
+describe('StoragePlugin indicator — the lifecycle signal (M70c)', () => {
+  it('should report down once the provider has been disconnected', async () => {
+    // The lifecycle half of the two-signal indicator, distinct from a
+    // connected-but-unreachable backend: after `onClose` runs, the memory
+    // provider's `isReady()` is false, and a scrape landing in that window must
+    // say `down` rather than `up` with a reachable backend.
+    const { ctx, healthIndicators, onCloseHandlers } = createFakeContext();
+    await StoragePlugin({ provider: 'memory' }).register!(ctx);
+
+    const indicator = healthIndicators.get(CAPABILITIES.STORAGE);
+    expect((await indicator!()).status).toBe('up');
+
+    await onCloseHandlers[0]!();
+
+    const afterClose = await indicator!();
+    expect(afterClose.status).toBe('down');
+    expect(afterClose.data).toEqual({ provider: 'memory', reachable: false });
+  });
+});
+
+describe('StoragePlugin — the local provider refuses to start unwritable (X8-9)', () => {
+  /** A file system that can be read but not written, as Deno's `--allow-read`-only grant produces. */
+  function readOnlyFs(): import('@setu-ts/common').IFileSystem {
+    const denied = (path: string) =>
+      Promise.reject(new Error(`PermissionDenied: Requires write access to "${path}"`));
+    return {
+      stat: () => Promise.resolve({ size: 0 }),
+      mkdir: (path: string) => denied(path),
+      writeFile: (path: string) => denied(path),
+      rm: () => Promise.resolve(),
+    } as unknown as import('@setu-ts/common').IFileSystem;
+  }
+
+  it('should fail registration naming the root and the Deno flag', async () => {
+    // The plugin threads `runtime.platform()` into the provider as a THUNK, so
+    // this is also what proves that wiring exists: without it the message would
+    // carry no flag even on Deno.
+    const { ctx } = createFakeContext({}, false, readOnlyFs(), 'deno');
+    const plugin = StoragePlugin({ provider: 'local', options: { rootDir: '/var/media' } });
+
+    await expect(plugin.register!(ctx)).rejects.toThrow("cannot write to '/var/media'");
+    await expect(plugin.register!(ctx)).rejects.toThrow('--allow-write');
+  });
+
+  it('should not name the Deno flag on another runtime', async () => {
+    // On Node the same failure is an ordinary file permission, which that flag
+    // does not address.
+    const { ctx } = createFakeContext({}, false, readOnlyFs(), 'node');
+    const plugin = StoragePlugin({ provider: 'local', options: { rootDir: '/var/media' } });
+
+    const error = await Promise.resolve(plugin.register!(ctx)).then(
+      () => null,
+      (raised: unknown) => raised as Error,
+    );
+    expect(error?.message).toContain("cannot write to '/var/media'");
+    expect(error?.message).not.toContain('--allow-write');
   });
 });

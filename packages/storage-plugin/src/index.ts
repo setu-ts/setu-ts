@@ -31,12 +31,25 @@ export { createUploadMiddleware, getUploadedFile } from './middleware/upload-mid
 
 export type {
   AzureBlobProviderOptions,
+  AzureStorageOptions,
   GcsProviderOptions,
-  IAwsS3Client,
+  GcsStorageOptions,
   IAzureBlobClient,
   IGcsClient,
+  IS3Backend,
+  /**
+   * @deprecated Renamed to {@linkcode IS3Backend} in 0.3.0 (M70k, X8-10). The
+   * old name promised an `@aws-sdk/client-s3` client; the type is the
+   * provider's own backend surface and a real `S3Client` never satisfied it.
+   * Kept as an alias per AI_GUIDELINES §9.2 — the replacement is a working,
+   * identical shape, so a rename does not need to be a compile error.
+   */
+  IS3Backend as IAwsS3Client,
+  LocalStorageOptions,
   LocalStorageProviderOptions,
+  MemoryStorageOptions,
   S3ProviderOptions,
+  S3StorageOptions,
   StoragePluginOptions,
   StorageProviderOptions,
   StorageProviderType,
@@ -46,4 +59,4 @@ export type {
 
 // ── Re-export common contracts ────────────────────────────────────────────
 
-export type { IStorage, SignedUrlOptions } from '@setu-ts/common';
+export type { IStorage, PutObjectOptions, SignedUrlOptions } from '@setu-ts/common';

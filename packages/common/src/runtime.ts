@@ -167,6 +167,28 @@ export interface IWorkerHandle {
    */
   onError(listener: (error: Error) => void): void;
   /**
+   * Registers a listener for the worker's THREAD ENDING, however it ended —
+   * a clean self-termination included. This is distinct from
+   * {@linkcode onError}, which reports a failure the worker survived long
+   * enough to report; a worker that simply stops raises no error at all.
+   *
+   * Optional, and its absence is load-bearing information rather than a
+   * shortfall to work around: a host omits it when its runtime emits nothing
+   * when a worker ends, so a consumer MUST treat absence as "this runtime
+   * cannot tell me a worker died" and not as "no worker has died". Ask
+   * {@linkcode IWorkerHost.reportsExit} before spawning if the answer changes
+   * what you configure.
+   *
+   * Fires for a host-requested `terminate()` too on runtimes that implement it
+   * that way, so a consumer that terminates deliberately must track that
+   * itself rather than reading every exit as a crash.
+   *
+   * @param listener - Receives the exit code when the runtime reports one, and
+   * `null` when it ends the worker without one
+   * @since 0.3.0
+   */
+  onExit?(listener: (code: number | null) => void): void;
+  /**
    * Terminates the worker immediately.
    */
   terminate(): Promise<void>;
@@ -194,6 +216,22 @@ export interface IWorkerHost {
    * @returns The available parallelism (at least 1)
    */
   availableParallelism(): number;
+  /**
+   * Reports whether handles from {@linkcode spawn} will implement
+   * {@linkcode IWorkerHandle.onExit}.
+   *
+   * Answerable BEFORE a worker exists, which is the reason it sits here rather
+   * than being inferred from a handle: a consumer that must warn about — or
+   * configure around — undetectable worker death has to know at registration
+   * time, and the first spawn may be far later or never happen at all.
+   *
+   * Optional so an existing custom host stays valid; a host that omits it is
+   * treated exactly as one reporting `false`.
+   *
+   * @returns `true` when an exit signal is available on this runtime
+   * @since 0.3.0
+   */
+  reportsExit?(): boolean;
 }
 
 /**

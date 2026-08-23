@@ -262,4 +262,38 @@ export class FakeRedisClient implements IRedisQueueClient {
 
     return deleted;
   }
+
+  /**
+   * Counts a sorted set's members, as `ZCARD` does. A key that does not exist
+   * is zero rather than an error — Redis's own behaviour, and the distinction
+   * matters because the health indicator must be able to report an empty queue.
+   */
+  // deno-lint-ignore require-await
+  async zcard(key: string): Promise<number> {
+    this.#record('zcard', [key]);
+
+    if (!this.#connected) {
+      throw new Error('Not connected');
+    }
+
+    return this.#zsets.get(key)?.size ?? 0;
+  }
+
+  /**
+   * Records an `EXPIRE`. The fake does not actually expire anything — the tests
+   * assert the command was issued with the right TTL, which is what the adapter
+   * controls; enforcing the deadline is Redis's job.
+   *
+   * @returns `1` when the key exists, `0` otherwise, matching Redis
+   */
+  // deno-lint-ignore require-await
+  async expire(key: string, seconds: number): Promise<number> {
+    this.#record('expire', [key, seconds]);
+
+    if (!this.#connected) {
+      throw new Error('Not connected');
+    }
+
+    return this.#zsets.has(key) || this.#hashes.has(key) ? 1 : 0;
+  }
 }

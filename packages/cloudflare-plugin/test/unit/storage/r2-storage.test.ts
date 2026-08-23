@@ -94,3 +94,32 @@ describe('R2Storage', () => {
     });
   });
 });
+
+describe('R2Storage — object attributes (X8-6)', () => {
+  it('should translate contentType into R2 httpMetadata and metadata into customMetadata', async () => {
+    // R2 spells these differently from every other backend, so forwarding
+    // `PutObjectOptions` unchanged would store nothing: the content type lives
+    // under `httpMetadata`, user metadata under `customMetadata`.
+    const bucket = new FakeR2();
+    const storage = new R2Storage(bucket);
+
+    await storage.put('avatars/ada.png', new Uint8Array([1, 2, 3]), {
+      contentType: 'image/png',
+      metadata: { owner: 'ada' },
+    });
+
+    expect(bucket.putOptions.get('avatars/ada.png')).toEqual({
+      httpMetadata: { contentType: 'image/png' },
+      customMetadata: { owner: 'ada' },
+    });
+  });
+
+  it('should send an empty options bag when the caller supplies no attributes', async () => {
+    const bucket = new FakeR2();
+    const storage = new R2Storage(bucket);
+
+    await storage.put('raw.bin', new Uint8Array([1]));
+
+    expect(bucket.putOptions.get('raw.bin')).toEqual({});
+  });
+});

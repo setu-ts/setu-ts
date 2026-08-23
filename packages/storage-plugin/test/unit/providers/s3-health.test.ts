@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IAwsS3Client } from '../../../src/interfaces/index.ts';
+import type { IS3Backend } from '../../../src/interfaces/index.ts';
 import { S3Provider } from '../../../src/providers/s3-provider.ts';
 
 interface HeadBehavior {
@@ -8,7 +8,7 @@ interface HeadBehavior {
   calls: string[];
 }
 
-function makeClient(ok: boolean): { client: IAwsS3Client; behavior: HeadBehavior } {
+function makeClient(ok: boolean): { client: IS3Backend; behavior: HeadBehavior } {
   const behavior: HeadBehavior = { ok, calls: [] };
   const client: Record<string, unknown> = {
     put: () => Promise.resolve(),
@@ -21,7 +21,7 @@ function makeClient(ok: boolean): { client: IAwsS3Client; behavior: HeadBehavior
       return Promise.resolve(ok);
     },
   };
-  return { client: client as unknown as IAwsS3Client, behavior };
+  return { client: client as unknown as IS3Backend, behavior };
 }
 
 describe('S3Provider health (M70c)', () => {
