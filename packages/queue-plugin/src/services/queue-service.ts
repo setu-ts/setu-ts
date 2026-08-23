@@ -10,15 +10,18 @@
 import type {
   AddJobOptions,
   HealthCheckResult,
+  IJob,
   IQueue,
   JobProcessor,
   ProcessOptions,
   RecurringOptions,
 } from '@setu-ts/common';
 import type { HealthIndicatorFn, IRuntimeServices, TimerHandle } from '@setu-ts/common';
-import type { QueueAdapter } from '../adapters/queue-adapter.ts';
+import type { QueueAdapter, QueueDepths } from '../adapters/queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import { runJob } from '../processors/job-processor.ts';
+import type { JobOutcome } from '../processors/job-processor.ts';
+import type { QueueCollector } from '../metrics/queue-collector.ts';
 import { cronNextMs } from '../scheduler/cron-calculator.ts';
 
 /**
@@ -41,6 +44,11 @@ interface ProcessorRegistration<T> {
   concurrency: number;
   inFlight: number;
   reserveInProgress: boolean;
+  /**
+   * The application's `ProcessOptions.onFailed`, kept per name because it is
+   * registered per processor.
+   */
+  onFailed?: (job: IJob<T>, error: unknown) => void | Promise<void>;
 }
 
 /**
@@ -68,6 +76,12 @@ export class QueueService implements IQueue {
   #recurringHandle: TimerHandle | null = null;
   #connected = false;
   #logger: QueueLogger | undefined;
+  /**
+   * Present only when the application registered `CAPABILITIES.METRICS`. Every
+   * call site is optional-chained, so an application without the metrics plugin
+   * runs exactly the code that shipped before X8-4.
+   */
+  #collector: QueueCollector | undefined;
 
   constructor(
     adapter: QueueAdapter,
@@ -77,6 +91,8 @@ export class QueueService implements IQueue {
       pollIntervalMs?: number;
       /** Optional logger; when absent, failures are reported nowhere (see #report). */
       logger?: QueueLogger | undefined;
+      /** Optional metrics collector; absent when the metrics capability is not registered. */
+      collector?: QueueCollector | undefined;
     },
   ) {
     this.#adapter = adapter;
@@ -85,6 +101,7 @@ export class QueueService implements IQueue {
     this.#pollIntervalMs = options?.pollIntervalMs ?? 1000;
     this.#processors = new Map();
     this.#logger = options?.logger;
+    this.#collector = options?.collector;
   }
 
   /**
@@ -174,6 +191,8 @@ export class QueueService implements IQueue {
       concurrency,
       inFlight: 0,
       reserveInProgress: false,
+      // Omitted rather than assigned `undefined` (`exactOptionalPropertyTypes`).
+      ...(options?.onFailed === undefined ? {} : { onFailed: options.onFailed }),
     } as ProcessorRegistration<unknown>);
   }
 
@@ -210,15 +229,53 @@ export class QueueService implements IQueue {
       if (!this.isReady()) {
         return { status: 'down', data: { adapter: adapterName, reachable: false } };
       }
+      const depths = await this.#collectDepths();
       if (typeof this.#adapter.isHealthy !== 'function') {
-        return { status: 'up', data: { adapter: adapterName, reachable: 'unknown' } };
+        return {
+          status: 'up',
+          data: { adapter: adapterName, reachable: 'unknown', ...depths },
+        };
       }
       const reachable = await this.#adapter.isHealthy();
       if (reachable === false) {
-        return { status: 'down', data: { adapter: adapterName, reachable: false } };
+        return { status: 'down', data: { adapter: adapterName, reachable: false, ...depths } };
       }
-      return { status: 'up', data: { adapter: adapterName, reachable: true } };
+      return { status: 'up', data: { adapter: adapterName, reachable: true, ...depths } };
     };
+  }
+
+  /**
+   * Reads the ready/processing/dead depth of every name this instance
+   * processes, when the adapter can report one.
+   *
+   * X8-4: a dead-lettered job was invisible through every surface — the
+   * indicator's entire payload was `{"adapter":"RedisQueue"}`. This is the
+   * DURABLE half of the fix; `queue_jobs_total` is per-process and resets on
+   * restart, so a restarted replica would report zero dead letters while the
+   * backend still held them.
+   *
+   * The key is OMITTED, never reported as an empty object or as zeros, when the
+   * adapter cannot count: "cannot report" and "nothing there" are different
+   * answers and an operator acting on a dead-letter alert needs to tell them
+   * apart. A failing count is reported and skipped rather than taking the whole
+   * probe down — a health check that throws is worse than one missing a field.
+   *
+   * @returns `{ queues }` keyed by job name, or `{}` when unavailable
+   */
+  async #collectDepths(): Promise<Record<string, unknown>> {
+    const readDepths = this.#adapter.depths;
+    if (typeof readDepths !== 'function' || this.#processors.size === 0) {
+      return {};
+    }
+    const queues: Record<string, QueueDepths> = {};
+    for (const name of this.#processors.keys()) {
+      try {
+        queues[name] = await readDepths.call(this.#adapter, name);
+      } catch (error) {
+        this.#report('queue depth probe failed', error, { name });
+      }
+    }
+    return Object.keys(queues).length === 0 ? {} : { queues };
   }
 
   #startWorkerLoop(): void {
@@ -293,6 +350,11 @@ export class QueueService implements IQueue {
           storedJob,
           reg.processor,
           (message, error, meta) => this.#report(message, error, meta),
+          {
+            ...(reg.onFailed === undefined ? {} : { onFailed: reg.onFailed }),
+            onOutcome: (name: string, outcome: JobOutcome) =>
+              this.#collector?.jobSettled(name, outcome),
+          },
         );
       } finally {
         // Decrement in-flight when the job settles

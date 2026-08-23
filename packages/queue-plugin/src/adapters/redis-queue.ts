@@ -7,7 +7,7 @@
  * @module
  */
 
-import type { QueueAdapter } from './queue-adapter.ts';
+import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import type {
   IRedisQueueClient,
   RedisQueueOptions,
@@ -103,6 +103,8 @@ export class RedisQueue implements QueueAdapter {
   #client: IRedisQueueClient | null = null;
   #url: string;
   #injectedClient: IRedisQueueClient | undefined;
+  /** Retention for a dead-lettered job's payload; unbounded when undefined. */
+  #deadLetterTtlMs: number | undefined;
   #ready = false;
   /**
    * M70c: present only when the client exposes `ping()`; its absence is
@@ -116,6 +118,7 @@ export class RedisQueue implements QueueAdapter {
   constructor(options?: RedisQueueOptions) {
     this.#url = options?.url ?? 'redis://localhost:6379';
     this.#injectedClient = options?.client;
+    this.#deadLetterTtlMs = options?.deadLetterTtlMs;
   }
 
   async connect(): Promise<void> {
@@ -128,6 +131,7 @@ export class RedisQueue implements QueueAdapter {
     }
     this.#ready = true;
     this.#installProbe();
+    this.#installDepths();
   }
 
   /**
@@ -283,6 +287,74 @@ export class RedisQueue implements QueueAdapter {
 
     // Add to dead set with score = nowMs (keep payload in jobs hash for debugging)
     await this.#client.zadd(deadKey, nowMs, id);
+
+    // X8-4: the retained payload had no TTL and no trim, so the jobs hash grew
+    // without bound for the lifetime of the deployment. The TTL is opt-in
+    // because dropping a dead job's payload by default would remove the
+    // debugging value the retention exists for.
+    await this.#expireDeadLetterKeys(name);
+  }
+
+  /**
+   * Applies the configured dead-letter TTL to this name's dead set and its jobs
+   * hash.
+   *
+   * A no-op when no TTL is configured, and when the injected client does not
+   * expose `expire` — the member is optional so an existing fake still
+   * type-checks, and reporting a retention the client cannot enforce would be
+   * worse than not applying one.
+   *
+   * The TTL is applied to the KEY rather than to individual members, because
+   * Redis has no per-member expiry on a sorted set or a hash. That is a
+   * deliberate approximation: a name that keeps dead-lettering keeps pushing
+   * its expiry out, so the bound holds for a queue that goes quiet, which is
+   * the unbounded-growth case.
+   *
+   * @param name - Job name
+   */
+  async #expireDeadLetterKeys(name: string): Promise<void> {
+    const ttlMs = this.#deadLetterTtlMs;
+    const client = this.#client;
+    if (ttlMs === undefined || client === null || typeof client.expire !== 'function') {
+      return;
+    }
+    const seconds = Math.max(1, Math.ceil(ttlMs / 1000));
+    await client.expire(`queue:${name}:dead`, seconds);
+    await client.expire(`queue:${name}:jobs`, seconds);
+  }
+
+  /**
+   * M70k (X8-4): counts this name's three states with one `ZCARD` each.
+   *
+   * Absent on a client that does not expose `zcard`, which is why the member is
+   * assigned in the constructor rather than declared as a method — the health
+   * indicator must be able to tell "cannot report" from "nothing there".
+   *
+   * @param name - Job name
+   * @returns The depth of each state
+   * @since 0.3.0
+   */
+  depths?: (name: string) => Promise<QueueDepths>;
+
+  /**
+   * Installs {@link depths} when the resolved client can count a sorted set.
+   */
+  #installDepths(): void {
+    const client = this.#client;
+    if (client === null || typeof client.zcard !== 'function') {
+      return;
+    }
+    const zcard = client.zcard;
+    this.depths = async (name: string): Promise<QueueDepths> => {
+      // Bound to the client for the same reason M70c bound `ping`: ioredis
+      // reads `this.options` and an unbound call throws.
+      const [ready, processing, dead] = await Promise.all([
+        zcard.call(client, `queue:${name}:ready`),
+        zcard.call(client, `queue:${name}:processing`),
+        zcard.call(client, `queue:${name}:dead`),
+      ]);
+      return { ready, processing, dead };
+    };
   }
 
   async storeRecurring(rec: StoredRecurring): Promise<void> {

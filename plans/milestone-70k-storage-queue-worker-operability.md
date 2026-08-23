@@ -15,11 +15,14 @@ does the work and then cannot tell an operator what it did.
 
 - **In scope:** X8-3, X8-4, X8-6, X8-7, X8-8, X8-9, X8-10, X8-11.
 - **Package list corrected from the ROADMAP row.** The row names
-  `storage-plugin, queue-plugin, worker-pool-plugin`; the rows it assigns need three more: `common`
+  `storage-plugin, queue-plugin, worker-pool-plugin`; the rows it assigns need FOUR more: `common`
   (X8-4 `ProcessOptions.onFailed`, X8-6 `PutObjectOptions`, X8-7 `IWorkerHandle.onExit?`), `runtime`
   (X8-7's per-runtime exit signal — the ROADMAP row itself says "an optional `common` widening plus
-  per-runtime implementations"), and `cli` (X8-9's assigned package). This mirrors the M70b and M70h
-  corrections, which added packages the row's body assigned but its list omitted.
+  per-runtime implementations"), `cli` (X8-9's assigned package), and — found during implementation
+  — `cloudflare-plugin`, because `R2Storage` is the other in-repo `IStorage` implementor and R2
+  carries both attributes natively (`httpMetadata.contentType` / `customMetadata`). This mirrors the
+  M70b, M70g and M70h corrections, which added packages the row's body assigned but its list
+  omitted.
 - **NOT this milestone:** X8-1, X8-2, X8-5 and X8-12 are already closed (M70f, M45b, M70c, M70f
   respectively). A streaming request body — the only thing that would stop a large upload being
   buffered at all — is a `common`/`kernel`/`runtime` widening of `IRequest`, named in §9 and owned

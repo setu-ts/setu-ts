@@ -128,15 +128,41 @@ await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midn
 
 ## Options
 
-| Option               | Type                                         | Default                    | Description                              |
-| -------------------- | -------------------------------------------- | -------------------------- | ---------------------------------------- |
-| `adapter`            | `'memory' \| 'redis' \| 'rabbitmq' \| 'sqs'` | `'memory'`                 | Queue adapter type                       |
-| `name`               | `string`                                     | -                          | Instance name for multi-instance support |
-| `url`                | `string`                                     | `'redis://localhost:6379'` | Redis / RabbitMQ connection URL          |
-| `region`             | `string`                                     | -                          | AWS region (SQS)                         |
-| `queues`             | `Record<string, string>`                     | -                          | Queue name→URL mapping (RabbitMQ / SQS)  |
-| `defaultMaxAttempts` | `number`                                     | `3`                        | Default retry attempts                   |
-| `pollIntervalMs`     | `number`                                     | `1000`                     | Worker poll interval                     |
+| Option               | Type                                         | Default                    | Description                                        |
+| -------------------- | -------------------------------------------- | -------------------------- | -------------------------------------------------- |
+| `adapter`            | `'memory' \| 'redis' \| 'rabbitmq' \| 'sqs'` | `'memory'`                 | Queue adapter type                                 |
+| `name`               | `string`                                     | —                          | Instance name for multi-instance support           |
+| `url`                | `string`                                     | `'redis://localhost:6379'` | Redis / RabbitMQ connection URL                    |
+| `client`             | `IRedisQueueClient \| IAmqpQueueConnection`  | —                          | Injected client, bypassing the lazy import         |
+| `prefix`             | `string`                                     | `'he.queue'`               | Queue-name prefix (RabbitMQ)                       |
+| `sqs`                | `SqsQueueOptions`                            | —                          | SQS configuration; required when `adapter: 'sqs'`  |
+| `defaultMaxAttempts` | `number`                                     | `3`                        | Default retry attempts                             |
+| `pollIntervalMs`     | `number`                                     | `1000`                     | Worker poll interval                               |
+| `deadLetterTtlMs`    | `number`                                     | — (retained forever)       | Retention for a dead-lettered payload (Redis only) |
+
+Two options this table used to list do not exist and never did: `region` (SQS configuration lives
+under `sqs`) and `queues` (RabbitMQ derives its queue names from `prefix`).
+
+## Seeing a job that failed for the last time
+
+A job that exhausts its attempts is dead-lettered by every adapter, and used to be reachable only by
+opening a Redis client: `IQueue` has no `getJob` and no dead-letter accessor, the health payload was
+`{"adapter":"RedisQueue"}`, and `/metrics` carried no queue series at all. Three surfaces answer
+different questions about it:
+
+| Surface                                  | Answers                                                               |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| `ProcessOptions.onFailed`                | "This job is being abandoned" — log, alert, or compensate in process. |
+| `queue_jobs_total{name,outcome}`         | "How often is this happening?" — the alertable rate.                  |
+| The `queues` field in the health payload | "How many are sitting there right now?" — survives a restart.         |
+
+The counter needs `@setu-ts/metrics-plugin` registered; without it no collector is built and
+behaviour is unchanged. Depths are reported by the memory and Redis adapters and OMITTED (never
+reported as zeros) on RabbitMQ and SQS, whose counts need a management API.
+
+`deadLetterTtlMs` bounds how long the retained payload lives. Without it the jobs hash grows for the
+lifetime of the deployment — the retention exists for debugging, so dropping it by default would
+remove the value it is there for.
 
 ## Adapters
 
@@ -217,6 +243,7 @@ the adapter has no liveness check.
 | `ISnsTransport`                | interface |
 | `ISqsTransport`                | interface |
 | `ProcessOptions`               | interface |
+| `QueueDepths`                  | interface |
 | `QueueLogger`                  | interface |
 | `QueuePluginOptions`           | interface |
 | `RabbitMqQueueOptions`         | interface |
