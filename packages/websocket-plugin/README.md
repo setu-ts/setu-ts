@@ -44,6 +44,61 @@ import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 
 ## Usage
 
+### In an application (the form a scaffolded project uses)
+
+Declare your routes in a plugin — an `IPlugin` with `dependencies: [CAPABILITIES.WEBSOCKET]` whose
+`register()` receives the live service. This is exactly what `setu generate plugin <name>` emits,
+and it is the only form that works inside a CLI-scaffolded project: its generated `setu.config.ts`
+forbids starting the server, so there is no post-`start()` moment to resolve the capability from.
+
+```typescript
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+
+export class ChatPlugin implements IPlugin {
+  readonly name = 'chat';
+  readonly dependencies = [CAPABILITIES.WEBSOCKET];
+
+  register(ctx: IPluginContext): void {
+    const ws = ctx.services.get<{ route(path: string, handlers: unknown): void }>(
+      CAPABILITIES.WEBSOCKET,
+    );
+
+    ws.route('/ws/chat', {
+      onOpen: (conn, { query }) => {
+        // Authenticate here; close(1008) to refuse a peer after the handshake.
+        const room = query.room ?? 'lobby';
+        conn.data.set('room', room);
+        ws.room(room).add(conn);
+      },
+      onMessage: (conn, data) => {
+        const room = conn.data.get('room') as string;
+        ws.room(room).broadcast(data, { except: conn });
+      },
+      onClose: () => {
+        // Rooms evict the connection automatically — nothing to clean up here.
+      },
+      onError: (conn, error) => {
+        logger.error('socket failed', { id: conn.id, error });
+      },
+    });
+  }
+}
+
+// setu.config.ts
+export default createApplication({
+  plugins: [
+    RuntimePlugin(),
+    WebSocketPlugin({ heartbeatMs: 30_000, idleTimeoutMs: 90_000 }),
+    new ChatPlugin(),
+  ],
+});
+```
+
+### Standalone script
+
+In a plain script you own end to end, resolving the service after `app.start()` works too:
+
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';

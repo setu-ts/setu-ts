@@ -93,7 +93,10 @@ describe('GraphQL plugin integration', () => {
     expect(res.statusCode).toBe(200);
 
     expect(seen).toBeDefined();
-    expect(Object.keys(seen!).sort()).toEqual(['requestContext', 'services', 'tenant', 'user']);
+    // X6-6: the HTTP context carries `services` + `requestContext`; `user` and
+    // `tenant` are ABSENT (not undefined-valued) when the request carried no
+    // principal or tenant, and `connection` is absent off the WS transport.
+    expect(Object.keys(seen!).sort()).toEqual(['requestContext', 'services']);
     // The registry must be the live one, so a resolver can reach any capability.
     const services = seen!.services as { get(token: string): unknown };
     expect(services.get(CAPABILITIES.RUNTIME)).toBeDefined();

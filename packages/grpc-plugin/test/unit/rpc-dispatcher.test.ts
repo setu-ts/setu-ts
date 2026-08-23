@@ -7,6 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
+  DEFAULT_BASE_PATH,
   dispatchRequest,
   isWithinBasePath,
   normalizeBasePath,
@@ -23,8 +24,11 @@ function mapWith(...paths: string[]): Map<string, (r: Request) => Promise<Respon
 }
 
 describe('normalizeBasePath', () => {
-  it('defaults to /grpc', () => {
-    expect(normalizeBasePath()).toBe('/grpc');
+  it('defaults to the root (M70i: DEFAULT_BASE_PATH is the single home)', () => {
+    // The constant is the one value both the default parameter and
+    // GrpcService read; pinning it here is what makes the default root.
+    expect(DEFAULT_BASE_PATH).toBe('/');
+    expect(normalizeBasePath()).toBe('');
   });
 
   it('normalizes with and without a trailing slash identically', () => {
@@ -142,5 +146,95 @@ describe('dispatchRequest', () => {
       '/grpc',
     );
     expect(response?.status).toBe(200);
+  });
+});
+
+describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
+  it('refuses a matched native application/grpc request with Trailers-Only UNIMPLEMENTED', async () => {
+    const map = mapWith('/pkg.Svc/Method');
+    const response = await dispatchRequest(
+      new Request('http://x/pkg.Svc/Method', {
+        method: 'POST',
+        headers: { 'content-type': 'application/grpc' },
+        body: new Uint8Array([0, 0, 0, 0, 1]),
+      }),
+      map,
+      '',
+    );
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get('content-type')).toBe('application/grpc');
+    expect(response?.headers.get('grpc-status')).toBe('12');
+    expect(response?.headers.get('grpc-message')).toContain('Connect');
+    expect(await response!.text()).toBe('');
+  });
+
+  it('refuses native +proto and +json at a non-root base path too', async () => {
+    const map = mapWith('/grpc/pkg.Svc/Method');
+    for (const contentType of ['application/grpc+proto', 'application/grpc+json']) {
+      const response = await dispatchRequest(
+        new Request('http://x/grpc/pkg.Svc/Method', {
+          method: 'POST',
+          headers: { 'content-type': contentType },
+          body: new Uint8Array([0]),
+        }),
+        map,
+        '/grpc',
+      );
+      expect(response?.status).toBe(200);
+      expect(response?.headers.get('grpc-status')).toBe('12');
+    }
+  });
+
+  it('lets Connect and gRPC-Web content types reach the handler', async () => {
+    const map = mapWith('/pkg.Svc/Method');
+    for (
+      const contentType of [
+        'application/connect+json',
+        'application/connect+proto',
+        'application/grpc-web+json',
+        'application/grpc-web+proto',
+        'application/json',
+      ]
+    ) {
+      const response = await dispatchRequest(
+        new Request('http://x/pkg.Svc/Method', {
+          method: 'POST',
+          headers: { 'content-type': contentType },
+          body: '{}',
+        }),
+        map,
+        '',
+      );
+      expect(response?.status).toBe(200);
+      expect(await response!.text()).toBe('handled:/pkg.Svc/Method');
+    }
+  });
+
+  it('does not refuse an unmatched path even with a native content type', async () => {
+    // Refusal is for MATCHED procedures only; an unknown path under a root
+    // base falls through to Hono, and under a prefix answers the plain 404.
+    const map = mapWith('/pkg.Svc/Method');
+    expect(
+      await dispatchRequest(
+        new Request('http://x/no.Such/Method', {
+          method: 'POST',
+          headers: { 'content-type': 'application/grpc' },
+          body: new Uint8Array([0]),
+        }),
+        map,
+        '',
+      ),
+    ).toBeNull();
+
+    const miss = await dispatchRequest(
+      new Request('http://x/grpc/no.Such/Method', {
+        method: 'POST',
+        headers: { 'content-type': 'application/grpc' },
+        body: new Uint8Array([0]),
+      }),
+      mapWith('/grpc/pkg.Svc/Method'),
+      '/grpc',
+    );
+    expect(miss?.status).toBe(404);
   });
 });

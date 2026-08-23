@@ -8387,41 +8387,66 @@ subset accepted by the generator. They are intentionally different from the open
 gRPC/Connect co-serving on the same port as ordinary Hono routes. Registered under
 `CAPABILITIES.GRPC`. Added in Milestone 49.
 
+> `createApplication()` returns an application descriptor; there is no `new Application()` /
+> `app.use()` API. Plugins register during `app.start()`, so **do not resolve `CAPABILITIES.GRPC`
+> before `start()` resolves** — the capability does not exist yet and the lookup throws. Pass
+> services through the `services` option (below) or call `addService` after `start()`.
+
 ### Registration
 
 ```typescript
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
 
-app.register(GrpcPlugin({
-  basePath: '/grpc', // default
+GrpcPlugin({
+  basePath: '/', // default — the root
   reflection: true, // default — grpc.reflection.v1.ServerReflection
   health: true, // default — grpc.health.v1.Health (bridged to M20)
   services: [], // initial service definitions
   connectModule: undefined, // inject for testing; otherwise lazy-loaded
   interceptors: [], // default — application Connect interceptors
-}));
+});
 ```
 
 ### Usage
 
-```typescript
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IGrpcService } from '@setu-ts/common';
+Pass services through the plugin's `services` option at construction:
 
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+import { MyServiceDefinition, myServiceImpl } from './my-service.ts';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    GrpcPlugin({
+      services: [{ definition: MyServiceDefinition, implementation: myServiceImpl }],
+    }),
+  ],
+});
+
+await app.start({ port: 3000 });
+
+// AFTER start(): late registration through the resolved capability.
 const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
-grpc.addService(MyServiceDefinition, myServiceImpl);
+grpc.addService(AnotherDefinition, anotherImpl);
 ```
 
 ### Options
 
 | Option          | Type                                     | Default | Description                                                                                                                                                                                                                                                                  |
 | --------------- | ---------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.                                                                                                                                                                                   |
+| `basePath`      | `string`                                 | `/`     | URL prefix that marks a request as RPC. Defaults to the root so clients reach procedures without a path prefix; detection stays segment-aware, so prefix-adjacent routes (`/grpcfoo`) are untouched. Requests outside this prefix fall through to Hono.                      |
 | `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch.                                                                                                                                                                        |
 | `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                                                                                                                                                                                           |
-| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                                                                                                                                                                                                     |
+| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup. The recommended registration path: the capability does not exist before `start()`.                                                                                                                                                  |
 | `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.                                                                                                                                                                                 |
 | `interceptors`  | `readonly unknown[]`                     | `[]`    | Application Connect interceptors, forwarded to Connect router construction (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a handler throw is logged before an application interceptor observes it. Absent: none installed. |
+
+> Native gRPC-binary requests (`application/grpc`, `+proto`, `+json`) are refused with a
+> Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`). No runtime the plugin loads on exposes the
+> HTTP/2 trailers the native protocol requires. Connect and gRPC-Web are fully supported.
 
 ### Exports
 
@@ -8930,38 +8955,46 @@ schema definition with resolver maps and pre-built schemas. Includes media-type 
 
 ### Usage
 
+Pass the plugin to `createApplication({ plugins: [...] })` — there is no `new Application()` /
+`app.use()` API:
+
 ```typescript
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IGraphqlService } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
 
-// Schema-first
-app.use(
-  GraphqlPlugin({
-    typeDefs: `
-      type Query {
-        hello(name: String!): String
-      }
-    `,
-    resolvers: {
-      Query: {
-        hello: (_, { name }) => `Hello, ${name}!`,
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    // Schema-first
+    GraphqlPlugin({
+      typeDefs: `
+        type Query {
+          hello(name: String!): String
+        }
+      `,
+      resolvers: {
+        Query: {
+          hello: (_, { name }) => `Hello, ${name}!`,
+        },
       },
-    },
-  }),
-);
+    }),
+  ],
+});
 
-// Code-first
+await app.start({ port: 3000 });
+
+// Resolve the service AFTER start() — plugins register during start().
+const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+```
+
+Code-first differs only in passing a pre-built schema instead of `typeDefs` + `resolvers`:
+
+```typescript
 import { buildSchema } from 'npm:graphql@^16';
 const schema = buildSchema(`type Query { hello: String }`);
 
-app.use(
-  GraphqlPlugin({
-    schema,
-  }),
-);
-
-// Resolve the service
-const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+GraphqlPlugin({ schema });
 ```
 
 ### Options
@@ -9052,10 +9085,16 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 - **Two schema construction arms.** Schema-first (`typeDefs` + `resolvers`) and code-first
   (`schema`) are mutually exclusive; supplying both is a compile error.
-- **Resolver context.** Without `buildContext`, resolvers receive a `DefaultGraphqlContext` of
-  `{ services, requestContext, user, tenant }` — `services` is the live `IServiceRegistry`, so a
-  resolver reaches any other capability through it, and `user`/`tenant` are whatever the auth and
-  multi-tenancy middleware published on the request. Supplying `buildContext` replaces that object
+- **Resolver context.** Without `buildContext`, resolvers receive a `DefaultGraphqlContext` whose
+  shape is per-transport. Over **HTTP**: `{ services, requestContext, user?, tenant? }` — `services`
+  is the live `IServiceRegistry`, so a resolver reaches any other capability through it, and
+  `user`/`tenant` are whatever the auth and multi-tenancy middleware published on the request. Over
+  **WebSocket**: `{ services, connection }` — `requestContext` is **absent** (not
+  `undefined`-valued): the runtime closes the upgrade request once the handshake response is
+  returned, so a synthesized one would be dead by the time a resolver runs; that is why the member
+  is typed optional. The upgrade request's headers and query live on
+  `GraphqlConnectionInfo.headers`/`.query`, and identity set by an `onConnect` hook via
+  `info.data.set('user', …)` surfaces as `ctx.user`. Supplying `buildContext` replaces that object
   wholesale.
 - **Media-type negotiation and the status watershed.** Responds with
   `application/graphql-response+json` when the client requests it, otherwise `application/json` —
@@ -9066,8 +9105,13 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
   in the body, because a client predating the newer media type reads a non-200 as a network failure
   and never reads the `errors` array. Exactly three cases keep their status under `application/json`
   — an unsupported request content type (`415`), a malformed JSON body (`400`), and a mutation over
-  `GET` (`405`) — because none of them is a GraphQL result. The status is decided from the outcome
-  alone and never from the response body, so a `formatError` hook cannot change it.
+  `GET` (`405`) — because none of them is a GraphQL result. An **APQ refusal** follows the watershed
+  too: under `application/json` it answers `200` with `PersistedQueryNotFound` in the body (it is
+  exactly the error a client must read and retry), while under `graphql-response` it carries the
+  resolver's own status. Batching remains refused before per-element resolution, so an APQ miss
+  inside a batch under `graphql-response` surfaces as `400 BATCHING_NOT_SUPPORTED`. The status is
+  decided from the outcome alone and never from the response body, so a `formatError` hook cannot
+  change it.
 - **An executed operation is always `200`.** A field error that nulls `data` is not a request error,
   so it does not become a `400` even under `graphql-response`.
 - **`405` carries `Allow: POST`.** A mutation sent over `GET` is refused with `METHOD_NOT_ALLOWED`

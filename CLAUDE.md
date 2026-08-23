@@ -2823,13 +2823,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   run fails with `RequestTimeoutError`, contradicting the doc's "repeated runs never share state"),
   so the container is restarted between runs. Both suites now pass under the project's own
   permission model — 7 steps, verified in this worktree.) — complete (PR #175)
-- **Next milestone** — **M70i** (gRPC and GraphQL viability). The repair-versus-withdraw decision
-  for `grpc-plugin`, plus the documented-API-does-not-exist rows both packages carry: every gRPC
-  registration snippet in README and `PUBLIC_API.md` throws because it resolves the capability
-  before `app.start()` (X7-1), and `graphql-plugin`'s only documented registration API uses a
-  `new Application()` / `app.use()` the kernel does not export (X6-2). Also X7-2, X7-4, X6-3 (the
-  code-first arm does not type-check against the real `graphql` package), X6-4, X6-5, X6-6, X6-7.
-  M70e closed X7-3 first, so the viability decision is taken against a package that loads.
+- **Next milestone** — **M70j** (database adapter correctness). M70i is complete: `grpc-plugin` was
+  REPAIRED with an explicit withdrawal of the native-gRPC claim (`basePath` now defaults to the
+  root; native `application/grpc` requests are refused with a Trailers-Only `UNIMPLEMENTED`; Connect
+  and gRPC-Web remain fully supported), and both packages' documented-API-does-not-exist rows are
+  closed — registration snippets resolve capabilities only after `app.start()` and use
+  `createApplication({ plugins })`. M70j closes `IDatabaseService.query()`'s broken Drizzle shape
+  (X12-2) and the Memory adapter that silently accepts invalid writes (X12-5), plus X4-9, X12-4,
+  X12-6, D7.
 
 ## Verification (run before declaring any work done)
 

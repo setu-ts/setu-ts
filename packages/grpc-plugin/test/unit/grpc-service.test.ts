@@ -79,12 +79,12 @@ describe('GrpcService — service registration', () => {
     const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
     const service = createService({ runtime });
 
-    // Build the router once by dispatching.
-    await service.handleRequest(new Request('http://x/grpc/unknown'));
+    // Build the router once by dispatching (root default: bare unknown path).
+    await service.handleRequest(new Request('http://x/unknown'));
     const before = runtime.registered.length;
 
     service.addService(echoDefinition);
-    await service.handleRequest(new Request('http://x/grpc/unknown'));
+    await service.handleRequest(new Request('http://x/unknown'));
 
     // The router was rebuilt and now carries the app service too.
     expect(runtime.registered.length).toBeGreaterThan(before);
@@ -95,25 +95,47 @@ describe('GrpcService — service registration', () => {
     const runtime = runtimeWith();
     const service = createService({ runtime });
 
-    await service.handleRequest(new Request('http://x/grpc/unknown'));
+    await service.handleRequest(new Request('http://x/unknown'));
     const afterFirst = runtime.registered.length;
-    await service.handleRequest(new Request('http://x/grpc/unknown'));
+    await service.handleRequest(new Request('http://x/unknown'));
 
     expect(runtime.registered.length).toBe(afterFirst);
   });
 });
 
 describe('GrpcService — dispatch', () => {
-  it('serves a registered procedure through handleRequest', async () => {
+  it('serves a registered procedure at the bare method path (root default, M70i)', async () => {
     const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
     const service = createService({ runtime });
     service.addService(echoDefinition);
 
     const response = await service.handleRequest(
-      new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
+      new Request('http://x/example.Echo/Echo', { method: 'POST' }),
     );
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('handled:/example.Echo/Echo');
+  });
+
+  it('a stock service claims only registered procedure paths at the root', () => {
+    // The root default is safe because claims() at the root reports only
+    // dispatchMap hits — an ordinary route like /products is never claimed.
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime });
+    service.addService(echoDefinition);
+
+    expect(service.claims(new Request('http://x/example.Echo/Echo'))).toBe(true);
+    expect(service.claims(new Request('http://x/products'))).toBe(false);
+  });
+
+  it('an explicit basePath: /grpc restores prefix claiming', () => {
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime, options: { basePath: '/grpc' } });
+    service.addService(echoDefinition);
+
+    expect(service.claims(new Request('http://x/grpc/example.Echo/Echo'))).toBe(true);
+    expect(service.claims(new Request('http://x/example.Echo/Echo'))).toBe(false);
+    // Inside the prefix, an unknown procedure is still claimed (404, not fall-through).
+    expect(service.claims(new Request('http://x/grpc/no.Such/Method'))).toBe(true);
   });
 
   it('answers 404 from handleRequest for a non-RPC path', async () => {
@@ -146,7 +168,7 @@ describe('GrpcService — fetch handler', () => {
     service.addService(echoDefinition);
 
     const response = await service.createFetchHandler()(
-      new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
+      new Request('http://x/example.Echo/Echo', { method: 'POST' }),
     );
     expect(response?.status).toBe(200);
   });
@@ -158,8 +180,8 @@ describe('GrpcService — shutdown', () => {
     const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
     const service = createService({ runtime });
     service.addService(echoDefinition);
-    // Build the router so the served-path set is populated.
-    await service.handleRequest(new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }));
+    // Build the router so the served-path set is populated (root default: bare path).
+    await service.handleRequest(new Request('http://x/example.Echo/Echo', { method: 'POST' }));
     service.close();
     return { service, runtime };
   }
@@ -167,7 +189,7 @@ describe('GrpcService — shutdown', () => {
   it('answers 503 for its own procedures after close()', async () => {
     const { service } = await closedService();
     const response = await service.handleRequest(
-      new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
+      new Request('http://x/example.Echo/Echo', { method: 'POST' }),
     );
     expect(response.status).toBe(503);
   });
@@ -177,13 +199,13 @@ describe('GrpcService — shutdown', () => {
     const { service } = await closedService();
     const handler = service.createFetchHandler();
     expect(await handler(new Request('http://x/users'))).toBeNull();
-    expect(await handler(new Request('http://x/grpc/example.Echo/Unknown'))).toBeNull();
+    expect(await handler(new Request('http://x/example.Echo/Unknown'))).toBeNull();
   });
 
   it('does not rebuild the router after close()', async () => {
     const { service, runtime } = await closedService();
     const registeredAtClose = runtime.registered.length;
-    await service.handleRequest(new Request('http://x/grpc/example.Echo/Echo'));
+    await service.handleRequest(new Request('http://x/example.Echo/Echo'));
 
     expect(runtime.registered.length).toBe(registeredAtClose);
   });
@@ -192,7 +214,7 @@ describe('GrpcService — shutdown', () => {
     const { service } = await closedService();
     expect(() => service.close()).not.toThrow();
     const response = await service.handleRequest(
-      new Request('http://x/grpc/example.Echo/Echo', { method: 'POST' }),
+      new Request('http://x/example.Echo/Echo', { method: 'POST' }),
     );
     expect(response.status).toBe(503);
   });

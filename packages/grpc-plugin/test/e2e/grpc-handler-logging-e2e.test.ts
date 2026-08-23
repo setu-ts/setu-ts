@@ -84,7 +84,7 @@ describe('gRPC handler-error logging (X7-5)', () => {
     });
 
     const response = await app.fetch(
-      new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+      new Request('http://localhost:0/example.EchoService/Echo', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: 'x' }),
@@ -116,7 +116,7 @@ describe('gRPC handler-error logging (X7-5)', () => {
     });
 
     const response = await app.fetch(
-      new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+      new Request('http://localhost:0/example.EchoService/Echo', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: 'x' }),
@@ -146,7 +146,7 @@ describe('gRPC handler-error logging (X7-5)', () => {
     });
 
     const response = await app.fetch(
-      new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+      new Request('http://localhost:0/example.EchoService/Echo', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: 'x' }),
@@ -191,7 +191,7 @@ describe('gRPC handler-error logging (X7-5)', () => {
     };
     try {
       const response = await app.fetch(
-        new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+        new Request('http://localhost:0/example.EchoService/Echo', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ message: 'x' }),
@@ -230,7 +230,7 @@ describe('gRPC handler-error logging (X7-5)', () => {
     grpc.addService(await reviveEchoService(), new EchoService());
 
     const response = await app.fetch(
-      new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+      new Request('http://localhost:0/example.EchoService/Echo', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: 'x' }),

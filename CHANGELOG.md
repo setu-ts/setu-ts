@@ -198,6 +198,40 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`GrpcPlugin`'s `basePath` now defaults to `/` (the root), and native gRPC-binary requests are
+  refused with `UNIMPLEMENTED`** (M70i, X7-2 / X7-4). The old default `'/grpc'` was unreachable by
+  every native client — a gRPC path comes from the method name alone, and no client has a prefix
+  option. RPC detection stays segment-aware, so ordinary routes like `/grpcfoo` are untouched.
+
+  **Migration — applications that relied on the default.** If you pointed clients at
+  `http://host:3000/grpc/<service>/<method>`, either pass `basePath: '/grpc'` explicitly or point
+  the client at `http://host:3000/<service>/<method>`. Applications that already set `basePath`
+  explicitly see no change.
+
+  Native gRPC-binary requests (`application/grpc`, `application/grpc+proto`,
+  `application/grpc+json`) are answered with a Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`)
+  instead of reaching Connect's handler, where every call failed with an opaque "missing status"
+  transport error after a successful handshake: no runtime the plugin loads on exposes the HTTP/2
+  trailers the native protocol requires. **Connect (`application/connect+*`) and gRPC-Web
+  (`application/grpc-web+*`) remain fully supported** on all runtimes; point native gRPC clients at
+  a gRPC-Web-capable proxy or switch them to Connect.
+
+- **`graphql-plugin`: resolvers can be typed without casts, and the WebSocket context no longer
+  pretends to carry an HTTP request** (M70i, X6-4 / X6-6 / X6-7). `FieldResolver` is generic
+  (`FieldResolver<TSource = unknown, TContext = unknown, TArgs = Record<string, unknown>>`; existing
+  all-`unknown` resolvers stay assignable), and `DefaultGraphqlContext` is typed against
+  `@setu-ts/common` (`services: IServiceRegistry`, `user?: IPrincipal`, `tenant?: ITenant`). Over
+  HTTP the context is `{ services, requestContext, user?, tenant? }`; over WebSocket it is
+  `{ services, connection }` and **`requestContext` is absent** — the upgrade request is closed once
+  the handshake response returns, so a synthesized one would be dead by resolver time. The upgrade
+  request's headers/query live on `connection.headers`/`.query`. `requestContext` is therefore typed
+  optional; code that dereferenced it must narrow first.
+
+  APQ refusals now follow the documented media-type watershed from one owner: under
+  `application/json` an APQ miss answers `200` with `PersistedQueryNotFound` in the body (the one
+  error a client must read and retry); under `application/graphql-response+json` it carries the
+  resolver's own status.
+
 - **Error bodies now answer in the application's configured format (X4-8, C3)** (M70f). Every
   short-circuiting site — the kernel's 404/400/503/500 terminals, `createUploadMiddleware`'s
   rejections, the multi-tenancy `400`, the session tenant-mismatch and form-CSRF `403`s, the auth

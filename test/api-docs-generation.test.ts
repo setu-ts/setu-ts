@@ -348,7 +348,7 @@ error[private-type-ref]: public type references private type
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the frozen baseline of 764', () => {
+    it('is the frozen baseline of 760', () => {
       // 776 when the plan was written against a pre-M56 tree; merging
       // origin/main brought M56-M61's JSDoc and the real count fell to 775.
       // M59 then added four diagnostics and removed five, so it fell to 774.
@@ -358,9 +358,12 @@ error[private-type-ref]: public type references private type
       // `graphql` package, replacing a number of `missing-jsdoc` /
       // `private-type-ref` diagnostics on the old narrow facade members with
       // documented, `unknown`-typed ones — the real count fell to 764.
+      // M70i's fix pass then completed the plan's gRPC + GraphQL deliverables:
+      // the new modules and widened members replaced four further diagnostics,
+      // and the ratchet recorded the measured 760.
       // The ratchet refused the stale constant in BOTH directions and named
       // the new number, which is exactly the behaviour §3.10 specifies.
-      expect(DOC_LINT_BASELINE).toBe(764);
+      expect(DOC_LINT_BASELINE).toBe(760);
     });
   });
 

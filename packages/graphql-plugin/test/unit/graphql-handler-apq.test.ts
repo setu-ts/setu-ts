@@ -168,7 +168,10 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
       expect(dec(captures.body!)).toContain('"hello":"world"');
     });
 
-    it('returns the APQ miss as a 400 with its code', async () => {
+    it('returns the APQ miss with its code (200 under application/json, M70i X6-7)', async () => {
+      // The documented watershed keeps exactly three statuses under
+      // application/json; an APQ miss is a GraphQL result the client MUST read
+      // and retry, so it answers 200 with the error in the body.
       const { mock, captures } = createMockResponse();
       const { post } = createGraphqlHandler(makeService(), '/graphql', {
         graphiql: true,
@@ -185,11 +188,11 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
 
       await post(ctx);
 
-      expect(captures.status).toBe(400);
+      expect(captures.status).toBe(200);
       expect(dec(captures.body!)).toContain('PERSISTED_QUERY_NOT_FOUND');
     });
 
-    it('returns the APQ hash mismatch as a 400', async () => {
+    it('returns the APQ hash mismatch with its code (200 under application/json)', async () => {
       const { mock, captures } = createMockResponse();
       const { post } = createGraphqlHandler(makeService(), '/graphql', {
         graphiql: true,
@@ -206,7 +209,7 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
 
       await post(ctx);
 
-      expect(captures.status).toBe(400);
+      expect(captures.status).toBe(200);
       expect(dec(captures.body!)).toContain('PERSISTED_QUERY_HASH_MISMATCH');
     });
 
@@ -221,14 +224,16 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
       const query = '{ hello }';
       const hash = await persistedQueryHash(query, subtle);
 
-      // 1. Hash-only miss → 400 PERSISTED_QUERY_NOT_FOUND.
+      // 1. Hash-only miss → 200 with PERSISTED_QUERY_NOT_FOUND in the body
+      //    (application/json watershed; the client reads the error and retries).
       const miss = createMockContext({
         body: { extensions: { persistedQuery: { version: 1, sha256Hash: hash } } },
       });
       const missResp = createMockResponse();
       (miss as { response?: IResponse }).response = missResp.mock;
       await post(miss);
-      expect(missResp.captures.status).toBe(400);
+      expect(missResp.captures.status).toBe(200);
+      expect(dec(missResp.captures.body!)).toContain('PERSISTED_QUERY_NOT_FOUND');
 
       // 2. Retry with query + hash → persists, executes 200.
       const retry = createMockContext({
@@ -490,6 +495,122 @@ describe('graphql-handler — APQ, batch edges, variables, GET', () => {
 
       expect(captures.status).toBe(200);
       expect(dec(captures.body!)).toContain('"hello":"world"');
+    });
+  });
+
+  /**
+   * The X6-7 APQ refusal matrix: every refusal site × every negotiated media
+   * type. `application/json` → 200 (the documented "exactly three" watershed);
+   * `application/graphql-response+json` → the APQ result's own status. The body
+   * carries `PersistedQueryNotFound` in every cell.
+   */
+  describe('graphql-handler — APQ refusal matrix (M70i X6-7)', () => {
+    const APQ_MISS = {
+      ok: false,
+      message: 'PersistedQueryNotFound',
+      code: 'PERSISTED_QUERY_NOT_FOUND',
+      status: 400,
+    } as const;
+
+    const STRICT_ACCEPT = 'application/graphql-response+json';
+
+    it('single POST: 200 under application/json, 400 under graphql-response', async () => {
+      for (
+        const [accept, expected] of [
+          ['application/json', 200],
+          [STRICT_ACCEPT, 400],
+        ] as const
+      ) {
+        const { mock, captures } = createMockResponse();
+        const { post } = createGraphqlHandler(makeService(), '/graphql', {
+          graphiql: true,
+          maxBatchSize: 0,
+          apqResolver: fakeApq(APQ_MISS),
+        });
+        const ctx = createMockContext({ body: {}, accept });
+        (ctx as { response?: IResponse }).response = mock;
+
+        await post(ctx);
+
+        expect(captures.status).toBe(expected);
+        expect(dec(captures.body!)).toContain('PERSISTED_QUERY_NOT_FOUND');
+      }
+    });
+
+    it('batch POST: 200 under application/json (plan-measured deviation for strict)', async () => {
+      // application/json: the per-element APQ miss answers 200 with the error.
+      {
+        const { mock, captures } = createMockResponse();
+        const { post } = createGraphqlHandler(makeService(), '/graphql', {
+          graphiql: true,
+          maxBatchSize: 10,
+          apqResolver: fakeApq(APQ_MISS),
+        });
+        const ctx = createMockContext({
+          body: [{ extensions: { persistedQuery: { version: 1, sha256Hash: 'h' } } }],
+          accept: 'application/json',
+        });
+        (ctx as { response?: IResponse }).response = mock;
+
+        await post(ctx);
+
+        expect(captures.status).toBe(200);
+        expect(dec(captures.body!)).toContain('PERSISTED_QUERY_NOT_FOUND');
+      }
+      // Plan-measured deviation: under graphql-response the batch is refused
+      // BATCHING_NOT_SUPPORTED (400) BEFORE per-element APQ resolution, so an
+      // APQ miss is unreachable in this cell. The 400 is the documented
+      // transport-failure status, not the APQ watershed.
+      {
+        const { mock, captures } = createMockResponse();
+        const { post } = createGraphqlHandler(makeService(), '/graphql', {
+          graphiql: true,
+          maxBatchSize: 10,
+          apqResolver: fakeApq(APQ_MISS),
+        });
+        const ctx = createMockContext({
+          body: [{ extensions: { persistedQuery: { version: 1, sha256Hash: 'h' } } }],
+          accept: STRICT_ACCEPT,
+        });
+        (ctx as { response?: IResponse }).response = mock;
+
+        await post(ctx);
+
+        expect(captures.status).toBe(400);
+        expect(dec(captures.body!)).toContain('BATCHING_NOT_SUPPORTED');
+      }
+    });
+
+    it('GET: 200 under application/json, 400 under graphql-response', async () => {
+      // GET requires a `query` param before APQ resolution (C6 verify path), so
+      // the miss is a query+hash pair the resolver rejects.
+      for (
+        const [accept, expected] of [
+          ['application/json', 200],
+          [STRICT_ACCEPT, 400],
+        ] as const
+      ) {
+        const { mock, captures } = createMockResponse();
+        const { get } = createGraphqlHandler(makeService(), '/graphql', {
+          graphiql: true,
+          maxBatchSize: 0,
+          apqResolver: fakeApq(APQ_MISS),
+        });
+        const ctx = createMockContext({
+          query: {
+            query: '{ hello }',
+            extensions: JSON.stringify({ persistedQuery: { version: 1, sha256Hash: 'h' } }),
+          },
+          accept,
+          method: 'GET',
+        });
+        (ctx as { response?: IResponse }).response = mock;
+
+        await get(ctx);
+
+        expect(captures.status).toBe(expected);
+        expect(dec(captures.body!)).toContain('PERSISTED_QUERY_NOT_FOUND');
+      }
     });
   });
 });

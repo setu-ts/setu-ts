@@ -11,8 +11,10 @@ import type {
   GraphqlRequestParams,
   GraphqlSubscriptionOutcome,
   IGraphqlService,
+  IPrincipal,
   IRequestContext,
   IServiceRegistry,
+  ITenant,
 } from '@setu-ts/common';
 import type { GraphqlLogger } from '../interfaces/options.ts';
 import type { GraphqlRuntime, GraphqlSchemaLike } from '../interfaces/graphql-runtime.ts';
@@ -28,6 +30,30 @@ interface MaskOptions {
   maskInternalErrors: boolean;
   formatError?: (error: unknown) => unknown;
   logger?: GraphqlLogger;
+}
+
+/**
+ * Structural guard for a value an `onConnect` hook may have written to
+ * `conn.data` under the `'user'` key. The hook's contract is to store an
+ * `IPrincipal`; anything else (a string id, a raw token) is dropped rather
+ * than placed on a member typed `IPrincipal` — the context must never carry a
+ * value that does not satisfy the type it is declared as.
+ */
+function isPrincipal(value: unknown): value is IPrincipal {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === 'string'
+  );
+}
+
+/** Structural guard for a value written to `conn.data` under `'tenant'`. */
+function isTenant(value: unknown): value is ITenant {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === 'string'
+  );
 }
 
 /**
@@ -161,13 +187,22 @@ export class GraphqlService implements IGraphqlService {
       contextValue = await this.#buildContext(this.#buildContextValue(opContext));
     } else {
       const ctxInput = this.#buildContextValue(opContext);
+      // The HTTP path: `requestContext` present, `connection` absent. Members
+      // are added only when defined — `exactOptionalPropertyTypes` forbids
+      // writing an explicit `undefined` into an optional member, and the
+      // documented per-transport shape (X6-6) is about ABSENCE, not undefined.
       const defaultContext: DefaultGraphqlContext = {
-        services: ctxInput.services,
-        requestContext: requestContext,
-        user: requestContext ? (requestContext.request as { user?: unknown })?.user : undefined,
-        tenant: requestContext
-          ? (requestContext.request as { tenant?: unknown })?.tenant
-          : undefined,
+        // `#buildContextValue` types its services as `unknown` (the custom
+        // buildContext input is permissively typed); the value is always the
+        // request-scoped registry or the plugin-level one, so this is sound.
+        services: ctxInput.services as IServiceRegistry,
+        ...(requestContext !== undefined && { requestContext }),
+        ...(requestContext?.request.user !== undefined && {
+          user: requestContext.request.user,
+        }),
+        ...(requestContext?.request.tenant !== undefined && {
+          tenant: requestContext.request.tenant,
+        }),
       };
       contextValue = defaultContext;
     }
@@ -210,19 +245,40 @@ export class GraphqlService implements IGraphqlService {
       contextValue = await this.#buildContext(this.#buildContextValue(opContext));
     } else {
       const ctxInput = this.#buildContextValue(opContext);
-      const defaultContext: Record<string, unknown> = {
-        services: ctxInput.services,
-        requestContext: opContext.requestContext,
-        user: opContext.requestContext
-          ? (opContext.requestContext.request as { user?: unknown })?.user
-          : opContext.connection?.data.get('user'),
-        tenant: opContext.requestContext
-          ? (opContext.requestContext.request as { tenant?: unknown })?.tenant
-          : opContext.connection?.data.get('tenant'),
+      // The WS path (X6-6): `requestContext` is NOT synthesized from the
+      // upgrade request — the runtime closes it once the handshake response is
+      // returned, so a resolver reading `ctx.requestContext.response` or
+      // awaiting `ctx.requestContext.signal` would get a plausible object with
+      // wrong behaviour. It is declared absent instead, and the upgrade
+      // request's headers/query live on `connection.headers` / `connection.query`.
+      //
+      // The old `Record<string, unknown>` escape is gone: the context is
+      // annotated `DefaultGraphqlContext`, and members are added only when
+      // defined (absence, not `undefined`, under `exactOptionalPropertyTypes`).
+      const defaultContext: DefaultGraphqlContext = {
+        // `#buildContextValue` types its services as `unknown` (the custom
+        // buildContext input is permissively typed); the value is always the
+        // plugin-level registry or the request-scoped one, so this is sound.
+        services: ctxInput.services as IServiceRegistry,
+        ...(opContext.requestContext !== undefined && {
+          requestContext: opContext.requestContext,
+        }),
+        ...(opContext.requestContext?.request.user !== undefined && {
+          user: opContext.requestContext.request.user,
+        }),
+        ...(opContext.requestContext?.request.tenant !== undefined && {
+          tenant: opContext.requestContext.request.tenant,
+        }),
+        ...(opContext.connection !== undefined && {
+          connection: opContext.connection,
+          ...(isPrincipal(opContext.connection.data.get('user')) && {
+            user: opContext.connection.data.get('user') as IPrincipal,
+          }),
+          ...(isTenant(opContext.connection.data.get('tenant')) && {
+            tenant: opContext.connection.data.get('tenant') as ITenant,
+          }),
+        }),
       };
-      if (opContext.connection) {
-        defaultContext.connection = opContext.connection;
-      }
       contextValue = defaultContext;
     }
 

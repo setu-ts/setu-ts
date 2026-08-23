@@ -14,7 +14,11 @@ import type { ConnectRuntime } from './connect-runtime.ts';
 export interface GrpcPluginOptions {
   /**
    * Base path under which gRPC/Connect services are served.
-   * Defaults to `/grpc`. Requests outside this prefix fall through to Hono.
+   * Defaults to the root (`'/'`, M70i) so a stock installation is reachable
+   * by native gRPC clients, which derive their path from the method name
+   * alone and have no prefix option. At the root, unknown paths fall through
+   * to Hono and only registered procedure paths are claimed. Pass
+   * `'/grpc'` to restore the pre-M70i prefix.
    */
   basePath?: string;
 

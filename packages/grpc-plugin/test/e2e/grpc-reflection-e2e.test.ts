@@ -26,8 +26,8 @@ import {
 } from '@setu-ts/common';
 import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
 
-const REFLECTION_PATH = '/grpc/grpc.reflection.v1.ServerReflection/ServerReflectionInfo';
-const HEALTH_PATH = '/grpc/grpc.health.v1.Health/Check';
+const REFLECTION_PATH = '/grpc.reflection.v1.ServerReflection/ServerReflectionInfo';
+const HEALTH_PATH = '/grpc.health.v1.Health/Check';
 
 /** Frames a JSON payload into a Connect streaming envelope. */
 function envelope(payload: unknown): Uint8Array {

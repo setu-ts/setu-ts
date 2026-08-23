@@ -29,9 +29,9 @@ describe('gRPC through kernel pipeline (M70a)', () => {
     const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
     expect(grpc.available).toBe(true);
 
-    // gRPC Health Check through fetch
+    // gRPC Health Check through fetch (root default: bare method path)
     const response = await app.fetch(
-      new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+      new Request('http://localhost/grpc.health.v1.Health/Check', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ service: '' }),
@@ -59,9 +59,9 @@ describe('gRPC through kernel pipeline (M70a)', () => {
 
     await app.start({ port: 0 });
 
-    // Unauthenticated gRPC request → 401
+    // Unauthenticated gRPC request → 401 (root default: bare method path)
     const unauthResponse = await app.fetch(
-      new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+      new Request('http://localhost/grpc.health.v1.Health/Check', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ service: '' }),
@@ -71,7 +71,7 @@ describe('gRPC through kernel pipeline (M70a)', () => {
 
     // Authenticated gRPC request → 200
     const authResponse = await app.fetch(
-      new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+      new Request('http://localhost/grpc.health.v1.Health/Check', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: 'Bearer token' },
         body: JSON.stringify({ service: '' }),
@@ -114,7 +114,9 @@ describe('gRPC through kernel pipeline (M70a)', () => {
   it('does not claim a path merely prefixed by basePath', async () => {
     // `/grpcfoo` starts with `/grpc` but is not inside it. A bare `startsWith`
     // would shadow an ordinary application route.
-    const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
+    const app = createApplication({
+      plugins: [RuntimePlugin(), GrpcPlugin({ basePath: '/grpc' })],
+    });
     await app.start({ port: 0 });
 
     const response = await app.fetch(new Request('http://localhost/grpcfoo'));
@@ -129,7 +131,9 @@ describe('gRPC through kernel pipeline (M70a)', () => {
     // The other side of the guard: inside the base path, gRPC answers — which
     // is what makes the two tests above a real distinction rather than a
     // service that never claims anything.
-    const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
+    const app = createApplication({
+      plugins: [RuntimePlugin(), GrpcPlugin({ basePath: '/grpc' })],
+    });
     await app.start({ port: 0 });
 
     const response = await app.fetch(
@@ -153,7 +157,7 @@ describe('gRPC through kernel pipeline (M70a)', () => {
     await app.start({ port: 0 });
 
     const rpc = await app.fetch(
-      new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+      new Request('http://localhost/grpc.health.v1.Health/Check', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ service: '' }),
@@ -210,9 +214,9 @@ describe('gRPC through kernel pipeline (M70a)', () => {
     // Start shutdown (triggers drain)
     app.stop();
 
-    // gRPC request during drain → 503
+    // gRPC request during drain → 503 (root default: bare method path)
     const drainResponse = await app.fetch(
-      new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+      new Request('http://localhost/grpc.health.v1.Health/Check', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ service: '' }),

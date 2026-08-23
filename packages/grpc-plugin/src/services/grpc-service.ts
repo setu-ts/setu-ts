@@ -18,6 +18,7 @@ import type {
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import {
+  DEFAULT_BASE_PATH,
   dispatchRequest,
   isWithinBasePath,
   normalizeBasePath,
@@ -41,6 +42,13 @@ export interface GrpcServiceOptions {
 
 /**
  * The gRPC service applications use to register Connect/gRPC services.
+ *
+ * The default `basePath` is the **root** (`DEFAULT_BASE_PATH`), which is what
+ * makes a stock installation reachable by native gRPC clients — they derive
+ * their path from the method name alone and have no prefix option. At the
+ * root, `claims()` reports only registered procedure paths, so the kernel
+ * consults this service before route matching without shadowing ordinary
+ * routes. Pass `basePath: '/grpc'` to restore the pre-M70i prefix.
  *
  * @example
  * ```typescript
@@ -79,7 +87,7 @@ export class GrpcService implements IGrpcService {
     this.#options = init.options;
     this.#healthService = init.healthService;
     this.#resolveLogger = init.resolveLogger;
-    this.#basePath = normalizeBasePath(init.options.basePath ?? '/grpc');
+    this.#basePath = normalizeBasePath(init.options.basePath ?? DEFAULT_BASE_PATH);
 
     for (const entry of init.options.services ?? []) {
       this.addService(entry.definition as GrpcServiceDefinition, entry.implementation);
