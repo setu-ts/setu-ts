@@ -93,3 +93,80 @@ describe('upload middleware passes downstream errors through (X8-1)', () => {
     }
   });
 });
+
+describe('a size refusal answers 413 in the configured Problem Details format (X8-3)', () => {
+  /** Builds a started app whose upload middleware refuses at the given bounds. */
+  async function limitedApp(
+    options: Parameters<typeof createUploadMiddleware>[0],
+  ): Promise<IKernelApplication> {
+    const built = await createTestApp({ plugins: [RuntimePlugin()], autoStart: false });
+    built.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }), {
+      priority: 0,
+      name: 'error-handler',
+    });
+    built.middleware.add(createUploadMiddleware(options), { priority: 100, name: 'upload' });
+    built.router.post('/upload', (ctx) => ctx.response.json({ ok: true }));
+    await built.start();
+    return built;
+  }
+
+  /** Posts the fixture body and reads the response. */
+  async function post(built: IKernelApplication): Promise<Response> {
+    return await built.fetch(
+      new Request('http://test.local/upload', {
+        method: 'POST',
+        headers: { 'content-type': `multipart/form-data; boundary=${BOUNDARY}` },
+        body: MULTIPART_BODY,
+      }),
+    );
+  }
+
+  /**
+   * Asserts the documented Problem Details members field by field, forbidden
+   * ones included: a Problem Details body carries `detail`, never `message`.
+   *
+   * The status changed from 400 to 413, and the BODY must still be whatever the
+   * application configured — which is what M70f's responder seam exists for, so
+   * this is the test that proves the two changes compose.
+   */
+  async function expectProblemDetails(response: Response, detail: string): Promise<void> {
+    expect(response.status).toBe(413);
+    expect(response.headers.get('content-type')).toBe('application/problem+json');
+
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.status).toBe(413);
+    // RFC 9457 §4.2: with `about:blank` the title IS the status reason phrase,
+    // so the formatter standardizes it. Which guard fired therefore survives in
+    // `detail` — and that distinction is X8-3's own thesis: the error text is
+    // the only externally visible signal of pre-parse versus per-file, so it is
+    // asserted at the HTTP layer and not only in the unit matrix.
+    expect(body.type).toBe('about:blank');
+    expect(body.title).toBe('Payload Too Large');
+    expect(body.detail).toBe(detail);
+    expect(body.instance).toBe('/upload');
+    expect('message' in body).toBe(false);
+  }
+
+  it('answers the pre-parse refusal as Problem Details', async () => {
+    // A parse bound below the body size: refused before `parseMultipart` runs.
+    const built = await limitedApp({ maxSize: 4, maxBodyBytes: 16 });
+    try {
+      await expectProblemDetails(
+        await post(built),
+        'Request body exceeds the maximum allowed size of 16 bytes',
+      );
+    } finally {
+      await built.stop();
+    }
+  });
+
+  it('answers the per-file refusal as Problem Details', async () => {
+    // Body within the parse bound, file over `maxSize`: the OTHER guard.
+    const built = await limitedApp({ maxSize: 2 });
+    try {
+      await expectProblemDetails(await post(built), 'Maximum size is 2 bytes');
+    } finally {
+      await built.stop();
+    }
+  });
+});
