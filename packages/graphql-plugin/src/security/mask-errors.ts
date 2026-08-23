@@ -51,7 +51,7 @@ export function isExposable(error: unknown): boolean {
  * @returns The masked result
  */
 export function maskErrors(
-  result: { data?: unknown | null; errors?: unknown[] },
+  result: { data?: unknown | null; errors?: readonly unknown[] },
   options: {
     maskInternalErrors: boolean;
     formatError?: (error: unknown) => unknown;

@@ -196,6 +196,21 @@ the recurrence gates and the four committed docs.
 - **Test home:** `test/types/real-graphql-types.ts` (a committed fixture, type-checked by
   `deno task check`, which covers `test/`) plus `test/unit/graphql-runtime-types.test.ts` asserting
   the adapted module round-trips a real parse.
+- **Execution note (plan claim corrected by measurement):** the two widenings above were necessary
+  but not sufficient. Measured against the real `graphql@16.14.2` under the workspace's `strict` +
+  `exactOptionalPropertyTypes` compiler options, the facades diverged from the real package in ~15
+  members, so the static fixture failed until the widening was completed: `GraphqlSchemaLike`
+  getters return `Maybe<T>` (`| null | undefined`) and plural getters return `ReadonlyArray`;
+  `GraphqlFieldLike.resolve`/`subscribe` are `unknown` (the real resolvers take a concrete
+  `GraphQLResolveInfo` that no facade can name, and no `src` reader invokes them);
+  `GraphqlDirectiveLike.locations` is a string-union array, not `number[]`; `validate`/`errors`
+  return `ReadonlyArray`; `execute`/`subscribe` `variableValues` is a readonly index that may be
+  `null`; `GraphQLError`'s `options` is `undefined` (contravariance); and `GraphqlModuleLike` is
+  declared with method syntax (bivariant) referencing only the public `GraphqlSchemaLike` +
+  `unknown`, so the real module assigns without a cast while keeping the precise types internal on
+  `GraphqlRuntime`. The ratchet recorded the net effect: `DOC_LINT_BASELINE` 775 → 764 (the widened,
+  documented facade members replaced a number of `missing-jsdoc`/`private-type-ref` diagnostics on
+  the old narrow ones).
 
 ### 3.7 X6-4 — the resolver surface becomes typeable
 
