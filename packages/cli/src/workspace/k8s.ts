@@ -49,12 +49,21 @@ export const K8S_DIR = 'k8s';
 const RUN_AS_USER = 1000;
 
 /**
+ * The seconds the generated `preStop` sleep waits. Matches this repository's
+ * own chart default (`preStopSleepSeconds`), which M39 measured against a real
+ * cluster.
+ */
+const PRE_STOP_SLEEP_SECONDS = 5;
+
+/**
  * Renders the Deployment and Service for one member.
  *
  * @param name - The member's name, used for every object and selector
  * @param port - The port it binds
  * @param siblings - Every other member, whose host variables it carries
  * @param transport - The workspace's transport
+ * @param healthProbes - Whether the member serves `/live` and `/ready`
+ * @param metricsEndpoint - Whether the member serves `/metrics`
  * @returns One YAML document pair
  */
 function memberObjects(
@@ -63,6 +72,7 @@ function memberObjects(
   siblings: readonly WorkspaceManifest['members'][number][],
   transport: TransportSpec,
   healthProbes: boolean,
+  metricsEndpoint: boolean,
 ): string {
   // X2-7: every generated Deployment used a TCP probe and a comment telling the
   // developer to switch to `httpGet` "once" the member registers HealthPlugin —
@@ -113,6 +123,31 @@ ${
       .join('\n')
   }`;
 
+  // X10-6: Prometheus discovery annotations, emitted ONLY for a member the
+  // manifest records as serving /metrics. Annotating a member that serves no
+  // such endpoint makes Prometheus report a permanently-down target — worse
+  // than not discovering it. ABSENT (pre-M70l manifests) means unknown, and
+  // unknown omits them, exactly like `healthProbes`.
+  const annotationsBlock = metricsEndpoint
+    ? `      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '${port}'
+        prometheus.io/path: '/metrics'
+`
+    : '';
+
+  // X10-4: the chart's preStop sleep (M39's cluster finding). Covers the gap
+  // between the pod leaving the Service endpoints and every node's kube-proxy
+  // noticing; SIGTERM is not sent until it returns. Without it a rolling deploy
+  // drops in-flight requests to endpoints that no longer exist.
+  const lifecycleBlock = `          lifecycle:
+            # Covers the gap between this pod leaving the Service endpoints and every
+            # node's kube-proxy noticing. SIGTERM is not sent until this returns.
+            preStop:
+              sleep:
+                # Requires Kubernetes 1.30+ (native sleep action).
+                seconds: ${PRE_STOP_SLEEP_SECONDS}`;
+
   return `# ${name}
 apiVersion: apps/v1
 kind: Deployment
@@ -131,7 +166,7 @@ spec:
       app.kubernetes.io/name: ${name}
   template:
     metadata:
-      labels:
+${annotationsBlock}      labels:
         app.kubernetes.io/name: ${name}
         app.kubernetes.io/part-of: \${WORKSPACE}
     spec:
@@ -163,6 +198,7 @@ spec:
             capabilities:
               drop: ['ALL']${envBlock}
 ${probeBlock}
+${lifecycleBlock}
           resources:
             requests:
               cpu: 50m
@@ -228,6 +264,7 @@ export function workspaceK8sFiles(
       members.filter((other) => other.name !== member.name),
       transport,
       member.healthProbes === true,
+      member.metricsEndpoint === true,
     )
   );
 
@@ -242,6 +279,12 @@ file through \`envsubst\`:
 \`\`\`bash
 NAMESPACE=acme WORKSPACE=acme envsubst < ${K8S_DIR}/members.yaml | kubectl apply -f -
 \`\`\`
+
+Members generated WITH a template carry Prometheus discovery annotations —
+\`prometheus.io/scrape: 'true'\`, \`prometheus.io/port: <the member's port>\`, and
+\`prometheus.io/path: /metrics\` — so a Prometheus scraping the standard annotations finds every
+member without static target config. Template-less members carry none, because annotating a member
+that serves no \`/metrics\` would make Prometheus report a permanently-down target.
 
 What this does NOT include, deliberately:
 

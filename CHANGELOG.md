@@ -244,7 +244,52 @@ All notable changes to this project are documented here. The format follows
   `deno task release:verify` enforces it as check 6, so the X7-3 shape (a specifier routed through a
   variable that JSR's static npm-compat rewrite cannot reach) cannot re-enter the source tree.
 
+- **Scheduler multi-instance deduplication** (M70l, X10-2). Each fire claims a never-released slot
+  lock (`scheduler:job:<name>:<slot>`) expiring on `ttlMs`, so replicas sharing one lock backend run
+  an intended fire exactly once between them; the existing per-handler mutex is kept unchanged for
+  overlap protection. `MemoryLock` now sweeps every expired entry on `acquire`, because slot keys
+  are never released or reacquired and previously accumulated forever.
+
+- **`MetricsPluginOptions.excludePaths`** (M70l, X10-7). Request paths the HTTP metrics middleware
+  skips entirely. When supplied it REPLACES the default `['/health', '/live', '/ready']`; the
+  plugin's own scrape endpoint is always excluded either way, so `/metrics` no longer counts its own
+  scrapes or the health probes.
+
+- **Generated Kubernetes members carry the chart's graceful-shutdown pieces** (M70l, X10-4/X10-6).
+  `setu generate app` now emits `lifecycle.preStop.sleep.seconds: 5` (Kubernetes 1.30+) on every
+  container, and `prometheus.io/scrape|port|path` annotations on members generated with a template
+  (recorded via the new `metricsEndpoint` field of `setu.workspace.json`; absent means unknown and
+  emits none).
+
+- **`SchedulerUnavailableError`** (M70l, X9-2). `SchedulerPlugin.register()` refuses to register on
+  Cloudflare Workers, where its timers cannot fire, naming `WorkersCron` and `[triggers] crons` as
+  the replacement.
+
 ### Changed
+
+- **`WorkersCron.dispatch` now rejects on failure instead of always resolving** (M70l, X9-5).
+  **Breaking.** A firing trigger with no registered handler throws naming the expression; one or
+  more rejecting handlers run to settlement — a failing handler still never abandons the others —
+  and then `dispatch` throws an `AggregateError` carrying every failure. `createScheduledHandler` is
+  a bare delegation, so the rejection reaches Cloudflare and counts the whole invocation as failed:
+  that is the signal, and it needs no logger configuration. A configured logger still receives both
+  reports first. An application that wants the old fire-and-forget behaviour wraps its own handlers
+  in `try`.
+
+- **`every` jobs arm on an absolute epoch grid** (M70l, X10-2). The first fire lands on
+  `(floor(now / interval) + 1) * interval` rather than a full interval after registration, at
+  registration, re-arm, and resume alike. The period is unchanged; only the phase moves, and the
+  fire is never LATER than before — it may come sooner than one full interval after registration, so
+  a job assuming "I have been up a full interval" behaves differently. This is what makes replicas
+  started at different instants agree on distributed-lock slot keys.
+
+- **`RabbitMqBroker` declares its queues with the shape their subscription implies** (M70l, X10-1).
+  A caller-supplied queue name (a consumer group) is declared `{ durable: true }` — it survives a
+  broker restart, which is what `queue` documents; the private per-subscriber queue and the RPC
+  reply inbox are declared `{ exclusive: true, autoDelete: true }`. The previous unconditional
+  `{ durable: false }` named non-exclusive form is refused by RabbitMQ 4 outright
+  (`541 INTERNAL-ERROR … transient_nonexcl_queues`). CI's RabbitMQ service moves to major version 4
+  with this change.
 
 - **`GrpcPlugin`'s `basePath` now defaults to `/` (the root), and native gRPC-binary requests are
   refused with `UNIMPLEMENTED`** (M70i, X7-2 / X7-4). The old default `'/grpc'` was unreachable by

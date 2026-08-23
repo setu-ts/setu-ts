@@ -55,7 +55,9 @@ jobs:
       # answers, and the outage test stops/restarts the container, so the
       # service must be healthy before the first test runs.
       rabbitmq:
-        image: rabbitmq:3.13-management-alpine
+        # Major version 4 is load-bearing (M70l X10-1): 3.13 accepts the queue
+        # declaration the broker used to emit, so the defect is invisible there.
+        image: rabbitmq:4-management-alpine
         ports:
           - 5672:5672
         options: >-

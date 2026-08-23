@@ -10,7 +10,11 @@ import type { IMetricsService, IPlugin } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { MetricsPluginOptions } from '../interfaces/index.ts';
 import { MetricsService } from '../services/metrics-service.ts';
-import { HttpCollector, MIDDLEWARE_PRIORITY } from '../collectors/http-collector.ts';
+import {
+  DEFAULT_EXCLUDED_PATHS,
+  HttpCollector,
+  MIDDLEWARE_PRIORITY,
+} from '../collectors/http-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -71,7 +75,11 @@ export function MetricsPlugin(options?: MetricsPluginOptions): IPlugin {
       // Register HTTP metrics and middleware if enabled
       if (defaultMetrics) {
         if (httpMetrics) {
-          const collector = new HttpCollector(service, ctx.runtime, defaultBuckets);
+          // X10-7: our own scrape endpoint is ALWAYS excluded, so /metrics
+          // never counts its own scrapes; `excludePaths`, when supplied,
+          // REPLACES the default health literals rather than extending them.
+          const excludedPaths = [endpoint, ...(options?.excludePaths ?? DEFAULT_EXCLUDED_PATHS)];
+          const collector = new HttpCollector(service, ctx.runtime, defaultBuckets, excludedPaths);
           collector.register();
 
           ctx.middleware.add(collector.middleware.bind(collector), {

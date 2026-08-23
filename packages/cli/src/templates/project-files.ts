@@ -636,8 +636,9 @@ function workersEntry(
   // process-wide — bindings and variables arrive as the `env` argument below —
   // so a factory-composed app would otherwise resolve its configuration from
   // nothing, and a plugin-list app would register a RuntimePlugin whose
-  // `runtime.env` is empty. Either failure is permanent, because `booted`
-  // memoises the rejection.
+  // `runtime.env` is empty. A failed boot is NOT permanent (M70l X9-8): only a
+  // SUCCESSFUL boot is memoised, so a transient failure is retried on the next
+  // request instead of being cached for the isolate's life.
   // THE import lives here and nowhere else. `setu commands` loads
   // `setu.config.ts` under Deno to discover plugin-contributed verbs, and Deno
   // cannot resolve `cloudflare:workers` at all — putting it there, which is what
@@ -648,9 +649,25 @@ function workersEntry(
   const bootSignature =
     'async function boot(env: Record<string, unknown>): Promise<IApplication> {';
   const bootCall = `${CONFIG_EXPORT}(env${wantsWaitUntil ? ', waitUntil' : ''})`;
-  const bootedInit = 'booted ??= boot(env);';
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
+
+  // The memoisation seam every entry shares. `??= boot(env)` cached the raw
+  // promise, so ONE failed boot — a mistyped binding, a broker briefly down at
+  // cold start — was permanent for the isolate's life; the catch clears the
+  // slot before rethrowing so the next request re-attempts. Synchronous on
+  // purpose: an `async` wrapper with no await fails the generated project's
+  // own `deno lint` (require-await).
+  const ensureBootedFn =
+    `function ensureBooted(env: Record<string, unknown>): Promise<IApplication> {
+  if (booted === undefined) {
+    booted = boot(env).catch((error: unknown) => {
+      booted = undefined;
+      throw error;
+    });
+  }
+  return booted;
+}`;
 
   // One import line per contributing package, and one export per contribution.
   // Each reuses `booted`, never a second `boot(env)`: two applications would
@@ -668,8 +685,7 @@ function workersEntry(
     payload: ${entry.payloadType},
     env: Record<string, unknown>,
   ): Promise<void> {
-    ${bootedInit}
-    const app = await booted;
+    const app = await ensureBooted(env);
 ${renderRoutes(entry)}
   },`
     )
@@ -693,11 +709,19 @@ ${bootSignature}
   return app;
 }
 
+${ensureBootedFn}
+
 export default {
   ${fetchSignature}
-    ${bootedInit}
-    const app = await booted;
-    return await app.fetch(request);
+    try {
+      const app = await ensureBooted(env);
+      return await app.fetch(request);
+    } catch (error) {
+      // A failed boot must not leak the stack to the client (M70l X9-8): the
+      // body is generic and the real error goes to the platform's logs.
+      console.error('setu: application failed to start', error);
+      return new Response('Service Unavailable', { status: 503 });
+    }
   },${exportBlock}
 };
 ${reExportBlock}`;

@@ -17,7 +17,13 @@
 import type { ISubscription, MessageMetadata, SubscribeOptions } from '@setu-ts/common';
 
 /** Prefix for the per-instance topics {@link createTopicInbox} mints. */
-const TOPIC_INBOX_PREFIX = 'rr.inbox.';
+/**
+ * Prefix of every reply-inbox topic. Internal to this package, but read by
+ * `RabbitMqBroker` so a broker can tell its own per-instance reply queues
+ * (transient) from a caller-supplied consumer-group queue name (durable)
+ * without widening `common`'s `SubscribeOptions`.
+ */
+export const TOPIC_INBOX_PREFIX = 'rr.inbox.';
 
 /**
  * An open reply inbox: the address responders send replies to, plus its
