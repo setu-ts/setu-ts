@@ -841,6 +841,72 @@ describe('review findings (PR #181)', () => {
     expect(out).toContain('return e instanceof HttpClientError && (e.status === 404);');
   });
 
+  const inlineErrorDoc = (operationId: string, codes: readonly string[]) => {
+    const responses: Record<string, unknown> = { '200': { description: 'ok' } };
+    for (const code of codes) {
+      responses[code] = {
+        description: code,
+        content: {
+          'application/json': {
+            schema: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+          },
+        },
+      };
+    }
+    return {
+      openapi: '3.1.0',
+      paths: { '/x': { get: { operationId, responses } } },
+    } as unknown as SdkOpenApiDocument;
+  };
+
+  it('breaks an over-width single-arm union into a leading-& block', () => {
+    // An operationId of ~17 characters with an inline error body already pushes
+    // the one-line declaration past 100 columns — this is an ordinary size, not
+    // an exotic one.
+    const out = generateOpenApiClient(inlineErrorDoc('createUserAccount', ['409']), {});
+
+    expect(out.split('\n').filter((l) => l.length > 100)).toEqual([]);
+    expect(out).toContain('export type CreateUserAccountError =\n');
+    expect(out).toContain('  & HttpClientError<CreateUserAccountError409Body>\n');
+    expect(out).toContain('  & { readonly status: 409 };');
+  });
+
+  it('keeps a single-arm union on one line when it fits', () => {
+    const out = generateOpenApiClient(inlineErrorDoc('getUser', ['409']), {});
+
+    expect(out).toContain(
+      'export type GetUserError = HttpClientError<GetUserError409Body> & { readonly status: 409 };',
+    );
+  });
+
+  it('breaks an over-width union ARM into a nested leading-& block', () => {
+    const out = generateOpenApiClient(
+      inlineErrorDoc('reconcileOutstandingInvoiceForCustomerAccountLedger', ['404', '409']),
+      {},
+    );
+
+    expect(out.split('\n').filter((l) => l.length > 100)).toEqual([]);
+    expect(out).toContain('  | (\n');
+    expect(out).toContain(
+      '    & HttpClientError<ReconcileOutstandingInvoiceForCustomerAccountLedgerError404Body>\n',
+    );
+    expect(out).toContain('    & { readonly status: 404 }\n');
+  });
+
+  it('wraps a guard signature that is over width on operationId length alone', () => {
+    // No inline schema is involved here: the signature line alone exceeds 100
+    // columns once the operationId is long enough.
+    const out = generateOpenApiClient(
+      inlineErrorDoc('reconcileOutstandingInvoiceForCustomerAccountLedger', ['409']),
+      {},
+    );
+
+    expect(out.split('\n').filter((l) => l.length > 100)).toEqual([]);
+    expect(out).toContain(
+      'export function isReconcileOutstandingInvoiceForCustomerAccountLedgerError(\n  e: unknown,\n)',
+    );
+  });
+
   it('honours additionalProperties on an object declaring an empty properties map', () => {
     // Two spellings of one schema must not contradict each other: reading
     // `properties: {}` as closed emitted `Record<PropertyKey, never>`, which
