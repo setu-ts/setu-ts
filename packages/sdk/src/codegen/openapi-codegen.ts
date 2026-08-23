@@ -1074,22 +1074,58 @@ export function generateOpenApiClient(
   // `body` the compiler can tell apart.
   for (const shape of shapes) {
     if (shape.errorArms.length === 0) continue;
-    const arm = (a: { status: number; type: string }) =>
-      `HttpClientError<${a.type}> & { readonly status: ${a.status} }`;
+    type ErrorArm = { readonly status: number; readonly type: string };
+    const arm = (a: ErrorArm) => `HttpClientError<${a.type}> & { readonly status: ${a.status} }`;
+    // An over-width intersection has its own canonical `deno fmt` form: a
+    // leading-`&` block, mirroring the leading-`|` one a union takes. Both are
+    // stable at ANY length (probed), so the only decision is whether the
+    // one-line form fits — measured off the emitted string, never estimated.
+    // This matters at ordinary sizes: an operationId of ~17 characters with an
+    // inline error body already pushes the single-arm declaration past 100.
+    const armBlock = (a: ErrorArm, indent: string): [string, string] => [
+      `${indent}& HttpClientError<${a.type}>`,
+      `${indent}& { readonly status: ${a.status} }`,
+    ];
     if (shape.errorArms.length === 1) {
       // A single-arm union is not a union: `deno fmt` strips the leading `|`
       // AND the parentheses, so emitting them would fail the fmt gate.
-      L(`export type ${shape.errorTypeName} = ${arm(shape.errorArms[0]!)};`);
+      const only = shape.errorArms[0]!;
+      const oneLine = `export type ${shape.errorTypeName} = ${arm(only)};`;
+      if (oneLine.length <= LINE_WIDTH) {
+        L(oneLine);
+      } else {
+        L(`export type ${shape.errorTypeName} =`);
+        const [head, tail] = armBlock(only, INDENT);
+        L(head);
+        L(`${tail};`);
+      }
     } else {
       // Two or more arms: `deno fmt` ALWAYS breaks a union of parenthesized
       // intersections onto leading-`|` lines, even a short one (probed).
       L(`export type ${shape.errorTypeName} =`);
       shape.errorArms.forEach((a, i) => {
-        const tail = i === shape.errorArms.length - 1 ? ';' : '';
-        L(`${INDENT}| (${arm(a)})${tail}`);
+        const end = i === shape.errorArms.length - 1 ? ';' : '';
+        const oneLine = `${INDENT}| (${arm(a)})${end}`;
+        if (oneLine.length <= LINE_WIDTH) {
+          L(oneLine);
+          return;
+        }
+        L(`${INDENT}| (`);
+        for (const line of armBlock(a, INDENT.repeat(2))) L(line);
+        L(`${INDENT})${end}`);
       });
     }
-    L(`export function ${shape.errorGuardName}(e: unknown): e is ${shape.errorTypeName} {`);
+    // The guard's own signature goes over width on operationId length ALONE,
+    // with no inline schema involved, so it wraps through the same helper the
+    // operation signatures use rather than a second mechanism.
+    for (
+      const line of renderSignature(
+        '',
+        `export function ${shape.errorGuardName}`,
+        ['e: unknown'],
+        `: e is ${shape.errorTypeName} {`,
+      )
+    ) L(line);
     const clauses = shape.errorArms.map((a) => `e.status === ${a.status}`);
     const oneLine = `${INDENT}return e instanceof HttpClientError && (${clauses.join(' || ')});`;
     if (oneLine.length <= LINE_WIDTH) {
