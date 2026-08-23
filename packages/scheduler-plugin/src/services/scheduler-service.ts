@@ -400,8 +400,16 @@ export class SchedulerService implements IScheduler {
     // rather than `runtime.now()` makes the slot immune to timer jitter —
     // `#armTimer` uses `Math.max(0, nextRunAtMs - now)`, so a late timer still
     // computes the slot it was armed for.
-    const slot = entry.kind === 'delay' ? 'once' : String(entry.nextRunAtMs);
-    const slotKey = `scheduler:job:${entry.name}:${slot}`;
+    //
+    // C1 fix — `delay` entries use the same keying as `every`/`cron`. A literal
+    // `'once'` slot would be reused when a delay job is re-registered under the
+    // same name within ttlMs (legal after firing: `#fire` removed it from the
+    // registry), so the second registration's fire would find its slot already
+    // claimed and silently never run. Keying on `nextRunAtMs` gives each
+    // distinct intended fire its own slot; two replicas registering the SAME
+    // delay still collide on the same instant, which is exactly the dedup we
+    // want.
+    const slotKey = `scheduler:job:${entry.name}:${String(entry.nextRunAtMs)}`;
     let slotClaimed = true;
     try {
       const slotToken = await this.#lock.acquire(slotKey, this.#ttlMs);

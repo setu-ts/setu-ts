@@ -85,6 +85,40 @@ describe('SchedulerService fire-slot deduplication', () => {
     expect(runs.sort()).toEqual(['A', 'B']);
   });
 
+  it('a delay job re-registered under the same name within ttlMs fires again (C1)', async () => {
+    // C1 regression: the `delay` arm used to key its fire slot on the literal
+    // `'once'` instead of the intended fire time. After a delay job fired,
+    // `#fire` removed it from the registry — so re-registering under the same
+    // name is legal (retry/backoff flows) — but the second registration's fire
+    // called `acquire('…:once')`, got `null` ("slot already claimed"), and was
+    // silently dropped because the never-released first slot still held the
+    // key within ttlMs. Keying on `nextRunAtMs` gives each distinct intended
+    // fire its own slot while two replicas registering the SAME delay still
+    // collide on one instant (the dedup X10-2 wants).
+    const runtime = new FakeRuntime();
+    const service = new SchedulerService(runtime, new MemoryLock(runtime));
+    await service.connect();
+
+    const runs: number[] = [];
+    await service.delay('retryable', 1000, () => {
+      runs.push(1);
+    });
+    await runtime.advance(1000);
+
+    // First fire ran once and removed itself from the registry.
+    expect(runs).toEqual([1]);
+
+    // Re-registration under the freed name — a NEW intended fire time.
+    await service.delay('retryable', 1000, () => {
+      runs.push(2);
+    });
+    await runtime.advance(1000);
+
+    // The second fire must run on its own slot, not be swallowed by the
+    // first registration's stale `'once'` slot claim.
+    expect(runs).toEqual([1, 2]);
+  });
+
   it('a still-running previous fire is still skipped — the overlap mutex survives', async () => {
     // The negative consequence the naive "slot lock only" fix would have
     // shipped: slot N+1 is a different key from slot N, so replacing the old
