@@ -94,11 +94,19 @@ describe('package README actual-fence compiler (M70i §3.10a)', () => {
   it('compiles every @setu-ts/-importing fence in both owned package READMEs', async () => {
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
     const failures: string[] = [];
+    /** Per-README pinned counts, keyed by README path (plan §6). */
+    const PINNED_COUNTS: Record<string, number> = {
+      'packages/grpc-plugin/README.md': 1,
+      'packages/graphql-plugin/README.md': 3,
+    };
     let checked = 0;
     for (const readme of PACKAGE_READMES) {
       const markdown = await Deno.readTextFile(readme);
       const setu = extractFences(readme, markdown)
         .filter((f) => (f.lang === 'typescript' || f.lang === 'ts') && importsFromSetuTs(f.code));
+      // Pinned per README, not just summed: a fence silently dropped from one
+      // README must fail even if the other gained one to compensate.
+      expect(setu.length).toBe(PINNED_COUNTS[readme]);
       checked += setu.length;
       for (const fence of setu) {
         const slug = readme.split('/')[1]!.replace(/[^a-z]/g, '');
@@ -113,8 +121,7 @@ describe('package README actual-fence compiler (M70i §3.10a)', () => {
         }
       }
     }
-    // Both READMEs must contribute: a silent rename would empty the gate.
-    expect(checked).toBeGreaterThanOrEqual(4);
+    expect(checked).toBe(4);
     if (failures.length > 0) {
       throw new Error(
         `${failures.length} README fence(s) failed to compile:\n\n${failures.join('\n\n---\n\n')}`,

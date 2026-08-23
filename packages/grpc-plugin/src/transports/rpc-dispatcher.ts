@@ -4,8 +4,9 @@
  * Detection is **prefix-only**, deliberately: Connect's real unary content
  * types include `application/json` and `application/proto`, so media-type
  * sniffing would classify every ordinary JSON POST as RPC and hijack the
- * application's own routes (plan §3.4). A Connect/gRPC client is configured
- * with a base URL, so the prefix is sufficient and unambiguous.
+ * application's own routes (M70a plan §3.4,
+ * `plans/archive/milestone-70a-pipeline-bypass.md`). A Connect/gRPC client is
+ * configured with a base URL, so the prefix is sufficient and unambiguous.
  *
  * Within the prefix, dispatch is an exact-match `Map` lookup keyed by
  * `basePath + handler.requestPath`, built once at router-build time.

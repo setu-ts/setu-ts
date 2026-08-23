@@ -79,7 +79,7 @@ export class ChatPlugin implements IPlugin {
         // Rooms evict the connection automatically — nothing to clean up here.
       },
       onError: (conn, error) => {
-        logger.error('socket failed', { id: conn.id, error });
+        ctx.logger?.error('socket failed', { id: conn.id, error });
       },
     });
   }
@@ -130,7 +130,8 @@ ws.route('/ws/chat', {
     // Rooms evict the connection automatically — nothing to clean up here.
   },
   onError: (conn, error) => {
-    logger.error('socket failed', { id: conn.id, error });
+    // A standalone script has no IPluginContext — use your own logger here.
+    console.error(`socket ${conn.id} failed`, error);
   },
 });
 ```
