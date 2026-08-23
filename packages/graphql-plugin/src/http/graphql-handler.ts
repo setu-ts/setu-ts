@@ -144,12 +144,15 @@ async function handleGraphqlPost(
       }, mediaType);
     }
 
-    // Execute each element concurrently — APQ resolves per-element
+    // Execute each element concurrently — APQ resolves per-element. A batch
+    // always answers HTTP 200: batching is only reachable under
+    // `application/json` (the strict media type refuses it above), and the
+    // documented watershed keeps that media type at 200 for every GraphQL
+    // outcome, so no per-element status is computed or surfaced.
     const outcomes = await Promise.all(
       body.map(async (item: unknown) => {
         if (typeof item !== 'object' || item === null || Array.isArray(item)) {
           return {
-            status: 400,
             result: { errors: [{ message: 'Batch item must be a JSON object' }] },
           };
         }
@@ -167,7 +170,6 @@ async function handleGraphqlPost(
           const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
           if (!apqResult.ok) {
             return {
-              status: apqRefusalStatus(mediaType, apqResult.status),
               result: {
                 errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
               },

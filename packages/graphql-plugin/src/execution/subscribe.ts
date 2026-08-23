@@ -15,6 +15,24 @@ import type { DocumentCache } from './document-cache.ts';
 import { prepareDocument, toInternalError } from './executor.ts';
 
 /**
+ * The single facade-to-contract adaptation point for this module.
+ *
+ * The plugin reads execution results through the structural graphql facades
+ * (`GraphqlExecutionResultLike`, M70i X6-3) so the real `graphql` package
+ * assigns without a cast, but the transports serialize the committed
+ * `GraphqlExecutionResult` contract from `@setu-ts/common`. The two shapes
+ * agree field-for-field at runtime — both are plain `{ data, errors }` — yet
+ * TypeScript cannot prove it: the facade widens `errors` to a
+ * `ReadonlyArray<GraphqlGraphQLErrorLike>` while the contract names
+ * `GraphqlFormattedError[]`. Every conversion in this module funnels through
+ * this one named function so that justification lives here instead of in
+ * scattered double casts.
+ */
+function fromFacade<T>(value: unknown): T {
+  return value as T;
+}
+
+/**
  * Options shared between the executor and subscribe pipeline.
  */
 export interface SubscribeOptions {
@@ -51,7 +69,7 @@ export async function subscribeGraphql(
     return {
       kind: 'error',
       status: prepared.outcome.status,
-      result: prepared.outcome.result as unknown as GraphqlExecutionResult,
+      result: fromFacade<GraphqlExecutionResult>(prepared.outcome.result),
     };
   }
 
@@ -88,23 +106,23 @@ export async function subscribeGraphql(
         return {
           kind: 'error',
           status: 200,
-          result: result as unknown as GraphqlExecutionResult,
+          result: fromFacade<GraphqlExecutionResult>(result),
         };
       }
       return {
         kind: 'stream',
         status: 200,
-        stream: result as unknown as AsyncIterable<GraphqlExecutionResult>,
+        stream: fromFacade<AsyncIterable<GraphqlExecutionResult>>(result),
       };
     }
 
     const result = await runtime.execute(execArgs);
-    return { kind: 'single', status: 200, result: result as unknown as GraphqlExecutionResult };
+    return { kind: 'single', status: 200, result: fromFacade<GraphqlExecutionResult>(result) };
   } catch (e) {
     return {
       kind: 'error',
       status: 500,
-      result: { errors: [toInternalError(e)] } as unknown as GraphqlExecutionResult,
+      result: fromFacade<GraphqlExecutionResult>({ errors: [toInternalError(e)] }),
     };
   }
 }
