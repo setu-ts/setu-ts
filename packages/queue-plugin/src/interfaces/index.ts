@@ -203,6 +203,15 @@ export interface QueuePluginOptions {
    * dead job's payload from `queue:<name>:jobs`, which holds every queued job's
    * payload for that name, into `queue:<name>:dead:jobs`.
    *
+   * The retention it delivers is a bound rather than a deadline: AT LEAST this
+   * long, and AT MOST this long past the LAST dead-letter on the queue — so a
+   * payload that dies just before a short burst can live for just under twice
+   * this value. The sweep runs only when a dead-letter arrives, and the
+   * key-level backstop beside it carries one deadline for a shared key, which
+   * must be the newest or it would take newer payloads with it. It errs late
+   * deliberately: dropping a payload early discards the debugging data this
+   * option exists to keep.
+   *
    * @since 0.3.0
    */
   deadLetterTtlMs?: number;
