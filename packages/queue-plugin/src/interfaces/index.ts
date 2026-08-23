@@ -197,6 +197,12 @@ export interface QueuePluginOptions {
    * lifetime of the deployment (X8-4). Applied only by the Redis adapter, and
    * only when the injected client exposes `expire`.
    *
+   * Enforced PER PAYLOAD: each dead-letter sweeps the dead set — scored by
+   * dead-letter time — and deletes every entry older than this, so a queue that
+   * keeps failing still drops its oldest payloads. Setting it also relocates a
+   * dead job's payload from `queue:<name>:jobs`, which holds every queued job's
+   * payload for that name, into `queue:<name>:dead:jobs`.
+   *
    * @since 0.3.0
    */
   deadLetterTtlMs?: number;

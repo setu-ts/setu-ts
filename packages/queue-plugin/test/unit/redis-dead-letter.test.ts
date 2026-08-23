@@ -219,3 +219,44 @@ describe('RedisQueue depths (X8-4)', () => {
     expect(queue.depths).toBeUndefined();
   });
 });
+
+describe('RedisQueue dead-letter retention is enforced per payload', () => {
+  /**
+   * A key-level `EXPIRE` alone is renewed by every new dead-letter, so a queue
+   * that keeps failing retains its OLDEST payloads forever — the opposite of
+   * what the option promises, and precisely the case where growth matters. The
+   * dead set is scored by dead-letter time, so the sweep can find them.
+   */
+  it('should drop a payload older than the TTL even while dead-letters keep arriving', async () => {
+    const client = new FakeRedisClient();
+    const queue = new RedisQueue({ client, deadLetterTtlMs: 60_000 });
+    await queue.connect();
+    await queue.enqueue({ ...JOB, id: 'old' });
+    await queue.enqueue({ ...JOB, id: 'recent' });
+
+    const t0 = 1_700_000_000_000;
+    await queue.deadLetter('thumbnail', 'old', t0, 'old');
+    // Well past the retention, and the queue is still failing.
+    await queue.deadLetter('thumbnail', 'recent', t0 + 120_000, 'recent');
+
+    expect(await client.hget('queue:thumbnail:dead:jobs', 'old')).toBeNull();
+    expect(await client.hget('queue:thumbnail:dead:jobs', 'recent')).not.toBeNull();
+    expect(await client.zcard('queue:thumbnail:dead')).toBe(1);
+  });
+
+  it('should keep a payload that is still inside its retention window', async () => {
+    // The control for the sweep: it must not delete what it was asked to keep.
+    const client = new FakeRedisClient();
+    const queue = new RedisQueue({ client, deadLetterTtlMs: 60_000 });
+    await queue.connect();
+    await queue.enqueue({ ...JOB, id: 'first' });
+    await queue.enqueue({ ...JOB, id: 'second' });
+
+    const t0 = 1_700_000_000_000;
+    await queue.deadLetter('thumbnail', 'first', t0, 'first');
+    await queue.deadLetter('thumbnail', 'second', t0 + 30_000, 'second');
+
+    expect(await client.hget('queue:thumbnail:dead:jobs', 'first')).not.toBeNull();
+    expect(await client.zcard('queue:thumbnail:dead')).toBe(2);
+  });
+});

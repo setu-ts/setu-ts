@@ -293,7 +293,7 @@ export class RedisQueue implements QueueAdapter {
     // without bound for the lifetime of the deployment. The TTL is opt-in
     // because dropping a dead job's payload by default would remove the
     // debugging value the retention exists for.
-    await this.#retainDeadLetterPayload(name, id);
+    await this.#retainDeadLetterPayload(name, id, nowMs);
   }
 
   /**
@@ -315,30 +315,50 @@ export class RedisQueue implements QueueAdapter {
    * worse than not applying one. Without a TTL the payload stays in the jobs
    * hash exactly as it always has.
    *
-   * The TTL is applied to the KEY rather than to individual members, because
-   * Redis has no per-member expiry on a sorted set or a hash. That is a
-   * deliberate approximation: a name that keeps dead-lettering keeps pushing
-   * its expiry out, so the bound holds for a queue that goes quiet, which is
-   * the unbounded-growth case.
+   * Retention is enforced PER PAYLOAD, by sweeping the dead set — which is
+   * scored by dead-letter time — for members older than the TTL and deleting
+   * both the member and its payload. Redis has no per-member expiry on a sorted
+   * set or a hash, and a key-level `EXPIRE` alone is not equivalent: every new
+   * dead-letter renews it, so a queue that keeps failing would retain its
+   * oldest payloads forever, which is the opposite of what the option promises
+   * and the case where growth actually matters.
+   *
+   * The key-level expiry is kept BESIDE the sweep, as the backstop for the one
+   * case the sweep cannot reach: a queue that dead-letters once and then goes
+   * quiet never runs another sweep, so without it that last payload would
+   * outlive its retention indefinitely.
    *
    * @param name - Job name
    * @param id - The dead-lettered job's id
+   * @param nowMs - Wall-clock time of this dead-letter, the sweep's reference
    */
-  async #retainDeadLetterPayload(name: string, id: string): Promise<void> {
+  async #retainDeadLetterPayload(name: string, id: string, nowMs: number): Promise<void> {
     const ttlMs = this.#deadLetterTtlMs;
     const client = this.#client;
     if (ttlMs === undefined || client === null || typeof client.expire !== 'function') {
       return;
     }
     const jobsKey = `queue:${name}:jobs`;
+    const deadKey = `queue:${name}:dead`;
     const deadJobsKey = `queue:${name}:dead:jobs`;
+
+    // Move the payload out of the LIVE hash: that key holds every queued job's
+    // payload for this name, so it can carry no expiry of its own.
     const raw = await client.hget(jobsKey, id);
     if (raw !== null) {
       await client.hset(deadJobsKey, id, raw);
       await client.hdel(jobsKey, id);
     }
+
+    // Sweep whatever has now outlived the retention.
+    const expired = await client.zrangebyscore(deadKey, 0, nowMs - ttlMs);
+    if (expired.length > 0) {
+      await client.hdel(deadJobsKey, ...expired);
+      await client.zrem(deadKey, ...expired);
+    }
+
     const seconds = Math.max(1, Math.ceil(ttlMs / 1000));
-    await client.expire(`queue:${name}:dead`, seconds);
+    await client.expire(deadKey, seconds);
     await client.expire(deadJobsKey, seconds);
   }
 
