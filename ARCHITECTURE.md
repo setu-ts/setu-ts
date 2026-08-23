@@ -1935,10 +1935,10 @@ The `state` map allows middleware to pass data to downstream middleware and hand
 
 ```typescript
 // Validation middleware
-ctx.state.set('validatedBody', result.data);
+ctx.state.set('validated:body', result.data);
 
 // Handler
-const body = ctx.state.get('validatedBody');
+const body = ctx.state.get('validated:body');
 ```
 
 ### Request-Scoped Data

@@ -1,8 +1,26 @@
-import type { RouteInfo, SecurityRequirement } from '@setu-ts/common';
-import { securityMetadataOf } from '@setu-ts/common';
+import type {
+  RouteInfo,
+  RouteSchema,
+  RouteValidationMetadata,
+  SecurityRequirement,
+} from '@setu-ts/common';
+import { securityMetadataOf, validationMetadataOf } from '@setu-ts/common';
 
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
+
+/**
+ * Plugin names whose routes are operational rather than part of the API being
+ * documented, excluded by default through
+ * {@linkcode OpenApiGeneratorOptions.excludeOwners}.
+ *
+ * Owners rather than paths, because every one of these endpoints is
+ * CONFIGURABLE — `HealthPlugin({ endpoints })` and `MetricsPlugin({ endpoint })`
+ * both accept a path — so a static path list silently stops working the moment
+ * an application renames one. `RouteInfo.owner` (M68) reports the plugin whose
+ * `register()` created the route and cannot drift.
+ */
+const DEFAULT_EXCLUDED_OWNERS: readonly string[] = ['health-plugin', 'metrics-plugin'];
 
 /**
  * Schema emitted for a path parameter the route's `params` schema does not
@@ -19,6 +37,41 @@ import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
  */
 function defaultPathParamSchema(): OpenApiSchemaObject {
   return { type: 'string' };
+}
+
+/**
+ * Whether a transformed schema is a shape worth naming as a reusable
+ * component: an object, an array, or a composition (`anyOf`/`allOf`) or
+ * enumeration of them.
+ *
+ * A constrained primitive is deliberately excluded — see the call site.
+ *
+ * @param schema - The transformed schema
+ * @returns `true` when the schema earns a `components/schemas` entry
+ */
+function isStructuralShape(schema: OpenApiSchemaObject): boolean {
+  return schema.type === 'object' || schema.type === 'array' ||
+    schema.anyOf !== undefined || schema.allOf !== undefined ||
+    schema.enum !== undefined;
+}
+
+/**
+ * Converts an operation-derived name hint (`post-orders-by-idBody`) into a
+ * PascalCase component name (`PostOrdersByIdBody`).
+ *
+ * Splits on every run of characters outside `[A-Za-z0-9]`, upper-cases each
+ * part's first character and preserves the rest, so an interior capital in a
+ * hand-written hint survives. A hint that sanitizes to nothing falls back to
+ * `Schema`, since a component name may not be empty.
+ *
+ * @param hint - The raw name hint
+ * @returns A PascalCase identifier safe as a component name
+ */
+function toPascalCase(hint: string): string {
+  const parts = hint.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const joined = parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('');
+  const prefixed = joined.replace(/^[0-9]+/, (digits) => `N${digits}`);
+  return prefixed || 'Schema';
 }
 
 /**
@@ -201,6 +254,44 @@ export interface OpenApiGeneratorOptions {
    * is omitted. An entry matching no route is silently ignored.
    */
   readonly exclude?: readonly string[];
+  /**
+   * Plugin names whose routes are left out of the generated document,
+   * matched against {@linkcode RouteInfo.owner}.
+   *
+   * Defaults to `['health-plugin', 'metrics-plugin']`, so an application's
+   * operational surface (`/health`, `/live`, `/ready`, `/metrics`) does not
+   * flow into every client generated from the document. Pass `[]` to document
+   * them again.
+   *
+   * Owners rather than paths, because those endpoints are configurable: a
+   * static path list would silently stop excluding a renamed one.
+   *
+   * @defaultValue `['health-plugin', 'metrics-plugin']`
+   */
+  readonly excludeOwners?: readonly string[];
+  /**
+   * Fills each operation's `requestBody` and `parameters` from the validation
+   * middleware actually guarding its route, so a route that already carries
+   * `validateBody(schema)` does not have to repeat that schema in
+   * `schema.body`.
+   *
+   * A middleware brands itself with `RouteValidationMetadata` (every helper
+   * `@setu-ts/validation-plugin` ships does). A value DECLARED on the route's
+   * own `schema` always wins, per field.
+   *
+   * `cookies` brands are read and ignored: `RouteSchema` has no `cookies`
+   * field, so there is no declared counterpart, and `@setu-ts/sdk`'s client
+   * generator refuses an `in: 'cookie'` parameter outright — emitting one
+   * would turn a working document into a codegen failure.
+   *
+   * Unlike {@linkcode OpenApiGeneratorOptions.deriveSecurity} this is ON by
+   * default, because nothing has to be configured for it: a security
+   * requirement names a scheme that cannot be inferred from a guard, while the
+   * schema on the route IS the schema the document wants.
+   *
+   * @defaultValue `true`
+   */
+  readonly deriveRequestSchemas?: boolean;
 }
 
 /**
@@ -219,10 +310,38 @@ export class OpenApiGenerator {
    * {@linkcode generate} costs a lookup per route rather than a scan.
    */
   readonly #excluded: ReadonlySet<string>;
+  /** Plugin owners whose routes never reach the document. */
+  readonly #excludedOwners: ReadonlySet<string>;
+  /** Derived operationIds already claimed in this `generate` call. */
+  readonly #operationIds = new Set<string>();
   readonly #schemaMap: Map<unknown, string>;
   readonly #componentSchemas: Map<string, OpenApiSchemaObject>;
-  readonly #seenSchemas: Set<unknown>;
-  #anonymousSchemaCounter: number;
+  /**
+   * Schemas registered through `addSchema`, as opposed to hoisted by a
+   * `generate` call.
+   *
+   * `generate` must leave these alone and drop everything else: without the
+   * split, a second call on the same instance emitted the FIRST document's
+   * components (verified). The plugin builds a fresh generator per spec, so
+   * only a direct consumer of this exported class could reach that — which is
+   * exactly why it went unnoticed.
+   */
+  readonly #registered = new Set<unknown>();
+  /**
+   * Transformer WITHOUT the dedup hook, used where the caller reads the
+   * transformed object's own `properties` (parameter destructuring). A `$ref`
+   * there would have no `properties` to destructure, so those sites must never
+   * be hoisted.
+   */
+  readonly #plainTransformer: ZodToOpenApi;
+  /** How many sites reference each schema identity, filled by the counting pass. */
+  readonly #schemaCounts: Map<unknown, number>;
+  /** Guards hoisting reentrancy: the node being hoisted must transform normally. */
+  readonly #hoisting: Set<unknown>;
+  /** `'count'` fills `#schemaCounts`; `'emit'` hoists anything counted twice. */
+  #pass: 'count' | 'emit';
+  /** Name hint for the schema currently being resolved, e.g. `PostOrdersBody`. */
+  #nameHint: string;
 
   /**
    * Creates a new OpenAPI generator.
@@ -241,16 +360,24 @@ export class OpenApiGenerator {
       ...(options.security !== undefined ? { security: options.security } : {}),
       ...(options.exclude !== undefined ? { exclude: options.exclude } : {}),
       ...(options.deriveSecurity !== undefined ? { deriveSecurity: options.deriveSecurity } : {}),
+      ...(options.excludeOwners !== undefined ? { excludeOwners: options.excludeOwners } : {}),
+      ...(options.deriveRequestSchemas !== undefined
+        ? { deriveRequestSchemas: options.deriveRequestSchemas }
+        : {}),
     } as OpenApiGeneratorOptions & {
       title: string;
       version: string;
     };
     this.#excluded = new Set(options.exclude ?? []);
-    this.#transformer = new ZodToOpenApi();
+    this.#excludedOwners = new Set(options.excludeOwners ?? DEFAULT_EXCLUDED_OWNERS);
+    this.#transformer = new ZodToOpenApi((schema) => this.#hook(schema));
+    this.#plainTransformer = new ZodToOpenApi();
     this.#schemaMap = new Map();
     this.#componentSchemas = new Map();
-    this.#seenSchemas = new Set();
-    this.#anonymousSchemaCounter = 0;
+    this.#schemaCounts = new Map();
+    this.#hoisting = new Set();
+    this.#pass = 'emit';
+    this.#nameHint = 'Schema';
   }
 
   /**
@@ -260,8 +387,14 @@ export class OpenApiGenerator {
    * @param schema - The schema to register
    */
   addSchema(name: string, schema: unknown): void {
+    this.#registered.add(schema);
+    // Transformed under the reentrancy guard, so the hook does not answer this
+    // node with a `$ref` to the component it is in the middle of building.
+    this.#hoisting.add(schema);
+    const transformed = this.#transformer.transform(schema);
+    this.#hoisting.delete(schema);
     this.#schemaMap.set(schema, name);
-    this.#componentSchemas.set(name, this.#transformer.transform(schema));
+    this.#componentSchemas.set(name, transformed);
   }
 
   /**
@@ -271,8 +404,30 @@ export class OpenApiGenerator {
    * @returns The complete OpenAPI 3.1 document
    */
   generate(routes: readonly RouteInfo[]): OpenApiDocument {
-    // Do NOT clear #schemaMap - pre-registered schemas from addSchema must persist
-    // so #resolveSchema finds them by object identity and emits the contributor's chosen name
+    // Pre-registered schemas from `addSchema` must persist, so `#resolveSchema`
+    // finds them by object identity and emits the contributor's chosen name.
+    // Everything hoisted by a PREVIOUS `generate` call must not: it belongs to
+    // that document, and keeping it both leaked those components into this one
+    // and let names be allocated around them.
+    for (const [schema, name] of [...this.#schemaMap]) {
+      if (this.#registered.has(schema)) continue;
+      this.#schemaMap.delete(schema);
+      this.#componentSchemas.delete(name);
+    }
+
+    // Pass 1 counts how many sites reference each schema identity, INCLUDING
+    // nested ones, because the counting hook is consulted at every node the
+    // transformer visits. Pass 2 can then hoist on FIRST use: without the
+    // count, the first occurrence has to be inlined and is never rewritten,
+    // which is what made one shape appear both inline and as a `$ref`.
+    this.#operationIds.clear();
+    this.#schemaCounts.clear();
+    this.#pass = 'count';
+    for (const route of routes) {
+      if (this.#isExcluded(route)) continue;
+      this.#createOperation(route, this.#convertPath(route.path));
+    }
+    this.#pass = 'emit';
 
     const paths: Record<string, {
       get?: OpenApiOperation;
@@ -289,7 +444,7 @@ export class OpenApiGenerator {
       // Excluded paths are dropped for every method registered on them. The
       // plugin's own `/docs` and `/openapi.json` arrive here pre-excluded, so
       // a document never advertises the endpoints that serve it.
-      if (this.#excluded.has(route.path)) continue;
+      if (this.#isExcluded(route)) continue;
 
       const openApiPath = this.#convertPath(route.path);
       const method = route.method.toLowerCase() as keyof typeof paths;
@@ -348,13 +503,15 @@ export class OpenApiGenerator {
    * @returns The operation object
    */
   #createOperation(route: RouteInfo, openApiPath: string): OpenApiOperation {
-    const schema = route.definition.schema;
-
     // Generate operationId from method and path
     const operationId = this.#generateOperationId(route.method, openApiPath);
 
+    // Declared schema merged with what the route's validation middleware
+    // enforces; declared wins per field.
+    const { schema, derived } = this.#effectiveSchema(route);
+
     // Build parameters from params and query schemas
-    const parameters = this.#buildParameters(route);
+    const parameters = this.#buildParameters(route, schema);
 
     // Build request body from body schema
     const requestBody = schema?.body
@@ -362,14 +519,20 @@ export class OpenApiGenerator {
         required: true,
         content: {
           'application/json': {
-            schema: this.#resolveSchema(schema.body),
+            schema: this.#resolveSchema(schema.body, `${operationId}Body`),
           },
         },
       }
       : undefined;
 
-    // Build responses from response schema
-    const responses = this.#buildResponses(schema?.response);
+    // Build responses from response schema. A route whose request shape was
+    // DERIVED also answers 400 when validation fails, so the document says so
+    // unless the route declares its own 400 — Redocly flags an operation with
+    // no 4XX and is right.
+    const responses = this.#buildResponses(schema?.response, operationId);
+    if (derived && responses['400'] === undefined) {
+      responses['400'] = { description: 'Bad request' };
+    }
 
     return {
       operationId,
@@ -387,6 +550,73 @@ export class OpenApiGenerator {
         ? { security: schema.security }
         : this.#deriveSecurity(route)),
     };
+  }
+
+  /**
+   * Whether a route is left out of the document entirely — by path, or by the
+   * plugin that owns it.
+   *
+   * @param route - The route being considered
+   * @returns `true` when the route contributes no operation
+   */
+  #isExcluded(route: RouteInfo): boolean {
+    if (this.#excluded.has(route.path)) return true;
+    return route.owner !== undefined && this.#excludedOwners.has(route.owner);
+  }
+
+  /**
+   * Merges the route's DECLARED schema with what its validation middleware
+   * enforces, per field, declared winning.
+   *
+   * `cookies` brands are read and dropped — see
+   * {@linkcode OpenApiGeneratorOptions.deriveRequestSchemas} for why.
+   *
+   * @param route - The route being documented
+   * @returns The effective schema and whether any field came from a brand
+   */
+  #effectiveSchema(
+    route: RouteInfo,
+  ): { schema: RouteSchema | undefined; derived: boolean } {
+    const declared = route.definition.schema;
+    if (this.#options.deriveRequestSchemas === false) {
+      return { schema: declared, derived: false };
+    }
+
+    const brands: RouteValidationMetadata[] = [];
+    for (const middleware of route.definition.middleware ?? []) {
+      const metadata = validationMetadataOf(middleware);
+      if (metadata !== undefined) brands.push(metadata);
+    }
+    if (brands.length === 0) return { schema: declared, derived: false };
+
+    const additions: {
+      body?: unknown;
+      query?: unknown;
+      params?: unknown;
+      headers?: unknown;
+    } = {};
+    for (const { target, schema } of brands) {
+      // `cookies` deliberately contributes nothing.
+      if (target === 'cookies') continue;
+      // Neither does a brand carrying no schema. Assigning `undefined` still
+      // creates an OWN key, which counted as a derivation and added a `400` to
+      // an operation whose request shape had not changed at all.
+      if (schema === undefined) continue;
+      // A route may carry two brands for one target (a merged chain). The LAST
+      // one wins, because that is what the handler actually receives: each
+      // middleware writes `validated:<target>` on its way through, so the final
+      // writer's parsed value is the one in `ctx.state` by the time the handler
+      // runs — verified against a real chain, where a second, narrower body
+      // schema stripped a field the first had kept. Note the request must still
+      // satisfy EVERY brand, since any of them can short-circuit with a 400;
+      // the document shows the shape the handler sees, not that conjunction.
+      if (declared?.[target] !== undefined) continue;
+      additions[target] = schema;
+    }
+
+    const keys = Object.keys(additions);
+    if (keys.length === 0) return { schema: declared, derived: false };
+    return { schema: { ...declared, ...additions }, derived: true };
   }
 
   /**
@@ -430,8 +660,36 @@ export class OpenApiGenerator {
    */
   #generateOperationId(method: string, path: string): string {
     const methodLower = method.toLowerCase();
-    const pathSlug = path.split('/').filter(Boolean).join('-');
-    return `${methodLower}-${pathSlug || 'root'}`;
+    // `{id}` becomes `by-id` rather than surviving verbatim: OpenAPI puts no
+    // character restriction on `operationId`, but braces are URL-unsafe, and a
+    // tool that uses the id in an anchor, a filename or a URL — Redocly's
+    // recommended ruleset flags exactly this — is entitled to break on them.
+    const pathSlug = path
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => segment.replace(/\{([^}]*)\}/g, (_m, name: string) => `by-${name}`))
+      .join('-');
+    const base = `${methodLower}-${pathSlug || 'root'}`;
+    // Unwrapping `{id}` to `by-id` costs injectivity: a LITERAL `by-id` segment
+    // slugs identically, so `GET /users/{id}` and `GET /users/by-id` both derive
+    // `get-users-by-id`. A duplicate `operationId` is invalid per the
+    // specification and makes a generated client emit two methods with one
+    // name, so a repeat is suffixed. Only the emit pass claims a name — the
+    // counting pass runs the same code and would otherwise consume every id.
+    if (this.#pass === 'count') return base;
+    // Counting per base is not enough: a suffixed candidate can collide with
+    // another route's NATURAL base id. `/users/:id`, `/users/by-id` and
+    // `/users/by-id-2` derive `get-users-by-id`, `get-users-by-id-2` and
+    // `get-users-by-id-2` — a duplicate. Every emitted id is therefore claimed
+    // in one set and a candidate advances until it is unclaimed.
+    let candidate = base;
+    let n = 1;
+    while (this.#operationIds.has(candidate)) {
+      n += 1;
+      candidate = `${base}-${n}`;
+    }
+    this.#operationIds.add(candidate);
+    return candidate;
   }
 
   /**
@@ -441,9 +699,11 @@ export class OpenApiGenerator {
    * @param route - Route information
    * @returns Array of parameters
    */
-  #buildParameters(route: RouteInfo): readonly OpenApiParameter[] {
+  #buildParameters(
+    route: RouteInfo,
+    schema: RouteSchema | undefined,
+  ): readonly OpenApiParameter[] {
     const parameters: OpenApiParameter[] = [];
-    const schema = route.definition.schema;
 
     // Extract path parameters from the path template
     const pathParams = this.#extractPathParams(route.path);
@@ -451,7 +711,7 @@ export class OpenApiGenerator {
     // Hoist transform of params schema to avoid repeated transforms
     let paramsTransformed: Record<string, OpenApiSchemaObject> | undefined;
     if (schema?.params) {
-      const paramsObj = this.#transformer.transform(schema.params);
+      const paramsObj = this.#plainTransformer.transform(schema.params);
       paramsTransformed = paramsObj.properties ?? {};
     }
 
@@ -475,7 +735,7 @@ export class OpenApiGenerator {
 
     // Hoist transform of query schema to avoid repeated transforms
     if (schema?.query) {
-      const queryObj = this.#transformer.transform(schema.query);
+      const queryObj = this.#plainTransformer.transform(schema.query);
       const queryProps = queryObj.properties ?? {};
       const queryRequired = queryObj.required ?? [];
       for (const [name, propSchema] of Object.entries(queryProps)) {
@@ -494,7 +754,7 @@ export class OpenApiGenerator {
     // `Content-Type`, and `Authorization`, so filtering them here would only
     // hide what the route actually declared.
     if (schema?.headers) {
-      const headerObj = this.#transformer.transform(schema.headers);
+      const headerObj = this.#plainTransformer.transform(schema.headers);
       const headerProps = headerObj.properties ?? {};
       const headerRequired = headerObj.required ?? [];
       for (const [name, propSchema] of Object.entries(headerProps)) {
@@ -528,7 +788,8 @@ export class OpenApiGenerator {
    * @returns Responses object
    */
   #buildResponses(
-    responseSchema?: Readonly<Record<number, unknown>>,
+    responseSchema: Readonly<Record<number, unknown>> | undefined,
+    operationId: string,
   ): Record<string, OpenApiResponse> {
     const responses: Record<string, OpenApiResponse> = {};
 
@@ -543,7 +804,7 @@ export class OpenApiGenerator {
             ? {
               content: {
                 'application/json': {
-                  schema: this.#resolveSchema(schema),
+                  schema: this.#resolveSchema(schema, `${operationId}Response${statusCode}`),
                 },
               },
             }
@@ -619,9 +880,13 @@ export class OpenApiGenerator {
   /**
    * Resolves a schema, potentially creating a $ref for deduplication.
    *
-   * Anonymous schemas used more than once get a generated name (Schema<n>)
-   * on first reuse and are hoisted to components/schemas; schemas used
-   * exactly once are inlined.
+   * An anonymous schema referenced by two or more sites is hoisted to
+   * `components/schemas` under a name derived from its FIRST use site (never
+   * `Schema<n>`) and every one of those sites emits a `$ref`; a schema used
+   * exactly once is inlined. Reuse is keyed on schema object IDENTITY, so two
+   * structurally identical but separately constructed schemas are two schemas.
+   * Only structural shapes are hoisted — see `isStructuralShape` — and
+   * parameter schemas never are, because they reach `#plainTransformer`.
    *
    * Pre-registered named schemas (from addSchema/OPENAPI_SCHEMA contributions)
    * keep their contributor-chosen name and are always hoisted.
@@ -629,45 +894,86 @@ export class OpenApiGenerator {
    * @param schema - The schema to resolve
    * @returns The schema or a $ref
    */
-  #resolveSchema(schema: unknown): OpenApiSchemaObject {
-    // Check if we've seen this schema before (pre-registered or previously hoisted)
-    const existingRef = this.#schemaMap.get(schema);
-    if (existingRef) {
-      return { $ref: `#/components/schemas/${existingRef}` };
+  #resolveSchema(schema: unknown, nameHint: string): OpenApiSchemaObject {
+    const previous = this.#nameHint;
+    this.#nameHint = nameHint;
+    try {
+      return this.#transformer.transform(schema);
+    } finally {
+      this.#nameHint = previous;
     }
-
-    // Check if this is a second use (first reuse)
-    if (this.#seenSchemas.has(schema)) {
-      // This is a reuse - hoist it with a generated name
-      const transformed = this.#transformer.transform(schema);
-      const name = this.#hoistSchema(schema, transformed);
-      return { $ref: `#/components/schemas/${name}` };
-    }
-
-    // First use: transform and mark as seen
-    const transformed = this.#transformer.transform(schema);
-    this.#seenSchemas.add(schema);
-
-    return transformed;
   }
 
   /**
-   * Hoists a schema to components/schemas with a generated Schema<n> name.
-   * Called when a schema is encountered for the second time (first reuse).
+   * The per-node hook the deduplicating transformer consults.
    *
-   * @param schema - The schema to hoist
-   * @param transformed - The already-transformed schema
-   * @returns The generated schema name
+   * In the counting pass it records the identity and returns `undefined`, so
+   * the transformer walks the whole tree and every NESTED schema is counted
+   * exactly as a top-level one is. In the emit pass it answers with a `$ref`
+   * for any schema referenced by two or more sites — on FIRST use, which is
+   * what stops one shape appearing inline at one site and as a `$ref` at
+   * another.
+   *
+   * @param schema - The node the transformer is about to convert
+   * @returns A `$ref`, or `undefined` to transform normally
    */
-  #hoistSchema(schema: unknown, transformed: OpenApiSchemaObject): string {
-    // Generate a Schema<n> name
-    this.#anonymousSchemaCounter++;
-    const name = `Schema${this.#anonymousSchemaCounter}`;
+  #hook(schema: unknown): OpenApiSchemaObject | undefined {
+    // The node currently BEING hoisted must transform normally, or it would
+    // answer itself with a `$ref` to the component it is building.
+    if (this.#hoisting.has(schema)) return undefined;
 
-    // Store the mapping
+    if (this.#pass === 'count') {
+      const seen = this.#schemaCounts.get(schema) ?? 0;
+      this.#schemaCounts.set(schema, seen + 1);
+      // Descend only on the FIRST sighting, mirroring the emit pass, where a
+      // hoisted schema is transformed once and every later site gets a `$ref`
+      // that descends into nothing. Without this the children of a twice-used
+      // parent are counted twice as well and hoist into components with a
+      // single reference each — and the child claims the name the parent
+      // wanted, since both derive it from the same site.
+      return seen === 0 ? undefined : {};
+    }
+
+    // Pre-registered (addSchema / OPENAPI_SCHEMA) or already hoisted: the
+    // contributor-chosen or previously-claimed name wins.
+    const existing = this.#schemaMap.get(schema);
+    if (existing !== undefined) return { $ref: `#/components/schemas/${existing}` };
+
+    if ((this.#schemaCounts.get(schema) ?? 0) < 2) return undefined;
+
+    this.#hoisting.add(schema);
+    const transformed = this.#transformer.transform(schema);
+    this.#hoisting.delete(schema);
+
+    // Only a structural shape earns a component. A `$ref` to `{type:'string'}`
+    // is larger than the schema it replaces, and `components/schemas` is where
+    // a reader looks for MODELS — a reused `z.string().uuid()` hoisted under a
+    // name taken from whichever route happened to reach it first is noise.
+    if (!isStructuralShape(transformed)) return transformed;
+
+    const name = this.#claimComponentName();
     this.#schemaMap.set(schema, name);
     this.#componentSchemas.set(name, transformed);
+    return { $ref: `#/components/schemas/${name}` };
+  }
 
-    return name;
+  /**
+   * Claims a free component name derived from the site that first hoisted the
+   * schema (`PostOrdersResponse409`), suffixing on collision.
+   *
+   * The old `Schema<n>` was derived from nothing and landed in every generated
+   * client as an equally meaningless exported type. A Zod `.describe()` was
+   * considered and rejected: a description is prose, so it makes a poor type
+   * name.
+   *
+   * @returns A component name not already in use
+   */
+  #claimComponentName(): string {
+    const base = toPascalCase(this.#nameHint);
+    if (!this.#componentSchemas.has(base)) return base;
+    for (let n = 2;; n++) {
+      const candidate = `${base}${n}`;
+      if (!this.#componentSchemas.has(candidate)) return candidate;
+    }
   }
 }
