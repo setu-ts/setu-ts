@@ -8624,8 +8624,11 @@ grpc.addService(AnotherDefinition, anotherImpl);
   body. Cloning every request before mapping would tax the whole application to serve the gRPC
   minority. Trailers do not survive the round trip — M49 already records that native gRPC-binary
   trailers work on no runtime this plugin runs on, so no working path regresses.
-- **`inject()` does not reach the interceptor.** The kernel's `inject()` bypasses the HTTP adapter
-  entirely. RPC must be exercised via `app.fetch(webRequest)` in tests.
+- **`inject()` CAN exercise RPC.** Since M70a the kernel dispatches gRPC from its terminal handler,
+  and `inject()` attaches the undisturbed web `Request` as `IRequest.raw` before running the
+  pipeline, so an injected request reaches RPC dispatch exactly as a socket request does — the
+  integration suite drives gRPC through `inject()`. The retired adapter interceptor is not involved:
+  no `setRpcHandler` seam is consulted on any path.
 - **Bidi streaming requires HTTP/2.** `grpc.reflection.v1.ServerReflection` is bidi-only. Over a
   real HTTP/1.1 socket, bidi calls fail at the transport. Unary, server-streaming, and
   client-streaming work on every runtime.
