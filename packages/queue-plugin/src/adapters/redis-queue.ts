@@ -166,6 +166,7 @@ export class RedisQueue implements QueueAdapter {
     this.#client = null;
     this.#ready = false;
     delete this.isHealthy;
+    delete this.depths;
   }
 
   isReady(): boolean {
@@ -328,6 +329,16 @@ export class RedisQueue implements QueueAdapter {
    * quiet never runs another sweep, so without it that last payload would
    * outlive its retention indefinitely.
    *
+   * Together they bound retention rather than pin it: a payload lives at least
+   * `ttlMs`, and at most `ttlMs` past the LAST dead-letter — just under twice
+   * `ttlMs` for one that dies immediately before a burst that then stops. The
+   * backstop is armed from `nowMs` and not from the oldest survivor because one
+   * key carries one deadline, and the oldest survivor's would delete the newer
+   * payloads sharing the key before their own retention elapsed. Erring late is
+   * the deliberate side: an early drop destroys the debugging data the option
+   * exists to keep. Exact per-payload expiry is not available — Redis has no
+   * per-member TTL on a sorted set, and every payload shares `deadJobsKey`.
+   *
    * @param name - Job name
    * @param id - The dead-lettered job's id
    * @param nowMs - Wall-clock time of this dead-letter, the sweep's reference
@@ -366,8 +377,12 @@ export class RedisQueue implements QueueAdapter {
    * M70k (X8-4): counts this name's three states with one `ZCARD` each.
    *
    * Absent on a client that does not expose `zcard`, which is why the member is
-   * assigned in the constructor rather than declared as a method — the health
-   * indicator must be able to tell "cannot report" from "nothing there".
+   * an assigned property rather than a declared method — the health indicator
+   * must be able to tell "cannot report" from "nothing there". Absent again
+   * after {@link disconnect}, for the same reason `isHealthy` is: the closure
+   * captures the client it was installed for, so leaving it in place would
+   * answer a depth read with that dead client's rejection instead of the
+   * absence that says the adapter cannot count right now.
    *
    * @param name - Job name
    * @returns The depth of each state
@@ -376,11 +391,15 @@ export class RedisQueue implements QueueAdapter {
   depths?: (name: string) => Promise<QueueDepths>;
 
   /**
-   * Installs {@link depths} when the resolved client can count a sorted set.
+   * Installs {@link depths} when the resolved client can count a sorted set,
+   * and removes it when the client cannot — the same shape as
+   * {@link RedisQueue.isHealthy}'s installer, holding the same invariant:
+   * `depths` is present exactly when the CURRENT client can answer it.
    */
   #installDepths(): void {
     const client = this.#client;
     if (client === null || typeof client.zcard !== 'function') {
+      delete this.depths;
       return;
     }
     const zcard = client.zcard;

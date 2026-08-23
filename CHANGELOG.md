@@ -71,7 +71,10 @@ All notable changes to this project are documented here. The format follows
   opt-in, because the retention exists for debugging. Configuring it MOVES a dead job's payload out
   of `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and only that key and the dead set carry the
   expiry — the live hash holds every queued job's payload for that name, so expiring it would
-  destroy work that is merely waiting.
+  destroy work that is merely waiting. Retention is a bound, not a deadline: at least the TTL, and
+  at most the TTL past the last dead-letter, because the sweep runs only when one arrives and the
+  shared key carries a single deadline. It errs late deliberately — dropping a payload early would
+  discard the debugging data the option exists to keep.
 - **`UploadMiddlewareOptions.maxBodyBytes`** (M70k, X8-3). An explicit ceiling on the request body
   the upload middleware will parse, default 50 MB.
 - **`IWorkerHandle.onExit?` and `IWorkerHost.reportsExit?`** (M70k, X8-7). An optional worker-exit

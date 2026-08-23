@@ -218,6 +218,37 @@ describe('RedisQueue depths (X8-4)', () => {
 
     expect(queue.depths).toBeUndefined();
   });
+
+  it('should OMIT depths again after disconnect, rather than keep the dead client', async () => {
+    // `depths` closes over the client it was installed for. Left in place after
+    // `disconnect()`, a read answers with that quit client's rejection — which
+    // reports the adapter as BROKEN where absence reports it as unable to count.
+    // `isHealthy` is deleted here for the same reason; this member was not.
+    const client = new FakeRedisClient();
+    const queue = new RedisQueue({ client });
+    await queue.connect();
+
+    // Installed and working while connected, so the assertion below is about
+    // the disconnect and not about the member never having been there.
+    expect(await queue.depths!('thumbnail')).toEqual({ ready: 0, processing: 0, dead: 0 });
+
+    await queue.disconnect();
+
+    expect(queue.depths).toBeUndefined();
+    expect(queue.isHealthy).toBeUndefined();
+  });
+
+  it('should reinstall depths against the client a later connect resolves', async () => {
+    const client = new FakeRedisClient();
+    const queue = new RedisQueue({ client });
+    await queue.connect();
+    await queue.disconnect();
+    await queue.connect();
+
+    // The reinstalled closure reads the live client rather than the quit one,
+    // so this resolves instead of rejecting with 'Not connected'.
+    expect(await queue.depths!('thumbnail')).toEqual({ ready: 0, processing: 0, dead: 0 });
+  });
 });
 
 describe('RedisQueue dead-letter retention is enforced per payload', () => {
@@ -258,5 +289,43 @@ describe('RedisQueue dead-letter retention is enforced per payload', () => {
 
     expect(await client.hget('queue:thumbnail:dead:jobs', 'first')).not.toBeNull();
     expect(await client.zcard('queue:thumbnail:dead')).toBe(2);
+  });
+
+  /**
+   * Pins the bound the option documents, so the prose and the behaviour cannot
+   * drift apart: retention is AT LEAST the TTL and AT MOST the TTL past the
+   * LAST dead-letter, which is just under twice the TTL for a payload that dies
+   * immediately before a burst that then stops.
+   *
+   * The backstop is armed from the arriving dead-letter and not from the oldest
+   * survivor because one key carries one deadline — arming it from `first`
+   * would delete `second`'s payload while `second` was still inside its own
+   * retention, and an early drop destroys the debugging data the option exists
+   * to keep. That trade is the reason the ceiling is 2x rather than 1x.
+   */
+  it('should re-arm the shared backstop from the arriving dead-letter, extending an older survivor', async () => {
+    const client = new FakeRedisClient();
+    const queue = new RedisQueue({ client, deadLetterTtlMs: 60_000 });
+    await queue.connect();
+    await queue.enqueue({ ...JOB, id: 'old' });
+    await queue.enqueue({ ...JOB, id: 'recent' });
+
+    const t0 = 1_700_000_000_000;
+    await queue.deadLetter('thumbnail', 'old', t0, 'old');
+    // One millisecond inside `old`'s window, so the sweep spares it.
+    await queue.deadLetter('thumbnail', 'recent', t0 + 59_999, 'recent');
+
+    expect(await client.hget('queue:thumbnail:dead:jobs', 'old')).not.toBeNull();
+
+    // Every EXPIRE is a full TTL, including the one issued alongside `recent` —
+    // so `old`'s payload now outlives its own deadline by nearly another TTL if
+    // the queue goes quiet here. Asserting the seconds is what makes the
+    // documented ceiling checkable rather than a claim about what "may" happen.
+    expect(expireCalls(client)).toEqual([
+      ['queue:thumbnail:dead', 60],
+      ['queue:thumbnail:dead:jobs', 60],
+      ['queue:thumbnail:dead', 60],
+      ['queue:thumbnail:dead:jobs', 60],
+    ]);
   });
 });

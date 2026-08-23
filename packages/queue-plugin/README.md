@@ -171,6 +171,16 @@ failing would retain its oldest payloads forever. The key-level expiry is kept b
 the backstop for the case the sweep cannot reach: a queue that dead-letters once and then goes quiet
 never runs another sweep.
 
+The bound this gives is **at least the TTL, and at most the TTL past the last dead-letter** — so a
+payload that dead-letters just before a short burst that then stops can live for just under twice
+the TTL. Two mechanics produce that: the sweep only runs when a dead-letter arrives, so a payload is
+dropped at the first dead-letter after its deadline rather than at the deadline itself; and the
+backstop is armed from the dead-letter that armed it, because one shared key carries one deadline
+and arming it from the oldest survivor would take the newer payloads with it before their own TTL
+elapsed. It errs late by construction: dropping a payload early would discard exactly the debugging
+data the option exists to keep. Exact per-payload expiry is not expressible here — Redis has no
+per-member TTL on a sorted set, and the payloads share one hash.
+
 Setting it MOVES a dead job's payload from `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and
 the expiry is applied to that key and the dead set. It is never applied to the live jobs hash: that
 key holds the payload of **every** job for the name, Redis keeps a key's TTL across later writes,
