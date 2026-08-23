@@ -142,7 +142,7 @@ describe('deriveRequestSchemas', () => {
     expect(op?.parameters?.map((p) => p.name)).toEqual(['q']);
   });
 
-  it('keeps the FIRST brand when a route carries two for one target', () => {
+  it('keeps the LAST brand when a route carries two for one target', () => {
     const first = z.object({ first: z.string() });
     const second = z.object({ second: z.string() });
     const doc = generator().generate([
@@ -154,7 +154,7 @@ describe('deriveRequestSchemas', () => {
         doc.paths['/orders']?.post?.requestBody?.content['application/json'].schema.properties ??
           {},
       ),
-    ).toEqual(['first']);
+    ).toEqual(['second']);
   });
 
   it('documents a 400 for a derived route', () => {

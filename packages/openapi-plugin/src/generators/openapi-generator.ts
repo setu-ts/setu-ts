@@ -582,10 +582,15 @@ export class OpenApiGenerator {
       // creates an OWN key, which counted as a derivation and added a `400` to
       // an operation whose request shape had not changed at all.
       if (schema === undefined) continue;
-      // A route may carry two brands for one target (a merged chain); the
-      // FIRST wins, matching the middleware order that actually runs.
+      // A route may carry two brands for one target (a merged chain). The LAST
+      // one wins, because that is what the handler actually receives: each
+      // middleware writes `validated:<target>` on its way through, so the final
+      // writer's parsed value is the one in `ctx.state` by the time the handler
+      // runs — verified against a real chain, where a second, narrower body
+      // schema stripped a field the first had kept. Note the request must still
+      // satisfy EVERY brand, since any of them can short-circuit with a 400;
+      // the document shows the shape the handler sees, not that conjunction.
       if (declared?.[target] !== undefined) continue;
-      if (additions[target] !== undefined) continue;
       additions[target] = schema;
     }
 
