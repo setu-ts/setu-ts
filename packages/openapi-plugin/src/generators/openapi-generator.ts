@@ -312,6 +312,8 @@ export class OpenApiGenerator {
   readonly #excluded: ReadonlySet<string>;
   /** Plugin owners whose routes never reach the document. */
   readonly #excludedOwners: ReadonlySet<string>;
+  /** Derived operationIds already claimed in this `generate` call. */
+  readonly #operationIds = new Map<string, number>();
   readonly #schemaMap: Map<unknown, string>;
   readonly #componentSchemas: Map<string, OpenApiSchemaObject>;
   /**
@@ -398,6 +400,7 @@ export class OpenApiGenerator {
     // transformer visits. Pass 2 can then hoist on FIRST use: without the
     // count, the first occurrence has to be inlined and is never rewritten,
     // which is what made one shape appear both inline and as a `$ref`.
+    this.#operationIds.clear();
     this.#schemaCounts.clear();
     this.#pass = 'count';
     for (const route of routes) {
@@ -575,6 +578,10 @@ export class OpenApiGenerator {
     for (const { target, schema } of brands) {
       // `cookies` deliberately contributes nothing.
       if (target === 'cookies') continue;
+      // Neither does a brand carrying no schema. Assigning `undefined` still
+      // creates an OWN key, which counted as a derivation and added a `400` to
+      // an operation whose request shape had not changed at all.
+      if (schema === undefined) continue;
       // A route may carry two brands for one target (a merged chain); the
       // FIRST wins, matching the middleware order that actually runs.
       if (declared?.[target] !== undefined) continue;
@@ -637,7 +644,17 @@ export class OpenApiGenerator {
       .filter(Boolean)
       .map((segment) => segment.replace(/\{([^}]*)\}/g, (_m, name: string) => `by-${name}`))
       .join('-');
-    return `${methodLower}-${pathSlug || 'root'}`;
+    const base = `${methodLower}-${pathSlug || 'root'}`;
+    // Unwrapping `{id}` to `by-id` costs injectivity: a LITERAL `by-id` segment
+    // slugs identically, so `GET /users/{id}` and `GET /users/by-id` both derive
+    // `get-users-by-id`. A duplicate `operationId` is invalid per the
+    // specification and makes a generated client emit two methods with one
+    // name, so a repeat is suffixed. Only the emit pass claims a name — the
+    // counting pass runs the same code and would otherwise consume every id.
+    if (this.#pass === 'count') return base;
+    const claimed = this.#operationIds.get(base) ?? 0;
+    this.#operationIds.set(base, claimed + 1);
+    return claimed === 0 ? base : `${base}-${claimed + 1}`;
   }
 
   /**
@@ -828,9 +845,13 @@ export class OpenApiGenerator {
   /**
    * Resolves a schema, potentially creating a $ref for deduplication.
    *
-   * Anonymous schemas used more than once get a generated name (Schema<n>)
-   * on first reuse and are hoisted to components/schemas; schemas used
-   * exactly once are inlined.
+   * An anonymous schema referenced by two or more sites is hoisted to
+   * `components/schemas` under a name derived from its FIRST use site (never
+   * `Schema<n>`) and every one of those sites emits a `$ref`; a schema used
+   * exactly once is inlined. Reuse is keyed on schema object IDENTITY, so two
+   * structurally identical but separately constructed schemas are two schemas.
+   * Only structural shapes are hoisted — see `isStructuralShape` — and
+   * parameter schemas never are, because they reach `#plainTransformer`.
    *
    * Pre-registered named schemas (from addSchema/OPENAPI_SCHEMA contributions)
    * keep their contributor-chosen name and are always hoisted.

@@ -140,4 +140,27 @@ describe('route validation metadata', () => {
 
     expect(validationMetadataOf(branded)).toEqual({ target: 'body', schema });
   });
+
+  it('rejects a value carrying a target but no schema (PR #181 review)', () => {
+    // `schema` must be PRESENT, not merely declared by the type: a foreign
+    // value branded under the same key otherwise read back as valid metadata,
+    // and the OpenAPI generator counted that as a derivation.
+    const fn: MiddlewareFunction = async (_ctx, next) => {
+      await next();
+    };
+    Object.defineProperty(fn, VALIDATION_METADATA, { value: { target: 'body' } });
+
+    expect(validationMetadataOf(fn)).toBeUndefined();
+  });
+
+  it('accepts an explicitly undefined schema, which is a legal unknown', () => {
+    const fn: MiddlewareFunction = async (_ctx, next) => {
+      await next();
+    };
+    Object.defineProperty(fn, VALIDATION_METADATA, {
+      value: { target: 'body', schema: undefined },
+    });
+
+    expect(validationMetadataOf(fn)?.target).toBe('body');
+  });
 });

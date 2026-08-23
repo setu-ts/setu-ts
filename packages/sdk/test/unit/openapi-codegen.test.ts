@@ -765,6 +765,142 @@ describe('component schemas', () => {
  * `deno fmt` reindented whatever was emitted. Both committed fixtures name
  * every schema through `$ref`, which is why neither could show it.
  */
+/**
+ * Findings from the automated review of PR #181.
+ */
+describe('review findings (PR #181)', () => {
+  const withResponses = (responses: Record<string, unknown>) =>
+    ({
+      openapi: '3.1.0',
+      paths: { '/a': { get: { operationId: 'get-a', responses } } },
+    }) as unknown as SdkOpenApiDocument;
+
+  it('skips a range code instead of reading its leading digit as a status', () => {
+    // `parseInt('4XX', 10)` is 4, so the previous `Number.isFinite` guard let a
+    // range code through as a `status: 4` arm that no response can carry —
+    // leaving a real 404 unnarrowed.
+    const out = generateOpenApiClient(
+      withResponses({
+        '200': { description: 'ok' },
+        '4XX': {
+          description: 'range',
+          content: { 'application/json': { schema: { type: 'string' } } },
+        },
+        default: { description: 'def' },
+      }),
+      {},
+    );
+
+    expect(out).not.toMatch(/status: 4\b/);
+    expect(out).not.toContain('e.status === 4');
+    expect(out).not.toContain('GetAError');
+  });
+
+  it('does not read a 2xx range code as an error arm either', () => {
+    const out = generateOpenApiClient(
+      withResponses({
+        '2XX': {
+          description: 'range',
+          content: { 'application/json': { schema: { type: 'string' } } },
+        },
+      }),
+      {},
+    );
+
+    expect(out).not.toContain('e.status === 2');
+  });
+
+  it('wraps an over-width guard rather than emitting a 140-column line', () => {
+    const responses: Record<string, unknown> = { '200': { description: 'ok' } };
+    for (const code of ['400', '401', '403', '404', '409']) {
+      responses[code] = {
+        description: code,
+        content: { 'application/json': { schema: { type: 'string' } } },
+      };
+    }
+    const out = generateOpenApiClient(withResponses(responses), {});
+
+    expect(out.split('\n').filter((l) => l.length > 100)).toEqual([]);
+    expect(out).toContain('  if (!(e instanceof HttpClientError)) return false;');
+    expect(out).toContain('    e.status === 400 ||');
+    expect(out).toContain('    e.status === 409\n');
+  });
+
+  it('keeps a guard that fits on one line', () => {
+    const out = generateOpenApiClient(
+      withResponses({
+        '200': { description: 'ok' },
+        '404': {
+          description: 'nf',
+          content: { 'application/json': { schema: { type: 'string' } } },
+        },
+      }),
+      {},
+    );
+
+    expect(out).toContain('return e instanceof HttpClientError && (e.status === 404);');
+  });
+
+  it('honours additionalProperties on an object declaring an empty properties map', () => {
+    // Two spellings of one schema must not contradict each other: reading
+    // `properties: {}` as closed emitted `Record<PropertyKey, never>`, which
+    // rejects every payload the schema accepts.
+    const body = (schema: unknown) =>
+      ({
+        openapi: '3.1.0',
+        paths: {
+          '/b': {
+            post: {
+              operationId: 'post-b',
+              requestBody: { required: true, content: { 'application/json': { schema } } },
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      }) as unknown as SdkOpenApiDocument;
+
+    const empty = generateOpenApiClient(
+      body({ type: 'object', properties: {}, additionalProperties: true }),
+      {},
+    );
+    const absent = generateOpenApiClient(
+      body({ type: 'object', additionalProperties: true }),
+      {},
+    );
+
+    expect(empty).toContain('body: Record<string, unknown>;');
+    expect(absent).toContain('body: Record<string, unknown>;');
+  });
+
+  it('still emits the closed empty object when nothing else is allowed', () => {
+    const closed = (ap: unknown) =>
+      ({
+        openapi: '3.1.0',
+        paths: {
+          '/c': {
+            post: {
+              operationId: 'post-c',
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: { type: 'object', properties: {}, ...(ap as object) },
+                  },
+                },
+              },
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      }) as unknown as SdkOpenApiDocument;
+
+    expect(generateOpenApiClient(closed({}), {}))
+      .toContain('body: Record<PropertyKey, never>;');
+    expect(generateOpenApiClient(closed({ additionalProperties: false }), {}))
+      .toContain('body: Record<PropertyKey, never>;');
+  });
+});
+
 describe('inline schemas are hoisted (X11-9)', () => {
   it('emits the committed inline-shapes fixture byte-for-byte', () => {
     const generated = generateOpenApiClient(inlineShapesDocument, {

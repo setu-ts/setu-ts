@@ -293,6 +293,31 @@ function renderSignature(
   ];
 }
 
+/**
+ * Renders `additionalProperties` for an object with no own declared properties.
+ *
+ * Shared by the two sites that reach it — `properties` absent, and `properties`
+ * present but EMPTY — because reading an empty map as a closed object made two
+ * spellings of one schema contradict each other.
+ *
+ * @param ap - The schema's `additionalProperties`
+ * @param seen - Cycle guard carried through the recursion
+ * @param path - Path, for diagnostics
+ * @param method - Method, for diagnostics
+ * @param depth - Current indentation depth
+ * @returns The rendered index-signature type
+ */
+function renderAdditional(
+  ap: boolean | SdkOpenApiSchema,
+  seen: Set<SdkOpenApiSchema>,
+  path: string | undefined,
+  method: string | undefined,
+  depth: number,
+): string {
+  if (typeof ap === 'boolean') return ap ? 'Record<string, unknown>' : EMPTY_OBJECT_TYPE;
+  return `Record<string, ${renderSchema(ap, seen, path, method, depth)}>`;
+}
+
 function renderSchema(
   schema: SdkOpenApiSchema | undefined,
   seen: Set<SdkOpenApiSchema> = new Set(),
@@ -373,7 +398,17 @@ function ros(
     const keys = Object.entries(schema.properties);
     // An object type that declares no properties is the empty object, and
     // emitting `{\n\n}` for it is both `ban-types` and a lie about its meaning.
-    if (keys.length === 0) return EMPTY_OBJECT_TYPE;
+    //
+    // `additionalProperties` still decides what the schema ACCEPTS, though, so
+    // it is only the closed empty object when nothing else is allowed. Reading
+    // `properties: {}` as closed regardless made two spellings of one schema
+    // contradict each other: with the empty key it rendered
+    // `Record<PropertyKey, never>`, which rejects every payload the schema
+    // accepts, while without it the branch below rendered `Record<string, …>`.
+    if (keys.length === 0) {
+      if (schema.additionalProperties === undefined) return EMPTY_OBJECT_TYPE;
+      return renderAdditional(schema.additionalProperties, seen, path, method, depth);
+    }
 
     const req = new Set(schema.required ?? []);
     // Properties sit one level deeper than the brace that opens them, and the
@@ -402,12 +437,7 @@ function ros(
     return body;
   }
   if (schema.additionalProperties !== undefined) {
-    if (typeof schema.additionalProperties === 'boolean') {
-      return schema.additionalProperties ? 'Record<string, unknown>' : EMPTY_OBJECT_TYPE;
-    }
-    return `Record<string, ${
-      renderSchema(schema.additionalProperties, seen, path, method, depth)
-    }>`;
+    return renderAdditional(schema.additionalProperties, seen, path, method, depth);
   }
   return 'Record<string, unknown>';
 }
@@ -584,6 +614,21 @@ interface OpShape {
   readonly errorGuardName: string;
 }
 
+/**
+ * Parses a response key that names ONE concrete HTTP status.
+ *
+ * `parseInt` is unusable here: `parseInt('4XX', 10)` returns `4`, so a range
+ * code passed a `Number.isFinite` guard and became a `status: 4` arm that no
+ * response can ever carry — while a real `404` went unnarrowed. Only `default`
+ * actually parses to `NaN`. The whole key must therefore match a status.
+ *
+ * @param code - The response key from the document
+ * @returns The status, or `undefined` for `default` and range codes such as `4XX`
+ */
+function parseStatusCode(code: string): number | undefined {
+  return /^[1-5][0-9]{2}$/.test(code) ? Number(code) : undefined;
+}
+
 /** A rendered type lifted out of its use site into its own exported alias. */
 interface HoistedAlias {
   readonly name: string;
@@ -640,10 +685,10 @@ function getErrorArms(
   if (!op.responses) return [];
   const arms: { status: number; type: string }[] = [];
   for (const [code, resp] of Object.entries(op.responses)) {
-    const status = parseInt(code, 10);
-    // `default` and range codes such as `4XX` parse to NaN; they name no
-    // single status, so they cannot become a discriminated arm.
-    if (!Number.isFinite(status) || (status >= 200 && status < 300)) continue;
+    // `default` and a range code such as `4XX` name no single status, so neither
+    // can become a discriminated arm.
+    const status = parseStatusCode(code);
+    if (status === undefined || (status >= 200 && status < 300)) continue;
     const media = resp.content?.['application/json'];
     const rendered = media?.schema
       ? renderSchema(media.schema, new Set(), path, method)
@@ -840,8 +885,8 @@ function getSuccessTypes(
   if (!op.responses) return ['void'];
   const out: string[] = [];
   for (const [code, resp] of Object.entries(op.responses)) {
-    const s = parseInt(code, 10);
-    if (s >= 200 && s < 300) {
+    const s = parseStatusCode(code);
+    if (s !== undefined && s >= 200 && s < 300) {
       const media = resp.content?.['application/json'];
       if (media?.schema) {
         // A success type is written at TWO indentation levels — the `Api`
@@ -1045,8 +1090,23 @@ export function generateOpenApiClient(
       });
     }
     L(`export function ${shape.errorGuardName}(e: unknown): e is ${shape.errorTypeName} {`);
-    const statuses = shape.errorArms.map((a) => `e.status === ${a.status}`).join(' || ');
-    L(`${INDENT}return e instanceof HttpClientError && (${statuses});`);
+    const clauses = shape.errorArms.map((a) => `e.status === ${a.status}`);
+    const oneLine = `${INDENT}return e instanceof HttpClientError && (${clauses.join(' || ')});`;
+    if (oneLine.length <= LINE_WIDTH) {
+      L(oneLine);
+    } else {
+      // Five three-digit statuses already reach 140 columns, and `deno fmt`
+      // rewraps a long `&&`/`||` chain in a shape no generator should try to
+      // reproduce. The width here is MEASURED off the emitted string rather
+      // than estimated from a prefix, and the wrapped form below is stable at
+      // every arity (probed), so nothing depends on guessing.
+      L(`${INDENT}if (!(e instanceof HttpClientError)) return false;`);
+      L(`${INDENT}return (`);
+      clauses.forEach((c, i) => {
+        L(`${INDENT.repeat(2)}${c}${i === clauses.length - 1 ? '' : ' ||'}`);
+      });
+      L(`${INDENT});`);
+    }
     L('}');
     L('');
   }
