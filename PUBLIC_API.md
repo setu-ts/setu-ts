@@ -3789,6 +3789,11 @@ rather than reported as zeros on RabbitMQ and SQS, whose counts need a managemen
 `GetQueueAttributes`: "this adapter cannot tell you" and "there is nothing there" are different
 answers, and an operator acting on a dead-letter alert needs to tell them apart.
 
+The counts are read only once the adapter has reported itself reachable, so a `down` payload carries
+`{ adapter, reachable }` and no `queues`. Counting against a backend already known to be unreachable
+would cost a failing round trip per name on every probe interval and tell an operator nothing that
+`reachable: false` does not.
+
 ```json
 {
   "adapter": "RedisQueue",
@@ -4206,7 +4211,9 @@ three types are NOT alike and the difference decides what you can pass:
 `IS3Backend` was named `IAwsS3Client` before the alpha.9 release, which promised something it never
 was: `@aws-sdk/client-s3`'s surface is `send(command)`, so a real `S3Client` was refused with
 `Injected S3 client is missing required methods`. There is consequently no supported way to
-configure the underlying SDK client (custom retry policy, timeout, proxy agent).
+configure the underlying SDK client (custom retry policy, timeout, proxy agent). The old name is
+still exported as a deprecated alias of the same type (AI_GUIDELINES §9.2), so existing imports keep
+compiling; new code should use `IS3Backend`.
 
 ### IStorage methods
 

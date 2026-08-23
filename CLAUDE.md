@@ -2960,8 +2960,40 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   worker fake materialized `onExit` as `undefined` on a handle that must OMIT it (fixed with a
   `declare` field), and `Object.create` could not stand in for a client missing a command because
   the fake's methods read private fields. Four negative controls were each observed failing and
-  reverted; a fifth PASSED and is what produced the `terminating` correction above — complete (PR
-  pending)
+  reverted; a fifth PASSED and is what produced the `terminating` correction above.
+
+  **Verification and code review then found five defects that all four gates, both publish gates and
+  the per-file bar had passed, and the two worst were introduced by this milestone.** (1) The X8-7
+  exit handler double-disposed a crash: Node emits `'error'` and THEN `'exit'` for a worker that
+  dies from an uncaught exception — a task module that throws at import, the commonest worker
+  failure — and Bun's `'close'` follows its error the same way, so the handler re-ran the
+  startup-failure branch `onWorkerError` had just run and ONE crashing worker rejected TWO queued
+  tasks: the one it was starting for, and a bystander never dispatched anywhere, whose rejection
+  named an exit code and so pointed at the wrong cause. Every pre-existing exit test emitted an exit
+  in ISOLATION, which no runtime does after an error. `dropSlot` now reports whether the pool still
+  owned the slot. (2) `deadLetterTtlMs` armed its `EXPIRE` on `queue:<name>:jobs` — the hash holding
+  the payload of EVERY job for that name, not only dead ones. Measured against a real Redis 7: a
+  key's TTL SURVIVES later `HSET`s, so every job enqueued after the first dead-letter inherited the
+  countdown, and `reserve` moves a job whose payload is missing into the processing set and returns
+  nothing — silent, permanent loss of queued work, caused by an option whose purpose is bounding
+  DEAD payloads. The payload is now MOVED into `queue:<name>:dead:jobs` and only that key and the
+  dead set are expired; the test that shipped asserted the defect by name ("TTL to BOTH the dead set
+  and the jobs hash"). (3) The X8-9 write probe used a FIXED filename, so two replicas sharing one
+  root — a ReadWriteMany volume, the ordinary deployment for this provider — raced, and whichever
+  `rm` ran second failed with ENOENT and refused to boot a process whose root was perfectly
+  writable; the name is now unique per connect and cleanup is best-effort, since the WRITE is what
+  proves writability. (4) Depths were collected BEFORE the reachability check, so an outage cost one
+  failing round trip per registered name on every probe interval, each one logged, saying nothing
+  `reachable: false` did not. (5) `IAwsS3Client` was REMOVED rather than deprecated, though the
+  replacement is an identical working shape — §9.2, the M14d precedent — so it is restored as a
+  deprecated alias. Four plan claims were also corrected against the code rather than left stale:
+  the depth member is `depths?`/`processing`, not the planned `stats?`/`delayed`; it does NOT ride
+  `createCachedProbe` (that helper caches a `Promise<boolean>`, a different key and return type);
+  `queue_jobs_in_flight` was planned and deliberately not shipped (the durable `processing` depth
+  answers the same question cluster-wide); and the plan's type-level `runtime-contracts.test.ts`
+  deliverable was unwritten — now four cases beside M55's `readStream` precedent. The storage
+  barrel's type exports were pinned at compile time for the same reason M56 gives: dropping one left
+  every runtime assertion in that file green — complete (PR pending)
 - **Next milestone** — **M70i** (gRPC and GraphQL viability). The repair-versus-withdraw decision
   for `grpc-plugin`, plus the documented-API-does-not-exist rows both packages carry: every gRPC
   registration snippet in README and `PUBLIC_API.md` throws because it resolves the capability

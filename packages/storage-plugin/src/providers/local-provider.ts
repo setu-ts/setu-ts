@@ -72,11 +72,16 @@ export class LocalStorageProvider implements StorageProvider {
         'LocalStorageProvider requires runtime.fs which is not available on this runtime',
       );
     }
+    // A UNIQUE probe name, and a best-effort cleanup: two replicas sharing one
+    // root (a ReadWriteMany volume is the ordinary way this provider is
+    // deployed) would otherwise race on a fixed path, and whichever `rm` ran
+    // second would fail with ENOENT and refuse to boot a process whose root was
+    // perfectly writable. The WRITE is what proves writability; failing to tidy
+    // up afterwards is not a reason to refuse to start.
+    const probe = `${this.#root}/.setu-write-probe-${crypto.randomUUID()}`;
     try {
       await fs.mkdir(this.#root, { recursive: true });
-      const probe = `${this.#root}/.setu-write-probe`;
       await fs.writeFile(probe, new Uint8Array());
-      await fs.rm(probe);
       this.#writable = true;
     } catch (error) {
       throw new Error(
@@ -85,6 +90,11 @@ export class LocalStorageProvider implements StorageProvider {
         }${this.#permissionHint()}`,
         { cause: error },
       );
+    }
+    try {
+      await fs.rm(probe);
+    } catch {
+      // Best effort; see above.
     }
   }
 

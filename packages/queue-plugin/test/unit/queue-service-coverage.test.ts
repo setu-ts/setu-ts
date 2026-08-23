@@ -506,3 +506,50 @@ describe('QueueService - coverage', () => {
     });
   });
 });
+
+describe('health indicator — depth probing is ordered behind reachability (X8-4)', () => {
+  /**
+   * An outage is exactly when the counts are unavailable AND the probe is most
+   * expensive: one failing round trip per registered name, on every probe
+   * interval, each one reported. `reachable: false` already says everything
+   * those failures would, so the counts are read only once the backend has
+   * answered.
+   */
+  it('should not count against a backend it already knows is unreachable', async () => {
+    const adapter = new MemoryQueue();
+    const counted: string[] = [];
+    adapter.isHealthy = () => Promise.resolve(false);
+    adapter.depths = (name: string) => {
+      counted.push(name);
+      return Promise.reject(new Error('CONNREFUSED'));
+    };
+    const service = new QueueService(adapter, new FakeRuntimeServices());
+    await service.connect();
+    service.process('thumbnail', () => {});
+
+    const result = await service.createHealthIndicator()();
+
+    expect(result.status).toBe('down');
+    expect(result.data).toEqual({ adapter: 'MemoryQueue', reachable: false });
+    expect(counted).toEqual([]);
+  });
+
+  it('should still report depths when the backend IS reachable', async () => {
+    // The control: the reordering must remove the pointless attempt, not the
+    // reporting.
+    const adapter = new MemoryQueue();
+    adapter.isHealthy = () => Promise.resolve(true);
+    adapter.depths = () => Promise.resolve({ ready: 2, processing: 1, dead: 3 });
+    const service = new QueueService(adapter, new FakeRuntimeServices());
+    await service.connect();
+    service.process('thumbnail', () => {});
+
+    const result = await service.createHealthIndicator()();
+
+    expect(result.status).toBe('up');
+    expect(result.data).toMatchObject({
+      reachable: true,
+      queues: { thumbnail: { ready: 2, processing: 1, dead: 3 } },
+    });
+  });
+});

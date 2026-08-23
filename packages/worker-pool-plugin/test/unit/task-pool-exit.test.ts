@@ -218,3 +218,59 @@ describe('TaskPool — shutdown ordering the exit path depends on', () => {
     expect(host.handles.every((handle) => handle.terminated)).toBe(true);
   });
 });
+
+describe('TaskPool — a crash reports ONCE, not once per platform event', () => {
+  /**
+   * Node emits `'error'` and THEN `'exit'` for a worker that dies from an
+   * uncaught exception — the ordinary failure when a task module throws at
+   * import. Bun's `'close'` follows its error the same way.
+   *
+   * Before this guard the exit handler re-ran the startup-failure branch that
+   * `onWorkerError` had already run, so ONE crashing worker rejected TWO
+   * queued tasks: the one it was starting for, and an innocent bystander that
+   * had never been dispatched anywhere. The bystander's rejection named an
+   * exit code, which points at the wrong cause entirely.
+   *
+   * The fake reproduces the real sequence rather than an exit in isolation,
+   * which is what the pre-existing exit tests drove.
+   */
+  it('should reject only the task the crashed worker was starting for', async () => {
+    const { pool, host } = makeReportingPool(1);
+
+    const first = pool.run({ n: 1 });
+    const second = pool.run({ n: 2 });
+    expect(host.handles).toHaveLength(1);
+
+    // The module throws at import: 'error', then 'exit' with a non-zero code.
+    host.handles[0].emitWorkerError(new Error('cannot load module'));
+    host.handles[0].emitExit(1);
+
+    await expect(first).rejects.toThrow('cannot load module');
+
+    // The bystander must still be queued — a fresh worker was spawned for it.
+    let settled = false;
+    void second.then(() => settled = true, () => settled = true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(pool.stats()).toMatchObject({ queued: 1 });
+
+    // And it runs to completion on the replacement worker.
+    const replacement = host.handles[1];
+    expect(replacement).toBeDefined();
+    replacement.emitReady();
+    replacement.replyOk('ok');
+    await expect(second).resolves.toBe('ok');
+  });
+
+  it('should not double-settle a running task when its worker errors then exits', async () => {
+    const { pool, host } = makeReportingPool(1);
+    const promise = pool.run({ n: 1 });
+    host.handles[0].emitReady();
+
+    host.handles[0].emitWorkerError(new Error('boom'));
+    host.handles[0].emitExit(1);
+
+    await expect(promise).rejects.toThrow('boom');
+    expect(pool.stats()).toMatchObject({ workers: 0, queued: 0 });
+  });
+});

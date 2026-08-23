@@ -164,6 +164,12 @@ reported as zeros) on RabbitMQ and SQS, whose counts need a management API.
 lifetime of the deployment — the retention exists for debugging, so dropping it by default would
 remove the value it is there for.
 
+Setting it MOVES a dead job's payload from `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and
+the expiry is applied to that key and the dead set. It is never applied to the live jobs hash: that
+key holds the payload of **every** job for the name, Redis keeps a key's TTL across later writes,
+and a job whose payload has vanished is moved to the processing set by `reserve` and never returned
+— so expiring it would silently discard work that was only waiting to run.
+
 ## Adapters
 
 ### MemoryQueue
