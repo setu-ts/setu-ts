@@ -74,7 +74,9 @@ All notable changes to this project are documented here. The format follows
   destroy work that is merely waiting. Retention is a bound, not a deadline: at least the TTL, and
   at most the TTL past the last dead-letter, because the sweep runs only when one arrives and the
   shared key carries a single deadline. It errs late deliberately — dropping a payload early would
-  discard the debugging data the option exists to keep.
+  discard the debugging data the option exists to keep. The payload move is ordered before the
+  dead-set insert so a concurrent dead-letter's sweep cannot delete a member whose payload has not
+  been written and strand it beyond every later sweep.
 - **`UploadMiddlewareOptions.maxBodyBytes`** (M70k, X8-3). An explicit ceiling on the request body
   the upload middleware will parse, default 50 MB.
 - **`IWorkerHandle.onExit?` and `IWorkerHost.reportsExit?`** (M70k, X8-7). An optional worker-exit

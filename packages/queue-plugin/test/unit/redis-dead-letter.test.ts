@@ -68,6 +68,50 @@ function withoutCommands(
   return delegate as unknown as IRedisQueueClient;
 }
 
+/**
+ * Delegates every command, parking the FIRST `hget` on a gate so a second
+ * `deadLetter` can be driven to completion in between. The adapter issues no
+ * two commands atomically, so an interleave is what a concurrency claim about
+ * it has to be tested with — a sequential test cannot see one.
+ */
+function stallFirstHget(
+  client: FakeRedisClient,
+  gate: Promise<void>,
+): { proxy: IRedisQueueClient; parked: Promise<void> } {
+  let announce: () => void;
+  const parked = new Promise<void>((resolve) => (announce = resolve));
+  let stalled = false;
+  const delegate: Record<string, unknown> = {};
+  for (
+    const key of [
+      'zadd',
+      'zrangebyscore',
+      'zrem',
+      'hset',
+      'hget',
+      'hdel',
+      'del',
+      'quit',
+      'connect',
+      'ping',
+      'zcard',
+      'expire',
+    ]
+  ) {
+    const method = (client as unknown as Record<string, unknown>)[key];
+    if (typeof method !== 'function') continue;
+    delegate[key] = async (...args: unknown[]) => {
+      if (key === 'hget' && !stalled) {
+        stalled = true;
+        announce();
+        await gate;
+      }
+      return await (method as (...a: unknown[]) => unknown).apply(client, args);
+    };
+  }
+  return { proxy: delegate as unknown as IRedisQueueClient, parked };
+}
+
 /** Reads the arguments of every `expire` the adapter issued. */
 function expireCalls(client: FakeRedisClient): unknown[][] {
   return client.calls.filter((call) => call.method === 'expire').map((call) => call.args);
@@ -327,5 +371,49 @@ describe('RedisQueue dead-letter retention is enforced per payload', () => {
       ['queue:thumbnail:dead', 60],
       ['queue:thumbnail:dead:jobs', 60],
     ]);
+  });
+  /**
+   * The payload MOVE is issued before the dead-set insert, and that order is
+   * load-bearing rather than incidental: none of these commands is atomic with
+   * the next, so a concurrent `deadLetter` whose sweep reaches a member before
+   * its payload has been written deletes the member and strands the payload in
+   * `dead:jobs` — where no later sweep can find it, because a sweep reads the
+   * dead set. The key-level backstop is renewed by every dead-letter, so on a
+   * queue that keeps failing that payload is retained indefinitely: the
+   * unbounded growth this option exists to stop.
+   *
+   * Writing the payload first makes a member visible only once its payload is
+   * already there, so either the sweep misses it entirely (and a later one
+   * collects it) or it collects both together.
+   */
+  it('should not strand a payload when a concurrent sweep reaches its id first', async () => {
+    const client = new FakeRedisClient();
+    let openGate: () => void;
+    const gate = new Promise<void>((resolve) => (openGate = resolve));
+    const { proxy, parked } = stallFirstHget(client, gate);
+
+    const queue = new RedisQueue({ client: proxy, deadLetterTtlMs: 1_000 });
+    await queue.connect();
+    await queue.enqueue({ ...JOB, id: 'stalled' });
+    await queue.enqueue({ ...JOB, id: 'later' });
+
+    const t0 = 1_700_000_000_000;
+
+    // Parks inside the payload move, before its id reaches the dead set.
+    const stalled = queue.deadLetter('thumbnail', 'stalled', t0, 'stalled');
+    await parked;
+
+    // Five seconds on, so this call's sweep covers anything scored at t0 —
+    // which is precisely the id the parked call has not finished writing.
+    await queue.deadLetter('thumbnail', 'later', t0 + 5_000, 'later');
+
+    openGate!();
+    await stalled;
+
+    // The payload survives WITH its dead-set member, so the next sweep can
+    // still collect it. Payload present but member gone is the leak.
+    expect(await client.hget('queue:thumbnail:dead:jobs', 'stalled')).not.toBeNull();
+    expect(await client.zrangebyscore('queue:thumbnail:dead', 0, t0 + 10_000))
+      .toContain('stalled');
   });
 });
