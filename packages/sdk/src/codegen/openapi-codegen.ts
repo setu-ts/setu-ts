@@ -570,13 +570,51 @@ interface OpShape {
     readonly status: number;
     /** The type written into the union arm — an alias name when one was needed. */
     readonly type: string;
-    /** Emitted alias declaration, when the rendered body spans lines. */
-    readonly alias?: { readonly name: string; readonly body: string };
   }[];
+  /**
+   * Multi-line types hoisted out of this operation's own use sites.
+   *
+   * Emitted as exported aliases ahead of everything that references them, so no
+   * object literal is ever written at an indentation `deno fmt` disagrees with.
+   */
+  readonly aliases: readonly HoistedAlias[];
   /** Name of the emitted error union, claimed only when `errorArms` is non-empty. */
   readonly errorTypeName: string;
   /** Name of the emitted narrowing guard. */
   readonly errorGuardName: string;
+}
+
+/** A rendered type lifted out of its use site into its own exported alias. */
+interface HoistedAlias {
+  readonly name: string;
+  readonly body: string;
+}
+
+/**
+ * Keep a rendered type on ONE line, hoisting a multi-line one into an alias.
+ *
+ * An emitted type lands at several indentation levels — an `Args` member, an
+ * `Api` signature, and the `client.request<…>` type argument — and the SAME
+ * rendered string is used at more than one of them, so NO single indent is
+ * correct for a multi-line object literal. `deno fmt` reindents it and the
+ * generated file then fails the `fmt` gate every scaffolded project runs, which
+ * is the whole of X11-9. Hoisting removes the question: every reference is a
+ * single-line name, and the shape also becomes nameable by a consumer.
+ *
+ * @param rendered - The rendered type
+ * @param name - Produces the alias name; called only when hoisting
+ * @param aliases - Collector the alias is appended to
+ * @returns `rendered` when single-line, else the claimed alias name
+ */
+function hoistMultiline(
+  rendered: string,
+  name: () => string,
+  aliases: HoistedAlias[],
+): string {
+  if (!rendered.includes('\n')) return rendered;
+  const claimed = name();
+  aliases.push({ name: claimed, body: rendered });
+  return claimed;
 }
 
 /**
@@ -597,13 +635,10 @@ function getErrorArms(
   method: string,
   operationId: string,
   types: TypeNameRegistry,
+  aliases: HoistedAlias[],
 ): OpShape['errorArms'] {
   if (!op.responses) return [];
-  const arms: {
-    status: number;
-    type: string;
-    alias?: { name: string; body: string };
-  }[] = [];
+  const arms: { status: number; type: string }[] = [];
   for (const [code, resp] of Object.entries(op.responses)) {
     const status = parseInt(code, 10);
     // `default` and range codes such as `4XX` parse to NaN; they name no
@@ -614,20 +649,21 @@ function getErrorArms(
       ? renderSchema(media.schema, new Set(), path, method)
       : 'unknown';
 
-    // A MULTI-LINE body is hoisted into its own exported alias so every union
-    // arm stays on one line. That is not cosmetic: `deno fmt` reformats a
-    // multi-line intersection into a leading-`&` block, so an inline object
-    // here would make the generated file fail the `fmt` gate every scaffolded
-    // project runs — which is the whole of X11-9.
-    if (!rendered.includes('\n')) {
-      arms.push({ status, type: rendered });
-      continue;
-    }
-    const name = types.claim(
-      `${sanitizeTypeName(operationId)}Error${status}Body`,
-      `the ${status} response body of operation '${operationId}'`,
-    );
-    arms.push({ status, type: name, alias: { name, body: rendered } });
+    // A multi-line body must be hoisted, or `deno fmt` reformats the union arm's
+    // intersection into a leading-`&` block. `hoistMultiline` owns that rule for
+    // every emitted type, not just this one.
+    arms.push({
+      status,
+      type: hoistMultiline(
+        rendered,
+        () =>
+          types.claim(
+            `${sanitizeTypeName(operationId)}Error${status}Body`,
+            `the ${status} response body of operation '${operationId}'`,
+          ),
+        aliases,
+      ),
+    });
   }
   return arms.sort((a, b) => a.status - b.status);
 }
@@ -700,12 +736,22 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const split = splitParams(entry.parameters, path, method);
   assertPathParamsMatchTemplate(path, method, split.pathParams);
 
+  const aliases: HoistedAlias[] = [];
+
   const render = (p: SdkOpenApiParameter, forcedRequired?: boolean): RenderedParam => ({
     name: sanitizeIdentifier(p.name),
     wireName: p.name,
     // A parameter with no `schema` is treated as a string: that is the only
     // shape that can be serialized into a URL or a header without guessing.
-    type: renderSchema(p.schema ?? { type: 'string' }, new Set(), path, method),
+    type: hoistMultiline(
+      renderSchema(p.schema ?? { type: 'string' }, new Set(), path, method),
+      () =>
+        types.claim(
+          `${sanitizeTypeName(entry.operationId)}${sanitizeTypeName(p.name)}Param`,
+          `the '${p.name}' parameter of operation '${entry.operationId}'`,
+        ),
+      aliases,
+    ),
     required: forcedRequired ?? p.required === true,
   });
 
@@ -717,12 +763,36 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const headerParams = split.headerParams.map((p) => render(p));
 
   const bodySchema = getBodySchema(entry.operation);
-  const bodyType = bodySchema ? renderSchema(bodySchema, new Set(), path, method) : undefined;
+  const bodyType = bodySchema
+    ? hoistMultiline(
+      renderSchema(bodySchema, new Set(), path, method),
+      () =>
+        types.claim(
+          `${sanitizeTypeName(entry.operationId)}Body`,
+          `the request body of operation '${entry.operationId}'`,
+        ),
+      aliases,
+    )
+    : undefined;
   const bodyRequired = bodyType !== undefined && isBodyRequired(entry.operation);
 
-  const errorArms = getErrorArms(entry.operation, path, method, entry.operationId, types);
+  const errorArms = getErrorArms(
+    entry.operation,
+    path,
+    method,
+    entry.operationId,
+    types,
+    aliases,
+  );
 
-  const successTypes = getSuccessTypes(entry.operation, path, method);
+  const successTypes = getSuccessTypes(
+    entry.operation,
+    path,
+    method,
+    entry.operationId,
+    types,
+    aliases,
+  );
   const returnType = successTypes.length === 1 && successTypes[0] === 'void'
     ? 'void'
     : successTypes.join(' | ');
@@ -748,6 +818,7 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
       headerParams.some((p) => p.required),
     returnType,
     errorArms,
+    aliases,
     errorTypeName: errorArms.length > 0
       ? types.claim(
         sanitizeTypeName(entry.operationId) + 'Error',
@@ -758,15 +829,34 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   };
 }
 
-function getSuccessTypes(op: SdkOpenApiOperation, path: string, method: string): string[] {
+function getSuccessTypes(
+  op: SdkOpenApiOperation,
+  path: string,
+  method: string,
+  operationId: string,
+  types: TypeNameRegistry,
+  aliases: HoistedAlias[],
+): string[] {
   if (!op.responses) return ['void'];
   const out: string[] = [];
   for (const [code, resp] of Object.entries(op.responses)) {
     const s = parseInt(code, 10);
     if (s >= 200 && s < 300) {
       const media = resp.content?.['application/json'];
-      if (media?.schema) out.push(renderSchema(media.schema, new Set(), path, method));
-      else out.push('void');
+      if (media?.schema) {
+        // A success type is written at TWO indentation levels — the `Api`
+        // signature and the `client.request<…>` argument — so a multi-line one
+        // cannot be correct at both. Hoisting is the only fix available here.
+        out.push(hoistMultiline(
+          renderSchema(media.schema, new Set(), path, method),
+          () =>
+            types.claim(
+              `${sanitizeTypeName(operationId)}Response${s}`,
+              `the ${s} response body of operation '${operationId}'`,
+            ),
+          aliases,
+        ));
+      } else out.push('void');
     }
   }
   return out.length ? out : ['void'];
@@ -899,6 +989,18 @@ export function generateOpenApiClient(
     L('');
   }
 
+  // Pass 0 — every hoisted type, ahead of everything that references it.
+  //
+  // One block for all four sources (a request body, a parameter, a success
+  // response, an error body), because `hoistMultiline` is the single owner of
+  // the rule; splitting emission per source is what let the multi-line indent
+  // defect survive in three of them while the fourth was correct.
+  const hoisted = shapes.flatMap((shape) => shape.aliases);
+  if (hoisted.length > 0) {
+    for (const alias of hoisted) L(`export type ${alias.name} = ${alias.body};`);
+    L('');
+  }
+
   // Pass 1 — the `*Args` interface for each operation that takes any.
   // Path parameters are deliberately excluded: they are positional function
   // arguments, since a path cannot be built without them.
@@ -927,10 +1029,6 @@ export function generateOpenApiClient(
   // `body` the compiler can tell apart.
   for (const shape of shapes) {
     if (shape.errorArms.length === 0) continue;
-    for (const arm of shape.errorArms) {
-      if (arm.alias === undefined) continue;
-      L(`export type ${arm.alias.name} = ${arm.alias.body};`);
-    }
     const arm = (a: { status: number; type: string }) =>
       `HttpClientError<${a.type}> & { readonly status: ${a.status} }`;
     if (shape.errorArms.length === 1) {

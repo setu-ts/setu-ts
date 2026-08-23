@@ -180,6 +180,14 @@ describe('typed error responses (X11-7)', () => {
         const body: NotFound = e.body;
         expect(body.code).toBe('gone');
         expect(body.detail).toBe('no such user');
+        // The NEGATIVE half, and the only assertion that proves the emitted
+        // body type is PRECISE rather than merely present: `conflictingId`
+        // belongs to the 409 arm. An over-wide arm — `unknown` widened back, or
+        // a `Record<string, unknown>` — would satisfy every runtime assertion
+        // in this file while typing nothing, and an unused `@ts-expect-error`
+        // is itself a compile error, so this cannot rot into a no-op.
+        // @ts-expect-error - the 404 body carries no `conflictingId`
+        e.body.conflictingId;
       } else {
         throw new Error(`unexpected status ${e.status}`);
       }

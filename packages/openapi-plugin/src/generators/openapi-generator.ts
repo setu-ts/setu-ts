@@ -40,18 +40,6 @@ function defaultPathParamSchema(): OpenApiSchemaObject {
 }
 
 /**
- * Converts an operation-derived name hint (`post-orders-by-idBody`) into a
- * PascalCase component name (`PostOrdersByIdBody`).
- *
- * Splits on every run of characters outside `[A-Za-z0-9]`, upper-cases each
- * part's first character and preserves the rest, so an interior capital in a
- * hand-written hint survives. A hint that sanitizes to nothing falls back to
- * `Schema`, since a component name may not be empty.
- *
- * @param hint - The raw name hint
- * @returns A PascalCase identifier safe as a component name
- */
-/**
  * Whether a transformed schema is a shape worth naming as a reusable
  * component: an object, an array, or a composition (`anyOf`/`allOf`) or
  * enumeration of them.
@@ -67,6 +55,18 @@ function isStructuralShape(schema: OpenApiSchemaObject): boolean {
     schema.enum !== undefined;
 }
 
+/**
+ * Converts an operation-derived name hint (`post-orders-by-idBody`) into a
+ * PascalCase component name (`PostOrdersByIdBody`).
+ *
+ * Splits on every run of characters outside `[A-Za-z0-9]`, upper-cases each
+ * part's first character and preserves the rest, so an interior capital in a
+ * hand-written hint survives. A hint that sanitizes to nothing falls back to
+ * `Schema`, since a component name may not be empty.
+ *
+ * @param hint - The raw name hint
+ * @returns A PascalCase identifier safe as a component name
+ */
 function toPascalCase(hint: string): string {
   const parts = hint.split(/[^A-Za-z0-9]+/).filter(Boolean);
   const joined = parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('');
@@ -530,21 +530,6 @@ export class OpenApiGenerator {
   }
 
   /**
-   * Derives an operation's security requirement from the guards on its route.
-   *
-   * Returns a spreadable fragment rather than a value so the caller can splice
-   * it in without a second `undefined` check: `{}` contributes no `security`
-   * key at all, which is what lets the document-level default apply.
-   *
-   * `authenticated: true` wins over `false` when both are present, because
-   * that is what the middleware chain does — `publicRoute()` only calls
-   * `next()`, so a route carrying it alongside `requireAuth()` still rejects
-   * an anonymous caller.
-   *
-   * @param route - The route being documented
-   * @returns `{ security }` when a requirement was derived, else `{}`
-   */
-  /**
    * Whether a route is left out of the document entirely — by path, or by the
    * plugin that owns it.
    *
@@ -602,6 +587,21 @@ export class OpenApiGenerator {
     return { schema: { ...declared, ...additions }, derived: true };
   }
 
+  /**
+   * Derives an operation's security requirement from the guards on its route.
+   *
+   * Returns a spreadable fragment rather than a value so the caller can splice
+   * it in without a second `undefined` check: `{}` contributes no `security`
+   * key at all, which is what lets the document-level default apply.
+   *
+   * `authenticated: true` wins over `false` when both are present, because
+   * that is what the middleware chain does — `publicRoute()` only calls
+   * `next()`, so a route carrying it alongside `requireAuth()` still rejects
+   * an anonymous caller.
+   *
+   * @param route - The route being documented
+   * @returns `{ security }` when a requirement was derived, else `{}`
+   */
   #deriveSecurity(route: RouteInfo): { security?: readonly SecurityRequirement[] } {
     const derive = this.#options.deriveSecurity;
     if (derive === undefined) return {};

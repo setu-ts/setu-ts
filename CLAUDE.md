@@ -3136,8 +3136,64 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Six negative controls were each observed failing and reverted. The first records an honest nuance:
   swapping `Symbol.for` for `Symbol()` fails only the cross-copy unit test, because both plugins
   share one `common` instance in-process, so the integration test would have passed either way —
-  which is precisely why that unit test exists. Developed in an isolated worktree, in parallel with
-  M70l) — complete (PR pending)
+  which is precisely why that unit test exists. **Verification and code review then found five more
+  defects, and the first is the milestone's own headline claim being false in the case its other
+  deliverable creates.** Generated output does NOT satisfy `deno fmt` in general — only for the two
+  committed sample documents. A multi-line object type was emitted at whatever indentation its use
+  site happened to sit at, so an INLINE (non-`$ref`) schema produced `body: {` followed by members
+  at the wrong depth, and `deno fmt --check` rejected the file. Both existing fixtures name every
+  schema through `$ref`, which is exactly why neither could show it — and X11-5 makes the broken
+  case the COMMON one, since a derived schema used once is not hoisted into `components` and
+  therefore arrives inline. Measured across all three positions that render a type: a request body,
+  a parameter, and a success response. The response is the one that settles the fix, because the
+  SAME rendered string is written at TWO indentation levels (the `Api` signature and the
+  `client.request<…>` argument), so threading a depth cannot be correct for it. Everything
+  multi-line is therefore hoisted into an exported alias — which `getErrorArms` already did for
+  error bodies, under a comment naming X11-9, so the technique was right and applied to one of four
+  sites. `hoistMultiline` now owns that rule for all four and emission is ONE block, since splitting
+  it per source is what let three of them drift from the fourth. A third committed fixture generated
+  from an inline-schema document puts the case under the repo's own `fmt:check` and `check` gates
+  permanently, which the deleted `fmt.exclude` entries alone could not do — they cover whatever
+  fixtures exist, and neither existing one had the shape.
+
+  Also fixed: the plan mandated a `@ts-expect-error` control proving a generated guard narrows to a
+  PRECISE body type and it was never written, so an over-wide emitted arm would have satisfied every
+  runtime assertion in the file (the directive is self-validating — an unused one is a compile
+  error). Two JSDoc blocks were left describing the WRONG function, because the milestone's own
+  insertions stacked a new block on top of an existing one: `toPascalCase` and `#deriveSecurity`
+  were undocumented while their prose sat above `isStructuralShape` and `#isExcluded`.
+  `SchemaNodeHook` was pinned by NOTHING but the README exports-table drift check — removing it left
+  the whole suite AND `deno check` green — so both changed barrels now carry compile-time assertions
+  declared against the barrel rather than the concrete module. And three doc sites promised that
+  `deriveRequestSchemas: false` "reproduces the previous document exactly", which is false and was
+  measured so: owner exclusion, the `operationId` format and schema deduplication are all
+  unconditional, so with the flag off `/health` is still dropped and the id is still
+  `post-orders-by-id`. `PUBLIC_API.md`'s CORS section had not been touched at all — it still
+  documented `Access-Control-Allow-Headers` as emitted "when configured", the precise inverse of the
+  new default, and mentioned neither the echo nor the mandatory `Vary` — and the CHANGELOG recorded
+  the two default changes under **Added** with no breaking marker, so the entry that silently
+  removes `getHealth`/`getLive`/`getReady`/`getMetrics` from every regenerated client never said a
+  call site would stop compiling.
+
+  **The end-to-end loop the register describes also surfaced a defect in nobody's diff.** Driving a
+  real app's own `/openapi.json` through the real generator and then performing the write through
+  the generated client — 200, with the validated body round-tripping, where the register recorded a
+  400 — required reading the validated body, and the documented way to do that does not work.
+  `validateBody` stores under `validated:${target}`, while `packages/validation-plugin`'s README,
+  its module JSDoc (what jsr.io renders as the package page), `ARCHITECTURE.md` and five
+  `PUBLIC_API.md` examples all said `validatedBody`/`validatedQuery`/`validatedParams` — so a route
+  following any of them received `undefined` and answered with an empty body, with validation itself
+  working and nothing failing loudly. 11 sites corrected, the released key untouched; every test in
+  the package already used the real key, which is precisely why no gate could see it.
+
+  Two things are recorded rather than fixed. The plan's `exclude-owners.test.ts` was folded into
+  `derive-request-schemas.test.ts`, with all three of its assertions intact. And an object-schema
+  QUERY parameter emits source that does not compile (`TS2322` — `ClientRequest.query` accepts no
+  object), which predates this milestone and is unchanged by it: the generator already refuses
+  `in: 'cookie'` and a path/template mismatch by name, so refusing this one belongs with them, but
+  it is not an X11 row and is left unowned rather than quietly widened into scope.
+
+  Developed in an isolated worktree, in parallel with M70l) — complete (PR pending)
 - **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
   `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
   CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per
