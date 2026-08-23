@@ -239,3 +239,42 @@ describe('StoragePlugin indicator — the lifecycle signal (M70c)', () => {
     expect(afterClose.data).toEqual({ provider: 'memory', reachable: false });
   });
 });
+
+describe('StoragePlugin — the local provider refuses to start unwritable (X8-9)', () => {
+  /** A file system that can be read but not written, as Deno's `--allow-read`-only grant produces. */
+  function readOnlyFs(): import('@setu-ts/common').IFileSystem {
+    const denied = (path: string) =>
+      Promise.reject(new Error(`PermissionDenied: Requires write access to "${path}"`));
+    return {
+      stat: () => Promise.resolve({ size: 0 }),
+      mkdir: (path: string) => denied(path),
+      writeFile: (path: string) => denied(path),
+      rm: () => Promise.resolve(),
+    } as unknown as import('@setu-ts/common').IFileSystem;
+  }
+
+  it('should fail registration naming the root and the Deno flag', async () => {
+    // The plugin threads `runtime.platform()` into the provider as a THUNK, so
+    // this is also what proves that wiring exists: without it the message would
+    // carry no flag even on Deno.
+    const { ctx } = createFakeContext({}, false, readOnlyFs(), 'deno');
+    const plugin = StoragePlugin({ provider: 'local', options: { rootDir: '/var/media' } });
+
+    await expect(plugin.register!(ctx)).rejects.toThrow("cannot write to '/var/media'");
+    await expect(plugin.register!(ctx)).rejects.toThrow('--allow-write');
+  });
+
+  it('should not name the Deno flag on another runtime', async () => {
+    // On Node the same failure is an ordinary file permission, which that flag
+    // does not address.
+    const { ctx } = createFakeContext({}, false, readOnlyFs(), 'node');
+    const plugin = StoragePlugin({ provider: 'local', options: { rootDir: '/var/media' } });
+
+    const error = await Promise.resolve(plugin.register!(ctx)).then(
+      () => null,
+      (raised: unknown) => raised as Error,
+    );
+    expect(error?.message).toContain("cannot write to '/var/media'");
+    expect(error?.message).not.toContain('--allow-write');
+  });
+});
