@@ -79,7 +79,7 @@ class TypeNameRegistry {
     const previous = this.#claimed.get(name);
     if (previous !== undefined) {
       throw new OpenApiCodegenError(
-        `Duplicate generated type name '${name}': '${previous}' and '${origin}'`,
+        `Duplicate generated name '${name}': '${previous}' and '${origin}'`,
       );
     }
     this.#claimed.set(name, origin);
@@ -870,7 +870,12 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
         `error responses of operation '${entry.operationId}'`,
       )
       : '',
-    errorGuardName: `is${sanitizeTypeName(entry.operationId)}Error`,
+    errorGuardName: errorArms.length > 0
+      ? types.claim(
+        `is${sanitizeTypeName(entry.operationId)}Error`,
+        `the error guard of operation '${entry.operationId}'`,
+      )
+      : `is${sanitizeTypeName(entry.operationId)}Error`,
   };
 }
 
@@ -998,7 +1003,24 @@ export function generateOpenApiClient(
   // line depends on whether any operation declares an error response, and a
   // component name must win a clash against a generated one.
   const types = new TypeNameRegistry();
+  // The emitted import lines BIND these identifiers, so a component schema
+  // named `ClientResponse` produced both an import and an `export type` of the
+  // same name and the generated file did not compile. Reserved before anything
+  // else is claimed, so the diagnostic names the collision instead.
+  // `HttpClientError` is reserved unconditionally although its import is
+  // conditional: the guard names that force it are claimed during shape
+  // building, below, so whether it is needed is not yet known here — and the
+  // name belongs to the SDK either way.
+  for (const imported of ['ClientResponse', 'IHttpClient', 'HttpClientError']) {
+    types.claim(imported, 'an identifier imported from @setu-ts/sdk');
+  }
   const apiTypeName = types.claim(sanitizeTypeName(opts.apiTypeName), 'the `apiTypeName` option');
+  // The factory is a module-level VALUE, and a generated error guard is too, so
+  // both share this namespace: `factoryName: 'isGetUserError'` beside an
+  // operation deriving that guard emitted two functions of one name.
+  // Claimed VERBATIM: the emitter writes `opts.factoryName` as given, so
+  // sanitizing here would reserve `CreateApi` while emitting `createApi`.
+  types.claim(opts.factoryName, 'the `factoryName` option');
 
   const componentLines: string[] = [];
   if (schemas) {

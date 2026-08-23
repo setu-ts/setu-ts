@@ -286,6 +286,54 @@ describe('review findings (PR #181)', () => {
     expect(doc.paths?.['/users/by-id']?.get?.operationId).toBe('get-users-by-id-2');
   });
 
+  it('keeps every operationId unique when a suffix meets a natural base id', () => {
+    // Counting per base is not enough: `/users/by-id-2` derives the same id the
+    // suffix allocator hands `/users/by-id`.
+    const doc = new OpenApiGenerator({ title: 'T', version: '1' }).generate([
+      route('GET', '/users/:id'),
+      route('GET', '/users/by-id'),
+      route('GET', '/users/by-id-2'),
+    ]);
+    const ids = [
+      doc.paths?.['/users/{id}']?.get?.operationId,
+      doc.paths?.['/users/by-id']?.get?.operationId,
+      doc.paths?.['/users/by-id-2']?.get?.operationId,
+    ];
+
+    expect(ids).toEqual(['get-users-by-id', 'get-users-by-id-2', 'get-users-by-id-2-2']);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it("does not carry one document's hoisted components into the next", () => {
+    // The plugin builds a fresh generator per spec, so only a direct consumer
+    // of this exported class reaches this — which is why it went unnoticed.
+    const generator = new OpenApiGenerator({ title: 'T', version: '1' });
+    const alpha = z.object({ alpha: z.string() });
+    const beta = z.object({ beta: z.string() });
+
+    generator.generate([
+      route('POST', '/a1', { middleware: [branded('body', alpha)] }),
+      route('POST', '/a2', { middleware: [branded('body', alpha)] }),
+    ]);
+    const second = generator.generate([
+      route('POST', '/b1', { middleware: [branded('body', beta)] }),
+      route('POST', '/b2', { middleware: [branded('body', beta)] }),
+    ]);
+
+    expect(Object.keys(second.components?.schemas ?? {})).toEqual(['PostB1Body']);
+  });
+
+  it('still keeps an addSchema registration across generate calls', () => {
+    const generator = new OpenApiGenerator({ title: 'T', version: '1' });
+    generator.addSchema('Kept', z.object({ k: z.string() }));
+
+    const first = generator.generate([route('GET', '/x')]);
+    const second = generator.generate([route('GET', '/y')]);
+
+    expect(Object.keys(first.components?.schemas ?? {})).toEqual(['Kept']);
+    expect(Object.keys(second.components?.schemas ?? {})).toEqual(['Kept']);
+  });
+
   it('does not let the counting pass consume operation ids', () => {
     // The counting pass runs the same derivation, so claiming there would
     // suffix every id in a document that has no collision at all.

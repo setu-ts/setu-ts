@@ -313,9 +313,20 @@ export class OpenApiGenerator {
   /** Plugin owners whose routes never reach the document. */
   readonly #excludedOwners: ReadonlySet<string>;
   /** Derived operationIds already claimed in this `generate` call. */
-  readonly #operationIds = new Map<string, number>();
+  readonly #operationIds = new Set<string>();
   readonly #schemaMap: Map<unknown, string>;
   readonly #componentSchemas: Map<string, OpenApiSchemaObject>;
+  /**
+   * Schemas registered through `addSchema`, as opposed to hoisted by a
+   * `generate` call.
+   *
+   * `generate` must leave these alone and drop everything else: without the
+   * split, a second call on the same instance emitted the FIRST document's
+   * components (verified). The plugin builds a fresh generator per spec, so
+   * only a direct consumer of this exported class could reach that — which is
+   * exactly why it went unnoticed.
+   */
+  readonly #registered = new Set<unknown>();
   /**
    * Transformer WITHOUT the dedup hook, used where the caller reads the
    * transformed object's own `properties` (parameter destructuring). A `$ref`
@@ -376,6 +387,7 @@ export class OpenApiGenerator {
    * @param schema - The schema to register
    */
   addSchema(name: string, schema: unknown): void {
+    this.#registered.add(schema);
     // Transformed under the reentrancy guard, so the hook does not answer this
     // node with a `$ref` to the component it is in the middle of building.
     this.#hoisting.add(schema);
@@ -392,8 +404,16 @@ export class OpenApiGenerator {
    * @returns The complete OpenAPI 3.1 document
    */
   generate(routes: readonly RouteInfo[]): OpenApiDocument {
-    // Do NOT clear #schemaMap - pre-registered schemas from addSchema must persist
-    // so #resolveSchema finds them by object identity and emits the contributor's chosen name
+    // Pre-registered schemas from `addSchema` must persist, so `#resolveSchema`
+    // finds them by object identity and emits the contributor's chosen name.
+    // Everything hoisted by a PREVIOUS `generate` call must not: it belongs to
+    // that document, and keeping it both leaked those components into this one
+    // and let names be allocated around them.
+    for (const [schema, name] of [...this.#schemaMap]) {
+      if (this.#registered.has(schema)) continue;
+      this.#schemaMap.delete(schema);
+      this.#componentSchemas.delete(name);
+    }
 
     // Pass 1 counts how many sites reference each schema identity, INCLUDING
     // nested ones, because the counting hook is consulted at every node the
@@ -657,9 +677,19 @@ export class OpenApiGenerator {
     // name, so a repeat is suffixed. Only the emit pass claims a name — the
     // counting pass runs the same code and would otherwise consume every id.
     if (this.#pass === 'count') return base;
-    const claimed = this.#operationIds.get(base) ?? 0;
-    this.#operationIds.set(base, claimed + 1);
-    return claimed === 0 ? base : `${base}-${claimed + 1}`;
+    // Counting per base is not enough: a suffixed candidate can collide with
+    // another route's NATURAL base id. `/users/:id`, `/users/by-id` and
+    // `/users/by-id-2` derive `get-users-by-id`, `get-users-by-id-2` and
+    // `get-users-by-id-2` — a duplicate. Every emitted id is therefore claimed
+    // in one set and a candidate advances until it is unclaimed.
+    let candidate = base;
+    let n = 1;
+    while (this.#operationIds.has(candidate)) {
+      n += 1;
+      candidate = `${base}-${n}`;
+    }
+    this.#operationIds.add(candidate);
+    return candidate;
   }
 
   /**
