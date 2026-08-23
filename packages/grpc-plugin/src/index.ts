@@ -1,10 +1,12 @@
 /**
  * @module
  *
- * gRPC plugin for Setu-TS — enables co-serving of gRPC, Connect, and
- * gRPC-Web protocols on the same port as ordinary Hono routes. The plugin
- * registers an {@linkcode IGrpcService} under `CAPABILITIES.GRPC` and installs
- * a fetch handler into the HTTP adapter's RPC interceptor seam.
+ * gRPC plugin for Setu-TS — enables co-serving of Connect and gRPC-Web
+ * protocols (native `application/grpc` is refused with a Trailers-Only
+ * `UNIMPLEMENTED`) on the same port as ordinary Hono routes. The plugin
+ * registers an {@linkcode IGrpcService} under `CAPABILITIES.GRPC`; since M70a
+ * the kernel dispatches RPC from its terminal handler after the middleware
+ * pipeline, so no HTTP-adapter interceptor is involved.
  *
  * @example
  * ```typescript
@@ -17,10 +19,11 @@
  *   plugins: [RuntimePlugin(), GrpcPlugin()],
  * });
  *
- * const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
- * // Add service definitions and implementations here...
- *
  * await app.start({ port: 3000 });
+ *
+ * // The plugin registers CAPABILITIES.GRPC during start(), so resolve it
+ * // only AFTER start() resolves — before that, the capability does not exist.
+ * const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
  * ```
  */
 

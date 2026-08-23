@@ -28,11 +28,20 @@ export type ResolverMap = Record<string, TypeResolverMap | GraphqlScalarResolver
  * `Subscription` root type — to a {@linkcode SubscriptionResolver} carrying the
  * event source.
  *
- * @since 0.3.0
+ * The `FieldResolver` binding is instantiated at `never` (X6-4): a map stores
+ * resolvers it never calls itself — graphql does, with values only it knows —
+ * so the entry type must accept ANY resolver instantiation. Under
+ * `strictFunctionTypes` the bare all-`unknown` `FieldResolver` cannot: a
+ * narrowly annotated resolver (`FieldResolver<IssueRow,
+ * DefaultGraphqlContext, { id: string }>`) has narrower parameters, which is a
+ * contravariance error against `unknown`. With `never` parameters every
+ * resolver assigns — target parameter `never` is assignable to any source
+ * parameter — while nothing weakens inside the stored function: the map hands
+ * entries to graphql untouched.
  */
 export type TypeResolverMap = Record<
   string,
-  | FieldResolver
+  | FieldResolver<never, never, never>
   | SubscriptionResolver
   | (() => unknown) // __resolveType for interfaces
 >;
