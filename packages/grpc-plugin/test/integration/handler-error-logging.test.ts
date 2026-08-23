@@ -77,7 +77,7 @@ function loggerPlugin(logger: ILogger): IPlugin {
 /** Drives a real unary Echo RPC and returns the response. */
 function driveEcho(app: ReturnType<typeof createApplication>): Promise<Response> {
   return app.fetch(
-    new Request('http://localhost:0/grpc/example.EchoService/Echo', {
+    new Request('http://localhost:0/example.EchoService/Echo', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: 'x' }),

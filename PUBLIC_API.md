@@ -151,6 +151,8 @@ No decorators. No DI. No reflection. Just a router and a runtime.
 
 The entry point to the framework.
 
+A capability is not resolvable from `app.services` until `start()` has run.
+
 ### Signature
 
 ```typescript
@@ -8516,41 +8518,66 @@ subset accepted by the generator. They are intentionally different from the open
 gRPC/Connect co-serving on the same port as ordinary Hono routes. Registered under
 `CAPABILITIES.GRPC`. Added in Milestone 49.
 
+> `createApplication()` returns an application descriptor; there is no `new Application()` /
+> `app.use()` API. Plugins register during `app.start()`, so **do not resolve `CAPABILITIES.GRPC`
+> before `start()` resolves** — the capability does not exist yet and the lookup throws. Pass
+> services through the `services` option (below) or call `addService` after `start()`.
+
 ### Registration
 
 ```typescript
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
 
-app.register(GrpcPlugin({
-  basePath: '/grpc', // default
+GrpcPlugin({
+  basePath: '/', // default — the root
   reflection: true, // default — grpc.reflection.v1.ServerReflection
   health: true, // default — grpc.health.v1.Health (bridged to M20)
   services: [], // initial service definitions
   connectModule: undefined, // inject for testing; otherwise lazy-loaded
   interceptors: [], // default — application Connect interceptors
-}));
+});
 ```
 
 ### Usage
 
-```typescript
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IGrpcService } from '@setu-ts/common';
+Pass services through the plugin's `services` option at construction:
 
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+import { MyServiceDefinition, myServiceImpl } from './my-service.ts';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    GrpcPlugin({
+      services: [{ definition: MyServiceDefinition, implementation: myServiceImpl }],
+    }),
+  ],
+});
+
+await app.start({ port: 3000 });
+
+// AFTER start(): late registration through the resolved capability.
 const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
-grpc.addService(MyServiceDefinition, myServiceImpl);
+grpc.addService(AnotherDefinition, anotherImpl);
 ```
 
 ### Options
 
 | Option          | Type                                     | Default | Description                                                                                                                                                                                                                                                                  |
 | --------------- | ---------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.                                                                                                                                                                                   |
+| `basePath`      | `string`                                 | `/`     | URL prefix that marks a request as RPC. Defaults to the root so clients reach procedures without a path prefix; detection stays segment-aware, so prefix-adjacent routes (`/grpcfoo`) are untouched. Requests outside this prefix fall through to Hono.                      |
 | `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch.                                                                                                                                                                        |
 | `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                                                                                                                                                                                           |
-| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                                                                                                                                                                                                     |
+| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup. The recommended registration path: the capability does not exist before `start()`.                                                                                                                                                  |
 | `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.                                                                                                                                                                                 |
 | `interceptors`  | `readonly unknown[]`                     | `[]`    | Application Connect interceptors, forwarded to Connect router construction (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a handler throw is logged before an application interceptor observes it. Absent: none installed. |
+
+> Native gRPC-binary requests (`application/grpc`, `+proto`, `+json`) are refused with a
+> Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`). No runtime the plugin loads on exposes the
+> HTTP/2 trailers the native protocol requires. Connect and gRPC-Web are fully supported.
 
 ### Exports
 
@@ -8570,10 +8597,11 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 
 ### Notes
 
-- **Co-serves with Hono.** gRPC requests are detected by path prefix only (`/grpc` by default).
-  Content-type sniffing is deliberately not used because Connect's real unary content types include
-  `application/json` and `application/proto`. A non-prefixed path returns `null` and falls through
-  to the Hono pipeline unchanged.
+- **Co-serves with Hono.** gRPC requests are detected by path prefix only (`basePath`, which
+  defaults to `/` — the root, so clients reach procedures at the bare method path). Content-type
+  sniffing is deliberately not used because Connect's real unary content types include
+  `application/json` and `application/proto`. A path outside `basePath` returns `null` and falls
+  through to the Hono pipeline unchanged.
 - **The middleware pipeline runs first.** Since M70a the kernel dispatches gRPC from its terminal
   handler, after the pipeline and **before** route matching — so auth, metrics, security headers and
   the shutdown drain apply to RPC exactly as to ordinary routes, a draining application answers
@@ -8596,8 +8624,11 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
   body. Cloning every request before mapping would tax the whole application to serve the gRPC
   minority. Trailers do not survive the round trip — M49 already records that native gRPC-binary
   trailers work on no runtime this plugin runs on, so no working path regresses.
-- **`inject()` does not reach the interceptor.** The kernel's `inject()` bypasses the HTTP adapter
-  entirely. RPC must be exercised via `app.fetch(webRequest)` in tests.
+- **`inject()` CAN exercise RPC.** Since M70a the kernel dispatches gRPC from its terminal handler,
+  and `inject()` attaches the undisturbed web `Request` as `IRequest.raw` before running the
+  pipeline, so an injected request reaches RPC dispatch exactly as a socket request does — the
+  integration suite drives gRPC through `inject()`. The retired adapter interceptor is not involved:
+  no `setRpcHandler` seam is consulted on any path.
 - **Bidi streaming requires HTTP/2.** `grpc.reflection.v1.ServerReflection` is bidi-only. Over a
   real HTTP/1.1 socket, bidi calls fail at the transport. Unary, server-streaming, and
   client-streaming work on every runtime.
@@ -8625,15 +8656,19 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 - **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.1.2`,
   `@bufbuild/protobuf@^2.7.0`, `@bufbuild/protobuf@^2.7.0/wkt`) are loaded on first `register()`.
   Absence throws `GrpcRuntimeLoadError` with the install command.
-- **Optional seam.** If the HTTP adapter does not implement `setRpcHandler?`, the plugin still
-  registers and reports `available: false`; `handleRequest` throws `GrpcUnavailableError` while
-  `createFetchHandler` returns `null` for every request.
-- **gRPC-binary trailers on Deno.** Native gRPC-binary protocol (`application/grpc`) relies on
-  HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling. Deno's
-  `Deno.serve` does not expose HTTP/2 trailers, so native gRPC-binary responses may not work
-  correctly on Deno. This is a **platform limitation**, not a plugin bug. Connect-JSON and gRPC-Web
-  protocols work on all runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer
-  support.
+- **No adapter seam.** Since M70a the kernel dispatches gRPC from its terminal handler after the
+  middleware pipeline; dispatch depends on no adapter capability, so the plugin serves on every
+  runtime and `IGrpcService.available` is always `true`. The retired `setRpcHandler?` member is
+  consulted by nothing, and `GrpcUnavailableError` remains exported only as published surface —
+  nothing throws it.
+- **Native gRPC-binary is refused by design.** Native gRPC (`application/grpc`, `+proto`, `+json`)
+  relies on HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling, and
+  no fetch-based server runtime exposes them to a `Response` — including Deno's `Deno.serve`,
+  Node.js, and Bun. Every native request is therefore answered with a **Trailers-Only
+  `UNIMPLEMENTED`** (`HTTP 200`, `content-type: application/grpc`, `grpc-status: 12`) instead of
+  half-serving the protocol. This is a deliberate design decision, not a platform bug. Connect-JSON
+  and gRPC-Web work completely on all runtimes; point native gRPC clients at a gRPC-Web-capable
+  proxy or switch them to Connect (see the CHANGELOG migration notes).
 
 ---
 
@@ -9059,38 +9094,46 @@ schema definition with resolver maps and pre-built schemas. Includes media-type 
 
 ### Usage
 
+Pass the plugin to `createApplication({ plugins: [...] })` — there is no `new Application()` /
+`app.use()` API:
+
 ```typescript
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IGraphqlService } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
 
-// Schema-first
-app.use(
-  GraphqlPlugin({
-    typeDefs: `
-      type Query {
-        hello(name: String!): String
-      }
-    `,
-    resolvers: {
-      Query: {
-        hello: (_, { name }) => `Hello, ${name}!`,
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    // Schema-first
+    GraphqlPlugin({
+      typeDefs: `
+        type Query {
+          hello(name: String!): String
+        }
+      `,
+      resolvers: {
+        Query: {
+          hello: (_, { name }) => `Hello, ${name}!`,
+        },
       },
-    },
-  }),
-);
+    }),
+  ],
+});
 
-// Code-first
+await app.start({ port: 3000 });
+
+// Resolve the service AFTER start() — plugins register during start().
+const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+```
+
+Code-first differs only in passing a pre-built schema instead of `typeDefs` + `resolvers`:
+
+```typescript
 import { buildSchema } from 'npm:graphql@^16';
 const schema = buildSchema(`type Query { hello: String }`);
 
-app.use(
-  GraphqlPlugin({
-    schema,
-  }),
-);
-
-// Resolve the service
-const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+GraphqlPlugin({ schema });
 ```
 
 ### Options
@@ -9137,42 +9180,44 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 ### Exports
 
-| Export                        | Kind     | Purpose                                                                   |
-| ----------------------------- | -------- | ------------------------------------------------------------------------- |
-| `GraphqlPlugin`               | function | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL` |
-| `GraphqlService`              | class    | The `IGraphqlService` implementation; exported for testing                |
-| `adaptGraphqlModule`          | function | Structural adaptation of graphql module into internal runtime port        |
-| `graphiqlHtml`                | function | Generates GraphiQL UI HTML page                                           |
-| `createDepthLimitRule`        | function | Creates a validation rule for query depth limiting                        |
-| `GraphqlSchemaError`          | class    | Thrown when schema construction or resolver attachment fails              |
-| `GraphqlRuntimeLoadError`     | class    | Thrown when graphql runtime cannot be loaded                              |
-| `loadGraphqlModule`           | function | Loads `npm:graphql@^16` through a real dynamic import                     |
-| `GraphqlPluginOptions`        | type     | The factory parameter shape (union of the two arms)                       |
-| `GraphqlSchemaFirstOptions`   | type     | The schema-first arm of that union                                        |
-| `GraphqlCodeFirstOptions`     | type     | The code-first arm of that union                                          |
-| `ResolverMap`                 | type     | Resolver map for schema-first mode                                        |
-| `TypeResolverMap`             | type     | The resolver entries for one object or interface type                     |
-| `FieldResolver`               | type     | Field resolver function type                                              |
-| `SubscriptionResolver`        | type     | A subscription field's `{ subscribe, resolve? }` pair                     |
-| `GraphqlScalarResolver`       | type     | Custom scalar `serialize`/`parseValue`/`parseLiteral` methods             |
-| `GraphqlSubscriptionsOptions` | type     | The `subscriptions` option (WebSocket and SSE arms)                       |
-| `GraphqlWsTransportOptions`   | type     | WebSocket transport options, including `onConnect`                        |
-| `GraphqlSseTransportOptions`  | type     | SSE transport options                                                     |
-| `GraphqlApqOptions`           | type     | Automatic Persisted Queries options                                       |
-| `ApqResolver`                 | class    | Verifies and resolves persisted-query hashes                              |
-| `IApqResolver`                | type     | The port the transports consume; implemented by `ApqResolver`             |
-| `ApqResolveResult`            | type     | The resolved query, or a refusal carrying its code                        |
-| `extractPersistedQuery`       | function | Reads `{ version, sha256Hash }` from a request's `extensions`             |
-| `persistedQueryHash`          | function | SHA-256 hex of a query, over an injected `SubtleCrypto`                   |
-| `encodeSseEvent`              | function | Encodes a `next` SSE frame                                                |
-| `encodeSseComplete`           | function | Encodes the `complete` SSE frame, empty `data:` field included            |
-| `encodeSseComment`            | function | Encodes a `:keep-alive` comment frame                                     |
-| `GRAPHQL_TRANSPORT_WS`        | const    | The `'graphql-transport-ws'` subprotocol identifier                       |
-| `GraphqlScalarTypeLike`       | type     | Structural constraint for a custom scalar type                            |
-| `GraphqlSchemaLike`           | type     | Structural constraint for pre-built schemas                               |
-| `GraphqlModuleLike`           | type     | Structural constraint for injected graphql modules                        |
-| `DefaultGraphqlContext`       | type     | Default context shape passed to resolvers                                 |
-| `GraphqlContextInput`         | type     | Input type for custom context builder                                     |
+| Export                        | Kind      | Purpose                                                                                                                                        |
+| ----------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GraphqlPlugin`               | function  | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL`                                                                      |
+| `GraphqlService`              | class     | The `IGraphqlService` implementation; exported for testing                                                                                     |
+| `adaptGraphqlModule`          | function  | Structural adaptation of graphql module into internal runtime port                                                                             |
+| `graphiqlHtml`                | function  | Generates GraphiQL UI HTML page                                                                                                                |
+| `createDepthLimitRule`        | function  | Creates a validation rule for query depth limiting                                                                                             |
+| `GraphqlSchemaError`          | class     | Thrown when schema construction or resolver attachment fails                                                                                   |
+| `GraphqlRuntimeLoadError`     | class     | Thrown when graphql runtime cannot be loaded                                                                                                   |
+| `loadGraphqlModule`           | function  | Loads `npm:graphql@^16` through a real dynamic import                                                                                          |
+| `GraphqlPluginOptions`        | type      | The factory parameter shape (union of the two arms)                                                                                            |
+| `GraphqlSchemaFirstOptions`   | type      | The schema-first arm of that union                                                                                                             |
+| `GraphqlCodeFirstOptions`     | type      | The code-first arm of that union                                                                                                               |
+| `ResolverMap`                 | type      | Resolver map for schema-first mode                                                                                                             |
+| `TypeResolverMap`             | type      | The resolver entries for one object or interface type                                                                                          |
+| `FieldResolver`               | type      | Field resolver function type                                                                                                                   |
+| `AnyFieldResolver`            | type      | The bivariant entry type a `TypeResolverMap` field holds — accepts a narrowly annotated resolver AND contextually types an unannotated one     |
+| `AnySubscriptionResolver`     | interface | The bivariant entry type a `TypeResolverMap` subscription field holds — same rule as `AnyFieldResolver`, for `{ subscribe, resolve? }` entries |
+| `SubscriptionResolver`        | type      | A subscription field's `{ subscribe, resolve? }` pair                                                                                          |
+| `GraphqlScalarResolver`       | type      | Custom scalar `serialize`/`parseValue`/`parseLiteral` methods                                                                                  |
+| `GraphqlSubscriptionsOptions` | type      | The `subscriptions` option (WebSocket and SSE arms)                                                                                            |
+| `GraphqlWsTransportOptions`   | type      | WebSocket transport options, including `onConnect`                                                                                             |
+| `GraphqlSseTransportOptions`  | type      | SSE transport options                                                                                                                          |
+| `GraphqlApqOptions`           | type      | Automatic Persisted Queries options                                                                                                            |
+| `ApqResolver`                 | class     | Verifies and resolves persisted-query hashes                                                                                                   |
+| `IApqResolver`                | type      | The port the transports consume; implemented by `ApqResolver`                                                                                  |
+| `ApqResolveResult`            | type      | The resolved query, or a refusal carrying its code                                                                                             |
+| `extractPersistedQuery`       | function  | Reads `{ version, sha256Hash }` from a request's `extensions`                                                                                  |
+| `persistedQueryHash`          | function  | SHA-256 hex of a query, over an injected `SubtleCrypto`                                                                                        |
+| `encodeSseEvent`              | function  | Encodes a `next` SSE frame                                                                                                                     |
+| `encodeSseComplete`           | function  | Encodes the `complete` SSE frame, empty `data:` field included                                                                                 |
+| `encodeSseComment`            | function  | Encodes a `:keep-alive` comment frame                                                                                                          |
+| `GRAPHQL_TRANSPORT_WS`        | const     | The `'graphql-transport-ws'` subprotocol identifier                                                                                            |
+| `GraphqlScalarTypeLike`       | type      | Structural constraint for a custom scalar type                                                                                                 |
+| `GraphqlSchemaLike`           | type      | Structural constraint for pre-built schemas                                                                                                    |
+| `GraphqlModuleLike`           | type      | Structural constraint for injected graphql modules                                                                                             |
+| `DefaultGraphqlContext`       | type      | Default context shape passed to resolvers                                                                                                      |
+| `GraphqlContextInput`         | type      | Input type for custom context builder                                                                                                          |
 
 > `GraphqlRuntime` and the structural graphql facades are **not** exported. They are an internal
 > port.
@@ -9181,10 +9226,16 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 - **Two schema construction arms.** Schema-first (`typeDefs` + `resolvers`) and code-first
   (`schema`) are mutually exclusive; supplying both is a compile error.
-- **Resolver context.** Without `buildContext`, resolvers receive a `DefaultGraphqlContext` of
-  `{ services, requestContext, user, tenant }` — `services` is the live `IServiceRegistry`, so a
-  resolver reaches any other capability through it, and `user`/`tenant` are whatever the auth and
-  multi-tenancy middleware published on the request. Supplying `buildContext` replaces that object
+- **Resolver context.** Without `buildContext`, resolvers receive a `DefaultGraphqlContext` whose
+  shape is per-transport. Over **HTTP**: `{ services, requestContext, user?, tenant? }` — `services`
+  is the live `IServiceRegistry`, so a resolver reaches any other capability through it, and
+  `user`/`tenant` are whatever the auth and multi-tenancy middleware published on the request. Over
+  **WebSocket**: `{ services, connection }` — `requestContext` is **absent** (not
+  `undefined`-valued): the runtime closes the upgrade request once the handshake response is
+  returned, so a synthesized one would be dead by the time a resolver runs; that is why the member
+  is typed optional. The upgrade request's headers and query live on
+  `GraphqlConnectionInfo.headers`/`.query`, and identity set by an `onConnect` hook via
+  `info.data.set('user', …)` surfaces as `ctx.user`. Supplying `buildContext` replaces that object
   wholesale.
 - **Media-type negotiation and the status watershed.** Responds with
   `application/graphql-response+json` when the client requests it, otherwise `application/json` —
@@ -9195,8 +9246,22 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
   in the body, because a client predating the newer media type reads a non-200 as a network failure
   and never reads the `errors` array. Exactly three cases keep their status under `application/json`
   — an unsupported request content type (`415`), a malformed JSON body (`400`), and a mutation over
-  `GET` (`405`) — because none of them is a GraphQL result. The status is decided from the outcome
-  alone and never from the response body, so a `formatError` hook cannot change it.
+  `GET` (`405`) — because none of them is a GraphQL result. An **APQ refusal** follows the watershed
+  too: under `application/json` it answers `200` with `PersistedQueryNotFound` in the body (it is
+  exactly the error a client must read and retry), while under `graphql-response` it carries the
+  resolver's own status. Batching remains refused before per-element resolution, so an APQ miss
+  inside a batch under `graphql-response` surfaces as `400 BATCHING_NOT_SUPPORTED`. The status is
+  decided from the outcome alone and never from the response body, so a `formatError` hook cannot
+  change it.
+- **Two resolver authoring styles, both supported.** `FieldResolver<TSource, TContext, TArgs>` is
+  generic with `unknown` defaults, so a resolver may be **annotated** narrowly
+  (`FieldResolver<IssueRow, DefaultGraphqlContext, { id: string }>`) and still assign to a
+  `ResolverMap`. A resolver written **unannotated** — `(source, args) => …`, the ordinary
+  schema-first shape — takes its parameter types contextually from `AnyFieldResolver`, so `args` is
+  `Record<string, unknown>` rather than `never`. The map entry is bivariant for exactly this reason:
+  a non-bivariant entry can serve one style or the other, never both. Subscription entries follow
+  the same rule through `AnySubscriptionResolver`, so a typed
+  `{ subscribe, resolve: (payload: Book) => … }` assigns too.
 - **An executed operation is always `200`.** A field error that nulls `data` is not a request error,
   so it does not become a `400` even under `graphql-response`.
 - **`405` carries `Allow: POST`.** A mutation sent over `GET` is refused with `METHOD_NOT_ALLOWED`

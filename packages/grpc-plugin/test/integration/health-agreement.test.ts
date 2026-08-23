@@ -55,7 +55,7 @@ describe('gRPC ↔ HTTP health agreement (M70c X7-8)', () => {
 
       // gRPC face: the whole-server Check must agree — NOT_SERVING, not SERVING.
       const check = await running.fetch(
-        new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+        new Request('http://localhost/grpc.health.v1.Health/Check', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ service: '' }),
@@ -76,7 +76,7 @@ describe('gRPC ↔ HTTP health agreement (M70c X7-8)', () => {
       expect(ready.status).toBe(200);
 
       const check = await running.fetch(
-        new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+        new Request('http://localhost/grpc.health.v1.Health/Check', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ service: '' }),

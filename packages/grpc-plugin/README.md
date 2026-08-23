@@ -11,9 +11,12 @@ drain as every other route. No adapter seam is involved: `GrpcService.available`
 
 - Supports all four RPC kinds: unary, server-streaming, client-streaming, and bidi (HTTP/2 required)
 - Connect protocol (`application/connect+json`, `application/connect+proto`)
-- gRPC protocol (`application/grpc+json`, `application/grpc+proto`)
 - gRPC-Web protocol (`application/grpc-web+json`, `application/grpc-web+proto`)
-- Server reflection (v1, default ON) for grpcurl, grpcui, and other tools
+- Native gRPC-binary requests (`application/grpc`, `application/grpc+proto`,
+  `application/grpc+json`) are refused with a Trailers-Only `UNIMPLEMENTED` response — see
+  [Limitations](#limitations)
+- Server reflection (v1, default ON), reachable over Connect and gRPC-Web — **not** from stock
+  `grpcurl`/`grpcui`, which speak native `application/grpc` (see Limitations)
 - gRPC Health v1 service bridged to M20 health plugin (default ON)
 - Zero runtime dependencies in the source — Connect-ES is loaded lazily behind a structural facade
 - Module loading works on Node, Deno, Bun, and Cloudflare Workers without modification
@@ -32,25 +35,33 @@ npm i @connectrpc/connect @bufbuild/protobuf
 bun add @connectrpc/connect @bufbuild/protobuf
 ```
 
-> **Native gRPC-binary transport is still limited.** This milestone settles _module loading_ on Node
-> and Bun (the `npm:` specifiers now survive JSR's static rewrite). The viability of the native
-> `application/grpc+proto` transport itself — and the default `basePath` reachability — is the
-> subject of M70i (register rows X7-2 / X7-4) and is **not** claimed here.
-
 ## Usage
+
+Pass your services through the plugin's **`services` option**. Plugins register during
+`app.start()`, so `CAPABILITIES.GRPC` does not exist until `start()` resolves — resolving it before
+`start()` throws `No service registered for capability 'grpc'`. (`createApplication()` returns a
+descriptor, not a running application; there is no `new Application()` / `app.use()` API.)
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
-import { CAPABILITIES, type IGrpcService } from '@setu-ts/common';
+import type { GrpcServiceDefinition } from '@setu-ts/grpc-plugin';
+
+// Your generated descriptor + implementation (illustrative stand-ins).
+declare const MyServiceDefinition: GrpcServiceDefinition;
+declare const myServiceImpl: Record<string, unknown>;
 
 const app = createApplication({
-  plugins: [RuntimePlugin(), GrpcPlugin()],
+  plugins: [
+    RuntimePlugin(),
+    GrpcPlugin({
+      services: [
+        { definition: MyServiceDefinition, implementation: myServiceImpl },
+      ],
+    }),
+  ],
 });
-
-const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
-// Add your service definitions and implementations here...
 
 await app.start({ port: 3000 });
 ```
@@ -59,7 +70,9 @@ await app.start({ port: 3000 });
 
 The `GrpcPlugin` accepts optional configuration:
 
-- `basePath`: Base path under which gRPC services are served (defaults to `/grpc`)
+- `basePath`: Base path under which gRPC services are served (defaults to `/` — the root, so a
+  client pointed at `http://host:3000` reaches its procedures without a path prefix). Detection is
+  still segment-aware: with the default, `/grpcfoo` and other prefix-adjacent routes stay yours.
 - `reflection`: Whether to enable server reflection (defaults to `true`)
 - `health`: Whether to enable gRPC Health v1 service (defaults to `true`)
 - `services`: Initial services to register at startup
@@ -130,13 +143,27 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   procedures.
 - **No client SDK**: This plugin only provides server-side gRPC serving. Client-side gRPC calls are
   handled by generated Connect/gRPC client code in the application.
-- **gRPC-binary trailers on Deno**: Native gRPC-binary protocol (`application/grpc`) relies on
-  HTTP/2 response trailers (specifically the `grpc-status` trailer) for proper status signaling.
-  Deno's `Deno.serve` does not expose HTTP/2 trailers, so native gRPC-binary responses may not work
-  correctly on Deno. This is a **platform limitation**, not a plugin bug—the plugin correctly
-  forwards `Response.trailers` when available. Connect-JSON and gRPC-Web protocols work on all
-  runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer support depending on
-  their HTTP/2 implementations.
+- **Native gRPC-binary is refused by design**: requests with a native gRPC content type
+  (`application/grpc`, `application/grpc+proto`, `application/grpc+json`) are answered with a
+  **Trailers-Only `UNIMPLEMENTED`** response — HTTP `200`, `content-type: application/grpc`, and
+  `grpc-status: 12` in the headers. The native wire protocol depends on HTTP/2 trailers for status
+  signaling, and no fetch-based server runtime exposes them to a `Response` (Deno's `Deno.serve`
+  surfaces no trailers; Node's and Bun's fetch handlers do not either). Module loading itself is
+  unaffected — the plugin loads its Connect dependency on every runtime it runs on — but a fetch
+  `Response` carries trailers nowhere, so the protocol cannot be served honestly. Serving half of
+  the protocol — reflection and health resolve, every real call fails with "missing status" — is
+  worse than refusing it cleanly: clients see an explicit, well-formed `UNIMPLEMENTED` instead of an
+  opaque transport error after a successful handshake. Measured with real `grpcurl` v1.9.3: a unary
+  native call reports `target server does not expose service …` and exits 1. A **bidi** native call
+  still hangs rather than reporting the refusal — including `grpcurl list`, whose reflection call is
+  bidi-streaming — for the transport reason the bidi bullet above gives, not because of this
+  refusal; it hangs identically with the refusal removed. **Use Connect or gRPC-Web instead**; both
+  work completely for unary, server-streaming and client-streaming over both HTTP/1.1 and HTTP/2;
+  bidi additionally requires HTTP/2, per the bidi bullet above. Every non-JS gRPC client can speak
+  Connect or gRPC-Web, but **not through `grpcurl`** — its `-format` flag selects the message
+  encoding (`json`/`text`), not the wire protocol, and it implements native gRPC only. Use
+  `buf curl --protocol connect` (or `--protocol grpcweb`), a generated Connect client, or a web
+  client; for an existing native-gRPC fleet, put Envoy's `grpc_web` filter in front.
 
 ## Health Indicator
 

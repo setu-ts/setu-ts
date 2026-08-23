@@ -2994,13 +2994,82 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   deliverable was unwritten — now four cases beside M55's `readStream` precedent. The storage
   barrel's type exports were pinned at compile time for the same reason M56 gives: dropping one left
   every runtime assertion in that file green — complete (PR #178)
-- **Next milestone** — **M70i** (gRPC and GraphQL viability). The repair-versus-withdraw decision
-  for `grpc-plugin`, plus the documented-API-does-not-exist rows both packages carry: every gRPC
-  registration snippet in README and `PUBLIC_API.md` throws because it resolves the capability
-  before `app.start()` (X7-1), and `graphql-plugin`'s only documented registration API uses a
-  `new Application()` / `app.use()` the kernel does not export (X6-2). Also X7-2, X7-4, X6-3 (the
-  code-first arm does not type-check against the real `graphql` package), X6-4, X6-5, X6-6, X6-7.
-  M70e closed X7-3 first, so the viability decision is taken against a package that loads.
+- **Milestone 70i** (`packages/grpc-plugin` + `packages/graphql-plugin` +
+  `packages/websocket-plugin` — gRPC and GraphQL viability. The ROADMAP deferred an explicit
+  **repair-versus-withdraw** decision for `grpc-plugin` to this milestone; the answer is **REPAIR,
+  with the native-gRPC claim withdrawn**. Measured evidence: 12 of 15 reference-client checks
+  already passed — Connect and gRPC-Web, on both HTTP/1.1 and HTTP/2, for all three RPC kinds — and
+  exactly one wire format failed. That failure is **architectural, not a bug**: native gRPC signals
+  completion in HTTP/2 **trailers**, the fetch `Response` has no trailer mechanism, and M23
+  deliberately moved the framework onto Hono's `fetch` entry, so "run it on Node or Bun" is not a
+  remedy even now that M70e made the package load there. Withdrawing the package outright would have
+  deleted working capability; a trailer-capable serve path is a `packages/runtime` change and a
+  reversal of M23, so it is named as unowned rather than deferred to a letter. **X7-2:** `basePath`
+  now defaults to the **root**, from one `DEFAULT_BASE_PATH` constant replacing two spellings of
+  `'/grpc'`. A gRPC path comes from the fully-qualified method name alone and no native client —
+  grpcurl, grpcui, `grpc-go`, `grpc-java` — has a prefix option, so the old default made the
+  reflection service the README advertises "for grpcurl, grpcui" unreachable by both tools it names.
+  Root mounting is safe for two independent reasons already in source: `dispatchRequest` falls
+  through on a root miss rather than 404-ing, and post-M70a `claims()` at root reports only
+  registered procedure paths, so the kernel consults it before route matching without shadowing an
+  ordinary route. **X7-4:** a native `application/grpc` request is refused with a **Trailers-Only
+  `UNIMPLEMENTED`** (`grpc-status: 12`) before the handler runs — the protocol's own way to report a
+  status without trailers, since it lives in the header block, which is exactly what a `Response`
+  can carry. Detection is **exact-match**, and that is the milestone's sharpest trap:
+  `'application/grpc-web+proto'.startsWith('application/grpc')` is `true`, so a prefix test would
+  have refused gRPC-Web — the format that carries its trailers in the body and is the standard
+  browser answer — and a negative control pins it. The README's "the plugin correctly forwards
+  `Response.trailers` when available" was **deleted**: `grep -rni trailer` over the plugin and
+  runtime sources returns nothing, and `Response.trailers` is in no runtime's fetch implementation.
+  **X7-1 / X6-2:** both packages' only documented registration APIs did not work. gRPC's README and
+  `PUBLIC_API.md` resolved `CAPABILITIES.GRPC` before `app.start()`, and plugins register during
+  `start()`, so the documented sequence was a hard startup crash; GraphQL's README and
+  `PUBLIC_API.md` used `new Application()` / `app.use()`, and `@setu-ts/kernel` exports one value,
+  `createApplication`. Both corrected, plus a one-sentence `createApplication` note in
+  `PUBLIC_API.md` — the cheap generalization, since X7-1 and X6-5 are the same mistake in two
+  packages and fixing only the READMEs guarantees a third. **X6-3 is where the plan did not survive
+  contact.** It named two widenings — optional `toAST`, `parse` source to `unknown` — and measured
+  against real `graphql@16.14.2` under `strict` + `exactOptionalPropertyTypes` the facades diverged
+  in about **fifteen** members (`Maybe<T>` getters, `ReadonlyArray` plurals, a string-union
+  `locations` rather than `number[]`, nullable `variableValues`), so the two named widenings were
+  necessary and nowhere near sufficient. The committed **static** type fixture is what makes this
+  stick: the package's five existing real-`graphql` tests all use a dynamic `import()` inside a test
+  body, so `deno check` never compared the two type worlds, which is precisely why it shipped.
+  **X6-4:** `FieldResolver` is generic with `unknown` defaults (existing all-`unknown` resolvers
+  stay assignable) and `DefaultGraphqlContext` is typed against `common`, so a resolver no longer
+  needs hand-written casts in a codebase whose guidelines forbid `any`. **X6-6:** `requestContext`
+  is deliberately **not** synthesized over WebSocket. The register's stronger suggestion would hand
+  resolvers a context that is dead by the time they run — M46 records the runtime closing the native
+  request once the handshake response returns — so it is typed optional and absent over WS, with
+  `connection.headers`/`.query` documented as where the upgrade request's data lives; the
+  `Record<string, unknown>` escape that had let an undeclared `connection` member exist is gone.
+  **X6-7:** APQ refusals now follow the documented media-type watershed from one owner, answering
+  `200` under `application/json` — `PUBLIC_API.md` states the rule as "exactly three" exceptions and
+  APQ was a fourth, while the rule's own rationale describes the APQ miss exactly, since
+  `PersistedQueryNotFound` is the one error a client must read and retry. **X6-5:** the websocket
+  README leads with the plugin-based form and names `setu generate plugin`; the `ws-route` schematic
+  was declined with reason, so `cli` was dropped from the package list while `websocket-plugin` was
+  added — the M70b/M70h list-correction precedent. The recurrence gate is two layers, because one
+  alone would be wrong: the two owned READMEs were folded into M70k's
+  `test/package-readme-fence-compiler.test.ts` rather than shipping the second gate this plan
+  specified — §11.1, and M70k's own header warns against a second classifier. The fold was strictly
+  stronger, not merely tidier: M70i's gate pinned 1 compilable fence in the gRPC README and 3 in
+  GraphQL where the shared engine finds **2 and 6**, and **four** fences it never reached did not
+  compile — including the `## Options` fence for the very plugin this milestone repairs. `docs-gate`
+  rejects the nonexistent kernel API repo-wide — scoped to package READMEs and `PUBLIC_API.md`
+  rather than a naive grep, since `docs/migration-{fastify,nestjs}.md` legitimately show `app.use(`
+  as foreign-framework code the reader is migrating from. Also recorded: the ROADMAP's claim that
+  X6-4 is a `common` widening did not survive source-checking — both types are plugin-local — so
+  alpha.9 carries one fewer breaking `common` change than stated. `DOC_LINT_BASELINE` 775 → 760) —
+  complete (PR #180)
+- **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
+  `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
+  CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per
+  replica and `distributedLock` does not stop it, because the lock is released ~0.5 ms after the
+  handler while replica timers sit 0.70 s apart, so they never contend (X10-2); generated manifests
+  carry no `prometheus.io/*` annotations, so a vanilla Prometheus discovers **zero** targets
+  (X10-6); and `/metrics` counts its own scrapes and the health probes with no exclusion option
+  (X10-7). Plus X10-4, X10-5, X9-2, X9-5, X9-8.
 
 ## Verification (run before declaring any work done)
 

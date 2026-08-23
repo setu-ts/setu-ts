@@ -7,6 +7,7 @@ import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
 import { GraphqlPlugin } from '../../src/plugin/graphql-plugin.ts';
 import type { ResolverMap } from '../../src/interfaces/options.ts';
+import type { GraphqlDocumentNodeLike } from '../../src/interfaces/graphql-runtime.ts';
 import { createHandlerLogger } from '../../src/plugin/graphql-plugin.ts';
 
 describe('createHandlerLogger', () => {
@@ -717,8 +718,7 @@ describe('GraphqlPlugin', () => {
           toAST: () => ({}),
         }),
         validateSchema: () => [],
-        getOperationAST: (document: { definitions: Array<{ kind: string; operation?: string }> }) =>
-          document.definitions[0] ?? null,
+        getOperationAST: (document: GraphqlDocumentNodeLike) => document.definitions[0] ?? null,
         GraphQLError: class extends Error {
           override name = 'GraphQLError';
           toJSON() {
@@ -821,8 +821,7 @@ describe('GraphqlPlugin', () => {
           };
         },
         validateSchema: () => [],
-        getOperationAST: (document: { definitions: Array<{ kind: string; operation?: string }> }) =>
-          document.definitions[0] ?? null,
+        getOperationAST: (document: GraphqlDocumentNodeLike) => document.definitions[0] ?? null,
         GraphQLError: class extends Error {
           override name = 'GraphQLError';
           toJSON() {

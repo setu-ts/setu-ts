@@ -28,6 +28,35 @@ interface HandlerOptions {
 }
 
 /**
+ * The HTTP status for an APQ refusal, decided once from the negotiated media
+ * type (X6-7).
+ *
+ * Under `application/json` the refusal answers **`200`**: the documented
+ * watershed keeps exactly three statuses under `application/json` (415, 400
+ * malformed JSON, 405), and the watershed's own rationale — "a client
+ * predating the newer media type reads a non-200 as a network failure and
+ * never reads the `errors` array" — describes the APQ miss precisely, since
+ * `PersistedQueryNotFound` is the one error a client is REQUIRED to read and
+ * retry. Under `application/graphql-response+json` the APQ result's own
+ * status is used verbatim, like every other GraphQL result on that media type.
+ *
+ * Called from the two refusal sites that can vary — single POST and GET — so
+ * the decision has one owner instead of two spellings. The batch path does NOT
+ * call it: a batch is refused outright under `graphql-response` (see
+ * `BATCHING_NOT_SUPPORTED` above), so every batch element is already on the
+ * `application/json` side of the watershed and answers `200` unconditionally.
+ *
+ * @param mediaType - The negotiated response media type.
+ * @param apqStatus - The status the APQ resolver reported for the refusal.
+ */
+function apqRefusalStatus(
+  mediaType: 'json' | 'graphql-response',
+  apqStatus: number,
+): number {
+  return mediaType === 'graphql-response' ? apqStatus : 200;
+}
+
+/**
  * Create a GraphQL route handler.
  *
  * @param graphqlService - The GraphQL service
@@ -118,12 +147,15 @@ async function handleGraphqlPost(
       }, mediaType);
     }
 
-    // Execute each element concurrently — APQ resolves per-element
+    // Execute each element concurrently — APQ resolves per-element. A batch
+    // always answers HTTP 200: batching is only reachable under
+    // `application/json` (the strict media type refuses it above), and the
+    // documented watershed keeps that media type at 200 for every GraphQL
+    // outcome, so no per-element status is computed or surfaced.
     const outcomes = await Promise.all(
       body.map(async (item: unknown) => {
         if (typeof item !== 'object' || item === null || Array.isArray(item)) {
           return {
-            status: 400,
             result: { errors: [{ message: 'Batch item must be a JSON object' }] },
           };
         }
@@ -141,7 +173,6 @@ async function handleGraphqlPost(
           const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
           if (!apqResult.ok) {
             return {
-              status: 400,
               result: {
                 errors: [{ message: apqResult.message, extensions: { code: apqResult.code } }],
               },
@@ -195,7 +226,7 @@ async function handleGraphqlPost(
     }
     const apqResult: ApqResolveResult = await apqResolver.resolve(apqParams);
     if (!apqResult.ok) {
-      return sendGraphqlError(response, 400, {
+      return sendGraphqlError(response, apqRefusalStatus(mediaType, apqResult.status), {
         message: apqResult.message,
         extensions: { code: apqResult.code },
       }, mediaType);
@@ -302,7 +333,7 @@ async function handleGraphqlGet(
     }
     const apqResult = await apqResolver.resolve(apqParams);
     if (!apqResult.ok) {
-      return sendGraphqlError(response, apqResult.status, {
+      return sendGraphqlError(response, apqRefusalStatus(mediaType, apqResult.status), {
         message: apqResult.message,
         extensions: { code: apqResult.code },
       }, mediaType);

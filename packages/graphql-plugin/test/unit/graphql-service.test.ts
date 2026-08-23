@@ -5,7 +5,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GraphqlService } from '../../src/services/graphql-service.ts';
-import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
+import type {
+  GraphqlDocumentNodeLike,
+  GraphqlRuntime,
+  GraphqlSchemaLike,
+} from '../../src/interfaces/graphql-runtime.ts';
 import type {
   GraphqlConnectionInfo,
   GraphqlOperationContext,
@@ -75,7 +79,7 @@ describe('GraphqlService', () => {
         toAST: () => ({}),
       }),
       validateSchema: () => [],
-      getOperationAST: (document: { definitions: unknown[] }) => document.definitions[0] ?? null,
+      getOperationAST: (document: GraphqlDocumentNodeLike) => document.definitions[0] ?? null,
       GraphQLError: class extends Error {
         override name = 'GraphQLError';
         toJSON() {
@@ -474,21 +478,154 @@ describe('GraphqlService', () => {
         })());
       };
       const service = makeService(runtime);
+      const principal = { id: 'bob' };
       const connection: GraphqlConnectionInfo = {
         id: 'c1',
         headers: new Headers(),
         query: {},
-        data: new Map([['user', 'bob']]),
+        data: new Map([['user', principal]]),
       };
 
       await service.subscribe({ query: 'subscription { tick }' }, { connection });
 
-      const ctx = subscribedContext as { services: unknown; user?: string };
+      // X6-6: the WS context carries `connection` and a principal `user` from
+      // conn.data, and OMITS `requestContext` (absent, not undefined).
+      const ctx = subscribedContext as {
+        services: unknown;
+        user?: { id: string };
+        connection?: GraphqlConnectionInfo;
+        requestContext?: unknown;
+      };
       expect(ctx.services).toBe(mockServiceRegistry);
-      expect(ctx.user).toBe('bob');
+      expect(ctx.user).toEqual(principal);
+      expect(ctx.connection).toBe(connection);
+      expect('requestContext' in ctx).toBe(false);
     });
 
-    it('defaults services to {} when neither requestContext nor connection is supplied', async () => {
+    it('X6-6: HTTP with an authenticated principal and tenant surfaces both on the context', async () => {
+      let subscribedContext: unknown;
+      const runtime = createSubscribeRuntime({ operation: 'query' });
+      (runtime as unknown as { execute: (args: unknown) => Promise<unknown> }).execute = (
+        args: unknown,
+      ) => {
+        const ctx = args as { contextValue?: unknown };
+        subscribedContext = ctx.contextValue;
+        return Promise.resolve({ data: { hello: 'world' } });
+      };
+      const service = makeService(runtime);
+      const principal = { id: 'u1', roles: ['admin'] };
+      const tenant = { id: 't1' };
+      const requestContext = {
+        services: mockServiceRegistry,
+        request: { url: 'http://test.com', user: principal, tenant },
+      } as never;
+
+      await service.execute({ query: '{ hello }' }, requestContext);
+
+      const ctx = subscribedContext as {
+        user?: unknown;
+        tenant?: unknown;
+        connection?: unknown;
+      };
+      expect(ctx.user).toEqual(principal);
+      expect(ctx.tenant).toEqual(tenant);
+      // Still the HTTP shape: no connection member.
+      expect('connection' in ctx).toBe(false);
+    });
+
+    it('X6-6: a non-principal conn.data user is dropped rather than mistyped', async () => {
+      let subscribedContext: unknown;
+      const runtime = createSubscribeRuntime({ operation: 'subscription' });
+      (runtime as unknown as { subscribe: (args: unknown) => Promise<unknown> }).subscribe = (
+        args: unknown,
+      ) => {
+        const ctx = args as { contextValue?: unknown };
+        subscribedContext = ctx.contextValue;
+        return Promise.resolve((async function* () {
+          yield { data: { tick: 0 } };
+        })());
+      };
+      const service = makeService(runtime);
+      const connection: GraphqlConnectionInfo = {
+        id: 'c1',
+        headers: new Headers(),
+        query: {},
+        // An onConnect hook that stored a raw token string, not a principal:
+        // the context must not carry it on a member typed IPrincipal.
+        data: new Map<string, unknown>([['user', 'raw-token'], ['tenant', 42]]),
+      };
+
+      await service.subscribe({ query: 'subscription { tick }' }, { connection });
+
+      const ctx = subscribedContext as {
+        services: unknown;
+        connection?: GraphqlConnectionInfo;
+        user?: unknown;
+        tenant?: unknown;
+      };
+      expect(ctx.connection).toBe(connection);
+      expect(ctx.services).toBe(mockServiceRegistry);
+      expect('user' in ctx).toBe(false);
+      expect('tenant' in ctx).toBe(false);
+    });
+
+    it('X6-6: a WS principal AND tenant from conn.data both surface', async () => {
+      let subscribedContext: unknown;
+      const runtime = createSubscribeRuntime({ operation: 'subscription' });
+      (runtime as unknown as { subscribe: (args: unknown) => Promise<unknown> }).subscribe = (
+        args: unknown,
+      ) => {
+        const ctx = args as { contextValue?: unknown };
+        subscribedContext = ctx.contextValue;
+        return Promise.resolve((async function* () {
+          yield { data: { tick: 0 } };
+        })());
+      };
+      const service = makeService(runtime);
+      const principal = { id: 'carol' };
+      const tenant = { id: 'acme' };
+      const connection: GraphqlConnectionInfo = {
+        id: 'c1',
+        headers: new Headers(),
+        query: {},
+        data: new Map<string, unknown>([['user', principal], ['tenant', tenant]]),
+      };
+
+      await service.subscribe({ query: 'subscription { tick }' }, { connection });
+
+      const ctx = subscribedContext as { user?: unknown; tenant?: unknown };
+      expect(ctx.user).toEqual(principal);
+      expect(ctx.tenant).toEqual(tenant);
+    });
+
+    it('X6-6: the HTTP context carries requestContext and omits connection', async () => {
+      let subscribedContext: unknown;
+      const runtime = createSubscribeRuntime({ operation: 'query' });
+      (runtime as unknown as { execute: (args: unknown) => Promise<unknown> }).execute = (
+        args: unknown,
+      ) => {
+        const ctx = args as { contextValue?: unknown };
+        subscribedContext = ctx.contextValue;
+        return Promise.resolve({ data: { hello: 'world' } });
+      };
+      const service = makeService(runtime);
+      const requestContext = {
+        services: mockServiceRegistry,
+        request: { url: 'http://test.com' },
+      } as never;
+
+      await service.execute({ query: '{ hello }' }, requestContext);
+
+      const ctx = subscribedContext as {
+        services: unknown;
+        requestContext?: unknown;
+        connection?: unknown;
+      };
+      expect(ctx.requestContext).toBe(requestContext);
+      expect('connection' in ctx).toBe(false);
+    });
+
+    it('falls back to the plugin registry when neither requestContext nor connection is supplied', async () => {
       let subscribedContext: unknown;
       const runtime = createSubscribeRuntime({ operation: 'query' });
       (runtime as unknown as { execute: (args: unknown) => Promise<unknown> }).execute = (
@@ -502,7 +639,11 @@ describe('GraphqlService', () => {
 
       await service.subscribe({ query: '{ hello }' });
 
-      expect((subscribedContext as { services: unknown }).services).toEqual({});
+      // NOT `{}`: `subscribe()` takes its context optionally, so a server-side
+      // call passing only `params` lands here, and `DefaultGraphqlContext.services`
+      // is typed `IServiceRegistry` so a resolver may call `.get()` without a
+      // cast. Handing out `{}` made that call throw a masked `TypeError`.
+      expect((subscribedContext as { services: unknown }).services).toBe(mockServiceRegistry);
     });
 
     // C4 regression: HTTP path must use requestContext.services, not the plugin registry.

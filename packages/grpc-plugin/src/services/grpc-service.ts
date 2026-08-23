@@ -18,6 +18,7 @@ import type {
 import type { ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { GrpcPluginOptions } from '../interfaces/index.ts';
 import {
+  DEFAULT_BASE_PATH,
   dispatchRequest,
   isWithinBasePath,
   normalizeBasePath,
@@ -41,6 +42,15 @@ export interface GrpcServiceOptions {
 
 /**
  * The gRPC service applications use to register Connect/gRPC services.
+ *
+ * The default `basePath` is the **root** (`DEFAULT_BASE_PATH`): a gRPC-family
+ * client derives its path from the method name alone and has no prefix option,
+ * so a prefixed default serves every procedure at an address no such client
+ * asks for. At the root, `claims()` reports only registered procedure paths, so
+ * the kernel consults this service before route matching without shadowing
+ * ordinary routes. Connect and gRPC-Web are then served at their natural
+ * addresses; native `application/grpc` is refused with a Trailers-Only
+ * `UNIMPLEMENTED`. Pass `basePath: '/grpc'` to restore the pre-M70i prefix.
  *
  * @example
  * ```typescript
@@ -79,7 +89,7 @@ export class GrpcService implements IGrpcService {
     this.#options = init.options;
     this.#healthService = init.healthService;
     this.#resolveLogger = init.resolveLogger;
-    this.#basePath = normalizeBasePath(init.options.basePath ?? '/grpc');
+    this.#basePath = normalizeBasePath(init.options.basePath ?? DEFAULT_BASE_PATH);
 
     for (const entry of init.options.services ?? []) {
       this.addService(entry.definition as GrpcServiceDefinition, entry.implementation);
@@ -186,7 +196,23 @@ export class GrpcService implements IGrpcService {
       return;
     }
     this.#closed = true;
-    this.#servedPaths = new Set(this.#dispatchMap?.keys() ?? []);
+    // Build the router if it has not been built yet, rather than reading an
+    // unbuilt `#dispatchMap` as "nothing was served". The map is LAZY — it is
+    // constructed on the first request or `claims()` — so an application that
+    // shuts down before serving a single RPC would otherwise capture an EMPTY
+    // set here, and `claims()` would then answer `false` for a procedure this
+    // server really does serve, dropping its documented drain `503`.
+    //
+    // Guarded: `close()` runs during shutdown, where a throw is far worse than
+    // a missing 503. If the router cannot be built at this point there is
+    // genuinely nothing to serve, so the empty set is the right answer.
+    let paths: Iterable<string> = [];
+    try {
+      paths = this.#buildDispatchMap().keys();
+    } catch {
+      // Ignored deliberately — see above.
+    }
+    this.#servedPaths = new Set(paths);
     this.#dispatchMap = null;
   }
 

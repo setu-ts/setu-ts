@@ -80,7 +80,9 @@ const discovery = app.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCO
 
 const out: Record<string, unknown> = {};
 for (const peer of ['billing', 'shipping']) {
-  const base = await discovery.resolveUrl(peer, '/grpc/grpc.health.v1.Health/Check');
+  // M70i moved the default basePath to the root, so the bare method path is
+  // what a bare GrpcPlugin() serves.
+  const base = await discovery.resolveUrl(peer, '/grpc.health.v1.Health/Check');
   let status = 0;
   let body = '';
   for (let attempt = 0; attempt < 40 && status === 0; attempt += 1) {
