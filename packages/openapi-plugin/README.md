@@ -103,7 +103,10 @@ Neither package imports the other.
 Rules and limits:
 
 - A value **declared** on the route's own `schema` always wins, per field.
-- The **first** brand for a target wins when a route carries two, matching the order that runs.
+- The **last** brand for a target wins when a route carries two, because that is the value the
+  handler receives: each middleware writes `validated:<target>` as it passes, so the final writer's
+  is the one in `ctx.state`. The request must still satisfy every brand — any of them can answer
+  `400` — so the documented shape is what the handler sees, not that conjunction.
 - A `cookies` brand derives **nothing**: `RouteSchema` has no `cookies` field, and `@setu-ts/sdk`'s
   client generator refuses an `in: 'cookie'` parameter outright, so emitting one would turn a
   working document into a codegen failure for its consumers.

@@ -5256,8 +5256,11 @@ Rules and limits, stated rather than left to discovery:
 
 - **A declared `schema` field always wins, per field.** Declaring `schema.body` and carrying
   `validateQuery(...)` gives the declared body and the derived query.
-- **The FIRST brand for a target wins** when a route carries two, matching the middleware order that
-  actually runs.
+- **The LAST brand for a target wins** when a route carries two, because that is the value the
+  handler receives: each validation middleware writes `validated:<target>` as it passes, so the
+  final writer's parsed value is the one in `ctx.state` by the time the handler runs. The request
+  must still satisfy EVERY brand, since any of them can short-circuit with a `400`; the document
+  shows the shape the handler sees, not that conjunction.
 - **`cookies` derives nothing.** `RouteSchema` has no `cookies` field, so there is no declared
   counterpart — and `@setu-ts/sdk`'s client generator refuses an `in: 'cookie'` parameter outright,
   so emitting one would turn a working document into a hard codegen failure for its consumers.
