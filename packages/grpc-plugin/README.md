@@ -146,10 +146,12 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   (`application/grpc`, `application/grpc+proto`, `application/grpc+json`) are answered with a
   **Trailers-Only `UNIMPLEMENTED`** response — HTTP `200`, `content-type: application/grpc`, and
   `grpc-status: 12` in the headers. The native wire protocol depends on HTTP/2 trailers for status
-  signaling, and no runtime this plugin runs on exposes them (Deno's `Deno.serve` surfaces no
-  trailers; on Node and Bun the plugin cannot load its Connect dependency). Serving half of the
-  protocol — reflection and health resolve, every real call fails with "missing status" — is worse
-  than refusing it cleanly: clients see an explicit, well-formed `UNIMPLEMENTED` instead of an
+  signaling, and no fetch-based server runtime exposes them to a `Response` (Deno's `Deno.serve`
+  surfaces no trailers; Node's and Bun's fetch handlers do not either). Module loading itself is
+  unaffected — the plugin loads its Connect dependency on every runtime it runs on — but a fetch
+  `Response` carries trailers nowhere, so the protocol cannot be served honestly. Serving half of
+  the protocol — reflection and health resolve, every real call fails with "missing status" — is
+  worse than refusing it cleanly: clients see an explicit, well-formed `UNIMPLEMENTED` instead of an
   opaque transport error after a successful handshake. **Use Connect or gRPC-Web instead**; both
   work completely, over HTTP/1.1 and HTTP/2, for all four RPC kinds. Every non-JS gRPC client can
   speak gRPC-Web (grpcurl: `-format connect` or a web client; Envoy: the `grpc_web` filter).

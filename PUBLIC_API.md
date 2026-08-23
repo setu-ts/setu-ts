@@ -8468,10 +8468,11 @@ grpc.addService(AnotherDefinition, anotherImpl);
 
 ### Notes
 
-- **Co-serves with Hono.** gRPC requests are detected by path prefix only (`/grpc` by default).
-  Content-type sniffing is deliberately not used because Connect's real unary content types include
-  `application/json` and `application/proto`. A non-prefixed path returns `null` and falls through
-  to the Hono pipeline unchanged.
+- **Co-serves with Hono.** gRPC requests are detected by path prefix only (`basePath`, which
+  defaults to `/` — the root, so clients reach procedures at the bare method path). Content-type
+  sniffing is deliberately not used because Connect's real unary content types include
+  `application/json` and `application/proto`. A path outside `basePath` returns `null` and falls
+  through to the Hono pipeline unchanged.
 - **The middleware pipeline runs first.** Since M70a the kernel dispatches gRPC from its terminal
   handler, after the pipeline and **before** route matching — so auth, metrics, security headers and
   the shutdown drain apply to RPC exactly as to ordinary routes, a draining application answers
@@ -8523,15 +8524,19 @@ grpc.addService(AnotherDefinition, anotherImpl);
 - **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.1.2`,
   `@bufbuild/protobuf@^2.7.0`, `@bufbuild/protobuf@^2.7.0/wkt`) are loaded on first `register()`.
   Absence throws `GrpcRuntimeLoadError` with the install command.
-- **Optional seam.** If the HTTP adapter does not implement `setRpcHandler?`, the plugin still
-  registers and reports `available: false`; `handleRequest` throws `GrpcUnavailableError` while
-  `createFetchHandler` returns `null` for every request.
-- **gRPC-binary trailers on Deno.** Native gRPC-binary protocol (`application/grpc`) relies on
-  HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling. Deno's
-  `Deno.serve` does not expose HTTP/2 trailers, so native gRPC-binary responses may not work
-  correctly on Deno. This is a **platform limitation**, not a plugin bug. Connect-JSON and gRPC-Web
-  protocols work on all runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer
-  support.
+- **No adapter seam.** Since M70a the kernel dispatches gRPC from its terminal handler after the
+  middleware pipeline; dispatch depends on no adapter capability, so the plugin serves on every
+  runtime and `IGrpcService.available` is always `true`. The retired `setRpcHandler?` member is
+  consulted by nothing, and `GrpcUnavailableError` remains exported only as published surface —
+  nothing throws it.
+- **Native gRPC-binary is refused by design.** Native gRPC (`application/grpc`, `+proto`, `+json`)
+  relies on HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling, and
+  no fetch-based server runtime exposes them to a `Response` — including Deno's `Deno.serve`,
+  Node.js, and Bun. Every native request is therefore answered with a **Trailers-Only
+  `UNIMPLEMENTED`** (`HTTP 200`, `content-type: application/grpc`, `grpc-status: 12`) instead of
+  half-serving the protocol. This is a deliberate design decision, not a platform bug. Connect-JSON
+  and gRPC-Web work completely on all runtimes; point native gRPC clients at a gRPC-Web-capable
+  proxy or switch them to Connect (see the CHANGELOG migration notes).
 
 ---
 
