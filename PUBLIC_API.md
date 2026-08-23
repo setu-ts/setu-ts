@@ -151,6 +151,8 @@ No decorators. No DI. No reflection. Just a router and a runtime.
 
 The entry point to the framework.
 
+A capability is not resolvable from `app.services` until `start()` has run.
+
 ### Signature
 
 ```typescript
