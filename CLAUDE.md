@@ -3061,7 +3061,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   as foreign-framework code the reader is migrating from. Also recorded: the ROADMAP's claim that
   X6-4 is a `common` widening did not survive source-checking — both types are plugin-local — so
   alpha.9 carries one fewer breaking `common` change than stated. `DOC_LINT_BASELINE` 775 → 760) —
-  complete (PR pending)
+  complete (PR #180)
 - **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
   `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
   CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per
