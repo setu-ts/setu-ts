@@ -350,10 +350,16 @@ export class TaskPool {
    * unrelated queued task.
    */
   private onWorkerExit(slot: WorkerSlot, code: number | null): void {
-    if (slot.terminating) {
+    // `dropSlot` returning false means another handler already disposed of this
+    // slot, so its death is accounted for. That is the ordinary crash sequence,
+    // not an edge case: Node emits `'error'` and THEN `'exit'` for a worker
+    // that dies from an uncaught exception, and Bun's `'close'` follows its
+    // error the same way. Without this, the startup-failure branch below ran
+    // twice for one crash and rejected a queued task that had never been
+    // dispatched anywhere.
+    if (slot.terminating || !this.dropSlot(slot)) {
       return;
     }
-    this.dropSlot(slot);
     const task = slot.task;
     if (task !== null) {
       slot.task = null;
@@ -450,10 +456,20 @@ export class TaskPool {
     }
   }
 
-  private dropSlot(slot: WorkerSlot): void {
+  /**
+   * Removes a slot from the pool.
+   *
+   * @param slot - The slot to remove
+   * @returns `true` when the pool still owned it, `false` when it had already
+   * been dropped — which is how {@linkcode onWorkerExit} recognizes a death
+   * another handler has already accounted for.
+   */
+  private dropSlot(slot: WorkerSlot): boolean {
     const index = this.slots.indexOf(slot);
-    if (index !== -1) {
-      this.slots.splice(index, 1);
+    if (index === -1) {
+      return false;
     }
+    this.slots.splice(index, 1);
+    return true;
   }
 }

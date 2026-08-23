@@ -229,18 +229,25 @@ export class QueueService implements IQueue {
       if (!this.isReady()) {
         return { status: 'down', data: { adapter: adapterName, reachable: false } };
       }
-      const depths = await this.#collectDepths();
       if (typeof this.#adapter.isHealthy !== 'function') {
         return {
           status: 'up',
-          data: { adapter: adapterName, reachable: 'unknown', ...depths },
+          data: { adapter: adapterName, reachable: 'unknown', ...(await this.#collectDepths()) },
         };
       }
+      // Reachability FIRST, and depths only if the backend answered. Counting
+      // against a backend already known to be down buys nothing and costs a
+      // failing round trip per name on every probe interval, each one reported
+      // — so an outage would fill the log with depth failures that say nothing
+      // the `reachable: false` beside them does not.
       const reachable = await this.#adapter.isHealthy();
       if (reachable === false) {
-        return { status: 'down', data: { adapter: adapterName, reachable: false, ...depths } };
+        return { status: 'down', data: { adapter: adapterName, reachable: false } };
       }
-      return { status: 'up', data: { adapter: adapterName, reachable: true, ...depths } };
+      return {
+        status: 'up',
+        data: { adapter: adapterName, reachable: true, ...(await this.#collectDepths()) },
+      };
     };
   }
 

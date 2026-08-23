@@ -114,19 +114,41 @@ Every one of these was measured on this machine during planning; each changed a 
      final attempt", and a callback that also fired on retries would need a `willRetry` flag whose
      only honest consumer is a caller that wants the final one anyway.
   2. Queue metrics behind an OPTIONAL `CAPABILITIES.METRICS`, following M45b exactly:
-     `queue_jobs_total{name,outcome}` with `outcome` in `completed|retried|dead_lettered`, and
-     `queue_jobs_in_flight{name}`. Every write is guarded and reported through the logger read at
-     call time.
+     `queue_jobs_total{name,outcome}` with `outcome` in `completed|retried|dead_lettered`. Every
+     write is guarded and reported through the logger read at call time.
+     - **`queue_jobs_in_flight{name}` was planned and deliberately NOT shipped**, recorded here
+       rather than silently dropped. It answers saturation, not X8-4's dead-letter visibility, and
+       the durable `processing` depth already reports the same quantity — better, since it is
+       cluster-wide where a per-process gauge is not. Adding an instrument no row asks for is scope
+       creep; the README and `PUBLIC_API.md` document only the counter, so docs match behaviour.
   3. `QueuePluginOptions.deadLetterTtlMs` (default `undefined` = retain forever, today's behaviour)
      bounding the retained payload, applied by `RedisQueue.deadLetter` through a new OPTIONAL
      `IRedisQueueClient.expire`.
-- **Depth reporting is included but bounded:** a new OPTIONAL `QueueAdapter.stats?(name)` returning
-  `{ ready, delayed, dead }`, implemented on **memory** (in-process, free) and **redis** (`zcard`,
-  one round trip, ridden on the same `createCachedProbe` cache the M70c liveness probe uses), and
-  omitted on rabbitmq and sqs. Omitted rather than faked because both would need a management-API or
-  `GetQueueAttributes` call whose cost and permissions are not this milestone's to take on; the
-  health payload reports the field as absent, never as `0`, so "not reported" and "none" stay
-  distinguishable.
+     - **Which KEY carries the expiry was a review finding, and the first implementation was
+       wrong.** It expired `queue:<name>:jobs` — the hash holding the payload of EVERY job for that
+       name, not only dead ones. Redis keeps a key's TTL across later `HSET`s (measured against a
+       real Redis 7), so every job enqueued after the first dead-letter inherited the countdown; and
+       `reserve` moves a job whose payload is missing into the processing set and returns nothing,
+       so those jobs were lost silently and permanently. A retention option for DEAD payloads
+       destroyed live queued work. The payload is now MOVED into a dedicated
+       `queue:<name>:dead:jobs`, and only that key and the dead set are expired.
+- **Depth reporting is included but bounded:** a new OPTIONAL `QueueAdapter.depths?(name)` returning
+  `{ ready, processing, dead }`, implemented on **memory** (in-process, free) and **redis**
+  (`zcard`, one round trip per state), and omitted on rabbitmq and sqs.
+  - **Corrected against the implementation.** This plan first named the member `stats?` and its
+    middle field `delayed`; both were wrong. `stats` collides with `WorkerPoolService.stats()` in
+    the reader's ear and, more importantly, neither adapter tracks a "delayed" set — a delayed job
+    lives in the ready set with a future score, while the state both adapters DO track separately is
+    `processing` (reserved, not yet acked). The shipped names describe the data that exists.
+  - **The `createCachedProbe` claim was also wrong and is dropped.** That helper caches a
+    `Promise<boolean>` liveness answer; a per-name depth read has a different key and a different
+    return type, so it cannot ride the same cache without a second cache. The cost is bounded a
+    different way instead: depths are read only AFTER `isHealthy()` reports the backend reachable,
+    so an outage costs no depth round trips at all (a review finding — the first implementation read
+    them first, which meant one failing round trip per name per probe interval, each one logged).
+    Omitted rather than faked because both would need a management-API or `GetQueueAttributes` call
+    whose cost and permissions are not this milestone's to take on; the health payload reports the
+    field as absent, never as `0`, so "not reported" and "none" stay distinguishable.
 - **Why counters AND depths:** counters are per-process and reset on restart, so a restarted replica
   would report zero dead letters while Redis still held them; depths are the durable view. Neither
   alone answers the register's question.
@@ -164,8 +186,10 @@ Every one of these was measured on this machine during planning; each changed a 
   answer "will this application detect a dead worker?" at `register()` time — and that question has
   two real readers: the `worker-pool` health indicator's payload and the register-time warning in
   §3.7. A single member would leave the plugin unable to say anything until the first task ran.
-- **Test home:** `packages/common/test/unit/runtime-contracts.test.ts` (type-level), and the runtime
-  and pool tests below.
+- **Test home:** `packages/common/test/unit/runtime-contracts.test.ts` (type-level — four cases
+  beside M55's `readStream` precedent: a handle satisfies the contract WITHOUT `onExit`, with it,
+  with a `null` code, and a host with and without `reportsExit`), and the runtime and pool tests
+  below.
 
 ### 3.5 Which runtimes report exit (X8-7, per-runtime)
 
@@ -207,10 +231,22 @@ Every one of these was measured on this machine during planning; each changed a 
   `WorkerExitError` instead of the shutdown error, because each not-yet-ready slot's exit takes the
   startup-failure branch. It is kept on that basis and the code comment says so; the ordering it
   backs up is pinned by its own test.
+- **One crash, one disposition — a review finding the first implementation missed.** The guard above
+  covers an exit the pool ASKED for; it did not cover an exit that ANOTHER handler has already
+  accounted for, which is the ordinary crash sequence rather than an edge case. Node emits `'error'`
+  and THEN `'exit'` for a worker that dies from an uncaught exception — a task module that throws at
+  import, the commonest worker failure — and Bun's `'close'` follows its error the same way. The
+  exit handler therefore re-ran the startup-failure branch `onWorkerError` had just run, so ONE
+  crashing worker rejected TWO queued tasks: the one it was starting for, and a bystander that had
+  never been dispatched anywhere, whose rejection named an exit code and so pointed at the wrong
+  cause entirely. `dropSlot` now reports whether the pool still owned the slot, and an exit for a
+  slot already dropped returns early. The pre-existing exit tests could not see it because every one
+  of them emitted an exit in ISOLATION, which no runtime does after an error.
 - **Test home:** `test/unit/task-pool-exit.test.ts` — unexpected exit fails the in-flight task and
   frees the slot; a second task then runs on a fresh worker (this is X8-7's case D, the wedge);
   `taskTimeoutMs: 0` plus an exit still settles; a deliberate `terminate()` produces no extra settle
-  and rejects no pending task.
+  and rejects no pending task; and the real `'error'`-then-`'exit'` sequence settles exactly the one
+  task the crashed worker was starting for, leaving its queued sibling to run on the replacement.
 
 ### 3.7 Telling an application that exit detection is absent (X8-7, Deno)
 
@@ -231,10 +267,15 @@ Every one of these was measured on this machine during planning; each changed a 
 ### 3.8 Local storage fails at startup, not at the first upload (X8-9)
 
 - **Decision:** `LocalStorageProvider.connect()` probes writability — `mkdir(root, {recursive})`
-  then write-then-delete of a probe key under the root — and on failure throws an error naming the
-  root, the underlying cause, and, when `runtime.platform()` is `'deno'`, the `--allow-write` flag.
-  `isHealthy()` reports the cached outcome alongside the existing `stat`, so a root that becomes
-  unwritable later reads `down` instead of `up`.
+  then write-then-delete of a UNIQUELY NAMED probe key under the root — and on failure throws an
+  error naming the root, the underlying cause, and, when `runtime.platform()` is `'deno'`, the
+  `--allow-write` flag. `isHealthy()` reports the cached outcome alongside the existing `stat`, so a
+  root that becomes unwritable later reads `down` instead of `up`.
+- **The probe name is unique per connect, and its cleanup is best-effort** — a review finding. A
+  fixed path races between two replicas sharing one root, which is the ordinary way this provider is
+  deployed (a ReadWriteMany volume): both write the same probe, and whichever `rm` runs second fails
+  with ENOENT and refuses to boot a process whose root is perfectly writable. The WRITE is what
+  proves writability; failing to tidy up afterwards is not a reason to refuse to start.
 - **Why a startup probe rather than a per-check write:** this package's own stated principle
   (`facades.ts:402`, cited by M52c and M52d) is to fail at `register()` with a name rather than at
   the first request with a bare error; and a write on every health-probe interval is recurring I/O

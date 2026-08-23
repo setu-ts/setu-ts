@@ -165,6 +165,7 @@ the provider has no liveness check.
 
 | Export                        | Kind      |
 | ----------------------------- | --------- |
+| `IAwsS3Client`                | reference |
 | `canSign`                     | function  |
 | `createUploadMiddleware`      | function  |
 | `getUploadedFile`             | function  |

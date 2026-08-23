@@ -29,6 +29,24 @@ function makeFs(present: ReadonlySet<string>, writable = true): IFileSystem {
   return fs as unknown as IFileSystem;
 }
 
+/**
+ * A writable fs that records every path handed to `writeFile`, so a test can
+ * see the probe path the provider chose. `rm` is replaceable so the
+ * cleanup-failure branch can be driven.
+ */
+function writableFs(written: string[]): IFileSystem & { rm: (path: string) => Promise<void> } {
+  const fs = {
+    stat: () => Promise.resolve({ size: 0 }),
+    mkdir: () => Promise.resolve(),
+    writeFile: (path: string) => {
+      written.push(path);
+      return Promise.resolve();
+    },
+    rm: () => Promise.resolve(),
+  };
+  return fs as unknown as IFileSystem & { rm: (path: string) => Promise<void> };
+}
+
 describe('LocalStorageProvider health (M70c)', () => {
   it('is reachable while stat(root) succeeds', async () => {
     const provider = new LocalStorageProvider(makeFs(new Set(['/data'])), { rootDir: '/data' });
@@ -96,5 +114,35 @@ describe('LocalStorageProvider health (M70c)', () => {
     await provider.connect().catch(() => {});
 
     expect(await provider.isHealthy()).toBe(false);
+  });
+});
+
+describe('LocalStorageProvider — the write probe under a shared root', () => {
+  it('should use a unique probe path per connect, so two replicas cannot collide', async () => {
+    // Two processes sharing one volume connect concurrently. With a fixed probe
+    // name whichever `rm` ran second failed with ENOENT and refused to boot a
+    // process whose root was perfectly writable.
+    const written: string[] = [];
+    const fs = writableFs(written);
+
+    await new LocalStorageProvider(fs, { rootDir: '/data' }).connect();
+    await new LocalStorageProvider(fs, { rootDir: '/data' }).connect();
+
+    const probes = written.filter((path) => path.includes('.setu-write-probe'));
+    expect(probes).toHaveLength(2);
+    expect(probes[0]).not.toBe(probes[1]);
+  });
+
+  it('should still start when the probe cannot be cleaned up', async () => {
+    // The write is what proves writability. A root that accepts the write but
+    // refuses the unlink — or whose sibling replica already removed it — is
+    // writable, and refusing to boot there would be a false negative.
+    const fs = writableFs([]);
+    fs.rm = () => Promise.reject(new Error('ENOENT: no such file or directory'));
+
+    const provider = new LocalStorageProvider(fs, { rootDir: '/data' });
+    await provider.connect();
+
+    await expect(provider.isHealthy()).resolves.toBe(true);
   });
 });

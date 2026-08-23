@@ -68,7 +68,10 @@ All notable changes to this project are documented here. The format follows
   SQS: "this adapter cannot tell you" and "there is nothing there" are different answers.
 - **`QueuePluginOptions.deadLetterTtlMs`** (M70k, X8-4). Bounds how long a dead-lettered job's
   payload is retained (Redis). Without it the jobs hash grows for the lifetime of the deployment;
-  opt-in, because the retention exists for debugging.
+  opt-in, because the retention exists for debugging. Configuring it MOVES a dead job's payload out
+  of `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and only that key and the dead set carry the
+  expiry — the live hash holds every queued job's payload for that name, so expiring it would
+  destroy work that is merely waiting.
 - **`UploadMiddlewareOptions.maxBodyBytes`** (M70k, X8-3). An explicit ceiling on the request body
   the upload middleware will parse, default 50 MB.
 - **`IWorkerHandle.onExit?` and `IWorkerHost.reportsExit?`** (M70k, X8-7). An optional worker-exit
@@ -248,12 +251,14 @@ All notable changes to this project are documented here. The format follows
   now requires its own `options` and its required fields — `bucket` for `'s3'`/`'b2'`/`'gcs'`,
   `containerName` for `'azure'` — which were previously runtime failures. `MemoryProviderOptions` is
   removed; the memory arm takes no `options`, so drop `options: {}` if you passed it.
-- **BREAKING: `IAwsS3Client` is renamed `IS3Backend`** (M70k, X8-10). The old name promised
-  something it never was: `@aws-sdk/client-s3`'s surface is `send(command)`, so injecting a real
-  `S3Client` was refused with `Injected S3 client is missing required methods`. What the type
-  declares is the backend surface this package's own adapter PRODUCES. **Migration:** rename the
-  import; the shape is unchanged. There is still no supported way to configure the underlying SDK
-  client.
+- **`IAwsS3Client` is renamed `IS3Backend`, with the old name kept as a deprecated alias** (M70k,
+  X8-10). The old name promised something it never was: `@aws-sdk/client-s3`'s surface is
+  `send(command)`, so injecting a real `S3Client` was refused with
+  `Injected S3 client is missing required methods`. What the type declares is the backend surface
+  this package's own adapter PRODUCES. **Migration:** rename the import; the shape is unchanged, and
+  the alias keeps existing code compiling in the meantime (AI_GUIDELINES §9.2 — the replacement is a
+  working, identical shape, so a rename does not need to be a compile error). There is still no
+  supported way to configure the underlying SDK client.
 - **BREAKING: `WebWorkerLike` requires `addEventListener`** (M70k, X8-7). A real web `Worker` is an
   `EventTarget`, and the worker-exit signal needs it. **Migration:** an injected fake worker must
   add the method; a real `Worker` already satisfies it.

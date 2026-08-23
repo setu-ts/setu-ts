@@ -74,9 +74,12 @@ function expireCalls(client: FakeRedisClient): unknown[][] {
 }
 
 describe('RedisQueue dead-letter retention (X8-4)', () => {
-  it('should apply the configured TTL to BOTH the dead set and the jobs hash', async () => {
-    // Both keys retain data for the dead job, so bounding only one would leave
-    // the other growing — and the jobs hash is the one holding the payload.
+  it('should expire the dead set and a DEDICATED payload key, never the live jobs hash', async () => {
+    // `queue:<name>:jobs` holds the payload of EVERY job for this name, not
+    // only dead ones. Expiring it destroys work that is merely queued: Redis
+    // keeps a key's TTL across later HSETs, so jobs enqueued after the first
+    // dead-letter inherit the countdown, and `reserve` drops a job whose
+    // payload is missing into the processing set and never returns it.
     const client = new FakeRedisClient();
     const queue = new RedisQueue({ client, deadLetterTtlMs: 90_000 });
     await queue.connect();
@@ -86,8 +89,46 @@ describe('RedisQueue dead-letter retention (X8-4)', () => {
 
     expect(expireCalls(client)).toEqual([
       ['queue:thumbnail:dead', 90],
-      ['queue:thumbnail:jobs', 90],
+      ['queue:thumbnail:dead:jobs', 90],
     ]);
+    expect(expireCalls(client).map(([key]) => key)).not.toContain('queue:thumbnail:jobs');
+  });
+
+  it('should move the dead payload out of the live jobs hash, not copy it', async () => {
+    // Retention must not leave the payload in the hash the TTL cannot bound,
+    // or the growth X8-4 reported would continue unchecked beside the copy.
+    const client = new FakeRedisClient();
+    const queue = new RedisQueue({ client, deadLetterTtlMs: 90_000 });
+    await queue.connect();
+    await queue.enqueue(JOB);
+
+    await queue.deadLetter('thumbnail', 'job-1', 0, 'job-1');
+
+    expect(await client.hget('queue:thumbnail:dead:jobs', 'job-1')).not.toBeNull();
+    expect(await client.hget('queue:thumbnail:jobs', 'job-1')).toBeNull();
+  });
+
+  it('should leave a queued job reservable once the armed expiries actually fire', async () => {
+    // The consequence the key choice exists to prevent, driven end to end. The
+    // fake records an EXPIRE without enforcing it, so the test applies what the
+    // adapter armed — deleting exactly the keys it asked Redis to expire — and
+    // then reserves. Pointed at the live jobs hash this fails: `job-2`'s
+    // payload is gone, and `reserve` moves it to the processing set and returns
+    // nothing, losing it permanently.
+    const client = new FakeRedisClient();
+    const queue = new RedisQueue({ client, deadLetterTtlMs: 90_000 });
+    await queue.connect();
+    await queue.enqueue(JOB);
+    await queue.enqueue({ ...JOB, id: 'job-2' });
+
+    await queue.deadLetter('thumbnail', 'job-1', 0, 'job-1');
+
+    for (const [key] of expireCalls(client)) {
+      await client.del(String(key));
+    }
+
+    const reserved = await queue.reserve('thumbnail', 10, JOB.availableAtMs + 1);
+    expect(reserved.map((job) => job.id)).toEqual(['job-2']);
   });
 
   it('should round a sub-second TTL up to one second rather than to zero', async () => {

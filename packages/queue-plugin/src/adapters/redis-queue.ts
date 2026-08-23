@@ -92,6 +92,7 @@ async function resolveClient(
  * - `queue:<name>:processing` - ZSET (score = reservedAtMs, member = jobId)
  * - `queue:<name>:dead` - ZSET (score = deadLetterAtMs, member = jobId)
  * - `queue:<name>:jobs` - HASH (field = jobId, value = JSON job)
+ * - `queue:<name>:dead:jobs` - HASH (dead payloads; only when a TTL is configured)
  *
  * Recurring jobs:
  * - `queue:recurring:due` - ZSET (score = nextRunAtMs, member = recurringId)
@@ -292,17 +293,27 @@ export class RedisQueue implements QueueAdapter {
     // without bound for the lifetime of the deployment. The TTL is opt-in
     // because dropping a dead job's payload by default would remove the
     // debugging value the retention exists for.
-    await this.#expireDeadLetterKeys(name);
+    await this.#retainDeadLetterPayload(name, id);
   }
 
   /**
-   * Applies the configured dead-letter TTL to this name's dead set and its jobs
-   * hash.
+   * Bounds the retained dead-letter payload, when a TTL is configured.
+   *
+   * The payload is MOVED out of `queue:<name>:jobs` into a dedicated
+   * `queue:<name>:dead:jobs`, and the expiry is applied to that key and the
+   * dead set — never to the live jobs hash. That hash holds the payload of
+   * every job for this name, not only dead ones, so expiring it destroys work
+   * that is merely queued: Redis keeps a key's TTL across later `HSET`s
+   * (measured), so jobs enqueued after the first dead-letter inherit the
+   * countdown, and `reserve` drops a job whose payload is missing into the
+   * processing set and never returns it. That is silent, permanent loss of
+   * queued work — caused by an option whose purpose is bounding DEAD payloads.
    *
    * A no-op when no TTL is configured, and when the injected client does not
    * expose `expire` — the member is optional so an existing fake still
    * type-checks, and reporting a retention the client cannot enforce would be
-   * worse than not applying one.
+   * worse than not applying one. Without a TTL the payload stays in the jobs
+   * hash exactly as it always has.
    *
    * The TTL is applied to the KEY rather than to individual members, because
    * Redis has no per-member expiry on a sorted set or a hash. That is a
@@ -311,16 +322,24 @@ export class RedisQueue implements QueueAdapter {
    * the unbounded-growth case.
    *
    * @param name - Job name
+   * @param id - The dead-lettered job's id
    */
-  async #expireDeadLetterKeys(name: string): Promise<void> {
+  async #retainDeadLetterPayload(name: string, id: string): Promise<void> {
     const ttlMs = this.#deadLetterTtlMs;
     const client = this.#client;
     if (ttlMs === undefined || client === null || typeof client.expire !== 'function') {
       return;
     }
+    const jobsKey = `queue:${name}:jobs`;
+    const deadJobsKey = `queue:${name}:dead:jobs`;
+    const raw = await client.hget(jobsKey, id);
+    if (raw !== null) {
+      await client.hset(deadJobsKey, id, raw);
+      await client.hdel(jobsKey, id);
+    }
     const seconds = Math.max(1, Math.ceil(ttlMs / 1000));
     await client.expire(`queue:${name}:dead`, seconds);
-    await client.expire(`queue:${name}:jobs`, seconds);
+    await client.expire(deadJobsKey, seconds);
   }
 
   /**
