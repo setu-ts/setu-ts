@@ -5,7 +5,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { GraphqlService } from '../../src/services/graphql-service.ts';
-import type { GraphqlRuntime, GraphqlSchemaLike } from '../../src/interfaces/graphql-runtime.ts';
+import type {
+  GraphqlDocumentNodeLike,
+  GraphqlRuntime,
+  GraphqlSchemaLike,
+} from '../../src/interfaces/graphql-runtime.ts';
 import type {
   GraphqlConnectionInfo,
   GraphqlOperationContext,
@@ -75,7 +79,7 @@ describe('GraphqlService', () => {
         toAST: () => ({}),
       }),
       validateSchema: () => [],
-      getOperationAST: (document: { definitions: unknown[] }) => document.definitions[0] ?? null,
+      getOperationAST: (document: GraphqlDocumentNodeLike) => document.definitions[0] ?? null,
       GraphQLError: class extends Error {
         override name = 'GraphQLError';
         toJSON() {

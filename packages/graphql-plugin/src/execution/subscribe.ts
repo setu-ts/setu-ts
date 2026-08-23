@@ -51,7 +51,7 @@ export async function subscribeGraphql(
     return {
       kind: 'error',
       status: prepared.outcome.status,
-      result: prepared.outcome.result as GraphqlExecutionResult,
+      result: prepared.outcome.result as unknown as GraphqlExecutionResult,
     };
   }
 
@@ -85,17 +85,21 @@ export async function subscribeGraphql(
       // the event stream cannot be created at all.
       const maybeIterable = result as { [Symbol.asyncIterator]?: unknown };
       if (typeof maybeIterable[Symbol.asyncIterator] !== 'function') {
-        return { kind: 'error', status: 200, result: result as GraphqlExecutionResult };
+        return {
+          kind: 'error',
+          status: 200,
+          result: result as unknown as GraphqlExecutionResult,
+        };
       }
       return {
         kind: 'stream',
         status: 200,
-        stream: result as AsyncIterable<GraphqlExecutionResult>,
+        stream: result as unknown as AsyncIterable<GraphqlExecutionResult>,
       };
     }
 
     const result = await runtime.execute(execArgs);
-    return { kind: 'single', status: 200, result: result as GraphqlExecutionResult };
+    return { kind: 'single', status: 200, result: result as unknown as GraphqlExecutionResult };
   } catch (e) {
     return {
       kind: 'error',
