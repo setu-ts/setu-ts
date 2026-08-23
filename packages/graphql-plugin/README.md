@@ -249,6 +249,7 @@ MIT
 | `GraphqlSchemaError`          | class     |
 | `GraphqlService`              | class     |
 | `GRAPHQL_TRANSPORT_WS`        | const     |
+| `AnySubscriptionResolver`     | interface |
 | `DefaultGraphqlContext`       | interface |
 | `GraphqlApqOptions`           | interface |
 | `GraphqlCodeFirstOptions`     | interface |

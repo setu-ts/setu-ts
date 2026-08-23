@@ -38,7 +38,7 @@ export type ResolverMap = Record<string, TypeResolverMap | GraphqlScalarResolver
 export type TypeResolverMap = Record<
   string,
   | AnyFieldResolver
-  | SubscriptionResolver
+  | AnySubscriptionResolver
   | (() => unknown) // __resolveType for interfaces
 >;
 
@@ -61,6 +61,7 @@ export type TypeResolverMap = Record<
  * whose resolvers are written the ordinary unannotated way. Bivariance is the
  * only form that serves both authoring styles.
  */
+
 export type AnyFieldResolver = {
   resolver(
     source: unknown,
@@ -69,6 +70,36 @@ export type AnyFieldResolver = {
     info: unknown,
   ): unknown;
 }['resolver'];
+
+/**
+ * The entry type for a SUBSCRIPTION resolver stored in a
+ * {@linkcode TypeResolverMap}.
+ *
+ * The bivariant counterpart of {@linkcode AnyFieldResolver}, for the same
+ * reason and by the same mechanism: `TypeResolverMap` bound the bare
+ * `SubscriptionResolver`, whose defaults are all `unknown`, so a typed
+ * subscription entry — `resolve: (payload: Book) => payload.title` — was
+ * rejected under `strictFunctionTypes` with
+ * `Type 'unknown' is not assignable to type 'Book'`. That is X6-4's defect
+ * surviving on the subscription arm.
+ *
+ * `subscribe` is declared with method syntax (bivariant) and `resolve` reuses
+ * {@linkcode AnyFieldResolver}, so a typed subscription assigns while an
+ * unannotated one still gets its parameters contextually. Instantiating
+ * `SubscriptionResolver` at `never` would buy the first and lose the second,
+ * which is the regression the field arm already hit.
+ */
+export interface AnySubscriptionResolver {
+  /** Produces the event source for this subscription field. */
+  subscribe(
+    source: unknown,
+    args: Record<string, unknown>,
+    context: unknown,
+    info: unknown,
+  ): AsyncIterable<unknown> | Promise<AsyncIterable<unknown>>;
+  /** Maps each emitted payload to the field value. Optional. */
+  resolve?: AnyFieldResolver;
+}
 
 /**
  * A field resolver function.

@@ -52,17 +52,19 @@ and it is the only form that works inside a CLI-scaffolded project: its generate
 forbids starting the server, so there is no post-`start()` moment to resolve the capability from.
 
 ```typescript
-import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import type { IPlugin, IPluginContext, IWebSocketService } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 
 export class ChatPlugin implements IPlugin {
   readonly name = 'chat';
+  readonly version = '1.0.0';
   readonly dependencies = [CAPABILITIES.WEBSOCKET];
 
   register(ctx: IPluginContext): void {
-    const ws = ctx.services.get<{ route(path: string, handlers: unknown): void }>(
-      CAPABILITIES.WEBSOCKET,
-    );
+    const ws = ctx.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
 
     ws.route('/ws/chat', {
       onOpen: (conn, { query }) => {

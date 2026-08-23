@@ -259,8 +259,8 @@ All notable changes to this project are documented here. The format follows
   Native gRPC-binary requests (`application/grpc`, `application/grpc+proto`,
   `application/grpc+json`) are answered with a Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`)
   instead of reaching Connect's handler, where every call failed with an opaque "missing status"
-  transport error after a successful handshake: no runtime the plugin loads on exposes the HTTP/2
-  trailers the native protocol requires. **Connect (`application/connect+*`) and gRPC-Web
+  transport error after a successful handshake: no runtime on which the plugin loads exposes the
+  HTTP/2 trailers the native protocol requires. **Connect (`application/connect+*`) and gRPC-Web
   (`application/grpc-web+*`) remain fully supported** on all runtimes; point native gRPC clients at
   a gRPC-Web-capable proxy or switch them to Connect.
 
