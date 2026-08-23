@@ -1,7 +1,8 @@
 # Milestone 70i — gRPC and GraphQL viability (`@setu-ts/grpc-plugin`, `@setu-ts/graphql-plugin`)
 
-> **Status:** Planning. Branch: `feat/m70i-grpc-graphql-viability`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Archived on completion. Branch:
+> `feat/m70i-grpc-graphql-viability`. `main` is protected — all work (implementation + fixes) stayed
+> on this one branch until it merged via a single PR.
 
 ## 0. Objective & scope
 
