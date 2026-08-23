@@ -907,6 +907,44 @@ describe('review findings (PR #181)', () => {
     );
   });
 
+  it('refuses a factoryName that collides with a generated error guard', () => {
+    // Both are module-level VALUES, so emitting them produced two exported
+    // functions of one name and the generated file did not compile.
+    expect(() =>
+      generateOpenApiClient(inlineErrorDoc('getUser', ['409']), {
+        factoryName: 'isGetUserError',
+      })
+    ).toThrow(/Duplicate generated name 'isGetUserError'/);
+  });
+
+  it('reserves the identifiers the emitted import lines bind', () => {
+    for (const name of ['ClientResponse', 'IHttpClient', 'HttpClientError']) {
+      const doc = {
+        openapi: '3.1.0',
+        components: { schemas: { [name]: { type: 'object', properties: {} } } },
+        paths: {
+          '/c': {
+            get: {
+              operationId: 'get-c',
+              responses: {
+                '200': {
+                  description: 'ok',
+                  content: {
+                    'application/json': { schema: { $ref: `#/components/schemas/${name}` } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      } as unknown as SdkOpenApiDocument;
+
+      expect(() => generateOpenApiClient(doc, {})).toThrow(
+        new RegExp(`Duplicate generated name '${name}'`),
+      );
+    }
+  });
+
   it('honours additionalProperties on an object declaring an empty properties map', () => {
     // Two spellings of one schema must not contradict each other: reading
     // `properties: {}` as closed emitted `Record<PropertyKey, never>`, which
@@ -1182,7 +1220,7 @@ describe('hostile path templates', () => {
           user: { type: 'object' },
         }),
       )
-    ).toThrow(/Duplicate generated type name 'User'.*'User'.*'user'/);
+    ).toThrow(/Duplicate generated name 'User'.*'User'.*'user'/);
   });
 });
 
@@ -1349,7 +1387,7 @@ describe('Api interface and explicit return type (X11-4)', () => {
           Api: { type: 'object' },
         }),
       )
-    ).toThrow(/Duplicate generated type name 'Api'/);
+    ).toThrow(/Duplicate generated name 'Api'/);
   });
 
   it('throws when a component schema collides with a generated Args name', () => {
@@ -1367,7 +1405,7 @@ describe('Api interface and explicit return type (X11-4)', () => {
           },
         }, { ListUsersArgs: { type: 'object' } }),
       )
-    ).toThrow(/Duplicate generated type name 'ListUsersArgs'/);
+    ).toThrow(/Duplicate generated name 'ListUsersArgs'/);
   });
 
   it('claims no Args name for an operation that takes no args', () => {
