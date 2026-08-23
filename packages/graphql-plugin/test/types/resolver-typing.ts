@@ -14,9 +14,14 @@
  *   — `GraphqlPlugin({ typeDefs, resolvers })`. The first widening stopped at
  *   the generic instantiation; `TypeResolverMap` still bound the bare
  *   all-`unknown` `FieldResolver`, so the same TS2322 fired one level up, at
- *   the option. The map's `FieldResolver` binding is now instantiated at
- *   `never`, which accepts every resolver instantiation without weakening what
- *   graphql receives.
+ *   the option. The map's entry is now the bivariant `AnyFieldResolver`.
+ * - an **UNANNOTATED** resolver still gets its parameters contextually typed.
+ *   This is the half the first fix broke: instantiating the map entry at
+ *   `never` made every parameter of an unannotated resolver infer `never`, so
+ *   `args.id` became `Property 'id' does not exist on type 'never'` and
+ *   `apps/graphql-demo` — whose resolvers are written the ordinary unannotated
+ *   way — stopped compiling. Only `check:apps` type-checks `apps/`, so none of
+ *   the four gates saw it. Both authoring styles are asserted here now.
  * - `ctx.services.get(...)` and `ctx.user?.id` compile **without a cast**:
  *   `DefaultGraphqlContext` is typed against `@setu-ts/common`
  *   (`IServiceRegistry`, `IPrincipal`), not `unknown`.
@@ -24,7 +29,11 @@
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { GraphqlPlugin } from '../../src/index.ts';
-import type { DefaultGraphqlContext, FieldResolver } from '../../src/interfaces/options.ts';
+import type {
+  DefaultGraphqlContext,
+  FieldResolver,
+  ResolverMap,
+} from '../../src/interfaces/options.ts';
 
 /** A row shape a real application resolver would resolve. */
 interface IssueRow {
@@ -108,3 +117,33 @@ const legacy: FieldResolver = (
 ) => null;
 
 export { getIssue, legacy, plugin, resolvers };
+
+/**
+ * X6-4 regression guard, second authoring style: an **unannotated** resolver.
+ *
+ * This is how `apps/graphql-demo` and most real schema-first code is written —
+ * the parameters take their types from the map entry contextually rather than
+ * being spelled out. Instantiating that entry at `FieldResolver<never, never,
+ * never>` type-checks every ANNOTATED case above while silently inferring
+ * `never` here, so `args.id` and `source.title` stop existing. The bivariant
+ * `AnyFieldResolver` serves both.
+ */
+const rows: IssueRow[] = [];
+const unannotatedResolvers: ResolverMap = {
+  Query: {
+    // `args` must infer `Record<string, unknown>`, NOT `never`.
+    issue: (_source, args) => rows.find((row) => row.id === String(args.id)) ?? null,
+  },
+  Issue: {
+    // `source` must infer `unknown` and stay narrowable, NOT `never`.
+    title: (source) => (source as IssueRow).title,
+  },
+};
+
+/** The unannotated map must reach the plugin option too, not just a local. */
+const unannotatedPlugin = GraphqlPlugin({
+  typeDefs: `type Issue { id: ID! title: String! } type Query { issue(id: ID!): Issue }`,
+  resolvers: unannotatedResolvers as never,
+});
+
+export { unannotatedPlugin, unannotatedResolvers };

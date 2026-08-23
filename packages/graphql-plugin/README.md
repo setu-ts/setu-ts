@@ -269,6 +269,7 @@ MIT
 | `IApqResolver`                | interface |
 | `IGraphqlService`             | interface |
 | `SubscriptionResolver`        | interface |
+| `AnyFieldResolver`            | type      |
 | `ApqResolveResult`            | type      |
 | `FieldResolver`               | type      |
 | `GraphqlPluginOptions`        | type      |

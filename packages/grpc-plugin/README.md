@@ -153,7 +153,11 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   `Response` carries trailers nowhere, so the protocol cannot be served honestly. Serving half of
   the protocol — reflection and health resolve, every real call fails with "missing status" — is
   worse than refusing it cleanly: clients see an explicit, well-formed `UNIMPLEMENTED` instead of an
-  opaque transport error after a successful handshake. **Use Connect or gRPC-Web instead**; both
+  opaque transport error after a successful handshake. Measured with real `grpcurl` v1.9.3: a unary
+  native call reports `target server does not expose service …` and exits 1. A **bidi** native call
+  still hangs rather than reporting the refusal — including `grpcurl list`, whose reflection call is
+  bidi-streaming — for the transport reason the bidi bullet above gives, not because of this
+  refusal; it hangs identically with the refusal removed. **Use Connect or gRPC-Web instead**; both
   work completely, over HTTP/1.1 and HTTP/2, for all four RPC kinds. Every non-JS gRPC client can
   speak Connect or gRPC-Web, but **not through `grpcurl`** — its `-format` flag selects the message
   encoding (`json`/`text`), not the wire protocol, and it implements native gRPC only. Use
