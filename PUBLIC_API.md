@@ -9180,44 +9180,44 @@ GraphqlPlugin({ schema });
 
 ### Exports
 
-| Export                        | Kind     | Purpose                                                                                                                                        |
-| ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GraphqlPlugin`               | function | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL`                                                                      |
-| `GraphqlService`              | class    | The `IGraphqlService` implementation; exported for testing                                                                                     |
-| `adaptGraphqlModule`          | function | Structural adaptation of graphql module into internal runtime port                                                                             |
-| `graphiqlHtml`                | function | Generates GraphiQL UI HTML page                                                                                                                |
-| `createDepthLimitRule`        | function | Creates a validation rule for query depth limiting                                                                                             |
-| `GraphqlSchemaError`          | class    | Thrown when schema construction or resolver attachment fails                                                                                   |
-| `GraphqlRuntimeLoadError`     | class    | Thrown when graphql runtime cannot be loaded                                                                                                   |
-| `loadGraphqlModule`           | function | Loads `npm:graphql@^16` through a real dynamic import                                                                                          |
-| `GraphqlPluginOptions`        | type     | The factory parameter shape (union of the two arms)                                                                                            |
-| `GraphqlSchemaFirstOptions`   | type     | The schema-first arm of that union                                                                                                             |
-| `GraphqlCodeFirstOptions`     | type     | The code-first arm of that union                                                                                                               |
-| `ResolverMap`                 | type     | Resolver map for schema-first mode                                                                                                             |
-| `TypeResolverMap`             | type     | The resolver entries for one object or interface type                                                                                          |
-| `FieldResolver`               | type     | Field resolver function type                                                                                                                   |
-| `AnyFieldResolver`            | type     | The bivariant entry type a `TypeResolverMap` field holds — accepts a narrowly annotated resolver AND contextually types an unannotated one     |
-| `AnySubscriptionResolver`     | type     | The bivariant entry type a `TypeResolverMap` subscription field holds — same rule as `AnyFieldResolver`, for `{ subscribe, resolve? }` entries |
-| `SubscriptionResolver`        | type     | A subscription field's `{ subscribe, resolve? }` pair                                                                                          |
-| `GraphqlScalarResolver`       | type     | Custom scalar `serialize`/`parseValue`/`parseLiteral` methods                                                                                  |
-| `GraphqlSubscriptionsOptions` | type     | The `subscriptions` option (WebSocket and SSE arms)                                                                                            |
-| `GraphqlWsTransportOptions`   | type     | WebSocket transport options, including `onConnect`                                                                                             |
-| `GraphqlSseTransportOptions`  | type     | SSE transport options                                                                                                                          |
-| `GraphqlApqOptions`           | type     | Automatic Persisted Queries options                                                                                                            |
-| `ApqResolver`                 | class    | Verifies and resolves persisted-query hashes                                                                                                   |
-| `IApqResolver`                | type     | The port the transports consume; implemented by `ApqResolver`                                                                                  |
-| `ApqResolveResult`            | type     | The resolved query, or a refusal carrying its code                                                                                             |
-| `extractPersistedQuery`       | function | Reads `{ version, sha256Hash }` from a request's `extensions`                                                                                  |
-| `persistedQueryHash`          | function | SHA-256 hex of a query, over an injected `SubtleCrypto`                                                                                        |
-| `encodeSseEvent`              | function | Encodes a `next` SSE frame                                                                                                                     |
-| `encodeSseComplete`           | function | Encodes the `complete` SSE frame, empty `data:` field included                                                                                 |
-| `encodeSseComment`            | function | Encodes a `:keep-alive` comment frame                                                                                                          |
-| `GRAPHQL_TRANSPORT_WS`        | const    | The `'graphql-transport-ws'` subprotocol identifier                                                                                            |
-| `GraphqlScalarTypeLike`       | type     | Structural constraint for a custom scalar type                                                                                                 |
-| `GraphqlSchemaLike`           | type     | Structural constraint for pre-built schemas                                                                                                    |
-| `GraphqlModuleLike`           | type     | Structural constraint for injected graphql modules                                                                                             |
-| `DefaultGraphqlContext`       | type     | Default context shape passed to resolvers                                                                                                      |
-| `GraphqlContextInput`         | type     | Input type for custom context builder                                                                                                          |
+| Export                        | Kind      | Purpose                                                                                                                                        |
+| ----------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GraphqlPlugin`               | function  | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL`                                                                      |
+| `GraphqlService`              | class     | The `IGraphqlService` implementation; exported for testing                                                                                     |
+| `adaptGraphqlModule`          | function  | Structural adaptation of graphql module into internal runtime port                                                                             |
+| `graphiqlHtml`                | function  | Generates GraphiQL UI HTML page                                                                                                                |
+| `createDepthLimitRule`        | function  | Creates a validation rule for query depth limiting                                                                                             |
+| `GraphqlSchemaError`          | class     | Thrown when schema construction or resolver attachment fails                                                                                   |
+| `GraphqlRuntimeLoadError`     | class     | Thrown when graphql runtime cannot be loaded                                                                                                   |
+| `loadGraphqlModule`           | function  | Loads `npm:graphql@^16` through a real dynamic import                                                                                          |
+| `GraphqlPluginOptions`        | type      | The factory parameter shape (union of the two arms)                                                                                            |
+| `GraphqlSchemaFirstOptions`   | type      | The schema-first arm of that union                                                                                                             |
+| `GraphqlCodeFirstOptions`     | type      | The code-first arm of that union                                                                                                               |
+| `ResolverMap`                 | type      | Resolver map for schema-first mode                                                                                                             |
+| `TypeResolverMap`             | type      | The resolver entries for one object or interface type                                                                                          |
+| `FieldResolver`               | type      | Field resolver function type                                                                                                                   |
+| `AnyFieldResolver`            | type      | The bivariant entry type a `TypeResolverMap` field holds — accepts a narrowly annotated resolver AND contextually types an unannotated one     |
+| `AnySubscriptionResolver`     | interface | The bivariant entry type a `TypeResolverMap` subscription field holds — same rule as `AnyFieldResolver`, for `{ subscribe, resolve? }` entries |
+| `SubscriptionResolver`        | type      | A subscription field's `{ subscribe, resolve? }` pair                                                                                          |
+| `GraphqlScalarResolver`       | type      | Custom scalar `serialize`/`parseValue`/`parseLiteral` methods                                                                                  |
+| `GraphqlSubscriptionsOptions` | type      | The `subscriptions` option (WebSocket and SSE arms)                                                                                            |
+| `GraphqlWsTransportOptions`   | type      | WebSocket transport options, including `onConnect`                                                                                             |
+| `GraphqlSseTransportOptions`  | type      | SSE transport options                                                                                                                          |
+| `GraphqlApqOptions`           | type      | Automatic Persisted Queries options                                                                                                            |
+| `ApqResolver`                 | class     | Verifies and resolves persisted-query hashes                                                                                                   |
+| `IApqResolver`                | type      | The port the transports consume; implemented by `ApqResolver`                                                                                  |
+| `ApqResolveResult`            | type      | The resolved query, or a refusal carrying its code                                                                                             |
+| `extractPersistedQuery`       | function  | Reads `{ version, sha256Hash }` from a request's `extensions`                                                                                  |
+| `persistedQueryHash`          | function  | SHA-256 hex of a query, over an injected `SubtleCrypto`                                                                                        |
+| `encodeSseEvent`              | function  | Encodes a `next` SSE frame                                                                                                                     |
+| `encodeSseComplete`           | function  | Encodes the `complete` SSE frame, empty `data:` field included                                                                                 |
+| `encodeSseComment`            | function  | Encodes a `:keep-alive` comment frame                                                                                                          |
+| `GRAPHQL_TRANSPORT_WS`        | const     | The `'graphql-transport-ws'` subprotocol identifier                                                                                            |
+| `GraphqlScalarTypeLike`       | type      | Structural constraint for a custom scalar type                                                                                                 |
+| `GraphqlSchemaLike`           | type      | Structural constraint for pre-built schemas                                                                                                    |
+| `GraphqlModuleLike`           | type      | Structural constraint for injected graphql modules                                                                                             |
+| `DefaultGraphqlContext`       | type      | Default context shape passed to resolvers                                                                                                      |
+| `GraphqlContextInput`         | type      | Input type for custom context builder                                                                                                          |
 
 > `GraphqlRuntime` and the structural graphql facades are **not** exported. They are an internal
 > port.

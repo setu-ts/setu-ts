@@ -1467,7 +1467,13 @@ describe('documentation gate — no nonexistent kernel API in package READMEs (M
     expect(FILES.length).toBeGreaterThanOrEqual(5);
     for (const file of FILES) {
       const lines = (await Deno.readTextFile(file)).split('\n');
-      const { blocks } = scanFences(lines);
+      const { blocks, unclosedAt } = scanFences(lines);
+      // An UNCLOSED fence is omitted from `blocks` entirely (measured: a file
+      // whose only fence never closes yields 0 blocks), so its contents escape
+      // this scan. Fail on the malformed file instead of silently covering
+      // less than the file claims.
+      expect(unclosedAt, `${file} has an unclosed code fence at line ${unclosedAt}`)
+        .toBeNull();
       for (const block of blocks) {
         const lang = (block as { info: string }).info;
         // Reuse the fence engine's alias set rather than a hardcoded pair: it

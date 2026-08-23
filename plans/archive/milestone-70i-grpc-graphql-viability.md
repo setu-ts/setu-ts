@@ -97,15 +97,16 @@ the recurrence gates and the four committed docs.
 - **Why:** withdrawing the package would delete working capability. The measured evidence is that 12
   of 15 reference-client checks pass — Connect and gRPC-Web, on both HTTP/1.1 and HTTP/2, for unary,
   server-streaming and client-streaming — and reflection and Health v1 were complete against real
-  `grpcurl` **on alpha.8, before this milestone's refusal**; after it, a native client reaches them
-  only through Connect or gRPC-Web (§3.3, and the measurement under Verification bar below). Exactly
-  one wire format fails, and its failure is **architectural, not a bug**: native gRPC signals
-  completion in HTTP/2 **trailers**, the Fetch `Response` has no trailer mechanism, and M23
-  deliberately moved the whole framework onto Hono's `fetch` entry point. No runtime adapter can
-  emit trailers through a `Response`, so "run it on Node or Bun" is not a remedy even now that X7-3
-  is closed and the package loads there. Making native gRPC work is a non-fetch serve path in
-  `packages/runtime` — a reversal of M23, not a plugin fix — so it is named in §0 as unowned rather
-  than deferred to a letter.
+  `grpcurl` **on alpha.8, before this milestone's refusal**. After it, reflection and Health remain
+  reachable over Connect and gRPC-Web; a client speaking native `application/grpc` receives the
+  refusal instead, and needs a Connect/gRPC-Web-capable client or a proxy (§3.3, and the measurement
+  under Verification bar below). Exactly one wire format fails, and its failure is **architectural,
+  not a bug**: native gRPC signals completion in HTTP/2 **trailers**, the Fetch `Response` has no
+  trailer mechanism, and M23 deliberately moved the whole framework onto Hono's `fetch` entry point.
+  No runtime adapter can emit trailers through a `Response`, so "run it on Node or Bun" is not a
+  remedy even now that X7-3 is closed and the package loads there. Making native gRPC work is a
+  non-fetch serve path in `packages/runtime` — a reversal of M23, not a plugin fix — so it is named
+  in §0 as unowned rather than deferred to a letter.
 - **Test home:** no test asserts the decision itself; §3.2 and §3.3 are its executable halves, and
   the README/PUBLIC_API rewrites are its documented half.
 
