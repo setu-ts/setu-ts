@@ -60,12 +60,14 @@ drift into — it is a conclusion you may only reach after a deliberate hunt has
   out-of-order, dependency absent, error thrown midway. Walk the error, rollback, and not-found
   paths with the same care as the happy path: that is where this repo's bugs live, and exactly where
   the behavioral probes never went. Include the inputs that are pathological rather than merely
-  wrong, and note that the three numeric ones fail by three different mechanisms: `NaN`, where every
-  comparison including `>` yields `false`, so a bound stops rejecting anything; `Infinity` as an
-  upper bound, which nothing can exceed, disabling the same check by a different route; `-Infinity`,
-  which inverts it into rejecting everything. Then a negative or zero limit, a value whose
-  `toString`/`valueOf` throws, and a revoked `Proxy`. A limit option that disabled the very check it
-  configured, and an error serializer that threw while serializing, have both shipped here.
+  wrong, and note that the three numeric ones fail by three different mechanisms: `NaN`, where the
+  relational operators (`>`, `<`, `>=`, `<=`) and both equality forms all yield `false`, so a bound
+  stops rejecting anything — while `!=`/`!==` yield `true`, so an inequality guard beside it fires
+  exactly where the bound has gone silent; `Infinity` as an upper bound, which nothing can exceed,
+  disabling the same check by a different route; `-Infinity`, which inverts it into rejecting
+  everything. Then a negative or zero limit, a value whose `toString`/`valueOf` throws, and a
+  revoked `Proxy`. A limit option that disabled the very check it configured, and an error
+  serializer that threw while serializing, have both shipped here.
 - **For every sequence of two or more awaited operations against shared external state** — a Redis
   key, a table row, a file, a shared registry — re-read it as though a second caller interleaves at
   each `await`. Ask what that caller observes between a write and the read that depends on it, and
