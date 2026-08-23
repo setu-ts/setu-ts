@@ -7135,7 +7135,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   X8-6's `PutObjectOptions`, X8-7's `IWorkerHandle.onExit?`), `runtime` (X8-7's per-runtime exit
   signal — the row's own text calls for "per-runtime implementations"), and `cli` (X8-9's assigned
   package). `cloudflare-plugin` also changes, because `R2Storage` is the other in-repo `IStorage`
-  implementor and R2 can genuinely carry the metadata X8-6 adds. **Complete (PR pending).**
+  implementor and R2 can genuinely carry the metadata X8-6 adds. **Complete (PR #178).**
 - ⬜ **M70l — Deployment and operations** (`cli`, `scheduler-plugin`, `messaging-plugin`,
   `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the CLI-generated stack crash-loops
   two of three services (X10-1); a scheduled job runs once per replica and `distributedLock` does

@@ -2993,7 +2993,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   answers the same question cluster-wide); and the plan's type-level `runtime-contracts.test.ts`
   deliverable was unwritten — now four cases beside M55's `readStream` precedent. The storage
   barrel's type exports were pinned at compile time for the same reason M56 gives: dropping one left
-  every runtime assertion in that file green — complete (PR pending)
+  every runtime assertion in that file green — complete (PR #178)
 - **Next milestone** — **M70i** (gRPC and GraphQL viability). The repair-versus-withdraw decision
   for `grpc-plugin`, plus the documented-API-does-not-exist rows both packages carry: every gRPC
   registration snippet in README and `PUBLIC_API.md` throws because it resolves the capability
