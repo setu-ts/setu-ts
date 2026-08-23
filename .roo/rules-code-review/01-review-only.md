@@ -60,10 +60,12 @@ drift into — it is a conclusion you may only reach after a deliberate hunt has
   out-of-order, dependency absent, error thrown midway. Walk the error, rollback, and not-found
   paths with the same care as the happy path: that is where this repo's bugs live, and exactly where
   the behavioral probes never went. Include the inputs that are pathological rather than merely
-  wrong: `NaN` and infinities, where every `>` silently becomes `false` and the check disappears
-  entirely; a negative or zero limit; a value whose `toString`/`valueOf` throws; a revoked `Proxy`.
-  A limit option that disabled the very check it configured, and an error serializer that threw
-  while serializing, have both shipped here.
+  wrong, and note that the three numeric ones fail by three different mechanisms: `NaN`, where every
+  comparison including `>` yields `false`, so a bound stops rejecting anything; `Infinity` as an
+  upper bound, which nothing can exceed, disabling the same check by a different route; `-Infinity`,
+  which inverts it into rejecting everything. Then a negative or zero limit, a value whose
+  `toString`/`valueOf` throws, and a revoked `Proxy`. A limit option that disabled the very check it
+  configured, and an error serializer that threw while serializing, have both shipped here.
 - **For every sequence of two or more awaited operations against shared external state** — a Redis
   key, a table row, a file, a shared registry — re-read it as though a second caller interleaves at
   each `await`. Ask what that caller observes between a write and the read that depends on it, and
@@ -141,12 +143,20 @@ shipped a defect that lived only in their own review fix**, each found afterward
 reviewer on the PR; in one, the fix replaced two lines with a six-command sequence against shared
 Redis state and introduced an interleaving bug that stranded data permanently.
 
-So on any pass after the first, isolate the fix and hunt it as new code by someone else:
+So on any pass after the first, isolate the fix and hunt it as new code by someone else. The
+boundary is the commit hash the PREVIOUS review reported (see "The report you hand back" — recording
+it is what makes this step executable; `main...HEAD` cannot substitute, since it spans the whole
+milestone and, being a symmetric difference, also picks up commits unique to `main`):
 
 ```bash
-git log --oneline main...HEAD          # identify the fix commits from the previous round
-git diff <last-reviewed-commit>..HEAD  # the fixes, as their own reviewable diff
+PREV=<reviewed-commit-hash from the previous report>
+git log --oneline "$PREV"..HEAD   # every commit added since that review
+git diff "$PREV"..HEAD            # those commits as one reviewable diff
 ```
+
+If no previous report recorded a hash, say so and fall back to the fix commits named in the
+orchestrator's subtask handoff — but treat the missing hash as a process defect worth reporting,
+because without it the next pass is guessing too.
 
 Apply the same dimensions, and weight the three the fix most likely introduced: a fix that adds
 awaited commands gets the interleaving question, a fix that adds a member gets the lifecycle-mirror
@@ -156,6 +166,10 @@ Say in your report which range you re-reviewed; without it a reader cannot tell 
 from a rubber stamp.
 
 ## The report you hand back
+
+Open the report with the **commit hash you reviewed** (`git rev-parse HEAD`) and, on a re-review,
+the range you isolated. The next pass reads that hash as its boundary, so omitting it breaks the
+step above for whoever comes next.
 
 Return a ranked report (correctness first), each finding carrying: **category** (correctness |
 cleanup), **file:line**, a one-line **summary**, and for every correctness finding a concrete
