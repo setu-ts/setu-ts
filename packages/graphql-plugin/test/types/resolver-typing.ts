@@ -143,7 +143,42 @@ const unannotatedResolvers: ResolverMap = {
 /** The unannotated map must reach the plugin option too, not just a local. */
 const unannotatedPlugin = GraphqlPlugin({
   typeDefs: `type Issue { id: ID! title: String! } type Query { issue(id: ID!): Issue }`,
-  resolvers: unannotatedResolvers as never,
+  resolvers: unannotatedResolvers,
 });
 
 export { unannotatedPlugin, unannotatedResolvers };
+
+/**
+ * X6-4 on the SUBSCRIPTION arm: a typed `{ subscribe, resolve }` entry must
+ * assign through `ResolverMap` and through the public plugin option.
+ *
+ * `TypeResolverMap` bound the bare `SubscriptionResolver` (defaults all
+ * `unknown`), so `resolve: (payload: Book) => payload.title` failed with
+ * `Type 'unknown' is not assignable to type 'Book'` — X6-4's defect surviving
+ * on the arm the original fixture never covered.
+ */
+interface Book {
+  id: string;
+  title: string;
+}
+
+const typedSubscription: ResolverMap = {
+  Subscription: {
+    bookAdded: {
+      subscribe: (): AsyncIterable<Book> =>
+        (async function* () {
+          await Promise.resolve();
+        })() as AsyncIterable<Book>,
+      resolve: (payload: Book) => payload.title,
+    },
+  },
+};
+
+const subscriptionPlugin = GraphqlPlugin({
+  typeDefs: `type Book { id: ID! title: String! }
+type Query { books: [Book!]! }
+type Subscription { bookAdded: String! }`,
+  resolvers: typedSubscription,
+});
+
+export { subscriptionPlugin, typedSubscription };

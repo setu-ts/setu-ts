@@ -96,10 +96,12 @@ the recurrence gates and the four committed docs.
   explicit, protocol-legal refusal (§3.3) rather than left to produce a broken response.
 - **Why:** withdrawing the package would delete working capability. The measured evidence is that 12
   of 15 reference-client checks pass — Connect and gRPC-Web, on both HTTP/1.1 and HTTP/2, for unary,
-  server-streaming and client-streaming — and reflection and Health v1 are complete against real
-  `grpcurl`. Exactly one wire format fails, and its failure is **architectural, not a bug**: native
-  gRPC signals completion in HTTP/2 **trailers**, the Fetch `Response` has no trailer mechanism, and
-  M23 deliberately moved the whole framework onto Hono's `fetch` entry point. No runtime adapter can
+  server-streaming and client-streaming — and reflection and Health v1 were complete against real
+  `grpcurl` **on alpha.8, before this milestone's refusal**; after it, a native client reaches them
+  only through Connect or gRPC-Web (§3.3, and the measurement under Verification bar below). Exactly
+  one wire format fails, and its failure is **architectural, not a bug**: native gRPC signals
+  completion in HTTP/2 **trailers**, the Fetch `Response` has no trailer mechanism, and M23
+  deliberately moved the whole framework onto Hono's `fetch` entry point. No runtime adapter can
   emit trailers through a `Response`, so "run it on Node or Bun" is not a remedy even now that X7-3
   is closed and the package loads there. Making native gRPC work is a non-fetch serve path in
   `packages/runtime` — a reversal of M23, not a plugin fix — so it is named in §0 as unowned rather
@@ -149,10 +151,25 @@ the recurrence gates and the four committed docs.
   prefix test would refuse gRPC-Web — the format that carries its trailers in the body and is the
   standard browser answer. The check parses the media type's essence and matches the exact set
   above.
-- **Verification bar:** asserted in unit tests **and** driven against real `grpcurl` during
-  implementation, per this repo's real-client discipline. If the probe shows a conformant client
-  does not accept the Trailers-Only refusal, that is an implementation-time finding to record in
-  this plan and in the PR body — not a licence to fall back silently.
+- **Verification bar:** asserted in unit tests **and** driven against real `grpcurl`, per this
+  repo's real-client discipline.
+
+  **Measured (grpcurl v1.9.3), after the branch was first archived** — the plan originally recorded
+  this bar as met when `grpcurl` was not yet installed, which CodeRabbit correctly flagged on PR
+  #180; these are the actual results:
+
+  | check                                             | result                                                        |
+  | ------------------------------------------------- | ------------------------------------------------------------- |
+  | unary native call (`-proto`, reflection bypassed) | `UNIMPLEMENTED` reported cleanly, exit 1 — **the bar is met** |
+  | `grpcurl list` (reflection, **bidi**-streaming)   | hangs (exit 124)                                              |
+  | control: same `list` with the refusal **removed** | hangs identically — so the hang is **not** this refusal       |
+  | `grpcurl -format connect`                         | rejected: "The -format option must be 'json' or 'text'"       |
+
+  So a conformant client **does** accept the Trailers-Only refusal on the unary path. A bidi call
+  never reaches it, for the transport reason the bidi Limitations bullet already gives — the control
+  is what separates the two, and it is why this is recorded as a pre-existing limitation rather than
+  a defect in §3.3. The last row confirms by execution the README correction that replaced
+  `grpcurl -format connect`, which was previously argued from documented flag semantics alone.
 - **Test home:** `test/unit/grpc-binary-refusal.test.ts` (the exact-match table, gRPC-Web explicitly
   passing through), `test/integration/grpc-integration.test.ts` (a native content type refused; the
   same procedure over Connect and over gRPC-Web still answering normally).

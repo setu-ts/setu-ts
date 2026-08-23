@@ -1463,13 +1463,17 @@ describe('documentation gate — no nonexistent kernel API in package READMEs (M
 
   it('no code fence uses new Application() or app.use()', async () => {
     const { scanFences } = await import('../scripts/check-docs.ts');
+    const { TS_ALIASES } = await import('./fixtures/snippets/fence-engine.ts');
     expect(FILES.length).toBeGreaterThanOrEqual(5);
     for (const file of FILES) {
       const lines = (await Deno.readTextFile(file)).split('\n');
       const { blocks } = scanFences(lines);
       for (const block of blocks) {
         const lang = (block as { info: string }).info;
-        if (!(lang === 'typescript' || lang === 'ts')) continue;
+        // Reuse the fence engine's alias set rather than a hardcoded pair: it
+        // includes `tsx`, and a `tsx` fence carrying the nonexistent API used to
+        // slip past this gate entirely.
+        if (!TS_ALIASES.has(lang)) continue;
         const code = lines.slice(
           (block as { bodyStart: number }).bodyStart,
           (block as { bodyEnd: number }).bodyEnd,

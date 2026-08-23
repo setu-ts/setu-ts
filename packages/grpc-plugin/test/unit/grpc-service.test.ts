@@ -194,6 +194,27 @@ describe('GrpcService — shutdown', () => {
     expect(response.status).toBe(503);
   });
 
+  it('answers 503 after close() even when no RPC was served first', async () => {
+    // The dispatch map is LAZY. `close()` used to read an unbuilt map as
+    // "nothing was served" and capture an EMPTY served-path set, so an
+    // application that shut down before its first RPC lost the drain 503 for
+    // procedures it really does serve — reachable only once the root basePath
+    // default (M70i) made `claims()` consult that set at all.
+    const runtime = runtimeWith([fakeService('example.Echo', ['Echo'], fakeFile('e.proto'))]);
+    const service = createService({ runtime });
+    service.addService(echoDefinition);
+    // Deliberately NO request before closing.
+    service.close();
+
+    expect(service.claims(new Request('http://x/example.Echo/Echo'))).toBe(true);
+    const response = await service.handleRequest(
+      new Request('http://x/example.Echo/Echo', { method: 'POST' }),
+    );
+    expect(response.status).toBe(503);
+    // An ordinary route is still untouched.
+    expect(service.claims(new Request('http://x/users'))).toBe(false);
+  });
+
   it('leaves ordinary application routes alone while draining', async () => {
     // Returning 503 for every path would take the whole app down on shutdown.
     const { service } = await closedService();

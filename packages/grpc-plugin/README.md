@@ -158,8 +158,9 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   still hangs rather than reporting the refusal — including `grpcurl list`, whose reflection call is
   bidi-streaming — for the transport reason the bidi bullet above gives, not because of this
   refusal; it hangs identically with the refusal removed. **Use Connect or gRPC-Web instead**; both
-  work completely, over HTTP/1.1 and HTTP/2, for all four RPC kinds. Every non-JS gRPC client can
-  speak Connect or gRPC-Web, but **not through `grpcurl`** — its `-format` flag selects the message
+  work completely for unary, server-streaming and client-streaming over both HTTP/1.1 and HTTP/2;
+  bidi additionally requires HTTP/2, per the bidi bullet above. Every non-JS gRPC client can speak
+  Connect or gRPC-Web, but **not through `grpcurl`** — its `-format` flag selects the message
   encoding (`json`/`text`), not the wire protocol, and it implements native gRPC only. Use
   `buf curl --protocol connect` (or `--protocol grpcweb`), a generated Connect client, or a web
   client; for an existing native-gRPC fleet, put Envoy's `grpc_web` filter in front.
