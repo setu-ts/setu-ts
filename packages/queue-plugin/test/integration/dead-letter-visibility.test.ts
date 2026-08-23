@@ -22,8 +22,8 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { MetricsPlugin } from '@setu-ts/metrics-plugin';
 import { HealthPlugin } from '@setu-ts/health-plugin';
-import type { IQueue } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import type { IMetricsService, IPlugin, IQueue } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { QueuePlugin } from '../../src/index.ts';
 import { QUEUE_METRICS } from '../../src/metrics/metric-names.ts';
@@ -96,6 +96,83 @@ describe('dead-letter visibility through a real application (X8-4)', () => {
       expect(queueCheck?.data?.queues).toEqual({
         thumbnail: { ready: 0, processing: 0, dead: 1 },
       });
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
+describe('a refusing metrics backend cannot break the queue (X8-4)', () => {
+  it('should report the write failure through the logger and keep settling jobs', async () => {
+    // `MetricBase.validateLabels` throws on an undeclared or incomplete label
+    // set, and `IMetricsService` is a replaceable capability — so the plugin's
+    // reporter callback is a real path, not a defensive one. A metrics plugin
+    // registered at a higher priority number replaces the built-in service,
+    // which is exactly the §3.4 case that makes this reachable.
+    const warnings: { message: string; metadata?: Record<string, unknown> }[] = [];
+    const refusingMetrics: IPlugin = {
+      name: 'refusing-metrics',
+      version: '0.0.0',
+      provides: [CAPABILITIES.METRICS],
+      priority: PLUGIN_PRIORITY.HIGH,
+      register(ctx) {
+        ctx.services.register<IMetricsService>(CAPABILITIES.METRICS, {
+          counter: () => ({
+            inc: () => {
+              throw new Error('metric labels rejected');
+            },
+          }),
+          gauge: () => ({}),
+          histogram: () => ({}),
+          summary: () => ({}),
+          get: () => undefined,
+        } as unknown as IMetricsService);
+      },
+    };
+    const capturingLogger: IPlugin = {
+      name: 'capturing-logger',
+      version: '0.0.0',
+      provides: [CAPABILITIES.LOGGER],
+      priority: PLUGIN_PRIORITY.HIGHEST,
+      register(ctx) {
+        ctx.services.register(CAPABILITIES.LOGGER, {
+          warn: (message: string, metadata?: Record<string, unknown>) => {
+            warnings.push({ message, ...(metadata === undefined ? {} : { metadata }) });
+          },
+          error: () => {},
+          info: () => {},
+          debug: () => {},
+        });
+      },
+    };
+
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        capturingLogger,
+        refusingMetrics,
+        QueuePlugin({ adapter: 'memory', pollIntervalMs: POLL_MS }),
+      ],
+    });
+    await app.start();
+
+    try {
+      const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
+      let processed = 0;
+      queue.process('ping', () => {
+        processed++;
+      });
+
+      await queue.add('ping', {});
+      await until(() => processed > 0, 'the job to run');
+      await until(
+        () => warnings.some((w) => w.message.includes('queue metrics write failed')),
+        'the metrics failure to be reported',
+      );
+
+      // The job ran despite the refusing backend — observing the work must
+      // never be able to lose it (the M45b review finding).
+      expect(processed).toBe(1);
     } finally {
       await app.stop();
     }

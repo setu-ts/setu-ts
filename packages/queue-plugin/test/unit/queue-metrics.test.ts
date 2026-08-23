@@ -41,11 +41,16 @@ class RecordingMetrics implements IMetricsService {
   readonly increments: Increment[] = [];
   /** When set, every `inc` throws — a backend refusing a write. */
   refuse = false;
+  /** When set, every `inc` throws a non-`Error`, which a capability may do. */
+  throwNonError = false;
 
   counter(name: string, options?: MetricOptions): ICounter {
     this.created.set(name, options);
     return {
       inc: (value?: number, labels?: Record<string, string>) => {
+        if (this.throwNonError) {
+          throw 'backend exploded';
+        }
         if (this.refuse) {
           throw new Error('metric labels rejected');
         }
@@ -121,5 +126,21 @@ describe('QueueCollector (X8-4)', () => {
     expect(() => collector.jobSettled('a', 'completed')).not.toThrow();
     expect(errors).toHaveLength(1);
     expect(errors[0]!.message).toContain('metric labels rejected');
+  });
+});
+
+describe('QueueCollector — a non-Error thrown by the backend', () => {
+  it('should normalize a thrown non-Error before reporting it', () => {
+    // A replaceable capability can throw anything; the reporter's contract is
+    // `(error: Error)`, so a bare string must not reach it unwrapped.
+    const metrics = new RecordingMetrics();
+    const errors: Error[] = [];
+    const collector = new QueueCollector(metrics, (error) => errors.push(error));
+    metrics.throwNonError = true;
+
+    collector.jobSettled('a', 'completed');
+
+    expect(errors[0]).toBeInstanceOf(Error);
+    expect(errors[0]!.message).toContain('backend exploded');
   });
 });
