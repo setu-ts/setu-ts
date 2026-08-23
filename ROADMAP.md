@@ -4587,7 +4587,9 @@ M70k**: its named fix needs a worker exit signal that `IWorkerHandle`
 (`packages/common/src/runtime.ts:149`) does not have, so it is an optional `common` widening plus
 per-runtime implementations — M70k's kind of work, not an observability milestone's. The limitation
 is documented in the package README and `PUBLIC_API.md` instead of being left to discovery. M70k's
-row is amended to keep X8-7 and drop X8-2.
+row is amended to keep X8-7 and drop X8-2. **M70k then closed X8-7** with exactly that widening —
+optional `IWorkerHandle.onExit?` plus `IWorkerHost.reportsExit?`, implemented on Node and Bun and
+omitted on Deno, whose web `Worker` emits nothing at all when a worker ends itself (measured).
 
 ### Implementation Files
 
@@ -7118,15 +7120,22 @@ Ordered by the sequence they should be worked, not by severity alone.
   column refusal threw **synchronously** from a method typed `Promise<…>`, bypassing any caller
   using `.catch()` — the M52b/M52c class — so the check returns its error and the adapter rejects
   with it.
-- ⬜ **M70k — Storage, queue and worker operability** (`storage-plugin`, `queue-plugin`,
-  `worker-pool-plugin`). Upload `maxSize` does not bound what is buffered, so a 1 KB limit
-  multipart-parses a 40 MB body first (X8-3); `taskTimeoutMs: 0` leaks a pool slot permanently (X8-7
-  — its fix needs a worker exit signal on `IWorkerHandle`, which `common` does not have; X8-2 was
-  fixed in M45b, whose branch already touched that file); a job exhausting its retries is invisible
-  through every surface (X8-4); `IStorage.put` takes no metadata, so every object is
-  `application/octet-stream` (X8-6); and the `local` provider cannot work in a scaffolded project at
-  all (X8-9). Plus X8-8, X8-10, X8-11. M45b shipped ahead of this row: it closed X8-2 itself and
-  documented X8-7's limitation, so this row no longer blocks it.
+- ✅ **M70k — Storage, queue and worker operability** (`storage-plugin`, `queue-plugin`,
+  `worker-pool-plugin`, plus `common`, `runtime` and `cli`). Upload `maxSize` did not bound what is
+  buffered, so a 1 KB limit multipart-parsed a 40 MB body first (X8-3); `taskTimeoutMs: 0` leaked a
+  pool slot permanently (X8-7 — its fix needs a worker exit signal on `IWorkerHandle`, which
+  `common` did not have; X8-2 was fixed in M45b, whose branch already touched that file); a job
+  exhausting its retries was invisible through every surface (X8-4); `IStorage.put` took no
+  metadata, so every object was `application/octet-stream` (X8-6); and the `local` provider could
+  not work in a scaffolded project at all (X8-9). Plus X8-8, X8-10, X8-11. M45b shipped ahead of
+  this row: it closed X8-2 itself and documented X8-7's limitation, so this row did not block it.
+
+  **The package list is corrected from the row's original three**, mirroring the M70b, M70g and M70h
+  corrections: the rows the row itself assigns need `common` (X8-4's `ProcessOptions.onFailed`,
+  X8-6's `PutObjectOptions`, X8-7's `IWorkerHandle.onExit?`), `runtime` (X8-7's per-runtime exit
+  signal — the row's own text calls for "per-runtime implementations"), and `cli` (X8-9's assigned
+  package). `cloudflare-plugin` also changes, because `R2Storage` is the other in-repo `IStorage`
+  implementor and R2 can genuinely carry the metadata X8-6 adds. **Complete (PR pending).**
 - ⬜ **M70l — Deployment and operations** (`cli`, `scheduler-plugin`, `messaging-plugin`,
   `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the CLI-generated stack crash-loops
   two of three services (X10-1); a scheduled job runs once per replica and `distributedLock` does
@@ -7272,7 +7281,7 @@ branch during a version bump.
 | 70h       | ✅     | cli scaffold batch                    |
 | 70i       | ⬜     | grpc and graphql viability            |
 | 70j       | ✅     | database adapter correctness          |
-| 70k       | ⬜     | storage, queue, worker operability    |
+| 70k       | ✅     | storage, queue, worker operability    |
 | 70l       | ⬜     | deployment and operations             |
 | 70m       | ⬜     | sdk and openapi                       |
 | 70n       | ⬜     | decorators, di, docs sweep            |

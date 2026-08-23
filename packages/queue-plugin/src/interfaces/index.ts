@@ -32,6 +32,22 @@ export interface IRedisQueueClient {
   hdel(key: string, ...fields: string[]): Promise<number>;
   /** Delete a key. */
   del(...keys: string[]): Promise<number>;
+  /**
+   * Number of members in a sorted set. OPTIONAL so an existing injected fake
+   * still type-checks; an adapter whose client omits it reports no depths
+   * rather than reporting zero.
+   *
+   * @since 0.3.0
+   */
+  zcard?(key: string): Promise<number>;
+  /**
+   * Sets a key's time-to-live in seconds. OPTIONAL for the same reason as
+   * {@link zcard}; without it a configured `deadLetterTtlMs` cannot be applied
+   * and the retained payload keeps today's unbounded lifetime.
+   *
+   * @since 0.3.0
+   */
+  expire?(key: string, seconds: number): Promise<number>;
   /** Connect to Redis (optional). */
   connect?(): Promise<void>;
   /**
@@ -173,6 +189,17 @@ export interface QueuePluginOptions {
   pollIntervalMs?: number;
   /** Queue name prefix for RabbitMQ adapter (default 'he.queue'). */
   prefix?: string;
+  /**
+   * How long a dead-lettered job's payload is retained, in milliseconds.
+   *
+   * Omitted (the default) keeps today's behaviour: the payload is retained
+   * indefinitely "for debugging", so the jobs hash grows without bound for the
+   * lifetime of the deployment (X8-4). Applied only by the Redis adapter, and
+   * only when the injected client exposes `expire`.
+   *
+   * @since 0.3.0
+   */
+  deadLetterTtlMs?: number;
   /** SQS-specific options (required when adapter is 'sqs'). */
   sqs?: import('../adapters/sqs-queue.ts').SqsQueueOptions;
 }
@@ -185,6 +212,13 @@ export interface RedisQueueOptions {
   url?: string;
   /** Injected Redis client (bypasses lazy import). */
   client?: IRedisQueueClient;
+  /**
+   * How long a dead-lettered job's payload is retained, in milliseconds; see
+   * {@link QueuePluginOptions.deadLetterTtlMs}.
+   *
+   * @since 0.3.0
+   */
+  deadLetterTtlMs?: number;
 }
 
 /**

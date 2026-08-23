@@ -102,24 +102,47 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
   in-flight task, drops the worker, and re-dispatches its queued work to survivors.
 - **Timeout.** A task exceeding its timeout rejects with `WorkerTaskTimeoutError`; the worker is
   terminated and replaced (in-flight JavaScript cannot be cancelled).
-- **`taskTimeoutMs: 0` also disables crash detection for a self-terminated worker.** A worker that
-  ends itself is not reported through any host event, so the timeout is the only thing that settles
-  its task; with the timeout off, that `run()` never settles and its pool slot is not released. Set
-  a timeout on any pool whose task module can call `self.close()`. (Tracked as smoke finding X8-7;
-  the durable fix needs a worker exit signal on `IWorkerHandle` and is owned by M70k.)
+- **A worker that ends its own thread** — `process.exit()` inside the handler, or `self.close()` on
+  Deno — settles its in-flight task with `WorkerExitError` and frees the slot, independently of the
+  task timeout. This is what the "worker crash" line above always promised; before M70k the only
+  thing that settled such a task was the timeout, so `taskTimeoutMs: 0` left `run()` pending forever
+  and wedged the pool permanently (smoke finding X8-7).
+
+  **Whether it is detected depends on the runtime, and the pool tells you which you have.** The
+  `worker-pool` health payload reports `exitDetection`, and `register()` warns once when
+  `taskTimeoutMs` is `0` on a runtime that cannot report an exit:
+
+  | Runtime            | Worker host           | Exit reported? | Mechanism                        |
+  | ------------------ | --------------------- | -------------- | -------------------------------- |
+  | Node               | `node:worker_threads` | yes            | the `'exit'` event               |
+  | Bun                | web `Worker`          | yes            | Bun's non-standard `'close'`     |
+  | Deno               | web `Worker`          | **no**         | nothing is emitted at all        |
+  | Cloudflare Workers | none                  | n/a            | `run()` throws; no worker spawns |
+
+  Deno's web `Worker` emits no host-side event when a worker calls `self.close()` — not `close`,
+  `exit`, `error` or `messageerror` — and a later `postMessage` still resolves, so the death is
+  undetectable. Keep a task timeout on any Deno pool whose task module can terminate itself; it
+  remains the only backstop there.
 - **Overload.** When the pending queue is at its bound, `run()` rejects with `WorkerQueueFullError`
   instead of growing memory without limit.
 - **Shutdown.** The plugin's `onClose` hook terminates every worker and rejects pending tasks.
 
 ## Errors
 
-All four are exported for `instanceof` handling: `WorkerPoolUnavailableError`, `WorkerTaskError`,
-`WorkerTaskTimeoutError`, `WorkerQueueFullError`.
+All five are exported for `instanceof` handling: `WorkerPoolUnavailableError`, `WorkerTaskError`,
+`WorkerTaskTimeoutError`, `WorkerQueueFullError`, `WorkerExitError`.
+
+`WorkerExitError` is distinct from `WorkerTaskError` on purpose: the latter carries an error the
+worker managed to report, while a thread that simply stops raises nothing at all.
 
 ## Health
 
-Registers a `worker-pool` health indicator reporting `{ available, pools }`, where `pools` is one
-`{ taskModule, workers, busy, queued, completed, failed }` snapshot per pool.
+Registers a `worker-pool` health indicator reporting `{ available, exitDetection, pools }`, where
+`pools` is one `{ taskModule, workers, busy, queued, completed, failed }` snapshot per pool.
+
+`exitDetection` reports whether this runtime can tell the pool that a worker's thread ended — see
+the lifecycle table above. It is `false` on Deno and on any custom `IWorkerHost` that does not
+implement `reportsExit`.
 
 ## Metrics
 
@@ -156,6 +179,7 @@ The gauges are written from the same snapshot the health indicator reads, on eve
 | Export                       | Kind      |
 | ---------------------------- | --------- |
 | `WorkerPoolPlugin`           | function  |
+| `WorkerExitError`            | class     |
 | `WorkerPoolService`          | class     |
 | `WorkerPoolUnavailableError` | class     |
 | `WorkerQueueFullError`       | class     |
