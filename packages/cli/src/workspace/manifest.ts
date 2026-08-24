@@ -131,6 +131,21 @@ export interface WorkspaceMember {
    * pointing a probe at a path that may 404 (X2-7).
    */
   readonly healthProbes?: boolean;
+  /**
+   * Whether this member serves `/metrics`.
+   *
+   * Recorded at `generate app` time for the same reason {@linkcode healthProbes}
+   * is — the Kubernetes renderer has only the manifest, and a member's plugin
+   * set is knowable only where the template is chosen. Every named template
+   * reaches `MetricsPlugin`, so only a template-LESS member serves neither.
+   *
+   * ABSENT means "unknown", not "no": the renderer omits the Prometheus
+   * annotations rather than pointing a scraper at an endpoint that may not
+   * exist (X10-6). It deliberately does NOT reuse `healthProbes`, because the
+   * two can diverge and a boolean whose name says one thing while being read
+   * for another is how these drift.
+   */
+  readonly metricsEndpoint?: boolean;
 }
 
 /** A workspace's CLI-owned record of itself. */
@@ -239,11 +254,13 @@ function toMember(value: unknown): WorkspaceMember | undefined {
       !dependsOn.every((entry) => typeof entry === 'string' && entry !== ''))
   ) return undefined;
   const healthProbes = record['healthProbes'];
+  const metricsEndpoint = record['metricsEndpoint'];
   return {
     name,
     port,
     ...(dependsOn === undefined ? {} : { dependsOn }),
     ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),
+    ...(typeof metricsEndpoint === 'boolean' ? { metricsEndpoint } : {}),
   };
 }
 

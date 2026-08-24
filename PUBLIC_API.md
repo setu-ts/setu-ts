@@ -3830,7 +3830,11 @@ schedule until the registering plugin re-creates it. For durable background work
 
 ### Exports
 
-- **`SchedulerPlugin`** — Plugin factory for registering the scheduler service
+- **`SchedulerPlugin`** — Plugin factory for registering the scheduler service; **throws**
+  `SchedulerUnavailableError` at `register()` on Cloudflare Workers, where its timers cannot fire —
+  use `WorkersCron` with `[triggers] crons` there instead
+- **`SchedulerUnavailableError`** — Thrown by `register()` when the runtime platform cannot run the
+  scheduler (Cloudflare Workers); catch it by identity to branch on the refusal
 - **`SchedulerPluginOptions`** — Plugin configuration options (`timezone?`, `distributedLock?`)
 - **`DistributedLockOptions`** — Lock configuration (`enabled?`, `storage?`, `url?`, `client?`,
   `lock?`, `ttlMs?`)
@@ -3871,6 +3875,30 @@ When `distributedLock` is absent or `enabled: false`, a process-local memory loc
 unless you inject one via `client`, or supply your own `IDistributedLock` via `lock` (which takes
 priority over `storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime —
 if the lock expires mid-run, another instance may start the same job.
+
+**Multi-instance deduplication** works across replicas sharing one lock backend. `cron` and `every`
+fires each claim a never-released _slot_ lock keyed on the fire's intended time
+(`scheduler:job:<name>:<slot>`), so two replicas whose timers land anywhere in the same intended
+slot run the handler exactly once between them; `ttlMs` bounds how long a claimed slot is
+remembered, so it must exceed the maximum skew between replicas. `delay` jobs claim their slot at
+REGISTRATION, keyed on the job name plus a `:once` suffix (`scheduler:job:<name>:once`), because a
+delay's intended fire time is `now + delayMs` and carries per-replica startup skew — the name is
+what identifies "the same one-shot job" across replicas. The suffix is load-bearing: the bare
+`scheduler:job:<name>` is the per-handler mutex, and a slot holding that key would make the mutex
+acquire at fire time always lose to the slot's own claim. A delay's slot is released when the job
+leaves the registry (on fire, `remove`, or TTL expiry), so re-registering the same name after it
+fired gets a fresh slot and fires again.
+
+**A `delay` job is lost if the replica that claimed it leaves before firing.** The claim is decided
+at registration, so a replica that finds the slot held never re-attempts: if the claiming replica
+crashes — or shuts down gracefully, since `disconnect()` clears timers without releasing the slot —
+between registering the delay and firing it, no replica runs the handler and nothing reports it. The
+exposure window is the delay itself, so it matters for a long `delayMs` on a replica set that may
+lose a pod in that window. `cron` and `every` are unaffected: they claim at fire time, so the next
+fire re-contends. A separate per-handler mutex preserves overlap protection — a second fire of a job
+whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
+(`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
+slot keys; the first fire may come sooner than one full interval after registration.
 
 ### Scheduling Jobs
 
@@ -3951,8 +3979,14 @@ All four **throw** if no job with that name exists — including after a `delay`
 auto-removed itself. `getNextRun` additionally throws if the job is currently paused.
 
 `resume` re-arms from the current time rather than resuming the original countdown: cron jobs
-compute the next fire from now, `every` jobs restart the interval from now, and `delay` jobs re-arm
-the **full** original `delayMs` from now.
+compute the next fire from now, `delay` jobs re-arm the **full** original `delayMs` from now, and
+`every` jobs resume on the next epoch grid boundary of their interval
+(`(floor(now / intervalMs) + 1) * intervalMs`) — **not** a full interval after now. This is
+**breaking versus 0.1.0-alpha.8**, whose contract stated the interval "restarts from now": the fire
+may now come sooner than one full interval after resume (never later). Grid alignment at resume is
+deliberate — it is the same alignment that makes replicas agree on fire times and slot keys, and a
+resume that restarted the phase would let one replica's resumed job drift out of slot agreement with
+the others.
 
 ### IScheduler Interface
 
@@ -4951,6 +4985,9 @@ app.register(MetricsPlugin({
   endpoint: '/metrics',
   defaultMetrics: true,
   httpMetrics: true,
+  // Replaces the default ['/health', '/live', '/ready'] exclusion set; the
+  // plugin's own endpoint is always excluded either way.
+  excludePaths: ['/health', '/live', '/ready'],
   customMetrics: [
     { name: 'users_total', help: 'Total users', type: 'counter' },
     { name: 'active_connections', help: 'Active connections', type: 'gauge' },

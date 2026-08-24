@@ -3194,14 +3194,101 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it is not an X11 row and is left unowned rather than quietly widened into scope.
 
   Developed in an isolated worktree, in parallel with M70l) — complete (PR #181)
-- **Next milestone** — **M70l** (deployment and operations: `cli`, `scheduler-plugin`,
-  `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the
-  CLI-generated stack crash-loops two of three services (X10-1); a scheduled job runs once per
-  replica and `distributedLock` does not stop it, because the lock is released ~0.5 ms after the
-  handler while replica timers sit 0.70 s apart, so they never contend (X10-2); generated manifests
-  carry no `prometheus.io/*` annotations, so a vanilla Prometheus discovers **zero** targets
-  (X10-6); and `/metrics` counts its own scrapes and the health probes with no exclusion option
-  (X10-7). Plus X10-4, X10-5, X9-2, X9-5, X9-8.
+- **Milestone 70l** (`cli` + `scheduler-plugin` + `messaging-plugin` + `metrics-plugin` +
+  `cloudflare-plugin` — deployment and operations: nine register rows that share one shape, **the
+  framework is correct on one machine and stops being correct once containerised, scaled, or
+  scraped**. No `common` contract change and no new token — the one `common` edit is a JSDoc
+  correction to a released `IScheduler.resume` statement.
+
+  **X10-1** `docker compose up` on the CLI's own generated stack crash-looped two of three services:
+  `messaging-plugin` declared every subscriber queue `{ durable: false }` — named, non-durable,
+  non-exclusive, the exact trio RabbitMQ 4 refuses (`541 … transient_nonexcl_queues`). The fix is
+  **communicating intent the code already computed**: `subscribe` had computed `isExclusive` since
+  M14 and used it only for delete-on-unsubscribe bookkeeping, never passing it to `assertQueue`. A
+  caller-supplied queue name is a consumer GROUP → `{ durable: true }`; an absent one is private →
+  `{ exclusive: true, autoDelete: true }`. The image pin was rejected as the register's own
+  last-resort option. Two traps: the RPC reply inbox supplies a queue NAME (its per-instance
+  address), so the naive "named ⇒ durable" rule would leak a durable reply queue per instance —
+  hence a package-internal `REPLY_INBOX_TRANSIENT` symbol on an `InternalSubscribeOptions`, never a
+  `rr.inbox.` name-prefix match, since `SubscribeOptions.queue` reserves no prefix and a legitimate
+  group named `rr.inbox.orders` must stay durable; and `declareOptions` is carried on the active
+  consumer so the drive-mode replay re-asserts the SAME shape, because RabbitMQ refuses a
+  re-declaration that disagrees. **Breaking against an existing broker**: a group queue created
+  non-durable cannot be re-declared durable (`406 PRECONDITION_FAILED` closes the channel), so
+  CHANGELOG carries the drain-and-delete migration. `queue-plugin` was unaffected — it already
+  declared `{ durable: true }`. **CI's RabbitMQ service moved 3.13 → 4 in both workflows, and that
+  bump is the gate**: on 3.13 the defect is invisible and the new suite passes vacuously, so
+  `test/apps-gate.test.ts` pins major version 4.
+
+  **X10-2** a scheduled job ran once per replica and `distributedLock` did not stop it. Two
+  decisions, and the second is what makes the first work. **Two locks, not one**: the register's
+  preferred single slot-lock silently drops the overlap protection `MemoryLock`'s own module doc
+  promises (slot N+1 is a different key from slot N, so it cannot see a running slot N), so the
+  never-released slot lock is added ALONGSIDE the existing handler mutex. And **`every` arms on an
+  absolute epoch grid** — `(floor(now / interval) + 1) * interval` — because without it replicas
+  started 0.7 s apart compute `nextRunAtMs` values 0.7 s apart forever and slot keys never collide:
+  slot-keying alone would have shipped a mechanism that LOOKS like a fix while reducing duplicates
+  by ~77 %. Keying on the INTENDED time rather than `runtime.now()` makes the slot immune to timer
+  jitter. Grid alignment is **breaking** (the phase moves; the fire may come sooner than one full
+  interval, never later — including at `resume`, which is why the `common` JSDoc is corrected), and
+  `#armInterval` had to be DELETED rather than kept, since arming for a full interval against a
+  grid-aligned target would fire every job one interval late. `MemoryLock` now sweeps every expired
+  entry on `acquire`: slot keys are never released and never reacquired, so the lazy per-key delete
+  could never reclaim them and the map grew one entry per job per fire, forever. `delay` is the
+  exception — its slot is claimed at REGISTRATION keyed `scheduler:job:<name>:once` (a fire-time key
+  on `nextRunAtMs` carries startup skew and never collides; the `:once` suffix is load-bearing,
+  since a bare-name key would collide with the handler mutex and always lose to its own claim). That
+  carries a **documented limitation**: a `delay` whose claiming replica leaves between registration
+  and fire is lost, because `disconnect()` clears timers without releasing the slot and the loser
+  never re-contends — proved with a two-service probe returning `runs === []`, and recorded in
+  `#claimDelaySlot`'s JSDoc and `PUBLIC_API.md` rather than left to discovery.
+
+  **X9-2** `SchedulerPlugin.register()` now throws `SchedulerUnavailableError` on Workers, following
+  `messaging-plugin`'s `cloud-gate.ts` precedent — viable only because M59 fixed `detectRuntime()`,
+  which until then answered `'node'` on real workerd and would have made the check silently dead.
+  **X9-5** the register's preferred fix (default the sink to `console`) is **unavailable**:
+  `no-console` binds every package outside `cli` and `scripts`, and a repo-wide grep found no real
+  `console.` call in any plugin source (all six matches are `@example` blocks). So the platform's
+  own reporting is the sink that needs no configuration — `dispatch` runs every handler to
+  settlement (one failure still never abandons the others) and then throws an `AggregateError`,
+  which `createScheduledHandler` propagates so Cloudflare counts the invocation failed.
+  **Breaking**: `dispatch` previously never rejected. **X9-8** only a SUCCESSFUL boot is memoised
+  now (`??=` cached the rejection, so one transient failure was permanent for the isolate's life),
+  and boot failure and request failure are reported separately — folding both into one catch logged
+  "failed to start" for a fault unrelated to startup and answered 503, a drain signal, for a single
+  bad request.
+
+  **X10-4/5/6** are CLI-generated-output rows. `lifecycle.preStop.sleep` (K8s 1.30+) now mirrors the
+  repository's own chart, which shipped it while the generated manifest did not — drift between two
+  committed artifacts, and the register moved the symptom both ways on that field alone (7 → 0 → 10
+  failures over ~28k requests). The Dockerfile's `chown -R` folds into the `deno cache` RUN: a
+  standalone recursive chown rewrites metadata on every file, so overlayfs copied the whole module
+  cache into a second layer (563 MB → 362 MB measured). Prometheus annotations are gated on a NEW
+  `WorkspaceMember.metricsEndpoint`, recorded at `generate app` exactly as `healthProbes` is, with
+  absent meaning "unknown" and emitting nothing — annotating a member that serves no `/metrics`
+  would make Prometheus report a permanently-down target. It gets its own field rather than reusing
+  `healthProbes` because the two can diverge. **X10-7** the HTTP collector skips its own scrape
+  endpoint and the health probes BEFORE touching any instrument (so an excluded request cannot even
+  perturb `http_active_requests`); the health paths are literals because §2.2 forbids importing
+  `health-plugin`, and `excludePaths` REPLACES them while the plugin's own endpoint is always
+  excluded. The low-cardinality `route` label the register also suggests was declined — the
+  middleware never receives the matched pattern, and it would change every existing series'
+  identity.
+
+  Seven negative controls were each observed failing and reverted, including the real-backend one
+  (reverting `{ durable: false }` fails the RabbitMQ 4 suite with the register's own channel close),
+  and the one that matters most: reverting grid alignment while KEEPING the slot key fails the dedup
+  test plus four grid tests, which is the difference between a fix and a mechanism that looks like
+  one. **Not verified against a real cluster** — X10-4/5/6 are asserted at the level the repository
+  can gate, the emitted text; the register's kind measurements are not re-run here. Developed on a
+  branch cut before M70m, so `origin/main` was merged in and the gates re-run against the merged
+  tree before hand-off) — complete (PR #182)
+- **Next milestone** — **M70n** (decorators, DI and docs sweep: `decorator-plugin`,
+  `validation-plugin`, docs). `@ValidateBody(schema)` does not validate anything — it only feeds
+  OpenAPI (E1) — and `@Body()` re-reads the raw request, discarding validation transforms, defaults
+  and coercions (E2). Closes with the mechanical documentation rows the other workstreams do not
+  absorb (C1, C2, X3-1, X3-3, X3-4, X3-5, X3-6, X3-8, X3-9, X4-5, X4-7, X4-11, X5-5, X5-7, X5-9,
+  X7-9, X8-8, X9-10, D8, X2-6).
 
 ## Verification (run before declaring any work done)
 

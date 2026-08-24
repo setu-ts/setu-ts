@@ -94,6 +94,19 @@ describe('real-backend CI wiring', () => {
     expect(workflow).toContain('AWS_SECRET_ACCESS_KEY: test');
   });
 
+  it('pins the RabbitMQ service at major version 4 (M70l §3.1)', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const rabbitLine = workflow
+      .split('\n')
+      .find((line) => line.trim().startsWith('image: rabbitmq:'));
+    expect(rabbitLine).toBeDefined();
+    // 3.13 accepts the pre-M70l queue declaration, so X10-1 is INVISIBLE
+    // there — pointing CI back at major version 3 makes the declaration
+    // suite pass vacuously. The gate cannot be silently reverted.
+    expect(rabbitLine).toMatch(/image: rabbitmq:(4|-)/);
+    expect(rabbitLine).not.toContain('rabbitmq:3');
+  });
+
   it('grants each Redis package the net permission its guarded test needs', async () => {
     const redisPackages = ['cache-plugin', 'messaging-plugin'];
     for (const pkg of redisPackages) {
@@ -150,8 +163,10 @@ describe('real-backend CI wiring', () => {
     // the service, the port mapping, and the env var from drifting.
     for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
       const text = await Deno.readTextFile(workflow);
-      // RabbitMQ (messaging broker + queue outage suites)
-      expect(text).toContain('image: rabbitmq:3.13-management-alpine');
+      // RabbitMQ (messaging broker + queue outage suites). Major version 4 is
+      // load-bearing since M70l §3.1 — 3.13 accepts the queue declaration the
+      // defect lives in, so a revert to 3 makes those suites pass vacuously.
+      expect(text).toContain('image: rabbitmq:4-management-alpine');
       expect(text).toContain('- 5672:5672');
       expect(text).toContain('RABBITMQ_URL: amqp://localhost:5672');
       // MinIO (storage S3 outage suite)

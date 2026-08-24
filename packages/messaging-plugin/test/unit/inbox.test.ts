@@ -1,19 +1,27 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ISubscription, MessageMetadata, SubscribeOptions } from '@setu-ts/common';
-import { createTopicInbox } from '../../src/brokers/inbox.ts';
+import type { ISubscription, MessageMetadata } from '@setu-ts/common';
+import {
+  createTopicInbox,
+  type InternalSubscribeOptions,
+  REPLY_INBOX_TRANSIENT,
+} from '../../src/brokers/inbox.ts';
 
 type Handler = (message: unknown, metadata: MessageMetadata) => void | Promise<void>;
 
 /** Records what `createTopicInbox` asks of a broker's subscribe/uuid. */
 class RecordingDeps {
-  calls: Array<{ topic: string; options?: SubscribeOptions }> = [];
+  calls: Array<{ topic: string; options?: InternalSubscribeOptions }> = [];
   handlers: Handler[] = [];
   unsubscribeCalls = 0;
   subscribeError: Error | null = null;
   #uuidN = 0;
 
-  subscribe(topic: string, handler: Handler, options?: SubscribeOptions): Promise<ISubscription> {
+  subscribe(
+    topic: string,
+    handler: Handler,
+    options?: InternalSubscribeOptions,
+  ): Promise<ISubscription> {
     if (this.subscribeError) {
       return Promise.reject(this.subscribeError);
     }
@@ -47,7 +55,22 @@ describe('createTopicInbox', () => {
 
     // Without a queue, a broker that defaults to a shared consumer group would
     // hand this instance's replies to whichever member owns the partition.
-    expect(deps.calls[0]?.options).toEqual({ queue: inbox.address });
+    expect(deps.calls[0]?.options?.queue).toBe(inbox.address);
+  });
+
+  it('marks its own subscription transient at creation, not by queue-name pattern (F3)', async () => {
+    // F3: the transience marker travels on the INTERNAL subscribe call. A
+    // broker must read this flag — never pattern-match the queue name —
+    // because `SubscribeOptions.queue` has no reserved-prefix restriction
+    // and a user queue named `rr.inbox.orders` is a legitimate durable
+    // consumer group.
+    const deps = new RecordingDeps();
+    const inbox = await createTopicInbox(deps)(() => {});
+
+    const options = deps.calls[0]?.options;
+    expect(options).toBeDefined();
+    expect(options?.queue).toBe(inbox.address);
+    expect(options?.[REPLY_INBOX_TRANSIENT]).toBe(true);
   });
 
   it('mints a distinct address per open so instances never share an inbox', async () => {

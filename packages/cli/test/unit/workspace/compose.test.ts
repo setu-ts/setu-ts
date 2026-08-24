@@ -11,6 +11,7 @@ import {
   WORKSPACE_VERSION,
   type WorkspaceManifest,
 } from '../../../src/workspace/manifest.ts';
+import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { type TransportName, transportSpec } from '../../../src/workspace/transport.ts';
 
 /**
@@ -274,6 +275,50 @@ describe('workspaceContainerFiles', () => {
       );
       expect(compose).toContain('services:');
       expect(compose).not.toContain('build:');
+    });
+  });
+
+  describe('the npm/bun Dockerfile arms', () => {
+    // F5: the npm/bun arms of the parameterized Dockerfile (the `npmDockerfile`
+    // function) are a different code path from the Deno arm and must be
+    // exercised directly — the default profile is Deno, so without these the
+    // npm/bun functions are never called and their coverage is a hollow
+    // "100% branch / 0% function" artifact rather than real coverage.
+    const dockerfileFor = (runtime: 'node' | 'bun') =>
+      contentsOf(
+        workspaceContainerFiles(
+          manifestOf([{ name: 'orders', port: 3000 }]),
+          transportSpec('http'),
+          workspaceProfile(runtime),
+        ),
+        DOCKERFILE,
+      );
+
+    it('builds a Node member into the pinned Node image', () => {
+      const contents = dockerfileFor('node');
+      expect(contents).toContain('FROM node:24-alpine');
+      expect(contents).not.toContain('denoland/deno');
+      // The whole workspace installs, not one member: a member resolves its
+      // dependencies through the ROOT manifest and lockfile.
+      expect(contents).toContain('COPY package.json package-lock.json* .npmrc ./');
+      expect(contents).toContain('RUN npm install');
+      // Numeric user, same reason as the Deno arm.
+      expect(contents).toContain('USER 1000:1000');
+      expect(contents).not.toMatch(/^USER deno/m);
+      // The start command runs the member's entry via tsx.
+      expect(contents).toContain('CMD ["sh", "-c", "npx tsx main.ts"]');
+    });
+
+    it('builds a Bun member into the pinned Bun image', () => {
+      const contents = dockerfileFor('bun');
+      expect(contents).toContain('FROM oven/bun:1-alpine');
+      expect(contents).not.toContain('node:24');
+      expect(contents).not.toContain('denoland/deno');
+      // Bun installs into each member's own node_modules as well as the root,
+      // and runs the entry with `bun`.
+      expect(contents).toContain('RUN bun install');
+      expect(contents).toContain('USER 1000:1000');
+      expect(contents).toContain('CMD ["sh", "-c", "bun run main.ts"]');
     });
   });
 });

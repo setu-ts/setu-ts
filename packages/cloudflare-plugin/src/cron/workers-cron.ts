@@ -119,14 +119,22 @@ export class WorkersCron {
   /**
    * Runs every handler registered for the firing trigger's expression.
    *
-   * Handlers run concurrently and are all awaited, so the Worker invocation
-   * stays alive until the slowest finishes. A rejection is reported and
-   * swallowed rather than propagated: one failing handler must not abandon the
-   * others, and the platform's only response to a thrown `scheduled` is to
-   * count the whole invocation as failed.
+   * Handlers run to settlement — all of them are awaited even when some
+   * reject, so one failing handler never abandons the others. After every
+   * handler has settled, a rejection is REPORTED and then PROPAGATED as an
+   * `AggregateError`, and a firing expression with no registered handler
+   * throws: `createScheduledHandler` is a bare delegation, so the platform's
+   * own response — counting the whole invocation as failed — becomes the
+   * sink that needs no logger configuration (M70l X9-5). **Breaking** vs
+   * earlier versions, where `dispatch` never rejected; an application that
+   * wants the old fire-and-forget behaviour wraps its handlers in `try`.
    *
    * @param controller - The firing trigger
-   * @returns Resolves once every handler for the expression has settled
+   * @returns Resolves once every handler for the expression has settled,
+   *   when none rejected and the expression had at least one handler
+   * @throws {AggregateError} When any handler rejected, after all have
+   *   settled
+   * @throws {Error} When no handler is registered for `controller.cron`
    */
   async dispatch(controller: IScheduledController): Promise<void> {
     const handlers = this.#handlers.get(controller.cron);
@@ -137,13 +145,33 @@ export class WorkersCron {
         scheduledTime: controller.scheduledTime,
         registered: this.expressions(),
       });
-      return;
+      throw new Error(
+        `cloudflare-cron: trigger fired with no handler registered for '${controller.cron}' ` +
+          `(registered: ${
+            this.expressions().length === 0 ? 'none' : this.expressions().join(', ')
+          })`,
+      );
     }
 
-    await Promise.all(handlers.map((handler) => this.#runOne(controller, handler)));
+    const results = await Promise.allSettled(
+      handlers.map((handler) => this.#runOne(controller, handler)),
+    );
+
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) =>
+        result.reason instanceof Error ? result.reason : new Error(String(result.reason))
+      );
+
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'cloudflare-cron: one or more handlers failed');
+    }
   }
 
-  /** Runs one handler, reporting rather than propagating a rejection. */
+  /**
+   * Runs one handler, reporting a rejection and then RE-THROWING it so
+   * {@linkcode dispatch}'s settlement pass can aggregate it.
+   */
   async #runOne(controller: IScheduledController, handler: CronHandler): Promise<void> {
     try {
       await handler(controller);
@@ -153,6 +181,7 @@ export class WorkersCron {
         scheduledTime: controller.scheduledTime,
         error: error instanceof Error ? error.message : String(error),
       });
+      throw error;
     }
   }
 }

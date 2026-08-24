@@ -7143,13 +7143,14 @@ Ordered by the sequence they should be worked, not by severity alone.
   signal — the row's own text calls for "per-runtime implementations"), and `cli` (X8-9's assigned
   package). `cloudflare-plugin` also changes, because `R2Storage` is the other in-repo `IStorage`
   implementor and R2 can genuinely carry the metadata X8-6 adds. **Complete (PR #178).**
-- ⬜ **M70l — Deployment and operations** (`cli`, `scheduler-plugin`, `messaging-plugin`,
+- ✅ **M70l — Deployment and operations** (`cli`, `scheduler-plugin`, `messaging-plugin`,
   `metrics-plugin`, `cloudflare-plugin`). `docker compose up` on the CLI-generated stack crash-loops
   two of three services (X10-1); a scheduled job runs once per replica and `distributedLock` does
   not stop it, because the lock is released ~0.5 ms after the handler while replica timers sit 0.70
   s apart, so they never contend (X10-2); generated manifests carry no `prometheus.io/*` annotations
   so a vanilla Prometheus discovers **zero** targets (X10-6); and `/metrics` counts its own scrapes
   and the health probes with no exclusion option (X10-7). Plus X10-4, X10-5, X9-2, X9-5, X9-8.
+  **Complete (PR #182).**
 - ✅ **M70m — SDK and OpenAPI** (`sdk`, `openapi-plugin`, `validation-plugin`, plus `common` and
   `http-security-plugin`). A route carrying `validateBody(schema)` contributed nothing to the
   document, so the generated client for the API's only write took **no argument** and 400'd against
@@ -7324,6 +7325,6 @@ branch during a version bump.
 | 70i       | ✅     | grpc and graphql viability            |
 | 70j       | ✅     | database adapter correctness          |
 | 70k       | ✅     | storage, queue, worker operability    |
-| 70l       | ⬜     | deployment and operations             |
+| 70l       | ✅     | deployment and operations             |
 | 70m       | ✅     | sdk and openapi                       |
 | 70n       | ⬜     | decorators, di, docs sweep            |

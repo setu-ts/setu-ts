@@ -164,11 +164,11 @@ describe('a deployed Worker module', () => {
     await stop();
   });
 
-  it('ignores a trigger the Worker has no handler for, without failing the invocation', async () => {
+  it('fails the invocation for a trigger the Worker has no handler for (M70l X9-5)', async () => {
     const { worker, producer, stop } = await buildWorker();
 
     await expect(worker.scheduled({ cron: '*/1 * * * *', scheduledTime: 1 }))
-      .resolves.toBeUndefined();
+      .rejects.toThrow(/no handler registered/);
     expect(producer.sends).toEqual([]);
 
     await stop();
