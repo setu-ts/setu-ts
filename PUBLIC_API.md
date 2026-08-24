@@ -1303,41 +1303,42 @@ does not register an authorization service or advertise the authorization capabi
 
 ### Exports
 
-| Export                    | File                                      | Description                                                           |
-| ------------------------- | ----------------------------------------- | --------------------------------------------------------------------- |
-| `AuthPlugin`              | `src/plugin/auth-plugin.ts`               | Plugin factory                                                        |
-| `AuthPluginOptions`       | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac`)          |
-| `JwtOptions`              | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme) |
-| `ApiKeyOptions`           | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                |
-| `LocalOptions`            | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                           |
-| `PasswordHasher`          | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                     |
-| `authMiddleware`          | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`     |
-| `requireAuth`             | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                       |
-| `requireRole`             | `src/guards/index.ts`                     | Guard: require a role (401/403)                                       |
-| `requirePermission`       | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                 |
-| `requireAnyRole`          | `src/guards/index.ts`                     | Guard: require any of the given roles                                 |
-| `requireAllPermissions`   | `src/guards/index.ts`                     | Guard: require all of the given permissions                           |
-| `publicRoute`             | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                        |
-| `RefreshTokenService`     | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`             |
-| `RefreshTokenOptions`     | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                             |
-| `TokenPair`               | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`         |
-| `RefreshTokenStore`       | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records             |
-| `RefreshTokenRecord`      | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                    |
-| `MemoryRefreshTokenStore` | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                              |
-| `rateLimitMiddleware`     | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)      |
-| `RateLimitOptions`        | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                              |
-| `RateLimitStore`          | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                       |
-| `RateLimitResult`         | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                        |
-| `MemoryRateLimitStore`    | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                  |
-| `RedisRateLimitStore`     | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                 |
-| `IAuthService`            | re-export                                 | From `@setu-ts/common`                                                |
-| `IJwtService`             | re-export                                 | From `@setu-ts/common`                                                |
-| `IAuthorizationService`   | re-export                                 | From `@setu-ts/common`                                                |
-| `IAuthStrategy`           | re-export                                 | From `@setu-ts/common`                                                |
-| `IPrincipal`              | re-export                                 | From `@setu-ts/common`                                                |
-| `JwtSignOptions`          | re-export                                 | From `@setu-ts/common`                                                |
-| `RbacConfig`              | re-export                                 | From `@setu-ts/common`                                                |
-| `RoleDefinition`          | re-export                                 | From `@setu-ts/common`                                                |
+| Export                       | File                                      | Description                                                               |
+| ---------------------------- | ----------------------------------------- | ------------------------------------------------------------------------- |
+| `AuthPlugin`                 | `src/plugin/auth-plugin.ts`               | Plugin factory                                                            |
+| `AuthPluginOptions`          | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac`)              |
+| `JwtOptions`                 | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme)     |
+| `ApiKeyOptions`              | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                    |
+| `LocalOptions`               | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                               |
+| `PasswordHasher`             | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                         |
+| `MalformedPasswordHashError` | `src/services/password-hasher.ts`         | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash |
+| `authMiddleware`             | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`         |
+| `requireAuth`                | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                           |
+| `requireRole`                | `src/guards/index.ts`                     | Guard: require a role (401/403)                                           |
+| `requirePermission`          | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                     |
+| `requireAnyRole`             | `src/guards/index.ts`                     | Guard: require any of the given roles                                     |
+| `requireAllPermissions`      | `src/guards/index.ts`                     | Guard: require all of the given permissions                               |
+| `publicRoute`                | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                            |
+| `RefreshTokenService`        | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                 |
+| `RefreshTokenOptions`        | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                                 |
+| `TokenPair`                  | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`             |
+| `RefreshTokenStore`          | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records                 |
+| `RefreshTokenRecord`         | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                        |
+| `MemoryRefreshTokenStore`    | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                                  |
+| `rateLimitMiddleware`        | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)          |
+| `RateLimitOptions`           | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                                  |
+| `RateLimitStore`             | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                           |
+| `RateLimitResult`            | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                            |
+| `MemoryRateLimitStore`       | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                      |
+| `RedisRateLimitStore`        | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                     |
+| `IAuthService`               | re-export                                 | From `@setu-ts/common`                                                    |
+| `IJwtService`                | re-export                                 | From `@setu-ts/common`                                                    |
+| `IAuthorizationService`      | re-export                                 | From `@setu-ts/common`                                                    |
+| `IAuthStrategy`              | re-export                                 | From `@setu-ts/common`                                                    |
+| `IPrincipal`                 | re-export                                 | From `@setu-ts/common`                                                    |
+| `JwtSignOptions`             | re-export                                 | From `@setu-ts/common`                                                    |
+| `RbacConfig`                 | re-export                                 | From `@setu-ts/common`                                                    |
+| `RoleDefinition`             | re-export                                 | From `@setu-ts/common`                                                    |
 
 ### Registration
 
@@ -1368,7 +1369,10 @@ app.register(AuthPlugin({
 }));
 
 // Global middleware: authenticates every request and sets ctx.request.user.
-app.middleware.add(authMiddleware());
+// The priority is explicit and deliberate: the §10 table in ARCHITECTURE.md
+// reserves 300 for authentication, but a bare add() takes the kernel's default
+// of 500 — AFTER every band in that table, including the row named for it.
+app.middleware.add(authMiddleware(), { priority: 300 });
 ```
 
 ### Login (Issue Token)
@@ -1568,6 +1572,13 @@ const hasher = new PasswordHasher(runtime); // IRuntimeServices resolved from th
 const stored = await hasher.hash('correct horse battery staple');
 const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 ```
+
+`verify(stored, secret)` **throws** the exported `MalformedPasswordHashError` when `stored` is not a
+well-formed `pbkdf2$…` string, instead of returning `false`. The two parameters are both plain
+`string`s, so a reversed call — password in the `stored` position — used to fail closed and
+silently: every correct password answered `401 Invalid credentials` with nothing logged. The
+malformed branch detects exactly that mistake and names both positions; a genuinely wrong password
+still returns `false`.
 
 ---
 
@@ -1986,7 +1997,9 @@ Omitting an option disables that behaviour (no timer created).
 
 - `ISseService.open(ctx): ISseConnection` — opens a new SSE connection; sets headers, returns a
   connection with `result` (`HandlerResult`) the handler must return.
-- `ISseService.channel(name): SseChannel` — get-or-create a named broadcast channel.
+- `ISseService.channel(name): SseChannel` — get-or-create a named broadcast channel. First call
+  creates; reading `size` for a caller-supplied name is therefore a write, and a never-published
+  channel is reclaimed only when another connection in this process closes.
 - `ISseService.connectionCount: number` — current open connections.
 - `ISseConnection.send(msg)` — enqueue an encoded SSE frame (`id:`, `event:`, `data:` / multi-line
   `data:`, `retry:` + blank-line terminator).
@@ -2014,7 +2027,13 @@ Omitting an option disables that behaviour (no timer created).
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `publish` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
   provider the behavior is unchanged. `SseChannel.size` keeps reporting **local** membership either
-  way. `SseChannelImpl.publishLocal` is the local-only delivery path the backplane subscriber uses;
+- **`SseMessage.data` accepts any JSON-serializable value** —
+  `string | number | boolean | null |
+  readonly unknown[] | Record<string, unknown>`. The encoder
+  has always written a string literally and `JSON.stringify`-ed anything else; the TYPE was narrower
+  than that behaviour, so a named interface failed to assign while an inline literal passed and
+  every real application cast. Widening a parameter position is source-compatible for callers.
+  `SseChannelImpl.publishLocal` is the local-only delivery path the backplane subscriber uses;
   applications call `publish`.
 - Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
@@ -2147,6 +2166,11 @@ ws.route('/ws/chat', {
   `fetch` path.
 - **A custom adapter without `setUpgradeRouter` degrades gracefully**: the service still registers,
   the health indicator reports `available: false`, and `route()` throws `WebSocketUnavailableError`.
+- **`room(name)` is get-or-create, so reading presence is a write.** There is no non-creating
+  lookup: `room(callerSupplied).size` creates a room per distinct name polled, and the registry
+  reclaims never-joined rooms only on the next disconnection somewhere in this process — an idle
+  application never does. Deliberate in source (`RoomRegistry`'s own JSDoc records the tradeoff);
+  keep polled names to a fixed set.
 - **Rooms are in-process until a backplane is registered.** Register
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `broadcast` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
@@ -2203,16 +2227,22 @@ registers and subscribes.
 
 Discriminated on `transport`.
 
-| Option                  | Applies to       | Default                  | Description                                                         |
-| ----------------------- | ---------------- | ------------------------ | ------------------------------------------------------------------- |
-| `transport`             | all              | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                    |
-| `topic`                 | all but `memory` | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it        |
-| `origin`                | all              | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic |
-| `bus`                   | `'memory'`       | `'default'`              | Named in-process bus; separate names stay isolated                  |
-| `url`                   | `'redis'`        | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path        |
-| `client` / `subscriber` | `'redis'`        | —                        | Injected client pair. **Required together** — see Notes             |
-| `module`                | `'redis'`        | —                        | An `ioredis`-shaped module, for testing without the real driver     |
-| `instance`              | `'custom'`       | —                        | The `IRealtimeBackplane` to register, used as-is                    |
+| Option                  | Applies to       | Default                  | Description                                                                                                                                                                                                                                 |
+| ----------------------- | ---------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transport`             | all              | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                            |
+| `topic`                 | all but `memory` | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                |
+| `origin`                | all              | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                         |
+| `bus`                   | `'memory'`       | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                          |
+| `url`                   | `'redis'`        | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path                                                                                                                                                                                |
+| `client` / `subscriber` | `'redis'`        | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                     |
+| `module`                | `'redis'`        | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                             |
+| `instance`              | `'custom'`       | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                            |
+| `localNotice`           | `'memory'`       | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape |
+
+Registering the plugin **bare** is not a scaling fix: the default `'memory'` transport is a real bus
+but a single-process one, and before the `localNotice` existed a bare registration also silenced the
+consumers' startup notices without fanning anything out. The notice now comes from the plugin that
+knows its own transport.
 
 ### Transports
 
@@ -2268,7 +2298,11 @@ Discriminated on `transport`.
   `decodeFrameData`, in `@setu-ts/common` because three packages need the identical shape). An
   `SseMessage` is already JSON-serializable and travels as its JSON encoding.
 - **Delivery is at-most-once** and inherits the transport's guarantees. Frames are not persisted or
-  replayed; a replica partitioned from the transport misses frames sent during the partition.
+  replayed. On `'redis'` a SHORT partition buffers rather than drops: ioredis's default
+  `enableOfflineQueue: true` holds publishes issued while disconnected and flushes them on
+  reconnect, so frames arrive LATE (measured ~6 s) until the `maxRetriesPerRequest` budget (default
+  20, ~11 s) exhausts and the buffered commands reject with a `warn` per frame. Neither ioredis
+  default is configurable through this plugin; inject a `client`/`subscriber` pair to change it.
 - **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
   which means nothing in another process — but connection IDs come from `runtime.uuid()` and are
   therefore globally unique, so `RealtimeFrame.exceptId` carries the ID and every replica skips the
@@ -2331,7 +2365,7 @@ app.router.post('/login', (ctx) => {
 | `rolling`            | `boolean`                              | `false`                    | `true` re-issues on every response, extending expiry                                                                                                                                                   |
 | `idleTimeoutMs`      | `number`                               | —                          | Expiry after this long with no requests. Refreshed by ANY request including a read-only one, so setting it commits on every response to advance the activity stamp; it does not extend absolute expiry |
 | `maxCookieBytes`     | `number`                               | `4096`                     | Throws `SessionTooLargeError` rather than emitting a cookie browsers drop                                                                                                                              |
-| `cookie.name`        | `string`                               | `hono_session`             |                                                                                                                                                                                                        |
+| `cookie.name`        | `string`                               | `setu_session`             | Renamed from `hono_session` — see the CHANGELOG migration note; pin the old name to preserve in-flight sessions                                                                                        |
 | `cookie.path`        | `string`                               | `'/'`                      |                                                                                                                                                                                                        |
 | `cookie.domain`      | `string`                               | —                          | Omitted produces a host-only cookie                                                                                                                                                                    |
 | `cookie.sameSite`    | `'strict' \| 'lax' \| 'none'`          | `'lax'`                    | `'none'` forces `Secure`                                                                                                                                                                               |
@@ -2339,7 +2373,7 @@ app.router.post('/login', (ctx) => {
 | `cookie.httpOnly`    | `boolean`                              | `true`                     |                                                                                                                                                                                                        |
 | `csrf`               | `CsrfFormOptions`                      | —                          | Presence registers `csrfFormMiddleware` at priority 275                                                                                                                                                |
 | `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                                                                                                                                                          |
-| `csrf.headerName`    | `string`                               | —                          | Accepted alternative source; REQUIRED for `multipart/form-data`                                                                                                                                        |
+| `csrf.headerName`    | `string`                               | `'x-csrf-token'`           | Header accepted as an alternative token source for `fetch` posts; an explicit name still wins. REQUIRED for `multipart/form-data`, which is not parsed for the field                                   |
 | `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                                                                                                                                                         |
 | `tenantBinding`      | `boolean`                              | `true`                     | Seals the resolved tenant id into the session on commit; replaying it under a different tenant is refused with `403` before the handler. Inert when either side has no tenant; `false` disables both   |
 
@@ -2473,15 +2507,16 @@ app.router.get('/api/health', (ctx) => {
 
 ### Options
 
-| Option                | Type                                                         | Default        | Description                                                                                           |
-| --------------------- | ------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------- |
-| `serverBuildPath`     | `string`                                                     | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
-| `loadRequestHandler`  | `(buildPath, mode) => Promise<SsrRuntime>`                   | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
-| `assetsDir`           | `string`                                                     | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
-| `assetUrlPrefix`      | `string`                                                     | `/assets/`     | URL prefix for the asset route.                                                                       |
-| `basename`            | `string`                                                     | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.   |
-| `populateLoadContext` | `(ctx: IRequestContext, context: RouterLoadContext) => void` | omitted        | Adds app values to the per-request React Router context, on top of the keys the plugin always sets.   |
-| `mode`                | `'production' \| 'development'`                              | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
+| Option                | Type                                                         | Default        | Description                                                                                                                                                                                                                                |
+| --------------------- | ------------------------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `serverBuildPath`     | `string`                                                     | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                                                                                                                                                               |
+| `loadRequestHandler`  | `(buildPath, mode) => Promise<SsrRuntime>`                   | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`.                                                                                                                                      |
+| `assetsDir`           | `string`                                                     | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                                                                                                                                                        |
+| `assetUrlPrefix`      | `string`                                                     | `/assets/`     | URL prefix for the asset route.                                                                                                                                                                                                            |
+| `publicFiles`         | `boolean`                                                    | `true`         | Also serve files from the client build ROOT (Vite copies `public/` there — `robots.txt`, `favicon.ico`) with `must-revalidate`, not `immutable`: those files are not content-hashed. `false` reproduces the previous prefix-only behaviour |
+| `basename`            | `string`                                                     | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.                                                                                                                                        |
+| `populateLoadContext` | `(ctx: IRequestContext, context: RouterLoadContext) => void` | omitted        | Adds app values to the per-request React Router context, on top of the keys the plugin always sets.                                                                                                                                        |
+| `mode`                | `'production' \| 'development'`                              | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                                                                                                                                                             |
 
 ### Interface Reference
 
@@ -2917,6 +2952,9 @@ not part of the public capability this milestone.
 - `IAuditDbClient` — structural database client facade for the `'database'` backend
   (`insert(table, row)` / `select(table, criteria?)`).
 - `IAuditLogger`, `AuditEntry` — re-exported from `@setu-ts/common`.
+- `StoredAuditEntry`, `AuditQuery` — the return and parameter types of the exported storage classes'
+  `query` members. Exported so those signatures are nameable by a consumer (the M52c
+  `NormalizedQuery` lesson); the read path belongs to the storages, not to `IAuditLogger`.
 
 ### Notes
 
@@ -4118,6 +4156,11 @@ When multiple patterns are enabled they compose in one fixed order, outermost to
 breaker, retry, or `fn`; an open breaker fails fast before any retry attempt; each retry attempt
 gets its own timeout. A field set to `true` with no matching `default*` policy configured throws at
 `wrap` time.
+
+> **Hoist the wrapped call.** The state-preserving closure is built once per `wrap` — a `wrap()`
+> written inside a handler constructs a fresh breaker on every request, so the breaker never opens
+> while retry and timeout keep working (the broken shape looks identical to the working one). Wrap
+> at module or plugin scope and call the returned closure per request.
 
 ### Cancellation
 
@@ -7468,6 +7511,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `brandErrorResponder(fn, r)`  | function | Attaches `errorHandler`'s resolved `IErrorResponder` to its middleware function under `ERROR_RESPONDER_BRAND`, so the kernel — which runs the drain `503`, the malformed-request `400`, and the request hooks BEFORE the pipeline — can read the same responder at startup (M70f re-review)                                                                                                                                                                           |
 | `errorResponderOf(fn)`        | function | Reads the brand off a middleware function, returning the attached `IErrorResponder` (or `undefined`). The kernel's only route to the resolved formatter for the pre-pipeline sites                                                                                                                                                                                                                                                                                    |
 | `ERROR_RESPONDER_BRAND`       | const    | A `Symbol.for` brand pairing with the two functions above; `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                             |
+| `validatedStateKey(target)`   | function | Returns `` `validated:${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `@Body`/`@Query`/`@Param` read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                                               |
 
 ### Types
 
@@ -7579,6 +7623,11 @@ Contract notes:
   without removing existing ones (`Headers.append`). `appendHeader` is the correct way to emit
   multiple headers of the same name — most notably several `Set-Cookie` headers (e.g. access +
   refresh cookies). Both chain (`return this`).
+- `IResponse.html(body: string): HandlerResult` — sends an HTML response with
+  `content-type: text/html; charset=utf-8`. The charset is not optional: a bare `text/html` lets a
+  browser sniff the encoding. Added because every CSRF-protected form example was setting the header
+  by hand. **Breaking for out-of-repo `IResponse` implementors** (both in-repo implementors — the
+  kernel's `ResponseBuilder` and `testing`'s `MockResponse` — implement it).
 - `IResponse.stream(body: ReadableStream<Uint8Array>): HandlerResult` — sends a streaming response
   body. The runtime maps this to `new Response(streamBody, { status, headers })`; streaming is free
   on every platform (Node via Hono, Deno, Bun, Cloudflare Workers) with no buffer-then-send. Added
@@ -8082,51 +8131,51 @@ carry full JSDoc.
 
 ### Values (decorator-plugin exports)
 
-| Export                                               | Kind     | Purpose                                                                                                                               |
-| ---------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                                        |
-| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                                  |
-| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                                   |
-| `Controller`                                         | function | Class decorator — base path prefix                                                                                                    |
-| `Version`                                            | function | Class decorator — API version prefix                                                                                                  |
-| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                                                |
-| `Body`/`Query`/`Param`/`Header`/`Cookie`/`Ctx`       | function | Request parameter decorators; `Ctx` injects the active `IRequestContext` without reserving the application custom type name `context` |
-| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                                   |
-| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens                   |
-| `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider                            |
-| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                                   |
-| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                                      |
-| `Public`                                             | function | Method decorator — bypasses auth                                                                                                      |
-| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                                      |
-| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                                                                                         |
-| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                                        |
-| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                                        |
-| `createDecorator`                                    | function | Custom class/method decorator factory                                                                                                 |
-| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                                    |
-| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                                            |
-| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                                     |
-| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                                      |
-| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                                  |
-| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                                           |
-| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                                     |
-| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                                     |
+| Export                                               | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                                                                                                                                                                                                                                                                                                                                               |
+| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                                                                                                                                                                                                                                                                                                                                         |
+| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                                                                                                                                                                                                                                                                                                                                          |
+| `Controller`                                         | function | Class decorator — base path prefix                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `Version`                                            | function | Class decorator — API version prefix                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `Body`/`Query`/`Param`/`Header`/`Cookie`/`Ctx`       | function | Request parameter decorators; `Ctx` injects the active `IRequestContext` without reserving the application custom type name `context`                                                                                                                                                                                                                                                                                                        |
+| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                                                                                                                                                                                                                                                                                                                                          |
+| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens                                                                                                                                                                                                                                                                                                                          |
+| `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider                                                                                                                                                                                                                                                                                                                                   |
+| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                                                                                                                                                                                                                                                                                                                                          |
+| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                                                                                                                                                                                                                                                                                                                                             |
+| `Public`                                             | function | Method decorator — bypasses auth                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route |
+| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                               |
+| `createDecorator`                                    | function | Custom class/method decorator factory                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                                                                                                                                                                                                                                                                                                                                                   |
+| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                                                                                                                                                                                                                                                                                                                                             |
+| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                                                                                                                                                                                                                                                                                                                                            |
+| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### Types
 
-| Export                    | Kind | Purpose                                                                                            |
-| ------------------------- | ---- | -------------------------------------------------------------------------------------------------- |
-| `DecoratorPluginOptions`  | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`) |
-| `InjectableOptions`       | type | Options for `@Injectable()` (`scope?`, `token?`)                                                   |
-| `ApiOperationConfig`      | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                          |
-| `ApiResponseConfig`       | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                  |
-| `HttpMethodDecorator`     | type | `(path?: string) => MethodDecorator`                                                               |
-| `MiddlewareLike`          | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                  |
-| `CustomParameterResolver` | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                  |
-| `ParameterMetadata`       | type | Parameter metadata captured by parameter decorators                                                |
-| `ParameterType`           | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                 |
-| `DiscoveryOptions`        | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                             |
-| `DiscoveryResult`         | type | Result of discovery (`controllers`, `services`, `errors`)                                          |
-| `ModuleImporter`          | type | `(specifier: string) => Promise<unknown>` — injectable module loader                               |
+| Export                    | Kind | Purpose                                                                                                               |
+| ------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`  | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `enforceSchemas?`) |
+| `InjectableOptions`       | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                      |
+| `ApiOperationConfig`      | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                             |
+| `ApiResponseConfig`       | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                     |
+| `HttpMethodDecorator`     | type | `(path?: string) => MethodDecorator`                                                                                  |
+| `MiddlewareLike`          | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                     |
+| `CustomParameterResolver` | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                     |
+| `ParameterMetadata`       | type | Parameter metadata captured by parameter decorators                                                                   |
+| `ParameterType`           | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                    |
+| `DiscoveryOptions`        | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                |
+| `DiscoveryResult`         | type | Result of discovery (`controllers`, `services`, `errors`)                                                             |
+| `ModuleImporter`          | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                  |
 
 Contract notes:
 
@@ -8134,6 +8183,20 @@ Contract notes:
   class-definition time regardless of whether the plugin is registered. Only
   `DecoratorPlugin.register()` reads the store and calls the kernel APIs; without it, no
   routes/services/middleware are registered.
+- **Validation schemas are enforced, not just described** (`enforceSchemas`, default `true`): for
+  each of `schema.body`/`query`/`params` present on a route, `registerController` resolves
+  `CAPABILITIES.VALIDATION` and appends that capability's middleware LAST in the route's chain —
+  innermost, after guards, so an unauthenticated request is refused by its guard rather than told
+  `400` with a body that names the schema's field paths. With no validation provider registered, a
+  decorated schema stays description-only (OpenAPI) and ONE warning per route names the controller,
+  handler, affected targets and `ValidationPlugin`; nothing throws. `enforceSchemas: false` keeps
+  schemas description-only and silences the warning.
+- **`@Body()`/`@Query()`/`@Param()` read the VALIDATED value when one exists.** Each checks
+  `ctx.state` under `validatedStateKey(target)` first — presence-tested with `has`, so a validated
+  `null` or `0` is honoured — and falls back to today's raw source when absent. A Zod `transform` or
+  `default` therefore reaches the handler instead of being discarded. `@Header` and `@Cookie`
+  deliberately read their raw sources: headers resolve case-insensitively through
+  `headers.get(name)`, which the validated record would break, and no schema key exists for cookies.
 - **No reflection**: metadata is stored in plain `Map`s keyed by class reference, not via
   `Reflect.getMetadata()`. No `reflect-metadata` dependency.
 - **Decorator composition**: parameter and cross-cutting decorators (`@Body`, `@ValidateBody`,
@@ -9525,17 +9588,17 @@ app.register(StaticPlugin({
 
 ### Options
 
-| Option           | Type                           | Default                                | Description                   |
-| ---------------- | ------------------------------ | -------------------------------------- | ----------------------------- |
-| `root`           | `string`                       | (required)                             | Directory to serve files from |
-| `urlPrefix`      | `string`                       | `'/'`                                  | URL prefix for static routes  |
-| `index`          | `string`                       | `'index.html'`                         | Index file for directories    |
-| `fallback`       | `string`                       | `undefined`                            | SPA fallback file             |
-| `cacheControl`   | `string \| ((path) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header          |
-| `etag`           | `boolean`                      | `true`                                 | Enable ETag generation        |
-| `ranges`         | `boolean`                      | `true`                                 | Enable Range requests         |
-| `compressed`     | `boolean`                      | `true`                                 | Negotiate .br/.gz sidecars    |
-| `maxBufferBytes` | `number`                       | `1048576`                              | Threshold for streaming       |
+| Option           | Type                           | Default                                | Description                                                                              |
+| ---------------- | ------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `root`           | `string`                       | (required)                             | Directory to serve files from                                                            |
+| `urlPrefix`      | `string`                       | `'/'`                                  | URL prefix for static routes                                                             |
+| `index`          | `string`                       | `'index.html'`                         | Index file for directories                                                               |
+| `fallback`       | `string`                       | `undefined`                            | SPA fallback file                                                                        |
+| `cacheControl`   | `string \| ((path) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header. A callback receives a **leading-slash** root-relative request path |
+| `etag`           | `boolean`                      | `true`                                 | Enable ETag generation                                                                   |
+| `ranges`         | `boolean`                      | `true`                                 | Enable Range requests                                                                    |
+| `compressed`     | `boolean`                      | `true`                                 | Negotiate .br/.gz sidecars                                                               |
+| `maxBufferBytes` | `number`                       | `1048576`                              | Threshold for streaming                                                                  |
 
 ### Exports
 
@@ -9569,10 +9632,13 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
   be ignored for a weak validator (RFC 9110 §13.1.5), so an interrupted download resumes only
   against the strong form. `size`+`mtime` is what nginx and Apache emit as strong for static files
 - Precompressed sidecars: `.br` preferred over `.gz`, ETag from sidecar stat
-- `Cache-Control` is resolved from the **original root-relative** path, never the absolute
-  filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed asset keeps its
-  `immutable` policy whichever encoding is negotiated, and a `cacheControl` function receives the
-  root-relative path (`assets/app.js`, not `/srv/assets/app.js`)
+- `Cache-Control` is resolved from the **original root-relative request path with a leading slash**,
+  never the absolute filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed
+  asset keeps its `immutable` policy whichever encoding is negotiated. A `cacheControl` function
+  receives `/assets/app-A9acsx54.js` (not `assets/app-…`, not `/srv/assets/app-…`), and the literal
+  `'/'` when the request equals the prefix root. The leading slash is guaranteed for BOTH shapes —
+  before it was normalised, a file arrived slash-less while the prefix root arrived as `'/'`, so a
+  callback written against one observed shape was silently wrong for the other.
 - A `HEAD` opens no body stream, so it cannot leak a file descriptor on a file above
   `maxBufferBytes`
 - An explicit `Accept-Encoding` entry overrides the wildcard, so `br;q=0, *` refuses brotli
