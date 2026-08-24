@@ -30,7 +30,13 @@ export interface SseMessage {
    * `data:` lines); any non-string is `JSON.stringify`-ed. `undefined` is
    * forbidden — use `{}` or omit the message instead.
    */
-  readonly data: string | Record<string, unknown>;
+  readonly data:
+    | string
+    | number
+    | boolean
+    | null
+    | readonly unknown[]
+    | Record<string, unknown>;
   /** Reconnection time in milliseconds — sent as `retry:` field. */
   readonly retry?: number;
 }

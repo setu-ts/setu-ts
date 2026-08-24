@@ -112,6 +112,7 @@ package fits the plugin architecture.
 | `splitWorkerEnv`             | function  |
 | `unwrap`                     | function  |
 | `upgradeIntentOf`            | function  |
+| `validatedStateKey`          | function  |
 | `validationMetadataOf`       | function  |
 | `withSecurityMetadata`       | function  |
 | `withValidationMetadata`     | function  |
