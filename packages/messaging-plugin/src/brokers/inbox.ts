@@ -17,7 +17,7 @@
 import type { ISubscription, MessageMetadata, SubscribeOptions } from '@setu-ts/common';
 
 /** Prefix of every reply-inbox topic {@link createTopicInbox} mints. */
-export const TOPIC_INBOX_PREFIX = 'rr.inbox.';
+const TOPIC_INBOX_PREFIX = 'rr.inbox.';
 
 /**
  * The marker that a subscription is the broker's OWN reply inbox — transient

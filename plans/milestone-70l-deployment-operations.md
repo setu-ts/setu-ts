@@ -98,6 +98,17 @@ register was written against published `v0.1.0-alpha.8` and this tree has moved 
   `subscribe` already computes `isExclusive` and already deletes the queue on unsubscribe when it is
   set. The declaration was simply never told. A durable named queue is also what a consumer group
   wants — it survives a broker restart, which is the semantics `queue` documents.
+- **Correction after implementation (F3).** The rule as written above is the naive "named ⇒ durable"
+  one §1 already flagged as a hazard, and it makes the RPC reply inbox durable, because
+  `createTopicInbox` DOES supply a queue name (its own per-instance address). The implemented rule
+  therefore has a second input: the inbox marks its own subscription with a package-internal
+  `REPLY_INBOX_TRANSIENT` symbol carried on an `InternalSubscribeOptions`, and the broker declares
+  transient in two cases: the queue name is absent, or that marker is present. Matching the
+  `rr.inbox.` name prefix was rejected — `SubscribeOptions.queue` reserves no prefix, so a
+  legitimate consumer group named `rr.inbox.orders` would wrongly be made exclusive. The marker
+  never appears on the public surface. Implementation also carries `declareOptions` on the active
+  consumer so the drive-mode replay re-asserts the SAME shape: RabbitMQ refuses a re-declaration
+  that disagrees with an existing queue, which the plan had not accounted for.
 - **Test home:** `test/unit/rabbitmq-broker-queue-declaration.test.ts` (both shapes asserted on a
   recording fake) and `test/integration/rabbitmq-v4-declaration.test.ts` (real RabbitMQ 4).
 
@@ -114,6 +125,21 @@ register was written against published `v0.1.0-alpha.8` and this tree has moved 
   rather than `runtime.now()` makes the slot immune to timer jitter: `#armTimer` uses
   `Math.max(0, nextRunAtMs - now)`, so a fire lands at or after its intended instant and a late
   timer still computes the slot it was armed for.
+- **Correction after implementation (F1, F2).** Two parts of this decision did not survive contact.
+  **F2:** the `once` literal keyed at FIRE time does not deduplicate a `delay`, because a delay's
+  `nextRunAtMs` is `now + delayMs` and the plan's own key template embeds the slot value — so the
+  implemented mechanism claims the delay slot at REGISTRATION, keyed `scheduler:job:<name>:once`,
+  and releases it when the entry leaves the registry. The `:once` suffix is load-bearing rather than
+  cosmetic: a bare-name key would collide with the handler mutex and make the mutex acquire at fire
+  time always lose to the slot's own claim. The trade-off this introduces is recorded rather than
+  left implicit — a `delay` whose claiming replica leaves between registration and fire is LOST,
+  with no replica re-contending, since `disconnect()` clears timers without releasing the slot
+  (proved with a two-service probe: `runs === []`). It is documented in `#claimDelaySlot`'s JSDoc
+  and in `PUBLIC_API.md`; moving the claim back to fire time would trade that for blocking
+  re-registration within `ttlMs`, and is a maintainer call, not a review-time change. **F1:**
+  `#armInterval` had to be deleted rather than kept, because it armed for a full `intervalMs` while
+  a grid-aligned `nextRunAtMs` needs the distance to the boundary — keeping it would have fired
+  every `every` job one interval late and silently defeated §3.3.
 - **Test home:** `test/unit/scheduler-slot-lock.test.ts` — two `SchedulerService` instances over
   **one shared** `MemoryLock`, armed at deliberately offset times, asserting one handler run per
   slot; plus an overlap test asserting the second fire of a slow job is still skipped.
@@ -190,6 +216,12 @@ register was written against published `v0.1.0-alpha.8` and this tree has moved 
   `console.error` is legal here and only here: this is emitted **CLI output**, not plugin source,
   and `no-console` exempts `packages/cli`. Returning the stack is a disclosure defect of the same
   family M70f closed for the kernel's fallback 500.
+- **Correction after review.** The first implementation wrapped `app.fetch(request)` in the same
+  `try` as the boot, so a REQUEST-time throw — `app.fetch` rejects when no HTTP adapter is
+  registered, and an adapter may reject on a malformed request — was logged as
+  `application failed to start` and answered `503`, a drain signal to a load balancer, for a single
+  bad request. The two are now separate blocks with their own message and status (`503` for boot,
+  `500` for a request); neither body carries a stack, which was the original guarantee.
 - **Test home:** `packages/cli/test/unit/workers-entry-boot.test.ts` asserts the emitted source
   shape; `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` drives a real Workers scaffold whose boot
   fails, asserting a `503` whose body carries no `node_modules` path and that a second request

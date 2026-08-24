@@ -713,14 +713,27 @@ ${ensureBootedFn}
 
 export default {
   ${fetchSignature}
+    let app: IApplication;
     try {
-      const app = await ensureBooted(env);
-      return await app.fetch(request);
+      app = await ensureBooted(env);
     } catch (error) {
       // A failed boot must not leak the stack to the client (M70l X9-8): the
-      // body is generic and the real error goes to the platform's logs.
+      // body is generic and the real error goes to the platform's logs. 503,
+      // because the instance genuinely has no application to serve with.
       console.error('setu: application failed to start', error);
       return new Response('Service Unavailable', { status: 503 });
+    }
+    try {
+      return await app.fetch(request);
+    } catch (error) {
+      // A REQUEST-time failure is a separate case, reported separately. Folding
+      // it into the boot catch above logged 'failed to start' for a fault that
+      // had nothing to do with startup, and answered 503 — which tells a load
+      // balancer to drain the instance — for what is a single bad request.
+      // app.fetch() does throw: the kernel rejects when no HTTP adapter is
+      // registered, and an adapter may reject on a malformed request.
+      console.error('setu: request failed', error);
+      return new Response('Internal Server Error', { status: 500 });
     }
   },${exportBlock}
 };

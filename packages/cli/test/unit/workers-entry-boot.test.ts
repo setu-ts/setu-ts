@@ -38,13 +38,30 @@ describe('generated Workers entry boot semantics (X9-8)', () => {
     expect(entry).toContain('booted = undefined;');
   });
 
-  it('answers fetch failures with a generic 503, never the stack', () => {
+  it('answers a failed BOOT with a generic 503, never the stack', () => {
     const entry = workersEntry();
     expect(entry).toContain("new Response('Service Unavailable', { status: 503 })");
     // The real error goes to the platform's logs, not the response body.
     expect(entry).toContain("console.error('setu: application failed to start', error)");
     expect(entry).not.toContain('error.message)');
     expect(entry).toContain('try {');
+  });
+
+  it('reports a REQUEST failure separately from a boot failure', () => {
+    const entry = workersEntry();
+    // Folding both into one catch logged 'failed to start' for a fault that had
+    // nothing to do with startup, and answered 503 — a drain signal to a load
+    // balancer — for a single bad request. `app.fetch` does throw: the kernel
+    // rejects with no HTTP adapter registered, and an adapter may reject on a
+    // malformed request.
+    expect(entry).toContain("console.error('setu: request failed', error)");
+    expect(entry).toContain("new Response('Internal Server Error', { status: 500 })");
+    // `app.fetch` is NOT inside the boot try block.
+    const bootCatch = entry.indexOf("console.error('setu: application failed to start'");
+    const fetchCall = entry.indexOf('await app.fetch(request)');
+    expect(fetchCall).toBeGreaterThan(bootCatch);
+    // Still no stack in either body.
+    expect(entry).not.toContain('String(error)');
   });
 
   it('keeps one shared boot across fetch and every worker export', () => {
