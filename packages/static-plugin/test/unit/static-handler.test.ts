@@ -648,6 +648,82 @@ describe('createStaticHandler', () => {
     expect(ctx.response._status).toBe(200);
   });
 
+  it('should pass a leading-slash path to the cacheControl callback', async () => {
+    const content = new TextEncoder().encode('hello world');
+    await fs.writeFile('/root/test.txt', content);
+
+    const received: string[] = [];
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      cacheControl: (path) => {
+        received.push(path);
+        return 'public, max-age=60';
+      },
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    await handler(ctx as never);
+
+    expect(ctx.response._status).toBe(200);
+    expect(received).toEqual(['/test.txt']);
+  });
+
+  it('should pass a leading-slash path to the cacheControl callback for directory index and fallback', async () => {
+    const indexContent = new TextEncoder().encode('<html>index</html>');
+    await fs.writeFile('/root/index.html', indexContent);
+
+    const received: string[] = [];
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+      fallback: 'index.html',
+      cacheControl: (path) => {
+        received.push(path);
+        return 'public, max-age=60';
+      },
+    }) as RouteHandler;
+
+    // Directory root serving the index file.
+    fs.stats.set('/root', { isFile: false, isDirectory: true, size: 0 });
+    ctx.request.path = '/';
+    await handler(ctx as never);
+    expect(ctx.response._status).toBe(200);
+    expect(received).toEqual(['/index.html']);
+
+    // Fallback for a missing path.
+    ctx.request.path = '/missing.html';
+    ctx.request.headers.set('Accept', 'text/html');
+    await handler(ctx as never);
+    expect(ctx.response._status).toBe(200);
+    expect(received).toEqual(['/index.html', '/index.html']);
+  });
+
+  it('should give hashed assets immutable Cache-Control by default', async () => {
+    const content = new TextEncoder().encode('console.log(1)');
+    await fs.writeFile('/root/entry.client-A9acsx54.js', content);
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    // Measured real Vite hash from apps/full-stack/build/client/assets/.
+    ctx.request.path = '/entry.client-A9acsx54.js';
+    await handler(ctx as never);
+
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._headers.get('Cache-Control')).toBe(
+      'public, max-age=31536000, immutable',
+    );
+  });
+
   it('should include Vary: Accept-Encoding on all 200 responses', async () => {
     const content = new TextEncoder().encode('hello world');
     await fs.writeFile('/root/test.txt', content);

@@ -128,13 +128,14 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
       }
     }
 
-    // Root-relative form of the resolved path. This — never the absolute
+    // Root-relative form of the resolved path, normalized to a LEADING SLASH —
+    // the documented shape of the path handed to `resolveCacheControl` and to a
+    // user-supplied `cacheControl` callback. This — never the absolute
     // filesystem path and never a `.br`/`.gz` sidecar path — is what drives
     // Cache-Control, so a hashed asset keeps its `immutable` policy whichever
-    // encoding is negotiated, and a user-supplied `cacheControl` function
-    // receives the documented root-relative path rather than the server's
-    // directory layout.
-    const rootRelative = normalizedPath === '/' ? '' : normalizedPath;
+    // encoding is negotiated, and the callback receives the request path rather
+    // than the server's directory layout.
+    const rootRelative = normalizedPath === '/' ? '/' : `/${normalizedPath}`;
 
     // Stat the file
     let stat: StatResult;
@@ -151,7 +152,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
             if (fallbackStat.isFile) {
               return serveFile(ctx, fs, fallbackPath, fallbackStat, {
                 cacheControl,
-                relativePath: fallback,
+                relativePath: `/${fallback}`,
                 etag,
                 ranges,
                 maxBufferBytes,
@@ -174,7 +175,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
           if (indexStat.isFile) {
             return serveFile(ctx, fs, indexPath, indexStat, {
               cacheControl,
-              relativePath: rootRelative === '' ? index : `${rootRelative}/${index}`,
+              relativePath: rootRelative === '/' ? `/${index}` : `${rootRelative}/${index}`,
               etag,
               ranges,
               maxBufferBytes,
@@ -217,7 +218,7 @@ async function serveFile(
   stat: StatResult,
   options: {
     cacheControl?: string | ((relativePath: string) => string) | undefined;
-    /** Root-relative path of the ORIGINAL resource — drives Cache-Control. */
+    /** Root-relative path of the ORIGINAL resource, leading '/' — drives Cache-Control. */
     relativePath: string;
     etag?: boolean | undefined;
     ranges?: boolean | undefined;
@@ -342,7 +343,7 @@ async function serveCompressedFile(
   contentEncoding: string | undefined,
   options: {
     cacheControl?: string | ((relativePath: string) => string) | undefined;
-    /** Root-relative path of the ORIGINAL resource — drives Cache-Control. */
+    /** Root-relative path of the ORIGINAL resource, leading '/' — drives Cache-Control. */
     relativePath: string;
     etag?: boolean | undefined;
     ranges?: boolean | undefined;
