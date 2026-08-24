@@ -189,6 +189,8 @@ describe('JobRegistry', () => {
       paused: false,
       nextRunAtMs: 10000,
       timerHandle: null,
+      slotClaimed: true,
+      slotToken: 'test-token',
     };
     registry.add(entry);
     const got = registry.get('delay-job');

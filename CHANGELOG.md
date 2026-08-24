@@ -281,7 +281,91 @@ All notable changes to this project are documented here. The format follows
   `deno task release:verify` enforces it as check 6, so the X7-3 shape (a specifier routed through a
   variable that JSR's static npm-compat rewrite cannot reach) cannot re-enter the source tree.
 
+- **Scheduler multi-instance deduplication** (M70l, X10-2). A `cron` or `every` fire claims a slot
+  lock keyed on the fire's intended time (`scheduler:job:<name>:<slot>`) which is **never released**
+  and expires on `ttlMs`, so replicas sharing one lock backend run an intended fire exactly once
+  between them — a guarantee that holds only while `ttlMs` exceeds the maximum skew between
+  replicas, since the TTL is how long a claimed slot stays remembered. A `delay` job differs: its
+  slot is keyed on the job name (`scheduler:job:<name>:once`), claimed at REGISTRATION rather than
+  at fire time, and **released** when the entry leaves the registry, so re-registering the name
+  after it fired fires again. The existing per-handler mutex is kept unchanged for overlap
+  protection. `MemoryLock` now sweeps every expired entry on `acquire`, because a recurring slot key
+  is never released and never reacquired, so the previous lazy per-key delete could never reclaim it
+  and the map grew one entry per job per fire, forever.
+
+- **`MetricsPluginOptions.excludePaths`** (M70l, X10-7). Request paths the HTTP metrics middleware
+  skips entirely. When supplied it REPLACES the default `['/health', '/live', '/ready']`; the
+  plugin's own scrape endpoint is always excluded either way, so `/metrics` no longer counts its own
+  scrapes or the health probes.
+
+- **Generated Kubernetes members carry the chart's graceful-shutdown pieces** (M70l, X10-4/X10-6).
+  `setu generate app` now emits `lifecycle.preStop.sleep.seconds: 5` (Kubernetes 1.30+) on every
+  container, and `prometheus.io/scrape|port|path` annotations on members generated with a template
+  (recorded via the new `metricsEndpoint` field of `setu.workspace.json`; absent means unknown and
+  emits none).
+
+- **`SchedulerUnavailableError`** (M70l, X9-2). `SchedulerPlugin.register()` refuses to register on
+  Cloudflare Workers, where its timers cannot fire, naming `WorkersCron` and `[triggers] crons` as
+  the replacement.
+
 ### Changed
+
+- **`WorkersCron.dispatch` now rejects on failure instead of always resolving** (M70l, X9-5).
+  **Breaking.** A firing trigger with no registered handler throws naming the expression; one or
+  more rejecting handlers run to settlement — a failing handler still never abandons the others —
+  and then `dispatch` throws an `AggregateError` carrying every failure. `createScheduledHandler` is
+  a bare delegation, so the rejection reaches Cloudflare and counts the whole invocation as failed:
+  that is the signal, and it needs no logger configuration. A configured logger still receives both
+  reports first. An application that wants the old fire-and-forget behaviour wraps its own handlers
+  in `try`.
+
+- **The generated Cloudflare Workers `fetch` export no longer propagates a failed boot** (M70l,
+  X9-8). A boot error (a mistyped binding, a broker briefly down at cold start) is now logged to the
+  platform's console and answered with a generic `503 Service Unavailable` — the stack never reaches
+  the client. The failed boot promise is cleared, so the next request re-attempts the boot rather
+  than being pinned to the failure for the isolate's life. An application that wants the error body
+  can wrap its own handler around `app.fetch`.
+
+- **The generated Dockerfile folds `chown -R` into the dependency-cache layer** (M70l, X10-5). A
+  standalone `chown -R` rewrites metadata on every file the cache layer created, so overlayfs copied
+  the ENTIRE Deno module cache into a second layer — measured at 563 MB vs 362 MB with the fold,
+  paid on every push and every node pull. Image contents are unchanged; only the layer layout
+  differs, so existing deployments need no action beyond the next rebuild.
+
+- **`every` jobs arm on an absolute epoch grid** (M70l, X10-2). The first fire lands on
+  `(floor(now / interval) + 1) * interval` rather than a full interval after registration, at
+  registration, re-arm, and resume alike. The period is unchanged; only the phase moves, and the
+  fire is never LATER than before — it may come sooner than one full interval after registration, so
+  a job assuming "I have been up a full interval" behaves differently. This is what makes replicas
+  started at different instants agree on distributed-lock slot keys. **Breaking (resume contract):**
+  the released contract stated that resuming an `every` job restarts the interval "from now";
+  resuming now lands the next fire on the next epoch grid boundary instead. The implementation has
+  always resumed on the grid (that is the alignment replicas need to agree on slot keys), so the
+  contract and `PUBLIC_API.md` are corrected to match — a resumed fire may come sooner than one full
+  interval after `resume()` (never later).
+
+- **`RabbitMqBroker` declares its queues with the shape their subscription implies** (M70l, X10-1).
+  **Breaking.** A caller-supplied queue name (a consumer group) is declared `{ durable: true }` — it
+  survives a broker restart, which is what `queue` documents; the private per-subscriber queue and
+  the RPC reply inbox are declared `{ exclusive: true, autoDelete: true }`. The previous
+  unconditional `{ durable: false }` named non-exclusive form is refused by RabbitMQ 4 outright
+  (`541 INTERNAL-ERROR … transient_nonexcl_queues`). CI's RabbitMQ service moves to major version 4
+  with this change.
+
+  **Migration — deployments upgrading against an EXISTING broker.** A named consumer-group queue
+  that the old client created as `{ durable: false }` cannot be re-declared `{ durable: true }`:
+  RabbitMQ answers `406 PRECONDITION_FAILED` and closes the channel, so every subscriber on that
+  queue stops until the queue is redeclared. To restore service, delete the existing non-durable
+  queue (drain it first if in-flight messages must be preserved — a non-durable queue's contents are
+  lost on broker restart anyway) and let the new client re-declare it as durable:
+
+  ```bash
+  rabbitmqadmin delete queue name=<consumer-group-queue>
+  ```
+
+  Deployments whose brokers are provisioned fresh (or whose queues were already declared durable)
+  see no change. Private per-subscriber queues and the RPC reply inbox are exclusive/auto-delete and
+  are recreated per connection; they never carry this problem.
 
 - **Reused OpenAPI schemas are deduplicated symmetrically, and named from their first use** (M70m,
   X11-6). The first use of a reused schema was inlined and never rewritten, so one shape appeared
@@ -670,6 +754,32 @@ All notable changes to this project are documented here. The format follows
   produced (`404` for a path with no WebSocket route) rather than a fixed `400`.
 
 ### Fixed
+
+- **`every` jobs armed their timer for a full interval instead of the delay to the grid boundary**
+  (M70l, X10-2). `every()` computed a grid-aligned `nextRunAtMs` but armed the timer for the whole
+  `intervalMs`, so an off-grid registration ran the job a full interval LATER than the boundary it
+  was aligned to — defeating the grid alignment (and the slot agreement it exists for) until the
+  re-arm after the first fire. The timer is now armed for `Math.max(0, nextRunAtMs - now)` at
+  registration and on every re-arm, so each fire lands at the boundary it was aligned to.
+
+- **`delay` jobs no longer deduplicated across replicas** (M70l, X10-2). The fire slot for `delay`
+  entries was keyed on `nextRunAtMs`, which for a delay is `now + delayMs` and therefore carries
+  per-replica startup skew: two replicas registering the same one-shot delay 700 ms apart computed
+  different slot keys and BOTH ran the handler. The slot is now claimed at REGISTRATION, keyed on
+  the job name (skew-independent), and released when the entry leaves the registry — on fire,
+  `remove()`, or TTL expiry — so a re-registration under the same name after the delay fired gets a
+  fresh slot and still fires (the regression the name-keying previously guarded against stays
+  guarded). `cron` and `every` keep their fire-time, grid-aligned slot keys, which are
+  skew-independent by construction.
+
+- **`RabbitMqBroker` treated any user queue named `rr.inbox.*` as the private RPC reply inbox**
+  (M70l, X10-1). The reply inbox's transience was detected by pattern-matching queue names against
+  the internal `rr.inbox.` prefix, but `SubscribeOptions.queue` has no reserved-prefix restriction —
+  a legitimate consumer group named e.g. `rr.inbox.orders` was declared
+  `{ exclusive: true, autoDelete: true }` and non-durable, so a second instance's use of it was
+  refused. The inbox is now marked transient by a flag on the internal subscribe call at the point
+  it is created, and a user `subscribe({ queue: 'rr.inbox.orders' })` is declared as a normal
+  durable competing-consumer group queue.
 
 - **Every documented example of reading a validated request read the WRONG `ctx.state` key** (M70m,
   found in verification). `validateBody` and friends store under `validated:${target}` —

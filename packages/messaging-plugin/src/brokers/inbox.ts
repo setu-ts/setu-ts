@@ -16,8 +16,33 @@
 
 import type { ISubscription, MessageMetadata, SubscribeOptions } from '@setu-ts/common';
 
-/** Prefix for the per-instance topics {@link createTopicInbox} mints. */
+/** Prefix of every reply-inbox topic {@link createTopicInbox} mints. */
 const TOPIC_INBOX_PREFIX = 'rr.inbox.';
+
+/**
+ * The marker that a subscription is the broker's OWN reply inbox — transient
+ * (exclusive + auto-delete), never durable.
+ *
+ * F3: this is carried on the internal subscribe call, at the point the inbox
+ * is created, rather than inferred from the queue NAME. `SubscribeOptions`
+ * has no reserved-prefix restriction, so pattern-matching user queue names
+ * (e.g. a legitimate consumer group named `rr.inbox.orders`) would wrongly
+ * make a public queue exclusive and auto-delete. The marker travels only on
+ * the broker's internal call and never on the public `subscribe()` surface.
+ *
+ * Package-internal: it is read by `RabbitMqBroker` (the only broker whose
+ * queue declaration must distinguish the two shapes) and is not exported
+ * from `src/index.ts`.
+ */
+export const REPLY_INBOX_TRANSIENT: unique symbol = Symbol('reply-inbox-transient');
+
+/**
+ * Options an internal subscribe call may carry beyond the public
+ * `SubscribeOptions` — the transience marker.
+ */
+export type InternalSubscribeOptions = SubscribeOptions & {
+  readonly [REPLY_INBOX_TRANSIENT]?: true;
+};
 
 /**
  * An open reply inbox: the address responders send replies to, plus its
@@ -48,11 +73,17 @@ export type OpenInbox = (onReply: (message: unknown) => void) => Promise<ReplyIn
 
 /** The broker primitives {@link createTopicInbox} composes. */
 export interface TopicInboxDeps {
-  /** Subscribe to a topic (the broker's own `subscribe`). */
+  /**
+   * Subscribe to a topic (the broker's own `subscribe`).
+   *
+   * Takes {@linkcode InternalSubscribeOptions} because the inbox marks its
+   * own subscription transient (F3); a broker whose public `subscribe` takes
+   * only `SubscribeOptions` passes it through unchanged.
+   */
   subscribe(
     topic: string,
     handler: (message: unknown, metadata: MessageMetadata) => void | Promise<void>,
-    options?: SubscribeOptions,
+    options?: InternalSubscribeOptions,
   ): Promise<ISubscription>;
   /** Inbox-address source (the broker's `runtime.uuid`). */
   uuid(): string;
@@ -87,7 +118,7 @@ export function createTopicInbox(deps: TopicInboxDeps): OpenInbox {
     const address = `${TOPIC_INBOX_PREFIX}${deps.uuid()}`;
     const subscription = await deps.subscribe(address, (message) => {
       onReply(message);
-    }, { queue: address });
+    }, { queue: address, [REPLY_INBOX_TRANSIENT]: true });
 
     return {
       address,

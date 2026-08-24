@@ -83,39 +83,70 @@ describe('WorkersCron.dispatch', () => {
     expect(ran.sort()).toEqual(['a', 'b']);
   });
 
-  it('does not let one rejecting handler stop the others, and reports it', async () => {
-    const cron = new WorkersCron({ logger: new RecordingLogger() });
+  it('does not let one rejecting handler stop the others, reports it, then fails the invocation', async () => {
     const logger = new RecordingLogger();
     const withLogger = new WorkersCron({ logger });
-    let ran = false;
+    const ran: string[] = [];
 
     withLogger.on('0 * * * *', () => {
       throw new Error('report build failed');
     });
     withLogger.on('0 * * * *', () => {
-      ran = true;
+      ran.push('healthy');
     });
 
-    await withLogger.dispatch(firing('0 * * * *'));
+    const failure = await withLogger.dispatch(firing('0 * * * *')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
-    expect(ran).toBe(true);
+    expect(ran).toEqual(['healthy']);
+    // M70l X9-5: the rejection reaches the platform AFTER every handler has
+    // settled — the platform counting the invocation failed is the sink that
+    // needs no logger configuration.
+    expect(failure).toBeInstanceOf(AggregateError);
+    const errors = (failure as AggregateError).errors;
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Error).message).toBe('report build failed');
     expect(logger.messages()).toEqual(['cloudflare-cron: handler failed']);
     expect(logger.records.at(0)?.meta).toMatchObject({
       cron: '0 * * * *',
       error: 'report build failed',
     });
-    // The registry with no failing handler stays quiet.
-    expect(cron.expressions()).toEqual([]);
   });
 
-  it('reports a non-Error rejection as a string', async () => {
+  it('aggregates EVERY handler failure, not only the first', async () => {
+    const cron = new WorkersCron();
+    cron.on('0 * * * *', () => {
+      throw new Error('first');
+    });
+    cron.on('0 * * * *', () => {
+      throw new Error('second');
+    });
+
+    const failure = await cron.dispatch(firing('0 * * * *')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    const messages = (failure as AggregateError).errors.map((e) => (e as Error).message);
+    expect(messages.sort()).toEqual(['first', 'second']);
+  });
+
+  it('reports a non-Error rejection as a string, then rejects with an Error', async () => {
     const logger = new RecordingLogger();
     const cron = new WorkersCron({ logger });
     cron.on('0 * * * *', () => Promise.reject('a bare string'));
 
-    await cron.dispatch(firing('0 * * * *'));
+    const failure = await cron.dispatch(firing('0 * * * *')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
     expect(logger.records.at(0)?.meta).toMatchObject({ error: 'a bare string' });
+    // Coerced so `instanceof` checks by consumers stay meaningful.
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors[0]).toBeInstanceOf(Error);
   });
 
   it('awaits a slow handler, so the invocation stays alive until it finishes', async () => {
@@ -132,9 +163,10 @@ describe('WorkersCron.dispatch', () => {
     expect(finished).toBe(true);
   });
 
-  it('reports an unmatched trigger with what IS registered, and runs nothing', async () => {
+  it('reports an unmatched trigger with what IS registered, runs nothing, and fails the invocation', async () => {
     // An expression configured in wrangler.toml with nothing registered here
-    // would otherwise fire silently forever.
+    // would otherwise fire silently forever. The report needs a logger; the
+    // failure does not (M70l X9-5).
     const logger = new RecordingLogger();
     const cron = new WorkersCron({ logger });
     let ran = false;
@@ -142,9 +174,14 @@ describe('WorkersCron.dispatch', () => {
       ran = true;
     });
 
-    await cron.dispatch(firing('*/5 * * * *'));
+    const failure = await cron.dispatch(firing('*/5 * * * *')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
     expect(ran).toBe(false);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain('*/5 * * * *');
     expect(logger.messages()).toEqual([
       'cloudflare-cron: trigger fired with no handler registered',
     ]);
@@ -156,26 +193,37 @@ describe('WorkersCron.dispatch', () => {
 
   it('matches the expression EXACTLY — whitespace is not normalized', async () => {
     // wrangler.toml is the source of truth for the string, so guessing at
-    // equivalence would silently run the wrong job or none at all.
+    // equivalence would silently run the wrong job or none at all. The
+    // whitespace variant has no handler, so dispatch also rejects (M70l).
     const cron = new WorkersCron();
     let ran = false;
     cron.on('0 * * * *', () => {
       ran = true;
     });
 
-    await cron.dispatch(firing('0  *  *  *  *'));
+    await expect(cron.dispatch(firing('0  *  *  *  *'))).rejects.toThrow(
+      /no handler registered/,
+    );
     expect(ran).toBe(false);
   });
 
-  it('is silent on both reporting paths when no logger was supplied', async () => {
+  it('rejects on both failure paths even when no logger was supplied', async () => {
     const cron = new WorkersCron();
     cron.on('0 * * * *', () => {
       throw new Error('x');
     });
 
-    await cron.dispatch(firing('0 * * * *'));
-    await cron.dispatch(firing('unmatched'));
-    // Reaching here without a TypeError is the assertion.
-    expect(cron.expressions()).toEqual(['0 * * * *']);
+    const handlerFailure = await cron.dispatch(firing('0 * * * *')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const unmatchedFailure = await cron.dispatch(firing('unmatched')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    // No logger: nothing was REPORTED, but both paths still FAIL loudly —
+    // the platform's own invocation-failed signal needs no configuration.
+    expect(handlerFailure).toBeInstanceOf(AggregateError);
+    expect(unmatchedFailure).toBeInstanceOf(Error);
   });
 });

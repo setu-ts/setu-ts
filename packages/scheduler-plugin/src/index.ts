@@ -5,6 +5,7 @@
  *
  * @since 0.1.0
  */
+export { SchedulerUnavailableError } from './errors.ts';
 export { SchedulerPlugin } from './plugin/scheduler-plugin.ts';
 export type {
   DistributedLockOptions,

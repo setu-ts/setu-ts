@@ -322,7 +322,7 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/shop/setu.config.ts');
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
-      expect(entry).toContain('booted ??= boot(env)');
+      expect(entry).toContain('await ensureBooted(env)');
       expect(entry).toContain('createApp(env)');
       expect(config).toContain('env?: Readonly<Record<string, unknown>>');
       expect(config).toContain('{ env }');
@@ -370,7 +370,7 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/api/setu.config.ts');
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
-      expect(entry).toContain('booted ??= boot(env);');
+      expect(entry).toContain('await ensureBooted(env);');
       expect(entry).toContain('createApp(env)');
       expect(config).toContain('export function createApp(env: Readonly<Record<string, unknown>>');
       expect(config).toContain('RuntimePlugin({ env })');
@@ -856,8 +856,8 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'cloudflare-workers']);
       const entry = h.fs.read('/work/app/src/index.ts');
-      expect(entry).toContain('booted ??= boot(env);');
-      expect(entry).toContain('const app = await booted;');
+      expect(entry).toContain('await ensureBooted(env);');
+      expect(entry).not.toContain('??=');
     });
 
     it('emits no root main.ts', async () => {

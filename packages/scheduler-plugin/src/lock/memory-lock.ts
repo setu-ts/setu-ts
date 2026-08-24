@@ -36,7 +36,24 @@ export class MemoryLock implements IDistributedLock {
   }
 
   /**
+   * Number of keys currently held (including not-yet-swept expired ones).
+   *
+   * Diagnostic surface for tests and health tooling; the scheduler's
+   * never-released slot keys make "how many entries exist" observable, which
+   * is what bounds the map.
+   */
+  get size(): number {
+    return this.#held.size;
+  }
+
+  /**
    * Attempt to acquire the lock.
+   *
+   * Sweeps EVERY expired entry before its own lookup, not just the key being
+   * acquired. The scheduler's fire-slot keys (M70l) are never released and
+   * never reacquired, so a lazy per-key delete could never reclaim them and
+   * the map would grow one entry per job per fire, forever. The map is bounded
+   * by jobs × ttl ÷ interval, so a full sweep is cheap.
    *
    * @param key - The lock key
    * @param ttlMs - Time-to-live in milliseconds
@@ -45,10 +62,11 @@ export class MemoryLock implements IDistributedLock {
   // deno-lint-ignore require-await
   async acquire(key: string, ttlMs: number): Promise<string | null> {
     const now = this.#runtime.now();
-    const existing = this.#held.get(key);
 
-    if (existing !== undefined && existing.expiresAtMs <= now) {
-      this.#held.delete(key);
+    for (const [expiredKey, held] of this.#held) {
+      if (held.expiresAtMs <= now) {
+        this.#held.delete(expiredKey);
+      }
     }
 
     if (this.#held.has(key)) {
