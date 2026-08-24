@@ -7150,7 +7150,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   s apart, so they never contend (X10-2); generated manifests carry no `prometheus.io/*` annotations
   so a vanilla Prometheus discovers **zero** targets (X10-6); and `/metrics` counts its own scrapes
   and the health probes with no exclusion option (X10-7). Plus X10-4, X10-5, X9-2, X9-5, X9-8.
-  **Complete (PR #TBD).**
+  **Complete (PR #182).**
 - ✅ **M70m — SDK and OpenAPI** (`sdk`, `openapi-plugin`, `validation-plugin`, plus `common` and
   `http-security-plugin`). A route carrying `validateBody(schema)` contributed nothing to the
   document, so the generated client for the API's only write took **no argument** and 400'd against
