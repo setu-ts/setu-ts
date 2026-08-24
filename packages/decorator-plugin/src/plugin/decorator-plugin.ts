@@ -18,11 +18,13 @@ import type {
   HttpMethod,
   IPlugin,
   IPluginContext,
+  IValidationService,
   MiddlewareFunction,
   ProviderOptions,
   RouteDefinition,
   RouteHandler,
   RouteSchema,
+  ValidationTarget,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
@@ -55,6 +57,18 @@ export interface DecoratorPluginOptions {
   readonly controllers?: readonly Constructor[];
   /** Explicit list of service classes to register. */
   readonly services?: readonly Constructor[];
+  /**
+   * When `true` (the default), a route decorated with `@ValidateBody` /
+   * `@ValidateQuery` / `@ValidateParams` gets the registered validation
+   * capability's enforcing middleware appended LAST in its chain (innermost,
+   * after guards and filters), so an invalid request is rejected with `400`
+   * before the handler runs — while guard `401`/`403` precedence is preserved.
+   *
+   * When `false`, schemas stay description-only (surfaced via
+   * `RouteDefinition.schema` for OpenAPI) and no enforcement middleware is
+   * appended; the absent-capability warning is also silenced.
+   */
+  readonly enforceSchemas?: boolean;
 }
 
 /** Plugin name — matches the package name without the scope. */
@@ -377,6 +391,96 @@ function buildRouteSchema(
   };
 }
 
+/**
+ * The validation targets a `@ValidateXxx` decorator can produce, in schema
+ * order. `RouteSchema` has no `cookies` key, so headers/cookies are never
+ * decorator-enforced.
+ */
+const DECORATOR_SCHEMA_TARGETS = ['body', 'query', 'params'] as const;
+
+/** A present schema target with the schema attached to it. */
+interface SchemaTarget {
+  readonly target: ValidationTarget;
+  readonly schema: unknown;
+}
+
+/**
+ * Returns the validation targets present on a route's schema, in schema
+ * order. Empty when the route carries no validation schema at all.
+ */
+function enforcedTargets(route: RouteMetadata): SchemaTarget[] {
+  const schema = route.schema;
+  if (schema === undefined) {
+    return [];
+  }
+  const out: SchemaTarget[] = [];
+  for (const target of DECORATOR_SCHEMA_TARGETS) {
+    const s = schema[target];
+    if (s !== undefined) {
+      out.push({ target, schema: s });
+    }
+  }
+  return out;
+}
+
+/**
+ * Warns that a route carries validation schemas but no
+ * `CAPABILITIES.VALIDATION` provider is registered, so the schemas stay
+ * description-only and are NOT enforced. One warning per affected route.
+ *
+ * Warns rather than throws, following M64's precedent: the decorators shipped
+ * as inert in M9, an application may legitimately want only the OpenAPI
+ * description, and turning a released no-op into a startup crash on upgrade is
+ * a worse failure than a named warning.
+ */
+function warnUnenforcedSchemas(
+  ctx: IPluginContext,
+  controller: Constructor,
+  route: RouteMetadata,
+  targets: readonly SchemaTarget[],
+): void {
+  if (ctx.logger === undefined) {
+    return;
+  }
+  ctx.logger.warn(
+    'Route declares validation schemas but no validation capability is registered; they are description-only and NOT enforced',
+    {
+      controller: className(controller),
+      handler: route.handler,
+      targets: targets.map((t) => t.target),
+      hint: 'Register ValidationPlugin (or another CAPABILITIES.VALIDATION provider) to enforce ' +
+        'them, or set enforceSchemas: false on DecoratorPlugin to silence this warning.',
+    },
+  );
+}
+
+/**
+ * Appends the validation capability's enforcing middleware for each present
+ * schema target, LAST in the route's middleware array (innermost — after
+ * guards, interceptors and filters), so guard `401`/`403` decisions still
+ * precede any `400`. No-op when enforcement is off or the route has no
+ * validation schema.
+ */
+function appendValidationMiddleware(
+  ctx: IPluginContext,
+  controller: Constructor,
+  route: RouteMetadata,
+  middleware: MiddlewareFunction[],
+  validation: IValidationService | undefined,
+): void {
+  const targets = enforcedTargets(route);
+  if (targets.length === 0) {
+    return;
+  }
+  if (validation === undefined) {
+    warnUnenforcedSchemas(ctx, controller, route, targets);
+    return;
+  }
+  for (const { target, schema } of targets) {
+    middleware.push(validation.middleware(schema, target));
+  }
+}
+
 /** Registers a single route on the router for the given HTTP method. */
 function registerOnRouter(
   ctx: IPluginContext,
@@ -483,7 +587,12 @@ function warnUnresolvableParameters(
  * route metadata entry builds a {@linkcode RouteDefinition} (merging class-
  * and method-level middleware/schema) and registers it on the router.
  */
-function registerController(ctx: IPluginContext, target: Constructor): void {
+function registerController(
+  ctx: IPluginContext,
+  target: Constructor,
+  validation: IValidationService | undefined,
+  enforceSchemas: boolean,
+): void {
   const ctrlMeta = metadataStore.getController(target);
   if (ctrlMeta === undefined) {
     return;
@@ -495,6 +604,9 @@ function registerController(ctx: IPluginContext, target: Constructor): void {
     warnUnresolvableParameters(ctx, target, route);
     const handler = createHandler(instance, route.handler, route.params);
     const middleware = composeMiddleware(ctrlMeta, route);
+    if (enforceSchemas) {
+      appendValidationMiddleware(ctx, target, route, middleware, validation);
+    }
     const schema = buildRouteSchema(ctrlMeta, route);
     const routeDef: RouteDefinition = {
       handler,
@@ -561,12 +673,24 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
     name: PLUGIN_NAME,
     version: denoJson.version,
     provides: [CAPABILITIES.METADATA_STORE],
+    // A real dependency edge (not priority luck): a REPLACEMENT validation
+    // provider registered at a higher priority number then still lands before
+    // this plugin, so register-time resolution sees it.
+    optionalDependencies: [CAPABILITIES.VALIDATION],
     priority: PLUGIN_PRIORITY.LOW,
 
     async register(ctx: IPluginContext): Promise<void> {
       if (!ctx.services.has(CAPABILITIES.METADATA_STORE)) {
         ctx.services.register(CAPABILITIES.METADATA_STORE, metadataStore);
       }
+
+      // Resolved ONCE per application start, not per request: the provider is
+      // fixed at registration time (optionalDependencies guarantees a
+      // replacement provider has already registered).
+      const enforceSchemas = opts.enforceSchemas ?? true;
+      const validation = ctx.services.has(CAPABILITIES.VALIDATION)
+        ? ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION)
+        : undefined;
 
       let discoveredControllers: Constructor[] = [];
       let discoveredServices: Constructor[] = [];
@@ -594,7 +718,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
         registerService(ctx, svc);
       }
       for (const ctrl of controllers) {
-        registerController(ctx, ctrl);
+        registerController(ctx, ctrl, validation, enforceSchemas);
       }
       replayCustomDecorators(ctx);
     },
