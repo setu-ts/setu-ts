@@ -58,6 +58,25 @@ export function RealtimeBackplanePlugin(
     priority: PLUGIN_PRIORITY.HIGH,
 
     async register(ctx: IPluginContext): Promise<void> {
+      // M70n X3-4: the plugin that knows its transport is the one that reports
+      // it. A `'memory'` backplane is a real single-process transport — frames
+      // never cross a process boundary — so behind more than one replica its
+      // fan-out looks like partial delivery rather than an error. Said once at
+      // register (the fact is fixed for the application's lifetime), and
+      // suppressible with `localNotice: false` like the consumers'
+      // `scalingNotice` opt-outs. Non-memory transports fan out already.
+      // Both arms of the disjunct narrow `options` to `MemoryBackplaneOptions`,
+      // the only arm that carries `localNotice`.
+      if (
+        (options.transport === undefined || options.transport === 'memory') &&
+        options.localNotice !== false
+      ) {
+        ctx.logger?.info(
+          "realtime-backplane: transport is 'memory' — frames fan out only within this " +
+            "process. Configure transport 'redis' or 'messaging' to broadcast across replicas.",
+        );
+      }
+
       const backplane = createBackplane(options, ctx.services, ctx.runtime.uuid());
 
       // Awaited, so the subscription is live before the first request and
