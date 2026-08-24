@@ -90,6 +90,11 @@ async function compilableFences(readme: string) {
 
 describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
   it('should carry the expected number of compilable fences per README', async () => {
+    // Pin the SIZE of the target list too: without this, deleting an entry
+    // shrinks both sides of the equality below and the gate passes vacuously
+    // (negative control §6.7 of the M70n plan).
+    expect(Object.keys(READMES)).toHaveLength(19);
+
     const counts: Record<string, number> = {};
     for (const readme of Object.keys(READMES)) {
       counts[readme] = (await compilableFences(readme)).length;
