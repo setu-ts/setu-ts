@@ -3282,7 +3282,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   one. **Not verified against a real cluster** — X10-4/5/6 are asserted at the level the repository
   can gate, the emitted text; the register's kind measurements are not re-run here. Developed on a
   branch cut before M70m, so `origin/main` was merged in and the gates re-run against the merged
-  tree before hand-off) — complete (PR #TBD)
+  tree before hand-off) — complete (PR #182)
 - **Next milestone** — **M70n** (decorators, DI and docs sweep: `decorator-plugin`,
   `validation-plugin`, docs). `@ValidateBody(schema)` does not validate anything — it only feeds
   OpenAPI (E1) — and `@Body()` re-reads the raw request, discarding validation transforms, defaults
