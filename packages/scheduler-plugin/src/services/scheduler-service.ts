@@ -378,6 +378,15 @@ export class SchedulerService implements IScheduler {
    * {@linkcode remove}), so a re-registration under the same name gets a
    * fresh slot. A lock failure is treated as not-claimed (skip the run),
    * never as a reason to drop the schedule.
+   *
+   * **Known limitation — the job is LOST if this replica leaves before it
+   * fires.** Because the claim is decided here rather than at fire time, a
+   * replica that finds the slot held sets `slotClaimed = false` once and never
+   * re-attempts. If the claiming replica then dies — a crash, or a graceful
+   * {@linkcode disconnect}, which clears timers WITHOUT releasing the slot —
+   * between this registration and the fire, no replica runs the handler and
+   * nothing reports it. The exposure window is `delayMs`. `cron` and `every`
+   * do not share it: they claim at fire time, so the next fire re-contends.
    */
   async #claimDelaySlot(entry: DelayRegistryEntry<unknown>): Promise<void> {
     const slotKey = this.#delaySlotKey(entry);

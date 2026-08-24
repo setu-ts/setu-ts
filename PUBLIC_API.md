@@ -3871,12 +3871,22 @@ fires each claim a never-released _slot_ lock keyed on the fire's intended time
 (`scheduler:job:<name>:<slot>`), so two replicas whose timers land anywhere in the same intended
 slot run the handler exactly once between them; `ttlMs` bounds how long a claimed slot is
 remembered, so it must exceed the maximum skew between replicas. `delay` jobs claim their slot at
-REGISTRATION, keyed on the job NAME (`scheduler:job:<name>`), because a delay's intended fire time
-is `now + delayMs` and carries per-replica startup skew — the name is what identifies "the same
-one-shot job" across replicas. A delay's slot is released when the job leaves the registry (on fire,
-`remove`, or TTL expiry), so re-registering the same name after it fired gets a fresh slot and fires
-again. A separate per-handler mutex preserves overlap protection — a second fire of a job whose
-previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
+REGISTRATION, keyed on the job name plus a `:once` suffix (`scheduler:job:<name>:once`), because a
+delay's intended fire time is `now + delayMs` and carries per-replica startup skew — the name is
+what identifies "the same one-shot job" across replicas. The suffix is load-bearing: the bare
+`scheduler:job:<name>` is the per-handler mutex, and a slot holding that key would make the mutex
+acquire at fire time always lose to the slot's own claim. A delay's slot is released when the job
+leaves the registry (on fire, `remove`, or TTL expiry), so re-registering the same name after it
+fired gets a fresh slot and fires again.
+
+**A `delay` job is lost if the replica that claimed it leaves before firing.** The claim is decided
+at registration, so a replica that finds the slot held never re-attempts: if the claiming replica
+crashes — or shuts down gracefully, since `disconnect()` clears timers without releasing the slot —
+between registering the delay and firing it, no replica runs the handler and nothing reports it. The
+exposure window is the delay itself, so it matters for a long `delayMs` on a replica set that may
+lose a pod in that window. `cron` and `every` are unaffected: they claim at fire time, so the next
+fire re-contends. A separate per-handler mutex preserves overlap protection — a second fire of a job
+whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
 (`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
 slot keys; the first fire may come sooner than one full interval after registration.
 
