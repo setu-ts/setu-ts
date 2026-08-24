@@ -205,4 +205,46 @@ describeEnforcement('decorator validation enforcement (integration)', () => {
     expect(res.json()).toEqual({ quantity: 'nope' });
     await app.stop();
   });
+
+  it('hands the handler the TRANSFORMED validated body as its @Body() argument', async () => {
+    // The E2 round-trip: validation middleware validates + writes the parsed
+    // value under `validatedStateKey('body')`, then the parameter resolver
+    // reads it back and supplies it as the `@Body()` argument. Only a schema
+    // that CHANGES its input can distinguish this from the raw body.
+    const Schema = transformingBodySchema();
+    let seenAsArgument: unknown;
+
+    @Controller('/roundtrip')
+    class RoundTripController {
+      @Post('/')
+      @ValidateBody(Schema)
+      create(@Body() body: unknown) {
+        seenAsArgument = body;
+        return null;
+      }
+    }
+
+    const app = createApplication({
+      plugins: [
+        testRuntimePlugin(),
+        ValidationPlugin(),
+        DecoratorPlugin({ controllers: [RoundTripController] }),
+      ],
+    });
+    await app.start();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: 'http://localhost/roundtrip',
+      // Raw input: untrimmed lowercase name, missing quantity.
+      body: { name: '  widget  ' },
+    });
+    expect(res.statusCode).toBe(200);
+    // The RAW body was `{ name: '  widget  ' }`; the argument carries the
+    // TRANSFORMED value (trimmed/uppercased name + defaulted quantity) —
+    // proof the middleware→state→resolver→handler path is live end to end.
+    expect(seenAsArgument).toEqual({ name: 'WIDGET', quantity: 1 });
+
+    await app.stop();
+  });
 });
