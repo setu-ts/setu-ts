@@ -34,7 +34,7 @@ export type { ApiKeyOptions } from './interfaces/index.ts';
 export type { LocalOptions } from './interfaces/index.ts';
 
 // Exported utilities
-export { PasswordHasher } from './services/password-hasher.ts';
+export { MalformedPasswordHashError, PasswordHasher } from './services/password-hasher.ts';
 
 // Middleware
 export { authMiddleware } from './middleware/auth-middleware.ts';

@@ -12,6 +12,31 @@ const HASH_LENGTH = 32; // 256 bits
 const SALT_LENGTH = 16; // 128 bits
 
 /**
+ * Thrown by {@linkcode PasswordHasher.verify} when the stored value is not a
+ * well-formed `pbkdf2$<iterations>$<salt>$<hash>` string.
+ *
+ * This usually means the arguments were passed in reverse order — a plaintext
+ * password in the `stored` position makes every correct verification fail, so
+ * it is reported loudly here instead of indistinguishably as `false`.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const ok = await hasher.verify(stored, password);
+ * } catch (error) {
+ *   if (error instanceof MalformedPasswordHashError) {
+ *     // The stored credential is corrupt, or verify's arguments are swapped
+ *   }
+ * }
+ * ```
+ * @since 0.3.0
+ */
+export class MalformedPasswordHashError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'MalformedPasswordHashError';
+}
+
+/**
  * Password hasher using PBKDF2-SHA256 via Web Crypto.
  */
 export class PasswordHasher {
@@ -41,32 +66,47 @@ export class PasswordHasher {
   /**
    * Verify a secret against a stored hash.
    *
-   * @param stored - The stored hash string
+   * A wrong secret returns `false`; a stored value that is not a well-formed
+   * `pbkdf2$…` string throws {@linkcode MalformedPasswordHashError}, because
+   * that shape of failure is a programming error (most often reversed
+   * arguments) rather than a failed login.
+   *
+   * @param stored - The stored hash string in `pbkdf2$<iterations>$<salt>$<hash>` format
    * @param secret - The password to verify
    * @returns `true` if the secret matches, `false` otherwise
+   * @throws {MalformedPasswordHashError} If `stored` is not a well-formed `pbkdf2$…` string
    */
   async verify(stored: string, secret: string): Promise<boolean> {
-    try {
-      const parts = stored.split('$');
-      if (parts.length !== 4 || parts[0] !== 'pbkdf2') {
-        return false;
-      }
-
-      const iterations = parseInt(parts[1], 10);
-      if (isNaN(iterations) || iterations <= 0) {
-        return false;
-      }
-
-      const salt = this.base64UrlDecode(parts[2]);
-      const expectedHash = this.base64UrlDecode(parts[3]);
-
-      const actualHash = await this.deriveHash(secret, salt, iterations);
-
-      // Constant-time comparison
-      return this.constantTimeCompare(actualHash, expectedHash);
-    } catch {
-      return false;
+    const parts = stored.split('$');
+    if (parts.length !== 4 || parts[0] !== 'pbkdf2') {
+      throw new MalformedPasswordHashError(
+        'the stored credential is not a pbkdf2$<iterations>$<salt>$<hash> string — ' +
+          'check that the STORED HASH is passed first and the SECRET second to PasswordHasher.verify',
+      );
     }
+
+    const iterations = parseInt(parts[1], 10);
+    if (isNaN(iterations) || iterations <= 0) {
+      throw new MalformedPasswordHashError(
+        `the stored credential's iterations part '${parts[1]}' is not a positive integer`,
+      );
+    }
+
+    let salt: Uint8Array;
+    let expectedHash: Uint8Array;
+    try {
+      salt = this.base64UrlDecode(parts[2]);
+      expectedHash = this.base64UrlDecode(parts[3]);
+    } catch {
+      throw new MalformedPasswordHashError(
+        "the stored credential's salt/hash parts are not valid base64url",
+      );
+    }
+
+    const actualHash = await this.deriveHash(secret, salt, iterations);
+
+    // Constant-time comparison
+    return this.constantTimeCompare(actualHash, expectedHash);
   }
 
   /**
