@@ -12,7 +12,7 @@ import type { ISessionStore } from '@setu-ts/common';
 import type { SessionMode } from './codec/crypto.ts';
 
 /** Default session cookie name. */
-const DEFAULT_COOKIE_NAME = 'hono_session';
+const DEFAULT_COOKIE_NAME = 'setu_session';
 /** Default absolute session lifetime, matching the 2 hours of the reference implementation. */
 const DEFAULT_MAX_AGE_SECONDS = 7200;
 /**
@@ -22,6 +22,8 @@ const DEFAULT_MAX_AGE_SECONDS = 7200;
 const DEFAULT_MAX_COOKIE_BYTES = 4096;
 /** Default form field carrying the CSRF token. */
 const DEFAULT_CSRF_FIELD = '_csrf';
+/** Default header that may carry the CSRF token instead of the form field. */
+const DEFAULT_CSRF_HEADER = 'x-csrf-token';
 /** Methods that never require a CSRF token. */
 const DEFAULT_IGNORE_METHODS: readonly string[] = ['GET', 'HEAD', 'OPTIONS'];
 
@@ -35,7 +37,7 @@ const DEFAULT_IGNORE_METHODS: readonly string[] = ['GET', 'HEAD', 'OPTIONS'];
  * @since 0.2.0
  */
 export interface SessionCookieOptions {
-  /** Cookie name. Default `'hono_session'`. */
+  /** Cookie name. Default `'setu_session'`. */
   readonly name?: string;
   /** `Path` scope. Default `'/'`. */
   readonly path?: string;
@@ -60,7 +62,8 @@ export interface CsrfFormOptions {
   /**
    * Header that may carry the token instead of a form field, for `fetch`-based
    * posts and for `multipart/form-data` bodies this package does not parse.
-   * Omitted by default, meaning the form field is the only source.
+   * Default `'x-csrf-token'`; header reading cannot be disabled — a synchroniser
+   * token that cannot be presented is not a security control.
    */
   readonly headerName?: string;
   /** Methods that skip verification. Default `['GET', 'HEAD', 'OPTIONS']`. */
@@ -209,7 +212,7 @@ export function resolveSessionConfig(options: SessionPluginOptions = {}): Resolv
 /** Fully-defaulted form-CSRF configuration. */
 export interface ResolvedCsrfConfig {
   readonly fieldName: string;
-  readonly headerName?: string;
+  readonly headerName: string;
   readonly ignoreMethods: ReadonlySet<string>;
 }
 
@@ -224,7 +227,7 @@ export function resolveCsrfConfig(options: CsrfFormOptions = {}): ResolvedCsrfCo
   const methods = options.ignoreMethods ?? DEFAULT_IGNORE_METHODS;
   return {
     fieldName: options.fieldName ?? DEFAULT_CSRF_FIELD,
-    ...(options.headerName === undefined ? {} : { headerName: options.headerName }),
+    headerName: options.headerName ?? DEFAULT_CSRF_HEADER,
     ignoreMethods: new Set(methods.map((m) => m.toUpperCase())),
   };
 }
