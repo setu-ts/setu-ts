@@ -15,7 +15,7 @@ import type {
 // IRuntimeServices type used via ctx.runtime (non-optional property)
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { ReactRouterPluginOptions } from '../interfaces/index.ts';
-import { createStaticAssetHandler } from '../assets/static-assets.ts';
+import { createPublicFileHandler, createStaticAssetHandler } from '../assets/static-assets.ts';
 import { SsrService } from '../services/ssr-service.ts';
 import { assertSsrRuntime, loadRequestHandler } from '../handler/server-build.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -113,10 +113,28 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       const catchAllPattern = joinWildcard(basename);
       const renderRoute: RouteHandler = (routeCtx) => ssrService.render(routeCtx);
 
+      // M70n X5-5: Vite copies `public/` into the client-build ROOT, outside
+      // `assetUrlPrefix`, so `/robots.txt` and `/favicon.ico` would otherwise
+      // reach this SSR catch-all and answer an HTML-shaped miss under a
+      // 200-shaped page. When enabled, a GET naming an existing build-root
+      // file is served with `must-revalidate` caching (those files are not
+      // content-hashed); every miss falls through to SSR unchanged.
+      let getRoute = renderRoute;
+      if (
+        options.publicFiles !== false && options.assetsDir != null &&
+        runtime.fs != null
+      ) {
+        const servePublicFile = createPublicFileHandler({
+          fs: runtime.fs,
+          assetsDir: options.assetsDir,
+        });
+        getRoute = async (routeCtx) => (await servePublicFile(routeCtx)) ?? renderRoute(routeCtx);
+      }
+
       for (const verb of ALL_VERBS) {
         switch (verb) {
           case 'GET':
-            ctx.router.get(catchAllPattern, renderRoute);
+            ctx.router.get(catchAllPattern, getRoute);
             break;
           case 'POST':
             ctx.router.post(catchAllPattern, renderRoute);
