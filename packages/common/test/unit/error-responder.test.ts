@@ -45,6 +45,10 @@ function makeResponse() {
       recorded.body = new TextEncoder().encode(body);
       return {} as HandlerResult;
     },
+    html(body: string) {
+      recorded.body = new TextEncoder().encode(body);
+      return {} as HandlerResult;
+    },
     send(body?: Uint8Array) {
       recorded.body = body;
       return {} as HandlerResult;

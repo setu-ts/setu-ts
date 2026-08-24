@@ -109,6 +109,9 @@ export function createFakeResponse(): FakeResponseResult {
     text(_b: string): HandlerResult {
       return HANDLER_RESULT;
     },
+    html(_b: string): HandlerResult {
+      return HANDLER_RESULT;
+    },
     send(_b?: Uint8Array): HandlerResult {
       return HANDLER_RESULT;
     },
