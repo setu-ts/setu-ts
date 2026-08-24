@@ -280,6 +280,7 @@ Three consequences, each a startup throw rather than a silent misinjection:
 | `FromConfigOptions`            | interface |
 | `FullStackStarterOptions`      | interface |
 | `RealtimeArm`                  | interface |
+| `StaticPluginOptions`          | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

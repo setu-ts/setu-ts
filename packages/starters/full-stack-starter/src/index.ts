@@ -23,3 +23,6 @@ export type { FromConfigOptions } from './from-config.ts';
 // reaching past this package. Routed through the microservice tier, which is the
 // only starter this package pins — the same chain the option types follow.
 export type { RealtimeArm } from '@setu-ts/microservice-starter';
+// Re-exported for the same reason: the gated `static` arm carries this shape,
+// so naming it must not require installing `@setu-ts/static-plugin` separately.
+export type { StaticPluginOptions } from '@setu-ts/static-plugin';
