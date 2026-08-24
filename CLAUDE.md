@@ -3275,7 +3275,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   middleware never receives the matched pattern, and it would change every existing series'
   identity.
 
-  Five negative controls were each observed failing and reverted, including the real-backend one
+  Seven negative controls were each observed failing and reverted, including the real-backend one
   (reverting `{ durable: false }` fails the RabbitMQ 4 suite with the register's own channel close),
   and the one that matters most: reverting grid alignment while KEEPING the slot key fails the dedup
   test plus four grid tests, which is the difference between a fix and a mechanism that looks like
