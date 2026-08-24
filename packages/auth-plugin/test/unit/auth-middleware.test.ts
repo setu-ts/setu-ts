@@ -37,6 +37,7 @@ function createContext(authService: IAuthService): {
     appendHeader: () => response,
     json: (): HandlerResult => ({ __handlerResult: true }),
     text: (): HandlerResult => ({ __handlerResult: true }),
+    html: (): HandlerResult => ({ __handlerResult: true }),
     send: (): HandlerResult => ({ __handlerResult: true }),
     redirect: (): HandlerResult => ({ __handlerResult: true }),
     stream: (): HandlerResult => ({ __handlerResult: true }),

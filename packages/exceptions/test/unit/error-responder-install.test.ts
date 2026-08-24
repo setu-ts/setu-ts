@@ -53,6 +53,10 @@ function fakeResponse(): { response: IResponse; record: { status?: number; body?
       record.body = new TextEncoder().encode(body);
       return { __handlerResult: true };
     },
+    html(body: string) {
+      record.body = new TextEncoder().encode(body);
+      return { __handlerResult: true };
+    },
     send(body?: Uint8Array) {
       if (body !== undefined) {
         record.body = body;
