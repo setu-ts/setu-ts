@@ -31,6 +31,11 @@ const callApi = resilience.wrap(() => externalApi.call(), { retry: true, timeout
 await callApi();
 ```
 
+> **Hoist the wrapped call.** `wrap()` builds its breaker, bulkhead and retry state ONCE, into the
+> returned closure — so a `wrap()` written inside a handler runs fresh on every request and its
+> circuit breaker can never open (retry and timeout still work, which makes the mistake silent).
+> Wrap at module or plugin scope; call per request.
+
 ## Options
 
 | Option                  | Type                   | Description                                         |
