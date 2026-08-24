@@ -717,12 +717,12 @@ app.router.post('/users', {
         return ctx.response.status(400).json({ errors: result.error });
       }
 
-      ctx.state.set('validatedBody', result.value);
+      ctx.state.set('validated:body', result.value);
       await next();
     },
   ],
   handler: async (ctx) => {
-    const body = ctx.state.get<z.infer<typeof CreateUserSchema>>('validatedBody');
+    const body = ctx.state.get<z.infer<typeof CreateUserSchema>>('validated:body');
     // body is fully typed and validated
     const user = await createUser(body);
     return ctx.response.status(201).json(user);
@@ -748,7 +748,7 @@ import {
 app.router.get('/users', {
   middleware: [validateQuery(ListUsersQuerySchema)],
   handler: async (ctx) => {
-    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>('validatedQuery');
+    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>('validated:query');
     // query is validated
   },
 });
@@ -759,8 +759,8 @@ app.router.put('/users/:id', {
     validateBody(UpdateUserSchema),
   ],
   handler: async (ctx) => {
-    const params = ctx.state.get('validatedParams');
-    const body = ctx.state.get('validatedBody');
+    const params = ctx.state.get('validated:params');
+    const body = ctx.state.get('validated:body');
     // both are validated
   },
 });
@@ -1630,9 +1630,19 @@ app.register(HttpSecurityPlugin({
 
 Origin matching via `origin` (boolean/string/array/function). Preflight (`OPTIONS` + `Origin` +
 `Access-Control-Request-Method`) → 204 short-circuit with `Access-Control-Allow-Origin`,
-`Access-Control-Allow-Methods`, and (when configured) `Access-Control-Allow-Headers` /
+`Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, and (when configured)
 `Access-Control-Max-Age`. Credentials reflect specific origin (never `*`). Non-preflight disallowed
 origins call `next()` without CORS headers (browser enforces block).
+
+`Access-Control-Allow-Headers` follows `allowedHeaders`, and omitting it is NOT the same as passing
+`[]`. Omitted, an allowed origin's preflight is answered by **echoing** that request's own
+`Access-Control-Request-Headers`, and the response also carries
+`Vary: Access-Control-Request-Headers` — mandatory rather than cosmetic, since the answer now
+depends on a request header and a shared cache would otherwise serve one caller's preflight to a
+caller asking for different headers. An explicit list allows exactly those headers; an explicit `[]`
+allows none. A denied origin echoes nothing. Echoing is the default because the previous empty-list
+default advertised every standard method and then refused `content-type`, so every browser blocked
+every JSON request; it does not widen the boundary, which the `origin` allowlist alone decides.
 
 `Vary: Origin` is appended to **every** response for a request carrying an `Origin` header —
 including a denied one — so a shared cache cannot serve an allowed origin's response to a denied
@@ -5219,7 +5229,13 @@ app.register(OpenApiPlugin({
   // Router paths to leave out of the document. Matched exactly against the
   // fully-resolved router pattern: router-style (`/todos/:id`, not the
   // template `/todos/{id}`) and including any `router.group()` prefix.
-  exclude: ['/health', '/live', '/ready', '/metrics'],
+  exclude: ['/internal/debug'],
+  // Plugin names whose routes are left out, matched against `RouteInfo.owner`.
+  // Defaults to ['health-plugin', 'metrics-plugin']; pass [] to document them.
+  excludeOwners: ['health-plugin', 'metrics-plugin'],
+  // Fill requestBody and parameters from the validation middleware guarding
+  // each route. On by default; pass false for the pre-0.3.0 document.
+  deriveRequestSchemas: true,
   // Endpoint configuration
   endpoint: '/docs', // Path for Swagger UI HTML (default: '/docs')
   specEndpoint: '/openapi.json', // Path for OpenAPI JSON spec (default: '/openapi.json')
@@ -5252,6 +5268,60 @@ app.router.delete('/todos/:id', {
 
 `RouteSchema.security` enforces nothing. Authentication is enforced by `authMiddleware` and the
 `requireXxx` guards; this describes the route for readers and for generated clients.
+
+### Deriving Request Schemas From Validation Middleware
+
+A route carrying `validateBody(schema)` already states its request shape, from a first-party plugin,
+on the route. `deriveRequestSchemas` (default `true`) reads that schema and fills the operation's
+`requestBody` and `parameters`, so the shape is not written twice:
+
+```typescript
+app.router.post('/orders', {
+  middleware: [validateBody(PlaceOrderSchema), validateQuery(ListQuerySchema)],
+  handler,
+});
+// -> requestBody from PlaceOrderSchema, query parameters from ListQuerySchema,
+//    and a documented 400 (which is what the middleware answers).
+```
+
+Every helper `@setu-ts/validation-plugin` ships brands the middleware it returns with
+`RouteValidationMetadata` (`@setu-ts/common`), and so does `IValidationService.middleware(...)` —
+both entry points, identically. No plugin imports another; the `Symbol.for`-keyed brand in `common`
+is the whole channel, exactly as `RouteSecurityMetadata` is for guards.
+
+Rules and limits, stated rather than left to discovery:
+
+- **A declared `schema` field always wins, per field.** Declaring `schema.body` and carrying
+  `validateQuery(...)` gives the declared body and the derived query.
+- **The LAST brand for a target wins** when a route carries two, because that is the value the
+  handler receives: each validation middleware writes `validated:<target>` as it passes, so the
+  final writer's parsed value is the one in `ctx.state` by the time the handler runs. The request
+  must still satisfy EVERY brand, since any of them can short-circuit with a `400`; the document
+  shows the shape the handler sees, not that conjunction.
+- **`cookies` derives nothing.** `RouteSchema` has no `cookies` field, so there is no declared
+  counterpart — and `@setu-ts/sdk`'s client generator refuses an `in: 'cookie'` parameter outright,
+  so emitting one would turn a working document into a hard codegen failure for its consumers.
+- **A derived route gains `400: { description: 'Bad request' }`** unless it declares its own. The
+  status is real; no body schema is emitted, because the shape depends on the plugin's configured
+  `errorFormat`, which the generator cannot see.
+- **`deriveRequestSchemas: false`** disables derivation only. Owner exclusion, the `operationId`
+  format and schema deduplication are unconditional, so this does not restore the whole pre-0.3.0
+  document; pass `excludeOwners: []` to document the operational routes again.
+
+Unlike `deriveSecurity` this is ON by default, because nothing has to be configured for it: a
+security requirement names a scheme that cannot be inferred from a guard, while the schema on the
+route IS the schema the document wants.
+
+### Excluding Operational Routes
+
+`excludeOwners` (default `['health-plugin', 'metrics-plugin']`) drops routes by the plugin that
+registered them, read from `RouteInfo.owner`. Without it, `/health`, `/live`, `/ready` and
+`/metrics` are documented and flow into every generated client as `getHealth`, `getLive`, `getReady`
+and `getMetrics` alongside the real API.
+
+Owners rather than paths, because those endpoints are configuration: `HealthPlugin({ endpoints })`
+and `MetricsPlugin({ endpoint })` both accept a path, so a static path list silently stops excluding
+a renamed one. Pass `excludeOwners: []` to document them again.
 
 ### Deriving Authentication From Guards
 
@@ -6356,7 +6426,9 @@ app.router.get('/users', {
 });
 
 app.router.post('/users', {
-  middleware: [app.services.auth.requireAuth()],
+  // `schema.body` DOCUMENTS the route; `validateBody` is what enforces it and
+  // writes `validated:body`. Declaring the schema alone leaves that key unset.
+  middleware: [app.services.auth.requireAuth(), validateBody(CreateUserSchema)],
   schema: {
     body: CreateUserSchema,
     response: { 201: UserSchema, 400: z.object({ error: z.string() }) },
@@ -6366,7 +6438,7 @@ app.router.post('/users', {
   },
   handler: async (ctx) => {
     const db = ctx.services.get('database');
-    const user = await db.getRepository('User').create(ctx.state.get('validatedBody'));
+    const user = await db.getRepository('User').create(ctx.state.get('validated:body'));
     return ctx.response.status(201).json(user);
   },
 });
@@ -7101,7 +7173,7 @@ app.router.post('/users', {
   schema: { body: CreateUserSchema, response: { 201: UserSchema } },
   handler: async (ctx) => {
     const userService = ctx.services.get('userService');
-    const user = await userService.create(ctx.state.get('validatedBody'));
+    const user = await userService.create(ctx.state.get('validated:body'));
     return ctx.response.status(201).json(user);
   },
 });
@@ -7399,48 +7471,48 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Types
 
-| Group               | Exports                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                   |
-| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`                                                                                                                                                                                                                                                                                                             |
-| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                                                                                                                         |
-| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                               |
-| Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                  |
-| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                  |
-| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest` |
-| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                            |
-| DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                            |
-| Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Config              | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                               |
-| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`                                                                                                                                                                                                                                                                                      |
-| Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                             |
-| Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                             |
-| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                                                                                                                                    |
-| Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                          |
-| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                             |
-| Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                             |
-| Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                       |
-| Secrets             | `ISecretManager`                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                                                                                                                              |
-| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                       |
-| Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                            |
-| Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Notifications       | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                    |
-| Errors              | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError` — the request-scoped error responder seam and the pure error serializer (M70f)                                                                                                                                                                                                                                                          |
-| Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                            |
-| Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                 |
-| SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                             |
-| SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                               |
-| Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                      |
-| WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`                                                                                                         |
-| Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                       |
-| Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                         |
-| Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                            |
-| DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                               |
-| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                           |
-| Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                        |
+| Group               | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                      |
+| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `VALIDATION_METADATA`, `RouteValidationMetadata`, `withValidationMetadata`, `validationMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest` |
+| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                |
+| DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                                                                                                                                |
+| Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Config              | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`                                                                                                                                                                                                                                                                                                                                                                                          |
+| Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                                                                                                                                                                                                                                        |
+| Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                                                                                                                                 |
+| Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Secrets             | `ISecretManager`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                                                                                                                           |
+| Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Notifications       | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Errors              | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError` — the request-scoped error responder seam and the pure error serializer (M70f)                                                                                                                                                                                                                                                                                                                                                              |
+| Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`                                                                                                                                                                                                             |
+| Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                                                                                                                           |
+| Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 Contract notes:
 
@@ -7470,6 +7542,16 @@ Contract notes:
   middleware's identity and behaviour are unchanged. It carries authentication PRESENCE only — a
   role is not a security scheme, so `requireRole('admin')` brands `{ authenticated: true }` and
   nothing more.
+- `withValidationMetadata` brands a `MiddlewareFunction` with a `RouteValidationMetadata`
+  (`{ target: ValidationTarget; schema: unknown }`), and `validationMetadataOf` reads it back — the
+  same mechanism, for the same reason, applied to request shape rather than authentication. Every
+  helper `@setu-ts/validation-plugin` ships carries it, as does
+  `IValidationService.middleware(schema, target)`, and `@setu-ts/openapi-plugin` reads it to fill an
+  operation's `requestBody` and `parameters`. `VALIDATION_METADATA` is created with `Symbol.for` for
+  the same cross-copy reason, the brand is symbol-keyed and non-enumerable, and the `schema` travels
+  by REFERENCE — a reader transforms it with whatever schema support it has, and identity is what
+  the OpenAPI generator's deduplication keys on. A foreign value under the same global symbol reads
+  as absent rather than being trusted.
 - `IRequest.raw?: Request` and `IRequestContext.raw?: Request` carry the **undisturbed** web
   `Request` the HTTP adapter received, alongside the mapped framework request whose body has already
   been buffered. The kernel terminal handler reads it to decide a WebSocket upgrade (which needs the
@@ -8504,23 +8586,68 @@ const source = generateOpenApiClient(document, {
 interface OpenApiCodegenOptions {
   sdkImport?: string;
   factoryName?: string;
+  apiTypeName?: string;
 }
 ```
 
-| Option        | Default          | Description                     |
-| ------------- | ---------------- | ------------------------------- |
-| `sdkImport`   | `'@setu-ts/sdk'` | Generated type-import specifier |
-| `factoryName` | `'createApi'`    | Exported generated factory name |
+| Option        | Default          | Description                                        |
+| ------------- | ---------------- | -------------------------------------------------- |
+| `sdkImport`   | `'@setu-ts/sdk'` | Generated type-import specifier                    |
+| `factoryName` | `'createApi'`    | Exported generated factory name                    |
+| `apiTypeName` | `'Api'`          | Exported interface the factory returns (see below) |
 
 #### Generated naming contract
 
-| Emitted symbol           | Derivation                                                                                                                    |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| Operation method         | lower-camelCase from `operationId`, split on non-alphanumeric runs, **interior casing preserved** (`listUsers` → `listUsers`) |
-| Component type           | PascalCase from the component name (`User` → `export type User`)                                                              |
-| Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                     |
-| Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                      |
-| Duplicate derived name   | throws `OpenApiCodegenError` naming both originals — for operations AND component schemas                                     |
+| Emitted symbol           | Derivation                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operation method         | lower-camelCase from `operationId`, split on non-alphanumeric runs, **interior casing preserved** (`listUsers` → `listUsers`)               |
+| Component type           | PascalCase from the component name (`User` → `export type User`)                                                                            |
+| Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                   |
+| Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                  |
+| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx response                  |
+| Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                     |
+| Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                      |
+| Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                             |
+| Parameter alias          | PascalCase from `operationId` plus the parameter name plus `Param`, emitted only when the parameter schema is inline and spans lines        |
+| Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                                    |
+| Duplicate derived name   | throws `OpenApiCodegenError` naming both originals — component schemas, `*Args`, `*Error*` and the client interface share ONE name registry |
+
+**No multi-line type is written at a use site.** An inline (non-`$ref`) request body, parameter or
+success response is hoisted into an exported alias, so every reference to it is a single-line name.
+This is not cosmetic: a rendered type lands at several indentation levels, and a success type lands
+at two of them at once — the client interface's signature and the `client.request<…>` type argument
+— so no single indentation is correct for a multi-line object literal, and `deno fmt` reindents
+whatever is emitted. Hoisting also makes the shape nameable by a consumer. A schema that
+`@setu-ts/openapi-plugin` derived from validation middleware and used once is inline, so this is the
+ordinary case rather than an exotic one.
+
+**The factory has a written-out return type.** `createApi(client: IHttpClient): Api`, with
+`export interface Api { … }` listing every operation's signature. An inferred return type is a JSR
+_slow type_: it blocks automatic `.d.ts` generation, so a consumer could not publish a package
+containing the generated file — while the file's own header tells them not to edit it. Naming the
+interface is also the only way a consumer can name the client's type.
+
+**Declared error responses are typed.** For each operation declaring a non-2xx response the
+generator emits a union discriminated on the literal `status`, plus a narrowing guard:
+
+```typescript
+export type GetUserByIdError =
+  | (HttpClientError<NotFound> & { readonly status: 404 })
+  | (HttpClientError<GetUserByIdError409Body> & { readonly status: 409 });
+export function isGetUserByIdError(e: unknown): e is GetUserByIdError { … }
+```
+
+`HttpClientError` is generic in its body (`HttpClientError<TBody = unknown>`), so the bare name
+keeps meaning exactly what it did. The union must be discriminated on `status` to be usable —
+`HttpClientError<A> | HttpClientError<B>` is not, because `status` is `number` on both arms. A
+`default` response and range codes such as `4XX` are skipped: they name no single status.
+
+**Generated output is `deno fmt`- and `deno lint`-clean.** Two-space indentation, nested inline
+object types indented, no lint pragma (`{}` is emitted as `Record<PropertyKey, never>`, which is
+both what the schema means and what `ban-types` accepts), signatures wrapped one parameter per line
+past 100 columns, and a path template too long for one line emitted as an equivalent `[…].join('')`.
+The two committed fixtures under `packages/sdk/test/fixtures/` are real generator output and are
+covered by the repository's own `fmt` and `lint` gates — they carry no exclusion.
 
 Path parameters are emitted as positional arguments (each substituted and percent-encoded, including
 a placeholder sharing a segment with literal text such as `/files/{id}.json`); query parameters,
@@ -8537,8 +8664,11 @@ so a hostile document cannot inject code into the generated file.
 
 `generateOpenApiClient` throws `OpenApiCodegenError` (carrying `path` and `method` where applicable)
 instead of emitting a client that misbehaves or does not compile, for: a missing `operationId`; two
-operations or two component schemas deriving onto one name; a `cookie` parameter; a path placeholder
-with no matching `in: 'path'` parameter; an `in: 'path'` parameter absent from the template; two
+operations deriving onto one name; two emitted TYPE names colliding — component schemas, `*Args`
+interfaces, `*Error` unions, `*Error<status>Body` aliases and the client interface all draw from ONE
+registry, so a component named `ListUsersArgs` beside an operation `listUsers` is refused rather
+than emitting two declarations of one name; a `cookie` parameter; a path placeholder with no
+matching `in: 'path'` parameter; an `in: 'path'` parameter absent from the template; two
 placeholders deriving onto one argument name; and a malformed local `$ref`.
 
 ### SdkOpenApi\* types

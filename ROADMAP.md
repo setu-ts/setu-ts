@@ -7151,12 +7151,47 @@ Ordered by the sequence they should be worked, not by severity alone.
   so a vanilla Prometheus discovers **zero** targets (X10-6); and `/metrics` counts its own scrapes
   and the health probes with no exclusion option (X10-7). Plus X10-4, X10-5, X9-2, X9-5, X9-8.
   **Complete (PR #TBD).**
-- ⬜ **M70m — SDK and OpenAPI** (`sdk`, `openapi-plugin`, `validation-plugin`). A route carrying
-  `validateBody(schema)` contributes nothing to the document, so the generated client for the API's
-  only write took **no argument** and 400'd against the live server (X11-5), and the generated
-  client cannot be published to JSR at all because `createApi` has an inferred return type — a slow
-  type, in a file whose own header claims JSR-readiness (X11-4). Plus X11-3, X11-6, X11-7, X11-8,
-  X11-9.
+- ✅ **M70m — SDK and OpenAPI** (`sdk`, `openapi-plugin`, `validation-plugin`, plus `common` and
+  `http-security-plugin`). A route carrying `validateBody(schema)` contributed nothing to the
+  document, so the generated client for the API's only write took **no argument** and 400'd against
+  the live server (X11-5), and the generated client could not be published to JSR at all because
+  `createApi` had an inferred return type — a slow type, in a file whose own header claims
+  JSR-readiness (X11-4). Plus X11-3, X11-6, X11-7, X11-8, X11-9.
+
+  **The package list is corrected from the row's original three**, mirroring the M70b, M70g, M70h
+  and M70k corrections. `common` carries X11-5's brand — a symbol plus two helpers that
+  `validation-plugin` writes and `openapi-plugin` reads, because §2.2 forbids a plugin importing a
+  plugin, exactly the channel M57 opened for `SECURITY_METADATA`. `http-security-plugin` is the
+  package `smoke/DEFECTS.md` assigns X11-3 to; the row's body listed the finding without listing its
+  package.
+
+  **X11-5 derives by default rather than behind an opt-in**, which is the one place this workstream
+  departs from `deriveSecurity`'s shape, with cause: that option must be opt-in because it needs a
+  scheme NAME no guard can supply, while here the schema on the route IS the schema the document
+  wants and nothing needs configuring. An opt-in would have left the register's actual complaint —
+  "a developer who has already written the validating one gets nothing for it" — intact for everyone
+  who did not discover the option. Safe to default on because `ZodToOpenApi.transform` returns `{}`
+  for anything it does not recognise and never throws, so the worst case is the document an
+  application already had.
+
+  **A `cookies` brand derives nothing, and that is a decision rather than an omission**:
+  `RouteSchema` has no `cookies` field, so there is no declared counterpart, and `packages/sdk`'s
+  client generator THROWS on an `in: 'cookie'` parameter — emitting one would convert a working
+  `generateOpenApiClient` call into a hard failure for every consumer of that document.
+
+  **X11-9's recurrence gate is two deletions, not new machinery.** `deno.json` excluded the two
+  committed generator-output fixtures from `deno fmt` — the workaround WAS the defect, committed —
+  so making the output formattable and removing both entries puts X11-9 under `deno task fmt:check`
+  and `deno task lint`, two of the four mandated gates, permanently. A stdin `deno fmt --check -`
+  gate was considered and rejected by measurement: it exits **0** on unformatted input, so it would
+  have been vacuous.
+
+  **Three formatting facts were established by probing `deno fmt` rather than guessing**, each
+  having first produced output that failed the gate: a union of two or more parenthesized
+  intersections is ALWAYS broken onto leading-`|` lines while a single arm collapses to one line
+  with no parentheses; a long parameter list wraps one per line; and a long template literal is
+  rewrapped at whichever `${` happens to fit, which no generator can predict — so a path too long
+  for one line is emitted as an equivalent `[…].join('')`, a shape fmt leaves alone.
 - ⬜ **M70n — Decorators, DI and docs sweep** (`decorator-plugin`, `validation-plugin`, docs).
   `@ValidateBody(schema)` does not validate anything — it only feeds OpenAPI (E1) — and `@Body()`
   re-reads the raw request, discarding validation transforms, defaults and coercions (E2). Closes
@@ -7291,5 +7326,5 @@ branch during a version bump.
 | 70j       | ✅     | database adapter correctness          |
 | 70k       | ✅     | storage, queue, worker operability    |
 | 70l       | ✅     | deployment and operations             |
-| 70m       | ⬜     | sdk and openapi                       |
+| 70m       | ✅     | sdk and openapi                       |
 | 70n       | ⬜     | decorators, di, docs sweep            |

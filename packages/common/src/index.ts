@@ -79,6 +79,7 @@ export type {
   RouteHandler,
   RouteSchema,
   RouteSecurityMetadata,
+  RouteValidationMetadata,
   SecurityRequirement,
   WebSocketUpgradeIntent,
 } from './http.ts';
@@ -89,7 +90,10 @@ export {
   setUpgradeIntent,
   UPGRADE_INTENT,
   upgradeIntentOf,
+  VALIDATION_METADATA,
+  validationMetadataOf,
   withSecurityMetadata,
+  withValidationMetadata,
 } from './http.ts';
 
 // Runtime abstraction

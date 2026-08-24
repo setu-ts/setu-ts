@@ -24,7 +24,7 @@ app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
 app.router.post('/users', {
   middleware: [validateBody(CreateUser)],
   handler: async (ctx) => {
-    const body = ctx.state.get('validatedBody');
+    const body = ctx.state.get('validated:body');
     return ctx.response.json(body);
   },
 });
@@ -55,6 +55,19 @@ problems. Both packages spell that URI `https://setu-ts.dev/errors/validation`.
 > **`'rfc7807'` is deprecated.** RFC 7807 was obsoleted by RFC 9457 in July 2023. Here the alias is
 > bound to the **same formatter**, so the emitted body is byte-identical and migrating changes
 > nothing on the wire. Removal is scheduled for v1.0.0.
+
+## The schema also documents the route
+
+Every middleware this package produces — the five `validateXxx` helpers and
+`IValidationService.middleware(schema, target)` alike — is branded with `RouteValidationMetadata`
+from `@setu-ts/common`, carrying its target and the schema itself.
+
+`@setu-ts/openapi-plugin` reads that brand, so a route carrying `validateBody(schema)` is documented
+with a matching `requestBody` and needs no second declaration in `schema.body`. Neither package
+imports the other; the `Symbol.for`-keyed brand in `common` is the whole channel.
+
+The brand is a description, not a mechanism: it is symbol-keyed and non-enumerable, the middleware's
+identity and behaviour are unchanged, and removing it would change nothing this package does.
 
 ## Exports
 
