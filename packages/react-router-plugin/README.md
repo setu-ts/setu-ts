@@ -35,13 +35,14 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option               | Type       | Default      | Description                                                                       |
-| -------------------- | ---------- | ------------ | --------------------------------------------------------------------------------- |
-| `serverBuildPath`    | `string`   | —            | Path to the compiled `ServerBuild`. Required.                                     |
-| `basename`           | `string`   | `'/'`        | Mount point for the SSR catch-all.                                                |
-| `assetsDir`          | `string`   | —            | Directory served as static assets. Omitted → no asset route is registered at all. |
-| `assetUrlPrefix`     | `string`   | `'/assets/'` | URL prefix the asset route claims. Read only when `assetsDir` is set.             |
-| `loadRequestHandler` | `function` | lazy import  | Injectable seam; defaults to importing `npm:react-router` plus the build.         |
+| Option               | Type       | Default      | Description                                                                                                                                                                                                                  |
+| -------------------- | ---------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serverBuildPath`    | `string`   | —            | Path to the compiled `ServerBuild`. Required.                                                                                                                                                                                |
+| `basename`           | `string`   | `'/'`        | Mount point for the SSR catch-all.                                                                                                                                                                                           |
+| `assetsDir`          | `string`   | —            | Directory served as static assets. Omitted → no asset route is registered at all.                                                                                                                                            |
+| `assetUrlPrefix`     | `string`   | `'/assets/'` | URL prefix the asset route claims. Read only when `assetsDir` is set.                                                                                                                                                        |
+| `publicFiles`        | `boolean`  | `true`       | Also serve files from the client build ROOT (Vite copies `public/` there — `robots.txt`, `favicon.ico`) with `must-revalidate`, not `immutable`: those files are not content-hashed. `false` restores prefix-only behaviour. |
+| `loadRequestHandler` | `function` | lazy import  | Injectable seam; defaults to importing `npm:react-router` plus the build.                                                                                                                                                    |
 
 On Cloudflare Workers leave `assetsDir` unset — there is no `runtime.fs`, so the asset handler has
 nothing to read, and omitting it registers no route rather than throwing.
@@ -55,17 +56,40 @@ JSR-published package's dependency graph.
 
 ## Loader context
 
-The default `loadContext` exposes `{ services, user }` to your React Router loaders and actions, so
-a loader can reach any registered capability:
+The default load context carries two keys — `servicesContext` and `userContext` — so a loader can
+reach any registered capability:
 
 ```typescript
-export async function loader({ context }) {
-  const db = context.services.get(CAPABILITIES.DATABASE);
-  return { orders: await db.getRepository('Order').findAll() };
+import { servicesContext, userContext } from '@setu-ts/react-router-plugin';
+import type { RouterLoadContext } from '@setu-ts/react-router-plugin';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
+
+export async function loader({ context }: { context: RouterLoadContext }) {
+  const services = context.get(servicesContext);
+  const user = context.get(userContext); // null when anonymous
+  const cache = services?.get<ICacheStore>(CAPABILITIES.CACHE);
+  return { user, featured: await cache?.get('featured') };
 }
 ```
 
 Override it with `populateLoadContext` to add your own keys.
+
+### Declaring your own context keys — always with `contextKeyFor`
+
+A hand-written `{ defaultValue }` literal type-checks and then **silently returns its default**:
+keys are matched by identity, and in a framework-mode application the declaring module exists twice
+(Vite inlines application modules into the server build while the kernel loads `setu.config.ts` from
+source), so two identical-looking literals match nothing and `context.get()` answers the default
+with no error anywhere. Construct every key through [`contextKeyFor`](#full-api), which resolves by
+name so both copies share one object:
+
+```typescript
+// app/lib/context-keys.server.ts
+import { contextKeyFor } from '@setu-ts/react-router-plugin';
+import type { ISession } from '@setu-ts/common';
+
+export const sessionContext = contextKeyFor<ISession | null>('app.session', null);
+```
 
 ## Routing
 
