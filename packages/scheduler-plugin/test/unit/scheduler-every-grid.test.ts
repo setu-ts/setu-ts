@@ -54,6 +54,36 @@ describe('SchedulerService `every` grid alignment', () => {
     expect(await serviceB.getNextRun('tick')).toBe(await serviceA.getNextRun('tick'));
   });
 
+  it('an off-grid registration arms for the delay to the boundary, not a full interval (F1)', async () => {
+    // F1 regression: `every()` computed a grid-aligned `nextRunAtMs` but
+    // armed the timer for the full `intervalMs`. The FakeRuntime base time
+    // (1700000000000) sits 1000 ms BEFORE the next 3000 ms boundary
+    // (1700000001000), so the intended delay is 1000 ms — arming for 3000
+    // ms runs the job two full intervals LATER than the boundary, defeating
+    // the grid alignment (and the slot agreement it exists for).
+    const runtime = new FakeRuntime();
+    const service = new SchedulerService(runtime, new MemoryLock(runtime));
+    await service.connect();
+
+    let firedAt = -1;
+    await service.every('tick', INTERVAL, () => {
+      firedAt = runtime.now();
+    });
+
+    // The armed delay is the distance to the boundary, not the interval.
+    expect(runtime.getNextTimerDelay()).toBe(1000);
+
+    // A full-interval advance would NOT have fired the job yet if the
+    // timer had been armed for 3000 ms: the boundary is reached at T0+1000.
+    await runtime.advance(1000);
+    expect(firedAt).toBe(runtime.now());
+    expect(firedAt % INTERVAL).toBe(0); // the boundary, not T0 + 3000
+    expect(firedAt).toBe(1_700_000_001_000);
+
+    // Re-arm after the fire: the next boundary is exactly one interval out.
+    expect(runtime.getNextTimerDelay()).toBe(INTERVAL);
+  });
+
   it('re-arm lands back on the grid', async () => {
     const runtime = new FakeRuntime();
     const service = new SchedulerService(runtime, new MemoryLock(runtime));

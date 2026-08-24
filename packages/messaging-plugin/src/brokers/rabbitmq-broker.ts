@@ -9,7 +9,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import { createTopicInbox, TOPIC_INBOX_PREFIX } from './inbox.ts';
+import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { IAmqpConnection, RabbitMqOptions } from '../interfaces/index.ts';
@@ -336,12 +336,22 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     // X10-1: the declaration carries the intent the shape already encodes.
     // A caller-supplied queue name is a consumer GROUP — durable, so it
     // survives a broker restart, which is what `queue` documents. An absent
-    // name (the private per-subscriber queue) and the broker's own reply
-    // inbox are both transient: exclusive + autoDelete. RabbitMQ 4 refuses
-    // the old unconditional `{ durable: false }` named non-exclusive form
-    // outright (`541 INTERNAL-ERROR … transient_nonexcl_queues`).
+    // name (the private per-subscriber queue) is transient: exclusive +
+    // autoDelete. RabbitMQ 4 refuses the old unconditional `{ durable: false
+    // }` named non-exclusive form outright (`541 INTERNAL-ERROR …
+    // transient_nonexcl_queues`).
+    //
+    // F3: the broker's own reply inbox is ALSO transient, but that is
+    // decided by a marker on the INTERNAL subscribe call (the inbox marks
+    // itself in `inbox.ts`), never by pattern-matching the queue NAME —
+    // `SubscribeOptions.queue` has no reserved-prefix restriction, so a
+    // legitimate consumer group named e.g. `rr.inbox.orders` must stay a
+    // normal durable group queue.
+    // The marker is package-internal (F3): it travels on the broker's own
+    // `createTopicInbox` closure call and is never on the public surface, so
+    // the public `SubscribeOptions` is narrowed here to read it.
     const declareOptions: QueueDeclareOptions = isExclusive ||
-        queueName.startsWith(TOPIC_INBOX_PREFIX)
+        (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true
       ? { exclusive: true, autoDelete: true }
       : { durable: true };
 

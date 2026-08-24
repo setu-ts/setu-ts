@@ -50,6 +50,31 @@ describe('RabbitMqBroker queue declaration (X10-1)', () => {
     await broker.disconnect();
   });
 
+  it('declares a USER queue named rr.inbox.* as a normal durable group queue (F3)', async () => {
+    // F3 regression: transience was detected by pattern-matching queue
+    // names against the internal `rr.inbox.` prefix, so a legitimate
+    // consumer group named e.g. `rr.inbox.orders` was made
+    // `{ exclusive: true, autoDelete: true }` and non-durable — a second
+    // instance's use of it was refused by RabbitMQ. The marker now travels
+    // on the internal subscribe call, so any user-supplied queue name,
+    // whatever it starts with, is declared as a durable group queue.
+    const { broker, connection } = setup();
+    await broker.connect();
+
+    await broker.subscribe('orders.created', () => {}, { queue: 'rr.inbox.orders' });
+
+    const channel = await connection.createChannel();
+    const call = channel.calls.find(
+      (c) => c.method === 'assertQueue' && c.args[0] === 'rr.inbox.orders',
+    );
+    expect(call).toBeDefined();
+    expect(call?.args[1]).toEqual({ durable: true });
+    expect(call?.args[1]).not.toHaveProperty('exclusive');
+    expect(call?.args[1]).not.toHaveProperty('autoDelete');
+
+    await broker.disconnect();
+  });
+
   it('declares a private per-subscriber queue EXCLUSIVE + auto-delete', async () => {
     const { broker, connection } = setup();
     await broker.connect();
