@@ -58,6 +58,23 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/worker-pool-plugin/README.md': 3,
   'packages/grpc-plugin/README.md': 2,
   'packages/graphql-plugin/README.md': 6,
+  // M70n: every README the documentation workstream touched, folded into this
+  // gate rather than a second one (plan §3.16). Counts are pinned so a fence
+  // added later cannot slip past unclassified.
+  'packages/auth-plugin/README.md': 7,
+  'packages/static-plugin/README.md': 3,
+  'packages/session-plugin/README.md': 10,
+  'packages/audit-plugin/README.md': 3,
+  'packages/decorator-plugin/README.md': 3,
+  'packages/validation-plugin/README.md': 2,
+  'packages/sse-plugin/README.md': 5,
+  'packages/websocket-plugin/README.md': 8,
+  'packages/realtime-backplane-plugin/README.md': 3,
+  'packages/resilience-plugin/README.md': 2,
+  'packages/react-router-plugin/README.md': 4,
+  'packages/starters/rest-starter/README.md': 7,
+  'packages/starters/microservice-starter/README.md': 6,
+  'packages/starters/full-stack-starter/README.md': 7,
 };
 
 /** Reads every fence the engine would compile from one README. */
