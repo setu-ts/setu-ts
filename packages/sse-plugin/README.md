@@ -48,6 +48,12 @@ const deploys = sse.channel('deploys');
 deploys.publish({ data: JSON.stringify({ build: 412, status: 'live' }) });
 ```
 
+**`channel(name)` is get-or-create.** First call creates the channel; every later call with the same
+name returns it. There is no non-creating lookup, so code that reads `channel(name).size` for an
+arbitrary caller-supplied name creates one channel per distinct name — and a never-published channel
+is reclaimed only when another connection closes somewhere in this process. Keep polled names to a
+fixed set.
+
 ## Scaling beyond one replica
 
 **A channel is process-local until you register a backplane.** On a single instance that is

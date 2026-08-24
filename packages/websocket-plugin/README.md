@@ -195,13 +195,26 @@ ws.route('/ws', handlers, { protocols: ['chat', 'json'] });
   outright. The adapter therefore consults the plugin's upgrade router first, and only for requests
   carrying WebSocket upgrade headers. Non-WebSocket traffic is untouched, and a request on an
   unregistered path falls straight through to your normal routes.
-- **Authenticate inside `onOpen`.** Browsers cannot set headers on a `WebSocket` constructor, so
-  carry the credential in a cookie, a query parameter, or a subprotocol, verify it in `onOpen`, and
-  `conn.close(1008)` to refuse.
+- **Authenticate inside `onOpen` — and know that a cookie session is not yet verifiable there.**
+  Browsers cannot set headers on a `WebSocket` constructor, so a bearer header never arrives. A
+  cookie does arrive, but this framework cannot read it in `onOpen` today:
+  `ISessionService.from(ctx)` needs the request context an upgrade bypasses, and the service exposes
+  no open-from-headers seam. Carrying a session cookie therefore authenticates nothing here — verify
+  instead a credential you can check directly: a signed token in the query string (keep it
+  short-lived; it lands in URLs and access logs) or a subprotocol carrying a nonce your HTTP layer
+  issued. `conn.close(1008)` refuses a peer whose credential fails. A cookie-backed strategy that
+  composes with sessions is tracked as a defect in `smoke/DEFECTS.md` (X3-5).
 - **The heartbeat is an application-level frame, not an RFC 6455 ping.** Deno and Cloudflare Workers
   expose no `ping()` on their web `WebSocket`, so a protocol ping would silently no-op on half the
   supported runtimes. Your client should treat `heartbeatPayload` as a keep-alive and may reply to
   keep the idle timer fresh — the idle sweep looks only at _inbound_ traffic.
+- **`room(name)` is get-or-create, so reading presence is a write.** There is no non-creating
+  lookup: calling `room('board:acme').size` for a name nobody has joined CREATES that room. A
+  presence or dashboard endpoint reporting size for caller-supplied names therefore accumulates one
+  empty room per distinct name polled — with nothing to reclaim it until some other socket
+  disconnects (the sweep runs on disconnection, so an idle application never reclaims). Deliberate
+  in source; keep polled names to a fixed set, or derive presence from your own registry instead of
+  `size`.
 - **Rooms are in-process by default.** `broadcast` skips closed members and drops them, and a room
   that empties is discarded, so a churning connection set does not grow memory. Behind more than one
   replica, register a backplane — see [Scaling beyond one replica](#scaling-beyond-one-replica).
