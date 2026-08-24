@@ -94,6 +94,7 @@ stateless.
 | `bridgeRequestToRR`        | function  |
 | `contextKeyFor`            | function  |
 | `createLoadContextFactory` | function  |
+| `createPublicFileHandler`  | function  |
 | `createStaticAssetHandler` | function  |
 | `loadRequestHandler`       | function  |
 | `ReactRouterPlugin`        | function  |
@@ -101,12 +102,16 @@ stateless.
 | `CAPABILITIES`             | const     |
 | `servicesContext`          | const     |
 | `userContext`              | const     |
+| `HandlerResult`            | interface |
+| `IFileSystem`              | interface |
+| `IRequestContext`          | interface |
 | `ISsrService`              | interface |
 | `ReactRouterPluginOptions` | interface |
 | `RouterContextKey`         | interface |
 | `RouterLoadContext`        | interface |
 | `SsrRuntime`               | interface |
 | `PopulateLoadContext`      | type      |
+| `RouteHandler`             | type      |
 | `SsrRequestHandler`        | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
