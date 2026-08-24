@@ -18,7 +18,7 @@ import type {
   ValidationIssue,
   ValidationTarget,
 } from '@setu-ts/common';
-import { CAPABILITIES, withValidationMetadata } from '@setu-ts/common';
+import { CAPABILITIES, validatedStateKey, withValidationMetadata } from '@setu-ts/common';
 
 import type {
   FormatValidationErrors,
@@ -169,7 +169,7 @@ export function createValidationMiddleware(
     const result = service.validate(schema, rawData);
 
     if (result.success) {
-      ctx.state.set(`validated:${target}`, result.value);
+      ctx.state.set(validatedStateKey(target), result.value);
       await next();
       return;
     }
