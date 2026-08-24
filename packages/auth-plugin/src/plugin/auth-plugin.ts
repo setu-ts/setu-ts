@@ -37,7 +37,9 @@ import denoJson from '../../deno.json' with { type: 'json' };
  *     },
  *   },
  * }));
- * app.middleware.add(authMiddleware());
+ * // Register the global middleware at the priority ARCHITECTURE.md §10
+ * // reserves for it; a bare add() takes the kernel default of 500.
+ * app.middleware.add(authMiddleware(), { priority: 300 });
  * ```
  */
 export function AuthPlugin(options: AuthPluginOptions): IPlugin {
