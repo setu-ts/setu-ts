@@ -294,7 +294,12 @@ All notable changes to this project are documented here. The format follows
   registration, re-arm, and resume alike. The period is unchanged; only the phase moves, and the
   fire is never LATER than before — it may come sooner than one full interval after registration, so
   a job assuming "I have been up a full interval" behaves differently. This is what makes replicas
-  started at different instants agree on distributed-lock slot keys.
+  started at different instants agree on distributed-lock slot keys. **Breaking (resume contract):**
+  the released contract stated that resuming an `every` job restarts the interval "from now";
+  resuming now lands the next fire on the next epoch grid boundary instead. The implementation has
+  always resumed on the grid (that is the alignment replicas need to agree on slot keys), so the
+  contract and `PUBLIC_API.md` are corrected to match — a resumed fire may come sooner than one full
+  interval after `resume()` (never later).
 
 - **`RabbitMqBroker` declares its queues with the shape their subscription implies** (M70l, X10-1).
   **Breaking.** A caller-supplied queue name (a consumer group) is declared `{ durable: true }` — it
@@ -654,6 +659,32 @@ All notable changes to this project are documented here. The format follows
   produced (`404` for a path with no WebSocket route) rather than a fixed `400`.
 
 ### Fixed
+
+- **`every` jobs armed their timer for a full interval instead of the delay to the grid boundary**
+  (M70l, X10-2). `every()` computed a grid-aligned `nextRunAtMs` but armed the timer for the whole
+  `intervalMs`, so an off-grid registration ran the job a full interval LATER than the boundary it
+  was aligned to — defeating the grid alignment (and the slot agreement it exists for) until the
+  re-arm after the first fire. The timer is now armed for `Math.max(0, nextRunAtMs - now)` at
+  registration and on every re-arm, so each fire lands at the boundary it was aligned to.
+
+- **`delay` jobs no longer deduplicated across replicas** (M70l, X10-2). The fire slot for `delay`
+  entries was keyed on `nextRunAtMs`, which for a delay is `now + delayMs` and therefore carries
+  per-replica startup skew: two replicas registering the same one-shot delay 700 ms apart computed
+  different slot keys and BOTH ran the handler. The slot is now claimed at REGISTRATION, keyed on
+  the job name (skew-independent), and released when the entry leaves the registry — on fire,
+  `remove()`, or TTL expiry — so a re-registration under the same name after the delay fired gets a
+  fresh slot and still fires (the regression the name-keying previously guarded against stays
+  guarded). `cron` and `every` keep their fire-time, grid-aligned slot keys, which are
+  skew-independent by construction.
+
+- **`RabbitMqBroker` treated any user queue named `rr.inbox.*` as the private RPC reply inbox**
+  (M70l, X10-1). The reply inbox's transience was detected by pattern-matching queue names against
+  the internal `rr.inbox.` prefix, but `SubscribeOptions.queue` has no reserved-prefix restriction —
+  a legitimate consumer group named e.g. `rr.inbox.orders` was declared
+  `{ exclusive: true, autoDelete: true }` and non-durable, so a second instance's use of it was
+  refused. The inbox is now marked transient by a flag on the internal subscribe call at the point
+  it is created, and a user `subscribe({ queue: 'rr.inbox.orders' })` is declared as a normal
+  durable competing-consumer group queue.
 
 - **An upload's `maxSize` did not bound what the middleware parsed** (M70k, X8-3). The buffering
   bound was `Math.max(maxSize * 2, 50 MB)` under a comment reading "cap at 50 MB", which made 50 MB

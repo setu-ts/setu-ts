@@ -3866,12 +3866,17 @@ unless you inject one via `client`, or supply your own `IDistributedLock` via `l
 priority over `storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime —
 if the lock expires mid-run, another instance may start the same job.
 
-**Multi-instance deduplication** works across replicas sharing one lock backend: each fire claims a
-never-released _slot_ lock keyed on the fire's intended time (`scheduler:job:<name>:<slot>`), so two
-replicas whose timers land anywhere in the same intended slot run the handler exactly once between
-them; `ttlMs` bounds how long a claimed slot is remembered, so it must exceed the maximum skew
-between replicas. A separate per-handler mutex preserves overlap protection — a second fire of a job
-whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
+**Multi-instance deduplication** works across replicas sharing one lock backend. `cron` and `every`
+fires each claim a never-released _slot_ lock keyed on the fire's intended time
+(`scheduler:job:<name>:<slot>`), so two replicas whose timers land anywhere in the same intended
+slot run the handler exactly once between them; `ttlMs` bounds how long a claimed slot is
+remembered, so it must exceed the maximum skew between replicas. `delay` jobs claim their slot at
+REGISTRATION, keyed on the job NAME (`scheduler:job:<name>`), because a delay's intended fire time
+is `now + delayMs` and carries per-replica startup skew — the name is what identifies "the same
+one-shot job" across replicas. A delay's slot is released when the job leaves the registry (on fire,
+`remove`, or TTL expiry), so re-registering the same name after it fired gets a fresh slot and fires
+again. A separate per-handler mutex preserves overlap protection — a second fire of a job whose
+previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
 (`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
 slot keys; the first fire may come sooner than one full interval after registration.
 
@@ -3954,8 +3959,14 @@ All four **throw** if no job with that name exists — including after a `delay`
 auto-removed itself. `getNextRun` additionally throws if the job is currently paused.
 
 `resume` re-arms from the current time rather than resuming the original countdown: cron jobs
-compute the next fire from now, `every` jobs restart the interval from now, and `delay` jobs re-arm
-the **full** original `delayMs` from now.
+compute the next fire from now, `delay` jobs re-arm the **full** original `delayMs` from now, and
+`every` jobs resume on the next epoch grid boundary of their interval
+(`(floor(now / intervalMs) + 1) * intervalMs`) — **not** a full interval after now. This is
+**breaking versus 0.1.0-alpha.8**, whose contract stated the interval "restarts from now": the fire
+may now come sooner than one full interval after resume (never later). Grid alignment at resume is
+deliberate — it is the same alignment that makes replicas agree on fire times and slot keys, and a
+resume that restarted the phase would let one replica's resumed job drift out of slot agreement with
+the others.
 
 ### IScheduler Interface
 
