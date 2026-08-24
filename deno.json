@@ -109,8 +109,6 @@
       "docs/api",
       ".verify",
       ".verify-milestone",
-      "packages/sdk/test/fixtures/generated-client.ts",
-      "packages/sdk/test/fixtures/params-client.ts",
       "k8s/chart/templates",
       "k8s/manifests"
     ]

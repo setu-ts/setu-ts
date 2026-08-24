@@ -32,7 +32,24 @@ export interface CorsOptions {
   readonly credentials?: boolean;
   /** Allowed methods for preflight `Allow-Methods` header. */
   readonly methods?: readonly string[];
-  /** Allowed request headers for preflight `Allow-Headers` header. */
+  /**
+   * Allowed request headers for the preflight `Access-Control-Allow-Headers`
+   * response.
+   *
+   * OMITTED (the default): an allowed origin's preflight ECHOES the request's
+   * `Access-Control-Request-Headers`, and the response carries
+   * `Vary: Access-Control-Request-Headers`.
+   *
+   * The previous default was an empty list, which advertised no headers at
+   * all while `methods` defaulted to every standard verb — so the preflight
+   * offered `POST`/`PUT`/`PATCH`/`DELETE` and then refused `content-type`, the
+   * one header a JSON body needs. Every browser blocked every JSON request.
+   *
+   * Echoing does not widen the security boundary: the ORIGIN allowlist is what
+   * decides, and it is unchanged — a caller that reaches this branch has
+   * already been admitted, and the header it is asking for is one it is
+   * already sending. Configure a list to deny everything outside it.
+   */
   readonly allowedHeaders?: readonly string[];
   /** Exposed response headers for `Access-Control-Expose-Headers`. */
   readonly exposedHeaders?: readonly string[];
@@ -70,7 +87,10 @@ export function corsMiddleware(options: CorsOptions = {}): MiddlewareFunction {
     );
   }
   const methods = options.methods ?? ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
-  const allowedHeaders = options.allowedHeaders ?? [];
+  // `undefined` and `[]` are DIFFERENT here: omitting the option opts into
+  // echoing, while an explicit empty list keeps the strict deny-everything
+  // behaviour a caller asked for.
+  const allowedHeaders = options.allowedHeaders;
   const exposedHeaders = options.exposedHeaders ?? [];
   const maxAge = options.maxAge;
 
@@ -123,8 +143,19 @@ export function corsMiddleware(options: CorsOptions = {}): MiddlewareFunction {
       }
       ctx.response.header('Access-Control-Allow-Methods', methods.join(', '));
 
-      if (allowedHeaders.length > 0) {
-        ctx.response.header('Access-Control-Allow-Headers', allowedHeaders.join(', '));
+      if (allowedHeaders !== undefined) {
+        if (allowedHeaders.length > 0) {
+          ctx.response.header('Access-Control-Allow-Headers', allowedHeaders.join(', '));
+        }
+      } else {
+        const requested = ctx.request.headers.get('Access-Control-Request-Headers');
+        if (requested) {
+          ctx.response.header('Access-Control-Allow-Headers', requested);
+        }
+        // Mandatory, not decorative: the answer now depends on this request
+        // header, so without it a shared cache can serve one caller's
+        // preflight response to a caller asking for different headers.
+        ctx.response.appendHeader('Vary', 'Access-Control-Request-Headers');
       }
       if (maxAge !== undefined) {
         ctx.response.header('Access-Control-Max-Age', String(maxAge));
