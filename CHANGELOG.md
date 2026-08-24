@@ -281,11 +281,17 @@ All notable changes to this project are documented here. The format follows
   `deno task release:verify` enforces it as check 6, so the X7-3 shape (a specifier routed through a
   variable that JSR's static npm-compat rewrite cannot reach) cannot re-enter the source tree.
 
-- **Scheduler multi-instance deduplication** (M70l, X10-2). Each fire claims a never-released slot
-  lock (`scheduler:job:<name>:<slot>`) expiring on `ttlMs`, so replicas sharing one lock backend run
-  an intended fire exactly once between them; the existing per-handler mutex is kept unchanged for
-  overlap protection. `MemoryLock` now sweeps every expired entry on `acquire`, because slot keys
-  are never released or reacquired and previously accumulated forever.
+- **Scheduler multi-instance deduplication** (M70l, X10-2). A `cron` or `every` fire claims a slot
+  lock keyed on the fire's intended time (`scheduler:job:<name>:<slot>`) which is **never released**
+  and expires on `ttlMs`, so replicas sharing one lock backend run an intended fire exactly once
+  between them — a guarantee that holds only while `ttlMs` exceeds the maximum skew between
+  replicas, since the TTL is how long a claimed slot stays remembered. A `delay` job differs: its
+  slot is keyed on the job name (`scheduler:job:<name>:once`), claimed at REGISTRATION rather than
+  at fire time, and **released** when the entry leaves the registry, so re-registering the name
+  after it fired fires again. The existing per-handler mutex is kept unchanged for overlap
+  protection. `MemoryLock` now sweeps every expired entry on `acquire`, because a recurring slot key
+  is never released and never reacquired, so the previous lazy per-key delete could never reclaim it
+  and the map grew one entry per job per fire, forever.
 
 - **`MetricsPluginOptions.excludePaths`** (M70l, X10-7). Request paths the HTTP metrics middleware
   skips entirely. When supplied it REPLACES the default `['/health', '/live', '/ready']`; the

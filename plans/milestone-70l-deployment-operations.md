@@ -1,7 +1,7 @@
 # Milestone 70l — Deployment and operations (`cli`, `scheduler-plugin`, `messaging-plugin`, `metrics-plugin`, `cloudflare-plugin`)
 
-> **Status:** Planning. Branch: `feat/m70l-deployment-operations`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #182). Branch: `feat/m70l-deployment-operations`. `main` is protected —
+> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
@@ -309,26 +309,27 @@ nothing new — their changes are internal or behavioural — which a barrel-exp
 
 ## 5. Implementation files
 
-| File                                                          | Purpose                                                                                             |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts`    | §3.1 — pass the subscription shape into `#consumeOn`; declare durable or exclusive accordingly.     |
-| `packages/messaging-plugin/src/brokers/inbox.ts`              | §3.1 — the reply inbox declares itself transient so a per-instance reply queue is not made durable. |
-| `packages/scheduler-plugin/src/services/scheduler-service.ts` | §3.2, §3.3 — slot lock plus handler mutex; grid-aligned `every` arming at all three sites.          |
-| `packages/scheduler-plugin/src/lock/memory-lock.ts`           | §3.4 — sweep expired keys on acquire.                                                               |
-| `packages/scheduler-plugin/src/plugin/scheduler-plugin.ts`    | §3.5 — refuse on Cloudflare Workers.                                                                |
-| `packages/scheduler-plugin/src/errors.ts`                     | §3.5 — new `SchedulerUnavailableError`.                                                             |
-| `packages/scheduler-plugin/src/index.ts`                      | §3.5 — export the error.                                                                            |
-| `packages/scheduler-plugin/src/interfaces/index.ts`           | C3 — JSDoc for the two lock guarantees and the skew window.                                         |
-| `packages/cloudflare-plugin/src/cron/workers-cron.ts`         | §3.6 — settle every handler, then throw.                                                            |
-| `packages/metrics-plugin/src/collectors/http-collector.ts`    | §3.11 — exclusion guard ahead of every instrument.                                                  |
-| `packages/metrics-plugin/src/plugin/metrics-plugin.ts`        | §3.11 — resolve the exclusion set and pass it in.                                                   |
-| `packages/metrics-plugin/src/interfaces/index.ts`             | §3.11 — `excludePaths`.                                                                             |
-| `packages/cli/src/workspace/compose.ts`                       | §3.9 — fold the `chown`.                                                                            |
-| `packages/cli/src/workspace/k8s.ts`                           | §3.8, §3.10 — `preStop` block; Prometheus annotations.                                              |
-| `packages/cli/src/workspace/manifest.ts`                      | §3.10 — `metricsEndpoint` field and its parse.                                                      |
-| `packages/cli/src/commands/app.ts`                            | §3.10 — record `metricsEndpoint` at `generate app`.                                                 |
-| `packages/cli/src/templates/project-files.ts`                 | §3.7 — boot retry and contained error response.                                                     |
-| `.github/workflows/ci.yml`                                    | §3.1 gate — RabbitMQ service image to 4.                                                            |
+| File                                                          | Purpose                                                                                                              |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts`    | §3.1 — pass the subscription shape into `#consumeOn`; declare durable or exclusive accordingly.                      |
+| `packages/messaging-plugin/src/brokers/inbox.ts`              | §3.1 — the reply inbox declares itself transient so a per-instance reply queue is not made durable.                  |
+| `packages/scheduler-plugin/src/services/scheduler-service.ts` | §3.2, §3.3 — slot lock plus handler mutex; grid-aligned `every` arming at all three sites.                           |
+| `packages/scheduler-plugin/src/lock/memory-lock.ts`           | §3.4 — sweep expired keys on acquire.                                                                                |
+| `packages/scheduler-plugin/src/plugin/scheduler-plugin.ts`    | §3.5 — refuse on Cloudflare Workers.                                                                                 |
+| `packages/scheduler-plugin/src/errors.ts`                     | §3.5 — new `SchedulerUnavailableError`.                                                                              |
+| `packages/scheduler-plugin/src/index.ts`                      | §3.5 — export the error.                                                                                             |
+| `packages/scheduler-plugin/src/interfaces/index.ts`           | C3 — JSDoc for the two lock guarantees and the skew window.                                                          |
+| `packages/cloudflare-plugin/src/cron/workers-cron.ts`         | §3.6 — settle every handler, then throw.                                                                             |
+| `packages/metrics-plugin/src/collectors/http-collector.ts`    | §3.11 — exclusion guard ahead of every instrument.                                                                   |
+| `packages/metrics-plugin/src/plugin/metrics-plugin.ts`        | §3.11 — resolve the exclusion set and pass it in.                                                                    |
+| `packages/metrics-plugin/src/interfaces/index.ts`             | §3.11 — `excludePaths`.                                                                                              |
+| `packages/cli/src/workspace/compose.ts`                       | §3.9 — fold the `chown`.                                                                                             |
+| `packages/cli/src/workspace/k8s.ts`                           | §3.8, §3.10 — `preStop` block; Prometheus annotations.                                                               |
+| `packages/cli/src/workspace/manifest.ts`                      | §3.10 — `metricsEndpoint` field and its parse.                                                                       |
+| `packages/cli/src/commands/app.ts`                            | §3.10 — record `metricsEndpoint` at `generate app`.                                                                  |
+| `packages/cli/src/templates/project-files.ts`                 | §3.7 — boot retry and contained error response.                                                                      |
+| `.github/workflows/ci.yml`                                    | §3.1 gate — RabbitMQ service image to 4.                                                                             |
+| `.github/workflows/release.yml`                               | §3.1 gate — the same image, because the release job re-runs the suite so the backend environment must agree exactly. |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -347,7 +348,7 @@ nothing new — their changes are internal or behavioural — which a barrel-exp
 | `cli/test/unit/k8s-manifest.test.ts`                                   | `k8s.ts`, `manifest.ts`                    | `lifecycle.preStop.sleep.seconds: 5` present with its comment; annotations present for `metricsEndpoint: true`, absent for `false` and for a member record omitting the field.                                                                                                                                                                          |
 | `cli/test/unit/workers-entry-boot.test.ts`                             | `project-files.ts`                         | The emitted entry does not contain `booted ??=`; it clears `booted` on rejection and returns a `503` rather than rethrowing.                                                                                                                                                                                                                            |
 | `cli/test/e2e/scaffold-runs-e2e.test.ts` (extended)                    | `project-files.ts`, `k8s.ts`, `compose.ts` | A scaffolded Workers project whose boot fails answers `503` with no `node_modules` path in the body, and a second request re-attempts boot. Generated manifests still `kubectl apply --dry-run=client` cleanly.                                                                                                                                         |
-| `test/apps-gate.test.ts` (extended)                                    | —                                          | Pins the CI RabbitMQ service image at major version **4**, so §3.1's gate cannot be silently reverted to a version where the defect is invisible.                                                                                                                                                                                                       |
+| `test/apps-gate.test.ts` (extended)                                    | —                                          | Pins the RabbitMQ service image at major version **4** in **both** `ci.yml` and `release.yml`, so §3.1's gate cannot be silently reverted to a version where the defect is invisible.                                                                                                                                                                   |
 
 **External-dep coverage.** The RabbitMQ integration suite is the guarded real-import path for §3.1;
 the branching around it (which options object is built) is unit-tested through the recording fake,
@@ -391,6 +392,9 @@ RABBITMQ_URL=amqp://localhost:5672 deno task test
 5. Restore `booted ??=` ⇒ the e2e's second request replays the first failure.
 6. Point CI's RabbitMQ service back at `3.13` ⇒ `test/apps-gate.test.ts` fails, and the §3.1
    integration suite passes vacuously — demonstrating that the image bump is load-bearing.
+7. Remove the §3.11 exclusion guard ⇒ `http-collector-exclusions.test.ts` and the kernel-level
+   `metrics-excludes-probes.test.ts` both fail, the latter because a probe and a scrape move
+   `http_requests_total`.
 
 ## 8. Risks & mitigations
 

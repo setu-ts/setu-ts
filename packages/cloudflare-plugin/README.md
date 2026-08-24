@@ -128,8 +128,9 @@ queue.process<{ to: string }>('send-welcome', async (job) => {
 }, { concurrency: 5 });
 
 // The expression must match wrangler.toml `[triggers] crons` exactly.
-// Pass a logger: an unmatched trigger and a failing handler report only
-// through it — without one, both paths are silent.
+// Pass a logger: an unmatched trigger is reported ONLY through it, so without
+// one that path is silent. A failing handler is different — it fails the
+// invocation whether or not a logger is configured.
 const cron = new WorkersCron({ logger });
 cron.on('0 3 * * *', () => queue.add('rebuild-reports', {}));
 
