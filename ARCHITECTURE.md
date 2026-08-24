@@ -1842,6 +1842,13 @@ last outbound).
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
 
+These priorities are **conventional bands, not self-registrations**: no first-party middleware
+registers itself globally at the number this table names — the application (or a starter) adds it.
+`AuthMiddleware` is the consequential case: `AuthPlugin` registers only services, and every doc site
+therefore writes the global add explicitly with `{ priority: 300 }`. A bare
+`app.middleware.add(authMiddleware())` takes the kernel's default priority of **500**, which is
+after every row above (including the row named for it) and outside the table's range entirely.
+
 The session sits below authentication so an auth strategy can read it, and its commit phase (which
 runs after `next()` returns) therefore wraps everything inner. The two CSRF middlewares are
 different mechanisms rather than one feature configured twice: the stateless Origin/Referer check at

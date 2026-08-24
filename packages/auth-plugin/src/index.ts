@@ -19,7 +19,9 @@
  *     },
  *   },
  * }));
- * app.middleware.add(authMiddleware());
+ * // Priority 300 is the band ARCHITECTURE.md §10 reserves for authentication;
+ * // a bare add() would take the kernel default of 500 and run after it.
+ * app.middleware.add(authMiddleware(), { priority: 300 });
  * app.router.get('/protected', { middleware: [requireAuth()], handler });
  * ```
  */
