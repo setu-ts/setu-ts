@@ -1,5 +1,10 @@
 {
   "compilerOptions": {
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
     "experimentalDecorators": true
   },
   "imports": {
@@ -10,6 +15,7 @@
     "@setu-ts/di-plugin": "../../../packages/di-plugin/src/index.ts",
     "@setu-ts/decorator-plugin": "../../../packages/decorator-plugin/src/index.ts",
     "@setu-ts/testing": "../../../packages/testing/src/index.ts",
+    "@setu-ts/audit-plugin": "../../../packages/audit-plugin/src/index.ts",
     "@setu-ts/auth-plugin": "../../../packages/auth-plugin/src/index.ts",
     "@setu-ts/cache-plugin": "../../../packages/cache-plugin/src/index.ts",
     "@setu-ts/cloudflare-plugin": "../../../packages/cloudflare-plugin/src/index.ts",
@@ -23,12 +29,18 @@
     "@setu-ts/metrics-plugin": "../../../packages/metrics-plugin/src/index.ts",
     "@setu-ts/react-router-plugin": "../../../packages/react-router-plugin/src/index.ts",
     "@setu-ts/realtime-backplane-plugin": "../../../packages/realtime-backplane-plugin/src/index.ts",
+    "@setu-ts/resilience-plugin": "../../../packages/resilience-plugin/src/index.ts",
     "@setu-ts/session-plugin": "../../../packages/session-plugin/src/index.ts",
     "@setu-ts/sse-plugin": "../../../packages/sse-plugin/src/index.ts",
+    "@setu-ts/static-plugin": "../../../packages/static-plugin/src/index.ts",
     "@setu-ts/validation-plugin": "../../../packages/validation-plugin/src/index.ts",
     "@setu-ts/websocket-plugin": "../../../packages/websocket-plugin/src/index.ts",
+    "@setu-ts/rest-starter": "../../../packages/starters/rest-starter/src/index.ts",
+    "@setu-ts/microservice-starter": "../../../packages/starters/microservice-starter/src/index.ts",
+    "@setu-ts/full-stack-starter": "../../../packages/starters/full-stack-starter/src/index.ts",
     "@std/testing/bdd": "jsr:@std/testing@^1.0.6/bdd",
     "@std/expect": "jsr:@std/expect@^1.0.19",
-    "@std/zod": "npm:zod@^3.23.8"
+    "@std/zod": "npm:zod@^3.23.8",
+    "zod": "npm:zod@^3.23.8"
   }
 }
