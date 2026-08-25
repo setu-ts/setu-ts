@@ -340,7 +340,7 @@ setu-ts/
 │       └── full-stack-starter/
 ├── docs/
 ├── docker/
-├── kubernetes/
+├── k8s/
 ├── scripts/
 ├── deno.json                     # Root workspace config: members, tasks, strict compilerOptions, lint/fmt
 └── deno.lock
@@ -418,7 +418,7 @@ the ServiceRegistry: `ctx.services.get<T>(CAPABILITIES.X)`.
    - Create `.gitignore`, `.editorconfig`
 
 2. **Create Directory Structure**
-   - Create `apps/`, `packages/`, `docs/`, `docker/`, `kubernetes/`, `scripts/`
+   - Create `apps/`, `packages/`, `docs/`, `docker/`, `k8s/`, `scripts/`
    - Create stub `deno.json` for each package with `@setu-ts/[name]` JSR naming, version, and
      exports
 
@@ -6863,7 +6863,7 @@ the authority on what remains, not this section.** It was reconciled on 2026-08-
 milestone closed: 35 rows still read `open` while their fixes were on `main`, because a workstream
 was expected to update the register but `smoke/` is excluded from the repository, so that update
 could never ship in a PR. Every row was re-checked against the workstream entry claiming it. **X2-6
-is the only row still open**, carried to M73.
+is the only row still open**, carried to M75.
 
 > **The register is NOT in this repository.** `smoke/` is excluded locally (`.git/info/exclude`, so
 > not even shared through `.gitignore`), which means the rows, reproductions and mechanisms behind
@@ -7261,9 +7261,9 @@ milestone work with a plan, a `PUBLIC_API.md` edit and (for two of them) §10.2 
 
 | Carried out                                                                       | From                          | Now     |
 | --------------------------------------------------------------------------------- | ----------------------------- | ------- |
-| Trace context across the broker (`traceparent` on publish, extracted on delivery) | X2-6, assigned to M70n        | **M73** |
-| A cookie-reading auth strategy, and a caller-supplied strategy hatch              | X3-5, doc half closed in M70n | **M71** |
-| A read-only room/channel lookup (`peek`)                                          | X3-8, docs closed in M70n     | **M72** |
+| Trace context across the broker (`traceparent` on publish, extracted on delivery) | X2-6, assigned to M70n        | **M75** |
+| A cookie-reading auth strategy, and a caller-supplied strategy hatch              | X3-5, doc half closed in M70n | **M73** |
+| A read-only room/channel lookup (`peek`)                                          | X3-8, docs closed in M70n     | **M74** |
 
 Two smaller deferrals came out of M70n's own PR review (#183) and are **not** milestones:
 
@@ -7274,7 +7274,7 @@ Two smaller deferrals came out of M70n's own PR review (#183) and are **not** mi
 - **`SseMessage.data` narrowed to a recursive JSON-safe type.** Declined as a breaking change
   unrelated to the row it was raised on: the pre-existing `Record<string, unknown>` arm already
   admits `{ x: 10n }`, which `JSON.stringify` throws on, so M70n's `readonly unknown[]` addition
-  introduced no new exposure. Folded into **M72**, which is already touching this contract.
+  introduced no new exposure. Folded into **M74**, which is already touching this contract.
 
 The register's own **Deferred follow-ons** section carries the same list with a source citation
 proving each gap is real, because two of its Status columns previously said "tracked separately"
@@ -7297,7 +7297,106 @@ branch during a version bump.
 
 ---
 
-## Milestone 71: Realtime Authentication ⬜ PLANNED
+## Milestone 71: Kernel and Contract Boundary Hardening ⬜ PLANNED
+
+**Objective:** Close the three registry/context boundaries that a plugin can cross by accident, and
+settle the `ctx.state` key convention on one shape. **Ships with `v0.1.0-alpha.9`** — these are
+contract-level changes, so they belong in the same release as the M70 closeout rather than trailing
+it into alpha.10.
+
+**The threat model, stated first because it decides the design.** All three assume buggy or careless
+in-process plugin code — a typo, an ordering mistake, a third-party middleware — not a compromised
+package. Anything already running in the process can also monkey-patch prototypes, so none of this
+is a security boundary. It is defense-in-depth against ACCIDENTS, and the milestone should say so
+rather than overselling it.
+
+**The gaps, probed 2026-08-19 and re-verified against `main` 2026-08-25.**
+
+- **The service registry is writable forever.** `ServiceRegistry.#store`
+  (`packages/kernel/src/registry/service-registry.ts:114`) throws on a duplicate single
+  registration, so "unrestricted overwrites" is false — but the guard is a speed bump.
+  `{ override: true }` succeeds silently at any time, and `unregister()` + `register()` does the
+  same **with no flag at all**; both were proven post-boot. `ctx.services` IS `app.services`
+  (identity-checked), retained by every plugin for the process lifetime, so no concurrency is
+  needed. `buildProviderIndex`'s duplicate check reads DECLARED `provides` only, so an imperative
+  registration bypasses it entirely.
+- **`request.user` is writable by any stage.** `user?: IPrincipal` and `tenant?: ITenant`
+  (`packages/common/src/http.ts:49,54`) are the only two non-`readonly` fields on `IRequest`.
+  Probed: a global middleware at priority 10 setting `ctx.request.user = { roles: ['admin'] }` sails
+  through a real `requireRole('admin')`, because all five guards read `ctx.request.user`.
+- **`ctx.state` has four competing key conventions**, which is worse than the "three bare keys" the
+  smoke register recorded. Verified call sites: `'clientIp'` (http-security-plugin — bare) and
+  `'__he_telemetry_span'` (telemetry-plugin — bare, and still carrying the pre-rename `he` prefix);
+  `'validated:<target>'` (`common`'s `validatedStateKey`) and `'setu.error.responder'` (`common`) —
+  prefixed, but not by plugin and not by the same separator; against `'storage-plugin:uploads'` and
+  `'multi-tenancy-plugin:cache-prefix'`, which follow the convention, and `'setu-ts:session'`, which
+  namespaces by framework instead.
+
+**Two facts that shape the work, both established rather than assumed.**
+
+- **Sealing breaks nothing in-repo.** `grep` finds ZERO `.unregister(` calls and zero runtime
+  `register(..., { override: true })` calls in `packages/*/src` — all five `override: true` hits are
+  error messages and JSDoc. The seal point is after step 7 of `Application#start`
+  (`application.ts:358`, `runBootstrap()`), which keeps `service-discovery-plugin`'s `onBootstrap`
+  self-registration working; request-scoped CHILD registries are separate objects, so DI scoping is
+  unaffected.
+- **Three of the state keys are PUBLISHED exports** (`SESSION_STATE_KEY`,
+  `TENANT_CACHE_PREFIX_STATE_KEY`, `ERROR_RESPONDER_STATE_KEY`, plus `validatedStateKey`). Reading
+  through the exported constant survives a value change; reading by string literal does not — so any
+  renaming is a behaviour change needing CHANGELOG migration text, not a silent tidy-up.
+
+- **In scope:** seal the app registry after `runBootstrap()` (`register`/`registerFactory`/
+  `unregister` throw post-boot); log every `{ override: true }` and every `unregister` through the
+  logger capability, naming the token and the plugin — the `#registeringPlugin` cursor already
+  exists — or delete `unregister`, which has no callers; a one-shot setter for `request.user` that
+  throws on a second write; and one `ctx.state` convention applied across all seven sites.
+- **NOT this milestone:** anything framed as defending against hostile plugin code, and the
+  `ctx`-retention claim — measured at 6.7 MB heap over 20k requests when `ctx` is dropped versus 102
+  MB when it is retained (~4.8 KB/request carried by `request`, `response`, `state`, `signal`), i.e.
+  **no framework leak**; the request-scoped child registry is two empty Maps and is not what strands
+  memory.
+- **Packages:** `kernel`, `common`, plus the state-key sites in `http-security-plugin`,
+  `telemetry-plugin`, `session-plugin`, `storage-plugin`, `multi-tenancy-plugin`,
+  `validation-plugin`.
+
+## Milestone 72: CLI Transport Selection and Interactive Scaffolding ⬜ PLANNED
+
+**Objective:** Let `setu new` choose a messaging/queue transport, and answer the question the CLI
+has never had an answer to — scaffolding with no flags memorised.
+
+**The gap, verified from source.**
+`grep -rn "prompt|stdin|confirm(|readLine|@std/cli"
+packages/cli/src` returns ONE hit, the word
+"Selects" in a JSDoc comment. It is structural, not incidental: `CliDependencies` is
+`fs`/`cwd`/`now`/`log`/`error`/`load` with no stdin, and `main.ts` reads `Deno.args` only. The HTTP
+transport IS selectable (`--runtime deno|node|bun|
+cloudflare-workers` picks the entry shape), but
+the **broker is not selectable at all** — the microservice template emits bare `MessagingPlugin()` /
+`QueuePlugin()`, both defaulting to `'memory'`, so redis-streams / rabbitmq / nats / kafka / sqs /
+pubsub / servicebus means hand-editing `setu.config.ts` in a project the CLI just wrote.
+
+**These are two asks of very different size, and the milestone should land them in that order.**
+
+- **The flag is cheap and needs no new contract.** `Wiring.args` already renders an option object —
+  exactly as M50b does for `ServiceDiscoveryPlugin({ provider: 'static', services: {} })` — so
+  `--broker` and `--queue` are a `VALUE_FLAGS` entry plus a rendered arm each. The trap is the M50b
+  one: `args` is a rendered STRING, invisible to the CLI's own `deno check` and a compile error only
+  in the generated project, so each arm needs e2e coverage that scaffolds and type-checks.
+- **Prompts are the structural one.** They need a stdin seam on `CliDependencies` AND a
+  non-interactive fallback, because every drift gate, the scaffold-boot e2e and the release workflow
+  run `runCli` with no TTY — a prompt that blocks there hangs CI rather than failing it. `runCli`
+  must keep returning an exit code and never call `Deno.exit` (M34), and schematics must stay pure
+  so `--dry-run` remains exact.
+
+- **In scope:** `--broker`/`--queue` value flags rendering the matching plugin arm; a stdin
+  dependency on `CliDependencies` with an explicit non-interactive fallback (a `--yes`/`--no-input`
+  escape hatch, and TTY detection that defaults to non-interactive when unsure); prompts for the
+  choices a scaffold already accepts as flags, never new ones.
+- **NOT this milestone:** prompting inside `setu generate` (a generate runs in scripts and hooks),
+  and any prompt on a path a gate drives.
+- **Packages:** `cli`.
+
+## Milestone 73: Realtime Authentication ⬜ PLANNED
 
 **Objective:** Let a browser authenticate over the two realtime transports it can actually use.
 Carried out of M70n, which closed X3-5's documentation half only.
@@ -7321,7 +7420,7 @@ capability.
   read the credential.
 - **Packages:** `auth-plugin`, `session-plugin`, `websocket-plugin`, `sse-plugin`, docs.
 
-## Milestone 72: Realtime Registry Reads and the SSE Contract ⬜ PLANNED
+## Milestone 74: Realtime Registry Reads and the SSE Contract ⬜ PLANNED
 
 **Objective:** A non-mutating way to read realtime registry state, and the `SseMessage.data`
 narrowing deferred from M70n's review.
@@ -7339,7 +7438,7 @@ the semantics in both READMEs and `PUBLIC_API.md`; it did not add the read.
   `Record<string, unknown>` arm has always admitted `{ x: 10n }`, which `JSON.stringify` throws on.
 - **Packages:** `websocket-plugin`, `sse-plugin`, `common`.
 
-## Milestone 73: Broker Trace Propagation ⬜ PLANNED
+## Milestone 75: Broker Trace Propagation ⬜ PLANNED
 
 **Objective:** Carry W3C trace context across the message broker, so a trace survives a publish.
 
@@ -7416,7 +7515,7 @@ the framework points a new project.
 | 37b       | ✅     | examples + Redis startup fix          |
 | 37c       | ✅     | full-stack example (apps/full-stack)  |
 | 38        | ✅     | documentation                         |
-| 39        | ✅     | docker/kubernetes                     |
+| 39        | ✅     | docker/k8s                            |
 | 40        | ⬜     | final release                         |
 | 58        | ✅     | cli (domain module scaffolding)       |
 | 59        | ✅     | cloudflare-plugin (workers messaging) |
@@ -7468,6 +7567,8 @@ the framework points a new project.
 | 70l       | ✅     | deployment and operations             |
 | 70m       | ✅     | sdk and openapi                       |
 | 70n       | ✅     | decorators, validation, closeout      |
-| 71        | ⬜     | realtime authentication               |
-| 72        | ⬜     | realtime reads + sse contract         |
-| 73        | ⬜     | broker trace propagation              |
+| 71        | ⬜     | kernel + contract boundary hardening  |
+| 72        | ⬜     | cli transports + interactive scaffold |
+| 73        | ⬜     | realtime authentication               |
+| 74        | ⬜     | realtime reads + sse contract         |
+| 75        | ⬜     | broker trace propagation              |
