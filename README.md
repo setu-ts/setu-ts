@@ -338,13 +338,13 @@ setu-ts/
 ├── scripts/               # Coverage, plan linting, JSR release tooling
 ├── docs/                  # Operator guides (releasing, telemetry fan-out, …)
 ├── docker/                # Docker and OpenTelemetry Collector configurations
-├── kubernetes/            # Kubernetes manifests
+├── k8s/                   # Helm chart and the manifests it renders (M39)
 ├── plans/                 # One plan per milestone, archived on completion
 ├── apps/                  # Example applications — 15 runnable apps (M37, M37b, M37c, M55)
 ├── ARCHITECTURE.md        # Technical architecture guide
 ├── PUBLIC_API.md          # Public API contract
 ├── AI_GUIDELINES.md       # Engineering guidelines
-├── ROADMAP.md             # Implementation roadmap, milestones 0–55
+├── ROADMAP.md             # Implementation roadmap, milestones 0–75
 ├── CHANGELOG.md           # Release notes
 └── README.md              # This file
 ```

@@ -3340,8 +3340,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `report-2024-01-15.pdf` would be cached for a year — the doc was sharpened rather than the regex,
   since base64url hashes legitimately contain `-`), and a "ten brokers" count that is seven) —
   complete (PR #183)
-- **Next milestone** — **the `v0.1.0-alpha.9` release**, which ships after every alpha-9 workstream
-  merges ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch).
+- **Next milestone** — **M71 (kernel and contract boundary hardening)**, which ships WITH
+  `v0.1.0-alpha.9` rather than after it: sealing the service registry, a one-shot `request.user`
+  setter and one `ctx.state` key convention are contract-level changes, so they belong in the same
+  release as the M70 closeout. Then **the `v0.1.0-alpha.9` release** itself, which ships once every
+  alpha-9 workstream has merged ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of
+  any milestone branch). M72 (CLI transports + interactive scaffolding) and M73–M75 (realtime
+  authentication, realtime reads + the SSE contract, broker trace propagation) follow it.
 
 ## Verification (run before declaring any work done)
 
