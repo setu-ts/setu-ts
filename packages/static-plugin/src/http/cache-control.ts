@@ -13,8 +13,10 @@
  * one digit — requiring the digit keeps ordinary words like `production` from
  * acquiring an unrecoverable one-year `immutable` cache. The heuristic can
  * under-match (a hash with no digit and no hex shape) and over-match (an 8+
- * character word containing a digit); pass an explicit `cacheControl` value or
- * callback for a deterministic policy.
+ * character run containing a digit). The run may span hyphens, so a dated name
+ * like `report-2024-01-15.pdf` matches and would be cached for a year; pass an
+ * explicit `cacheControl` value or callback for a deterministic policy on any
+ * directory holding files that are not content-hashed.
  *
  * @since 0.1.0
  */
