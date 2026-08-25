@@ -93,9 +93,17 @@ describe('cold-checkout npm resolution', () => {
     // passes once `node_modules` exists from any earlier build.
     for await (const entry of Deno.readDir('apps')) {
       if (!entry.isDirectory) continue;
-      const hasPackageJson = await Deno.stat(`apps/${entry.name}/package.json`)
-        .then(() => true)
-        .catch(() => false);
+      let hasPackageJson = true;
+      try {
+        await Deno.stat(`apps/${entry.name}/package.json`);
+      } catch (error) {
+        // Only absence means "no npm toolchain here". Any other stat failure
+        // is a real problem, and swallowing it would skip the app and pass
+        // the assertion vacuously — `check-apps.ts` itself rethrows a
+        // non-NotFound error from the equivalent `worker.ts` probe.
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+        hasPackageJson = false;
+      }
       if (!hasPackageJson) continue;
 
       const config = await readJson<AppConfig>(`apps/${entry.name}/deno.json`);
