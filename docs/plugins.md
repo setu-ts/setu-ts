@@ -42,7 +42,10 @@ ever uses the in-memory broker.
 
 Every package NOT listed here declares zero npm dependencies — that includes `common`, `kernel`,
 `exceptions`, `sdk`, `cloudflare-plugin`, `session-plugin`, `validation-plugin`, `openapi-plugin`,
-and the three starters.
+`static-plugin`, `websocket-plugin`, `worker-pool-plugin`, and the three starters. `cli` is on that
+list too, which is worth saying out loud because its source is full of `npm:` strings: those are
+DATA it writes into a generated project's manifest, not specifiers it imports, so nothing follows
+them into its own dependency graph.
 
 | Package                     | Declared npm drivers                                                                                            | Arm that needs them                                                           |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
@@ -62,7 +65,7 @@ and the three starters.
 | `scheduler-plugin`          | `ioredis`                                                                                                       | `RedisLock`                                                                   |
 | `secrets-plugin`            | `@aws-sdk/client-secrets-manager`, `@google-cloud/secret-manager`, `@azure/identity`, `@azure/keyvault-secrets` | the matching cloud provider                                                   |
 | `storage-plugin`            | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`, `@google-cloud/storage`, `@azure/storage-blob`           | the matching provider                                                         |
-| `telemetry-plugin`          | `@opentelemetry/*` (SDK, exporter, and the five auto-instrumentations)                                          | any non-noop exporter, or `instrumentations`                                  |
+| `telemetry-plugin`          | `@opentelemetry/{api,resources,sdk-trace-base,exporter-trace-otlp-http}`, plus the five `instrumentation-*`     | any non-noop exporter, or `instrumentations`                                  |
 
 Two of these — `graphql-plugin` and `grpc-plugin` — are marked "always" because the driver **is**
 the capability rather than one choice among several. Neither has a zero-driver arm, and neither
