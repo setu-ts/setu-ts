@@ -16,7 +16,7 @@ import type {
   IClientTiming,
   IHttpClient,
 } from './contracts.ts';
-import type { CircuitBreakerPolicy, RetryPolicy } from 'jsr:@setu-ts/common@^0.1.0-alpha.8';
+import type { CircuitBreakerPolicy, RetryPolicy } from 'jsr:@setu-ts/common@^0.1.0-alpha.9';
 
 import { HttpClientError } from '../errors.ts';
 import { createCircuitBreaker } from '../circuit-breaker/circuit-breaker.ts';
