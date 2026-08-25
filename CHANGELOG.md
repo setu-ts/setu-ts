@@ -342,6 +342,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Breaking: `ctx.state` keys now use the owner-prefixed convention** (M71). Migrate literal
+  readers from `'clientIp'` to `'http-security-plugin:client-ip'`, `'__he_telemetry_span'` to
+  `'telemetry-plugin:span'`, `'validated:<target>'` to `'validation-plugin:validated-<target>'`,
+  `'setu.error.responder'` to `'exceptions:error-responder'`, and `'setu-ts:session'` to
+  `'session-plugin:session'`. Prefer `CLIENT_IP_STATE_KEY`, `TELEMETRY_SPAN_KEY`,
+  `validatedStateKey`, and `ERROR_RESPONDER_STATE_KEY` where those exports are available;
+  `SESSION_STATE_KEY` remains module-private.
+- **Breaking: application-scoped registry mutation now stops after bootstrap** (M71). Plugins that
+  retain a context and call `register`, `registerFactory`, or `unregister` after `runBootstrap()`
+  now receive an error. Register during `register()`, `onInit`, or `onBootstrap`; use the
+  request-scoped `ctx.services` in middleware for per-request services.
+- **Breaking: request identity fields reject a second implicit assignment** (M71). `request.user`
+  and `request.tenant` permit one assignment and then throw; use `replacePrincipal` or
+  `replaceTenant` for a deliberate replacement. This is an accidental-overwrite guard, not an
+  authorization boundary: a write before authentication remains a permitted first write.
+
 - **BREAKING: `@ValidateBody(schema)` (and `@ValidateQuery`/`@ValidateParams`) now enforce their
   schema by default** (M70n, E1). The decorators shipped as inert metadata — a decorated route
   accepted any body — so an application upgrading that carries a decorated route whose body its

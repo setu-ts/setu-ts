@@ -28,7 +28,7 @@ import { createSession, parseSnapshot, restoreSession } from './session.ts';
  * every hand-rolled double — to construct one, and would type it as present on
  * requests the middleware never touched.
  */
-export const SESSION_STATE_KEY = 'setu-ts:session';
+export const SESSION_STATE_KEY = 'session-plugin:session';
 
 /** Runtime capabilities the service needs, injected for testability. */
 export interface SessionServiceDeps {

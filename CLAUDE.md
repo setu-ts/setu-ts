@@ -3340,13 +3340,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `report-2024-01-15.pdf` would be cached for a year — the doc was sharpened rather than the regex,
   since base64url hashes legitimately contain `-`), and a "ten brokers" count that is seven) —
   complete (PR #183)
-- **Next milestone** — **M71 (kernel and contract boundary hardening)**, which ships WITH
-  `v0.1.0-alpha.9` rather than after it: sealing the service registry, a one-shot `request.user`
-  setter and one `ctx.state` key convention are contract-level changes, so they belong in the same
-  release as the M70 closeout. Then **the `v0.1.0-alpha.9` release** itself, which ships once every
-  alpha-9 workstream has merged ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of
-  any milestone branch). M72 (CLI transports + interactive scaffolding) and M73–M75 (realtime
-  authentication, realtime reads + the SSE contract, broker trace propagation) follow it.
+- **Milestone 71** (`kernel` + `common` + state-key consumers — kernel and contract boundary
+  hardening): the application registry seals after `runBootstrap()` while child registries remain
+  request-mutable; startup overrides log at `info` and successful unregisters at `warn`; request
+  `user` and `tenant` accept one implicit write with explicit replacement escapes; and every
+  `ctx.state` key follows `<owner-package>:<kebab-key>` behind a recurrence gate — complete (PR
+  pending).
+- **Next milestone** — **the `v0.1.0-alpha.9` release**, once every alpha-9 workstream has merged
+  ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch). M72
+  (CLI transports + interactive scaffolding) and M73–M75 (realtime authentication, realtime reads
+  - the SSE contract, broker trace propagation) follow it.
 
 ## Verification (run before declaring any work done)
 

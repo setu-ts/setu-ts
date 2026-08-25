@@ -13,6 +13,22 @@ describe('createTestContext', () => {
     expect(ctx.id).toBe('test-ctx');
   });
 
+  it('honours the request identity single-write contract', () => {
+    const ctx = createTestContext();
+    ctx.request.user = { id: 'first', roles: [] };
+    expect(() => {
+      ctx.request.user = { id: 'second', roles: [] };
+    }).toThrow('ctx.request.user has already been set');
+  });
+
+  it('treats a seeded request identity as already written', () => {
+    const ctx = createTestContext({ request: { user: { id: 'seeded', roles: [] } } });
+    expect(ctx.request.user?.id).toBe('seeded');
+    expect(() => {
+      ctx.request.user = { id: 'later', roles: [] };
+    }).toThrow('ctx.request.user has already been set');
+  });
+
   it('default startTime is 0 (not Date.now())', () => {
     const ctx = createTestContext();
     expect(ctx.startTime).toBe(0);

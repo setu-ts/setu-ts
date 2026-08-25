@@ -6,6 +6,7 @@
  *
  * @example
  * ```typescript
+ * import { validatedStateKey } from '@setu-ts/common';
  * import { ValidationPlugin, validateBody, validateQuery } from '@setu-ts/validation-plugin';
  *
  * app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
@@ -13,7 +14,7 @@
  * app.router.post('/users', {
  *   middleware: [validateBody(CreateUserSchema)],
  *   handler: async (ctx) => {
- *     const body = ctx.state.get('validated:body');
+ *     const body = ctx.state.get(validatedStateKey('body'));
  *     // body is validated
  *   },
  * });

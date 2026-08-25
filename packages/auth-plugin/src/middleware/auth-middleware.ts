@@ -5,7 +5,7 @@
  */
 
 import type { IAuthService, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, replacePrincipal } from '@setu-ts/common';
 
 /**
  * Authentication middleware that runs passive strategies and populates ctx.request.user.
@@ -24,14 +24,18 @@ export function authMiddleware(): MiddlewareFunction {
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const authService = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
 
+    let principal;
     try {
-      const principal = await authService.authenticate(ctx.request);
-      if (principal !== null) {
-        ctx.request.user = principal;
-      }
+      principal = await authService.authenticate(ctx.request);
     } catch {
       // Authentication error - don't set user, but continue
       // Authorization guards will handle the 401
+      await next();
+      return;
+    }
+
+    if (principal !== null) {
+      replacePrincipal(ctx.request, principal);
     }
 
     await next();

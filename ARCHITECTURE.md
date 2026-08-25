@@ -794,17 +794,25 @@ Request-scoped services are registered on the request context, not the global re
 ```typescript
 app.middleware.add(async (ctx, next) => {
   // Register a request-scoped service
-  ctx.services.register('request-logger', logger.child({ requestId: ctx.request.id }));
+  ctx.services.register('request-logger', logger.child({ requestId: ctx.id }));
   await next();
 });
 ```
+
+### Registry Sealing
+
+The application registry is sealed immediately after `runBootstrap()`. Its `register`,
+`registerFactory`, and `unregister` methods throw after that point; request contexts retain an
+unsealed child registry for request-scoped services. An `override: true` and a successful
+`unregister` during startup are reported through the logger capability.
 
 ### Thread Safety Considerations
 
 The Service Registry is **not thread-safe** by design. JavaScript is single-threaded (event loop),
 so concurrent access is not an issue. However:
 
-- **Registration** must happen during the bootstrap phase, not during request processing.
+- **Registration** is enforced during bootstrap: the application registry seals after
+  `runBootstrap()`, so post-bootstrap mutations throw.
 - **Request-scoped registration** is safe because each request has its own context.
 - **Lazy factories** are safe because JavaScript is single-threaded — the factory is called at most
   once.
@@ -1942,10 +1950,10 @@ The `state` map allows middleware to pass data to downstream middleware and hand
 
 ```typescript
 // Validation middleware
-ctx.state.set('validated:body', result.data);
+ctx.state.set(validatedStateKey('body'), result.data);
 
 // Handler
-const body = ctx.state.get('validated:body');
+const body = ctx.state.get(validatedStateKey('body'));
 ```
 
 ### Request-Scoped Data

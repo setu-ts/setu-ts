@@ -192,6 +192,9 @@ class Application implements IKernelApplication {
     const registry = this.#registry;
     const envSpecs = this.#envSpecs;
     const registrationOwner = (): string | undefined => this.#registeringPlugin;
+    registry.setObserver((kind, token) => {
+      this.#reportRegistryMutation(kind, token, this.#registeringPlugin);
+    });
     // Name of the plugin whose `register()` is currently running — read by
     // `environment.validate` to attribute each env-var declaration. `undefined`
     // outside the registration loop (e.g. a `validate` call from a lifecycle
@@ -356,6 +359,7 @@ class Application implements IKernelApplication {
 
     // 7. Run bootstrap hooks
     await this.#lifecycle.runBootstrap();
+    registry.seal();
 
     // 8. Set the handler (always, so app.fetch works even without listen — CF Workers path)
     if (this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) {
@@ -995,6 +999,31 @@ class Application implements IKernelApplication {
       });
     } catch {
       // No safe channel remains — see #reportSuppressedHookError.
+    }
+  }
+
+  /** Reports a startup-time registry mutation when logging is available. */
+  #reportRegistryMutation(
+    kind: 'override' | 'unregister',
+    token: string,
+    plugin: string | undefined,
+  ): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      const owner = plugin ?? 'the application';
+      const message = `Capability '${token}' was ${
+        kind === 'override' ? 'overridden' : 'unregistered'
+      } by ${owner}.`;
+      if (kind === 'override') {
+        logger.info(message);
+      } else {
+        logger.warn(message);
+      }
+    } catch {
+      // No safe channel remains — a mutation must not make startup fail.
     }
   }
 

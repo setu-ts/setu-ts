@@ -2,7 +2,7 @@
  * IP security middleware factory.
  *
  * Resolves the client IP address and publishes it to
- * `ctx.state.set('clientIp', ip)`. Does not short-circuit.
+ * `ctx.state.set(CLIENT_IP_STATE_KEY, ip)`. Does not short-circuit.
  *
  * **`trustProxy` is the only working source since M23.** The web-standard
  * `fetch` mapping the HTTP adapters use cannot populate `IRequest.ip` — a web
@@ -13,6 +13,7 @@
  *
  * @module
  */
+import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
 import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 
 /** Options for IP security middleware. */
@@ -76,7 +77,7 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
     }
 
     // Publish the resolved IP to state (even if undefined)
-    ctx.state.set('clientIp', ip);
+    ctx.state.set(CLIENT_IP_STATE_KEY, ip);
 
     // Never short-circuit
     await next();

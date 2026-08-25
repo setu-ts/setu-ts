@@ -13,7 +13,7 @@ import type {
   IRuntimeServices,
   MiddlewareFunction,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, CLIENT_IP_STATE_KEY } from '@setu-ts/common';
 import type { RateLimitStore } from '../stores/rate-limit-store.ts';
 import { MemoryRateLimitStore } from '../stores/rate-limit-store.ts';
 
@@ -105,7 +105,7 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
  * Default rate-limit key, in order of preference:
  *
  * 1. `ctx.request.user?.id` — the authenticated principal, when auth middleware ran first.
- * 2. `ctx.state.get('clientIp')` — the IP `ipSecurityMiddleware` publishes (it needs
+ * 2. `ctx.state.get(CLIENT_IP_STATE_KEY)` — the IP `ipSecurityMiddleware` publishes (it needs
  *    `trustProxy` plus a proxy header to resolve one).
  * 3. `ctx.request.ip` — set only by a custom `IHttpAdapter`; the first-party adapters
  *    cannot populate it, because a web `Request` carries no peer address (M23).
@@ -127,7 +127,7 @@ export function defaultRateLimitKey(ctx: IRequestContext): string {
   if (userId !== undefined && userId !== '') {
     return `user:${userId}`;
   }
-  const stateIp = ctx.state.get('clientIp');
+  const stateIp = ctx.state.get(CLIENT_IP_STATE_KEY);
   if (typeof stateIp === 'string' && stateIp !== '') {
     return `ip:${stateIp}`;
   }

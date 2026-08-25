@@ -4,6 +4,7 @@ import { expect } from '@std/expect';
 
 import { ipSecurityMiddleware } from '../../src/middleware/ip-security-middleware.ts';
 import { createFakeContext } from '../fixtures/fake-request-context.ts';
+import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
 
 describe('ipSecurityMiddleware', () => {
   describe('enabled: false', () => {
@@ -29,7 +30,7 @@ describe('ipSecurityMiddleware', () => {
         nextCalled.push(true);
       });
       expect(nextCalled).toHaveLength(1);
-      expect(ctx.state.get('clientIp')).toBe('1.2.3.4');
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('1.2.3.4');
     });
 
     it('uses custom ipHeader', async () => {
@@ -46,7 +47,7 @@ describe('ipSecurityMiddleware', () => {
         nextCalled.push(true);
       });
       expect(nextCalled).toHaveLength(1);
-      expect(ctx.state.get('clientIp')).toBe('5.6.7.8');
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('5.6.7.8');
     });
 
     it('falls back to request.ip when header absent', async () => {
@@ -58,7 +59,7 @@ describe('ipSecurityMiddleware', () => {
         nextCalled.push(true);
       });
       expect(nextCalled).toHaveLength(1);
-      expect(ctx.state.get('clientIp')).toBe('192.168.1.1');
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('192.168.1.1');
     });
 
     it('handles single IP in X-Forwarded-For', async () => {
@@ -72,7 +73,7 @@ describe('ipSecurityMiddleware', () => {
         nextCalled.push(true);
       });
       expect(nextCalled).toHaveLength(1);
-      expect(ctx.state.get('clientIp')).toBe('203.0.113.50');
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('203.0.113.50');
     });
   });
 
@@ -86,7 +87,7 @@ describe('ipSecurityMiddleware', () => {
         nextCalled.push(true);
       });
       expect(nextCalled).toHaveLength(1);
-      expect(ctx.state.get('clientIp')).toBe('192.168.1.1');
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('192.168.1.1');
     });
 
     it('ignores X-Forwarded-For when trustProxy is false', async () => {
@@ -101,7 +102,7 @@ describe('ipSecurityMiddleware', () => {
         nextCalled.push(true);
       });
       expect(nextCalled).toHaveLength(1);
-      expect(ctx.state.get('clientIp')).toBe('192.168.1.1');
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('192.168.1.1');
     });
 
     it('publishes undefined when request.ip is absent', async () => {
@@ -111,8 +112,8 @@ describe('ipSecurityMiddleware', () => {
         nextCalled.push(true);
       });
       expect(nextCalled).toHaveLength(1);
-      expect(ctx.state.has('clientIp')).toBe(true);
-      expect(ctx.state.get('clientIp')).toBeUndefined();
+      expect(ctx.state.has(CLIENT_IP_STATE_KEY)).toBe(true);
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBeUndefined();
     });
   });
 
