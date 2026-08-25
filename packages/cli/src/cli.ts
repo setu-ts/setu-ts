@@ -20,6 +20,7 @@ import { runAddCommand } from './commands/add.ts';
 import { runAdoptCommand } from './commands/adopt.ts';
 import { runNewCommand } from './commands/new.ts';
 import { runWorkspaceCommand } from './commands/workspace.ts';
+import type { Prompter } from './prompt.ts';
 import { listSchematics } from './schematics/registry.ts';
 import type { ModuleLoader } from './schematics/custom.ts';
 import type { AppLoader } from './app-loader.ts';
@@ -58,6 +59,15 @@ export interface CliDependencies {
   readonly loadApp?: AppLoader;
   /** Checks whether a workspace port can bind before the CLI assigns it. */
   readonly portAvailable?: PortProbe;
+  /**
+   * Asks the questions `setu new` already accepts as flags.
+   *
+   * OPTIONAL by construction: when absent — as in every gate, which reaches the
+   * CLI through an in-process `runCli` — no prompt is ever attempted and each
+   * absent flag takes its documented default. `src/main.ts` supplies the
+   * terminal implementation only behind `Deno.stdin.isTerminal()`.
+   */
+  readonly ask?: Prompter;
 }
 
 /**
@@ -90,6 +100,7 @@ function printHelp(log: (message: string) => void): void {
   log('  --dir <path>        Operate on this directory instead of the CWD');
   log(`  --config <path>     Load the app from this module instead of ./${CONFIG_MODULE}`);
   log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (new; default deno)`);
+  log('  --yes, -y           Take every `new` default and ask nothing');
   log('');
   log('Schematics:');
   log(`  ${listSchematics().map((s) => s.name).join(', ')}, custom`);
@@ -143,6 +154,7 @@ export async function runCli(
         log: deps.log,
         error: deps.error,
         ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
+        ...(deps.ask === undefined ? {} : { ask: deps.ask }),
       });
 
     case 'generate':

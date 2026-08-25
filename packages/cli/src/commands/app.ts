@@ -203,14 +203,22 @@ function planMember(
     // a workspace on a bus it is not actually connected to.
     const contributes = transport.plugins.length > 0 || transport.messagingArgs !== undefined;
     if (choice.template.appFactory !== undefined && contributes) {
+      // The advice is narrowed per what each transport actually delivers: for a
+      // BROKER the standalone escape now restores the choice (`--broker`
+      // exists), but a standalone full-stack project still cannot take one, so
+      // pointing there would suggest an equivalence that does not hold.
+      const advice = transport.messagingArgs !== undefined
+        ? `Add it to a workspace on --transport http or memory, or scaffold a broker-connected ` +
+          `service with \`${PROGRAM_NAME} new <name> --template microservice --broker ` +
+          `${transport.name}\`.`
+        : `Add it to a workspace on --transport http or memory, or scaffold it standalone with ` +
+          `\`${PROGRAM_NAME} new <name> --template ${choice.template.name}\`.`;
       return {
         ok: false,
         message: `The "${choice.template.name}" template composes its whole plugin set through ` +
           `${choice.template.appFactory.symbol}, so this workspace's "${transport.name}" ` +
           `transport cannot reach it — the plugin it contributes would be dropped and the member ` +
-          `would look connected while talking to nobody. Add it to a workspace on ` +
-          `--transport http or memory, or scaffold it standalone with ` +
-          `\`${PROGRAM_NAME} new <name> --template ${choice.template.name}\`.`,
+          `would look connected while talking to nobody. ${advice}`,
       };
     }
 
@@ -327,18 +335,32 @@ export async function runAppCommand(
 
   // The transport belongs to the WORKSPACE: members can only meet on a bus they
   // share, so a per-member choice would make a workspace whose services cannot
-  // reach each other expressible in one flag.
-  for (const flag of ['transport', 'transport-url']) {
+  // reach each other expressible in one flag. The standalone broker flags get
+  // the same refusal with their own reason — they configure ONE project, and a
+  // member inherits whatever the workspace already recorded.
+  for (const flag of ['transport', 'transport-url', 'broker', 'queue'] as const) {
     if (args.flags[flag] !== undefined) {
-      deps.error(
-        `--${flag} is a workspace-wide choice, not a per-member one: members can only talk ` +
-          `over a transport they share.`,
-      );
-      deps.error(
-        `Set it when you create the workspace: ` +
-          `\`${PROGRAM_NAME} new <name> --workspace --${flag} <value>\`. ` +
-          `This workspace already records its own in ${WORKSPACE_MANIFEST}.`,
-      );
+      if (flag === 'broker' || flag === 'queue') {
+        deps.error(
+          `--${flag} selects a STANDALONE project's own backend; a workspace member inherits ` +
+            `the workspace's --transport instead.`,
+        );
+        deps.error(
+          `This workspace already records its transport in ${WORKSPACE_MANIFEST}. To choose ` +
+            `this backend for one service, scaffold it outside the workspace with ` +
+            `\`${PROGRAM_NAME} new <name> --template microservice --${flag} <value>\`.`,
+        );
+      } else {
+        deps.error(
+          `--${flag} is a workspace-wide choice, not a per-member one: members can only talk ` +
+            `over a transport they share.`,
+        );
+        deps.error(
+          `Set it when you create the workspace: ` +
+            `\`${PROGRAM_NAME} new <name> --workspace --${flag} <value>\`. ` +
+            `This workspace already records its own in ${WORKSPACE_MANIFEST}.`,
+        );
+      }
       return EXIT_USAGE;
     }
   }

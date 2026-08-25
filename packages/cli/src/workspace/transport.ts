@@ -245,6 +245,28 @@ const DEFAULT_BROKER_SUBSCRIPTION = 'messaging-consumers';
 /** The SA password the Service Bus emulator's SQL sidecar starts with. */
 const SQL_EDGE_PASSWORD_VARIABLE = 'MSSQL_SA_PASSWORD';
 
+/**
+ * Re-indents a rendered connection expression by one nesting level.
+ *
+ * {@linkcode WorkspaceRuntimeProfile.envRead} bakes a FIXED continuation indent
+ * into its output (`Deno.env.get('X') ??\n<10 spaces>'fallback'`), which is
+ * what `deno fmt` wants for a value sitting directly under a plugin option at
+ * eight spaces. Kafka is the one arm that nests the connection inside a bracket
+ * — `brokers: [...]` — where the element sits two columns deeper and the
+ * formatter therefore wants its continuation two columns deeper too. Emitting
+ * the unshifted form made a fresh `--broker kafka` (and `--transport kafka`)
+ * scaffold fail its OWN `deno fmt --check`, which is the bar M63 set.
+ *
+ * Adds two spaces to every line after the first rather than rewriting a known
+ * indent, so it stays correct if a profile ever renders a different one.
+ *
+ * @param connection - The rendered connection expression
+ * @returns The expression, indented for one extra nesting level
+ */
+function nestConnection(connection: string): string {
+  return connection.replaceAll('\n', '\n  ');
+}
+
 const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   ['http']: {
     name: 'http',
@@ -363,7 +385,10 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     // shared `{ broker, url }` template.
     description: 'Kafka broker shared by every member',
     plugins: [],
-    messagingArgs: (connection) => `{ broker: 'kafka', brokers: [${connection}] }`,
+    messagingArgs: (connection) =>
+      `{\n        broker: 'kafka',\n        brokers: [\n          ${
+        nestConnection(connection)
+      },\n        ],\n      }`,
     connection: {
       variable: 'KAFKA_BROKERS',
       localDefault: '127.0.0.1:9092',
@@ -588,6 +613,38 @@ export function transportSpec(name: TransportName): TransportSpec {
  */
 export function listTransports(): readonly TransportSpec[] {
   return TRANSPORTS.map((name) => TRANSPORT_SPECS[name]);
+}
+
+/**
+ * Lists every name `setu new --broker` accepts, derived from the registry.
+ *
+ * Every arm declaring a {@linkcode TransportSpec.messagingArgs} renderer, plus
+ * `memory` — the default the plugin already takes, which is accepted everywhere
+ * the flag is accepted and rewrites nothing. Derived rather than hand-written
+ * so help text, refusal text and validation cannot drift from the arms that
+ * exist.
+ *
+ * @returns Each accepted broker name, in registry order
+ */
+export function listBrokers(): readonly TransportName[] {
+  return TRANSPORTS.filter((name) =>
+    name === 'memory' || TRANSPORT_SPECS[name].messagingArgs !== undefined
+  );
+}
+
+/**
+ * Lists every name `setu new --queue` accepts, derived from the registry.
+ *
+ * Every arm declaring a {@linkcode TransportSpec.queueArgs} renderer, plus
+ * `memory`. A smaller set than {@linkcode listBrokers}: the queue supports
+ * fewer backends than the brokers.
+ *
+ * @returns Each accepted queue backend name, in registry order
+ */
+export function listQueues(): readonly TransportName[] {
+  return TRANSPORTS.filter((name) =>
+    name === 'memory' || TRANSPORT_SPECS[name].queueArgs !== undefined
+  );
 }
 
 /**

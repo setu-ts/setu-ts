@@ -47,6 +47,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`setu new --broker <name>` and `--queue <name>` select a standalone project's message broker and
+  job queue at scaffold time** (M72). Values derive from the same transport registry the workspace
+  `--transport` flag reads; the selected arm rewrites the template's `MessagingPlugin`/`QueuePlugin`
+  wiring to an environment read, adds its connection variable to the generated dotenv pair, and
+  emits a broker-only `docker/compose.yaml` so the scaffold can complete `app.start()`. Each flag is
+  refused — never silently ignored — wherever it would be a no-op: Cloudflare Workers,
+  starter-composed templates (`full-stack`; use `--template microservice` for a broker), templates
+  registering no matching wiring, unknown or arm-less names, workspaces, and `generate app`. No
+  existing flag's behaviour changes; a default scaffold is byte-identical.
+- **`setu new` can ask for the choices it already accepts as flags** (M72). At an interactive
+  terminal it prompts for runtime, template, broker and queue (standalone) or runtime and transport
+  (workspace); every prompted value is expressible as a flag, so prompts are never a second
+  configuration surface. Non-interactive by construction in three layers: `CliDependencies.ask` is
+  optional and programmatic callers pass none; the executable supplies the terminal prompter only
+  behind `Deno.stdin.isTerminal()`; Deno's own prompt returns `null` on a non-terminal. `--yes`
+  (`-y`) takes every default and asks nothing. New exports: the `Prompter` and `PromptChoice` types;
+  `createTerminalPrompter` stays internal.
 - **Decorated validation schemas can be enforced without hand-wiring middleware** (M70n, E1/E2) —
   see **Changed** for the breaking default. `DecoratorPluginOptions.enforceSchemas` controls it, and
   `@Body()`/`@Query()`/`@Param()` read the VALIDATED value (transforms, defaults and coercions

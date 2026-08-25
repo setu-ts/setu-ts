@@ -3346,10 +3346,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `user` and `tenant` accept one implicit write with explicit replacement escapes; and every
   `ctx.state` key follows `<owner-package>:<kebab-key>` behind a recurrence gate — complete (PR
   #190).
+- **Milestone 72** (`packages/cli` — standalone broker selection and interactive scaffolding):
+  `--broker <name>` and `--queue <name>` on a standalone `setu new`, derived from the SAME
+  `TRANSPORT_SPECS` registry the workspace `--transport` flag reads; the selected arm rewrites the
+  template's `MessagingPlugin`/`QueuePlugin` wiring, adds its connection variable to the generated
+  dotenv pair, and emits a broker-only `docker/compose.yaml` so the scaffold boots. Each flag is
+  REFUSED — never silently ignored — wherever it would be a no-op: Cloudflare Workers (the swap has
+  already removed both wirings), starter-composed templates, templates registering no matching
+  wiring, unknown or arm-less names, workspaces and `generate app`. Prompting is an OPTIONAL
+  `ask?: Prompter` on `CliDependencies` supplied by `src/main.ts` only behind
+  `Deno.stdin.isTerminal()`, with a `--yes` escape hatch; prompts rewrite FLAG VALUES before the
+  ordinary pipeline runs, so every prompted value is expressible as a flag and `--dry-run` stays
+  exact. The workspace transport overlay was refactored to compose the same
+  `withBrokerArgs`/`withQueueArgs` helpers, pinned byte-identical on a pre-captured
+  `--transport rabbitmq` member. Two stale ROADMAP claims were corrected in the same PR: the bare
+  grep evidence for "the CLI prompts nowhere" (an emitted-source hit) and "the broker is not
+  selectable at all" (true of a standalone project only) — complete (PR #191)
 - **Next milestone** — **the `v0.1.0-alpha.9` release**, once every alpha-9 workstream has merged
-  ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch). M72
-  (CLI transports + interactive scaffolding) and M73–M75 (realtime authentication, realtime reads
-  - the SSE contract, broker trace propagation) follow it.
+  ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch).
+  M73–M75 (realtime authentication, realtime reads - the SSE contract, broker trace propagation)
+  follow it.
 
 ## Verification (run before declaring any work done)
 

@@ -84,8 +84,17 @@ describe('the transport registry', () => {
     // Kafka is the one arm whose option is a LIST, not a `url` — rendering it
     // like the others would produce a literal the union rejects.
     it('renders kafka as a broker list, not a url', () => {
+      // Broken across lines, and the connection re-indented one level, because
+      // this is the ONE arm nesting it inside a bracket: `deno fmt` wants the
+      // element two columns deeper than a plain option value, and the
+      // single-line form made a `--transport kafka` scaffold fail its own
+      // `deno fmt --check`. `nestConnection` shifts every continuation line, so
+      // a multi-line connection lands where the formatter puts it.
       expect(transportSpec('kafka').messagingArgs?.('CONN')).toBe(
-        "{ broker: 'kafka', brokers: [CONN] }",
+        "{\n        broker: 'kafka',\n        brokers: [\n          CONN,\n        ],\n      }",
+      );
+      expect(transportSpec('kafka').messagingArgs?.('A ??\n          B')).toBe(
+        "{\n        broker: 'kafka',\n        brokers: [\n          A ??\n            B,\n        ],\n      }",
       );
     });
 

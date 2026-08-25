@@ -87,7 +87,9 @@ export async function useWorkspacePackages(root: string): Promise<void> {
   }
   manifest.imports = imports;
   manifest.compilerOptions = { ...manifest.compilerOptions, ...WORKSPACE_COMPILER_OPTIONS };
-  await Deno.writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
+  // Trailing newline, or a later `deno fmt --check` on the repointed project
+  // would flag the fixture's own rewrite rather than anything the CLI emitted.
+  await Deno.writeTextFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 /** What a `deno check` subprocess reported. */

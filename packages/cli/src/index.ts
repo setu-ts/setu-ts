@@ -30,6 +30,14 @@ export { runCli } from './cli.ts';
 /** The dependency bundle {@linkcode runCli} takes. */
 export type { CliDependencies } from './cli.ts';
 
+/**
+ * Asks one scaffold question and reports the chosen value.
+ *
+ * Implemented by the terminal prompter `src/main.ts` supplies; a programmatic
+ * consumer of {@linkcode CliDependencies} that wants prompting provides its own.
+ */
+export type { PromptChoice, Prompter } from './prompt.ts';
+
 /** Derives every naming form a schematic needs from one user-supplied name. */
 export { deriveNames } from './utils/names.ts';
 /** The five naming forms {@linkcode deriveNames} produces. */
