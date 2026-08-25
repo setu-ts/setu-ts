@@ -93,6 +93,20 @@ const VALIDATED_TARGETS: Readonly<Record<'body' | 'query' | 'param', ValidationT
 };
 
 /**
+ * Extracts a single named member from a validated whole-part record — the
+ * documented NAMED-value contract of `@Query('page')`, `@Param('id')`, …:
+ * validation middleware validates the WHOLE request part, but a parameter
+ * bound WITH a name receives only its own member, exactly as the raw path
+ * resolves. A non-object validated value has no members to name into.
+ */
+function extractNamed(validated: unknown, name: string): unknown {
+  if (typeof validated === 'object' && validated !== null) {
+    return (validated as Record<string, unknown>)[name];
+  }
+  return undefined;
+}
+
+/**
  * Resolves a `@Body`/`@Query`/`@Param` parameter from its RAW request source —
  * the fallback used when no validated value was written for the request part.
  */
@@ -135,7 +149,12 @@ export function resolveParameter(
   ) {
     const key = validatedStateKey(VALIDATED_TARGETS[param.type]);
     if (ctx.state.has(key)) {
-      return ctx.state.get(key);
+      const validated = ctx.state.get(key);
+      // A parameter bound WITH a name (`@Query('page')`) receives its own
+      // member of the validated record; one without (`@Body()`) receives the
+      // whole validated object. Returning the record to a named parameter
+      // handed handlers `{ page: 2 }` where the contract says `2`.
+      return param.name !== undefined ? extractNamed(validated, param.name) : validated;
     }
     return resolveRaw(ctx, param.type, param.name);
   }
