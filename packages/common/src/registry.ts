@@ -68,9 +68,9 @@ export type RegistryFactory<T> = (services: IServiceRegistry) => T;
  * Maps capability tokens to service instances.
  *
  * The registry is the framework's primary service resolution mechanism; the
- * optional DI container is a convenience layer on top of it. Registration
- * must happen during the bootstrap phase — never during request processing
- * (request-scoped services are registered on the request context instead).
+ * optional DI container is a convenience layer on top of it. The application
+ * registry is sealed after `runBootstrap()`; request-scoped services are
+ * registered on the request context instead.
  *
  * @example
  * ```typescript
@@ -92,6 +92,8 @@ export interface IServiceRegistry {
    * @param options - Override and multi-provider behavior
    * @throws {Error} If the token is already registered and neither
    * `override` nor `multi` is set
+   * @throws {Error} If called after the application has run `runBootstrap()`
+   * @remarks `override: true` is reported through the logger capability.
    */
   register<T extends object>(token: CapabilityToken, service: T, options?: RegisterOptions): void;
 
@@ -105,6 +107,8 @@ export interface IServiceRegistry {
    * @param options - Override and multi-provider behavior
    * @throws {Error} If the token is already registered and neither
    * `override` nor `multi` is set
+   * @throws {Error} If called after the application has run `runBootstrap()`
+   * @remarks `override: true` is reported through the logger capability.
    */
   registerFactory<T extends object>(
     token: CapabilityToken,
@@ -148,6 +152,10 @@ export interface IServiceRegistry {
    *
    * @param token - The capability token to remove
    * @returns `true` if a registration was removed
+   * @throws {Error} If called after the application has run `runBootstrap()`
+   * @remarks A successful unregister is reported through the logger
+   * capability. Prefer `register(token, service, { override: true })` for a
+   * replacement during bootstrap.
    */
   unregister(token: CapabilityToken): boolean;
 }

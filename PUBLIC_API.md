@@ -697,7 +697,7 @@ interface ValidationPluginOptions {
 
 ```typescript
 import { z } from 'zod';
-import { CAPABILITIES, IValidationService } from '@setu-ts/common';
+import { CAPABILITIES, IValidationService, validatedStateKey } from '@setu-ts/common';
 
 const CreateUserSchema = z.object({
   name: z.string().min(2).max(100),
@@ -717,12 +717,12 @@ app.router.post('/users', {
         return ctx.response.status(400).json({ errors: result.error });
       }
 
-      ctx.state.set('validated:body', result.value);
+      ctx.state.set(validatedStateKey('body'), result.value);
       await next();
     },
   ],
   handler: async (ctx) => {
-    const body = ctx.state.get<z.infer<typeof CreateUserSchema>>('validated:body');
+    const body = ctx.state.get<z.infer<typeof CreateUserSchema>>(validatedStateKey('body'));
     // body is fully typed and validated
     const user = await createUser(body);
     return ctx.response.status(201).json(user);
@@ -733,10 +733,11 @@ app.router.post('/users', {
 ### Validation Middleware Helpers
 
 The helpers resolve `IValidationService` from the request context automatically. Validated values
-are stored in `ctx.state` under `validated:<target>` keys.
+are stored in `ctx.state` under `validatedStateKey(target)`.
 
 ```typescript
 import { z } from 'zod';
+import { validatedStateKey } from '@setu-ts/common';
 import {
   validateBody,
   validateCookies,
@@ -748,7 +749,7 @@ import {
 app.router.get('/users', {
   middleware: [validateQuery(ListUsersQuerySchema)],
   handler: async (ctx) => {
-    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>('validated:query');
+    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>(validatedStateKey('query'));
     // query is validated
   },
 });
@@ -759,8 +760,8 @@ app.router.put('/users/:id', {
     validateBody(UpdateUserSchema),
   ],
   handler: async (ctx) => {
-    const params = ctx.state.get('validated:params');
-    const body = ctx.state.get('validated:body');
+    const params = ctx.state.get(validatedStateKey('params'));
+    const body = ctx.state.get(validatedStateKey('body'));
     // both are validated
   },
 });
@@ -1686,9 +1687,9 @@ without reading body. Absent or malformed `Content-Length` → pass through.
 
 #### IP Security (`ipSecurityMiddleware`)
 
-Resolves client IP and publishes to `ctx.state.set('clientIp', ip)`. When `trustProxy: true`, reads
-the configured `ipHeader` (default `X-Forwarded-For`) and takes the leftmost address. Never
-short-circuits.
+Resolves client IP and publishes to `ctx.state.set(CLIENT_IP_STATE_KEY, ip)`. When
+`trustProxy: true`, reads the configured `ipHeader` (default `X-Forwarded-For`) and takes the
+leftmost address. Never short-circuits.
 
 **`trustProxy` is the only working source on the first-party adapters.** The fallback to
 `request.ip` is vestigial since M23: a web `Request` carries no peer address, so the shared `fetch`
@@ -5202,7 +5203,7 @@ The plugin registers `telemetryMiddleware` at priority 30 by default. It:
 
 1. Extracts `traceparent`/`tracestate` from `ctx.request.headers` (W3C Trace Context)
 2. Starts a server span named `<METHOD> <path>`
-3. Stores the span on `ctx.state` under `TELEMETRY_SPAN_KEY` (`'__he_telemetry_span'`)
+3. Stores the span on `ctx.state` under `TELEMETRY_SPAN_KEY` (`'telemetry-plugin:span'`)
 4. Sets HTTP attributes (`http.method`, `http.route`, `http.status_code`)
 5. Injects `traceparent` into the response headers
 
@@ -6414,6 +6415,7 @@ A complete REST API using the REST starter:
 
 ```typescript
 import { createRestApp } from '@setu-ts/rest-starter';
+import { validatedStateKey } from '@setu-ts/common';
 import { z } from 'zod';
 
 const app = createRestApp({
@@ -6471,7 +6473,7 @@ app.router.get('/users', {
 
 app.router.post('/users', {
   // `schema.body` DOCUMENTS the route; `validateBody` is what enforces it and
-  // writes `validated:body`. Declaring the schema alone leaves that key unset.
+  // writes validatedStateKey('body'). Declaring the schema alone leaves that key unset.
   middleware: [app.services.auth.requireAuth(), validateBody(CreateUserSchema)],
   schema: {
     body: CreateUserSchema,
@@ -6482,7 +6484,7 @@ app.router.post('/users', {
   },
   handler: async (ctx) => {
     const db = ctx.services.get('database');
-    const user = await db.getRepository('User').create(ctx.state.get('validated:body'));
+    const user = await db.getRepository('User').create(ctx.state.get(validatedStateKey('body')));
     return ctx.response.status(201).json(user);
   },
 });
@@ -7217,7 +7219,7 @@ app.router.post('/users', {
   schema: { body: CreateUserSchema, response: { 201: UserSchema } },
   handler: async (ctx) => {
     const userService = ctx.services.get('userService');
-    const user = await userService.create(ctx.state.get('validated:body'));
+    const user = await userService.create(ctx.state.get(validatedStateKey('body')));
     return ctx.response.status(201).json(user);
   },
 });
@@ -7487,32 +7489,36 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 ### Values (runtime exports)
 
-| Export                        | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions)                                                                                                                                                                                 |
-| `createCapabilityToken(name)` | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                 |
-| `encodeFrameData(data)`       | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                           |
-| `decodeFrameData(payload)`    | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `createCachedProbe(options)`  | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false` |
-| `parseCookie(header)`         | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `@Cookie` both need it and no plugin may import another                                                                                                                                                                                                                                |
-| `serializeCookie(n, v, a?)`   | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                                                                                                                                                                                                |
-| `isWorkerReadySignal(m)`      | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `isWorkerTaskRequest(m)`      | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `isWorkerTaskReply(m)`        | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `PLUGIN_PRIORITY`             | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `ok(value)` / `err(error)`    | function | `Result` constructors                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `isOk(r)` / `isErr(r)`        | function | `Result` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `unwrap(r)`                   | function | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `serializeError(value)`       | function | Serializes any thrown value into a plain `SerializedError` (`{ name, message, stack?, cause? }`) with the `cause` chain followed to a bounded depth; a non-`Error` value yields `{ name: 'Error', message: String(value) }`. Pure — no runtime-specific APIs. Here so the logger plugin (metadata normalization), the kernel (fallback-500 logging), `exceptions`, `grpc-plugin`, and `notification-plugin` can all serialize without importing one another.          |
-| `respondWithError(ctx, init)` | function | Writes an error response through the request's published `IErrorResponder` (the application's configured format), falling back to `{ error, detail? }` when `errorHandler` has not published one. The seam that lets a package that produces error responses but may not import `@setu-ts/exceptions` answer in the configured format (M70f).                                                                                                                         |
-| `ERROR_RESPONDER_STATE_KEY`   | const    | The `ctx.state` key under which `errorHandler` publishes its `IErrorResponder`                                                                                                                                                                                                                                                                                                                                                                                        |
-| `brandErrorResponder(fn, r)`  | function | Attaches `errorHandler`'s resolved `IErrorResponder` to its middleware function under `ERROR_RESPONDER_BRAND`, so the kernel — which runs the drain `503`, the malformed-request `400`, and the request hooks BEFORE the pipeline — can read the same responder at startup (M70f re-review)                                                                                                                                                                           |
-| `errorResponderOf(fn)`        | function | Reads the brand off a middleware function, returning the attached `IErrorResponder` (or `undefined`). The kernel's only route to the resolved formatter for the pre-pipeline sites                                                                                                                                                                                                                                                                                    |
-| `ERROR_RESPONDER_BRAND`       | const    | A `Symbol.for` brand pairing with the two functions above; `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                             |
-| `validatedStateKey(target)`   | function | Returns `` `validated:${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `@Body`/`@Query`/`@Param` read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                                               |
+| Export                                 | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CAPABILITIES`                         | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions)                                                                                                                                                                                 |
+| `createCapabilityToken(name)`          | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                 |
+| `encodeFrameData(data)`                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                           |
+| `decodeFrameData(payload)`             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `createCachedProbe(options)`           | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false` |
+| `parseCookie(header)`                  | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `@Cookie` both need it and no plugin may import another                                                                                                                                                                                                                                |
+| `serializeCookie(n, v, a?)`            | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                                                                                                                                                                                                |
+| `isWorkerReadySignal(m)`               | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `isWorkerTaskRequest(m)`               | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `isWorkerTaskReply(m)`                 | function | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `PLUGIN_PRIORITY`                      | const    | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `ok(value)` / `err(error)`             | function | `Result` constructors                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `isOk(r)` / `isErr(r)`                 | function | `Result` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `unwrap(r)`                            | function | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `some(value)` / `none()`               | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `isSome(o)` / `isNone(o)`              | function | `Option` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `fromNullable(v)`                      | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `serializeError(value)`                | function | Serializes any thrown value into a plain `SerializedError` (`{ name, message, stack?, cause? }`) with the `cause` chain followed to a bounded depth; a non-`Error` value yields `{ name: 'Error', message: String(value) }`. Pure — no runtime-specific APIs. Here so the logger plugin (metadata normalization), the kernel (fallback-500 logging), `exceptions`, `grpc-plugin`, and `notification-plugin` can all serialize without importing one another.          |
+| `respondWithError(ctx, init)`          | function | Writes an error response through the request's published `IErrorResponder` (the application's configured format), falling back to `{ error, detail? }` when `errorHandler` has not published one. The seam that lets a package that produces error responses but may not import `@setu-ts/exceptions` answer in the configured format (M70f).                                                                                                                         |
+| `ERROR_RESPONDER_STATE_KEY`            | const    | `exceptions:error-responder`, the `ctx.state` key under which `errorHandler` publishes its `IErrorResponder`                                                                                                                                                                                                                                                                                                                                                          |
+| `brandErrorResponder(fn, r)`           | function | Attaches `errorHandler`'s resolved `IErrorResponder` to its middleware function under `ERROR_RESPONDER_BRAND`, so the kernel — which runs the drain `503`, the malformed-request `400`, and the request hooks BEFORE the pipeline — can read the same responder at startup (M70f re-review)                                                                                                                                                                           |
+| `errorResponderOf(fn)`                 | function | Reads the brand off a middleware function, returning the attached `IErrorResponder` (or `undefined`). The kernel's only route to the resolved formatter for the pre-pipeline sites                                                                                                                                                                                                                                                                                    |
+| `ERROR_RESPONDER_BRAND`                | const    | A `Symbol.for` brand pairing with the two functions above; `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                             |
+| `validatedStateKey(target)`            | function | Returns `` `validation-plugin:validated-${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `@Body`/`@Query`/`@Param` read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                             |
+| `CLIENT_IP_STATE_KEY`                  | const    | `http-security-plugin:client-ip`, the cross-package key `ipSecurityMiddleware` writes and `rateLimitMiddleware` reads                                                                                                                                                                                                                                                                                                                                                 |
+| `sealRequestIdentity(request)`         | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                        |
+| `replacePrincipal(request, principal)` | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `replaceTenant(request, tenant)`       | function | Deliberately replaces `request.tenant` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ### Types
 
@@ -7642,6 +7648,14 @@ Contract notes:
   is severed (client disconnect, timeout). Populated by the HTTP adapter from the native
   `Request.signal`; optional because injected / test requests may not carry one. Added in
   Milestone 42.
+- `IRequest.user` and `IRequest.tenant` each allow one implicit assignment per request; a later
+  assignment throws. `replacePrincipal` and `replaceTenant` are the explicit escapes for an
+  intentional replacement. This catches late accidental overwrites, not authorization bypasses: a
+  write before authentication is still the permitted first write.
+- The application service registry seals after `runBootstrap()`. Its `register`, `registerFactory`,
+  and `unregister` methods then throw; request-scoped child registries remain mutable. Startup-time
+  `override: true` mutations log at `info`, and successful unregisters log at `warn` through the
+  logger capability.
 - `IRequestContext.signal: AbortSignal` — required abort signal (always present). Populated by
   `createRequestContext` from the native `Request.signal`; falls back to a non-aborting sentinel for
   injected/test contexts so handlers always have a live signal to listen on. Added in Milestone 42.

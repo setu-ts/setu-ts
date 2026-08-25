@@ -17,7 +17,7 @@ security**.
 - **Request Size** — Enforces `Content-Length` against a configurable limit (default 1 MiB) with 413
   short-circuit before body reading.
 - **IP Security** — Resolves client IP from proxy headers (when behind a trusted reverse proxy) or
-  socket IP, publishing to `ctx.state.get('clientIp')`.
+  socket IP, publishing to `ctx.state.get(CLIENT_IP_STATE_KEY)`.
 
 ## Installation
 

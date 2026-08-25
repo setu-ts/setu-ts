@@ -8,6 +8,7 @@ Schemas are duck-typed through `safeParse`, so any Zod-compatible validator work
 ## Installation
 
 ```typescript
+import { validatedStateKey } from '@setu-ts/common';
 import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
 ```
 
@@ -15,6 +16,7 @@ import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
 
 ```typescript
 import { z } from 'zod';
+import { validatedStateKey } from '@setu-ts/common';
 import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
 
 const CreateUser = z.object({ email: z.string().email(), age: z.number().int() });
@@ -24,7 +26,7 @@ app.register(ValidationPlugin({ errorFormat: 'rfc9457' }));
 app.router.post('/users', {
   middleware: [validateBody(CreateUser)],
   handler: async (ctx) => {
-    const body = ctx.state.get('validated:body');
+    const body = ctx.state.get(validatedStateKey('body'));
     return ctx.response.json(body);
   },
 });
