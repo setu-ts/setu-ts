@@ -7,13 +7,20 @@
  * @module
  */
 
-import type { QueueAdapter } from './queue-adapter.ts';
+import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import type {
   IRedisQueueClient,
   RedisQueueOptions,
   StoredJob,
   StoredRecurring,
 } from '../interfaces/index.ts';
+
+/**
+ * The client shape the retention path needs: `expire` is optional on the
+ * facade, so a fake without it still type-checks, and the retention helpers
+ * only ever run once {@link RedisQueue} has established it is there.
+ */
+type RetentionCommands = { expire: NonNullable<IRedisQueueClient['expire']> };
 
 /**
  * Lazily load ioredis at runtime. Pin to 5.x for stability.
@@ -92,6 +99,7 @@ async function resolveClient(
  * - `queue:<name>:processing` - ZSET (score = reservedAtMs, member = jobId)
  * - `queue:<name>:dead` - ZSET (score = deadLetterAtMs, member = jobId)
  * - `queue:<name>:jobs` - HASH (field = jobId, value = JSON job)
+ * - `queue:<name>:dead:jobs` - HASH (dead payloads; only when a TTL is configured)
  *
  * Recurring jobs:
  * - `queue:recurring:due` - ZSET (score = nextRunAtMs, member = recurringId)
@@ -103,6 +111,8 @@ export class RedisQueue implements QueueAdapter {
   #client: IRedisQueueClient | null = null;
   #url: string;
   #injectedClient: IRedisQueueClient | undefined;
+  /** Retention for a dead-lettered job's payload; unbounded when undefined. */
+  #deadLetterTtlMs: number | undefined;
   #ready = false;
   /**
    * M70c: present only when the client exposes `ping()`; its absence is
@@ -116,6 +126,7 @@ export class RedisQueue implements QueueAdapter {
   constructor(options?: RedisQueueOptions) {
     this.#url = options?.url ?? 'redis://localhost:6379';
     this.#injectedClient = options?.client;
+    this.#deadLetterTtlMs = options?.deadLetterTtlMs;
   }
 
   async connect(): Promise<void> {
@@ -128,6 +139,7 @@ export class RedisQueue implements QueueAdapter {
     }
     this.#ready = true;
     this.#installProbe();
+    this.#installDepths();
   }
 
   /**
@@ -161,6 +173,7 @@ export class RedisQueue implements QueueAdapter {
     this.#client = null;
     this.#ready = false;
     delete this.isHealthy;
+    delete this.depths;
   }
 
   isReady(): boolean {
@@ -281,8 +294,181 @@ export class RedisQueue implements QueueAdapter {
     // Remove from processing
     await this.#client.zrem(processingKey, id);
 
+    // X8-4: the retained payload had no TTL and no trim, so the jobs hash grew
+    // without bound for the lifetime of the deployment. The TTL is opt-in
+    // because dropping a dead job's payload by default would remove the
+    // debugging value the retention exists for.
+    //
+    // The payload moves BEFORE the dead-set insert. These commands are not one
+    // atomic unit, so ordering is what keeps a concurrent sweep consistent: a
+    // sweep reads the dead set, and reaching a member whose payload has not
+    // been written yet deletes the member and leaves the payload behind with
+    // nothing that can ever find it again.
+    await this.#moveDeadLetterPayload(name, id);
+
     // Add to dead set with score = nowMs (keep payload in jobs hash for debugging)
     await this.#client.zadd(deadKey, nowMs, id);
+
+    await this.#sweepDeadLetters(name, nowMs);
+  }
+
+  /**
+   * Moves a dead job's payload out of the LIVE jobs hash, when a TTL is set.
+   *
+   * The payload goes into a dedicated `queue:<name>:dead:jobs`, and the expiry
+   * {@link RedisQueue.#sweepDeadLetters} applies lands on that key and the dead
+   * set — never on `queue:<name>:jobs`. That hash holds the payload of every
+   * job for this name, not only dead ones, so expiring it destroys work that is
+   * merely queued: Redis keeps a key's TTL across later `HSET`s (measured), so
+   * jobs enqueued after the first dead-letter inherit the countdown, and
+   * `reserve` drops a job whose payload is missing into the processing set and
+   * never returns it. That is silent, permanent loss of queued work — caused by
+   * an option whose purpose is bounding DEAD payloads.
+   *
+   * Issued BEFORE the caller's `ZADD` into the dead set. None of these commands
+   * is atomic with the next, and a sweep reads the dead set, so a member that
+   * became visible before its payload was written can be swept by a concurrent
+   * `deadLetter` — deleting the member and stranding the payload where no later
+   * sweep can reach it, since every sweep starts from the dead set. Writing
+   * first means a sweep either misses the id entirely, and a later one collects
+   * it, or finds both together.
+   *
+   * A no-op when no TTL is configured, and when the injected client does not
+   * expose `expire` — the member is optional so an existing fake still
+   * type-checks, and reporting a retention the client cannot enforce would be
+   * worse than not applying one. Without a TTL the payload stays in the jobs
+   * hash exactly as it always has.
+   *
+   * @param name - Job name
+   * @param id - The dead-lettered job's id
+   */
+  async #moveDeadLetterPayload(name: string, id: string): Promise<void> {
+    const retention = this.#retention();
+    if (retention === null) {
+      return;
+    }
+    const { client } = retention;
+    const jobsKey = `queue:${name}:jobs`;
+    const deadJobsKey = `queue:${name}:dead:jobs`;
+
+    // Move the payload out of the LIVE hash: that key holds every queued job's
+    // payload for this name, so it can carry no expiry of its own.
+    const raw = await client.hget(jobsKey, id);
+    if (raw !== null) {
+      await client.hset(deadJobsKey, id, raw);
+      await client.hdel(jobsKey, id);
+    }
+  }
+
+  /**
+   * Drops every dead-letter that has outlived the retention, and re-arms the
+   * key-level backstop.
+   *
+   * Retention is enforced PER PAYLOAD, by sweeping the dead set — which is
+   * scored by dead-letter time — for members older than the TTL and deleting
+   * both the member and its payload. Redis has no per-member expiry on a sorted
+   * set or a hash, and a key-level `EXPIRE` alone is not equivalent: every new
+   * dead-letter renews it, so a queue that keeps failing would retain its
+   * oldest payloads forever, which is the opposite of what the option promises
+   * and the case where growth actually matters.
+   *
+   * The key-level expiry is kept BESIDE the sweep, as the backstop for the one
+   * case the sweep cannot reach: a queue that dead-letters once and then goes
+   * quiet never runs another sweep, so without it that last payload would
+   * outlive its retention indefinitely.
+   *
+   * Together they bound retention rather than pin it: a payload lives at least
+   * the TTL, and at most the TTL past the LAST dead-letter — just under twice
+   * it for one that dies immediately before a burst that then stops. The
+   * backstop is armed from `nowMs` and not from the oldest survivor because one
+   * key carries one deadline, and the oldest survivor's would delete the newer
+   * payloads sharing the key before their own retention elapsed. Erring late is
+   * the deliberate side: an early drop destroys the debugging data the option
+   * exists to keep. Exact per-payload expiry is not available — Redis has no
+   * per-member TTL on a sorted set, and every payload shares the dead-jobs key.
+   *
+   * @param name - Job name
+   * @param nowMs - Wall-clock time of this dead-letter, the sweep's reference
+   */
+  async #sweepDeadLetters(name: string, nowMs: number): Promise<void> {
+    const retention = this.#retention();
+    if (retention === null) {
+      return;
+    }
+    const { client, ttlMs } = retention;
+    const deadKey = `queue:${name}:dead`;
+    const deadJobsKey = `queue:${name}:dead:jobs`;
+
+    // Sweep whatever has now outlived the retention.
+    const expired = await client.zrangebyscore(deadKey, 0, nowMs - ttlMs);
+    if (expired.length > 0) {
+      await client.hdel(deadJobsKey, ...expired);
+      await client.zrem(deadKey, ...expired);
+    }
+
+    const seconds = Math.max(1, Math.ceil(ttlMs / 1000));
+    await client.expire(deadKey, seconds);
+    await client.expire(deadJobsKey, seconds);
+  }
+
+  /**
+   * The client and TTL to run the retention path against, or `null` when there
+   * is no retention to run — no TTL configured, not connected, or a client that
+   * cannot `expire`. One reader, so the move and the sweep cannot disagree
+   * about whether retention is active, and it hands back the TTL so neither
+   * has to re-test a condition this already decided.
+   *
+   * @returns The client narrowed to carry `expire`, with the TTL, or `null`
+   */
+  #retention(): { client: IRedisQueueClient & RetentionCommands; ttlMs: number } | null {
+    const client = this.#client;
+    const ttlMs = this.#deadLetterTtlMs;
+    if (ttlMs === undefined || client === null || typeof client.expire !== 'function') {
+      return null;
+    }
+    return { client: client as IRedisQueueClient & RetentionCommands, ttlMs };
+  }
+
+  /**
+   * M70k (X8-4): counts this name's three states with one `ZCARD` each.
+   *
+   * Absent on a client that does not expose `zcard`, which is why the member is
+   * an assigned property rather than a declared method — the health indicator
+   * must be able to tell "cannot report" from "nothing there". Absent again
+   * after {@link disconnect}, for the same reason `isHealthy` is: the closure
+   * captures the client it was installed for, so leaving it in place would
+   * answer a depth read with that dead client's rejection instead of the
+   * absence that says the adapter cannot count right now.
+   *
+   * @param name - Job name
+   * @returns The depth of each state
+   * @since 0.3.0
+   */
+  depths?: (name: string) => Promise<QueueDepths>;
+
+  /**
+   * Installs {@link depths} when the resolved client can count a sorted set,
+   * and removes it when the client cannot — the same shape as
+   * {@link RedisQueue.isHealthy}'s installer, holding the same invariant:
+   * `depths` is present exactly when the CURRENT client can answer it.
+   */
+  #installDepths(): void {
+    const client = this.#client;
+    if (client === null || typeof client.zcard !== 'function') {
+      delete this.depths;
+      return;
+    }
+    const zcard = client.zcard;
+    this.depths = async (name: string): Promise<QueueDepths> => {
+      // Bound to the client for the same reason M70c bound `ping`: ioredis
+      // reads `this.options` and an unbound call throws.
+      const [ready, processing, dead] = await Promise.all([
+        zcard.call(client, `queue:${name}:ready`),
+        zcard.call(client, `queue:${name}:processing`),
+        zcard.call(client, `queue:${name}:dead`),
+      ]);
+      return { ready, processing, dead };
+    };
   }
 
   async storeRecurring(rec: StoredRecurring): Promise<void> {

@@ -36,6 +36,24 @@ describe('ResponseBuilder', () => {
     expect(res.ended).toBe(true);
   });
 
+  it('should set html body and content-type', () => {
+    const res = new ResponseBuilder();
+    const result = res.html('<p>hi</p>');
+    expect(result.__handlerResult).toBe(true);
+    const snap = res.snapshot();
+    expect(snap.body).toBe('<p>hi</p>');
+    expect(snap.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(res.ended).toBe(true);
+  });
+
+  it('should compose status() with html()', () => {
+    const res = new ResponseBuilder();
+    res.status(201).html('<p>created</p>');
+    const snap = res.snapshot();
+    expect(snap.status).toBe(201);
+    expect(snap.headers.get('content-type')).toBe('text/html; charset=utf-8');
+  });
+
   it('should set raw bytes body with send', () => {
     const res = new ResponseBuilder();
     const bytes = new Uint8Array([1, 2, 3]);

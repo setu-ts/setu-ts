@@ -200,7 +200,11 @@ describe('Application integration', () => {
     });
     app.router.get('/shared-route', (c) => c.response.json({ source: 'application' }));
 
-    await expect(app.start()).rejects.toThrow("Route 'GET /shared-route' is already registered.");
+    // The application registered it first, so the refusal names the application —
+    // not the plugin whose `register()` is on the stack (M70g/X4-4 fix 3).
+    await expect(app.start()).rejects.toThrow(
+      "Route 'GET /shared-route' is already registered by the application.",
+    );
 
     app.router.get('/after-failure', (c) => c.response.json({ source: 'application' }));
     expect(app.router.listRoutes()).toEqual([
@@ -1359,9 +1363,12 @@ describe('Application review fixes', () => {
     const res = await app.inject({ method: 'GET', url: 'http://localhost/boom' });
     expect(res.statusCode).toBe(500);
     expect(secondHookRan).toBe(true);
-    expect(logged).toHaveLength(1);
+    // Two entries: the suppressed hook error (logged first) and the X11-2
+    // fallback-500 report of the unhandled request error (logged second).
+    expect(logged).toHaveLength(2);
     expect(logged[0].message).toBe('onError hook threw and was suppressed');
     expect(logged[0].metadata?.error).toBe('audit hook blew up');
+    expect(logged[1].message).toBe('Unhandled request error');
     await app.stop();
   });
 

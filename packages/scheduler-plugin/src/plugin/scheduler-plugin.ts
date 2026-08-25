@@ -7,6 +7,7 @@
  * @module
  */
 import type { HealthIndicatorFn, IPlugin, IScheduler } from '@setu-ts/common';
+import { SchedulerUnavailableError } from '../errors.ts';
 import type { SchedulerPluginOptions } from '../interfaces/index.ts';
 import { resolveLock } from '../lock/distributed-lock.ts';
 import type { ILifecyclableLock } from '../lock/distributed-lock.ts';
@@ -44,6 +45,14 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
     priority: 100,
 
     async register(ctx) {
+      // X9-2: refuse BEFORE resolving or connecting any lock. The plugin's
+      // entire surface is inert on Workers — `every` and `delay` arm timers on
+      // an isolate that is evicted between invocations — so registering it can
+      // only produce a job that never runs and reports nothing.
+      if (ctx.runtime.platform() === 'cloudflare-workers') {
+        throw new SchedulerUnavailableError(ctx.runtime.platform());
+      }
+
       // Resolve distributed lock
       const lock = await resolveLock(options, ctx.runtime);
 

@@ -19,8 +19,11 @@ import { availableParallelism as osAvailableParallelism } from 'node:os';
 export interface NodeWorkerLike {
   /** Posts a structured-clonable message to the worker. */
   postMessage(value: unknown): void;
-  /** Registers an event listener (`'message'` payloads arrive unwrapped). */
-  on(event: 'message' | 'error', listener: (arg: unknown) => void): unknown;
+  /**
+   * Registers an event listener (`'message'` payloads arrive unwrapped;
+   * `'exit'` receives the numeric exit code).
+   */
+  on(event: 'message' | 'error' | 'exit', listener: (arg: unknown) => void): unknown;
   /** Terminates the worker; resolves with the exit code. */
   terminate(): Promise<number>;
 }
@@ -70,11 +73,22 @@ export function createNodeWorkerHost(
             listener(arg instanceof Error ? arg : new Error(String(arg)));
           });
         },
+        // `node:worker_threads` emits `'exit'` whenever the thread ends,
+        // including a clean `process.exit()` inside the worker, which raises no
+        // `'error'` and would otherwise be invisible to the host.
+        onExit: (listener: (code: number | null) => void) => {
+          worker.on('exit', (arg: unknown) => {
+            listener(typeof arg === 'number' ? arg : null);
+          });
+        },
         terminate: () => worker.terminate().then(() => undefined),
       };
     },
     availableParallelism(): number {
       return mods.availableParallelism();
+    },
+    reportsExit(): boolean {
+      return true;
     },
   };
 }

@@ -35,6 +35,7 @@ export function createFakeContext(
   env: Record<string, string | undefined> = {},
   withLogger = false,
   fs?: IFileSystem,
+  platform: 'deno' | 'node' | 'bun' | 'cloudflare-workers' = 'deno',
 ): FakeStorageContext {
   const registered = new Map<string, unknown>();
   const healthIndicators = new Map<
@@ -48,6 +49,10 @@ export function createFakeContext(
     env,
     now: (): number => 1_700_000_000_000,
     hrtime: (): number => performance.now(),
+    // A real `IRuntimeServices` ALWAYS reports its platform; omitting it here
+    // made this double reject a call the real one answers, which is how a
+    // fixture starts testing itself instead of the code.
+    platform: (): string => platform,
     fs,
   } as unknown as IRuntimeServices;
 

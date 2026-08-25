@@ -298,6 +298,9 @@ describe('class-based template', () => {
       'health-plugin',
       'metrics-plugin',
       'di-plugin',
+      // M70f (C3): validation answers in the same Problem Details shape the
+      // `errorHandler` emits for thrown errors, so it carries an `errorFormat`.
+      'validation-plugin',
     ]);
     for (const wiring of CLASS_BASED_TEMPLATE.plugins) {
       if (withArgs.has(wiring.pkg)) {

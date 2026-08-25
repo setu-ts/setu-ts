@@ -16,6 +16,7 @@ import {
   matchesWhere,
   type NormalizedQuery,
   projectFields,
+  unknownColumnError,
 } from '../../query/query-builder.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 
@@ -186,6 +187,10 @@ export class MemoryAdapter implements IDatabaseAdapter {
     return {
       findAll: (query) => {
         let results = effectiveRecords();
+        // Checked against the rows this transaction can see, so a column
+        // created inside the transaction counts as known.
+        const columnError = unknownColumnError(entity, results, query);
+        if (columnError) return Promise.reject(columnError);
         if (query.where && Object.keys(query.where).length > 0) {
           results = results.filter((row) => matchesWhere(row, query.where));
         }
@@ -309,6 +314,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
     query: NormalizedQuery,
   ): Promise<Record<string, unknown>[]> {
     const store = this.getStore(entity);
+    const columnError = unknownColumnError(entity, store.records, query);
+    if (columnError) return Promise.reject(columnError);
     let results = store.records;
 
     // Filter.

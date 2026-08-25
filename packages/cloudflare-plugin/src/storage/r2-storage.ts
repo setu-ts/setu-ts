@@ -4,8 +4,8 @@
  * @module
  */
 
-import type { IStorage, SignedUrlOptions } from '@setu-ts/common';
-import type { IR2Bucket } from '../bindings/facades.ts';
+import type { IStorage, PutObjectOptions, SignedUrlOptions } from '@setu-ts/common';
+import type { IR2Bucket, R2PutOptions } from '../bindings/facades.ts';
 import { CloudflareObjectNotFoundError, CloudflareUnsupportedError } from '../errors.ts';
 
 /**
@@ -44,8 +44,24 @@ export class R2Storage implements IStorage {
     this.#prefix = options?.prefix;
   }
 
-  async put(path: string, data: Uint8Array): Promise<void> {
-    await this.#bucket.put(this.#key(path), data);
+  /**
+   * Writes an object, translating {@linkcode PutObjectOptions} into R2's own
+   * spelling: the content type lives under `httpMetadata`, user metadata under
+   * `customMetadata`. Without this every object was served as
+   * `application/octet-stream` (X8-6).
+   *
+   * @param path - The object path
+   * @param data - The object bytes
+   * @param options - Object attributes to record with the bytes
+   */
+  async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+    const putOptions: R2PutOptions = {
+      ...(options?.contentType === undefined
+        ? {}
+        : { httpMetadata: { contentType: options.contentType } }),
+      ...(options?.metadata === undefined ? {} : { customMetadata: options.metadata }),
+    };
+    await this.#bucket.put(this.#key(path), data, putOptions);
   }
 
   async get(path: string): Promise<Uint8Array> {

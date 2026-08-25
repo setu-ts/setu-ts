@@ -103,6 +103,11 @@ describe('cacheMiddleware', () => {
           responseHeaders.set('content-type', 'text/plain; charset=utf-8');
           return hr;
         },
+        html: (body: string) => {
+          responseBodyVal = body;
+          responseHeaders.set('content-type', 'text/html; charset=utf-8');
+          return hr;
+        },
         send: (body?: Uint8Array) => {
           responseBodyVal = body ?? null;
           return hr;
@@ -404,6 +409,7 @@ describe('cacheMiddleware', () => {
           appendHeader: () => ctx.response,
           json: () => hr,
           text: () => hr,
+          html: () => hr,
           send: () => hr,
           redirect: () => hr,
           stream: () => hr,
@@ -575,6 +581,7 @@ describe('cacheMiddleware', () => {
           },
           json: () => hr,
           text: () => hr,
+          html: () => hr,
           send: () => hr,
           redirect: () => hr,
           stream: () => hr,

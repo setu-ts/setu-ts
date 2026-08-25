@@ -7,6 +7,7 @@
  * @module
  */
 import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import { respondWithError } from '@setu-ts/common';
 
 /** HTTP methods considered unsafe (mutable) for CSRF purposes. */
 const UNSAFE_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -59,12 +60,11 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
     if (customHeader) {
       const headerValue = ctx.request.headers.get(customHeader);
       if (!headerValue) {
-        ctx.response
-          .status(403)
-          .json({
-            error: 'Forbidden',
-            message: `Missing required CSRF custom header: ${customHeader}`,
-          });
+        respondWithError(ctx, {
+          status: 403,
+          title: 'Forbidden',
+          detail: `Missing required CSRF custom header: ${customHeader}`,
+        });
         return;
       }
     }
@@ -94,9 +94,10 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
     }
 
     // Disallowed origin — reject with 403
-    ctx.response.status(403).json({
-      error: 'Forbidden',
-      message: 'Cross-origin request not allowed',
+    respondWithError(ctx, {
+      status: 403,
+      title: 'Forbidden',
+      detail: 'Cross-origin request not allowed',
     });
   };
 }

@@ -13,6 +13,7 @@ export { WorkerPoolPlugin } from './plugin/worker-pool-plugin.ts';
 export type { TaskPoolOptions, WorkerPoolPluginOptions } from './interfaces/index.ts';
 export { WorkerPoolService } from './services/worker-pool-service.ts';
 export {
+  WorkerExitError,
   WorkerPoolUnavailableError,
   WorkerQueueFullError,
   WorkerTaskError,

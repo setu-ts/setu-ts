@@ -375,6 +375,16 @@ describe('MockResponse', () => {
     expect(resp.ended).toBe(true);
   });
 
+  it('html() sets ended, body, and the html content-type', () => {
+    const resp = new MockResponse();
+    const result = resp.html('<h1>hello</h1>');
+    expect(result.__handlerResult).toBe(true);
+    expect(resp.ended).toBe(true);
+    const snap = resp.snapshot();
+    expect(snap.body).toBe('<h1>hello</h1>');
+    expect(snap.headers.get('content-type')).toBe('text/html; charset=utf-8');
+  });
+
   it('status() chains and updates snapshot', () => {
     const resp = new MockResponse();
     resp.status(404);

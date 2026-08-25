@@ -14,6 +14,7 @@ import type { FeatureFlagsPluginOptions } from '@setu-ts/feature-flags-plugin';
 import type { NotificationPluginOptions } from '@setu-ts/notification-plugin';
 import type { MultiTenancyPluginOptions } from '@setu-ts/multi-tenancy-plugin';
 import type { ReactRouterPluginOptions } from '@setu-ts/react-router-plugin';
+import type { StaticPluginOptions } from '@setu-ts/static-plugin';
 
 /**
  * Options for {@linkcode createFullStackApp}. Extends {@linkcode MicroserviceStarterOptions}
@@ -70,4 +71,9 @@ export interface FullStackStarterOptions extends MicroserviceStarterOptions {
    * Optional arm: {@linkcode ReactRouterPlugin}. Gated — requires `serverBuildPath` for SSR.
    */
   reactRouter?: ReactRouterPluginOptions;
+  /**
+   * Optional arm: {@linkcode StaticPlugin}. Gated — requires `root` to serve
+   * from; absent registers nothing, leaving the composition byte-identical.
+   */
+  static?: StaticPluginOptions;
 }

@@ -21,10 +21,16 @@
  * @module
  */
 import type { HandlerResult, ILogger, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import {
+  brandErrorResponder,
+  CAPABILITIES,
+  ERROR_RESPONDER_STATE_KEY,
+  serializeError,
+} from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
 import { internalServerError, statusTitle } from '../errors/exceptions.ts';
+import { createErrorResponder } from './error-responder-impl.ts';
 import {
   type ErrorFormat,
   type ErrorHandlerFormatter,
@@ -130,11 +136,19 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
   const logErrors = options?.logErrors ?? true;
   const formatter = selectFormatter(format);
   const contentType = PROBLEM_DETAILS_FORMATTERS.has(formatter) ? PROBLEM_JSON : JSON_CONTENT_TYPE;
+  // The responder is built ONCE at factory time from the formatter and content
+  // type already resolved above, and published per request below: one
+  // `Map.set` of a pre-built object, not a re-resolution (AI_GUIDELINES §14).
+  const responder = createErrorResponder(formatter, contentType);
 
-  return async function handleError(
+  const handleError = async (
     ctx: IRequestContext,
     next: () => Promise<void>,
-  ): Promise<void | HandlerResult> {
+  ): Promise<void | HandlerResult> => {
+    // Publish the responder BEFORE `next()` so every site inside the pipeline
+    // — the kernel's own terminals and every short-circuiting middleware —
+    // answers in this application's configured format (M70f).
+    ctx.state.set(ERROR_RESPONDER_STATE_KEY, responder);
     try {
       await next();
       return;
@@ -193,6 +207,14 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
         .send(bytes);
     }
   };
+
+  // Brand the middleware with the SAME responder it publishes into `ctx.state`
+  // below, so the kernel can seed it into the state of the pre-pipeline sites
+  // — the drain `503`, the malformed-request `400`, and the request-lifecycle
+  // hooks — which run before this middleware and would otherwise always take
+  // the fallback shape (M70f re-review, findings 1 & 2).
+  brandErrorResponder(handleError, responder);
+  return handleError;
 }
 
 /**
@@ -207,9 +229,11 @@ function logError(ctx: IRequestContext, error: HttpError): void {
     return;
   }
   const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+  // Serialize the cause (X2-5): a raw `Error` in log metadata renders as `{}`
+  // under `JSON.stringify` because `message`/`stack` are non-enumerable.
   logger.error(error.message, {
     statusCode: error.statusCode,
     requestId: ctx.id,
-    ...(error.cause !== undefined && { cause: error.cause }),
+    ...(error.cause !== undefined && { cause: serializeError(error.cause) }),
   });
 }

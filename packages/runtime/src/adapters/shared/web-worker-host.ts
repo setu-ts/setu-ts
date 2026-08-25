@@ -22,8 +22,34 @@ export interface WebWorkerLike {
   onmessage: ((event: { data: unknown }) => void) | null;
   /** Error handler slot; events carry a `message` when available. */
   onerror: ((event: unknown) => void) | null;
+  /**
+   * Registers an event listener. Only used for the runtime-specific
+   * worker-ended event named by {@linkcode WebWorkerHostOptions.exitEventName},
+   * which is not part of the web `Worker` standard and therefore has no
+   * handler slot.
+   */
+  addEventListener(type: string, listener: (event: unknown) => void): void;
   /** Terminates the worker. */
   terminate(): void;
+}
+
+/**
+ * Host-construction options that vary between the runtimes sharing this
+ * implementation.
+ *
+ * @since 0.3.0
+ */
+export interface WebWorkerHostOptions {
+  /**
+   * Name of the non-standard event this runtime emits when a worker's thread
+   * ends. Bun emits `'close'`; **Deno emits nothing at all**, so it passes
+   * nothing and the handles this host produces omit `onExit` entirely.
+   *
+   * Omitted rather than registered-and-silent on purpose: a present `onExit`
+   * that can never fire would let a consumer conclude it has worker-death
+   * detection while a dead worker still went unnoticed.
+   */
+  readonly exitEventName?: string;
 }
 
 /**
@@ -78,13 +104,17 @@ function normalizeErrorEvent(event: unknown): Error {
  * (Deno and Bun).
  *
  * @param globals - Injected web globals (defaults to the real `globalThis`)
+ * @param options - Per-runtime differences; see
+ * {@linkcode WebWorkerHostOptions.exitEventName}
  * @returns A worker host; its `spawn` throws when the runtime has no `Worker`
  * constructor
  * @since 0.1.0
  */
 export function createWebWorkerHost(
   globals: WebWorkerGlobals = readWebWorkerGlobals(),
+  options: WebWorkerHostOptions = {},
 ): IWorkerHost {
+  const exitEventName = options.exitEventName;
   return {
     spawn(specifier: string): IWorkerHandle {
       const WorkerCtor = globals.Worker;
@@ -100,6 +130,16 @@ export function createWebWorkerHost(
         onError: (listener: (error: Error) => void) => {
           worker.onerror = (event) => listener(normalizeErrorEvent(event));
         },
+        // Present only when this runtime names an event that actually fires
+        // (`exactOptionalPropertyTypes` — the key is omitted, not undefined).
+        ...(exitEventName === undefined ? {} : {
+          onExit: (listener: (code: number | null) => void) => {
+            worker.addEventListener(exitEventName, (event: unknown) => {
+              const code = (event as { code?: unknown } | null)?.code;
+              listener(typeof code === 'number' ? code : null);
+            });
+          },
+        }),
         terminate: () => {
           worker.terminate();
           return Promise.resolve();
@@ -108,6 +148,9 @@ export function createWebWorkerHost(
     },
     availableParallelism(): number {
       return globals.hardwareConcurrency ?? 1;
+    },
+    reportsExit(): boolean {
+      return exitEventName !== undefined;
     },
   };
 }

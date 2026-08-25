@@ -524,6 +524,22 @@ Before marking a milestone as complete, verify:
 
 ## 9. Backward Compatibility Rules
 
+> **Scope: these rules govern a package from `v1.0.0` onward.** They are the post-v1 contract with
+> external consumers, and none of them applies while the project is in prerelease.
+>
+> **During prerelease (`0.x`, the `alpha`/`beta` line), a public export with no reader is DELETED,
+> not deprecated.** Carrying dead surface behind an `@deprecated` tag buys backward compatibility
+> nobody has asked for yet, and it costs a real reader — the tag reads as "still supported, for
+> now", so the next milestone consumes it and the debt compounds. Remove the symbol, its barrel
+> re-export, and its `PUBLIC_API.md` / package-README rows in the same change.
+>
+> What is **not** relaxed by prerelease is the bookkeeping, which is what makes deletion safe rather
+> than silent: a removal is a breaking change and needs its `CHANGELOG.md` entry with migration text
+> naming what a consumer does instead (§9.4's spirit), and the `PUBLIC_API.md` edit ships in the
+> same PR (§10.5). Deleting an export and saying nothing is still a defect.
+>
+> Once a package reaches `v1.0.0`, §9.1–§9.4 below apply as written.
+
 ### 9.1 Never Break Backward Compatibility
 
 - Once a public API is released, it must not break in a minor or patch release.
@@ -531,6 +547,8 @@ Before marking a milestone as complete, verify:
 - Breaking changes must be preceded by a deprecation period of at least one minor version.
 
 ### 9.2 Deprecation Process
+
+**Post-v1 only** — see the scope note above. In prerelease, skip this process and delete the symbol.
 
 1. Mark the API as `@deprecated` in JSDoc with a migration path.
 2. Provide a replacement API in the same version.
@@ -560,7 +578,12 @@ export function getRequired<T>(key: string): T { ... }
 
 - Never change the behavior of a public API without a version bump.
 - Never change the signature of a public function without a version bump.
-- Never remove a public export without a deprecation period.
+- Never remove a public export without a deprecation period (post-v1; in prerelease a removal needs
+  a `CHANGELOG.md` entry with migration text instead of a deprecation period — see the scope note
+  above).
+- In every case, "silent" is the defect being named: the version bump and the deprecation period are
+  post-v1 mechanisms for announcing a change, and prerelease replaces them with the CHANGELOG entry.
+  It never removes the obligation to announce.
 
 ---
 
@@ -691,7 +714,7 @@ A public API is any export from a package's `src/index.ts` file.
   plugin. (JSR has no peer-dependency concept, so the npm "peer dependency" pattern does not apply.)
 - Instead, adapters either:
   - accept a **client instance injected via plugin options** (preferred — e.g.,
-    `DatabasePlugin({ type: 'prisma', client: prismaClient })`), or
+    `DatabasePlugin({ type: 'prisma', options: { prismaClient } })`), or
   - **lazily load** the driver via dynamic `import()` of an `npm:` specifier, failing with a clear
     error if it is not installed.
 - The framework never installs a database driver by default.
@@ -894,7 +917,67 @@ Closes #123
 - Improvements go through the normal PR process.
 - Refactoring must be justified and must not break backward compatibility.
 
-### 16.5 Code Review Checklist
+### 16.5 Responding to Automated Review Comments
+
+**Applies to every AI agent working this repository — Claude Code, ChatGPT/Codex, Roo Code, and any
+future one.** Automated reviewers (CodeRabbit, the GitHub code-quality bot, and any successor) leave
+findings as **inline review comments on specific lines**. Answer them the same way.
+
+1. **Reply to each comment individually, in its own thread**, not in one summary comment on the PR.
+   A finding is anchored to a line; its resolution belongs on that line, where the next reader —
+   human or bot — will look for it. A single bundled reply forces every reviewer to map N answers
+   back onto N threads by hand, and it leaves each thread visibly unanswered.
+
+   ```bash
+   # Reply inside the thread the finding opened:
+   gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment-id>/replies -f body='…'
+   ```
+
+2. **Verify before you agree.** An automated finding is a hypothesis, not a fact. Reproduce it — a
+   probe, a failing test, or a source trace — before changing anything, and say in the reply which
+   you did. Several such findings have been half-right in this repo: correct about the defect and
+   wrong about the mechanism.
+
+3. **Say plainly when a finding is wrong**, in that thread, with the evidence. Do not silently
+   ignore it and do not make a change you cannot justify just to clear a comment. A refuted finding
+   is a useful record.
+
+4. **Each reply states the outcome**: fixed (with the commit), refuted (with the evidence), or
+   deferred (with the reason and the milestone that owns it).
+
+5. **A summary comment is optional and additional** — never a substitute for the per-thread replies.
+   Use one only to state the round's overall result and the gate evidence.
+
+6. **Decline a finding against an ARCHIVED plan document unless it also impacts the
+   implementation.** A milestone plan under `plans/` is a **design record written before the code**,
+   not a specification the code is checked against. Once the milestone ships, the code, its tests,
+   `PUBLIC_API.md` and `CHANGELOG.md` are the living contract; the plan is history, and it is moved
+   to `plans/archive/` for exactly that reason — so the directory a plan sits in is the test for
+   which rule applies, and it needs no judgement call. Editing it after the fact to satisfy a
+   reviewer rewrites the record of what was decided and when, which is the opposite of what an
+   archive is for.
+
+   So a finding whose entire subject is a plan file — a stale `Status:` header, a path that moved
+   during implementation, a table that no longer matches the shipped file list, prose polish — is
+   **declined, with that reason stated in the thread**. It is not ignored and it is not silently
+   resolved; the thread gets a reply saying the plan is an archived design record and the shipped
+   artifact governs.
+
+   The exception is the whole point of the rule: **if the plan finding also lands on the
+   implementation, the implementation half is in scope and gets fixed.** A reviewer noticing that
+   the plan's §4 exported-surface table names a symbol the barrel never exported has found a real
+   defect in `src/index.ts` or in `PUBLIC_API.md` — fix that, reply with the commit, and leave the
+   plan alone. The test is always: _does anything a consumer can run or read change if I act on
+   this?_ If nothing does, it is plan-only.
+
+   **A plan at `plans/` root is still corrected normally** — it belongs to a milestone under
+   construction, and a plan that misstates a contract there is a defect that will produce wrong
+   code, so §16.5's verify-first rule applies with no decline. This clause governs `plans/archive/`
+   only.
+
+The same rules apply to a human reviewer's inline comments.
+
+### 16.6 Code Review Checklist
 
 Reviewers must verify:
 

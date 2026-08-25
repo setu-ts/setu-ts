@@ -77,6 +77,27 @@ export interface ProblemDetails {
 }
 
 /**
+ * Marks an {@linkcode HttpError} as one the M70f error responder built, and
+ * carries the calling site's disclosure.
+ *
+ * The responder must hand the disclosure to the Problem Details formatters as
+ * the `detail` member while leaving the site's title as the error `message`
+ * (which the `default` formatter emits verbatim). It cannot use
+ * `HttpError.details` alone as that channel: `details` is a free-form bag an
+ * application writes into too, so promoting any `details.detail` would change
+ * the body of a thrown error that merely uses the same key name.
+ *
+ * This marker is a module-private `Symbol` — not `Symbol.for` — because both
+ * writer ({@linkcode ../middleware/error-responder-impl.ts}) and reader
+ * ({@linkcode buildProblemDetails}) live in this package and import it
+ * directly; a global registry key would expose an internal channel that a
+ * third party could forge.
+ *
+ * @internal
+ */
+export const RESPONDER_DETAIL: unique symbol = Symbol('setu.exceptions.responder-detail');
+
+/**
  * Resolves the `type` member of a Problem Details body.
  *
  * @param statusCode - The HTTP status code of the occurrence
@@ -125,12 +146,30 @@ export function buildProblemDetails(
   const isHttp = error instanceof HttpError;
   const statusCode = isHttp ? error.statusCode : 500;
   const errors = isHttp ? extractErrors(error) : undefined;
+  // A responder-built error carries the site's disclosure in its structured
+  // details under a `detail` key (M70f); the Problem Details `detail` member
+  // is that disclosure, falling back to the error message (the title) when a
+  // site supplied none.
+  //
+  // The promotion is gated on {@linkcode RESPONDER_DETAIL}, NOT on the mere
+  // presence of a `detail` key, because `HttpError.details` is a free-form bag
+  // an application also writes into: reading any `details.detail` would
+  // silently change the `detail` member of a thrown
+  // `new HttpError(400, 'Invalid payload', { detail: 'code-7' })` from its
+  // message to `'code-7'` — a released-behaviour change to every application
+  // that happens to use that key name (M70f code review, finding 4). Only an
+  // error the responder built carries the marker, so a thrown error keeps the
+  // pre-M70f shape: `detail` is the message.
+  const carriedDetail = isHttp && RESPONDER_DETAIL in error
+    ? (error as HttpError & { [RESPONDER_DETAIL]?: unknown })[RESPONDER_DETAIL]
+    : undefined;
+  const detail = typeof carriedDetail === 'string' ? carriedDetail : error.message;
 
   return {
     type: resolveType(statusCode, errors !== undefined),
     title: statusTitle(statusCode),
     status: statusCode,
-    detail: error.message,
+    detail,
     ...(ctx !== undefined && { instance: ctx.request.path }),
     ...(errors !== undefined && { errors }),
   };

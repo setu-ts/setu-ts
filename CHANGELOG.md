@@ -47,6 +47,144 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Decorated validation schemas can be enforced without hand-wiring middleware** (M70n, E1/E2) —
+  see **Changed** for the breaking default. `DecoratorPluginOptions.enforceSchemas` controls it, and
+  `@Body()`/`@Query()`/`@Param()` read the VALIDATED value (transforms, defaults and coercions
+  included) via the new `validatedStateKey(target)` helper exported from `@setu-ts/common` — the
+  cross-package state-key wire format both plugins must agree on byte-for-byte, replacing two
+  hardcoded literals. Presence-tested with `ctx.state.has`, so a validated `null` or `0` is
+  honoured; falls back to the raw source when no validated value exists. `@Header`/`@Cookie`
+  deliberately unchanged (case-insensitive header lookup; no cookies schema key).
+- **`PasswordHasher.verify(stored, secret)` throws `MalformedPasswordHashError`** (M70n, X3-9) when
+  `stored` is not a well-formed `pbkdf2$…` string, instead of returning `false`. Both parameters are
+  plain strings, so a reversed call used to fail closed silently — every correct password answered
+  `401 Invalid credentials` with nothing logged. Exported for `instanceof`; a genuinely wrong
+  password still returns `false`.
+- **`StoredAuditEntry` and `AuditQuery` exported from the audit-plugin barrel** (M70n, X4-7). They
+  are the return and parameter types of every exported storage class's `query` member, which were
+  previously unnameable by any consumer (the M52c `NormalizedQuery` class).
+- **`SseMessage.data` accepts any JSON-serializable value** (M70n, X3-6):
+  `string | number | boolean
+  | null | readonly unknown[] | Record<string, unknown>`. The encoder
+  already handled all of them; the type rejected what the implementation accepted, so named
+  interfaces needed casts.
+- **A process-local notice on `RealtimeBackplanePlugin`** (M70n, X3-4). Registering bare defaults to
+  the single-process `'memory'` transport AND silenced the consumers' startup notices — worse than
+  not registering it. The plugin now logs the notice itself at `register()` naming `'redis'`/
+  `'messaging'`; `localNotice: false` suppresses it.
+- **`ReactRouterPluginOptions.publicFiles`** (M70n, X5-5), default `true`: files Vite copies to the
+  client build root (`public/robots.txt`, `favicon.ico`) are served with `must-revalidate` instead
+  of answering an HTML 404 through the SSR catch-all. `false` restores prefix-only behaviour.
+- **`FullStackStarterOptions.static`** (M70n, X5-9): a gated arm registering `StaticPlugin` — the
+  browser-serving tier could not compose static files through configuration. Absent, the plugin list
+  is unchanged.
+
+- **The OpenAPI document is derived from validation middleware** (M70m, X11-5). A route carrying
+  `validateBody(schema)` contributed **nothing** to the document, so the generated client for an
+  API's only write took no argument and answered `400` against the live server, and every response
+  was typed `void`. `@setu-ts/common` gains `VALIDATION_METADATA`, `RouteValidationMetadata`,
+  `withValidationMetadata` and `validationMetadataOf` — the `RouteSecurityMetadata` mechanism
+  applied to request shape — every `@setu-ts/validation-plugin` helper AND
+  `IValidationService.middleware(...)` brand what they validate, and `@setu-ts/openapi-plugin` reads
+  the brand to fill `requestBody` and `parameters`. **On by default**; a declared `schema` field
+  still wins per field, and `OpenApiPlugin({ deriveRequestSchemas: false })` turns derivation off.
+  That flag disables derivation ONLY — the owner exclusion, `operationId` format and schema
+  deduplication changes below are unconditional, so it does not restore the previous document. See
+  **Changed** for the compatibility note. A `cookies` brand derives nothing, with cause:
+  `RouteSchema` has no `cookies` field and `@setu-ts/sdk` refuses an `in: 'cookie'` parameter, so
+  emitting one would turn a working document into a codegen failure.
+- **A derived route is documented as answering `400`** (M70m). The validation middleware genuinely
+  answers it, and an operation carrying no `4XX` is flagged by every strict linter. Description
+  only, no body schema — that shape depends on the validation plugin's configured `errorFormat`,
+  which the generator cannot see. A route declaring its own `400` is left alone.
+- **`OpenApiPlugin({ excludeOwners })`** (M70m, X11-8), defaulting to
+  `['health-plugin', 'metrics-plugin']`. `/health`, `/live`, `/ready` and `/metrics` were documented
+  by default, so every generated client shipped the application's operational surface. Exclusion is
+  by `RouteInfo.owner` rather than by path because those paths are configuration — a static path
+  list stops working the moment an endpoint is renamed. Pass `[]` to document them again. See
+  **Changed** for the compatibility note — a regenerated client loses `getHealth` and friends.
+- **The generated SDK client can be published to JSR** (M70m, X11-4). `createApi` had an inferred
+  return type, which JSR rejects as a slow type — so a consumer had to hand-edit a file whose own
+  header says "Do not edit manually", or lose `.d.ts` generation for their whole package. The
+  generator now emits `export interface Api { … }` and `createApi(client): Api`, renameable with the
+  new `OpenApiCodegenOptions.apiTypeName`.
+- **Declared error responses are typed in the generated client** (M70m, X11-7). An operation
+  declaring a non-2xx response now emits a `status`-discriminated union and an `is<Operation>Error`
+  narrowing guard, so a document's 4xx schemas finally type something. `HttpClientError` is generic
+  in its body (`HttpClientError<TBody = unknown>`), which is source-compatible: the bare name still
+  means `HttpClientError<unknown>`.
+- **`ZodToOpenApi` accepts an optional `onSchema` hook** (M70m), consulted at every node it
+  transforms. Additive — `new ZodToOpenApi()` is unchanged — and it is what lets the document
+  generator deduplicate a schema nested inside another.
+- **`IStorage.put` takes object metadata** (M70k, X8-6). `put(path, data, options?)` accepts a new
+  `PutObjectOptions` carrying `contentType` and `metadata`. Optional, so every existing two-argument
+  call is unchanged. Without it every stored object was `application/octet-stream`, so a presigned
+  URL — the entire point of the feature that produces one — downloaded the object instead of
+  rendering it. S3, GCS, Azure Blob and Cloudflare R2 each record both on the object in their own
+  spelling; the memory and local providers accept and do NOT persist them, documented per provider,
+  because neither backend has anything that could read an attribute back.
+- **`ProcessOptions.onFailed`** (M70k, X8-4). Invoked once when a job has exhausted its attempts,
+  immediately before it is dead-lettered — the first programmatic notice that work was permanently
+  abandoned. `IQueue` has no `getJob` and no dead-letter accessor, so before this the only way to
+  find a dead job was to open a Redis client. A callback that throws or rejects is reported and
+  swallowed; the dead-letter still happens.
+- **Queue metrics** (M70k, X8-4). With `@setu-ts/metrics-plugin` registered, the queue publishes
+  `queue_jobs_total{name,outcome}` where `outcome` is `completed`, `retried` or `dead_lettered`.
+  Absent the metrics capability no collector is built and behaviour is unchanged.
+- **Per-name queue depths in the `queue` health payload** (M70k, X8-4). `data.queues` reports
+  `{ ready, processing, dead }` per job name for the memory and Redis adapters — the durable view a
+  per-process counter cannot give after a restart. OMITTED, never reported as zeros, on RabbitMQ and
+  SQS: "this adapter cannot tell you" and "there is nothing there" are different answers.
+- **`QueuePluginOptions.deadLetterTtlMs`** (M70k, X8-4). Bounds how long a dead-lettered job's
+  payload is retained (Redis). Without it the jobs hash grows for the lifetime of the deployment;
+  opt-in, because the retention exists for debugging. Configuring it MOVES a dead job's payload out
+  of `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and only that key and the dead set carry the
+  expiry — the live hash holds every queued job's payload for that name, so expiring it would
+  destroy work that is merely waiting. Retention is a bound, not a deadline: at least the TTL, and
+  at most the TTL past the last dead-letter, because the sweep runs only when one arrives and the
+  shared key carries a single deadline. It errs late deliberately — dropping a payload early would
+  discard the debugging data the option exists to keep. The payload move is ordered before the
+  dead-set insert so a concurrent dead-letter's sweep cannot delete a member whose payload has not
+  been written and strand it beyond every later sweep.
+- **`UploadMiddlewareOptions.maxBodyBytes`** (M70k, X8-3). An explicit ceiling on the request body
+  the upload middleware will parse, default 50 MB.
+- **`IWorkerHandle.onExit?` and `IWorkerHost.reportsExit?`** (M70k, X8-7). An optional worker-exit
+  signal, implemented over `node:worker_threads`' `'exit'` on Node and Bun's non-standard `'close'`,
+  and **omitted on Deno**, whose web `Worker` emits nothing at all when a worker ends itself.
+  Absence means "this runtime cannot tell me a worker died", never "no worker has died".
+- **`WorkerExitError`** (M70k, X8-7), exported from `@setu-ts/worker-pool-plugin` for `instanceof`
+  handling. Distinct from `WorkerTaskError`, which carries an error the worker managed to report.
+- **`QueueDepths`** is exported from `@setu-ts/queue-plugin`: it appears in the public signature of
+  `MemoryQueue.depths` and `RedisQueue.depths`, and a type a consumer can see but cannot name is a
+  defect (the M52c `NormalizedQuery` class).
+
+- **Per-adapter option arms on `DatabasePluginOptions`** (M70j, D7). `MemoryDatabaseOptions`,
+  `PrismaDatabaseOptions` and `DrizzleDatabaseOptions` join the exported `CustomDatabaseOptions`,
+  and `BuiltInDatabaseOptions` becomes the union of the first three, keeping its published name.
+  `PrismaAdapterOptions` and `DrizzleAdapterOptions` narrow `DatabaseAdapterOptions` for their arm.
+  See **Changed** for the compile-time requirement this introduces.
+
+- **A request-scoped error responder seam in `@setu-ts/common`** (M70f).
+  `respondWithError(ctx,
+  { status, title, detail?, details? })` and the `IErrorResponder` /
+  `ErrorResponseInit` / `ERROR_RESPONDER_STATE_KEY` types let a package that produces an error
+  response — but may not import `@setu-ts/exceptions`, where every formatter lives — answer in the
+  application's configured format. `errorHandler` publishes a responder (built from the formatter
+  and content type it already resolved at factory time) into `ctx.state` before `next()`; every
+  short-circuiting site in the kernel and in the storage, multi-tenancy, session, auth,
+  http-security and feature-flags middleware now delegates to it, so one
+  `errorHandler({ format: 'rfc9457' })` governs every error body those sites produce.
+  `validation-plugin` is deliberately **not** part of the seam — it owns its own `errorFormat`
+  option and formats validation failures itself — so an application configures the two together; the
+  CLI templates and `rest-starter` now do (C3). `@setu-ts/common` also gains `serializeError` /
+  `SerializedError`, a pure serializer that turns any thrown value into a plain object with a
+  bounded `cause` chain.
+- **`INotifier.sendSettled?` and `ChannelSendResult` in `@setu-ts/common`** (M70f, X8-12). An
+  optional, non-throwing twin of `send` that reports one `{ channel, ok }` result per requested
+  channel (a failure carrying its serialized error), so a caller behind a retrying queue can retry
+  the one failing channel instead of re-sending the whole notification. `NotificationService`
+  implements it; `send`'s `AggregateError` members now each **name their channel**
+  (`"channel '<name>' failed"`), the original error riding on `cause`.
 - **Reachability-aware health signals for six infrastructure plugins** (M70c). `messaging-plugin`,
   `realtime-backplane-plugin`, `storage-plugin`, `mail-plugin`, `queue-plugin`, and
   `service-discovery-plugin` now report a backend's _reachability_, not just its lifecycle. Each
@@ -157,8 +295,398 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/common`).
 - **`DatabaseAdapterOptions.provider`**, the exported **`PrismaSqlProvider`** type, and
   **`UnsupportedFilterOperatorError`** — see **Changed** for the `contains` behaviour they govern.
+- **Telemetry auto-instrumentation outcomes are now reported, not silent** (M70e). The
+  `instrumentations` registry reports every outcome through the plugin's logger (`ctx.logger`, read
+  at call time): an enabled instrumentation logs one line at `debug`, a loader or enable failure one
+  line at `warn` carrying `kind` and `reason`. A failure remains a documented no-op — it is still
+  never thrown — but it is no longer invisible. The plugin declares the logger capability in
+  `optionalDependencies`, so the kernel registers a plugin-provided logger (e.g. `LoggerPlugin`)
+  before it and the standard configuration (`RuntimePlugin` + `LoggerPlugin` + `TelemetryPlugin`)
+  reports every outcome; without any logger plugin the app still boots and the outcomes are recorded
+  on the registry handle with nothing emitted. The five instrumentation loaders' default importers
+  now take zero arguments (the specifier is a literal inside the default), so the default path is
+  the one a published artifact can actually run.
+- **A recurrence gate for computed `import()` specifiers** (M70e). `scripts/npm-specifier-audit.ts`
+  walks every `packages/*/src` file and refuses any dynamic `import()` whose first argument is not a
+  string literal, unless the call carries a `computed-specifier: <reason>` marker (an empty reason
+  is rejected). `test/npm-specifier-gate.test.ts` runs it on every suite run, and
+  `deno task release:verify` enforces it as check 6, so the X7-3 shape (a specifier routed through a
+  variable that JSR's static npm-compat rewrite cannot reach) cannot re-enter the source tree.
+
+- **Scheduler multi-instance deduplication** (M70l, X10-2). A `cron` or `every` fire claims a slot
+  lock keyed on the fire's intended time (`scheduler:job:<name>:<slot>`) which is **never released**
+  and expires on `ttlMs`, so replicas sharing one lock backend run an intended fire exactly once
+  between them — a guarantee that holds only while `ttlMs` exceeds the maximum skew between
+  replicas, since the TTL is how long a claimed slot stays remembered. A `delay` job differs: its
+  slot is keyed on the job name (`scheduler:job:<name>:once`), claimed at REGISTRATION rather than
+  at fire time, and **released** when the entry leaves the registry, so re-registering the name
+  after it fired fires again. The existing per-handler mutex is kept unchanged for overlap
+  protection. `MemoryLock` now sweeps every expired entry on `acquire`, because a recurring slot key
+  is never released and never reacquired, so the previous lazy per-key delete could never reclaim it
+  and the map grew one entry per job per fire, forever.
+
+- **`MetricsPluginOptions.excludePaths`** (M70l, X10-7). Request paths the HTTP metrics middleware
+  skips entirely. When supplied it REPLACES the default `['/health', '/live', '/ready']`; the
+  plugin's own scrape endpoint is always excluded either way, so `/metrics` no longer counts its own
+  scrapes or the health probes.
+
+- **Generated Kubernetes members carry the chart's graceful-shutdown pieces** (M70l, X10-4/X10-6).
+  `setu generate app` now emits `lifecycle.preStop.sleep.seconds: 5` (Kubernetes 1.30+) on every
+  container, and `prometheus.io/scrape|port|path` annotations on members generated with a template
+  (recorded via the new `metricsEndpoint` field of `setu.workspace.json`; absent means unknown and
+  emits none).
+
+- **`SchedulerUnavailableError`** (M70l, X9-2). `SchedulerPlugin.register()` refuses to register on
+  Cloudflare Workers, where its timers cannot fire, naming `WorkersCron` and `[triggers] crons` as
+  the replacement.
 
 ### Changed
+
+- **BREAKING: `@ValidateBody(schema)` (and `@ValidateQuery`/`@ValidateParams`) now enforce their
+  schema by default** (M70n, E1). The decorators shipped as inert metadata — a decorated route
+  accepted any body — so an application upgrading that carries a decorated route whose body its
+  schema rejects starts answering `400` with no configuration change. Enforcement appends the
+  validation capability's middleware LAST in the route's chain (innermost, after guards), preserving
+  guard `401`/`403` precedence; with no validation provider registered the schema stays
+  description-only and ONE warning per route names the controller, handler, targets and
+  `ValidationPlugin`. **Migration:** pass `DecoratorPlugin({ enforceSchemas: false })` to keep the
+  previous description-only behaviour.
+
+- **BREAKING: the default session cookie is renamed `hono_session` → `setu_session`** (M70n, X9-10).
+  The framework is not Hono, and the rename only gets more expensive with every release that ships
+  it. In-flight sessions are invalidated at deploy: every user is logged out once. **Migration:**
+  pin `SessionPlugin({ cookie: { name: 'hono_session' } })` for one `maxAge` window to preserve live
+  sessions, then drop the pin.
+
+- **BREAKING: `IResponse` gains a REQUIRED `html(body)` member** (M70n, X4-11), implemented in the
+  kernel's `ResponseBuilder` and `testing`'s `MockResponse`. It sets
+  `content-type: text/html; charset=utf-8` — the charset is not optional, because a bare `text/html`
+  lets a browser sniff the encoding. **Migration:** an out-of-repo `IResponse` implementor adds the
+  member; every caller-side use is source-compatible.
+
+- **BREAKING: the `cacheControl` callback receives a leading-slash path** (M70n, C5/D8). The value
+  was slash-less for a file (`assets/app.js`) but the literal `'/'` at the prefix root, while the
+  docs said only "root-relative" — a callback written against one observed shape was silently wrong
+  for the other. Both shapes are now normalised to a leading slash (`/assets/app-A9acsx54.js`, `'/'`
+  at the root) and documented as such. **Migration:** a callback comparing against a slash-less form
+  (e.g. `path.startsWith('assets/')`) changes to `/assets/`; one matching on extensions or the root
+  literal is unaffected.
+
+- **`WorkersCron.dispatch` now rejects on failure instead of always resolving** (M70l, X9-5).
+  **Breaking.** A firing trigger with no registered handler throws naming the expression; one or
+  more rejecting handlers run to settlement — a failing handler still never abandons the others —
+  and then `dispatch` throws an `AggregateError` carrying every failure. `createScheduledHandler` is
+  a bare delegation, so the rejection reaches Cloudflare and counts the whole invocation as failed:
+  that is the signal, and it needs no logger configuration. A configured logger still receives both
+  reports first. An application that wants the old fire-and-forget behaviour wraps its own handlers
+  in `try`.
+
+- **The generated Cloudflare Workers `fetch` export no longer propagates a failed boot** (M70l,
+  X9-8). A boot error (a mistyped binding, a broker briefly down at cold start) is now logged to the
+  platform's console and answered with a generic `503 Service Unavailable` — the stack never reaches
+  the client. The failed boot promise is cleared, so the next request re-attempts the boot rather
+  than being pinned to the failure for the isolate's life. An application that wants the error body
+  can wrap its own handler around `app.fetch`.
+
+- **The generated Dockerfile folds `chown -R` into the dependency-cache layer** (M70l, X10-5). A
+  standalone `chown -R` rewrites metadata on every file the cache layer created, so overlayfs copied
+  the ENTIRE Deno module cache into a second layer — measured at 563 MB vs 362 MB with the fold,
+  paid on every push and every node pull. Image contents are unchanged; only the layer layout
+  differs, so existing deployments need no action beyond the next rebuild.
+
+- **`every` jobs arm on an absolute epoch grid** (M70l, X10-2). The first fire lands on
+  `(floor(now / interval) + 1) * interval` rather than a full interval after registration, at
+  registration, re-arm, and resume alike. The period is unchanged; only the phase moves, and the
+  fire is never LATER than before — it may come sooner than one full interval after registration, so
+  a job assuming "I have been up a full interval" behaves differently. This is what makes replicas
+  started at different instants agree on distributed-lock slot keys. **Breaking (resume contract):**
+  the released contract stated that resuming an `every` job restarts the interval "from now";
+  resuming now lands the next fire on the next epoch grid boundary instead. The implementation has
+  always resumed on the grid (that is the alignment replicas need to agree on slot keys), so the
+  contract and `PUBLIC_API.md` are corrected to match — a resumed fire may come sooner than one full
+  interval after `resume()` (never later).
+
+- **`RabbitMqBroker` declares its queues with the shape their subscription implies** (M70l, X10-1).
+  **Breaking.** A caller-supplied queue name (a consumer group) is declared `{ durable: true }` — it
+  survives a broker restart, which is what `queue` documents; the private per-subscriber queue and
+  the RPC reply inbox are declared `{ exclusive: true, autoDelete: true }`. The previous
+  unconditional `{ durable: false }` named non-exclusive form is refused by RabbitMQ 4 outright
+  (`541 INTERNAL-ERROR … transient_nonexcl_queues`). CI's RabbitMQ service moves to major version 4
+  with this change.
+
+  **Migration — deployments upgrading against an EXISTING broker.** A named consumer-group queue
+  that the old client created as `{ durable: false }` cannot be re-declared `{ durable: true }`:
+  RabbitMQ answers `406 PRECONDITION_FAILED` and closes the channel, so every subscriber on that
+  queue stops until the queue is redeclared. To restore service, delete the existing non-durable
+  queue (drain it first if in-flight messages must be preserved — a non-durable queue's contents are
+  lost on broker restart anyway) and let the new client re-declare it as durable:
+
+  ```bash
+  rabbitmqadmin delete queue name=<consumer-group-queue>
+  ```
+
+  Deployments whose brokers are provisioned fresh (or whose queues were already declared durable)
+  see no change. Private per-subscriber queues and the RPC reply inbox are exclusive/auto-delete and
+  are recreated per connection; they never carry this problem.
+
+- **Reused OpenAPI schemas are deduplicated symmetrically, and named from their first use** (M70m,
+  X11-6). The first use of a reused schema was inlined and never rewritten, so one shape appeared
+  **both inline and as a `$ref`** in one document, under the meaningless name `Schema1`; and a
+  schema nested inside another was not counted at all, so two structurally identical cases behaved
+  differently. Every site of a reused schema now carries a `$ref`, nested schemas are deduplicated
+  too, and a hoisted component is named from the site that first reached it
+  (`GetOrdersByIdResponse404`). **A generated client's component type names change accordingly** —
+  regenerate it. A reused primitive stays inline: a `$ref` to `{"type":"string"}` is larger than the
+  schema it replaces.
+- **`operationId` no longer carries path braces** (M70m, X11-8). `GET /orders/{id}` derived
+  `get-orders-{id}`, which Redocly's recommended ruleset flags as URL-unsafe and which breaks any
+  tool that puts an `operationId` in an anchor, a filename or a URL. It is now `get-orders-by-id`.
+  **This renames generated client methods** — `getOrdersId` becomes `getOrdersById` — so regenerate
+  clients and update call sites. Nothing else reads an `operationId`.
+- **Breaking (behaviour): an operation's `requestBody` and `parameters` are now derived from its
+  validation middleware** (M70m, X11-5). Derivation is ON by default, so the document emitted for
+  any application whose routes carry `validateBody`/`validateQuery`/`validateParams`/
+  `validateHeaders` changes without a configuration change, and a derived route also gains a `400`.
+  Regenerate any committed client. `OpenApiPlugin({ deriveRequestSchemas: false })` restores the
+  previous request shape — and nothing else; see the two entries below.
+- **Breaking (behaviour): operational routes are no longer documented** (M70m, X11-8). `/health`,
+  `/live`, `/ready` and `/metrics` are excluded by default via the new `excludeOwners`. A
+  regenerated client therefore NO LONGER declares `getHealth`, `getLive`, `getReady` or
+  `getMetrics`, so any call site using one stops compiling — that is the intended correction, since
+  those operations were the application's operational surface rather than its API. Pass
+  `excludeOwners: []` to document them again.
+- **Breaking (behaviour): CORS no longer refuses `content-type` while advertising `POST`** (M70m,
+  X11-3). `CorsOptions.allowedHeaders` defaulted to `[]` while `methods` defaulted to every standard
+  verb, so a preflight offered `POST`/`PUT`/`PATCH`/`DELETE` and then carried no
+  `Access-Control-Allow-Headers` — every browser blocked every JSON request made against the
+  configuration the README itself showed. Omitting the option now ECHOES the preflight's
+  `Access-Control-Request-Headers` for an allowed origin and adds
+  `Vary: Access-Control-Request-Headers`. An explicit list still allows only those headers, and an
+  explicit `[]` still allows none, so any application that configured the option is unaffected. The
+  origin allowlist — the actual security boundary — is unchanged, and a denied origin echoes
+  nothing.
+- **Generated SDK client source is `deno fmt`- and `deno lint`-clean** (M70m, X11-9). It emitted
+  4-space indentation against the 2-space config every scaffolded project ships, left nested inline
+  object types unindented, and opened with a blanket `deno-lint-ignore-file` carrying no rule list —
+  so codegen output could not be committed to a scaffolded project without formatting a file whose
+  header forbids editing it. Output is now 2-space and depth-indented, signatures past 100 columns
+  wrap one parameter per line, a path template too long for one line is emitted as an equivalent
+  `[…].join('')`, an empty-object schema emits `Record<PropertyKey, never>` rather than the
+  `ban-types`-rejected `{}`, and no pragma is emitted at all. The two committed generator-output
+  fixtures were removed from `deno.json`'s `fmt.exclude`, so the repository's own `fmt` and `lint`
+  gates now enforce this permanently. Every multi-line type is also **hoisted into an exported
+  alias** rather than written inline at a use site — an inline (non-`$ref`) request body, parameter
+  or success response was emitted at whatever indentation its use site sat at, and a success type is
+  written at TWO indentation levels at once, so no single indent could be correct. Both original
+  fixtures name every schema through `$ref` and so could not show it, while a schema derived from
+  validation middleware and used once arrives inline; a third fixture generated from an
+  inline-schema document now covers the case.
+- **`GrpcPlugin`'s `basePath` now defaults to `/` (the root), and native gRPC-binary requests are
+  refused with `UNIMPLEMENTED`** (M70i, X7-2 / X7-4). The old default `'/grpc'` was unreachable by
+  every native client — a gRPC path comes from the method name alone, and no client has a prefix
+  option. RPC detection stays segment-aware, so ordinary routes like `/grpcfoo` are untouched.
+
+  **Migration — applications that relied on the default.** If you pointed clients at
+  `http://host:3000/grpc/<service>/<method>`, either pass `basePath: '/grpc'` explicitly or point
+  the client at `http://host:3000/<service>/<method>`. Applications that already set `basePath`
+  explicitly see no change.
+
+  Native gRPC-binary requests (`application/grpc`, `application/grpc+proto`,
+  `application/grpc+json`) are answered with a Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`)
+  instead of reaching Connect's handler, where every call failed with an opaque "missing status"
+  transport error after a successful handshake: no runtime on which the plugin loads exposes the
+  HTTP/2 trailers the native protocol requires. **Connect (`application/connect+*`) and gRPC-Web
+  (`application/grpc-web+*`) remain fully supported** on all runtimes; point native gRPC clients at
+  a gRPC-Web-capable proxy or switch them to Connect.
+
+- **`graphql-plugin`: resolvers can be typed without casts, and the WebSocket context no longer
+  pretends to carry an HTTP request** (M70i, X6-4 / X6-6 / X6-7). `FieldResolver` is generic
+  (`FieldResolver<TSource = unknown, TContext = unknown, TArgs = Record<string, unknown>>`; existing
+  all-`unknown` resolvers stay assignable), and `DefaultGraphqlContext` is typed against
+  `@setu-ts/common` (`services: IServiceRegistry`, `user?: IPrincipal`, `tenant?: ITenant`). Over
+  HTTP the context is `{ services, requestContext, user?, tenant? }`; over WebSocket it is
+  `{ services, connection }` and **`requestContext` is absent** — the upgrade request is closed once
+  the handshake response returns, so a synthesized one would be dead by resolver time. The upgrade
+  request's headers/query live on `connection.headers`/`.query`. `requestContext` is therefore typed
+  optional; code that dereferenced it must narrow first.
+
+  A resolver's `ctx.services` is now the live registry on **every** entry point. `execute()` and
+  `subscribe()` take their request context optionally, and a call passing only `params` previously
+  received `{}` there — so `ctx.services.get(...)`, which `services: IServiceRegistry` now invites
+  without a cast, threw a `TypeError` that error masking reported as `Internal server error`. The
+  fallback is the plugin-level registry instead.
+
+  APQ refusals now follow the documented media-type watershed from one owner: under
+  `application/json` an APQ miss answers `200` with `PersistedQueryNotFound` in the body (the one
+  error a client must read and retry); under `application/graphql-response+json` it carries the
+  resolver's own status.
+
+- **BREAKING: `StoragePluginOptions` is now a union discriminated on `provider`** (M70k, X8-11). One
+  unknown key used to make the compiler report EVERY property of the literal as
+  `not assignable to type 'never'` while never naming the offending one, because the union's first
+  member was `MemoryProviderOptions = Record<string, never>` — which accepts any object shape while
+  requiring every property to be `never`. Discriminating the union alone did NOT fix the reporting
+  (measured); removing that member did. **Migration:** `provider` stays optional on the memory arm,
+  so `StoragePlugin()` and `StoragePlugin({ provider: 'memory' })` are unchanged. Every other arm
+  now requires its own `options` and its required fields — `bucket` for `'s3'`/`'b2'`/`'gcs'`,
+  `containerName` for `'azure'` — which were previously runtime failures. `MemoryProviderOptions` is
+  removed; the memory arm takes no `options`, so drop `options: {}` if you passed it.
+- **`IAwsS3Client` is renamed `IS3Backend`, with the old name kept as a deprecated alias** (M70k,
+  X8-10). The old name promised something it never was: `@aws-sdk/client-s3`'s surface is
+  `send(command)`, so injecting a real `S3Client` was refused with
+  `Injected S3 client is missing required methods`. What the type declares is the backend surface
+  this package's own adapter PRODUCES. **Migration:** rename the import; the shape is unchanged, and
+  the alias keeps existing code compiling in the meantime (AI_GUIDELINES §9.2 — the replacement is a
+  working, identical shape, so a rename does not need to be a compile error). There is still no
+  supported way to configure the underlying SDK client.
+- **BREAKING: `WebWorkerLike` requires `addEventListener`** (M70k, X8-7). A real web `Worker` is an
+  `EventTarget`, and the worker-exit signal needs it. **Migration:** an injected fake worker must
+  add the method; a real `Worker` already satisfies it.
+- **Upload size refusals answer `413` rather than `400`** (M70k, X8-3). A body over the parse bound
+  and a file over `maxSize` are now `413 Request entity too large` / `413 File too large`; a
+  malformed body, a disallowed MIME type and too many files remain `400`. Telling a client its
+  request was malformed when it was merely large sent it to the wrong fix.
+- **`LocalStorageProvider.connect()` proves its root is writable and refuses to start otherwise**
+  (M70k, X8-9). It also became a rejection rather than a synchronous throw, so a caller using
+  `.catch()` on this `Promise`-typed method reaches it. **Migration:** none for a working
+  configuration; a root the process cannot write now fails at startup naming the cause — and, on
+  Deno, naming `--allow-write` — instead of failing every upload while `/health` reported `up`.
+
+- **BREAKING (types only): a `'prisma'` or `'drizzle'` registration must now name the options its
+  adapter cannot run without** (M70j, D7). `DatabasePluginOptions` is a union discriminated on
+  `type`, and its built-in arm made every adapter-specific field optional on a nested bag, so
+  omitting one was a runtime throw at `connect()` rather than a compile error — unlike the
+  `'custom'` arm, which has required `adapter` since M52c. `type: 'prisma'` now requires
+  `options.prismaClient` and `type: 'drizzle'` requires both `options.drizzleInstance` and
+  `options.drizzleTables`. **Only a registration that already failed at startup stops compiling**,
+  and the runtime guards are unchanged, so a JavaScript caller sees exactly what it saw before.
+
+  ```typescript
+  // Before — compiled, then threw at app.start()
+  DatabasePlugin({ type: 'prisma' });
+  DatabasePlugin({ type: 'drizzle', options: { drizzleTables: { User: users } } });
+
+  // After
+  DatabasePlugin({ type: 'prisma', options: { prismaClient } });
+  DatabasePlugin({
+    type: 'drizzle',
+    options: {
+      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleTables: { User: users },
+    },
+  });
+  ```
+
+- **BREAKING (behaviour): the Memory adapter refuses an unknown `select` or `orderBy` column**
+  (M70j, X12-5). The **default** adapter used to accept both silently — a projection quietly lost
+  the field and a sort quietly returned rows in insertion order — while Prisma and Drizzle answered
+  `500` for the identical call, so a rule proved in development became a production failure. A field
+  that **no stored row carries** is now refused with the entity, the clause and the observed column
+  list, matching Drizzle's message. A field present on at least one row counts as known, and an
+  entity holding no rows accepts anything. `where` and `filter` are deliberately unchanged: with no
+  schema this adapter cannot tell an unknown column from one absent everywhere, and matching nothing
+  is a defensible answer. If a projection over a column that has never been written is intentional,
+  write the column (even as `null`) on one row, or list only fields the store has seen. Uniqueness
+  and column types remain unenforced and cannot be enforced by a schema-less store — the package
+  README now states that plainly.
+
+- **The Drizzle table registry validates `id` lazily** (M70j, X4-9). `connect()` refused **every**
+  registered table without an `id` column, so a composite-key join or per-tenant table registered
+  only for the typed query builder made the whole registry unusable. The registry now accepts any
+  table definition; a repository for an `id`-less table is refused by name at `getRepository()`,
+  where `IRepository`'s single-key contract actually applies. Strictly widening — no configuration
+  that worked before changes.
+
+- **Error bodies now answer in the application's configured format (X4-8, C3)** (M70f). Every
+  short-circuiting site — the kernel's 404/400/503/500 terminals, `createUploadMiddleware`'s
+  rejections, the multi-tenancy `400`, the session tenant-mismatch and form-CSRF `403`s, the auth
+  guards, the http-security `413`/`403`s, and the feature-flag guard — now writes its body through
+  the responder seam, so an `errorHandler({ format: 'rfc9457' })` governs them all.
+
+  **Migration — with `errorHandler` registered (every CLI template and starter).** This is the case
+  that changes, and it changes for every one of these sites: they previously bypassed the configured
+  format and answered their own `application/json` body, and they now answer in it. Under
+  `format: 'rfc9457'` a rejection that was
+  `{"error":"Too many files","detail":"Maximum 3 file(s) allowed"}` (`application/json`) becomes
+  `{"type":"about:blank","title":"Bad Request","status":400,"detail":"Maximum 3 file(s) allowed","instance":"/upload"}`
+  (`application/problem+json`). **A client that branched on the `error` member must read `detail`
+  instead** — the site-specific label (`Too many files`, `Tenant Required`, `Tenant Mismatch`,
+  `Invalid MIME type`) is no longer a body member, because RFC 9457 §4.2 requires `title` to be the
+  status title for the `about:blank` problem type. Under `format: 'default'` the label is the
+  `message` member and the disclosure is `details.detail`. There is no option that restores the
+  pre-M70f ad-hoc bodies; answering in the configured format is the defect being fixed (X4-8).
+
+  **Migration — with no `errorHandler` registered.** Sites that answered `{ error, message }` now
+  answer `{ error, detail }` (the disclosure moves from the non-standard `message` key to the RFC
+  9457 `detail` key), and the feature-flag guard's bare `text/plain` `Not Found` is now the JSON
+  fallback `{"error":"Not Found"}`.
+- **`IGrpcService.addService`'s `implementation` parameter is now `unknown`** (M70f). It was
+  `Partial<ServiceImpl>`, an index-signature type that **rejects a class instance** — whose methods
+  live on the prototype rather than as own properties — although Connect accepts one, so a
+  class-based service implementation could not be passed without a cast. Widening is
+  source-compatible for callers: an implementation that type-checked before still does.
+  **`ServiceImpl` is removed** from `@setu-ts/common` — the widening left it with no reader anywhere
+  in the framework, and while the project is in prerelease a dead export is deleted rather than
+  carried as deprecated surface. **Migration:** drop any `as Partial<ServiceImpl>` cast or
+  `ServiceImpl` annotation at an `addService` call site and pass the implementation directly.
+- **An unhandled request error is now logged by the kernel (X11-2)** (M70f). The fallback `500` path
+  previously discarded the error and logged nothing even with `LoggerPlugin` registered; it now
+  reports the message and stack through `CAPABILITIES.LOGGER` (guarded so a missing or broken logger
+  degrades silently). The response body stays opaque — the message is not disclosed to the client.
+- **A raw `Error` in log metadata no longer serializes to `{}` (X2-5)** (M70f). The console and pino
+  loggers normalize any `Error` value in merged metadata through `serializeError` before redaction,
+  so **any** call site is safe on those two loggers, and the two known raw-`Error` call sites
+  (`events-plugin`'s handler failure and `errorHandler`'s `cause`) serialize explicitly, so those
+  stay correct on a third-party `ILogger` too. A third-party logger does not normalize, so a NEW
+  call site handing it a raw `Error` can still render `{}` — pass `serializeError(err)` there.
+- **A gRPC handler error is now logged (X7-5)** (M70f). `grpc-plugin` wraps each application handler
+  so a thrown or rejected error is logged at `error` level with the procedure name and a serialized
+  error, then rethrown — the masked wire response is unchanged. The logger is resolved at call time,
+  so a logger registered after `GrpcPlugin` is still seen. `GrpcPluginOptions` gains
+  `interceptors?: readonly unknown[]`, threaded into `createConnectRouter` (which previously dropped
+  the argument its own facade declared).
+
+- **Breaking (behaviour): a route that names its path now beats a catch-all, in either registration
+  order** (M70g, X5-1/F1). The kernel's tie-break ranked candidates by static-segment count, and a
+  `*` segment was COUNTED AS STATIC — so `GET /*` tied with `GET /openapi.json` and whichever
+  registered first simply won. `ReactRouterPlugin` mounts its SSR catch-all at
+  `PLUGIN_PRIORITY.NORMAL` (500) while `OpenApiPlugin` registers at `OPENAPI` (700), deliberately
+  last so it can document every route, so **every full-stack application silently lost
+  `/openapi.json` and `/docs`** to an SSR 404 page, with no error anywhere; the same shape removed
+  those endpoints under a root-mounted `StaticPlugin`. `*` is now its own segment kind and the
+  ranking is: more static segments, then FEWER wildcards, then earliest registration. That also
+  corrects an inversion — `/a/*` outranked `/a/:id` in both orders. **Migration:** an application
+  relying on a catch-all registered first to shadow a later single-segment route now serves the
+  later route. The shadowed route was unreachable by accident rather than by configuration, so the
+  change is toward what the developer wrote; a route that must not be reachable should not be
+  registered. Known limit: the rule compares counts rather than positions, so `/a/*` loses to
+  `/:x/b` on `/a/b`.
+- **Breaking (message): the duplicate-route refusal now names the plugin that registered the route
+  first** (M70g, X5-6/X4-4). `Route 'GET /*' is already registered.` became
+  `Route 'GET /*' is already registered by plugin 'react-router'.`, or `… by the application.` for a
+  route the application registered itself. The old message named the pattern and the SECOND
+  claimant, which the stack trace already carried; the missing half was who held it. **Migration:**
+  a test asserting the exact old string needs the suffix; the message is otherwise unchanged.
+- **Breaking (behaviour): `setu generate` no longer lists a hand-registered module in the generated
+  barrel** (M70g, X4-4/F2). The seam scanner admits any file matching a family's suffix and exports,
+  so a developer's own `src/controllers/admin.routes.ts`, wired by hand from `setu.config.ts`, was
+  swept into the CLI-owned barrel by an UNRELATED `setu generate route report` — and since M68
+  refuses a duplicate `METHOD path`, the application stopped booting, with an error naming two files
+  the developer had not touched, from a command that reported success. A candidate whose symbol
+  already appears in `setu.config.ts` is now left out of the barrel and reported — for a barrel that
+  registers something, which excludes the functional `src/services/index.ts` re-export, where that
+  symbol is the developer consuming the barrel exactly as its header documents. A file the barrel
+  claims for the first time is reported as adopted, once, at the moment it happens. **Migration:**
+  none for generated artifacts, whose symbols never appear in `setu.config.ts`. A project that
+  deliberately wired a conventionally-named module by hand AND relied on the barrel registering it
+  too was already failing to boot.
+- **Breaking (behaviour): `setu generate health-indicator` refuses a name an installed plugin
+  claims** (M70g, A1). `setu g health-indicator database` in a project with `DatabasePlugin` wrote a
+  file, type-checked, and then threw `Duplicate health indicator name: "database"` at `app.start()`.
+  Every plugin that registers an indicator claims a name, and fifteen of them claim exactly the ones
+  reached for first — `database`, `cache`, `storage`, `session`, `events`, `mail`, `audit`, and
+  more. The command now refuses before writing, naming the plugin. **Migration:** choose a qualified
+  name (`billing-schema` rather than `database`), or remove the plugin.
 
 - **Breaking (behaviour): the gRPC health bridge maps `degraded → NOT_SERVING`** (M70c, X7-8). It
   previously mapped `degraded → SERVING`, so a degraded process answered `SERVING` on
@@ -289,6 +817,129 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Every doc site showed `authMiddleware()` registered at a priority its own architecture table
+  does not grant it** (M70n, X3-1). `ARCHITECTURE.md` §10 reserves 300 for authentication, but a
+  bare `app.middleware.add(authMiddleware())` takes the kernel default of 500 — AFTER every band in
+  that table, so a hand-written global guard in any documented band rejected valid credentials while
+  route guards worked. The README, both JSDoc examples and `PUBLIC_API.md` now write the explicit
+  `{ priority: 300 }`, and §10 states that its priorities are conventional bands, not
+  self-registrations, with 500 outside the table's range.
+- **The backplane's documented partition guarantee was wrong for the first ~11 seconds** (M70n,
+  X3-3). ioredis's default offline queue holds publishes during a short partition and delivers them
+  LATE (measured ~5.9 s) — which an application told "frames during a partition are missed" will not
+  defend against — until the `maxRetriesPerRequest` budget exhausts and drops them with a warn per
+  frame. Both READMEs and `PUBLIC_API.md` document the actual shape; neither ioredis default is
+  reachable through plugin options (inject a client pair to change it).
+- **The websocket README nominated a cookie as the first credential to verify in `onOpen` — and a
+  cookie cannot be verified there** (M70n, X3-5). `ISessionService.from(ctx)` needs the request
+  context an upgrade bypasses, and no open-from-headers seam exists. The README now says what works:
+  a signed query parameter or subprotocol nonce, with the composition gap tracked in
+  `smoke/DEFECTS.md`.
+- **`room()`/`channel()` are get-or-create, and nothing public said so** (M70n, X3-8). A presence
+  endpoint reading `size` for caller-supplied names created one room/channel per distinct name,
+  reclaimed only on some other connection's disconnect. Both READMEs and `PUBLIC_API.md` document
+  the semantics.
+- **A hand-written `RouterContextKey` literal silently returns its default** (M70n, X5-7) — keys
+  match by identity and the declaring module reliably exists twice in a framework-mode build. The
+  react-router README now carries the `contextKeyFor` warning (and its loader example, which read a
+  nonexistent `context.services`, actually compiles).
+- **`resilience.wrap()` rebuilt per request silently disables the circuit breaker** (M70n, X7-9).
+  Retry and timeout keep working, so the broken shape looks identical to the working one. The
+  resilience README and `PUBLIC_API.md` say to hoist the wrapped call to module or plugin scope.
+- **`SessionPlugin({ csrf: {} })` — the registration every doc shows — could not accept a JSON
+  mutation** (M70n, X4-5): `csrf.headerName` had no default, so the token was readable only from a
+  urlencoded body. It defaults to `'x-csrf-token'` (the name the package's own JSDoc example already
+  used); an explicit name still wins.
+
+- **`every` jobs armed their timer for a full interval instead of the delay to the grid boundary**
+  (M70l, X10-2). `every()` computed a grid-aligned `nextRunAtMs` but armed the timer for the whole
+  `intervalMs`, so an off-grid registration ran the job a full interval LATER than the boundary it
+  was aligned to — defeating the grid alignment (and the slot agreement it exists for) until the
+  re-arm after the first fire. The timer is now armed for `Math.max(0, nextRunAtMs - now)` at
+  registration and on every re-arm, so each fire lands at the boundary it was aligned to.
+
+- **`delay` jobs no longer deduplicated across replicas** (M70l, X10-2). The fire slot for `delay`
+  entries was keyed on `nextRunAtMs`, which for a delay is `now + delayMs` and therefore carries
+  per-replica startup skew: two replicas registering the same one-shot delay 700 ms apart computed
+  different slot keys and BOTH ran the handler. The slot is now claimed at REGISTRATION, keyed on
+  the job name (skew-independent), and released when the entry leaves the registry — on fire,
+  `remove()`, or TTL expiry — so a re-registration under the same name after the delay fired gets a
+  fresh slot and still fires (the regression the name-keying previously guarded against stays
+  guarded). `cron` and `every` keep their fire-time, grid-aligned slot keys, which are
+  skew-independent by construction.
+
+- **`RabbitMqBroker` treated any user queue named `rr.inbox.*` as the private RPC reply inbox**
+  (M70l, X10-1). The reply inbox's transience was detected by pattern-matching queue names against
+  the internal `rr.inbox.` prefix, but `SubscribeOptions.queue` has no reserved-prefix restriction —
+  a legitimate consumer group named e.g. `rr.inbox.orders` was declared
+  `{ exclusive: true, autoDelete: true }` and non-durable, so a second instance's use of it was
+  refused. The inbox is now marked transient by a flag on the internal subscribe call at the point
+  it is created, and a user `subscribe({ queue: 'rr.inbox.orders' })` is declared as a normal
+  durable competing-consumer group queue.
+
+- **Every documented example of reading a validated request read the WRONG `ctx.state` key** (M70m,
+  found in verification). `validateBody` and friends store under `validated:${target}` —
+  `validated:body`, `validated:query`, … — while `packages/validation-plugin/README.md`, that
+  package's module JSDoc (which is what jsr.io renders as its package page), `ARCHITECTURE.md` and
+  five `PUBLIC_API.md` examples all wrote `validatedBody`/`validatedQuery`/`validatedParams`. A
+  route following any of them received `undefined` and answered with an empty body — validation
+  itself worked, so nothing failed loudly. 11 sites corrected; the code's key is released behaviour
+  and is unchanged. Every test in the package already used the real key, which is exactly why no
+  gate could see it.
+- **An upload's `maxSize` did not bound what the middleware parsed** (M70k, X8-3). The buffering
+  bound was `Math.max(maxSize * 2, 50 MB)` under a comment reading "cap at 50 MB", which made 50 MB
+  a **floor**: a 1 KB per-file limit multipart-parsed a 40 MB body before rejecting it, and a 100 MB
+  limit raised the bound to 200 MB and delivered a 60 MB body to the handler unchecked. It is now
+  `min(maxSize * 2 + framing, maxBodyBytes)` — a real cap. Note what this does and does not do: it
+  bounds the PARSE and the per-part copies, not the initial read, because the HTTP adapter buffers
+  the whole body before any middleware runs and `IRequest` exposes no body stream.
+- **`taskTimeoutMs: 0` leaked a pool slot permanently** (M70k, X8-7). A worker that ended its own
+  thread raised no host event, so the task timeout was the only thing that ever settled its task —
+  and `0`, a documented and reasonable choice for long CPU-bound work, removed it. On a `size: 1`
+  pool one self-terminated worker wedged the pool forever. The pool now settles the task with
+  `WorkerExitError` and frees the slot wherever the runtime reports the exit (Node, Bun). On Deno it
+  cannot, so the pool reports `exitDetection: false` in its health payload and warns once at
+  `register()` rather than leaving the developer to discover the wedge.
+- **A dead-lettered job was invisible through every surface the framework offered** (M70k, X8-4).
+  See the three additions above; together they answer "this job is being abandoned", "how often is
+  this happening", and "how many are sitting there right now".
+- **The `local` storage provider could not work in a scaffolded project** (M70k, X8-9). The
+  generated `start` task requests `--allow-read` and not `--allow-write`, so every upload failed
+  while `/health` reported `storage: up` — the M70c liveness probe calls `stat`, a READ, which the
+  granted permission satisfies. Three defects had to be understood before the one-flag cause was
+  visible. The provider now fails at startup naming the flag, its health probe reflects writability,
+  and `setu add storage` prints the note.
+- **The storage README's Uploads example was broken three ways** (M70k, X8-8) — `maxFileSize` (the
+  option is `maxSize`, and the compiler's suggestion `maxFiles` means something else),
+  `file.contentType` (the field is `mimeType`), and a `getUploadedFile(ctx, 'avatar')` the
+  middleware's own fieldname filter guaranteed would return `undefined`. The same example sat in
+  `PUBLIC_API.md`. None of it was catchable because the doc-fence gate covered ten `docs/` guides
+  and no package README; it now covers the three READMEs this milestone rewrote.
+- **The queue README documented two options that do not exist** (M70k) — `region` and `queues`. SQS
+  configuration lives under `sqs`, and RabbitMQ derives its queue names from `prefix`. Found by the
+  new README fence gate.
+
+- **`IDatabaseService.query()` was inoperative on the Drizzle adapter** (M70j, X12-2). The adapter
+  called `execute({ sql, params })`, a shape no Drizzle driver accepts, so every raw query failed
+  with the internal `TypeError: query.getSQL is not a function` — a method on the capability's own
+  interface with no working path on that adapter at all. It now builds a real Drizzle `SQL` from the
+  statement and its parameters: the text is emitted verbatim for an ascending-placeholder statement
+  (`$1…` on PostgreSQL, `?` on MySQL and SQLite) and every value is bound, never interpolated. A
+  placeholder count that disagrees with `params`, a gap in the `$N` sequence, or both placeholder
+  styles in one statement is refused before the driver is reached, because a mis-bound parameter is
+  silent. On PostgreSQL a jsonb `?`/`?|`/`?&` operator is indistinguishable from a placeholder, so
+  such a statement is refused or fails at the database rather than being mis-bound — write it with
+  `$N` placeholders. The defect survived because the unit fake accepted any argument; the proof is
+  now the real Drizzle SQL generator, and that fake refuses a non-`SQLWrapper` exactly as a driver
+  does.
+- **`logQueries: true` silently dropped a portable `count` filter** (M70j). The service's logging
+  wrapper declared `count(where)` and called `ds.count(where)`, discarding the second parameter
+  `IDataSource.count(where, filter?)` defines — so `repo.count({ filter })` answered a different
+  number with query logging on than with it off. Every existing test built the service without
+  logging, which is why it survived. The wrapper now spreads the data source it wraps before
+  overriding the six required methods, so a member the contract does not require cannot be dropped
+  the same way again.
+
 - **X10-3 — a service-discovery indicator that never reached its backend reported `up`** (M70c). See
   Changed.
 - **X7-8 — the gRPC health bridge disagreed with `/ready` about a degraded process** (M70c). See
@@ -319,6 +970,35 @@ All notable changes to this project are documented here. The format follows
   killed the process. The listener is now installed before the channel is created, and the channel
   gets its own `'error'` listener (amqplib emits `error` on every channel when the connection
   resets).
+- **X11-1 — the SDK's default `fetch` receiver broke the client in a browser** (M70e). The default
+  transport stored the bare global `fetch` on a private field and called it as `this.#fetch(...)`,
+  so in a browser its receiver was the `HttpClient` instance and the first request died with
+  `TypeError: Illegal invocation` before any network I/O. The default now resolves
+  `globalThis.fetch` at call time with the global as its receiver, so the default works in a browser
+  unchanged — and a `globalThis.fetch` installed after construction (a mocking library or polyfill)
+  is honoured rather than shadowed by a value captured at construction. An injected `fetch` is
+  always used as-is. No configuration change is required; the fix is in the default.
+- **X7-3 — `@setu-ts/grpc-plugin` could not load on Node or Bun** (M70e). The Connect/Protobuf-ES
+  specifiers reached `import()` through a constant map, so JSR's static npm-compatibility rewrite
+  never saw them and the published artifact shipped `npm:` verbatim — unresolvable on Node and Bun.
+  The default importer now calls four literal `import('npm:…')` expressions (one per module,
+  including the two `/protocol` and `/wkt` subpaths), so the rewrite reaches every one. The
+  injectable seam is reshaped rather than removed: `loadConnectModule` now takes a partial record of
+  per-module zero-argument importers (`Partial<ConnectImporters>`) instead of one specifier-taking
+  `ModuleImporter`, so each of the four failure branches is still drivable in isolation. Both
+  `ModuleImporter` and `defaultImporter` are gone; neither was exported from the package barrel, so
+  no consumer could reference them. **Migration:** none — the published package now loads on Node
+  and Bun; the Connect/Protobuf-ES packages must be installed with the host runtime's package
+  manager (the README names the `deno add` / `npm i` / `bun add` commands).
+- **Telemetry outcome reporting was silent in the standard plugin configuration** (M70e). The
+  reporter reads `ctx.logger` at call time, but `TelemetryPlugin` (priority 30) declared no
+  dependency on the logger, so the kernel registered it before `LoggerPlugin` (priority 100) and
+  every outcome line was dropped — the documented "reported through the plugin's logger" behaviour
+  was unreachable in the standard configuration. `TelemetryPlugin` now declares
+  `CAPABILITIES.LOGGER` in `optionalDependencies`, so the kernel orders the logger provider first;
+  the edge is optional, so an app without a logger plugin still boots with no lines emitted. A
+  kernel-level e2e test with the real `LoggerPlugin` pins both directions. **Migration:** none — the
+  standard configuration now reports as documented.
 
 ### Deprecated
 

@@ -133,7 +133,7 @@ describe('GrpcPlugin — registration (post-M70a)', () => {
 
     // The router is built lazily, so drive one request first.
     const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
-    await service.handleRequest(new Request('http://x/grpc/unknown'));
+    await service.handleRequest(new Request('http://x/unknown'));
 
     // Proof the injected runtime is the one in use: it revived the embedded
     // sets and registered the built-ins on ITS router.
@@ -188,7 +188,7 @@ describe('GrpcPlugin — health capability bridging', () => {
 
     // Drive Check through the registered implementation to prove the bridge is wired.
     const service = harness.registered.get(CAPABILITIES.GRPC) as IGrpcService;
-    await service.handleRequest(new Request('http://x/grpc/unknown'));
+    await service.handleRequest(new Request('http://x/unknown'));
     const healthImpl = runtime.registered.find((r) => r.definition.typeName === HEALTH)!;
     const check = healthImpl.implementation.check as (
       r: { service: string },

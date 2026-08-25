@@ -67,6 +67,10 @@ console.log(res.data); // User
 — `Date.now()` appears nowhere in this package. See [Resilience](#resilience) for the three policy
 shapes and [Authentication](#authentication) for the bundled interceptors.
 
+The `fetch` default needs no browser-specific value: it resolves `globalThis.fetch` **at call
+time**, with the global as its receiver, so the default transport works in a browser unchanged. (An
+injected `fetch` is always used as-is, which is what tests rely on.)
+
 ## HTTP Client
 
 `createClient(options)` returns an `IHttpClient` whose single method is
@@ -78,7 +82,7 @@ shapes and [Authentication](#authentication) for the bundled interceptors.
 | ---------------------- | ----------------------------- | --------------------------------------------------------------------------- |
 | `baseUrl`              | `string` (required)           | Base URL for every request                                                  |
 | `headers`              | `Record<string, string>`      | Default headers cloned into each request                                    |
-| `fetch`                | `Function`                    | Injectable fetch seam (defaults to global `fetch`)                          |
+| `fetch`                | `Function`                    | Injectable fetch seam (default bound to the global realm)                   |
 | `timing`               | `IClientTiming`               | Injectable timing seam (defaults to `createDefaultClientTiming()`)          |
 | `retry`                | `RetryPolicy`                 | Retry policy (retries transport failures + 408/425/429/5xx on safe methods) |
 | `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy                                           |
@@ -279,6 +283,7 @@ const document = JSON.parse(readFileSync('openapi.json', 'utf-8'));
 const source = generateOpenApiClient(document, {
   sdkImport: '@setu-ts/sdk',
   factoryName: 'createApi',
+  apiTypeName: 'Api',
 });
 
 // Write `source` to a file, then import the generated factory:
@@ -290,6 +295,12 @@ The generated factory accepts an `IHttpClient` and returns typed operation metho
 covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, `enum`, `const`,
 `anyOf`, `allOf`, `additionalProperties`, `null`, and `integer`.
 
+**The output is publishable, formatted and lint-clean.** `createApi` has a written-out return type
+(`export interface Api`), so JSR does not reject the file as a slow type; the source round-trips
+through `deno fmt` unchanged and needs no lint pragma. Both properties are load-bearing rather than
+cosmetic: the generated file's own header says "Do not edit manually", so a consumer who cannot
+publish or format it has nowhere to go.
+
 ### Generated names and shapes
 
 - **Operation methods are lower-camelCase and preserve interior casing.** An `operationId` is split
@@ -298,9 +309,44 @@ covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, 
   is prefixed with `_`, and an id that sanitizes to nothing becomes `operation`.
 - **Component schemas and argument interfaces are PascalCase.** Component `User` emits
   `export type User`, and operation `listUsers` emits `export interface ListUsersArgs`.
+- **The factory returns a named interface.** `export interface Api { … }` lists every operation's
+  signature and is the factory's return type; rename it with `apiTypeName`.
 - **Two names that derive onto one identifier throw** `OpenApiCodegenError` rather than emitting a
-  file with a duplicate declaration — for both operations and component schemas, and the diagnostic
-  names both originals.
+  file with a duplicate declaration, and the diagnostic names both originals. Component schemas,
+  `*Args` interfaces, `*Error` unions, `*Error<status>Body` aliases and the client interface all
+  draw from ONE registry, so a component named `ListUsersArgs` beside an operation `listUsers` is
+  refused rather than silently emitting two declarations of one name.
+- **Declared error responses are typed.** An operation declaring a non-2xx response also emits a
+  union discriminated on the literal `status` and a narrowing guard:
+
+  ```typescript
+  try {
+    await api.getUserById('1');
+  } catch (e) {
+    if (isGetUserByIdError(e) && e.status === 404) {
+      e.body.code; // typed by the document's 404 schema
+    }
+  }
+  ```
+
+  `HttpClientError` is generic in its body (`HttpClientError<TBody = unknown>`), so the bare name
+  means what it always did. The union is discriminated on `status` because
+  `HttpClientError<A> | HttpClientError<B>` is not — `status` is `number` on both arms. A `default`
+  response and range codes such as `4XX` are skipped: they name no single status.
+- **Formatting matches `deno fmt`.** Two-space indentation, a signature past 100 columns wrapped one
+  parameter per line, and a path template too long for one line emitted as an equivalent
+  `[…].join('')` — a template literal is not usable there, because `deno fmt` rewraps a long one at
+  whichever `${` happens to fit, which no generator can predict.
+- **No multi-line type is written at a use site.** An inline (non-`$ref`) body, parameter or success
+  response is hoisted into an exported alias. A rendered type lands at several indentation levels,
+  and a success type lands at two at once — the client interface's signature and the
+  `client.request<…>` type argument — so no single indentation is correct for a multi-line object
+  literal and `deno fmt` reindents whatever is emitted. A schema that `@setu-ts/openapi-plugin`
+  derived from `validateBody` and used once arrives inline, so this is the ordinary case.
+- **No lint pragma.** An empty-object schema emits `Record<PropertyKey, never>` rather than `{}`,
+  which is both what the schema means and what `deno lint`'s `ban-types` accepts. A narrowed pragma
+  could not be emitted unconditionally either: an ignore matching nothing is itself reported as
+  `ban-unused-ignore`.
 - **Path parameters are positional arguments; everything else lives in `opts`.** Each path
   placeholder is substituted and percent-encoded, including a placeholder that shares a segment with
   literal text (`/files/{id}.json`).
@@ -322,16 +368,16 @@ covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, 
 `generateOpenApiClient` throws `OpenApiCodegenError` — carrying `path` and `method` where they apply
 — rather than emitting a client that misbehaves or does not compile:
 
-| Condition                                                        | Why it is rejected                                    |
-| ---------------------------------------------------------------- | ----------------------------------------------------- |
-| Missing `operationId`                                            | No name to derive a method from                       |
-| Two operations deriving onto one method name                     | Duplicate declaration; both originals are named       |
-| Two component schemas deriving onto one type name                | Duplicate `export type`                               |
-| Parameter with `in: 'cookie'`                                    | Unsupported location                                  |
-| Path placeholder with no matching `in: 'path'` parameter         | Emitted source would reference an undeclared argument |
-| `in: 'path'` parameter absent from the path template             | The caller's value would be silently dropped          |
-| Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature          |
-| Malformed local `$ref`                                           | No component name to resolve                          |
+| Condition                                                        | Why it is rejected                                           |
+| ---------------------------------------------------------------- | ------------------------------------------------------------ |
+| Missing `operationId`                                            | No name to derive a method from                              |
+| Two operations deriving onto one method name                     | Duplicate declaration; both originals are named              |
+| Two emitted TYPE names colliding                                 | Duplicate declaration; one registry covers all four families |
+| Parameter with `in: 'cookie'`                                    | Unsupported location                                         |
+| Path placeholder with no matching `in: 'path'` parameter         | Emitted source would reference an undeclared argument        |
+| `in: 'path'` parameter absent from the path template             | The caller's value would be silently dropped                 |
+| Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature                 |
+| Malformed local `$ref`                                           | No component name to resolve                                 |
 
 ## Errors
 
@@ -372,8 +418,10 @@ covers the M21 vocabulary: primitives, arrays, objects with `required`, `$ref`, 
 
 - **Zero npm dependencies** — uses only web-standard APIs (`URL`, `Headers`, `AbortSignal`,
   `performance.now()`).
-- **Browser and server** — runs in Node.js, Deno, Bun, Cloudflare Workers, and browsers.
-- **Injectable `fetch`** — tests inject a fake; production defaults to the global.
+- **Browser and server** — runs in browsers, Node.js, Deno, Bun, and Cloudflare Workers. The default
+  transport needs no browser-specific value: it resolves `globalThis.fetch` at call time with the
+  global as its receiver, so the default works in a browser unchanged.
+- **Injectable `fetch`** — tests inject a fake; the default is bound to the global realm.
 - **Injectable timing** — `IClientTiming` makes backoff, breaker windows, and rate-limit waits
   testable without real time.
 

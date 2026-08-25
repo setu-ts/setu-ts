@@ -9,6 +9,7 @@
  */
 
 import type {
+  ILogger,
   IPlugin,
   ITelemetryService,
   MiddlewareFunction,
@@ -19,7 +20,10 @@ import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts'
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
 import { contextToTraceparent, extractContextFromHeaders } from '../tracing/tracer.ts';
-import { buildInstrumentationRegistry } from '../instrumentation/instrumentation-registry.ts';
+import {
+  buildInstrumentationRegistry,
+  type InstrumentationReporter,
+} from '../instrumentation/instrumentation-registry.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -30,6 +34,35 @@ import denoJson from '../../deno.json' with { type: 'json' };
 const MIDDLEWARE_PRIORITY = {
   TELEMETRY: 30,
 } as const;
+
+/**
+ * Builds the instrumentation-outcome reporter. `ctx.logger` is read **at call
+ * time** rather than captured at plugin construction: a logger registered
+ * imperatively after this plugin must still receive the lines (the M52b
+ * lesson). `debug` for an enabled instrumentation, `warn` for a failure — a
+ * failure remains a no-op, never a throw.
+ *
+ * The plugin declares `CAPABILITIES.LOGGER` in `optionalDependencies` (below):
+ * the kernel resolver creates a registration-ordering edge from that entry, so
+ * a plugin-provided logger (e.g. `LoggerPlugin`) registers BEFORE this plugin
+ * and the call-time read finds it. The edge is optional, not required: an app
+ * without any logger plugin must still boot, with the outcomes recorded on the
+ * registry handle and nothing emitted.
+ */
+function createInstrumentationReporter(ctx: { logger?: ILogger }): InstrumentationReporter {
+  return (outcome) => {
+    const logger = ctx.logger;
+    if (!logger) return;
+    if (outcome.enabled) {
+      logger.debug(`Auto-instrumentation enabled: ${outcome.kind}`, { kind: outcome.kind });
+    } else {
+      logger.warn(`Auto-instrumentation unavailable: ${outcome.kind}`, {
+        kind: outcome.kind,
+        reason: outcome.reason,
+      });
+    }
+  };
+}
 
 /**
  * Creates a telemetry plugin.
@@ -71,6 +104,11 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
     name: 'telemetry-plugin',
     version: denoJson.version,
     provides: [CAPABILITIES.TELEMETRY],
+    // Optional edge on the logger capability: the kernel resolver orders the
+    // provider (e.g. LoggerPlugin) before this plugin so the outcome reporter's
+    // call-time read of ctx.logger finds it in the standard configuration.
+    // Optional — an app without a logger plugin must still boot.
+    optionalDependencies: [CAPABILITIES.LOGGER],
     priority: MIDDLEWARE_PRIORITY.TELEMETRY,
 
     async register(ctx) {
@@ -97,6 +135,7 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
             options.instrumentations,
             ctx.runtime,
             tracerHost.otelProvider,
+            createInstrumentationReporter(ctx),
           );
         }
 

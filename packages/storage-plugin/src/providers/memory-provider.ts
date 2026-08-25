@@ -3,6 +3,7 @@
  *
  * @module
  */
+import type { PutObjectOptions } from '@setu-ts/common';
 import type { StorageProvider } from '../interfaces/index.ts';
 
 /**
@@ -59,10 +60,15 @@ export class MemoryProvider implements StorageProvider {
   /**
    * Stores an object in memory.
    *
+   * Object attributes are ACCEPTED AND NOT PERSISTED: this store holds bytes only and its `getSignedUrl` produces a synthetic URL nothing fetches, so retaining a
+   * content type would be a field no code path reads. Documented per provider
+   * in the package README rather than silently dropped.
+   *
    * @param path - Object path/key
    * @param data - Object bytes
+   * @param _options - Accepted for interface parity; see above
    */
-  put(path: string, data: Uint8Array): Promise<void> {
+  put(path: string, data: Uint8Array, _options?: PutObjectOptions): Promise<void> {
     this.#store.set(path, data);
     return Promise.resolve();
   }

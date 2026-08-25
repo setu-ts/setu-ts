@@ -102,6 +102,13 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     // Normalize the path
     const normalizedPath = relativePath === '' ? '/' : relativePath;
 
+    // The path handed to a user-supplied `cacheControl` callback: the FULL
+    // leading-slash request path INCLUDING the URL prefix, per the documented
+    // contract (`/assets/app.js`, never the prefix-stripped `/app.js`).
+    // Internal resolution below keeps using the stripped form.
+    const callbackPath = (rootRelative: string): string =>
+      normalizedPrefix === '/' ? rootRelative : `${normalizedPrefix}${rootRelative}`;
+
     // Reject path traversal
     if (!isLexicallyContained(normalizedPath)) {
       return ctx.response.status(404).send();
@@ -128,13 +135,14 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
       }
     }
 
-    // Root-relative form of the resolved path. This — never the absolute
-    // filesystem path and never a `.br`/`.gz` sidecar path — is what drives
-    // Cache-Control, so a hashed asset keeps its `immutable` policy whichever
-    // encoding is negotiated, and a user-supplied `cacheControl` function
-    // receives the documented root-relative path rather than the server's
-    // directory layout.
-    const rootRelative = normalizedPath === '/' ? '' : normalizedPath;
+    // Prefix-stripped, root-relative form of the resolved path, normalized to
+    // a LEADING SLASH — the INTERNAL shape used for filesystem resolution.
+    // `callbackPath` above prepends the URL prefix before this reaches
+    // `resolveCacheControl`, so a user-supplied callback sees the full request
+    // path (`/assets/app.js`) rather than the server's directory layout or an
+    // absolute filesystem path, and a hashed asset keeps its `immutable`
+    // policy whichever encoding is negotiated.
+    const rootRelative = normalizedPath === '/' ? '/' : `/${normalizedPath}`;
 
     // Stat the file
     let stat: StatResult;
@@ -151,7 +159,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
             if (fallbackStat.isFile) {
               return serveFile(ctx, fs, fallbackPath, fallbackStat, {
                 cacheControl,
-                relativePath: fallback,
+                relativePath: callbackPath(`/${fallback}`),
                 etag,
                 ranges,
                 maxBufferBytes,
@@ -174,7 +182,9 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
           if (indexStat.isFile) {
             return serveFile(ctx, fs, indexPath, indexStat, {
               cacheControl,
-              relativePath: rootRelative === '' ? index : `${rootRelative}/${index}`,
+              relativePath: callbackPath(
+                rootRelative === '/' ? `/${index}` : `${rootRelative}/${index}`,
+              ),
               etag,
               ranges,
               maxBufferBytes,
@@ -190,7 +200,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     // Serve the file
     return serveFile(ctx, fs, fullPath, stat, {
       cacheControl,
-      relativePath: rootRelative,
+      relativePath: callbackPath(rootRelative),
       etag,
       ranges,
       maxBufferBytes,
@@ -217,7 +227,7 @@ async function serveFile(
   stat: StatResult,
   options: {
     cacheControl?: string | ((relativePath: string) => string) | undefined;
-    /** Root-relative path of the ORIGINAL resource — drives Cache-Control. */
+    /** Root-relative path of the ORIGINAL resource, leading '/' — drives Cache-Control. */
     relativePath: string;
     etag?: boolean | undefined;
     ranges?: boolean | undefined;
@@ -342,7 +352,7 @@ async function serveCompressedFile(
   contentEncoding: string | undefined,
   options: {
     cacheControl?: string | ((relativePath: string) => string) | undefined;
-    /** Root-relative path of the ORIGINAL resource — drives Cache-Control. */
+    /** Root-relative path of the ORIGINAL resource, leading '/' — drives Cache-Control. */
     relativePath: string;
     etag?: boolean | undefined;
     ranges?: boolean | undefined;

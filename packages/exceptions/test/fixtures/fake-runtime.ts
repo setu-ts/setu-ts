@@ -104,6 +104,11 @@ export function createFakeResponse(): FakeResponseResult {
       headers.set('content-type', 'text/plain; charset=utf-8');
       return HANDLER_RESULT;
     },
+    html(b: string): HandlerResult {
+      body = b;
+      headers.set('content-type', 'text/html; charset=utf-8');
+      return HANDLER_RESULT;
+    },
     send(b?: Uint8Array): HandlerResult {
       body = b ?? null;
       if (b !== undefined && !headers.has('content-type')) {

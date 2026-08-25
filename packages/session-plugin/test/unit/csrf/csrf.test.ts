@@ -307,9 +307,10 @@ describe('csrfFormMiddleware', () => {
     getCsrfToken(harness.ctx);
     await run(harness.ctx);
 
+    // M70f (X4-8): the rejection converges on the responder's `detail` key.
     expect(harness.response.body).toEqual({
       error: 'Forbidden',
-      message: 'CSRF token validation failed',
+      detail: 'CSRF token validation failed',
     });
   });
 

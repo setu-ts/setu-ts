@@ -250,7 +250,14 @@ describe('errorHandler middleware', () => {
       const root = new Error('db down');
       await mw(ctx, nextThrows(internalServerError('service failed', root)));
 
-      expect(logger.calls[0].meta?.cause).toBe(root);
+      // X2-5: the cause is serialized (a raw `Error` renders as `{}` under
+      // `JSON.stringify`), so the log carries its name/message/stack, not the
+      // raw object.
+      expect(logger.calls[0].meta?.cause).toEqual({
+        name: 'Error',
+        message: 'db down',
+        stack: root.stack,
+      });
     });
 
     it('does not throw when no logger is registered', async () => {

@@ -95,6 +95,12 @@ export interface DenoDirEntry {
  */
 export function createDenoRuntimeServices(
   host: DenoHost = Deno as unknown as DenoHost,
+  // No `exitEventName`: Deno's web `Worker` emits NOTHING to the host when a
+  // worker ends itself — not `close`, `exit`, `error` or `messageerror` — and
+  // a later `postMessage` still resolves, so a dead worker is undetectable
+  // here. The handles therefore omit `onExit` and `reportsExit()` is `false`,
+  // which is what lets the WorkerPoolPlugin say so instead of appearing to
+  // have detection it does not have. Do not pass an event name speculatively.
   workers: IWorkerHost = createWebWorkerHost(),
   dns: IDnsResolver = createDenoDnsResolver(host),
 ): IRuntimeServices {

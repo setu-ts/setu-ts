@@ -28,6 +28,7 @@ import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
+  bootAndProbe,
   bootWithGeneratedPermissions,
   useWorkspacePackages,
 } from '../fixtures/generated-project.ts';
@@ -301,6 +302,67 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
   }
 });
 
+describe('a scaffolded Workers project retries a failed boot and never leaks the stack', () => {
+  // X9-8: `booted ??= boot(env)` cached the raw promise, so ONE failed boot was
+  // permanent for the isolate's life AND the raw error reached the client. The
+  // generated entry must answer a generic 503 while reporting to the platform
+  // logs, and a later request must re-attempt boot.
+  it('answers 503 without the stack, and the next request re-attempts boot', async () => {
+    expect(await run(['new', 'shop', '--template', 'rest', '--runtime', 'cloudflare-workers']))
+      .toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+
+    // A config whose FIRST construction fails with an error carrying a path
+    // marker — under the old memoisation both requests would replay this
+    // failure and the message would leak into the response body.
+    await Deno.writeTextFile(
+      `${project}/setu.config.ts`,
+      `import type { IApplication } from '@setu-ts/common';\n` +
+        `let calls = 0;\n` +
+        `export function createApp(_env?: Readonly<Record<string, unknown>>): IApplication {\n` +
+        `  calls++;\n` +
+        `  if (calls === 1) {\n` +
+        `    throw new Error('transient cold-start failure at /srv/node_modules/@setu-ts');\n` +
+        `  }\n` +
+        `  return {\n` +
+        `    start: () => Promise.resolve(),\n` +
+        `    stop: () => Promise.resolve(),\n` +
+        `    fetch: () => Promise.resolve(new Response('recovered')),\n` +
+        `  } as unknown as IApplication;\n` +
+        `}\n`,
+    );
+
+    const result = await bootAndProbe(
+      project,
+      `const entry = await import('./src/index.ts');\n` +
+        `const first = await entry.default.fetch(\n` +
+        `  new Request('http://localhost/health'), {},\n` +
+        `);\n` +
+        `const body1 = await first.text();\n` +
+        `const second = await entry.default.fetch(\n` +
+        `  new Request('http://localhost/health'), {},\n` +
+        `);\n` +
+        `const body2 = await second.text();\n` +
+        `console.log('__PROBE_RESULT__' + JSON.stringify({\n` +
+        `  status1: first.status,\n` +
+        `  leakedStack: body1.includes('node_modules') || body1.includes('transient'),\n` +
+        `  status2: second.status,\n` +
+        `  body2,\n` +
+        `}));\n`,
+    );
+
+    // First request after a failed boot: generic 503, no stack.
+    expect(result['status1']).toBe(503);
+    expect(result['leakedStack']).toBe(false);
+
+    // The discriminating assertion: the SECOND request retried the boot and
+    // succeeded. Under `??=` it would have replayed the cached rejection.
+    expect(result['status2']).toBe(200);
+    expect(result['body2']).toBe('recovered');
+  });
+});
+
 describe('a scaffolded project configures itself from a dotenv file', () => {
   it('emits an ignored dotenv file beside a tracked example', async () => {
     expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
@@ -390,6 +452,69 @@ describe('a scaffolded project answers errors as RFC 9457 Problem Details', () =
     expect(body['status']).toBe(401);
     expect(body['detail']).toBe('Token expired');
     expect(body['message']).toBeUndefined();
+  });
+
+  it('a validation failure and a thrown error answer with the same Problem Details members (C3)', async () => {
+    // C3's CLI half: the `rest` template pairs `ValidationPlugin({ errorFormat:
+    // 'rfc9457' })` with `errorHandler({ format: 'rfc9457' })` so a validation
+    // failure and a thrown error answer in the SAME shape. Asserted on the
+    // booted app's bodies: both carry the Problem Details member set
+    // (`type`/`title`/`status`/`detail`) and neither carries the pre-M56
+    // default format's `message` field. If the template dropped the
+    // `errorFormat` argument, the validation failure would answer in the
+    // default shape (`message`/`errors`, no `type`/`title`/`status`/`detail`)
+    // and this assertion fails.
+    expect(await run(['new', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    await useWorkspacePackages(project);
+    await Deno.writeTextFile(
+      `${project}/src/controllers/index.ts`,
+      `import { unauthorized } from '@setu-ts/exceptions';\n` +
+        `import { validateQuery } from '@setu-ts/validation-plugin';\n` +
+        `import type { IRouterApi } from '@setu-ts/common';\n\n` +
+        `const nameRequired = {\n` +
+        `  safeParse(_data: unknown) {\n` +
+        `    return {\n` +
+        `      success: false as const,\n` +
+        `      error: { issues: [{ path: ['name'], message: 'name is required' }] },\n` +
+        `    };\n` +
+        `  },\n` +
+        `};\n\n` +
+        `export function registerGeneratedRoutes(router: IRouterApi): void {\n` +
+        `  router.get('/validate', {\n` +
+        `    middleware: [validateQuery(nameRequired)],\n` +
+        `    handler: (ctx) => ctx.response.text('ok'),\n` +
+        `  });\n` +
+        `  router.get('/boom', () => {\n` +
+        `    throw unauthorized('Token expired');\n` +
+        `  });\n` +
+        `}\n`,
+    );
+
+    const result = await bootWithGeneratedPermissions(project, ['/validate', '/boom']);
+
+    expect(result.statuses['/validate'], result.output).toBe(400);
+    expect(result.statuses['/boom'], result.output).toBe(401);
+
+    const val = JSON.parse(result.bodies['/validate']) as Record<string, unknown>;
+    const thr = JSON.parse(result.bodies['/boom']) as Record<string, unknown>;
+
+    // Both are Problem Details: the same member set, and neither is the
+    // default format (which carries `message` and `errors`).
+    expect(val['type']).toBe('https://setu-ts.dev/errors/validation');
+    expect(val['title']).toBe('Validation Error');
+    expect(val['status']).toBe(400);
+    expect(val['message']).toBeUndefined();
+    expect(thr['type']).toBe('about:blank');
+    expect(thr['title']).toBe('Unauthorized');
+    expect(thr['status']).toBe(401);
+    expect(thr['message']).toBeUndefined();
+    // The two agree on the member set (C3): each carries type/title/status/
+    // detail and no default-format `message`.
+    for (const member of ['type', 'title', 'status', 'detail']) {
+      expect(member in val, `validation body missing ${member}`).toBe(true);
+      expect(member in thr, `thrown body missing ${member}`).toBe(true);
+    }
   });
 });
 

@@ -21,28 +21,34 @@ deno add npm:graphql@^16 @setu-ts/graphql-plugin
 
 ## Usage
 
+Plugins are passed to
+[`createApplication()`](https://github.com/setu-ts/setu-ts/blob/main/docs/getting-started.md) —
+there is no `new Application()` / `app.use()` API.
+
 ### Schema-First
 
 ```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
-import { Application } from '@setu-ts/kernel';
 
-const app = new Application();
-
-app.use(
-  GraphqlPlugin({
-    typeDefs: `
-      type Query {
-        hello(name: String!): String
-      }
-    `,
-    resolvers: {
-      Query: {
-        hello: (_, { name }) => `Hello, ${name}!`,
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    GraphqlPlugin({
+      typeDefs: `
+        type Query {
+          hello(name: String!): String
+        }
+      `,
+      resolvers: {
+        Query: {
+          hello: (_, { name }) => `Hello, ${name}!`,
+        },
       },
-    },
-  }),
-);
+    }),
+  ],
+});
 
 await app.start({ port: 3000 });
 ```
@@ -50,6 +56,8 @@ await app.start({ port: 3000 });
 ### Code-First
 
 ```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
 import { buildSchema } from 'npm:graphql@^16';
 
@@ -59,13 +67,12 @@ const schema = buildSchema(`
   }
 `);
 
-const app = new Application();
-
-app.use(
-  GraphqlPlugin({
-    schema,
-  }),
-);
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    GraphqlPlugin({ schema }),
+  ],
+});
 
 await app.start({ port: 3000 });
 ```
@@ -76,14 +83,13 @@ If your application uses its own copy of `graphql`, inject it to avoid cross-cop
 
 ```typescript
 import { adaptGraphqlModule, GraphqlPlugin } from '@setu-ts/graphql-plugin';
+import { buildSchema } from 'npm:graphql@^16';
 import * as graphql from 'npm:graphql@^16';
 
-app.use(
-  GraphqlPlugin({
-    schema: mySchema,
-    graphqlModule: adaptGraphqlModule(graphql),
-  }),
-);
+GraphqlPlugin({
+  schema: buildSchema('type Query { hello: String }'),
+  graphqlModule: adaptGraphqlModule(graphql),
+});
 ```
 
 ## Options
@@ -121,8 +127,8 @@ deno run --allow-env --allow-net main.ts
 Enable `nodejs_compat` in your `wrangler.toml`:
 
 ```toml
-[vars]
-nodejs_compat = true
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
 ```
 
 ## Subscriptions
@@ -169,6 +175,21 @@ const resolvers: ResolverMap = {
 };
 ```
 
+## Resolver Context
+
+The default context a resolver receives is `DefaultGraphqlContext`, and its shape is
+**per-transport**:
+
+- **HTTP** — `services` (the live, request-scoped registry) and `requestContext` are present;
+  `user`/`tenant` are present when the request carried a principal or tenant.
+- **WebSocket** — `services` and `connection` (a `GraphqlConnectionInfo`) are present;
+  `requestContext` is **absent**, because the runtime closes the upgrade request once the handshake
+  response is returned — a synthesized one would be dead by the time a resolver runs. The upgrade
+  request's headers and query live on `connection.headers` and `connection.query`; identity set by
+  your `onConnect` hook (`info.data.set('user', …)`) surfaces as `ctx.user`.
+
+`requestContext` is typed optional for exactly this reason: the compiler enforces the caveat.
+
 The WebSocket route opts out of `websocket-plugin`'s shared heartbeat sweep, because that sweeper
 sends a raw text frame a `graphql-transport-ws` client must answer by closing `4400`. Liveness on
 this route is the protocol's own `ping`/`pong` via `subscriptions.websocket.heartbeatMs`.
@@ -202,7 +223,6 @@ under another client's hash. Hashing uses `IRuntimeServices.subtle`, so `apq` re
 - Internal errors are masked by default — including errors raised inside a live subscription, which
   are masked by the same code path the HTTP transport uses
 - APQ verifies a submitted hash against the submitted document before persisting it
-- Internal errors are masked by default
 - Introspection is enabled by default (disable in production if needed)
 - GraphiQL is enabled by default (disable in production with `graphiql: false`)
 
@@ -229,6 +249,7 @@ MIT
 | `GraphqlSchemaError`          | class     |
 | `GraphqlService`              | class     |
 | `GRAPHQL_TRANSPORT_WS`        | const     |
+| `AnySubscriptionResolver`     | interface |
 | `DefaultGraphqlContext`       | interface |
 | `GraphqlApqOptions`           | interface |
 | `GraphqlCodeFirstOptions`     | interface |
@@ -249,6 +270,7 @@ MIT
 | `IApqResolver`                | interface |
 | `IGraphqlService`             | interface |
 | `SubscriptionResolver`        | interface |
+| `AnyFieldResolver`            | type      |
 | `ApqResolveResult`            | type      |
 | `FieldResolver`               | type      |
 | `GraphqlPluginOptions`        | type      |

@@ -41,17 +41,32 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option           | Type                                 | Default        | Description                                                           |
-| ---------------- | ------------------------------------ | -------------- | --------------------------------------------------------------------- |
-| `root`           | `string`                             | (required)     | The filesystem directory to serve files from                          |
-| `urlPrefix`      | `string`                             | `'/`'`         | URL prefix for static routes                                          |
-| `index`          | `string`                             | `'index.html'` | Index file to serve for directories. Set to `''` to disable           |
-| `fallback`       | `string`                             | `undefined`    | Fallback file for SPA routing (served when Accept includes text/html) |
-| `cacheControl`   | `string \| (path: string) => string` | auto           | Cache-Control header configuration                                    |
-| `etag`           | `boolean`                            | `true`         | Enable ETag generation                                                |
-| `ranges`         | `boolean`                            | `true`         | Enable Range request handling                                         |
-| `compressed`     | `boolean`                            | `true`         | Enable precompressed sidecar negotiation                              |
-| `maxBufferBytes` | `number`                             | `1048576`      | Maximum file size to read fully into memory (1MB)                     |
+| Option           | Type                                 | Default        | Description                                                                              |
+| ---------------- | ------------------------------------ | -------------- | ---------------------------------------------------------------------------------------- |
+| `root`           | `string`                             | (required)     | The filesystem directory to serve files from                                             |
+| `urlPrefix`      | `string`                             | `'/`'`         | URL prefix for static routes                                                             |
+| `index`          | `string`                             | `'index.html'` | Index file to serve for directories. Set to `''` to disable                              |
+| `fallback`       | `string`                             | `undefined`    | Fallback file for SPA routing (served when Accept includes text/html)                    |
+| `cacheControl`   | `string \| (path: string) => string` | auto           | Cache-Control header. A callback receives a **leading-slash** root-relative request path |
+| `etag`           | `boolean`                            | `true`         | Enable ETag generation                                                                   |
+| `ranges`         | `boolean`                            | `true`         | Enable Range request handling                                                            |
+| `compressed`     | `boolean`                            | `true`         | Enable precompressed sidecar negotiation                                                 |
+| `maxBufferBytes` | `number`                             | `1048576`      | Maximum file size to read fully into memory (1MB)                                        |
+
+### A root `urlPrefix` claims the bare wildcard
+
+The plugin registers `<urlPrefix>/*` on `GET` and `HEAD`, so the default `urlPrefix: '/'` mounts
+`GET /*`. The kernel admits one route per `METHOD path` and refuses a second, naming the plugin that
+registered it first:
+
+```
+Route 'GET /*' is already registered by plugin 'react-router'.
+```
+
+So an application that serves SSR (or any other catch-all) at the root cannot also mount static
+files there. Give the static files their own prefix — `urlPrefix: '/assets'` — which is what
+content-hashed build output wants anyway. A prefixed mount never competes with a root catch-all: a
+route with more static segments outranks a wildcard regardless of registration order.
 
 ## Cache-Control Behavior
 
@@ -64,15 +79,23 @@ You can override this with a string or function:
 ```typescript
 StaticPlugin({
   root: './public',
+  urlPrefix: '/assets',
   cacheControl: 'no-cache',
 });
 
 // Or per-path:
 StaticPlugin({
   root: './public',
-  cacheControl: (path) => path.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000',
+  urlPrefix: '/assets',
+  cacheControl: (path) =>
+    path === '/' || path.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000',
 });
 ```
+
+**The callback's `path` argument is the leading-slash root-relative request path** —
+`/assets/app-A9acsx54.js` for a file under the prefix above, and the literal `'/'` when the request
+equals the prefix root. It is never the absolute filesystem path and never the `.br`/`.gz` sidecar
+path, so a hashed asset keeps its policy whichever encoding is negotiated.
 
 ## SPA Fallback
 

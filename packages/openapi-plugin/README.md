@@ -3,8 +3,18 @@
 OpenAPI 3.1 generation from registered routes, plus Swagger UI. Registers an `IOpenApiService` under
 `CAPABILITIES.OPENAPI` (`'openapi'`).
 
-Zod schemas are transformed to OpenAPI schema objects, and identical schemas are deduplicated into
-`components`.
+Zod schemas are transformed to OpenAPI schema objects, and a schema reused across request and
+response bodies — including one nested inside another — is hoisted into `components` and referenced
+by `$ref` from each of those sites.
+
+Reuse means the **same schema object**, not an equal one: two separately constructed but
+structurally identical schemas are two schemas and each stays where it is. Only object, array,
+composition and enum shapes are hoisted — a reused primitive is smaller inline than as a `$ref`.
+Parameter schemas are never hoisted, because a parameter list is built by destructuring the
+transformed object's `properties`, and a `$ref` has none.
+
+A route's schemas come from its declared `schema` field **or** are derived from the validation
+middleware guarding it, so a route already carrying `validateBody(...)` does not repeat itself.
 
 ## Installation
 
@@ -38,14 +48,16 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option           | Type                             | Default           | Description                                                |
-| ---------------- | -------------------------------- | ----------------- | ---------------------------------------------------------- |
-| `swagger`        | `boolean`                        | `true`            | Serve the Swagger UI HTML page.                            |
-| `endpoint`       | `string`                         | `'/docs'`         | Path for the Swagger UI page.                              |
-| `specEndpoint`   | `string`                         | `'/openapi.json'` | Path for the JSON spec.                                    |
-| `security`       | `readonly SecurityRequirement[]` | —                 | Document-level requirement inherited by every operation.   |
-| `deriveSecurity` | `{ scheme: string }`             | —                 | Derive each operation's requirement from its route guards. |
-| `exclude`        | `readonly string[]`              | —                 | Router paths to omit; matches the resolved pattern.        |
+| Option                 | Type                             | Default                               | Description                                                  |
+| ---------------------- | -------------------------------- | ------------------------------------- | ------------------------------------------------------------ |
+| `swagger`              | `boolean`                        | `true`                                | Serve the Swagger UI HTML page.                              |
+| `endpoint`             | `string`                         | `'/docs'`                             | Path for the Swagger UI page.                                |
+| `specEndpoint`         | `string`                         | `'/openapi.json'`                     | Path for the JSON spec.                                      |
+| `security`             | `readonly SecurityRequirement[]` | —                                     | Document-level requirement inherited by every operation.     |
+| `deriveSecurity`       | `{ scheme: string }`             | —                                     | Derive each operation's requirement from its route guards.   |
+| `exclude`              | `readonly string[]`              | —                                     | Router paths to omit; matches the resolved pattern.          |
+| `excludeOwners`        | `readonly string[]`              | `['health-plugin', 'metrics-plugin']` | Plugin names whose routes are omitted, by `RouteInfo.owner`. |
+| `deriveRequestSchemas` | `boolean`                        | `true`                                | Fill `requestBody`/`parameters` from validation middleware.  |
 
 The remaining options come from `OpenApiGeneratorOptions` (title, version, servers,
 `securitySchemes`, and the rest of the document metadata).
@@ -62,6 +74,53 @@ can detect that.
 The plugin's own `specEndpoint` and `endpoint` are never documented as operations — a spec listing
 `/openapi.json` and `/docs` describes its own delivery mechanism, and those entries flow into every
 generated client. They are still served; only the document entries are omitted.
+
+`excludeOwners` drops operational routes by the plugin that registered them rather than by path,
+because those paths are configuration: `HealthPlugin({ endpoints })` and
+`MetricsPlugin({ endpoint })` both accept one, so a static path list silently stops excluding a
+renamed endpoint. Without it, `/health`, `/live`, `/ready` and `/metrics` reach every generated
+client as `getHealth`, `getLive`, `getReady` and `getMetrics`. Pass `[]` to document them.
+
+## Deriving request schemas from validation middleware
+
+```typescript
+import { validateBody, validateQuery } from '@setu-ts/validation-plugin';
+
+app.router.post('/orders', {
+  middleware: [validateBody(PlaceOrderSchema), validateQuery(ListQuerySchema)],
+  handler,
+});
+```
+
+The operation is documented with a `requestBody` from `PlaceOrderSchema`, query parameters from
+`ListQuerySchema`, and a `400` — which is what the middleware actually answers. No `schema.body` is
+needed, and nothing is written twice.
+
+Every helper `@setu-ts/validation-plugin` ships brands the middleware it returns with
+`RouteValidationMetadata` from `@setu-ts/common`, and this plugin reads the brand off the route.
+Neither package imports the other.
+
+Rules and limits:
+
+- A value **declared** on the route's own `schema` always wins, per field.
+- The **last** brand for a target wins when a route carries two, because that is the value the
+  handler receives: each middleware writes `validated:<target>` as it passes, so the final writer's
+  is the one in `ctx.state`. The request must still satisfy every brand — any of them can answer
+  `400` — so the documented shape is what the handler sees, not that conjunction.
+- A `cookies` brand derives **nothing**: `RouteSchema` has no `cookies` field, and `@setu-ts/sdk`'s
+  client generator refuses an `in: 'cookie'` parameter outright, so emitting one would turn a
+  working document into a codegen failure for its consumers.
+- The derived `400` carries a description and no schema — the body shape depends on the validation
+  plugin's configured `errorFormat`, which this plugin cannot see.
+- `deriveRequestSchemas: false` disables derivation only. It does NOT restore the rest of the 0.3.0
+  document changes: owner exclusion, the `operationId` format and schema deduplication are
+  unconditional. To document the operational routes again, pass `excludeOwners: []`.
+
+## Operation ids
+
+An id is derived from the method and the path with placeholders unwrapped: `GET /orders/{id}`
+becomes `get-orders-by-id`. Braces are URL-unsafe — Redocly's recommended ruleset flags them — and
+tools that put an `operationId` in an anchor, a filename or a URL are entitled to break on them.
 
 ## Documenting authentication
 
@@ -148,6 +207,7 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `OpenApiSchemaObject`     | interface |
 | `OpenApiServiceOptions`   | interface |
 | `SwaggerUiOptions`        | interface |
+| `SchemaNodeHook`          | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

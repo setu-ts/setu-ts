@@ -12,6 +12,38 @@ const HASH_LENGTH = 32; // 256 bits
 const SALT_LENGTH = 16; // 128 bits
 
 /**
+ * Thrown by {@linkcode PasswordHasher.verify} when the stored value is not a
+ * well-formed `pbkdf2$<iterations>$<salt>$<hash>` string.
+ *
+ * This usually means the arguments were passed in reverse order — a plaintext
+ * password in the `stored` position makes every correct verification fail, so
+ * it is reported loudly here instead of indistinguishably as `false`.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   const ok = await hasher.verify(stored, password);
+ * } catch (error) {
+ *   if (error instanceof MalformedPasswordHashError) {
+ *     // The stored credential is corrupt, or verify's arguments are swapped
+ *   }
+ * }
+ * ```
+ * @since 0.3.0
+ */
+export class MalformedPasswordHashError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'MalformedPasswordHashError';
+}
+
+/**
+ * Largest PBKDF2 iteration count `verify` will accept from a stored credential.
+ * A sanity cap, not a policy: it exists so a corrupted or hostile hash cannot
+ * drive an unbounded key derivation.
+ */
+const MAX_ITERATIONS = 10_000_000;
+
+/**
  * Password hasher using PBKDF2-SHA256 via Web Crypto.
  */
 export class PasswordHasher {
@@ -41,32 +73,68 @@ export class PasswordHasher {
   /**
    * Verify a secret against a stored hash.
    *
-   * @param stored - The stored hash string
+   * A wrong secret returns `false`; a stored value that is not a well-formed
+   * `pbkdf2$…` string throws {@linkcode MalformedPasswordHashError}, because
+   * that shape of failure is a programming error (most often reversed
+   * arguments) rather than a failed login.
+   *
+   * @param stored - The stored hash string in `pbkdf2$<iterations>$<salt>$<hash>` format
    * @param secret - The password to verify
    * @returns `true` if the secret matches, `false` otherwise
+   * @throws {MalformedPasswordHashError} If `stored` is not a well-formed `pbkdf2$…` string
    */
   async verify(stored: string, secret: string): Promise<boolean> {
-    try {
-      const parts = stored.split('$');
-      if (parts.length !== 4 || parts[0] !== 'pbkdf2') {
-        return false;
-      }
-
-      const iterations = parseInt(parts[1], 10);
-      if (isNaN(iterations) || iterations <= 0) {
-        return false;
-      }
-
-      const salt = this.base64UrlDecode(parts[2]);
-      const expectedHash = this.base64UrlDecode(parts[3]);
-
-      const actualHash = await this.deriveHash(secret, salt, iterations);
-
-      // Constant-time comparison
-      return this.constantTimeCompare(actualHash, expectedHash);
-    } catch {
-      return false;
+    const parts = stored.split('$');
+    if (parts.length !== 4 || parts[0] !== 'pbkdf2') {
+      throw new MalformedPasswordHashError(
+        'the stored credential is not a pbkdf2$<iterations>$<salt>$<hash> string — ' +
+          'check that the STORED HASH is passed first and the SECRET second to PasswordHasher.verify',
+      );
     }
+
+    // Strict digits-only parse: `parseInt` would accept trailing junk
+    // (`100000junk` → `100000`) and treat a corrupted hash as well-formed.
+    if (!/^\d+$/.test(parts[1])) {
+      throw new MalformedPasswordHashError(
+        `the stored credential's iterations part '${parts[1]}' is not a positive integer`,
+      );
+    }
+    // `parseInt` saturates to Infinity past ~308 digits, and Infinity passes
+    // every `<=` bound — the classic disabled-bound case — so a corrupted hash
+    // carrying a long digit run would otherwise reach `deriveBits`. The upper
+    // bound below catches it: every value `/^\d+$/` admits that is not a safe
+    // integer also exceeds MAX_ITERATIONS, so no separate finiteness check is
+    // reachable.
+    // The upper bound is a sanity cap, well above any real work factor
+    // (OWASP's 2023 PBKDF2-SHA256 guidance is 600 000).
+    const iterations = parseInt(parts[1], 10);
+    if (iterations <= 0) {
+      throw new MalformedPasswordHashError(
+        `the stored credential's iterations part '${parts[1]}' is not a positive integer`,
+      );
+    }
+    if (iterations > MAX_ITERATIONS) {
+      throw new MalformedPasswordHashError(
+        `the stored credential's iterations part '${parts[1]}' exceeds the maximum supported ` +
+          `work factor (${MAX_ITERATIONS})`,
+      );
+    }
+
+    let salt: Uint8Array;
+    let expectedHash: Uint8Array;
+    try {
+      salt = this.base64UrlDecode(parts[2]);
+      expectedHash = this.base64UrlDecode(parts[3]);
+    } catch {
+      throw new MalformedPasswordHashError(
+        "the stored credential's salt/hash parts are not valid base64url",
+      );
+    }
+
+    const actualHash = await this.deriveHash(secret, salt, iterations);
+
+    // Constant-time comparison
+    return this.constantTimeCompare(actualHash, expectedHash);
   }
 
   /**

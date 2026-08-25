@@ -118,9 +118,11 @@ MIT
 | `MemoryAuditStorage`   | class     |
 | `AuditEntry`           | interface |
 | `AuditPluginOptions`   | interface |
+| `AuditQuery`           | interface |
 | `AuditStorageOptions`  | interface |
 | `IAuditDbClient`       | interface |
 | `IAuditLogger`         | interface |
+| `StoredAuditEntry`     | interface |
 | `AuditStorageType`     | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

@@ -5,7 +5,14 @@
  *
  * @module
  */
-import { CAPABILITIES, setUpgradeIntent } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  ERROR_RESPONDER_STATE_KEY,
+  errorResponderOf,
+  respondWithError,
+  serializeError,
+  setUpgradeIntent,
+} from '@setu-ts/common';
 import type {
   CliCommandHandler,
   DecoratorHandler,
@@ -14,6 +21,7 @@ import type {
   IApplication,
   IConfig,
   IContainer,
+  IErrorResponder,
   IHttpAdapter,
   ILogger,
   IMetadataStore,
@@ -121,6 +129,19 @@ class Application implements IKernelApplication {
   #stopping = false;
   /** Cached in-flight/completed shutdown, so stop() runs its side effects once. */
   #stopPromise: Promise<void> | null = null;
+  /**
+   * The application's resolved error responder, read from the compiled
+   * pipeline's `errorHandler` brand at startup (M70f re-review, findings 1 & 2).
+   *
+   * `errorHandler` publishes its responder into `ctx.state` per request, but
+   * three kernel sites run BEFORE any middleware: the shutdown-drain `503`,
+   * the malformed-request `400`, and the request-lifecycle hooks. Those sites
+   * cannot read `ctx.state` (no context yet, or the context is fresh), so the
+   * kernel seeds the SAME resolved responder into their state from this cache.
+   * `undefined` when no `errorHandler` is registered, in which case every site
+   * keeps the byte-identical no-handler fallback.
+   */
+  #errorResponder: IErrorResponder | undefined = undefined;
 
   get services() {
     return this.#registry;
@@ -319,7 +340,19 @@ class Application implements IKernelApplication {
     this.#warnUnsatisfiedConsumers();
 
     // 6. Compile the middleware pipeline
-    this.#pipeline.compile();
+    const chain = this.#pipeline.compile();
+
+    // 6b. Resolve the application's error responder from the pipeline (M70f
+    //     re-review, findings 1 & 2). `errorHandler` brands its middleware
+    //     function with the responder it built at factory time; the kernel
+    //     caches that ONE instance so the pre-pipeline sites — the drain 503,
+    //     the malformed-request 400, and the request-lifecycle hooks — can
+    //     seed it into their state before they run, where `errorHandler`'s own
+    //     `ctx.state` publication cannot reach them. The LAST branded stage
+    //     in execution order (the innermost, i.e. the highest priority number
+    //     among the selected stages) wins, matching the responder that stage
+    //     publishes into `ctx.state` for in-pipeline sites.
+    this.#errorResponder = this.#resolveErrorResponder(chain);
 
     // 7. Run bootstrap hooks
     await this.#lifecycle.runBootstrap();
@@ -540,7 +573,20 @@ class Application implements IKernelApplication {
   async #handleRequest(request: IRequest): Promise<ResponseBuilder> {
     if (this.#stopping) {
       const builder = new ResponseBuilder();
-      builder.status(503).json({ error: 'Service Unavailable' });
+      // Pre-pipeline: no request context exists yet, so the responder (if any)
+      // is seeded from the startup cache — the same instance `errorHandler`
+      // would publish into `ctx.state` inside the pipeline — into the fresh
+      // state map (M70f re-review, finding 1). With no `errorHandler` the
+      // cache is empty and the framework-default shape is written. The status
+      // is still written here, so metrics keep seeing 503.
+      const state = new Map<string, unknown>();
+      if (this.#errorResponder !== undefined) {
+        state.set(ERROR_RESPONDER_STATE_KEY, this.#errorResponder);
+      }
+      respondWithError(
+        { state, response: builder, ...this.#safeRequestTarget(request) },
+        { status: 503, title: 'Service Unavailable' },
+      );
       return builder;
     }
 
@@ -559,12 +605,24 @@ class Application implements IKernelApplication {
     try {
       handle = createRequestContext(request, this.#registry, runtime);
     } catch {
-      return this.#badRequest();
+      return this.#badRequest(request);
     }
     if (!isPathDecodable(handle.ctx.request.path)) {
-      return this.#badRequest();
+      return this.#badRequest(request);
     }
     const ctx = handle.ctx;
+
+    // Seed the application's resolved error responder into the fresh context
+    // BEFORE the request-lifecycle hooks run (M70f re-review, finding 2). The
+    // hooks execute before the middleware pipeline, so `errorHandler`'s own
+    // `ctx.state` publication has not happened yet: without this seed, a
+    // throwing `onRequest` hook would fall through to the no-handler fallback
+    // even when an `errorHandler` is registered. `errorHandler` re-publishes
+    // the SAME instance inside the pipeline, so the per-request set is
+    // idempotent and in-pipeline sites are unaffected.
+    if (this.#errorResponder !== undefined) {
+      ctx.state.set(ERROR_RESPONDER_STATE_KEY, this.#errorResponder);
+    }
 
     this.#inFlight++;
     try {
@@ -606,7 +664,7 @@ class Application implements IKernelApplication {
         const routeResult = this.#router.match(request.method, url.pathname);
 
         if (routeResult === null) {
-          ctx.response.status(404).json({ error: 'Not Found' });
+          respondWithError(ctx, { status: 404, title: 'Not Found' });
           return;
         }
 
@@ -648,7 +706,12 @@ class Application implements IKernelApplication {
         }
       }
 
-      (ctx.response as ResponseBuilder).status(500).json({ error: 'Internal Server Error' });
+      // X11-2: the unhandled error is visible to the operator. The body stays
+      // opaque — the message is not disclosed to the client (M70b's
+      // `maskInternalErrors` decision applied consistently); only the log
+      // carries it.
+      this.#reportUnhandledError(err, ctx);
+      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
       return ctx.response as ResponseBuilder;
     } finally {
       this.#inFlight--;
@@ -708,7 +771,7 @@ class Application implements IKernelApplication {
       // logger; the kernel does, so silence here would be a choice rather than
       // a constraint.
       this.#reportUpgradeRouterFailure(cause);
-      ctx.response.status(500).json({ error: 'Internal Server Error' });
+      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
       return true;
     }
 
@@ -717,7 +780,7 @@ class Application implements IKernelApplication {
     }
 
     if (!decision.accept) {
-      ctx.response.status(decision.status).json({ error: 'Upgrade rejected' });
+      respondWithError(ctx, { status: decision.status, title: 'Upgrade rejected' });
       return true;
     }
 
@@ -732,7 +795,7 @@ class Application implements IKernelApplication {
       // connection slot for this socket. RFC 6455 close code 1006 (abnormal
       // closure) is the honest signal that no connection was ever established.
       decision.sink.onClose({ code: 1006, reason: 'Upgrade request carried a body' });
-      ctx.response.status(400).json({ error: 'Bad Request' });
+      respondWithError(ctx, { status: 400, title: 'Bad Request' });
       return true;
     }
 
@@ -811,16 +874,101 @@ class Application implements IKernelApplication {
   }
 
   /**
+   * Reads the application's resolved error responder off the compiled pipeline
+   * (M70f re-review, findings 1 & 2).
+   *
+   * `errorHandler` brands its middleware function with the responder it built
+   * at factory time (see `brandErrorResponder` in `@setu-ts/common`). The
+   * kernel caches that instance at startup so the pre-pipeline sites — which
+   * run before the pipeline and cannot read `ctx.state` — can seed it into
+   * their state. The LAST branded stage in execution order (the innermost,
+   * i.e. the highest priority number among the selected stages) wins,
+   * because that is the stage whose `ctx.state` publication an in-pipeline
+   * site would see last. `undefined`
+   * when no `errorHandler` is registered, in which case every site keeps the
+   * byte-identical no-handler fallback.
+   *
+   * @param chain - The compiled middleware chain, in execution order
+   */
+  #resolveErrorResponder(chain: readonly unknown[]): IErrorResponder | undefined {
+    let responder: IErrorResponder | undefined;
+    for (const stage of chain) {
+      // Every compiled stage is a middleware function; `errorResponderOf`
+      // reads a brand off it, so narrow `unknown` to `object` first.
+      if (typeof stage !== 'function') {
+        continue;
+      }
+      const branded = errorResponderOf(stage);
+      if (branded !== undefined) {
+        responder = branded;
+      }
+    }
+    return responder;
+  }
+
+  /**
    * Builds a bare `400 Bad Request` response for a client error detected
    * before request processing begins (a malformed request URL or a
    * malformed percent-escape in the path). Kept as a helper so both
    * rejection sites in {@linkcode Application.#handleRequest} produce an
    * identical body.
+   *
+   * Pre-pipeline: no request context exists yet, so the responder is seeded
+   * from the startup cache ({@linkcode Application.#errorResponder}) into the
+   * fresh state map — the same responder `errorHandler` would publish into
+   * `ctx.state` were this site inside the pipeline. With no `errorHandler`
+   * registered the cache is empty and the framework-default shape is written.
+   *
+   * The target carries a SAFE request ({@linkcode Application.#safeRequestTarget}),
+   * never the raw one: a malformed request URL keeps a throwing `path` getter
+   * on the synthetic `IRequest`, and a Problem Details formatter that reads
+   * `ctx.request.path` for the `instance` member would throw the URL parser
+   * error again inside the responder — turning the configured 400 back into an
+   * unhandled `TypeError: Invalid URL` (M70f re-review round 2, finding 1).
    */
-  #badRequest(): ResponseBuilder {
+  #badRequest(request: IRequest): ResponseBuilder {
     const builder = new ResponseBuilder();
-    builder.status(400).json({ error: 'Bad Request' });
+    const state = new Map<string, unknown>();
+    if (this.#errorResponder !== undefined) {
+      state.set(ERROR_RESPONDER_STATE_KEY, this.#errorResponder);
+    }
+    respondWithError(
+      { state, response: builder, ...this.#safeRequestTarget(request) },
+      { status: 400, title: 'Bad Request' },
+    );
     return builder;
+  }
+
+  /**
+   * Builds the `request` member of a pre-pipeline {@linkcode respondWithError}
+   * target from a request whose path may be unreadable.
+   *
+   * A formatted error response needs the request path for the Problem Details
+   * `instance` member, and the target's `request` field is typed to supply it.
+   * But a request that failed URL parsing carries a `path` getter that throws
+   * (the synthetic `IRequest` in {@linkcode Application.inject} and the
+   * adapter-mapped requests both derive `path` from `new URL(...)`), so handing
+   * the raw request to the responder would make the formatter re-throw inside
+   * the very response that is supposed to report the failure.
+   *
+   * The safe target therefore carries the path only when it can be read
+   * without throwing — captured once, up front — and omits the `request` field
+   * entirely otherwise, which is the documented shape of
+   * {@linkcode ErrorResponderTarget.request} ("when one exists"). A formatter
+   * that receives no request answers without an `instance` member, which is
+   * the correct RFC 9457 outcome for a request whose path cannot be known.
+   *
+   * @param request - The request that failed pre-pipeline validation
+   * @returns `{ request: { path } }` when the path is readable, `{}` when it is not
+   */
+  #safeRequestTarget(request: IRequest): { request?: { readonly path: string } } {
+    let path: string | undefined;
+    try {
+      path = request.path;
+    } catch {
+      path = undefined;
+    }
+    return path === undefined ? {} : { request: { path } };
   }
 
   /**
@@ -869,6 +1017,37 @@ class Application implements IKernelApplication {
       logger.error('onError hook threw and was suppressed', {
         error: err.message,
         stack: err.stack,
+      });
+    } catch {
+      // The logger itself failed or none is resolvable — no safe channel
+      // remains without violating the no-console rule; degrade silently.
+    }
+  }
+
+  /**
+   * Surfaces an unhandled request error through the sanctioned logger channel
+   * (X11-2). The response body stays opaque — the message is not disclosed to
+   * the client (M70b's `maskInternalErrors` decision applied consistently) —
+   * but the operator sees the message and stack, with the request identified.
+   *
+   * Guarded exactly like {@linkcode Application.#reportSuppressedHookError}: a
+   * missing or itself-broken logger must not turn an already-failing request
+   * into a crashed one.
+   *
+   * @param error - The unhandled error
+   * @param ctx - The request context it occurred in
+   */
+  #reportUnhandledError(error: Error, ctx: IRequestContext): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      logger.error('Unhandled request error', {
+        ...serializeError(error),
+        requestId: ctx.id,
+        method: ctx.request.method,
+        path: ctx.request.path,
       });
     } catch {
       // The logger itself failed or none is resolvable — no safe channel

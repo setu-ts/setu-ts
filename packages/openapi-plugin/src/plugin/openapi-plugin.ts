@@ -81,6 +81,8 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
     securitySchemes,
     security,
     deriveSecurity,
+    excludeOwners,
+    deriveRequestSchemas,
     exclude,
     swagger = true,
     endpoint = '/docs',
@@ -140,6 +142,8 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
         ...(securitySchemes !== undefined ? { securitySchemes } : {}),
         ...(security !== undefined ? { security } : {}),
         ...(deriveSecurity !== undefined ? { deriveSecurity } : {}),
+        ...(excludeOwners !== undefined ? { excludeOwners } : {}),
+        ...(deriveRequestSchemas !== undefined ? { deriveRequestSchemas } : {}),
         exclude: excludedPaths,
         schemas: [], // Will be populated at onInit
       });

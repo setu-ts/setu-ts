@@ -184,6 +184,7 @@ package fits the plugin architecture.
 | `UpgradeEmitter`                       | interface |
 | `WebSocketLike`                        | interface |
 | `WebWorkerGlobals`                     | interface |
+| `WebWorkerHostOptions`                 | interface |
 | `WebWorkerLike`                        | interface |
 | `WsModuleLike`                         | interface |
 | `WsServerLike`                         | interface |

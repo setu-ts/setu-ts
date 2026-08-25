@@ -11,6 +11,7 @@ import type { HttpMethod } from './types.ts';
 import type { IServiceRegistry } from './registry.ts';
 import type { IPrincipal } from './services/auth.ts';
 import type { ITenant } from './services/tenancy.ts';
+import type { ValidationTarget } from './services/validation.ts';
 
 /**
  * Opaque marker returned by {@linkcode IResponse} terminal methods and
@@ -151,6 +152,17 @@ export interface IResponse {
    * @returns The handler result
    */
   text(body: string): HandlerResult;
+  /**
+   * Sends an HTML response.
+   *
+   * The `text/html; charset=utf-8` media type is set explicitly — a bare
+   * `text/html` lets a browser sniff the encoding.
+   *
+   * @param body - The HTML document text
+   * @returns The handler result
+   * @since 0.2.0
+   */
+  html(body: string): HandlerResult;
   /**
    * Sends a raw byte response.
    *
@@ -607,6 +619,130 @@ export function securityMetadataOf(
 function isRouteSecurityMetadata(value: unknown): value is RouteSecurityMetadata {
   return typeof value === 'object' && value !== null &&
     typeof (value as { authenticated?: unknown }).authenticated === 'boolean';
+}
+
+/**
+ * Key under which a {@linkcode MiddlewareFunction} carries its
+ * {@linkcode RouteValidationMetadata}.
+ *
+ * Created with `Symbol.for`, not `Symbol()`, so two copies of this package in
+ * one process resolve the same key — the {@linkcode SECURITY_METADATA}
+ * precedent, and for the same reason: a locally-created symbol would simply
+ * miss on every read, silently.
+ *
+ * Prefer {@linkcode withValidationMetadata} and {@linkcode validationMetadataOf}
+ * over touching this directly; the symbol is exported so a validating
+ * middleware outside `@setu-ts/validation-plugin` can be branded too.
+ *
+ * @since 0.3.0
+ */
+export const VALIDATION_METADATA: unique symbol = Symbol.for('setu.validation.metadata');
+
+/**
+ * What a validating middleware checks, branded onto the middleware function
+ * so a documentation generator can describe the route without importing the
+ * plugin that produced it.
+ *
+ * This is a **description**, not a mechanism: the middleware still performs
+ * the validation, and removing the metadata changes no runtime behaviour.
+ *
+ * The `schema` is carried verbatim — the same object the caller passed — so a
+ * reader transforms it with whatever schema support it already has. It is
+ * typed `unknown` rather than a Zod type because `@setu-ts/common` depends on
+ * nothing and the validation contract accepts any object exposing `safeParse`.
+ *
+ * @since 0.3.0
+ */
+export interface RouteValidationMetadata {
+  /** Which part of the request the middleware validates. */
+  readonly target: ValidationTarget;
+  /** The schema it validates against, exactly as the caller supplied it. */
+  readonly schema: unknown;
+}
+
+/**
+ * Brands a middleware function with the request part and schema it validates,
+ * so a documentation generator can read it without importing the plugin that
+ * produced it.
+ *
+ * The function is branded in place and returned, so identity is preserved and
+ * the brand costs no wrapper frame per request. The property is symbol-keyed
+ * and non-enumerable, so it is invisible to `Object.keys`, `JSON.stringify`
+ * and spread, and the middleware behaves exactly as it did.
+ *
+ * @param middleware - The middleware to brand
+ * @param metadata - The request part it validates, and against what
+ * @returns The same `middleware` reference, branded
+ *
+ * @example
+ * ```typescript
+ * export function validateBody(schema: unknown): MiddlewareFunction {
+ *   return withValidationMetadata(async (ctx, next) => {
+ *     // ... validate ctx.request body against `schema` ...
+ *     await next();
+ *   }, { target: 'body', schema });
+ * }
+ * ```
+ *
+ * @since 0.3.0
+ */
+export function withValidationMetadata<T extends MiddlewareFunction>(
+  middleware: T,
+  metadata: RouteValidationMetadata,
+): T {
+  Object.defineProperty(middleware, VALIDATION_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return middleware;
+}
+
+/**
+ * Reads the validation metadata a middleware function was branded with.
+ *
+ * @param middleware - The middleware to inspect
+ * @returns The metadata, or `undefined` when the middleware carries none
+ *
+ * @example
+ * ```typescript
+ * for (const fn of route.definition.middleware ?? []) {
+ *   const meta = validationMetadataOf(fn);
+ *   if (meta?.target === 'body') documentRequestBody(meta.schema);
+ * }
+ * ```
+ *
+ * @since 0.3.0
+ */
+export function validationMetadataOf(
+  middleware: MiddlewareFunction,
+): RouteValidationMetadata | undefined {
+  const carrier = middleware as MiddlewareFunction & {
+    readonly [VALIDATION_METADATA]?: unknown;
+  };
+  const value = carrier[VALIDATION_METADATA];
+  return isRouteValidationMetadata(value) ? value : undefined;
+}
+
+/**
+ * Narrows an unknown branded value. A foreign value under the same global
+ * symbol is treated as absent rather than trusted.
+ *
+ * `schema` is deliberately NOT checked beyond presence: it is `unknown` by
+ * contract, and any object may legitimately appear there.
+ */
+function isRouteValidationMetadata(value: unknown): value is RouteValidationMetadata {
+  if (typeof value !== 'object' || value === null) return false;
+  // `schema` must be PRESENT, not merely declared by the type. A foreign value
+  // branded under the same `Symbol.for` key with only a `target` otherwise read
+  // back as valid metadata, and the OpenAPI generator counted that as a
+  // derivation — adding a `400` response to an operation from which nothing was
+  // actually derived.
+  if (!('schema' in value)) return false;
+  const target = (value as { target?: unknown }).target;
+  return target === 'body' || target === 'query' || target === 'params' ||
+    target === 'headers' || target === 'cookies';
 }
 
 /**

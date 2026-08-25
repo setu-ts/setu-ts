@@ -46,6 +46,10 @@ function createFakeResponse(): {
       body = b;
       return { __handlerResult: true };
     },
+    html: (b: string): HandlerResult => {
+      body = b;
+      return { __handlerResult: true };
+    },
     send: (b?: Uint8Array): HandlerResult => {
       body = b;
       return { __handlerResult: true };
@@ -87,6 +91,10 @@ function createContext(opts: {
       return { __handlerResult: true };
     },
     text: (b: string): HandlerResult => {
+      respBody = b;
+      return { __handlerResult: true };
+    },
+    html: (b: string): HandlerResult => {
       respBody = b;
       return { __handlerResult: true };
     },

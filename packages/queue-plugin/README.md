@@ -37,7 +37,9 @@ import { QueuePlugin } from '@setu-ts/queue-plugin';
 app.register(QueuePlugin({
   adapter: 'rabbitmq',
   url: 'amqp://localhost:5672',
-  queues: { default: 'tasks' },
+  // Queue names are derived per job name from this prefix
+  // (`<prefix>.<name>.ready` / `.delay` / `.dead`); there is no `queues` map.
+  prefix: 'he.queue',
 }));
 ```
 
@@ -73,6 +75,7 @@ app.register(QueuePlugin({ adapter: 'memory', name: 'background' }));
 
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
+import type { IQueue } from '@setu-ts/common';
 
 const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
 
@@ -83,34 +86,113 @@ await queue.add('send-email', { to: 'user@example.com' });
 await queue.add('send-email', { to: 'user@example.com' }, { delayMs: 5000 });
 
 // Job with retry limit
-await queue.add('process-data', data, { maxAttempts: 5 });
+await queue.add('process-data', { rows: 100 }, { maxAttempts: 5 });
 ```
 
 ### Processing Jobs
 
 ```typescript
-queue.process('send-email', async (job) => {
-  await emailService.send(job.data);
-}, { concurrency: 3 });
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger, IMailer, IQueue } from '@setu-ts/common';
+
+const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
+const mailer = ctx.services.get<IMailer>(CAPABILITIES.MAIL);
+const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+
+interface SendEmail {
+  to: string;
+}
+
+queue.process<SendEmail>('send-email', async (job) => {
+  await mailer.send({ to: job.data.to, subject: 'Welcome', text: 'Hello' });
+}, {
+  concurrency: 3,
+  // Invoked once when a job has exhausted its attempts, immediately before it
+  // is dead-lettered — the only programmatic notice that work was abandoned.
+  onFailed: (job, error) => {
+    logger.error('job dead-lettered', { id: job.id, name: job.name, error: String(error) });
+  },
+});
 ```
 
 ### Recurring Jobs
 
 ```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IQueue } from '@setu-ts/common';
+
+const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
+
 await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midnight
 ```
 
 ## Options
 
-| Option               | Type                                         | Default                    | Description                              |
-| -------------------- | -------------------------------------------- | -------------------------- | ---------------------------------------- |
-| `adapter`            | `'memory' \| 'redis' \| 'rabbitmq' \| 'sqs'` | `'memory'`                 | Queue adapter type                       |
-| `name`               | `string`                                     | -                          | Instance name for multi-instance support |
-| `url`                | `string`                                     | `'redis://localhost:6379'` | Redis / RabbitMQ connection URL          |
-| `region`             | `string`                                     | -                          | AWS region (SQS)                         |
-| `queues`             | `Record<string, string>`                     | -                          | Queue name→URL mapping (RabbitMQ / SQS)  |
-| `defaultMaxAttempts` | `number`                                     | `3`                        | Default retry attempts                   |
-| `pollIntervalMs`     | `number`                                     | `1000`                     | Worker poll interval                     |
+| Option               | Type                                         | Default                    | Description                                        |
+| -------------------- | -------------------------------------------- | -------------------------- | -------------------------------------------------- |
+| `adapter`            | `'memory' \| 'redis' \| 'rabbitmq' \| 'sqs'` | `'memory'`                 | Queue adapter type                                 |
+| `name`               | `string`                                     | —                          | Instance name for multi-instance support           |
+| `url`                | `string`                                     | `'redis://localhost:6379'` | Redis / RabbitMQ connection URL                    |
+| `client`             | `IRedisQueueClient \| IAmqpQueueConnection`  | —                          | Injected client, bypassing the lazy import         |
+| `prefix`             | `string`                                     | `'he.queue'`               | Queue-name prefix (RabbitMQ)                       |
+| `sqs`                | `SqsQueueOptions`                            | —                          | SQS configuration; required when `adapter: 'sqs'`  |
+| `defaultMaxAttempts` | `number`                                     | `3`                        | Default retry attempts                             |
+| `pollIntervalMs`     | `number`                                     | `1000`                     | Worker poll interval                               |
+| `deadLetterTtlMs`    | `number`                                     | — (retained forever)       | Retention for a dead-lettered payload (Redis only) |
+
+Two options this table used to list do not exist and never did: `region` (SQS configuration lives
+under `sqs`) and `queues` (RabbitMQ derives its queue names from `prefix`).
+
+## Seeing a job that failed for the last time
+
+A job that exhausts its attempts is dead-lettered by every adapter, and used to be reachable only by
+opening a Redis client: `IQueue` has no `getJob` and no dead-letter accessor, the health payload was
+`{"adapter":"RedisQueue"}`, and `/metrics` carried no queue series at all. Three surfaces answer
+different questions about it:
+
+| Surface                                  | Answers                                                               |
+| ---------------------------------------- | --------------------------------------------------------------------- |
+| `ProcessOptions.onFailed`                | "This job is being abandoned" — log, alert, or compensate in process. |
+| `queue_jobs_total{name,outcome}`         | "How often is this happening?" — the alertable rate.                  |
+| The `queues` field in the health payload | "How many are sitting there right now?" — survives a restart.         |
+
+The counter needs `@setu-ts/metrics-plugin` registered; without it no collector is built and
+behaviour is unchanged. Depths are reported by the memory and Redis adapters and OMITTED (never
+reported as zeros) on RabbitMQ and SQS, whose counts need a management API.
+
+`deadLetterTtlMs` bounds how long the retained payload lives. Without it the jobs hash grows for the
+lifetime of the deployment — the retention exists for debugging, so dropping it by default would
+remove the value it is there for.
+
+Retention is enforced **per payload**: each dead-letter sweeps the dead set — which is scored by
+dead-letter time — and deletes every entry older than the TTL along with its payload. A key-level
+`EXPIRE` alone would not do this, because each new dead-letter renews it, so a queue that keeps
+failing would retain its oldest payloads forever. The key-level expiry is kept beside the sweep as
+the backstop for the case the sweep cannot reach: a queue that dead-letters once and then goes quiet
+never runs another sweep.
+
+The bound this gives is **at least the TTL, and at most the TTL past the last dead-letter** — so a
+payload that dead-letters just before a short burst that then stops can live for just under twice
+the TTL. Two mechanics produce that: the sweep only runs when a dead-letter arrives, so a payload is
+dropped at the first dead-letter after its deadline rather than at the deadline itself; and the
+backstop is armed from the dead-letter that armed it, because one shared key carries one deadline
+and arming it from the oldest survivor would take the newer payloads with it before their own TTL
+elapsed. It errs late by construction: dropping a payload early would discard exactly the debugging
+data the option exists to keep. Exact per-payload expiry is not expressible here — Redis has no
+per-member TTL on a sorted set, and the payloads share one hash.
+
+The payload move is issued **before** the dead-set insert, and that order is load-bearing: no two of
+these commands are atomic, and a sweep starts from the dead set, so a member that became visible
+before its payload was written can be swept by a concurrent `deadLetter` — deleting the member and
+stranding the payload where no later sweep can reach it. Writing first means a sweep either misses
+the id, and a later one collects it, or finds both together. Ordering closes that window; it does
+not make the sequence atomic, so a process that dies mid-sequence can still leave a payload behind.
+
+Setting it MOVES a dead job's payload from `queue:<name>:jobs` into `queue:<name>:dead:jobs`, and
+the expiry is applied to that key and the dead set. It is never applied to the live jobs hash: that
+key holds the payload of **every** job for the name, Redis keeps a key's TTL across later writes,
+and a job whose payload has vanished is moved to the processing set by `reserve` and never returned
+— so expiring it would silently discard work that was only waiting to run.
 
 ## Adapters
 
@@ -191,6 +273,7 @@ the adapter has no liveness check.
 | `ISnsTransport`                | interface |
 | `ISqsTransport`                | interface |
 | `ProcessOptions`               | interface |
+| `QueueDepths`                  | interface |
 | `QueueLogger`                  | interface |
 | `QueuePluginOptions`           | interface |
 | `RabbitMqQueueOptions`         | interface |

@@ -41,7 +41,10 @@ export const REST_PLUGINS: readonly Wiring[] = [
   // silently overrides.
   { pkg: 'config-plugin', symbol: 'ConfigPlugin' },
   { pkg: 'logger-plugin', symbol: 'LoggerPlugin' },
-  { pkg: 'validation-plugin', symbol: 'ValidationPlugin' },
+  // `errorFormat: 'rfc9457'` makes a validation failure answer in the same
+  // Problem Details shape the `errorHandler` below emits for thrown errors
+  // (C3): before this, the two disagreed on format in a scaffolded project.
+  { pkg: 'validation-plugin', symbol: 'ValidationPlugin', args: "{ errorFormat: 'rfc9457' }" },
   { pkg: 'http-security-plugin', symbol: 'HttpSecurityPlugin' },
   { pkg: 'health-plugin', symbol: 'HealthPlugin' },
   { pkg: 'metrics-plugin', symbol: 'MetricsPlugin' },

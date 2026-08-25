@@ -15,7 +15,9 @@ import { CAPABILITIES } from '@setu-ts/common';
  *
  * @example
  * ```typescript
- * app.middleware.add(authMiddleware());
+ * // Priority 300 is the band ARCHITECTURE.md §10 reserves for authentication;
+ * // a bare add() would take the kernel default of 500 and run after it.
+ * app.middleware.add(authMiddleware(), { priority: 300 });
  * ```
  */
 export function authMiddleware(): MiddlewareFunction {
