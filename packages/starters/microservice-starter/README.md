@@ -216,12 +216,12 @@ Three consequences, each a startup throw rather than a silent misinjection:
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `buildMicroservicePlugins` | function |
-| `createMicroserviceApp` | function |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `buildMicroservicePlugins`   | function  |
+| `createMicroserviceApp`      | function  |
 | `MicroserviceStarterOptions` | interface |
-| `RealtimeArm` | interface |
+| `RealtimeArm`                | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
-
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

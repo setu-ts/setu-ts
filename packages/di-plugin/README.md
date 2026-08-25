@@ -48,21 +48,22 @@ registrations always take precedence.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `createContainer` | function |
-| `DiPlugin` | function |
-| `CircularDetector` | class |
-| `ContainerBuilder` | class |
-| `DiContainer` | class |
-| `ProviderRegistry` | class |
-| `ScopeManager` | class |
-| `ContainerConfig` | interface |
-| `DiPluginOptions` | interface |
+| Export             | Kind      |
+| ------------------ | --------- |
+| `createContainer`  | function  |
+| `DiPlugin`         | function  |
+| `CircularDetector` | class     |
+| `ContainerBuilder` | class     |
+| `DiContainer`      | class     |
+| `ProviderRegistry` | class     |
+| `ScopeManager`     | class     |
+| `ContainerConfig`  | interface |
+| `DiPluginOptions`  | interface |
 | `ExternalResolver` | interface |
-| `ProviderEntry` | interface |
+| `ProviderEntry`    | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

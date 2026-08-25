@@ -7,7 +7,6 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
 
 import type {
   HandlerResult,
@@ -278,7 +277,7 @@ describe('HttpSecurityPlugin — integration', () => {
         .toBe('https://app.example.com');
 
       // IP resolved
-      expect(result.ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('203.0.113.50');
+      expect(result.ctx.state.get('clientIp')).toBe('203.0.113.50');
     });
   });
 
@@ -306,7 +305,7 @@ describe('HttpSecurityPlugin — integration', () => {
       const capturedState: Map<string, unknown> = new Map();
       const origJson = ctx.response.json.bind(ctx.response);
       ctx.response.json = <T>(b: T): HandlerResult => {
-        capturedState.set(CLIENT_IP_STATE_KEY, ctx.state.get(CLIENT_IP_STATE_KEY));
+        capturedState.set('clientIp', ctx.state.get('clientIp'));
         return origJson(b);
       };
 
@@ -327,7 +326,7 @@ describe('HttpSecurityPlugin — integration', () => {
       await chain();
 
       // IP was resolved before the handler ran
-      expect(capturedState.get(CLIENT_IP_STATE_KEY)).toBe('192.0.2.1');
+      expect(capturedState.get('clientIp')).toBe('192.0.2.1');
     });
   });
 

@@ -21,7 +21,7 @@ describe('barrel exports', () => {
   it('should export TELEMETRY_SPAN_KEY as a string', () => {
     expect(barrel.TELEMETRY_SPAN_KEY).toBeDefined();
     expect(typeof barrel.TELEMETRY_SPAN_KEY).toBe('string');
-    expect(barrel.TELEMETRY_SPAN_KEY).toBe('telemetry-plugin:span');
+    expect(barrel.TELEMETRY_SPAN_KEY).toBe('__he_telemetry_span');
   });
 
   it('should export NoopTelemetryService as a class', () => {
