@@ -7251,10 +7251,8 @@ Ordered by the sequence they should be worked, not by severity alone.
 
 ### Closed — what shipped, and what was carried out
 
-All fourteen workstreams (M70a–M70n) are complete. The `70` and `70n` rows flip together with this
-section, so the table is never internally inconsistent — but **M70n's own PR (#183) must merge
-first**, because until it does the code behind the `70n` row is not on `main`. This section is a
-record of the milestone closing, not a claim that every branch has already landed.
+All fourteen workstreams (M70a–M70n) are complete and merged, M70n last (PR #183). The `70` row
+flips with this section.
 
 **Three items were deliberately carried OUT of this milestone rather than closed in it.** Each is a
 capability gap rather than a defect in shipped code, which is why none of them is a `fix/…` branch:
