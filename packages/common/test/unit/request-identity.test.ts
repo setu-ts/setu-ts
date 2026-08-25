@@ -32,6 +32,17 @@ describe('sealRequestIdentity', () => {
     }).toThrow('ctx.request.user has already been set');
   });
 
+  it('guards tenant independently of the principal', () => {
+    const req = request();
+    const first: ITenant = { id: 'first', name: 'First' };
+    sealRequestIdentity(req);
+    req.tenant = first;
+    expect(req.tenant).toBe(first);
+    expect(() => {
+      req.tenant = { id: 'second', name: 'Second' };
+    }).toThrow('ctx.request.tenant has already been set');
+  });
+
   it('keeps identity fields visible and preserves seeded values as first writes', () => {
     const principal: IPrincipal = { id: 'seeded', roles: [] };
     const req = request({ user: principal });
@@ -55,5 +66,15 @@ describe('sealRequestIdentity', () => {
     expect(JSON.stringify(req)).not.toContain('setu.request.user');
     sealRequestIdentity(req);
     expect(req.user?.id).toBe('replacement');
+  });
+
+  it('uses ordinary assignments when an unsealed request is deliberately replaced', () => {
+    const req = request();
+    const principal: IPrincipal = { id: 'unsealed-principal', roles: [] };
+    const tenant: ITenant = { id: 'unsealed-tenant', name: 'Unsealed Tenant' };
+    replacePrincipal(req, principal);
+    replaceTenant(req, tenant);
+    expect(req.user).toBe(principal);
+    expect(req.tenant).toBe(tenant);
   });
 });
