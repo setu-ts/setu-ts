@@ -37,6 +37,13 @@ export class MalformedPasswordHashError extends Error {
 }
 
 /**
+ * Largest PBKDF2 iteration count `verify` will accept from a stored credential.
+ * A sanity cap, not a policy: it exists so a corrupted or hostile hash cannot
+ * drive an unbounded key derivation.
+ */
+const MAX_ITERATIONS = 10_000_000;
+
+/**
  * Password hasher using PBKDF2-SHA256 via Web Crypto.
  */
 export class PasswordHasher {
@@ -92,10 +99,24 @@ export class PasswordHasher {
         `the stored credential's iterations part '${parts[1]}' is not a positive integer`,
       );
     }
+    // `parseInt` saturates to Infinity past ~308 digits, and Infinity passes
+    // every `<=` bound — the classic disabled-bound case — so a corrupted hash
+    // carrying a long digit run would otherwise reach `deriveBits`. The upper
+    // bound below catches it: every value `/^\d+$/` admits that is not a safe
+    // integer also exceeds MAX_ITERATIONS, so no separate finiteness check is
+    // reachable.
+    // The upper bound is a sanity cap, well above any real work factor
+    // (OWASP's 2023 PBKDF2-SHA256 guidance is 600 000).
     const iterations = parseInt(parts[1], 10);
     if (iterations <= 0) {
       throw new MalformedPasswordHashError(
         `the stored credential's iterations part '${parts[1]}' is not a positive integer`,
+      );
+    }
+    if (iterations > MAX_ITERATIONS) {
+      throw new MalformedPasswordHashError(
+        `the stored credential's iterations part '${parts[1]}' exceeds the maximum supported ` +
+          `work factor (${MAX_ITERATIONS})`,
       );
     }
 

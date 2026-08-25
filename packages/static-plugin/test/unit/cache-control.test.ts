@@ -76,3 +76,14 @@ describe('resolveCacheControl', () => {
     }
   });
 });
+
+describe('IMMUTABLE_PATTERN date-stamped names (PR #183 review)', () => {
+  it('keeps an ISO-date-suffixed filename mutable', () => {
+    // Republished at the same URL; a one-year immutable cache is unrecoverable.
+    expect(resolveCacheControl('/report-2024-01-15.pdf', {})).toBe(DEFAULT_MUTABLE);
+  });
+
+  it('still marks a real content hash immutable', () => {
+    expect(resolveCacheControl('/assets/entry.client-A9acsx54.js', {})).toBe(DEFAULT_IMMUTABLE);
+  });
+});

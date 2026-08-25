@@ -41,6 +41,11 @@ You can customize plugin configuration through the optional `options` parameter:
 import { createRestApp } from '@setu-ts/rest-starter';
 import type { RestStarterOptions } from '@setu-ts/rest-starter';
 
+// Read from wherever the host supplies secrets: `Deno.env.get(...)` on Deno,
+// `process.env...` on Node/Bun, or the `env` argument on Cloudflare Workers.
+declare const jwtSecret: string;
+declare const sessionSecret: string;
+
 const options: RestStarterOptions = {
   config: {/* config plugin options */},
   logger: {/* logger plugin options */},
@@ -53,8 +58,8 @@ const options: RestStarterOptions = {
   decorators: {/* decorator plugin options */},
   database: { type: 'memory' },
   // `jwt` is required on the auth arm; `rbac` is optional.
-  auth: { jwt: { secret: Deno.env.get('JWT_SECRET')! } },
-  session: { secret: Deno.env.get('SESSION_SECRET')! },
+  auth: { jwt: { secret: jwtSecret } },
+  session: { secret: sessionSecret },
   di: {/* di plugin options */},
   realtime: {
     websocket: {/* websocket plugin options */},

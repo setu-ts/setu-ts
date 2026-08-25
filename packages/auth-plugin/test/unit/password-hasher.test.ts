@@ -8,6 +8,28 @@ import { MalformedPasswordHashError, PasswordHasher } from '../../src/services/p
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('PasswordHasher', () => {
+  describe('iteration bounds (PR #183 review)', () => {
+    it('rejects a digit run that saturates parseInt to Infinity', async () => {
+      const hasher = new PasswordHasher(createFakeRuntime());
+      // 400 nines parses to Infinity, which passes every `<=` bound and would
+      // reach deriveBits — the disabled-bound case.
+      const stored = `pbkdf2$${'9'.repeat(400)}$c2FsdA$aGFzaA`;
+      await expect(hasher.verify(stored, 'pw')).rejects.toThrow(MalformedPasswordHashError);
+    });
+
+    it('rejects an iteration count above the supported work factor', async () => {
+      const hasher = new PasswordHasher(createFakeRuntime());
+      await expect(hasher.verify('pbkdf2$10000001$c2FsdA$aGFzaA', 'pw')).rejects.toThrow(
+        /exceeds the maximum supported work factor/,
+      );
+    });
+
+    it('accepts a real work factor at the cap', async () => {
+      const hasher = new PasswordHasher(createFakeRuntime());
+      // Not a valid hash, but it must fail on the HASH, never on the bound.
+      await expect(hasher.verify('pbkdf2$10000000$c2FsdA$aGFzaA', 'pw')).resolves.toBe(false);
+    });
+  });
   it('hashes and verifies a password round-trip', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
     const stored = await hasher.hash('mypassword123');

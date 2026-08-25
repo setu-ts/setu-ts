@@ -47,6 +47,9 @@ function makeResponse() {
     },
     html(body: string) {
       recorded.body = new TextEncoder().encode(body);
+      // Mirrors the kernel builder, which sets this header — a double that
+      // omitted it could pass a test the real builder would fail.
+      recorded.contentType = 'text/html; charset=utf-8';
       return {} as HandlerResult;
     },
     send(body?: Uint8Array) {
