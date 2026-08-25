@@ -7196,7 +7196,7 @@ Ordered by the sequence they should be worked, not by severity alone.
   with no parentheses; a long parameter list wraps one per line; and a long template literal is
   rewrapped at whichever `${` happens to fit, which no generator can predict — so a path too long
   for one line is emitted as an equivalent `[…].join('')`, a shape fmt leaves alone.
-- ✅ **M70n — Decorators, validation and the alpha.8 closeout** — complete (PR pending)
+- ✅ **M70n — Decorators, validation and the alpha.8 closeout** — complete (PR #183)
   (`decorator-plugin`, `validation-plugin`, `common`, `kernel`, `testing`, `static-plugin`,
   `auth-plugin`, `session-plugin`, `audit-plugin`, `react-router-plugin`,
   `realtime-backplane-plugin`, `sse-plugin`, `starters`, docs). Plan:
