@@ -6859,11 +6859,11 @@ application's own instance type, since a seam that type-checks as `unknown` has 
 and produced **118 verified defects — 38 High, 52 Medium, 28 Low**, none of them closed when this
 milestone opened. The register is `smoke/DEFECTS.md`, which stays the authority for the full row set
 and the per-row reproduction; this section is the work breakdown. **The register's Status column is
-the authority on what remains, not this section** — a workstream that closed a row was expected to
-update it, and because `smoke/` is excluded from the repository that update could never ship in a
-PR, so several early workstreams' rows still read `open` in it while their fixes are on `main`.
-Reconciling it is a maintainer task, and it is the thing to do before drafting the alpha.9 release
-notes.
+the authority on what remains, not this section.** It was reconciled on 2026-08-25 after this
+milestone closed: 35 rows still read `open` while their fixes were on `main`, because a workstream
+was expected to update the register but `smoke/` is excluded from the repository, so that update
+could never ship in a PR. Every row was re-checked against the workstream entry claiming it. **X2-6
+is the only row still open**, carried to M73.
 
 > **The register is NOT in this repository.** `smoke/` is excluded locally (`.git/info/exclude`, so
 > not even shared through `.gitignore`), which means the rows, reproductions and mechanisms behind
