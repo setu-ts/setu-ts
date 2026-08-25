@@ -246,10 +246,21 @@ their notes live in `CHANGELOG.md`. `v0.1.0-alpha.8`'s was created by hand.
 there are immutable, and a re-run fails on every package in the list. Create the object by hand:
 
 ```bash
-deno run --allow-read scripts/release-notes.ts 0.1.0-alpha.9 > /tmp/notes.md
-gh release create v0.1.0-alpha.9 --verify-tag --title v0.1.0-alpha.9 \
-  --notes-file /tmp/notes.md --prerelease
+version=0.1.0-alpha.9   # the version that just published — the ONLY line to edit
+prerelease=$(case "$version" in *-*) echo --prerelease ;; esac)
+deno run --allow-read scripts/release-notes.ts "$version" > /tmp/notes.md &&
+gh release create "v$version" --verify-tag --title "v$version" \
+  --notes-file /tmp/notes.md $prerelease
 ```
+
+Everything after the first line is derived, deliberately: hardcoding the flag would mark the first
+stable release a prerelease, and hardcoding the version in three places invites the one typo this
+recovery path cannot afford. The `case` is the same idiom the workflow step uses, so the manual path
+and the automatic one cannot disagree about what counts as a prerelease.
+
+The `&&` is load-bearing rather than stylistic. The workflow step runs under `set -euo pipefail`; a
+block pasted into an interactive shell does not, so without it a failed extraction still leaves a
+truncated `/tmp/notes.md` behind and the next line publishes a release with empty notes.
 
 `--verify-tag` matters more here than in the workflow: without it `gh release create` creates a
 missing tag from the default branch, so a mistyped version would publish a release pointing at
