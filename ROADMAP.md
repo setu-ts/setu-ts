@@ -7571,7 +7571,7 @@ the framework points a new project.
 | 70m       | ✅     | sdk and openapi                                |
 | 70n       | ✅     | decorators, validation, closeout               |
 | 71        | ✅     | kernel + contract boundary hardening (PR #190) |
-| 72        | ✅     | cli                                            |
+| 72        | ✅     | cli (transports + interactive, PR #191)        |
 | 73        | ⬜     | realtime authentication                        |
 | 74        | ⬜     | realtime reads + sse contract                  |
 | 75        | ⬜     | broker trace propagation                       |

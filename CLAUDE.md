@@ -3361,7 +3361,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `withBrokerArgs`/`withQueueArgs` helpers, pinned byte-identical on a pre-captured
   `--transport rabbitmq` member. Two stale ROADMAP claims were corrected in the same PR: the bare
   grep evidence for "the CLI prompts nowhere" (an emitted-source hit) and "the broker is not
-  selectable at all" (true of a standalone project only) — complete (PR pending)
+  selectable at all" (true of a standalone project only) — complete (PR #191)
 - **Next milestone** — **the `v0.1.0-alpha.9` release**, once every alpha-9 workstream has merged
   ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch).
   M73–M75 (realtime authentication, realtime reads - the SSE contract, broker trace propagation)
