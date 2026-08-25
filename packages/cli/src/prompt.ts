@@ -28,14 +28,15 @@ export interface PromptChoice {
   readonly label: string;
 }
 
-/**
- * Asks one question and reports the chosen value.
- *
- * @param question - The question text; the default is rendered inside it
- * @param choices - The acceptable answers, first being the default
- * @returns The chosen value, or undefined when no answer could be taken
- */
+/** Asks the scaffold questions `setu new` accepts as flags. */
 export interface Prompter {
+  /**
+   * Asks one question and reports the chosen value.
+   *
+   * @param question - The question text; the default is rendered inside it
+   * @param choices - The acceptable answers, first being the default
+   * @returns The chosen value, or undefined when no answer could be taken
+   */
   select(question: string, choices: readonly PromptChoice[]): Promise<string | undefined>;
 }
 
