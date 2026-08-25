@@ -948,6 +948,31 @@ findings as **inline review comments on specific lines**. Answer them the same w
 5. **A summary comment is optional and additional** — never a substitute for the per-thread replies.
    Use one only to state the round's overall result and the gate evidence.
 
+6. **Decline a finding against a plan document unless it also impacts the implementation.** A
+   milestone plan under `plans/` is a **design record written before the code**, not a specification
+   the code is checked against. Once the milestone ships, the code, its tests, `PUBLIC_API.md` and
+   `CHANGELOG.md` are the living contract; the plan is history, and it is archived to
+   `plans/archive/` for exactly that reason. Editing it after the fact to satisfy a reviewer
+   rewrites the record of what was decided and when, which is the opposite of what an archive is
+   for.
+
+   So a finding whose entire subject is a plan file — a stale `Status:` header, a path that moved
+   during implementation, a table that no longer matches the shipped file list, prose polish — is
+   **declined, with that reason stated in the thread**. It is not ignored and it is not silently
+   resolved; the thread gets a reply saying the plan is an archived design record and the shipped
+   artifact governs.
+
+   The exception is the whole point of the rule: **if the plan finding also lands on the
+   implementation, the implementation half is in scope and gets fixed.** A reviewer noticing that
+   the plan's §4 exported-surface table names a symbol the barrel never exported has found a real
+   defect in `src/index.ts` or in `PUBLIC_API.md` — fix that, reply with the commit, and leave the
+   plan alone. The test is always: _does anything a consumer can run or read change if I act on
+   this?_ If nothing does, it is plan-only.
+
+   **A plan is still corrected while it is being built** — before its milestone merges, a plan that
+   misstates a contract is a defect that will produce wrong code, and §16.5's verify-first rule
+   applies normally. This clause governs a plan whose milestone has shipped.
+
 The same rules apply to a human reviewer's inline comments.
 
 ### 16.6 Code Review Checklist
