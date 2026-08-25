@@ -18,6 +18,7 @@
  */
 import type { ParsedArgs } from '../args.ts';
 import { isTargetRuntime, TARGET_RUNTIMES, type TargetRuntime } from '../constants.ts';
+import { isWorkspaceRuntime } from '../workspace/runtime-profile.ts';
 import type { PromptChoice, Prompter } from '../prompt.ts';
 import { standaloneOverlayRefusal } from '../templates/broker.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
@@ -102,10 +103,17 @@ export async function resolveNewChoices(
     log(`${question} ${answer}`);
   }
 
+  // A workspace cannot be hosted on Cloudflare Workers — each Worker is its own
+  // deploy unit — and `planWorkspace` refuses that pairing. Offering it here
+  // anyway would ask a question whose answer is then rejected, which is exactly
+  // what the broker and queue gates below exist to prevent; the same rule has
+  // to hold for the FIRST question or a workspace session dead-ends after
+  // answering every one of them.
   await ask(
     'runtime',
     'Runtime?',
-    TARGET_RUNTIMES.map((name) => ({ value: name, label: `Target ${name}` })),
+    TARGET_RUNTIMES.filter((name) => !workspace || isWorkspaceRuntime(name))
+      .map((name) => ({ value: name, label: `Target ${name}` })),
   );
 
   if (workspace) {

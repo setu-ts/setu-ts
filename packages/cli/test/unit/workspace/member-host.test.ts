@@ -196,6 +196,26 @@ describe('withWorkspaceMember — the transport overlay', () => {
     }
   });
 
+  // Kafka is DELIBERATELY not byte-identical to the pre-refactor form: it is
+  // the one arm nesting the connection inside a bracket, and the unshifted
+  // continuation indent made a `--transport kafka` workspace fail its own
+  // `deno fmt --check`. This pins the shifted form fmt actually accepts.
+  it('nests a --transport kafka connection one level deeper, as deno fmt wants', () => {
+    const member = withWorkspaceMember(
+      hostOf('microservice'),
+      transportSpec('kafka'),
+      'orders',
+      workspaceProfile('deno'),
+    );
+    expect(member.plugins.find((p) => p.pkg === 'messaging-plugin')?.args).toBe(
+      "{\n        broker: 'kafka',\n" +
+        '        brokers: [\n' +
+        "          Deno.env.get('KAFKA_BROKERS') ??\n" +
+        "            '127.0.0.1:9092',\n" +
+        '        ],\n      }',
+    );
+  });
+
   // M72 §3.3 moved the rewrite into `templates/plugin-args.ts` + `broker.ts`.
   // These strings were captured from the PRE-refactor implementation; the two
   // wirings must stay byte-identical across the refactor, or every shipped

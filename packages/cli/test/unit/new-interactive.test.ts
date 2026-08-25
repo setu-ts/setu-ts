@@ -26,6 +26,25 @@ async function resolve(argv: readonly string[], answers: readonly (string | unde
   return { args, questions };
 }
 
+/**
+ * Records the CHOICES each question offered, not just the question text.
+ *
+ * The scripted fake above discards them, which is why a prompt could offer a
+ * value the command then refuses without any test noticing.
+ */
+async function offered(argv: readonly string[], answers: readonly (string | undefined)[]) {
+  const menus = new Map<string, readonly string[]>();
+  const queue = [...answers];
+  const prompter: Prompter = {
+    select(question: string, choices: readonly PromptChoice[]): Promise<string | undefined> {
+      menus.set(question, choices.map((choice) => choice.value));
+      return Promise.resolve(queue.shift());
+    },
+  };
+  await resolveNewChoices(parseArgs(argv), prompter, () => {});
+  return menus;
+}
+
 describe('resolveNewChoices', () => {
   it('returns the input unchanged when no prompter is supplied', async () => {
     const args = parseArgs(['svc']);
@@ -39,6 +58,21 @@ describe('resolveNewChoices', () => {
     expect(args.flags['template']).toBe('microservice');
     expect(args.flags['broker']).toBe('redis');
     expect(args.flags['queue']).toBe('redis');
+  });
+
+  // A workspace cannot be hosted on Cloudflare Workers, and `planWorkspace`
+  // refuses that pairing with exit 2 — so offering it here dead-ends the whole
+  // session AFTER every question has been answered. The milestone's own stated
+  // invariant is that a question whose answer would be refused is never asked;
+  // it held for broker and queue and not for the very first question.
+  it('never offers a runtime a workspace cannot be hosted on', async () => {
+    const menus = await offered(['acme', '--workspace'], ['deno', 'http']);
+    expect(menus.get('Runtime?')).toEqual(['deno', 'node', 'bun']);
+  });
+
+  it('still offers every runtime to a standalone project', async () => {
+    const menus = await offered(['svc'], ['deno', 'minimal']);
+    expect(menus.get('Runtime?')).toEqual(['deno', 'node', 'bun', 'cloudflare-workers']);
   });
 
   it('asks runtime and transport only for a workspace', async () => {

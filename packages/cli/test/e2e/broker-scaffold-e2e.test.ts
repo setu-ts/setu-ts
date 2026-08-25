@@ -132,6 +132,22 @@ describe('a --broker redis --queue redis scaffold', () => {
     expect(checked.code, checked.stderr).toBe(0);
   });
 
+  // KAFKA specifically, because it is the ONE arm that nests the connection
+  // inside a bracket (`brokers: [...]`). `envRead` bakes a fixed continuation
+  // indent suited to a value at eight spaces, so the unshifted form made this
+  // scaffold fail its OWN `deno fmt --check` — the M63 bar, and invisible to
+  // every other arm. Reverting `nestConnection` fails exactly this case.
+  it('emits a --broker kafka scaffold that passes its own deno fmt --check', async () => {
+    expect(await run(['new', 'kf', '--template', 'microservice', '--broker', 'kafka'])).toBe(0);
+    const project = `${root}/kf`;
+    await useWorkspacePackages(project);
+
+    const formatted = await denoRun(project, ['fmt', '--check']);
+    expect(formatted.code, formatted.output).toBe(0);
+    const checked = await denoCheck(project, await collectSources(project));
+    expect(checked.code, checked.stderr).toBe(0);
+  });
+
   it('type-checks a --broker rabbitmq scaffold too', async () => {
     expect(await run(['new', 'mq', '--template', 'microservice', '--broker', 'rabbitmq'])).toBe(0);
     const project = `${root}/mq`;
