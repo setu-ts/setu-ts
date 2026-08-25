@@ -56,7 +56,10 @@ export const CLEAN_PACKAGES = new Set([
  * `missing-jsdoc`/`private-type-ref` diagnostics on the old narrow facade
  * members with documented, `unknown`-typed ones.
  */
-export const DOC_LINT_BASELINE = 752;
+// M72: +1 — `CliDependencies.ask` publicly references the `Prompter` interface
+// (the same private-type-ref class as the pre-existing `fs`/`portAvailable`
+// rows), accepted deliberately because `ask` is committed public API.
+export const DOC_LINT_BASELINE = 753;
 
 /** One parsed `deno doc --lint` diagnostic. */
 export interface DocLintDiagnostic {

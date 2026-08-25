@@ -7360,21 +7360,23 @@ rather than overselling it.
   `telemetry-plugin`, `session-plugin`, `storage-plugin`, `multi-tenancy-plugin`,
   `validation-plugin`.
 
-## Milestone 72: CLI Transport Selection and Interactive Scaffolding ⬜ PLANNED
+## Milestone 72: CLI Transport Selection and Interactive Scaffolding ✅ COMPLETE
 
-**Objective:** Let `setu new` choose a messaging/queue transport, and answer the question the CLI
-has never had an answer to — scaffolding with no flags memorised.
+**Objective:** Let `setu new` choose a messaging/queue transport for a standalone project, and
+answer the question the CLI has never had an answer to — scaffolding with no flags memorised.
 
-**The gap, verified from source.**
-`grep -rn "prompt|stdin|confirm(|readLine|@std/cli"
-packages/cli/src` returns ONE hit, the word
-"Selects" in a JSDoc comment. It is structural, not incidental: `CliDependencies` is
-`fs`/`cwd`/`now`/`log`/`error`/`load` with no stdin, and `main.ts` reads `Deno.args` only. The HTTP
-transport IS selectable (`--runtime deno|node|bun|
-cloudflare-workers` picks the entry shape), but
-the **broker is not selectable at all** — the microservice template emits bare `MessagingPlugin()` /
-`QueuePlugin()`, both defaulting to `'memory'`, so redis-streams / rabbitmq / nats / kafka / sqs /
-pubsub / servicebus means hand-editing `setu.config.ts` in a project the CLI just wrote.
+**The gap, verified from source — with two corrections made when this milestone was planned.**
+First, an earlier draft of this section cited a bare grep over `packages/cli/src` as evidence the
+CLI prompts nowhere; that evidence was stale, because `src/workspace/dev-runner.ts` carries
+`Deno.exit` inside the dev-runner SOURCE THE CLI EMITS into a generated workspace — emitted source
+and executed source are different things, which is why M72 ships an allowlisted recurrence gate
+(with a membership assertion) rather than trusting a bare grep. Second, the same draft claimed "the
+broker is not selectable at all"; that was true of a STANDALONE project only — the workspace half
+shipped earlier with the transport work (`--transport` on `setu new --workspace`, refused on a
+standalone project by `commands/new.ts`). What remained was the standalone gap: the microservice
+template emits bare `MessagingPlugin()` / `QueuePlugin()`, both defaulting to `'memory'`, so
+redis-streams / rabbitmq / nats / kafka / pubsub / service-bus meant hand-editing `setu.config.ts`
+in a project the CLI just wrote.
 
 **These are two asks of very different size, and the milestone should land them in that order.**
 
@@ -7569,6 +7571,7 @@ the framework points a new project.
 | 70m       | ✅     | sdk and openapi                                |
 | 70n       | ✅     | decorators, validation, closeout               |
 | 71        | ✅     | kernel + contract boundary hardening (PR #190) |
+| 72        | ✅     | cli                                            |
 | 72        | ⬜     | cli transports + interactive scaffold          |
 | 73        | ⬜     | realtime authentication                        |
 | 74        | ⬜     | realtime reads + sse contract                  |
