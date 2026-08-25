@@ -7515,7 +7515,7 @@ the framework points a new project.
 | 37b       | ✅     | examples + Redis startup fix          |
 | 37c       | ✅     | full-stack example (apps/full-stack)  |
 | 38        | ✅     | documentation                         |
-| 39        | ✅     | docker/kubernetes                     |
+| 39        | ✅     | docker/k8s                            |
 | 40        | ⬜     | final release                         |
 | 58        | ✅     | cli (domain module scaffolding)       |
 | 59        | ✅     | cloudflare-plugin (workers messaging) |
