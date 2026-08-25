@@ -71,6 +71,21 @@ describe('PasswordHasher', () => {
     );
   });
 
+  it('throws MalformedPasswordHashError for iterations with trailing junk', async () => {
+    const hasher = new PasswordHasher(createFakeRuntime());
+    // `parseInt` would silently accept `100000junk` as `100000` and verify a
+    // corrupted hash; the strict parse must reject it instead.
+    await expect(hasher.verify('pbkdf2$100000junk$salt$hash', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
+  });
+
+  it('still verifies a genuinely valid hash', async () => {
+    const hasher = new PasswordHasher(createFakeRuntime());
+    const stored = await hasher.hash('mypassword123');
+    expect(await hasher.verify(stored, 'mypassword123')).toBe(true);
+  });
+
   it('throws MalformedPasswordHashError for a stored string with zero iterations', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
     await expect(hasher.verify('pbkdf2$0$salt$hash', 'password')).rejects.toThrow(
