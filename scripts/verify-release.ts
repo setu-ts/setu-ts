@@ -8,7 +8,7 @@
  * deno run --allow-read scripts/verify-release.ts 0.1.0-alpha.1
  * ```
  *
- * Verifies six things a green test suite cannot:
+ * Verifies seven things a green test suite cannot:
  *
  * 1. Every publishable package carries exactly the expected version — so the
  *    tag, the CHANGELOG entry, and what lands on JSR all agree.
@@ -29,12 +29,18 @@
  *    static and reaches only a literal `import('npm:…')`; a computed specifier
  *    ships `npm:` verbatim and cannot load on Node or Bun (X7-3). The source
  *    gate catches the cause on every PR; this is the release backstop.
+ * 7. `CHANGELOG.md` carries a non-empty section for this version. The release
+ *    workflow builds the GitHub Release body from it AFTER publishing, and a
+ *    JSR version cannot be republished — so a missing section must fail here,
+ *    before anything is uploaded, rather than leaving a red job over packages
+ *    that are already live.
  *
  * Exits non-zero and prints every problem found, rather than stopping at the
  * first — a release is easier to fix in one pass.
  */
 import { PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
+import { extractReleaseNotes } from './release-notes.ts';
 
 const expected = Deno.args[0];
 if (!expected) {
@@ -212,6 +218,23 @@ for (const finding of audit.findings) {
       `\`computed-specifier\` marker — JSR's static npm-compatibility rewrite ` +
       `cannot see a non-literal specifier, so any npm: string would ship ` +
       `verbatim and fail to load on Node or Bun. ${finding.snippet}`,
+  );
+}
+
+// ── 7: the changelog must carry this version's release notes ───────────────
+
+// Checked here rather than in the workflow's release step, which runs after the
+// publish: JSR versions are immutable, so a problem discovered there cannot be
+// fixed by re-running the job. The runbook writes the entry in step 1 and runs
+// this in step 2, so the ordering already matches.
+const changelog = await Deno.readTextFile('CHANGELOG.md').catch(() => null);
+if (changelog === null) {
+  problems.push('CHANGELOG.md is missing — the release notes are built from it.');
+} else if (extractReleaseNotes(changelog, expected) === null) {
+  problems.push(
+    `CHANGELOG.md has no non-empty '## [${expected}]' section — the GitHub ` +
+      `Release body is built from it, and that step runs after the publish, ` +
+      `which cannot be repeated.`,
   );
 }
 

@@ -18,7 +18,10 @@ on:
         default: true
 
 permissions:
-  contents: read
+  # `write` for the "Create GitHub Release" step below, which is the only thing
+  # here that writes to the repository. There is one job, so scoping it at the
+  # job level would grant exactly the same token to the same steps.
+  contents: write
   # Required for JSR's OIDC authentication and for provenance attestation.
   id-token: write
 
@@ -110,6 +113,15 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # actions/checkout writes the job token into the local git config by
+          # default, so every step after it can push. This job now requests
+          # `contents: write` for the release step at the very end, and nothing
+          # here does a networked git operation — the suite's only git call is a
+          # local `git ls-files` — so the gates and the publish run with no
+          # write-capable credential in reach. The release step gets its token
+          # explicitly through GH_TOKEN instead.
+          persist-credentials: false
 
       - uses: denoland/setup-deno@v2
         with:
@@ -163,3 +175,41 @@ jobs:
         run: |
           deno task release:publish \
             ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+
+      # ── Release object ───────────────────────────────────────────────────
+      # LAST, and deliberately so: a failure here must not cost the publish.
+      # If this step goes red the packages are already live on JSR — do NOT
+      # re-run the job, because JSR versions are immutable and the publish
+      # would fail on every package. Create the object by hand instead:
+      #   deno run --allow-read scripts/release-notes.ts <version> > notes.md
+      #   gh release create v<version> --notes-file notes.md --prerelease
+      #
+      # Tags before v0.1.0-alpha.8 carry no Release object by decision and are
+      # not backfilled; alpha.8's was created by hand, and this step is what
+      # makes alpha.9 onward automatic.
+      #
+      # The notes come from a tested script, not from inlined shell — see that
+      # file's header, and the Publish step's comment above for what a drifting
+      # workflow copy has already cost this project once.
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists — nothing to do."
+            exit 0
+          fi
+          deno run --allow-read scripts/release-notes.ts "$version" > "$RUNNER_TEMP/notes.md"
+          prerelease=''
+          case "$version" in *-*) prerelease='--prerelease' ;; esac
+          # --verify-tag: without it `gh release create` CREATES a missing tag
+          # from the default branch, so a deleted or mistyped tag would produce
+          # a release pointing at a commit other than the one just published.
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            $prerelease
