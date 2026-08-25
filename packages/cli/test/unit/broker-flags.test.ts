@@ -105,8 +105,15 @@ describe('a --broker scaffold', () => {
     const compose = h.fs.read('/work/svc/docker/compose.yaml');
     expect(compose).toContain('redis:');
     expect(compose).toContain('image: redis:7');
-    expect(h.fs.read('/work/svc/README.md')).toContain(
-      'docker compose -f docker/compose.yaml up -d',
+    // ORDER, not just presence: the plugins connect during `register()` and do
+    // not retry, so a reader following the README top-to-bottom must be told to
+    // start the broker BEFORE the app. Emitting `## Run` first hands them a
+    // guaranteed first-run failure — which is the very thing the Compose file
+    // was added to prevent.
+    const readme = h.fs.read('/work/svc/README.md');
+    expect(readme).toContain('docker compose -f docker/compose.yaml up -d');
+    expect(readme.indexOf('## Local transport services')).toBeLessThan(
+      readme.indexOf('## Run'),
     );
 
     // Every broker arm declares a backing service — a selection without one

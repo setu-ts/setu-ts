@@ -1208,7 +1208,16 @@ export function projectFiles(
   const readme = `# ${projectName}
 
 A [Setu-TS](https://github.com/setu-ts/setu-ts) project targeting \`${runtime}\`.
-
+${
+    hasBrokerServices
+      // Wrapped exactly as `deno fmt` reflows markdown at the emitted
+      // lineWidth: 100. Hand-wrapping it anywhere else makes a fresh
+      // broker-selected scaffold fail its own `fmt --check` (M63 D6).
+      ? `\n## Local transport services\n\nStart these FIRST: the messaging and queue plugins ` +
+        `connect while the application registers, and do\nnot retry, so \`start\` fails against a ` +
+        `broker that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n`
+      : ''
+  }
 ## Run
 
 \`\`\`bash
@@ -1222,11 +1231,7 @@ ${
       : 'npm start'
   }
 \`\`\`
-${
-    hasBrokerServices
-      ? `\n## Local transport services\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n`
-      : ''
-  }
+
 ## Generate code
 
 \`\`\`bash

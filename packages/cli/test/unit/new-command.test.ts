@@ -1293,7 +1293,10 @@ describe('the interactive seam on setu new', () => {
   });
 
   it('asks nothing under --yes even when a prompter is present', async () => {
-    const { prompter, calls } = refusingPrompter();
+    // The tracker is kept WHOLE, never destructured: `calls` is a getter, so
+    // `const { calls } = …` snapshots it to 0 before the command runs and the
+    // assertion below would pass however many questions were asked.
+    const tracker = refusingPrompter();
     const fs = createFakeFs();
     const out = createRecorder();
     const err = createRecorder();
@@ -1302,10 +1305,10 @@ describe('the interactive seam on setu new', () => {
       cwd: '/work',
       log: out.sink,
       error: err.sink,
-      ask: prompter,
+      ask: tracker.prompter,
     });
     expect(code).toBe(0);
-    expect(calls).toBe(0);
+    expect(tracker.calls).toBe(0);
   });
 
   it('still refuses --transport standalone and names the flags that do apply', async () => {
