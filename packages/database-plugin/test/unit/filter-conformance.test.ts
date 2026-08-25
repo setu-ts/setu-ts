@@ -20,6 +20,7 @@ import {
   createDrizzleDataSource,
   type DrizzleOperators,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
+import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { UnsupportedFilterOperatorError } from '../../src/errors.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
@@ -45,7 +46,20 @@ const DRIZZLE_OPERATORS: DrizzleOperators = {
   lte: (col, val) => ({ op: 'lte', col, val }),
   inArray: (col, values) => ({ op: 'inArray', col, values }),
   isNull: (col) => ({ op: 'isNull', col }),
-  sql: (strings, ...values) => ({ op: 'sql', text: [...strings], values }),
+  sql: Object.assign(
+    (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      op: 'sql',
+      text: [...strings],
+      values,
+    }),
+    {
+      // The real Drizzle tag carries these; a fake without them would let a
+      // `sql.raw`/`sql.param` call ship untested (the contract-violating-double
+      // class this repository keeps hitting).
+      raw: (text: string) => ({ op: 'raw', text }),
+      param: (value: unknown) => ({ op: 'param', value }),
+    },
+  ),
   asc: (col) => ({ op: 'asc', col }),
   desc: (col) => ({ op: 'desc', col }),
   count: () => ({ op: 'count' }),
@@ -321,5 +335,62 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
     await adapter.connect();
     const ds = adapter.createDataSource('User');
     expect(() => ds.findAll(query({ filter: CASES[0].filter }))).toThrow(/provider/);
+  });
+
+  it('Memory and Drizzle both refuse an unknown orderBy column, by name', async () => {
+    // X12-5: Memory used to return rows in insertion order and answer 200 for
+    // a column Drizzle rejects outright, so the same call diverged between the
+    // default adapter and the one the application deploys on.
+    const memory = new MemoryAdapter();
+    await memory.connect();
+    const memorySource = memory.createDataSource('Widget');
+    await memorySource.create({ id: 'w1', name: 'Bolt' });
+
+    await expect(
+      memorySource.findAll({
+        where: {},
+        orderBy: { sku: 'asc' },
+        limit: -1,
+        offset: 0,
+        select: [],
+      }),
+    ).rejects.toThrow("has no 'sku' column for orderBy");
+
+    const drizzleSource = createDrizzleDataSource(
+      createFakeDrizzleInstance() as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'Widget',
+      { Widget: createFakeDrizzleTable('Widget') },
+      DRIZZLE_OPERATORS,
+    );
+    await expect(
+      drizzleSource.findAll({
+        where: {},
+        orderBy: { sku: 'asc' },
+        limit: -1,
+        offset: 0,
+        select: [],
+      }),
+    ).rejects.toThrow("has no 'sku' column");
+  });
+
+  it('Memory and Drizzle both refuse an unknown select column, by name', async () => {
+    const memory = new MemoryAdapter();
+    await memory.connect();
+    const memorySource = memory.createDataSource('Widget');
+    await memorySource.create({ id: 'w1', name: 'Bolt' });
+
+    await expect(
+      memorySource.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: ['sku'] }),
+    ).rejects.toThrow("has no 'sku' column for select");
+
+    const drizzleSource = createDrizzleDataSource(
+      createFakeDrizzleInstance() as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'Widget',
+      { Widget: createFakeDrizzleTable('Widget') },
+      DRIZZLE_OPERATORS,
+    );
+    await expect(
+      drizzleSource.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: ['sku'] }),
+    ).rejects.toThrow("has no 'sku' column");
   });
 });

@@ -151,6 +151,8 @@ No decorators. No DI. No reflection. Just a router and a runtime.
 
 The entry point to the framework.
 
+A capability is not resolvable from `app.services` until `start()` has run.
+
 ### Signature
 
 ```typescript
@@ -304,15 +306,30 @@ typed `WorkerPoolUnavailableError` rather than throwing at startup.
 interface IWorkerHost {
   spawn(specifier: string): IWorkerHandle;
   availableParallelism(): number;
+  // Answerable BEFORE a worker exists, which is why it sits on the host: a
+  // consumer that must warn about undetectable worker death needs to know at
+  // registration time. A host that omits it is treated as reporting `false`.
+  reportsExit?(): boolean;
 }
 
 interface IWorkerHandle {
   postMessage(message: unknown): void;
   onMessage(listener: (message: unknown) => void): void;
   onError(listener: (error: Error) => void): void;
+  // The worker's THREAD ENDING, however it ended — a clean self-termination
+  // included, which raises no error at all. `code` is `null` when the runtime
+  // ends the worker without reporting one, and the listener also fires for a
+  // host-requested `terminate()` on runtimes that implement it that way.
+  onExit?(listener: (code: number | null) => void): void;
   terminate(): Promise<void>;
 }
 ```
+
+`onExit`/`reportsExit` are **omitted, not no-ops**, on a runtime that cannot report a worker exit:
+their absence means "this runtime cannot tell me a worker died", never "no worker has died". The
+Node host implements both over `node:worker_threads`' `'exit'`; the shared web-worker host does when
+its runtime names an event that fires, which **Bun does (`'close'`) and Deno does not** — measured,
+Deno's `Worker` emits nothing on `self.close()` and a later `postMessage` still resolves.
 
 `dns` is an **optional** `IDnsResolver` for name resolution. It is implemented by the Node, Deno,
 and Bun runtime adapters and **absent on Cloudflare Workers**, whose network access is `fetch` —
@@ -700,12 +717,12 @@ app.router.post('/users', {
         return ctx.response.status(400).json({ errors: result.error });
       }
 
-      ctx.state.set('validatedBody', result.value);
+      ctx.state.set('validated:body', result.value);
       await next();
     },
   ],
   handler: async (ctx) => {
-    const body = ctx.state.get<z.infer<typeof CreateUserSchema>>('validatedBody');
+    const body = ctx.state.get<z.infer<typeof CreateUserSchema>>('validated:body');
     // body is fully typed and validated
     const user = await createUser(body);
     return ctx.response.status(201).json(user);
@@ -731,7 +748,7 @@ import {
 app.router.get('/users', {
   middleware: [validateQuery(ListUsersQuerySchema)],
   handler: async (ctx) => {
-    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>('validatedQuery');
+    const query = ctx.state.get<z.infer<typeof ListUsersQuerySchema>>('validated:query');
     // query is validated
   },
 });
@@ -742,8 +759,8 @@ app.router.put('/users/:id', {
     validateBody(UpdateUserSchema),
   ],
   handler: async (ctx) => {
-    const params = ctx.state.get('validatedParams');
-    const body = ctx.state.get('validatedBody');
+    const params = ctx.state.get('validated:params');
+    const body = ctx.state.get('validated:body');
     // both are validated
   },
 });
@@ -857,9 +874,14 @@ Provides database access with repository pattern and unit of work.
 
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from './generated/prisma/client.ts';
 
-const prismaClient = new PrismaClient();
+// Prisma 7 removed the Rust query engine, so a driver adapter is REQUIRED —
+// `new PrismaClient()` with no argument does not compile.
+const prismaClient = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: config.getOrThrow('DATABASE_URL') }),
+});
 
 app.register(DatabasePlugin({
   type: 'prisma',
@@ -869,6 +891,25 @@ app.register(DatabasePlugin({
   },
 }));
 ```
+
+`DatabasePluginOptions` is a union discriminated on `type`, and each arm names the options its
+adapter cannot run without: `'prisma'` requires `options.prismaClient`, `'drizzle'` requires both
+`options.drizzleInstance` and `options.drizzleTables`, and `'custom'` requires `adapter`. Omitting
+one is a **compile error** rather than a startup throw. The exported arms are
+`MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions` and
+`CustomDatabaseOptions`; `BuiltInDatabaseOptions` is the union of the first three and keeps its
+published name, so an existing annotation carrying a memory configuration still compiles.
+`PrismaAdapterOptions` and `DrizzleAdapterOptions` are `DatabaseAdapterOptions` narrowed for their
+arm.
+
+Three Prisma 7 prerequisites are the application's to supply and are documented in the package
+README: the driver-adapter package, a `prisma.config.ts` (Prisma 7 rejects `url` in
+`schema.prisma`), and `new PrismaPg({ connectionString }, { schema })` for a non-`public` PostgreSQL
+schema.
+
+`DatabaseAdapterOptions.transactionTimeout` (ms, default `30000`) raises Prisma's ~5 s
+interactive-transaction default, which is too short for a full Unit of Work. It is read by the
+Prisma adapter only; Memory and Drizzle ignore it.
 
 Prisma v7 clients are generated into an application-selected output path, so the Prisma adapter
 requires an application-created `options.prismaClient`; it never imports or constructs that client.
@@ -888,7 +929,9 @@ column and the adapter translates every repository field to a real Drizzle colum
 rows; an unsupported dialect throws a descriptive error. Promise-aware SQLite Proxy and
 libsql-shaped Drizzle instances without `execute()` are accepted for repository, transaction, and
 typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects with guidance to
-use Drizzle's typed query builder.
+use Drizzle's typed query builder. That refusal is permanent rather than pending: those drivers do
+expose `all()`, but on a raw statement the proxy protocol answers with **positional** rows, because
+Drizzle has no field map for a statement it did not build — and `query<T>()` promises row objects.
 
 Synchronous callback drivers (`better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite) are
 unsupported: their native transaction closes when the callback returns, before awaited UoW work can
@@ -1068,8 +1111,17 @@ interface IRepository<Entity> {
 
 `query()` is the existing backend-specific raw-SQL escape hatch. It requires a configured Drizzle
 instance with `execute()`; typed builders obtained through the Drizzle accessors do not.
-Programmatic `migrate()` is unsupported by all current adapters and rejects because each ORM owns
-migrations through its CLI.
+
+Every adapter binds `params` and never interpolates them, and the statement carries the connector's
+own placeholders — `$1…` on PostgreSQL, `?` on MySQL and SQLite. Prisma and D1 forward the text
+verbatim; the Drizzle adapter splits it at its placeholders and rebuilds it through Drizzle's own
+`SQL` chunks, which emits an ascending-placeholder statement byte-identically. A placeholder count
+that disagrees with `params`, a gap in the `$N` sequence, or both placeholder styles in one
+statement is refused before the driver is reached, because a mis-bound parameter is silent. On
+PostgreSQL, `?`, `?|` and `?&` are also jsonb key-containment operators that no scanner can tell
+from a placeholder; such a statement is refused or fails at the database, never mis-bound — write it
+with `$N` placeholders. Programmatic `migrate()` is unsupported by all current adapters and rejects
+because each ORM owns migrations through its CLI.
 
 `FindOptions.filter` and `CountOptions.filter` accept a portable expression tree in addition to the
 existing equality-only `where` map. `where` and `filter` are conjoined, and every built-in adapter
@@ -1105,6 +1157,20 @@ filter API (Prisma emits no `ESCAPE` clause and SQLite has no default escape cha
 query, or use the Memory/Drizzle adapter (both honour `contains` as a literal substring). When the
 adapter cannot determine the connector it throws the same error naming the `provider` option; pass
 `provider` (e.g. `provider: 'postgresql'`) in the adapter options to name it explicitly.
+
+### The Memory adapter's guarantees
+
+`MemoryAdapter` is the default and is never given a schema, which fixes what it can enforce. An
+unknown `select` or `orderBy` field — one that **no stored row carries** — is refused by name,
+matching what Drizzle answers for the same call; a field present on at least one row counts as
+known, and an entity holding no rows accepts anything, since there is nothing to observe and nothing
+to return. An unknown `where` or `filter` field is **not** refused: without a schema the adapter
+cannot tell an unknown column from one absent on every row, and matching nothing is a defensible
+answer.
+
+Uniqueness, column types, foreign keys, checks and defaults are **not enforced** and cannot be by a
+schema-less store. Use this adapter for development and tests, and run integration tests against the
+backend you deploy on.
 
 ### Custom Adapters (external backends)
 
@@ -1168,6 +1234,8 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 | `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                             |
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                        |
 | `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                             |
+| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`                                                  | interfaces                        |
+| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                        |
 | `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                             |
 | `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                             |
 | `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`          |
@@ -1182,16 +1250,19 @@ the promoted `IDataSource` (the same type), and will be removed in the next majo
 ### Multiple Databases
 
 ```typescript
+// Each named connection injects its own application-generated Prisma client;
+// `options.url` is deprecated and unread — a v7 client carries its own
+// connection configuration.
 app.register(DatabasePlugin({
   type: 'prisma',
   name: 'primary',
-  options: { url: config.get('PRIMARY_DATABASE_URL') },
+  options: { prismaClient: primaryPrismaClient },
 }));
 
 app.register(DatabasePlugin({
   type: 'prisma',
   name: 'analytics',
-  options: { url: config.get('ANALYTICS_DATABASE_URL') },
+  options: { prismaClient: analyticsPrismaClient },
 }));
 
 // Access by name
@@ -1233,41 +1304,42 @@ does not register an authorization service or advertise the authorization capabi
 
 ### Exports
 
-| Export                    | File                                      | Description                                                           |
-| ------------------------- | ----------------------------------------- | --------------------------------------------------------------------- |
-| `AuthPlugin`              | `src/plugin/auth-plugin.ts`               | Plugin factory                                                        |
-| `AuthPluginOptions`       | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac`)          |
-| `JwtOptions`              | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme) |
-| `ApiKeyOptions`           | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                |
-| `LocalOptions`            | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                           |
-| `PasswordHasher`          | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                     |
-| `authMiddleware`          | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`     |
-| `requireAuth`             | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                       |
-| `requireRole`             | `src/guards/index.ts`                     | Guard: require a role (401/403)                                       |
-| `requirePermission`       | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                 |
-| `requireAnyRole`          | `src/guards/index.ts`                     | Guard: require any of the given roles                                 |
-| `requireAllPermissions`   | `src/guards/index.ts`                     | Guard: require all of the given permissions                           |
-| `publicRoute`             | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                        |
-| `RefreshTokenService`     | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`             |
-| `RefreshTokenOptions`     | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                             |
-| `TokenPair`               | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`         |
-| `RefreshTokenStore`       | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records             |
-| `RefreshTokenRecord`      | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                    |
-| `MemoryRefreshTokenStore` | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                              |
-| `rateLimitMiddleware`     | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)      |
-| `RateLimitOptions`        | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                              |
-| `RateLimitStore`          | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                       |
-| `RateLimitResult`         | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                        |
-| `MemoryRateLimitStore`    | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                  |
-| `RedisRateLimitStore`     | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                 |
-| `IAuthService`            | re-export                                 | From `@setu-ts/common`                                                |
-| `IJwtService`             | re-export                                 | From `@setu-ts/common`                                                |
-| `IAuthorizationService`   | re-export                                 | From `@setu-ts/common`                                                |
-| `IAuthStrategy`           | re-export                                 | From `@setu-ts/common`                                                |
-| `IPrincipal`              | re-export                                 | From `@setu-ts/common`                                                |
-| `JwtSignOptions`          | re-export                                 | From `@setu-ts/common`                                                |
-| `RbacConfig`              | re-export                                 | From `@setu-ts/common`                                                |
-| `RoleDefinition`          | re-export                                 | From `@setu-ts/common`                                                |
+| Export                       | File                                      | Description                                                               |
+| ---------------------------- | ----------------------------------------- | ------------------------------------------------------------------------- |
+| `AuthPlugin`                 | `src/plugin/auth-plugin.ts`               | Plugin factory                                                            |
+| `AuthPluginOptions`          | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac`)              |
+| `JwtOptions`                 | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme)     |
+| `ApiKeyOptions`              | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                    |
+| `LocalOptions`               | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                               |
+| `PasswordHasher`             | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                         |
+| `MalformedPasswordHashError` | `src/services/password-hasher.ts`         | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash |
+| `authMiddleware`             | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`         |
+| `requireAuth`                | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                           |
+| `requireRole`                | `src/guards/index.ts`                     | Guard: require a role (401/403)                                           |
+| `requirePermission`          | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                     |
+| `requireAnyRole`             | `src/guards/index.ts`                     | Guard: require any of the given roles                                     |
+| `requireAllPermissions`      | `src/guards/index.ts`                     | Guard: require all of the given permissions                               |
+| `publicRoute`                | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                            |
+| `RefreshTokenService`        | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                 |
+| `RefreshTokenOptions`        | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                                 |
+| `TokenPair`                  | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`             |
+| `RefreshTokenStore`          | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records                 |
+| `RefreshTokenRecord`         | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                        |
+| `MemoryRefreshTokenStore`    | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                                  |
+| `rateLimitMiddleware`        | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)          |
+| `RateLimitOptions`           | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                                  |
+| `RateLimitStore`             | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                           |
+| `RateLimitResult`            | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                            |
+| `MemoryRateLimitStore`       | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                      |
+| `RedisRateLimitStore`        | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                     |
+| `IAuthService`               | re-export                                 | From `@setu-ts/common`                                                    |
+| `IJwtService`                | re-export                                 | From `@setu-ts/common`                                                    |
+| `IAuthorizationService`      | re-export                                 | From `@setu-ts/common`                                                    |
+| `IAuthStrategy`              | re-export                                 | From `@setu-ts/common`                                                    |
+| `IPrincipal`                 | re-export                                 | From `@setu-ts/common`                                                    |
+| `JwtSignOptions`             | re-export                                 | From `@setu-ts/common`                                                    |
+| `RbacConfig`                 | re-export                                 | From `@setu-ts/common`                                                    |
+| `RoleDefinition`             | re-export                                 | From `@setu-ts/common`                                                    |
 
 ### Registration
 
@@ -1298,7 +1370,10 @@ app.register(AuthPlugin({
 }));
 
 // Global middleware: authenticates every request and sets ctx.request.user.
-app.middleware.add(authMiddleware());
+// The priority is explicit and deliberate: the §10 table in ARCHITECTURE.md
+// reserves 300 for authentication, but a bare add() takes the kernel's default
+// of 500 — AFTER every band in that table, including the row named for it.
+app.middleware.add(authMiddleware(), { priority: 300 });
 ```
 
 ### Login (Issue Token)
@@ -1499,6 +1574,13 @@ const stored = await hasher.hash('correct horse battery staple');
 const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 ```
 
+`verify(stored, secret)` **throws** the exported `MalformedPasswordHashError` when `stored` is not a
+well-formed `pbkdf2$…` string, instead of returning `false`. The two parameters are both plain
+`string`s, so a reversed call — password in the `stored` position — used to fail closed and
+silently: every correct password answered `401 Invalid credentials` with nothing logged. The
+malformed branch detects exactly that mistake and names both positions; a genuinely wrong password
+still returns `false`.
+
 ---
 
 ## HttpSecurityPlugin() (`@setu-ts/http-security-plugin`)
@@ -1560,9 +1642,19 @@ app.register(HttpSecurityPlugin({
 
 Origin matching via `origin` (boolean/string/array/function). Preflight (`OPTIONS` + `Origin` +
 `Access-Control-Request-Method`) → 204 short-circuit with `Access-Control-Allow-Origin`,
-`Access-Control-Allow-Methods`, and (when configured) `Access-Control-Allow-Headers` /
+`Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`, and (when configured)
 `Access-Control-Max-Age`. Credentials reflect specific origin (never `*`). Non-preflight disallowed
 origins call `next()` without CORS headers (browser enforces block).
+
+`Access-Control-Allow-Headers` follows `allowedHeaders`, and omitting it is NOT the same as passing
+`[]`. Omitted, an allowed origin's preflight is answered by **echoing** that request's own
+`Access-Control-Request-Headers`, and the response also carries
+`Vary: Access-Control-Request-Headers` — mandatory rather than cosmetic, since the answer now
+depends on a request header and a shared cache would otherwise serve one caller's preflight to a
+caller asking for different headers. An explicit list allows exactly those headers; an explicit `[]`
+allows none. A denied origin echoes nothing. Echoing is the default because the previous empty-list
+default advertised every standard method and then refused `content-type`, so every browser blocked
+every JSON request; it does not widen the boundary, which the `origin` allowlist alone decides.
 
 `Vary: Origin` is appended to **every** response for a request carrying an `Origin` header —
 including a denied one — so a shared cache cannot serve an allowed origin's response to a denied
@@ -1906,7 +1998,9 @@ Omitting an option disables that behaviour (no timer created).
 
 - `ISseService.open(ctx): ISseConnection` — opens a new SSE connection; sets headers, returns a
   connection with `result` (`HandlerResult`) the handler must return.
-- `ISseService.channel(name): SseChannel` — get-or-create a named broadcast channel.
+- `ISseService.channel(name): SseChannel` — get-or-create a named broadcast channel. First call
+  creates; reading `size` for a caller-supplied name is therefore a write, and a never-published
+  channel is reclaimed only when another connection in this process closes.
 - `ISseService.connectionCount: number` — current open connections.
 - `ISseConnection.send(msg)` — enqueue an encoded SSE frame (`id:`, `event:`, `data:` / multi-line
   `data:`, `retry:` + blank-line terminator).
@@ -1934,7 +2028,13 @@ Omitting an option disables that behaviour (no timer created).
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `publish` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
   provider the behavior is unchanged. `SseChannel.size` keeps reporting **local** membership either
-  way. `SseChannelImpl.publishLocal` is the local-only delivery path the backplane subscriber uses;
+- **`SseMessage.data` accepts any JSON-serializable value** —
+  `string | number | boolean | null |
+  readonly unknown[] | Record<string, unknown>`. The encoder
+  has always written a string literally and `JSON.stringify`-ed anything else; the TYPE was narrower
+  than that behaviour, so a named interface failed to assign while an inline literal passed and
+  every real application cast. Widening a parameter position is source-compatible for callers.
+  `SseChannelImpl.publishLocal` is the local-only delivery path the backplane subscriber uses;
   applications call `publish`.
 - Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
@@ -2067,6 +2167,11 @@ ws.route('/ws/chat', {
   `fetch` path.
 - **A custom adapter without `setUpgradeRouter` degrades gracefully**: the service still registers,
   the health indicator reports `available: false`, and `route()` throws `WebSocketUnavailableError`.
+- **`room(name)` is get-or-create, so reading presence is a write.** There is no non-creating
+  lookup: `room(callerSupplied).size` creates a room per distinct name polled, and the registry
+  reclaims never-joined rooms only on the next disconnection somewhere in this process — an idle
+  application never does. Deliberate in source (`RoomRegistry`'s own JSDoc records the tradeoff);
+  keep polled names to a fixed set.
 - **Rooms are in-process until a backplane is registered.** Register
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `broadcast` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
@@ -2123,16 +2228,22 @@ registers and subscribes.
 
 Discriminated on `transport`.
 
-| Option                  | Applies to       | Default                  | Description                                                         |
-| ----------------------- | ---------------- | ------------------------ | ------------------------------------------------------------------- |
-| `transport`             | all              | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                    |
-| `topic`                 | all but `memory` | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it        |
-| `origin`                | all              | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic |
-| `bus`                   | `'memory'`       | `'default'`              | Named in-process bus; separate names stay isolated                  |
-| `url`                   | `'redis'`        | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path        |
-| `client` / `subscriber` | `'redis'`        | —                        | Injected client pair. **Required together** — see Notes             |
-| `module`                | `'redis'`        | —                        | An `ioredis`-shaped module, for testing without the real driver     |
-| `instance`              | `'custom'`       | —                        | The `IRealtimeBackplane` to register, used as-is                    |
+| Option                  | Applies to       | Default                  | Description                                                                                                                                                                                                                                 |
+| ----------------------- | ---------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transport`             | all              | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                            |
+| `topic`                 | all but `memory` | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                |
+| `origin`                | all              | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                         |
+| `bus`                   | `'memory'`       | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                          |
+| `url`                   | `'redis'`        | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path                                                                                                                                                                                |
+| `client` / `subscriber` | `'redis'`        | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                     |
+| `module`                | `'redis'`        | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                             |
+| `instance`              | `'custom'`       | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                            |
+| `localNotice`           | `'memory'`       | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape |
+
+Registering the plugin **bare** is not a scaling fix: the default `'memory'` transport is a real bus
+but a single-process one, and before the `localNotice` existed a bare registration also silenced the
+consumers' startup notices without fanning anything out. The notice now comes from the plugin that
+knows its own transport.
 
 ### Transports
 
@@ -2188,7 +2299,11 @@ Discriminated on `transport`.
   `decodeFrameData`, in `@setu-ts/common` because three packages need the identical shape). An
   `SseMessage` is already JSON-serializable and travels as its JSON encoding.
 - **Delivery is at-most-once** and inherits the transport's guarantees. Frames are not persisted or
-  replayed; a replica partitioned from the transport misses frames sent during the partition.
+  replayed. On `'redis'` a SHORT partition buffers rather than drops: ioredis's default
+  `enableOfflineQueue: true` holds publishes issued while disconnected and flushes them on
+  reconnect, so frames arrive LATE (measured ~6 s) until the `maxRetriesPerRequest` budget (default
+  20, ~11 s) exhausts and the buffered commands reject with a `warn` per frame. Neither ioredis
+  default is configurable through this plugin; inject a `client`/`subscriber` pair to change it.
 - **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
   which means nothing in another process — but connection IDs come from `runtime.uuid()` and are
   therefore globally unique, so `RealtimeFrame.exceptId` carries the ID and every replica skips the
@@ -2251,7 +2366,7 @@ app.router.post('/login', (ctx) => {
 | `rolling`            | `boolean`                              | `false`                    | `true` re-issues on every response, extending expiry                                                                                                                                                   |
 | `idleTimeoutMs`      | `number`                               | —                          | Expiry after this long with no requests. Refreshed by ANY request including a read-only one, so setting it commits on every response to advance the activity stamp; it does not extend absolute expiry |
 | `maxCookieBytes`     | `number`                               | `4096`                     | Throws `SessionTooLargeError` rather than emitting a cookie browsers drop                                                                                                                              |
-| `cookie.name`        | `string`                               | `hono_session`             |                                                                                                                                                                                                        |
+| `cookie.name`        | `string`                               | `setu_session`             | Renamed from `hono_session` — see the CHANGELOG migration note; pin the old name to preserve in-flight sessions                                                                                        |
 | `cookie.path`        | `string`                               | `'/'`                      |                                                                                                                                                                                                        |
 | `cookie.domain`      | `string`                               | —                          | Omitted produces a host-only cookie                                                                                                                                                                    |
 | `cookie.sameSite`    | `'strict' \| 'lax' \| 'none'`          | `'lax'`                    | `'none'` forces `Secure`                                                                                                                                                                               |
@@ -2259,7 +2374,7 @@ app.router.post('/login', (ctx) => {
 | `cookie.httpOnly`    | `boolean`                              | `true`                     |                                                                                                                                                                                                        |
 | `csrf`               | `CsrfFormOptions`                      | —                          | Presence registers `csrfFormMiddleware` at priority 275                                                                                                                                                |
 | `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                                                                                                                                                          |
-| `csrf.headerName`    | `string`                               | —                          | Accepted alternative source; REQUIRED for `multipart/form-data`                                                                                                                                        |
+| `csrf.headerName`    | `string`                               | `'x-csrf-token'`           | Header accepted as an alternative token source for `fetch` posts; an explicit name still wins. REQUIRED for `multipart/form-data`, which is not parsed for the field                                   |
 | `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                                                                                                                                                         |
 | `tenantBinding`      | `boolean`                              | `true`                     | Seals the resolved tenant id into the session on commit; replaying it under a different tenant is refused with `403` before the handler. Inert when either side has no tenant; `false` disables both   |
 
@@ -2378,11 +2493,14 @@ register SSR routes. The plugin owns all HTTP verbs at the configured `basename`
 import { CAPABILITIES, ISsrService } from '@setu-ts/common';
 
 // The plugin handles SSR automatically at the catch-all.
-// Custom routes take precedence based on static segment count:
-// a custom route with MORE static segments wins over /* (e.g. /api/users/:id has 2, beats 1).
-// Single-segment routes (e.g. /login, /health) registered AFTER ReactRouterPlugin
-// tie with /* (both have 1 static segment) and are silently shadowed by SSR.
-// Register single-segment routes BEFORE ReactRouterPlugin or use more-static routes.
+// Any route that NAMES its path beats the catch-all, in either registration order:
+// the kernel ranks candidates by static segments (descending), then wildcards
+// (ascending), then registration index. So /login, /openapi.json and /api/users/:id
+// all win over /*, and registration order does not enter into it.
+// Known limit: the ranking compares COUNTS, so /a/* loses to /:x/b on /a/b.
+// Before M70g a `*` counted as a static segment, so single-segment routes TIED with
+// /* and whichever registered first won — which silently removed /openapi.json and
+// /docs from every full-stack application.
 app.router.get('/api/health', (ctx) => {
   return ctx.response.json({ status: 'ok' });
 });
@@ -2390,15 +2508,16 @@ app.router.get('/api/health', (ctx) => {
 
 ### Options
 
-| Option                | Type                                                         | Default        | Description                                                                                           |
-| --------------------- | ------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------- |
-| `serverBuildPath`     | `string`                                                     | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                          |
-| `loadRequestHandler`  | `(buildPath, mode) => Promise<SsrRuntime>`                   | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`. |
-| `assetsDir`           | `string`                                                     | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                   |
-| `assetUrlPrefix`      | `string`                                                     | `/assets/`     | URL prefix for the asset route.                                                                       |
-| `basename`            | `string`                                                     | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.   |
-| `populateLoadContext` | `(ctx: IRequestContext, context: RouterLoadContext) => void` | omitted        | Adds app values to the per-request React Router context, on top of the keys the plugin always sets.   |
-| `mode`                | `'production' \| 'development'`                              | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                        |
+| Option                | Type                                                         | Default        | Description                                                                                                                                                                                                                                |
+| --------------------- | ------------------------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `serverBuildPath`     | `string`                                                     | **(required)** | Path to the React Router Vite server build (default export = `ServerBuild`).                                                                                                                                                               |
+| `loadRequestHandler`  | `(buildPath, mode) => Promise<SsrRuntime>`                   | omitted        | Injectable seam for lazy loading. When omitted, the default performs `await import(serverBuildPath)`.                                                                                                                                      |
+| `assetsDir`           | `string`                                                     | omitted        | Filesystem root of the built client bundle. Omit to disable the static-asset route.                                                                                                                                                        |
+| `assetUrlPrefix`      | `string`                                                     | `/assets/`     | URL prefix for the asset route.                                                                                                                                                                                                            |
+| `publicFiles`         | `boolean`                                                    | `true`         | Also serve files from the client build ROOT (Vite copies `public/` there — `robots.txt`, `favicon.ico`) with `must-revalidate`, not `immutable`: those files are not content-hashed. `false` reproduces the previous prefix-only behaviour |
+| `basename`            | `string`                                                     | `/`            | Mount prefix for the SSR catch-all. MUST match `react-router.config.ts` `basename` for flat routes.                                                                                                                                        |
+| `populateLoadContext` | `(ctx: IRequestContext, context: RouterLoadContext) => void` | omitted        | Adds app values to the per-request React Router context, on top of the keys the plugin always sets.                                                                                                                                        |
+| `mode`                | `'production' \| 'development'`                              | `'production'` | Passed to `createRequestHandler(build, mode)`.                                                                                                                                                                                             |
 
 ### Interface Reference
 
@@ -2657,13 +2776,17 @@ app.router.post('/thumbnail', async (ctx) => {
   instances. A clone failure surfaces as a rejected `run()` on both dispatch paths (immediately, and
   when the task is dispatched later from the queue); the worker is retained and the pool keeps
   serving.
-- **`taskTimeoutMs: 0` disables crash detection for a self-terminated worker.** Worker termination
-  is not delivered as a host event, so the timeout is the only thing that settles the task of a
-  worker that ended itself; with it off, that `run()` never settles and its pool slot is not
-  released. Owned by M70k.
+- **A worker that ends its own thread** settles its in-flight task with `WorkerExitError` and frees
+  the slot, independently of the task timeout — where the runtime reports the exit. It does on Node
+  (`node:worker_threads` `'exit'`) and on Bun (its non-standard `'close'`); it does **not** on Deno,
+  whose web `Worker` emits no host-side event at all when a worker calls `self.close()`, and where a
+  later `postMessage` still resolves. On Deno the task timeout therefore remains the only backstop,
+  so keep one on any pool whose task module can terminate itself. The pool reports which case it is
+  in through `exitDetection` in its health payload, and warns once at `register()` when
+  `taskTimeoutMs` resolves to `0` on a runtime that cannot report an exit.
 - **Node `.ts` task modules** need an app-level loader/build, exactly as the frontend build is the
   app's responsibility (AI_GUIDELINES §12.2); the plugin consumes the module specifier as given.
-- Health indicator `worker-pool` reports `{ available, pools }`.
+- Health indicator `worker-pool` reports `{ available, exitDetection, pools }`.
 - **Metrics (opt-in by capability).** When `CAPABILITIES.METRICS` is registered, the plugin
   publishes six series, all labelled `task_module`: gauges `worker_pool_workers`,
   `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
@@ -2830,6 +2953,9 @@ not part of the public capability this milestone.
 - `IAuditDbClient` — structural database client facade for the `'database'` backend
   (`insert(table, row)` / `select(table, criteria?)`).
 - `IAuditLogger`, `AuditEntry` — re-exported from `@setu-ts/common`.
+- `StoredAuditEntry`, `AuditQuery` — the return and parameter types of the exported storage classes'
+  `query` members. Exported so those signatures are nameable by a consumer (the M52c
+  `NormalizedQuery` lesson); the read path belongs to the storages, not to `IAuditLogger`.
 
 ### Notes
 
@@ -3501,6 +3627,8 @@ Provides background job queue with Memory and Redis adapters.
 - **`JobProcessor<T>`** — Job processor type (re-exported)
 - **`AddJobOptions`** — Options for `queue.add()` (re-exported)
 - **`ProcessOptions`** — Options for `queue.process()` (re-exported)
+- **`QueueDepths`** — `{ ready, processing, dead }` per job name, as the health indicator publishes
+  them
 - **`RecurringOptions`** — Options for `queue.addRecurring()` (re-exported)
 - **`QueueLogger`** — Minimal `error`/`warn` logger surface the service reports background failures
   through (structurally compatible with `ILogger`)
@@ -3666,6 +3794,11 @@ interface AddJobOptions {
 // ProcessOptions
 interface ProcessOptions {
   readonly concurrency?: number; // Jobs processed concurrently (default: 1)
+  // Invoked ONCE when a job has exhausted its attempts, immediately before it
+  // is dead-lettered. Does NOT fire on an attempt that will be retried. A
+  // callback that throws or rejects is reported through the logger and
+  // swallowed — the dead-letter still happens.
+  readonly onFailed?: (job: IJob, error: unknown) => void | Promise<void>;
 }
 
 // RecurringOptions
@@ -3701,6 +3834,25 @@ reachability (`isHealthy()`).
 | `up`   | The adapter is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
 | `down` | The adapter is not connected, or is connected but unreachable.                            |
 
+Since M70k the payload also carries `queues`, keyed by job name, when the adapter can count its
+states cheaply — the memory adapter (in process) and the Redis adapter (`ZCARD`). The key is OMITTED
+rather than reported as zeros on RabbitMQ and SQS, whose counts need a management API or
+`GetQueueAttributes`: "this adapter cannot tell you" and "there is nothing there" are different
+answers, and an operator acting on a dead-letter alert needs to tell them apart.
+
+The counts are read only once the adapter has reported itself reachable, so a `down` payload carries
+`{ adapter, reachable }` and no `queues`. Counting against a backend already known to be unreachable
+would cost a failing round trip per name on every probe interval and tell an operator nothing that
+`reachable: false` does not.
+
+```json
+{
+  "adapter": "RedisQueue",
+  "reachable": true,
+  "queues": { "thumbnail": { "ready": 0, "processing": 0, "dead": 1 } }
+}
+```
+
 `data` reports `{ adapter, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
 the adapter has no liveness check.
 
@@ -3717,7 +3869,11 @@ schedule until the registering plugin re-creates it. For durable background work
 
 ### Exports
 
-- **`SchedulerPlugin`** — Plugin factory for registering the scheduler service
+- **`SchedulerPlugin`** — Plugin factory for registering the scheduler service; **throws**
+  `SchedulerUnavailableError` at `register()` on Cloudflare Workers, where its timers cannot fire —
+  use `WorkersCron` with `[triggers] crons` there instead
+- **`SchedulerUnavailableError`** — Thrown by `register()` when the runtime platform cannot run the
+  scheduler (Cloudflare Workers); catch it by identity to branch on the refusal
 - **`SchedulerPluginOptions`** — Plugin configuration options (`timezone?`, `distributedLock?`)
 - **`DistributedLockOptions`** — Lock configuration (`enabled?`, `storage?`, `url?`, `client?`,
   `lock?`, `ttlMs?`)
@@ -3758,6 +3914,30 @@ When `distributedLock` is absent or `enabled: false`, a process-local memory loc
 unless you inject one via `client`, or supply your own `IDistributedLock` via `lock` (which takes
 priority over `storage`). `ttlMs` defaults to `30000` and must exceed the job's worst-case runtime —
 if the lock expires mid-run, another instance may start the same job.
+
+**Multi-instance deduplication** works across replicas sharing one lock backend. `cron` and `every`
+fires each claim a never-released _slot_ lock keyed on the fire's intended time
+(`scheduler:job:<name>:<slot>`), so two replicas whose timers land anywhere in the same intended
+slot run the handler exactly once between them; `ttlMs` bounds how long a claimed slot is
+remembered, so it must exceed the maximum skew between replicas. `delay` jobs claim their slot at
+REGISTRATION, keyed on the job name plus a `:once` suffix (`scheduler:job:<name>:once`), because a
+delay's intended fire time is `now + delayMs` and carries per-replica startup skew — the name is
+what identifies "the same one-shot job" across replicas. The suffix is load-bearing: the bare
+`scheduler:job:<name>` is the per-handler mutex, and a slot holding that key would make the mutex
+acquire at fire time always lose to the slot's own claim. A delay's slot is released when the job
+leaves the registry (on fire, `remove`, or TTL expiry), so re-registering the same name after it
+fired gets a fresh slot and fires again.
+
+**A `delay` job is lost if the replica that claimed it leaves before firing.** The claim is decided
+at registration, so a replica that finds the slot held never re-attempts: if the claiming replica
+crashes — or shuts down gracefully, since `disconnect()` clears timers without releasing the slot —
+between registering the delay and firing it, no replica runs the handler and nothing reports it. The
+exposure window is the delay itself, so it matters for a long `delayMs` on a replica set that may
+lose a pod in that window. `cron` and `every` are unaffected: they claim at fire time, so the next
+fire re-contends. A separate per-handler mutex preserves overlap protection — a second fire of a job
+whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
+(`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
+slot keys; the first fire may come sooner than one full interval after registration.
 
 ### Scheduling Jobs
 
@@ -3838,8 +4018,14 @@ All four **throw** if no job with that name exists — including after a `delay`
 auto-removed itself. `getNextRun` additionally throws if the job is currently paused.
 
 `resume` re-arms from the current time rather than resuming the original countdown: cron jobs
-compute the next fire from now, `every` jobs restart the interval from now, and `delay` jobs re-arm
-the **full** original `delayMs` from now.
+compute the next fire from now, `delay` jobs re-arm the **full** original `delayMs` from now, and
+`every` jobs resume on the next epoch grid boundary of their interval
+(`(floor(now / intervalMs) + 1) * intervalMs`) — **not** a full interval after now. This is
+**breaking versus 0.1.0-alpha.8**, whose contract stated the interval "restarts from now": the fire
+may now come sooner than one full interval after resume (never later). Grid alignment at resume is
+deliberate — it is the same alignment that makes replicas agree on fire times and slot keys, and a
+resume that restarted the phase would let one replica's resumed job drift out of slot agreement with
+the others.
 
 ### IScheduler Interface
 
@@ -3972,6 +4158,11 @@ breaker, retry, or `fn`; an open breaker fails fast before any retry attempt; ea
 gets its own timeout. A field set to `true` with no matching `default*` policy configured throws at
 `wrap` time.
 
+> **Hoist the wrapped call.** The state-preserving closure is built once per `wrap` — a `wrap()`
+> written inside a handler constructs a fresh breaker on every request, so the breaker never opens
+> while retry and timeout keep working (the broken shape looks identical to the working one). Wrap
+> at module or plugin scope and call the returned closure per request.
+
 ### Cancellation
 
 Each attempt is handed an `AbortSignal`. On a `timeout` deadline that signal is aborted with the
@@ -4031,46 +4222,57 @@ plus a typed `getUploadedFile()` helper.
 
 ```typescript
 const uploadMw = createUploadMiddleware({
-  fieldname: 'file',
-  maxSize: 10 * 1024 * 1024,         // 10 MB default
-  allowedMimeTypes?: ['image/jpeg', 'image/png'],  // optional
-  maxFiles?: 5,                      // optional
+  fieldname: 'file', // parts with any other name are dropped
+  maxSize: 10 * 1024 * 1024, // per file; exceeding it answers 413
+  allowedMimeTypes: ['image/jpeg', 'image/png'], // optional
+  maxFiles: 5, // optional; exceeding it answers 400
 });
 
-app.post('/upload', {
+app.router.post('/upload', {
   middleware: [uploadMw],
   handler: async (ctx) => {
+    // `getUploadedFile` returns `UploadedFile | undefined`, and the fieldname
+    // must match the middleware's — it filters parts to that name.
     const file = getUploadedFile(ctx, 'file');
-    if (!file) return ctx.json({ error: 'No file' }, 400);
+    if (!file) return ctx.response.status(400).json({ error: 'No file' });
 
     const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
     // `file.name` is the form field name; `file.filename` is the client's original file name.
-    const key = `uploads/${Date.now()}-${file.filename}`;
-    await storage.put(key, file.data);
+    const key = `uploads/${file.filename}`;
+    // Without `contentType` the object is stored as `application/octet-stream`
+    // and the signed URL below downloads it instead of rendering it.
+    await storage.put(key, file.data, { contentType: file.mimeType });
 
     const url = await storage.getSignedUrl(key, { expiresIn: 3600 });
-    return ctx.json({ url, key });
+    return ctx.response.json({ url, key });
   },
 });
 ```
 
+Refusal statuses: a body or file over its limit answers **413**; a malformed body, a disallowed MIME
+type and too many files answer **400**.
+
+`maxBodyBytes` (default 50 MB) caps the body the middleware will PARSE, with the effective bound
+`min(maxSize * 2 + framing, maxBodyBytes)`. It does not bound the initial read — the HTTP adapter
+buffers the whole body before any middleware runs, and `IRequest` exposes no body stream.
+
 ### Usage — buffered download
 
 ```typescript
-app.get('/files/:key', async (ctx) => {
+app.router.get('/files/:key', async (ctx) => {
   const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
-  const file = await storage.get(ctx.req.param('key'));
-  return ctx.header('content-type', 'application/octet-stream').send(file);
+  const file = await storage.get(ctx.params.key);
+  return ctx.response.header('content-type', 'application/octet-stream').send(file);
 });
 ```
 
 ### Usage — streaming download (`getStream?`)
 
 ```typescript
-app.get('/files/stream/:key', async (ctx) => {
+app.router.get('/files/stream/:key', async (ctx) => {
   const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
-  const stream = await storage.getStream!(ctx.req.param('key'));
-  return ctx.header('content-type', 'application/octet-stream').stream(stream);
+  const stream = await storage.getStream!(ctx.params.key);
+  return ctx.response.header('content-type', 'application/octet-stream').stream(stream);
 });
 ```
 
@@ -4087,19 +4289,32 @@ The plugin ships five named providers plus a first-class B2 preset that reuses S
 | `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?` | Lazy `npm:@azure/storage-blob@^12`           | SAS requires `accountKey`. No `@azure/identity` needed.                        |
 | B2 preset              | `'b2'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`                | Same as S3 (reuses `S3Provider`)             | Endpoint defaults to `https://s3.<region>.backblazeb2.com`. No separate class. |
 
-All cloud providers support an injectable `client` option (`IAwsS3Client` / `IGcsClient` /
-`IAzureBlobClient`) that bypasses the lazy import for testing.
+All cloud providers support an injectable `client` option that bypasses the lazy import, but the
+three types are NOT alike and the difference decides what you can pass:
+
+| Option type        | Mirrors its SDK? | What injecting it means                                                               |
+| ------------------ | ---------------- | ------------------------------------------------------------------------------------- |
+| `IGcsClient`       | yes              | A real `@google-cloud/storage` client fits structurally.                              |
+| `IAzureBlobClient` | yes              | A real `@azure/storage-blob` client fits structurally.                                |
+| `IS3Backend`       | **no**           | This package's own backend surface — implementing it, not handing over an `S3Client`. |
+
+`IS3Backend` was named `IAwsS3Client` before the alpha.9 release, which promised something it never
+was: `@aws-sdk/client-s3`'s surface is `send(command)`, so a real `S3Client` was refused with
+`Injected S3 client is missing required methods`. There is consequently no supported way to
+configure the underlying SDK client (custom retry policy, timeout, proxy agent). The old name is
+still exported as a deprecated alias of the same type (AI_GUIDELINES §9.2), so existing imports keep
+compiling; new code should use `IS3Backend`.
 
 ### IStorage methods
 
-| Method                                                                   | Description                                                                                                                                                                                      |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `put(path: string, data: Uint8Array): Promise<void>`                     | Stores an object.                                                                                                                                                                                |
-| `get(path: string): Promise<Uint8Array>`                                 | Retrieves an object. **Throws** if absent.                                                                                                                                                       |
-| `delete(path: string): Promise<boolean>`                                 | Deletes an object. Returns `true` if present.                                                                                                                                                    |
-| `exists(path: string): Promise<boolean>`                                 | Checks existence.                                                                                                                                                                                |
-| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → throws; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`). |
-| `getStream?(path: string): Promise<ReadableStream<Uint8Array>>`          | **Optional.** Streams an object for zero-copy downloads. Native on S3/GCS/Azure; Memory/Local fall back to wrapping `get(path)` in a one-chunk stream. Absent objects throw.                     |
+| Method                                                                   | Description                                                                                                                                                                                        |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `put(path, data, options?: PutObjectOptions): Promise<void>`             | Stores an object. `options` carries `contentType` and `metadata`; S3, GCS, Azure and Cloudflare R2 record them on the object, while the memory and local providers accept and do not persist them. |
+| `get(path: string): Promise<Uint8Array>`                                 | Retrieves an object. **Throws** if absent.                                                                                                                                                         |
+| `delete(path: string): Promise<boolean>`                                 | Deletes an object. Returns `true` if present.                                                                                                                                                      |
+| `exists(path: string): Promise<boolean>`                                 | Checks existence.                                                                                                                                                                                  |
+| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → throws; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`).   |
+| `getStream?(path: string): Promise<ReadableStream<Uint8Array>>`          | **Optional.** Streams an object for zero-copy downloads. Native on S3/GCS/Azure; Memory/Local fall back to wrapping `get(path)` in a one-chunk stream. Absent objects throw.                       |
 
 ### Per-provider `getSignedUrl` behavior
 
@@ -4814,6 +5029,9 @@ app.register(MetricsPlugin({
   endpoint: '/metrics',
   defaultMetrics: true,
   httpMetrics: true,
+  // Replaces the default ['/health', '/live', '/ready'] exclusion set; the
+  // plugin's own endpoint is always excluded either way.
+  excludePaths: ['/health', '/live', '/ready'],
   customMetrics: [
     { name: 'users_total', help: 'Total users', type: 'counter' },
     { name: 'active_connections', help: 'Active connections', type: 'gauge' },
@@ -4913,8 +5131,16 @@ instance; when `otelProvider` is absent, the registry returns a no-op handle imm
 
 Each instrumentation uses the **inject-or-lazy seam**: when `InstrumentationConfig.instrumentation`
 is set, the instance is used directly (inject path); otherwise the registry lazy-loads the OTel
-package via `npm:` dynamic import (lazy path). Any loader failure is caught and recorded as a
-failure outcome — the plugin **never throws** from instrumentation setup.
+package via a literal `npm:` dynamic import (lazy path). Any loader failure is caught and recorded
+as a failure outcome — the plugin **never throws** from instrumentation setup.
+
+Every outcome is reported through the plugin's logger (`ctx.logger`, read at call time): an enabled
+instrumentation logs one line at `debug`, a failure one line at `warn` carrying `kind` and `reason`.
+The plugin declares the logger capability in `optionalDependencies`, so the kernel orders a
+plugin-provided logger (e.g. `LoggerPlugin`) before it — the standard configuration
+(`RuntimePlugin` + `LoggerPlugin` + `TelemetryPlugin`) reports every outcome. A failure therefore
+remains a no-op rather than a throw, but is no longer silent — without a logger registered, the
+outcomes are still recorded on the registry handle and nothing is emitted.
 
 ### Span Processor
 
@@ -5047,7 +5273,13 @@ app.register(OpenApiPlugin({
   // Router paths to leave out of the document. Matched exactly against the
   // fully-resolved router pattern: router-style (`/todos/:id`, not the
   // template `/todos/{id}`) and including any `router.group()` prefix.
-  exclude: ['/health', '/live', '/ready', '/metrics'],
+  exclude: ['/internal/debug'],
+  // Plugin names whose routes are left out, matched against `RouteInfo.owner`.
+  // Defaults to ['health-plugin', 'metrics-plugin']; pass [] to document them.
+  excludeOwners: ['health-plugin', 'metrics-plugin'],
+  // Fill requestBody and parameters from the validation middleware guarding
+  // each route. On by default; pass false for the pre-0.3.0 document.
+  deriveRequestSchemas: true,
   // Endpoint configuration
   endpoint: '/docs', // Path for Swagger UI HTML (default: '/docs')
   specEndpoint: '/openapi.json', // Path for OpenAPI JSON spec (default: '/openapi.json')
@@ -5080,6 +5312,60 @@ app.router.delete('/todos/:id', {
 
 `RouteSchema.security` enforces nothing. Authentication is enforced by `authMiddleware` and the
 `requireXxx` guards; this describes the route for readers and for generated clients.
+
+### Deriving Request Schemas From Validation Middleware
+
+A route carrying `validateBody(schema)` already states its request shape, from a first-party plugin,
+on the route. `deriveRequestSchemas` (default `true`) reads that schema and fills the operation's
+`requestBody` and `parameters`, so the shape is not written twice:
+
+```typescript
+app.router.post('/orders', {
+  middleware: [validateBody(PlaceOrderSchema), validateQuery(ListQuerySchema)],
+  handler,
+});
+// -> requestBody from PlaceOrderSchema, query parameters from ListQuerySchema,
+//    and a documented 400 (which is what the middleware answers).
+```
+
+Every helper `@setu-ts/validation-plugin` ships brands the middleware it returns with
+`RouteValidationMetadata` (`@setu-ts/common`), and so does `IValidationService.middleware(...)` —
+both entry points, identically. No plugin imports another; the `Symbol.for`-keyed brand in `common`
+is the whole channel, exactly as `RouteSecurityMetadata` is for guards.
+
+Rules and limits, stated rather than left to discovery:
+
+- **A declared `schema` field always wins, per field.** Declaring `schema.body` and carrying
+  `validateQuery(...)` gives the declared body and the derived query.
+- **The LAST brand for a target wins** when a route carries two, because that is the value the
+  handler receives: each validation middleware writes `validated:<target>` as it passes, so the
+  final writer's parsed value is the one in `ctx.state` by the time the handler runs. The request
+  must still satisfy EVERY brand, since any of them can short-circuit with a `400`; the document
+  shows the shape the handler sees, not that conjunction.
+- **`cookies` derives nothing.** `RouteSchema` has no `cookies` field, so there is no declared
+  counterpart — and `@setu-ts/sdk`'s client generator refuses an `in: 'cookie'` parameter outright,
+  so emitting one would turn a working document into a hard codegen failure for its consumers.
+- **A derived route gains `400: { description: 'Bad request' }`** unless it declares its own. The
+  status is real; no body schema is emitted, because the shape depends on the plugin's configured
+  `errorFormat`, which the generator cannot see.
+- **`deriveRequestSchemas: false`** disables derivation only. Owner exclusion, the `operationId`
+  format and schema deduplication are unconditional, so this does not restore the whole pre-0.3.0
+  document; pass `excludeOwners: []` to document the operational routes again.
+
+Unlike `deriveSecurity` this is ON by default, because nothing has to be configured for it: a
+security requirement names a scheme that cannot be inferred from a guard, while the schema on the
+route IS the schema the document wants.
+
+### Excluding Operational Routes
+
+`excludeOwners` (default `['health-plugin', 'metrics-plugin']`) drops routes by the plugin that
+registered them, read from `RouteInfo.owner`. Without it, `/health`, `/live`, `/ready` and
+`/metrics` are documented and flow into every generated client as `getHealth`, `getLive`, `getReady`
+and `getMetrics` alongside the real API.
+
+Owners rather than paths, because those endpoints are configuration: `HealthPlugin({ endpoints })`
+and `MetricsPlugin({ endpoint })` both accept a path, so a static path list silently stops excluding
+a renamed one. Pass `excludeOwners: []` to document them again.
 
 ### Deriving Authentication From Guards
 
@@ -5878,8 +6164,9 @@ Notes:
 
 - **The generated factory is `async`.** `setu` awaits it during command discovery, and `main.ts`
   awaits it too, so nothing else changes.
-- **No hello-world route.** An exact `/` handler would take precedence over the SSR catch-all and
-  shadow the application's own index route.
+- **No hello-world route.** An exact `/` handler takes precedence over the SSR catch-all under the
+  M70g specificity rule (a wildcard ranks below any route naming its path, in either registration
+  order), so it would shadow the application's own index route.
 - **Every runtime target is supported.** Cloudflare Workers omits `assetsDir` and `envFilePath`:
   with no filesystem the asset handler would answer 404 for every asset, and a dotenv path would
   make ConfigPlugin throw. Static assets come from the platform binding and configuration from the
@@ -6086,7 +6373,9 @@ Notes:
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
-  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  // A Prisma v7 client is generated and constructed by the application; the
+  // adapter never builds one, so `url` is not a database option.
+  database: { type: 'prisma', options: { prismaClient } },
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
 }), { config: { envFilePath: ['.env.local', '.env'] } });
 
@@ -6136,9 +6425,10 @@ const app = createRestApp({
     }),
   },
   database: {
+    // The v7 client is generated and constructed by the application and
+    // carries its own connection configuration.
     type: 'prisma',
-    // Illustrative: in production, resolve via IConfig or similar
-    options: { url: process.env.DATABASE_URL },
+    options: { prismaClient },
   },
   auth: {
     jwt: {
@@ -6180,7 +6470,9 @@ app.router.get('/users', {
 });
 
 app.router.post('/users', {
-  middleware: [app.services.auth.requireAuth()],
+  // `schema.body` DOCUMENTS the route; `validateBody` is what enforces it and
+  // writes `validated:body`. Declaring the schema alone leaves that key unset.
+  middleware: [app.services.auth.requireAuth(), validateBody(CreateUserSchema)],
   schema: {
     body: CreateUserSchema,
     response: { 201: UserSchema, 400: z.object({ error: z.string() }) },
@@ -6190,7 +6482,7 @@ app.router.post('/users', {
   },
   handler: async (ctx) => {
     const db = ctx.services.get('database');
-    const user = await db.getRepository('User').create(ctx.state.get('validatedBody'));
+    const user = await db.getRepository('User').create(ctx.state.get('validated:body'));
     return ctx.response.status(201).json(user);
   },
 });
@@ -6224,9 +6516,10 @@ import { createMicroserviceApp } from '@setu-ts/microservice-starter';
 
 const app = createMicroserviceApp({
   database: {
+    // The v7 client is generated and constructed by the application and
+    // carries its own connection configuration.
     type: 'prisma',
-    // Illustrative: in production, resolve via IConfig or similar
-    options: { url: process.env.DATABASE_URL },
+    options: { prismaClient },
   },
   messaging: {
     broker: 'rabbitmq',
@@ -6320,7 +6613,9 @@ const app = createApplication({
     RuntimePlugin(),
     LoggerPlugin({ level: 'info' }),
     ConfigPlugin({ validationSchema: AppConfigSchema }),
-    DatabasePlugin({ type: 'prisma' }), // reads DATABASE_URL via the config capability
+    // A Prisma v7 client is application-generated, so the adapter is handed one
+    // rather than reading a connection URL of its own.
+    DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
     EventsPlugin(),
     CqrsPlugin(), // add cross-cutting behaviors via `behaviors: [myBehavior]` (typed IPipelineBehavior[])
     OpenApiPlugin({ title: 'CQRS API', version: '1.0.0' }),
@@ -6922,7 +7217,7 @@ app.router.post('/users', {
   schema: { body: CreateUserSchema, response: { 201: UserSchema } },
   handler: async (ctx) => {
     const userService = ctx.services.get('userService');
-    const user = await userService.create(ctx.state.get('validatedBody'));
+    const user = await userService.create(ctx.state.get('validated:body'));
     return ctx.response.status(201).json(user);
   },
 });
@@ -7211,50 +7506,58 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `some(value)` / `none()`      | function | `Option` constructors (`none()` returns a frozen singleton)                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `isSome(o)` / `isNone(o)`     | function | `Option` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `fromNullable(v)`             | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `serializeError(value)`       | function | Serializes any thrown value into a plain `SerializedError` (`{ name, message, stack?, cause? }`) with the `cause` chain followed to a bounded depth; a non-`Error` value yields `{ name: 'Error', message: String(value) }`. Pure — no runtime-specific APIs. Here so the logger plugin (metadata normalization), the kernel (fallback-500 logging), `exceptions`, `grpc-plugin`, and `notification-plugin` can all serialize without importing one another.          |
+| `respondWithError(ctx, init)` | function | Writes an error response through the request's published `IErrorResponder` (the application's configured format), falling back to `{ error, detail? }` when `errorHandler` has not published one. The seam that lets a package that produces error responses but may not import `@setu-ts/exceptions` answer in the configured format (M70f).                                                                                                                         |
+| `ERROR_RESPONDER_STATE_KEY`   | const    | The `ctx.state` key under which `errorHandler` publishes its `IErrorResponder`                                                                                                                                                                                                                                                                                                                                                                                        |
+| `brandErrorResponder(fn, r)`  | function | Attaches `errorHandler`'s resolved `IErrorResponder` to its middleware function under `ERROR_RESPONDER_BRAND`, so the kernel — which runs the drain `503`, the malformed-request `400`, and the request hooks BEFORE the pipeline — can read the same responder at startup (M70f re-review)                                                                                                                                                                           |
+| `errorResponderOf(fn)`        | function | Reads the brand off a middleware function, returning the attached `IErrorResponder` (or `undefined`). The kernel's only route to the resolved formatter for the pre-pipeline sites                                                                                                                                                                                                                                                                                    |
+| `ERROR_RESPONDER_BRAND`       | const    | A `Symbol.for` brand pairing with the two functions above; `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                             |
+| `validatedStateKey(target)`   | function | Returns `` `validated:${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `@Body`/`@Query`/`@Param` read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                                               |
 
 ### Types
 
-| Group               | Exports                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                   |
-| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`                                                                                                                                                                                                                                                                                                             |
-| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                                                                                                                         |
-| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                               |
-| Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                  |
-| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                  |
-| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest` |
-| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                            |
-| DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                            |
-| Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Config              | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                               |
-| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`                                                                                                                                                                                                                                                                                      |
-| Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                             |
-| Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                             |
-| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                                                                                                                                    |
-| Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                          |
-| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                             |
-| Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                             |
-| Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                       |
-| Secrets             | `ISecretManager`                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                                                                                                                              |
-| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                       |
-| Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                            |
-| Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Notifications       | `INotifier`, `NotificationMessage`                                                                                                                                                                                                                                                                                                                                                                                        |
-| Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                            |
-| Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                 |
-| SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                             |
-| SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                               |
-| Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                      |
-| WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`                                                                                                         |
-| Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                       |
-| Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                         |
-| Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                            |
-| DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                               |
-| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `ServiceImpl`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                            |
-| Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                        |
+| Group               | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                      |
+| Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| HTTP                | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `VALIDATION_METADATA`, `RouteValidationMetadata`, `withValidationMetadata`, `validationMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest` |
+| Runtime             | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                |
+| DI (optional)       | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                                                                                                                                |
+| Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Config              | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`                                                                                                                                                                                                                                                                                                                                                                                          |
+| Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                                                                                                                                                                                                                                        |
+| Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                                                                                                                                 |
+| Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Secrets             | `ISecretManager`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Audit               | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Resilience          | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy`, `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                                                                                                                           |
+| Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Notifications       | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Errors              | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError` — the request-scoped error responder seam and the pure error serializer (M70f)                                                                                                                                                                                                                                                                                                                                                              |
+| Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`                                                                                                                                                                                                             |
+| Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                                                                                                                           |
+| Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 Contract notes:
 
@@ -7284,6 +7587,16 @@ Contract notes:
   middleware's identity and behaviour are unchanged. It carries authentication PRESENCE only — a
   role is not a security scheme, so `requireRole('admin')` brands `{ authenticated: true }` and
   nothing more.
+- `withValidationMetadata` brands a `MiddlewareFunction` with a `RouteValidationMetadata`
+  (`{ target: ValidationTarget; schema: unknown }`), and `validationMetadataOf` reads it back — the
+  same mechanism, for the same reason, applied to request shape rather than authentication. Every
+  helper `@setu-ts/validation-plugin` ships carries it, as does
+  `IValidationService.middleware(schema, target)`, and `@setu-ts/openapi-plugin` reads it to fill an
+  operation's `requestBody` and `parameters`. `VALIDATION_METADATA` is created with `Symbol.for` for
+  the same cross-copy reason, the brand is symbol-keyed and non-enumerable, and the `schema` travels
+  by REFERENCE — a reader transforms it with whatever schema support it has, and identity is what
+  the OpenAPI generator's deduplication keys on. A foreign value under the same global symbol reads
+  as absent rather than being trusted.
 - `IRequest.raw?: Request` and `IRequestContext.raw?: Request` carry the **undisturbed** web
   `Request` the HTTP adapter received, alongside the mapped framework request whose body has already
   been buffered. The kernel terminal handler reads it to decide a WebSocket upgrade (which needs the
@@ -7311,6 +7624,11 @@ Contract notes:
   without removing existing ones (`Headers.append`). `appendHeader` is the correct way to emit
   multiple headers of the same name — most notably several `Set-Cookie` headers (e.g. access +
   refresh cookies). Both chain (`return this`).
+- `IResponse.html(body: string): HandlerResult` — sends an HTML response with
+  `content-type: text/html; charset=utf-8`. The charset is not optional: a bare `text/html` lets a
+  browser sniff the encoding. Added because every CSRF-protected form example was setting the header
+  by hand. **Breaking for out-of-repo `IResponse` implementors** (both in-repo implementors — the
+  kernel's `ResponseBuilder` and `testing`'s `MockResponse` — implement it).
 - `IResponse.stream(body: ReadableStream<Uint8Array>): HandlerResult` — sends a streaming response
   body. The runtime maps this to `new Response(streamBody, { status, headers })`; streaming is free
   on every platform (Node via Hono, Deno, Bun, Cloudflare Workers) with no buffer-then-send. Added
@@ -7394,11 +7712,16 @@ Contract notes:
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.
-- The kernel emits only **bare status JSON** (`{ error: 'Bad Request' }` for a malformed request URL
-  or malformed percent-escape in the path → `400`; `{ error: 'Not Found' }` → `404`;
-  `{ error: 'Internal Server Error' }` → `500`; `{ error: 'Service Unavailable' }` for a request
-  arriving while `stop()` is draining → `503`). Error formatting belongs to the exceptions package,
-  not the kernel.
+- The kernel's own error responses (malformed request URL or malformed percent-escape in the path →
+  `400`; unmatched path → `404`; unhandled error → `500`; a request arriving while `stop()` is
+  draining → `503`) are written through the **error responder seam** (`respondWithError` in
+  `@setu-ts/common`). With `errorHandler` registered they answer in the application's configured
+  format; with **no** `errorHandler` registered they fall back to the no-handler shape
+  `{ error, detail? }` — which is **not** the same as the `default` formatter's
+  `{ statusCode, message, details? }` body (see the exceptions contract notes). Error **formatting**
+  belongs to the exceptions package, not the kernel; the kernel only supplies the status and
+  message. The unhandled-error `500` additionally logs the error through `CAPABILITIES.LOGGER` when
+  a logger is registered.
 - **`inject()` body semantics.** `InjectResponse.body` is text: a byte body written with
   `response.send(bytes)` is UTF-8 decoded rather than reported as `null`, and `json()` parses it. A
   **streaming** response cannot be presented as text without draining the live stream, so `inject()`
@@ -7670,7 +7993,23 @@ Contract notes:
   returns an `HttpError` with a pre-set `statusCode` — no `BadRequestError extends HttpError`
   hierarchy.
 - **`cause` chaining**: `internalServerError(message, cause)` forwards `cause` to the ES2022 `Error`
-  cause chain. The error handler logs it when a logger is registered.
+  cause chain. The error handler logs it when a logger is registered (the logged `cause` is
+  serialized through `serializeError`, so a nested `Error` never renders as `{}`).
+- **Error format is the framework's error-body contract**: `errorHandler` is the single place an
+  application configures how **every** error body is written. It publishes a request-scoped
+  `IErrorResponder` (via `respondWithError` in `@setu-ts/common`) before `next()`, and every
+  short-circuiting site — the kernel's own 404/400/500/503 terminals, the storage, multi-tenancy,
+  session, auth, http-security, and feature-flags middleware — answers through it. So with
+  `errorHandler({ format: 'rfc9457' })` registered, every error those sites produce is RFC 9457.
+  **`validation-plugin` is the deliberate exception**: it formats validation failures itself and
+  takes its own `errorFormat` option, so an application configures the two to agree — the CLI
+  templates and `rest-starter` pair `ValidationPlugin({ errorFormat: 'rfc9457' })` with the handler
+  for exactly that reason. With **no** `errorHandler` registered, every responder site falls back to
+  the no-handler shape `{ error, detail? }` — a site cannot answer in its own ad-hoc shape. That
+  fallback is a **different** body from the `default` formatter's
+  `{ statusCode, message, details? }`: it is the framework's pre-formatter shape, written directly
+  by `respondWithError`, and it is what an application without `errorHandler` keeps receiving
+  byte-for-byte.
 - **RFC 9457 compliance**: when `format: 'rfc9457'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (Problem
@@ -7793,51 +8132,51 @@ carry full JSDoc.
 
 ### Values (decorator-plugin exports)
 
-| Export                                               | Kind     | Purpose                                                                                                                               |
-| ---------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                                        |
-| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                                  |
-| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                                   |
-| `Controller`                                         | function | Class decorator — base path prefix                                                                                                    |
-| `Version`                                            | function | Class decorator — API version prefix                                                                                                  |
-| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                                                |
-| `Body`/`Query`/`Param`/`Header`/`Cookie`/`Ctx`       | function | Request parameter decorators; `Ctx` injects the active `IRequestContext` without reserving the application custom type name `context` |
-| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                                   |
-| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens                   |
-| `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider                            |
-| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                                   |
-| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                                      |
-| `Public`                                             | function | Method decorator — bypasses auth                                                                                                      |
-| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                                      |
-| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas                                                                                         |
-| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                                        |
-| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                                        |
-| `createDecorator`                                    | function | Custom class/method decorator factory                                                                                                 |
-| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                                    |
-| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                                            |
-| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                                     |
-| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                                      |
-| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                                  |
-| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                                           |
-| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                                     |
-| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                                     |
+| Export                                               | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                                                                                                                                                                                                                                                                                                                                               |
+| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                                                                                                                                                                                                                                                                                                                                         |
+| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                                                                                                                                                                                                                                                                                                                                          |
+| `Controller`                                         | function | Class decorator — base path prefix                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `Version`                                            | function | Class decorator — API version prefix                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `Body`/`Query`/`Param`/`Header`/`Cookie`/`Ctx`       | function | Request parameter decorators; `Ctx` injects the active `IRequestContext` without reserving the application custom type name `context`                                                                                                                                                                                                                                                                                                        |
+| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                                                                                                                                                                                                                                                                                                                                          |
+| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens                                                                                                                                                                                                                                                                                                                          |
+| `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider                                                                                                                                                                                                                                                                                                                                   |
+| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                                                                                                                                                                                                                                                                                                                                          |
+| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                                                                                                                                                                                                                                                                                                                                             |
+| `Public`                                             | function | Method decorator — bypasses auth                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route |
+| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                               |
+| `createDecorator`                                    | function | Custom class/method decorator factory                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                                                                                                                                                                                                                                                                                                                                                   |
+| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                                                                                                                                                                                                                                                                                                                                             |
+| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                                                                                                                                                                                                                                                                                                                                            |
+| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### Types
 
-| Export                    | Kind | Purpose                                                                                            |
-| ------------------------- | ---- | -------------------------------------------------------------------------------------------------- |
-| `DecoratorPluginOptions`  | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`) |
-| `InjectableOptions`       | type | Options for `@Injectable()` (`scope?`, `token?`)                                                   |
-| `ApiOperationConfig`      | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                          |
-| `ApiResponseConfig`       | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                  |
-| `HttpMethodDecorator`     | type | `(path?: string) => MethodDecorator`                                                               |
-| `MiddlewareLike`          | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                  |
-| `CustomParameterResolver` | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                  |
-| `ParameterMetadata`       | type | Parameter metadata captured by parameter decorators                                                |
-| `ParameterType`           | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                 |
-| `DiscoveryOptions`        | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                             |
-| `DiscoveryResult`         | type | Result of discovery (`controllers`, `services`, `errors`)                                          |
-| `ModuleImporter`          | type | `(specifier: string) => Promise<unknown>` — injectable module loader                               |
+| Export                    | Kind | Purpose                                                                                                               |
+| ------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`  | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `enforceSchemas?`) |
+| `InjectableOptions`       | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                      |
+| `ApiOperationConfig`      | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                             |
+| `ApiResponseConfig`       | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                     |
+| `HttpMethodDecorator`     | type | `(path?: string) => MethodDecorator`                                                                                  |
+| `MiddlewareLike`          | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                     |
+| `CustomParameterResolver` | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                     |
+| `ParameterMetadata`       | type | Parameter metadata captured by parameter decorators                                                                   |
+| `ParameterType`           | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                    |
+| `DiscoveryOptions`        | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                |
+| `DiscoveryResult`         | type | Result of discovery (`controllers`, `services`, `errors`)                                                             |
+| `ModuleImporter`          | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                  |
 
 Contract notes:
 
@@ -7845,6 +8184,20 @@ Contract notes:
   class-definition time regardless of whether the plugin is registered. Only
   `DecoratorPlugin.register()` reads the store and calls the kernel APIs; without it, no
   routes/services/middleware are registered.
+- **Validation schemas are enforced, not just described** (`enforceSchemas`, default `true`): for
+  each of `schema.body`/`query`/`params` present on a route, `registerController` resolves
+  `CAPABILITIES.VALIDATION` and appends that capability's middleware LAST in the route's chain —
+  innermost, after guards, so an unauthenticated request is refused by its guard rather than told
+  `400` with a body that names the schema's field paths. With no validation provider registered, a
+  decorated schema stays description-only (OpenAPI) and ONE warning per route names the controller,
+  handler, affected targets and `ValidationPlugin`; nothing throws. `enforceSchemas: false` keeps
+  schemas description-only and silences the warning.
+- **`@Body()`/`@Query()`/`@Param()` read the VALIDATED value when one exists.** Each checks
+  `ctx.state` under `validatedStateKey(target)` first — presence-tested with `has`, so a validated
+  `null` or `0` is honoured — and falls back to today's raw source when absent. A Zod `transform` or
+  `default` therefore reaches the handler instead of being discarded. `@Header` and `@Cookie`
+  deliberately read their raw sources: headers resolve case-insensitively through
+  `headers.get(name)`, which the validated record would break, and no schema key exists for cookies.
 - **No reflection**: metadata is stored in plain `Map`s keyed by class reference, not via
   `Reflect.getMetadata()`. No `reflect-metadata` dependency.
 - **Decorator composition**: parameter and cross-cutting decorators (`@Body`, `@ValidateBody`,
@@ -8121,6 +8474,11 @@ deno add jsr:@setu-ts/sdk@^0.1.0-alpha.8
 Factory that returns an `IHttpClient`. Requires a base URL; accepts default headers, an injectable
 `fetch` seam, a timing seam, resilience policies, rate-limit policy, and interceptor arrays.
 
+`ClientRequest.path` must be **relative** — no leading slash, no absolute URL. A leading-slash path
+would discard `baseUrl`'s own path prefix, and an absolute URL would leave `baseUrl`'s origin
+entirely, which is what makes the per-origin breaker and rate limiter meaningful. A path that
+violates the rule throws `ClientRequest.path must be relative (no leading slash).` at request time.
+
 ```typescript
 import { createClient } from '@setu-ts/sdk';
 
@@ -8131,7 +8489,7 @@ const client = createClient({
 
 const res = await client.request<User>({
   method: 'GET',
-  path: '/users/123',
+  path: 'users/123',
 });
 console.log(res.data); // User
 ```
@@ -8292,23 +8650,68 @@ const source = generateOpenApiClient(document, {
 interface OpenApiCodegenOptions {
   sdkImport?: string;
   factoryName?: string;
+  apiTypeName?: string;
 }
 ```
 
-| Option        | Default          | Description                     |
-| ------------- | ---------------- | ------------------------------- |
-| `sdkImport`   | `'@setu-ts/sdk'` | Generated type-import specifier |
-| `factoryName` | `'createApi'`    | Exported generated factory name |
+| Option        | Default          | Description                                        |
+| ------------- | ---------------- | -------------------------------------------------- |
+| `sdkImport`   | `'@setu-ts/sdk'` | Generated type-import specifier                    |
+| `factoryName` | `'createApi'`    | Exported generated factory name                    |
+| `apiTypeName` | `'Api'`          | Exported interface the factory returns (see below) |
 
 #### Generated naming contract
 
-| Emitted symbol           | Derivation                                                                                                                    |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| Operation method         | lower-camelCase from `operationId`, split on non-alphanumeric runs, **interior casing preserved** (`listUsers` → `listUsers`) |
-| Component type           | PascalCase from the component name (`User` → `export type User`)                                                              |
-| Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                     |
-| Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                      |
-| Duplicate derived name   | throws `OpenApiCodegenError` naming both originals — for operations AND component schemas                                     |
+| Emitted symbol           | Derivation                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operation method         | lower-camelCase from `operationId`, split on non-alphanumeric runs, **interior casing preserved** (`listUsers` → `listUsers`)               |
+| Component type           | PascalCase from the component name (`User` → `export type User`)                                                                            |
+| Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                   |
+| Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                  |
+| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx response                  |
+| Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                     |
+| Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                      |
+| Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                             |
+| Parameter alias          | PascalCase from `operationId` plus the parameter name plus `Param`, emitted only when the parameter schema is inline and spans lines        |
+| Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                                    |
+| Duplicate derived name   | throws `OpenApiCodegenError` naming both originals — component schemas, `*Args`, `*Error*` and the client interface share ONE name registry |
+
+**No multi-line type is written at a use site.** An inline (non-`$ref`) request body, parameter or
+success response is hoisted into an exported alias, so every reference to it is a single-line name.
+This is not cosmetic: a rendered type lands at several indentation levels, and a success type lands
+at two of them at once — the client interface's signature and the `client.request<…>` type argument
+— so no single indentation is correct for a multi-line object literal, and `deno fmt` reindents
+whatever is emitted. Hoisting also makes the shape nameable by a consumer. A schema that
+`@setu-ts/openapi-plugin` derived from validation middleware and used once is inline, so this is the
+ordinary case rather than an exotic one.
+
+**The factory has a written-out return type.** `createApi(client: IHttpClient): Api`, with
+`export interface Api { … }` listing every operation's signature. An inferred return type is a JSR
+_slow type_: it blocks automatic `.d.ts` generation, so a consumer could not publish a package
+containing the generated file — while the file's own header tells them not to edit it. Naming the
+interface is also the only way a consumer can name the client's type.
+
+**Declared error responses are typed.** For each operation declaring a non-2xx response the
+generator emits a union discriminated on the literal `status`, plus a narrowing guard:
+
+```typescript
+export type GetUserByIdError =
+  | (HttpClientError<NotFound> & { readonly status: 404 })
+  | (HttpClientError<GetUserByIdError409Body> & { readonly status: 409 });
+export function isGetUserByIdError(e: unknown): e is GetUserByIdError { … }
+```
+
+`HttpClientError` is generic in its body (`HttpClientError<TBody = unknown>`), so the bare name
+keeps meaning exactly what it did. The union must be discriminated on `status` to be usable —
+`HttpClientError<A> | HttpClientError<B>` is not, because `status` is `number` on both arms. A
+`default` response and range codes such as `4XX` are skipped: they name no single status.
+
+**Generated output is `deno fmt`- and `deno lint`-clean.** Two-space indentation, nested inline
+object types indented, no lint pragma (`{}` is emitted as `Record<PropertyKey, never>`, which is
+both what the schema means and what `ban-types` accepts), signatures wrapped one parameter per line
+past 100 columns, and a path template too long for one line emitted as an equivalent `[…].join('')`.
+The two committed fixtures under `packages/sdk/test/fixtures/` are real generator output and are
+covered by the repository's own `fmt` and `lint` gates — they carry no exclusion.
 
 Path parameters are emitted as positional arguments (each substituted and percent-encoded, including
 a placeholder sharing a segment with literal text such as `/files/{id}.json`); query parameters,
@@ -8325,8 +8728,11 @@ so a hostile document cannot inject code into the generated file.
 
 `generateOpenApiClient` throws `OpenApiCodegenError` (carrying `path` and `method` where applicable)
 instead of emitting a client that misbehaves or does not compile, for: a missing `operationId`; two
-operations or two component schemas deriving onto one name; a `cookie` parameter; a path placeholder
-with no matching `in: 'path'` parameter; an `in: 'path'` parameter absent from the template; two
+operations deriving onto one name; two emitted TYPE names colliding — component schemas, `*Args`
+interfaces, `*Error` unions, `*Error<status>Body` aliases and the client interface all draw from ONE
+registry, so a component named `ListUsersArgs` beside an operation `listUsers` is refused rather
+than emitting two declarations of one name; a `cookie` parameter; a path placeholder with no
+matching `in: 'path'` parameter; an `in: 'path'` parameter absent from the template; two
 placeholders deriving onto one argument name; and a malformed local `$ref`.
 
 ### SdkOpenApi\* types
@@ -8343,39 +8749,66 @@ subset accepted by the generator. They are intentionally different from the open
 gRPC/Connect co-serving on the same port as ordinary Hono routes. Registered under
 `CAPABILITIES.GRPC`. Added in Milestone 49.
 
+> `createApplication()` returns an application descriptor; there is no `new Application()` /
+> `app.use()` API. Plugins register during `app.start()`, so **do not resolve `CAPABILITIES.GRPC`
+> before `start()` resolves** — the capability does not exist yet and the lookup throws. Pass
+> services through the `services` option (below) or call `addService` after `start()`.
+
 ### Registration
 
 ```typescript
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
 
-app.register(GrpcPlugin({
-  basePath: '/grpc', // default
+GrpcPlugin({
+  basePath: '/', // default — the root
   reflection: true, // default — grpc.reflection.v1.ServerReflection
   health: true, // default — grpc.health.v1.Health (bridged to M20)
   services: [], // initial service definitions
   connectModule: undefined, // inject for testing; otherwise lazy-loaded
-}));
+  interceptors: [], // default — application Connect interceptors
+});
 ```
 
 ### Usage
 
-```typescript
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IGrpcService } from '@setu-ts/common';
+Pass services through the plugin's `services` option at construction:
 
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+import { MyServiceDefinition, myServiceImpl } from './my-service.ts';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    GrpcPlugin({
+      services: [{ definition: MyServiceDefinition, implementation: myServiceImpl }],
+    }),
+  ],
+});
+
+await app.start({ port: 3000 });
+
+// AFTER start(): late registration through the resolved capability.
 const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
-grpc.addService(MyServiceDefinition, myServiceImpl);
+grpc.addService(AnotherDefinition, anotherImpl);
 ```
 
 ### Options
 
-| Option          | Type                                     | Default | Description                                                                                           |
-| --------------- | ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
-| `basePath`      | `string`                                 | `/grpc` | URL prefix that marks a request as RPC. Requests outside this prefix fall through to Hono.            |
-| `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch. |
-| `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                    |
-| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup.                                                              |
-| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.          |
+| Option          | Type                                     | Default | Description                                                                                                                                                                                                                                                                  |
+| --------------- | ---------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `basePath`      | `string`                                 | `/`     | URL prefix that marks a request as RPC. Defaults to the root so clients reach procedures without a path prefix; detection stays segment-aware, so prefix-adjacent routes (`/grpcfoo`) are untouched. Requests outside this prefix fall through to Hono.                      |
+| `reflection`    | `boolean`                                | `true`  | Register `grpc.reflection.v1.ServerReflection`. Bidi streaming — requires HTTP/2 or in-process fetch.                                                                                                                                                                        |
+| `health`        | `boolean`                                | `true`  | Register `grpc.health.v1.Health` (`Check` only), bridged to the M20 health plugin.                                                                                                                                                                                           |
+| `services`      | `Array<{ definition, implementation? }>` | `[]`    | Initial services to register at startup. The recommended registration path: the capability does not exist before `start()`.                                                                                                                                                  |
+| `connectModule` | `ConnectRuntime`                         | omitted | Injected Connect runtime for tests; omitted triggers lazy `import()` of four npm specifiers.                                                                                                                                                                                 |
+| `interceptors`  | `readonly unknown[]`                     | `[]`    | Application Connect interceptors, forwarded to Connect router construction (`createConnectRouter({ interceptors })`). Composed after the built-in handler-error logging, so a handler throw is logged before an application interceptor observes it. Absent: none installed. |
+
+> Native gRPC-binary requests (`application/grpc`, `+proto`, `+json`) are refused with a
+> Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`). No runtime the plugin loads on exposes the
+> HTTP/2 trailers the native protocol requires. Connect and gRPC-Web are fully supported.
 
 ### Exports
 
@@ -8395,10 +8828,11 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 
 ### Notes
 
-- **Co-serves with Hono.** gRPC requests are detected by path prefix only (`/grpc` by default).
-  Content-type sniffing is deliberately not used because Connect's real unary content types include
-  `application/json` and `application/proto`. A non-prefixed path returns `null` and falls through
-  to the Hono pipeline unchanged.
+- **Co-serves with Hono.** gRPC requests are detected by path prefix only (`basePath`, which
+  defaults to `/` — the root, so clients reach procedures at the bare method path). Content-type
+  sniffing is deliberately not used because Connect's real unary content types include
+  `application/json` and `application/proto`. A path outside `basePath` returns `null` and falls
+  through to the Hono pipeline unchanged.
 - **The middleware pipeline runs first.** Since M70a the kernel dispatches gRPC from its terminal
   handler, after the pipeline and **before** route matching — so auth, metrics, security headers and
   the shutdown drain apply to RPC exactly as to ordinary routes, a draining application answers
@@ -8421,8 +8855,11 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
   body. Cloning every request before mapping would tax the whole application to serve the gRPC
   minority. Trailers do not survive the round trip — M49 already records that native gRPC-binary
   trailers work on no runtime this plugin runs on, so no working path regresses.
-- **`inject()` does not reach the interceptor.** The kernel's `inject()` bypasses the HTTP adapter
-  entirely. RPC must be exercised via `app.fetch(webRequest)` in tests.
+- **`inject()` CAN exercise RPC.** Since M70a the kernel dispatches gRPC from its terminal handler,
+  and `inject()` attaches the undisturbed web `Request` as `IRequest.raw` before running the
+  pipeline, so an injected request reaches RPC dispatch exactly as a socket request does — the
+  integration suite drives gRPC through `inject()`. The retired adapter interceptor is not involved:
+  no `setRpcHandler` seam is consulted on any path.
 - **Bidi streaming requires HTTP/2.** `grpc.reflection.v1.ServerReflection` is bidi-only. Over a
   real HTTP/1.1 socket, bidi calls fail at the transport. Unary, server-streaming, and
   client-streaming work on every runtime.
@@ -8450,15 +8887,19 @@ grpc.addService(MyServiceDefinition, myServiceImpl);
 - **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.1.2`,
   `@bufbuild/protobuf@^2.7.0`, `@bufbuild/protobuf@^2.7.0/wkt`) are loaded on first `register()`.
   Absence throws `GrpcRuntimeLoadError` with the install command.
-- **Optional seam.** If the HTTP adapter does not implement `setRpcHandler?`, the plugin still
-  registers and reports `available: false`; `handleRequest` throws `GrpcUnavailableError` while
-  `createFetchHandler` returns `null` for every request.
-- **gRPC-binary trailers on Deno.** Native gRPC-binary protocol (`application/grpc`) relies on
-  HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling. Deno's
-  `Deno.serve` does not expose HTTP/2 trailers, so native gRPC-binary responses may not work
-  correctly on Deno. This is a **platform limitation**, not a plugin bug. Connect-JSON and gRPC-Web
-  protocols work on all runtimes. For native gRPC-binary, Node.js or Bun may provide better trailer
-  support.
+- **No adapter seam.** Since M70a the kernel dispatches gRPC from its terminal handler after the
+  middleware pipeline; dispatch depends on no adapter capability, so the plugin serves on every
+  runtime and `IGrpcService.available` is always `true`. The retired `setRpcHandler?` member is
+  consulted by nothing, and `GrpcUnavailableError` remains exported only as published surface —
+  nothing throws it.
+- **Native gRPC-binary is refused by design.** Native gRPC (`application/grpc`, `+proto`, `+json`)
+  relies on HTTP/2 response trailers (specifically `grpc-status`) for proper status signaling, and
+  no fetch-based server runtime exposes them to a `Response` — including Deno's `Deno.serve`,
+  Node.js, and Bun. Every native request is therefore answered with a **Trailers-Only
+  `UNIMPLEMENTED`** (`HTTP 200`, `content-type: application/grpc`, `grpc-status: 12`) instead of
+  half-serving the protocol. This is a deliberate design decision, not a platform bug. Connect-JSON
+  and gRPC-Web work completely on all runtimes; point native gRPC clients at a gRPC-Web-capable
+  proxy or switch them to Connect (see the CHANGELOG migration notes).
 
 ---
 
@@ -8884,38 +9325,46 @@ schema definition with resolver maps and pre-built schemas. Includes media-type 
 
 ### Usage
 
+Pass the plugin to `createApplication({ plugins: [...] })` — there is no `new Application()` /
+`app.use()` API:
+
 ```typescript
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IGraphqlService } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
 
-// Schema-first
-app.use(
-  GraphqlPlugin({
-    typeDefs: `
-      type Query {
-        hello(name: String!): String
-      }
-    `,
-    resolvers: {
-      Query: {
-        hello: (_, { name }) => `Hello, ${name}!`,
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    // Schema-first
+    GraphqlPlugin({
+      typeDefs: `
+        type Query {
+          hello(name: String!): String
+        }
+      `,
+      resolvers: {
+        Query: {
+          hello: (_, { name }) => `Hello, ${name}!`,
+        },
       },
-    },
-  }),
-);
+    }),
+  ],
+});
 
-// Code-first
+await app.start({ port: 3000 });
+
+// Resolve the service AFTER start() — plugins register during start().
+const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+```
+
+Code-first differs only in passing a pre-built schema instead of `typeDefs` + `resolvers`:
+
+```typescript
 import { buildSchema } from 'npm:graphql@^16';
 const schema = buildSchema(`type Query { hello: String }`);
 
-app.use(
-  GraphqlPlugin({
-    schema,
-  }),
-);
-
-// Resolve the service
-const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
+GraphqlPlugin({ schema });
 ```
 
 ### Options
@@ -8962,42 +9411,44 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 ### Exports
 
-| Export                        | Kind     | Purpose                                                                   |
-| ----------------------------- | -------- | ------------------------------------------------------------------------- |
-| `GraphqlPlugin`               | function | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL` |
-| `GraphqlService`              | class    | The `IGraphqlService` implementation; exported for testing                |
-| `adaptGraphqlModule`          | function | Structural adaptation of graphql module into internal runtime port        |
-| `graphiqlHtml`                | function | Generates GraphiQL UI HTML page                                           |
-| `createDepthLimitRule`        | function | Creates a validation rule for query depth limiting                        |
-| `GraphqlSchemaError`          | class    | Thrown when schema construction or resolver attachment fails              |
-| `GraphqlRuntimeLoadError`     | class    | Thrown when graphql runtime cannot be loaded                              |
-| `loadGraphqlModule`           | function | Loads `npm:graphql@^16` through a real dynamic import                     |
-| `GraphqlPluginOptions`        | type     | The factory parameter shape (union of the two arms)                       |
-| `GraphqlSchemaFirstOptions`   | type     | The schema-first arm of that union                                        |
-| `GraphqlCodeFirstOptions`     | type     | The code-first arm of that union                                          |
-| `ResolverMap`                 | type     | Resolver map for schema-first mode                                        |
-| `TypeResolverMap`             | type     | The resolver entries for one object or interface type                     |
-| `FieldResolver`               | type     | Field resolver function type                                              |
-| `SubscriptionResolver`        | type     | A subscription field's `{ subscribe, resolve? }` pair                     |
-| `GraphqlScalarResolver`       | type     | Custom scalar `serialize`/`parseValue`/`parseLiteral` methods             |
-| `GraphqlSubscriptionsOptions` | type     | The `subscriptions` option (WebSocket and SSE arms)                       |
-| `GraphqlWsTransportOptions`   | type     | WebSocket transport options, including `onConnect`                        |
-| `GraphqlSseTransportOptions`  | type     | SSE transport options                                                     |
-| `GraphqlApqOptions`           | type     | Automatic Persisted Queries options                                       |
-| `ApqResolver`                 | class    | Verifies and resolves persisted-query hashes                              |
-| `IApqResolver`                | type     | The port the transports consume; implemented by `ApqResolver`             |
-| `ApqResolveResult`            | type     | The resolved query, or a refusal carrying its code                        |
-| `extractPersistedQuery`       | function | Reads `{ version, sha256Hash }` from a request's `extensions`             |
-| `persistedQueryHash`          | function | SHA-256 hex of a query, over an injected `SubtleCrypto`                   |
-| `encodeSseEvent`              | function | Encodes a `next` SSE frame                                                |
-| `encodeSseComplete`           | function | Encodes the `complete` SSE frame, empty `data:` field included            |
-| `encodeSseComment`            | function | Encodes a `:keep-alive` comment frame                                     |
-| `GRAPHQL_TRANSPORT_WS`        | const    | The `'graphql-transport-ws'` subprotocol identifier                       |
-| `GraphqlScalarTypeLike`       | type     | Structural constraint for a custom scalar type                            |
-| `GraphqlSchemaLike`           | type     | Structural constraint for pre-built schemas                               |
-| `GraphqlModuleLike`           | type     | Structural constraint for injected graphql modules                        |
-| `DefaultGraphqlContext`       | type     | Default context shape passed to resolvers                                 |
-| `GraphqlContextInput`         | type     | Input type for custom context builder                                     |
+| Export                        | Kind      | Purpose                                                                                                                                        |
+| ----------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GraphqlPlugin`               | function  | Plugin factory — registers `IGraphqlService` under `CAPABILITIES.GRAPHQL`                                                                      |
+| `GraphqlService`              | class     | The `IGraphqlService` implementation; exported for testing                                                                                     |
+| `adaptGraphqlModule`          | function  | Structural adaptation of graphql module into internal runtime port                                                                             |
+| `graphiqlHtml`                | function  | Generates GraphiQL UI HTML page                                                                                                                |
+| `createDepthLimitRule`        | function  | Creates a validation rule for query depth limiting                                                                                             |
+| `GraphqlSchemaError`          | class     | Thrown when schema construction or resolver attachment fails                                                                                   |
+| `GraphqlRuntimeLoadError`     | class     | Thrown when graphql runtime cannot be loaded                                                                                                   |
+| `loadGraphqlModule`           | function  | Loads `npm:graphql@^16` through a real dynamic import                                                                                          |
+| `GraphqlPluginOptions`        | type      | The factory parameter shape (union of the two arms)                                                                                            |
+| `GraphqlSchemaFirstOptions`   | type      | The schema-first arm of that union                                                                                                             |
+| `GraphqlCodeFirstOptions`     | type      | The code-first arm of that union                                                                                                               |
+| `ResolverMap`                 | type      | Resolver map for schema-first mode                                                                                                             |
+| `TypeResolverMap`             | type      | The resolver entries for one object or interface type                                                                                          |
+| `FieldResolver`               | type      | Field resolver function type                                                                                                                   |
+| `AnyFieldResolver`            | type      | The bivariant entry type a `TypeResolverMap` field holds — accepts a narrowly annotated resolver AND contextually types an unannotated one     |
+| `AnySubscriptionResolver`     | interface | The bivariant entry type a `TypeResolverMap` subscription field holds — same rule as `AnyFieldResolver`, for `{ subscribe, resolve? }` entries |
+| `SubscriptionResolver`        | type      | A subscription field's `{ subscribe, resolve? }` pair                                                                                          |
+| `GraphqlScalarResolver`       | type      | Custom scalar `serialize`/`parseValue`/`parseLiteral` methods                                                                                  |
+| `GraphqlSubscriptionsOptions` | type      | The `subscriptions` option (WebSocket and SSE arms)                                                                                            |
+| `GraphqlWsTransportOptions`   | type      | WebSocket transport options, including `onConnect`                                                                                             |
+| `GraphqlSseTransportOptions`  | type      | SSE transport options                                                                                                                          |
+| `GraphqlApqOptions`           | type      | Automatic Persisted Queries options                                                                                                            |
+| `ApqResolver`                 | class     | Verifies and resolves persisted-query hashes                                                                                                   |
+| `IApqResolver`                | type      | The port the transports consume; implemented by `ApqResolver`                                                                                  |
+| `ApqResolveResult`            | type      | The resolved query, or a refusal carrying its code                                                                                             |
+| `extractPersistedQuery`       | function  | Reads `{ version, sha256Hash }` from a request's `extensions`                                                                                  |
+| `persistedQueryHash`          | function  | SHA-256 hex of a query, over an injected `SubtleCrypto`                                                                                        |
+| `encodeSseEvent`              | function  | Encodes a `next` SSE frame                                                                                                                     |
+| `encodeSseComplete`           | function  | Encodes the `complete` SSE frame, empty `data:` field included                                                                                 |
+| `encodeSseComment`            | function  | Encodes a `:keep-alive` comment frame                                                                                                          |
+| `GRAPHQL_TRANSPORT_WS`        | const     | The `'graphql-transport-ws'` subprotocol identifier                                                                                            |
+| `GraphqlScalarTypeLike`       | type      | Structural constraint for a custom scalar type                                                                                                 |
+| `GraphqlSchemaLike`           | type      | Structural constraint for pre-built schemas                                                                                                    |
+| `GraphqlModuleLike`           | type      | Structural constraint for injected graphql modules                                                                                             |
+| `DefaultGraphqlContext`       | type      | Default context shape passed to resolvers                                                                                                      |
+| `GraphqlContextInput`         | type      | Input type for custom context builder                                                                                                          |
 
 > `GraphqlRuntime` and the structural graphql facades are **not** exported. They are an internal
 > port.
@@ -9006,10 +9457,16 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
 
 - **Two schema construction arms.** Schema-first (`typeDefs` + `resolvers`) and code-first
   (`schema`) are mutually exclusive; supplying both is a compile error.
-- **Resolver context.** Without `buildContext`, resolvers receive a `DefaultGraphqlContext` of
-  `{ services, requestContext, user, tenant }` — `services` is the live `IServiceRegistry`, so a
-  resolver reaches any other capability through it, and `user`/`tenant` are whatever the auth and
-  multi-tenancy middleware published on the request. Supplying `buildContext` replaces that object
+- **Resolver context.** Without `buildContext`, resolvers receive a `DefaultGraphqlContext` whose
+  shape is per-transport. Over **HTTP**: `{ services, requestContext, user?, tenant? }` — `services`
+  is the live `IServiceRegistry`, so a resolver reaches any other capability through it, and
+  `user`/`tenant` are whatever the auth and multi-tenancy middleware published on the request. Over
+  **WebSocket**: `{ services, connection }` — `requestContext` is **absent** (not
+  `undefined`-valued): the runtime closes the upgrade request once the handshake response is
+  returned, so a synthesized one would be dead by the time a resolver runs; that is why the member
+  is typed optional. The upgrade request's headers and query live on
+  `GraphqlConnectionInfo.headers`/`.query`, and identity set by an `onConnect` hook via
+  `info.data.set('user', …)` surfaces as `ctx.user`. Supplying `buildContext` replaces that object
   wholesale.
 - **Media-type negotiation and the status watershed.** Responds with
   `application/graphql-response+json` when the client requests it, otherwise `application/json` —
@@ -9020,8 +9477,22 @@ const graphql = app.services.get<IGraphqlService>(CAPABILITIES.GRAPHQL);
   in the body, because a client predating the newer media type reads a non-200 as a network failure
   and never reads the `errors` array. Exactly three cases keep their status under `application/json`
   — an unsupported request content type (`415`), a malformed JSON body (`400`), and a mutation over
-  `GET` (`405`) — because none of them is a GraphQL result. The status is decided from the outcome
-  alone and never from the response body, so a `formatError` hook cannot change it.
+  `GET` (`405`) — because none of them is a GraphQL result. An **APQ refusal** follows the watershed
+  too: under `application/json` it answers `200` with `PersistedQueryNotFound` in the body (it is
+  exactly the error a client must read and retry), while under `graphql-response` it carries the
+  resolver's own status. Batching remains refused before per-element resolution, so an APQ miss
+  inside a batch under `graphql-response` surfaces as `400 BATCHING_NOT_SUPPORTED`. The status is
+  decided from the outcome alone and never from the response body, so a `formatError` hook cannot
+  change it.
+- **Two resolver authoring styles, both supported.** `FieldResolver<TSource, TContext, TArgs>` is
+  generic with `unknown` defaults, so a resolver may be **annotated** narrowly
+  (`FieldResolver<IssueRow, DefaultGraphqlContext, { id: string }>`) and still assign to a
+  `ResolverMap`. A resolver written **unannotated** — `(source, args) => …`, the ordinary
+  schema-first shape — takes its parameter types contextually from `AnyFieldResolver`, so `args` is
+  `Record<string, unknown>` rather than `never`. The map entry is bivariant for exactly this reason:
+  a non-bivariant entry can serve one style or the other, never both. Subscription entries follow
+  the same rule through `AnySubscriptionResolver`, so a typed
+  `{ subscribe, resolve: (payload: Book) => … }` assigns too.
 - **An executed operation is always `200`.** A field error that nulls `data` is not a request error,
   so it does not become a `400` even under `graphql-response`.
 - **`405` carries `Allow: POST`.** A mutation sent over `GET` is refused with `METHOD_NOT_ALLOWED`
@@ -9118,17 +9589,17 @@ app.register(StaticPlugin({
 
 ### Options
 
-| Option           | Type                           | Default                                | Description                   |
-| ---------------- | ------------------------------ | -------------------------------------- | ----------------------------- |
-| `root`           | `string`                       | (required)                             | Directory to serve files from |
-| `urlPrefix`      | `string`                       | `'/'`                                  | URL prefix for static routes  |
-| `index`          | `string`                       | `'index.html'`                         | Index file for directories    |
-| `fallback`       | `string`                       | `undefined`                            | SPA fallback file             |
-| `cacheControl`   | `string \| ((path) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header          |
-| `etag`           | `boolean`                      | `true`                                 | Enable ETag generation        |
-| `ranges`         | `boolean`                      | `true`                                 | Enable Range requests         |
-| `compressed`     | `boolean`                      | `true`                                 | Negotiate .br/.gz sidecars    |
-| `maxBufferBytes` | `number`                       | `1048576`                              | Threshold for streaming       |
+| Option           | Type                           | Default                                | Description                                                                              |
+| ---------------- | ------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `root`           | `string`                       | (required)                             | Directory to serve files from                                                            |
+| `urlPrefix`      | `string`                       | `'/'`                                  | URL prefix for static routes                                                             |
+| `index`          | `string`                       | `'index.html'`                         | Index file for directories                                                               |
+| `fallback`       | `string`                       | `undefined`                            | SPA fallback file                                                                        |
+| `cacheControl`   | `string \| ((path) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header. A callback receives a **leading-slash** root-relative request path |
+| `etag`           | `boolean`                      | `true`                                 | Enable ETag generation                                                                   |
+| `ranges`         | `boolean`                      | `true`                                 | Enable Range requests                                                                    |
+| `compressed`     | `boolean`                      | `true`                                 | Negotiate .br/.gz sidecars                                                               |
+| `maxBufferBytes` | `number`                       | `1048576`                              | Threshold for streaming                                                                  |
 
 ### Exports
 
@@ -9149,6 +9620,12 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
 ### Notes
 
 - Mounts routes on both `GET` and `HEAD`
+- **A root `urlPrefix` claims `GET /*` and `HEAD /*`, which no second plugin can share.** The plugin
+  registers `<urlPrefix>/*`, so `urlPrefix: '/'` mounts the bare wildcard — and the kernel refuses a
+  duplicate `METHOD path`, naming the plugin that registered it first
+  (`Route 'GET /*' is already registered by plugin 'react-router'.`). An application serving SSR at
+  the root therefore cannot also mount static files there: give the static files their own prefix
+  (`urlPrefix: '/assets'`), which is the arrangement content-hashed assets want anyway
 - Conditional requests: `ETag`, `If-None-Match`, `If-Modified-Since` → `304`
 - Range requests: `206` with `Content-Range`, `416` for unsatisfiable
 - The `ETag` is **strong** (`"<size>-<mtimeMs>"`) when the runtime reports an `mtime`, and degrades
@@ -9156,10 +9633,13 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
   be ignored for a weak validator (RFC 9110 §13.1.5), so an interrupted download resumes only
   against the strong form. `size`+`mtime` is what nginx and Apache emit as strong for static files
 - Precompressed sidecars: `.br` preferred over `.gz`, ETag from sidecar stat
-- `Cache-Control` is resolved from the **original root-relative** path, never the absolute
-  filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed asset keeps its
-  `immutable` policy whichever encoding is negotiated, and a `cacheControl` function receives the
-  root-relative path (`assets/app.js`, not `/srv/assets/app.js`)
+- `Cache-Control` is resolved from the **original root-relative request path with a leading slash**,
+  never the absolute filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed
+  asset keeps its `immutable` policy whichever encoding is negotiated. A `cacheControl` function
+  receives `/assets/app-A9acsx54.js` (not `assets/app-…`, not `/srv/assets/app-…`), and the literal
+  `'/'` when the request equals the prefix root. The leading slash is guaranteed for BOTH shapes —
+  before it was normalised, a file arrived slash-less while the prefix root arrived as `'/'`, so a
+  callback written against one observed shape was silently wrong for the other.
 - A `HEAD` opens no body stream, so it cannot leak a file descriptor on a file above
   `maxBufferBytes`
 - An explicit `Accept-Encoding` entry overrides the wildcard, so `br;q=0, *` refuses brotli

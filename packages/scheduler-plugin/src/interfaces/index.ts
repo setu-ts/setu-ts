@@ -79,6 +79,13 @@ export interface DistributedLockOptions {
   /**
    * Lock TTL in milliseconds. Must exceed the job's worst-case runtime.
    *
+   * Bounds TWO distinct guarantees (M70l C3): how long the per-handler
+   * OVERLAP mutex lives after a holder dies without releasing, and how long
+   * a claimed fire SLOT is remembered before a late replica may re-run it —
+   * slot locks are never released, so this value is the replica-skew window.
+   * A value below the maximum skew between replicas lets a slow replica
+   * re-run an already-claimed fire.
+   *
    * @default 30000
    */
   ttlMs?: number;
@@ -141,6 +148,22 @@ export interface DelayRegistryEntry<T = unknown> extends RegistryEntryBase<T> {
   kind: 'delay';
   /** Original delay in milliseconds. Always present for `delay` entries. */
   delayMs: number;
+  /**
+   * Whether this entry holds the fire slot (M70l F2).
+   *
+   * Claimed at REGISTRATION time, keyed on the job name — never on
+   * `nextRunAtMs`, which for a delay is `now + delayMs` and therefore
+   * carries per-replica startup skew that a fire-time key would turn into
+   * non-colliding slots. Set by `SchedulerService` in `delay()`; read by
+   * `#fire` to decide whether this replica runs the handler.
+   */
+  slotClaimed: boolean;
+  /**
+   * The token of the held fire slot, or `null` when this entry does not
+   * hold it. Released when the entry leaves the registry (fire, `remove`),
+   * so a re-registration under the same name gets a fresh slot.
+   */
+  slotToken: string | null;
 }
 
 /**

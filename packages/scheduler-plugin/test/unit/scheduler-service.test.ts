@@ -268,9 +268,11 @@ describe('SchedulerService', () => {
     expect(fired).toBe(0);
   });
 
-  it('a contended lock skips only that fire and keeps the schedule', async () => {
-    // Two-instance deployment: this instance loses the FIRST lock race, then wins.
-    // Skipping a fire must never cancel the job's schedule.
+  it('a contended slot skips only that fire and keeps the schedule', async () => {
+    // Two-instance deployment (M70l): each fire acquires TWICE — the
+    // never-released slot lock, then the handler mutex. This instance loses
+    // the FIRST fire's slot race, then wins everything after. Skipping a fire
+    // must never cancel the job's schedule.
     const runtime = new FakeRuntime();
     let acquires = 0;
     const lock = {
@@ -288,12 +290,12 @@ describe('SchedulerService', () => {
       fired++;
     });
 
-    await runtime.advance(50); // fire 1 — lock held elsewhere, skipped
+    await runtime.advance(50); // fire 1 — slot held elsewhere, skipped (1 acquire)
     expect(fired).toBe(0);
 
-    await runtime.advance(50); // fire 2 — lock free again
+    await runtime.advance(50); // fire 2 — slot + mutex both free (2 acquires)
     await runtime.advance(50); // fire 3
-    expect(acquires).toBe(3);
+    expect(acquires).toBe(5);
     expect(fired).toBe(2);
   });
 
@@ -381,8 +383,16 @@ describe('SchedulerService', () => {
     const runtime = new FakeRuntime();
     const { logger, entries } = createRecordingLogger();
 
+    // The SLOT claim succeeds; the HANDLER MUTEX acquire explodes — so this
+    // exercises #runWithLock's own failure path, past the M70l slot lock.
+    let acquires = 0;
     const lock = {
-      acquire: (): Promise<string | null> => Promise.reject(new Error('acquire exploded')),
+      acquire: (): Promise<string | null> => {
+        acquires++;
+        return acquires === 1
+          ? Promise.resolve('token')
+          : Promise.reject(new Error('acquire exploded'));
+      },
       release: (): Promise<void> => Promise.resolve(),
     };
     const service = new SchedulerService(runtime, lock, { logger });
@@ -399,9 +409,14 @@ describe('SchedulerService', () => {
     const runtime = new FakeRuntime();
     const { logger, entries } = createRecordingLogger();
 
-    // A lock backend that rejects with a bare string, not an Error.
+    // A lock backend that rejects with a bare string, not an Error. The first
+    // acquire (the M70l slot) succeeds so the failure lands in #runWithLock.
+    let acquires = 0;
     const lock = {
-      acquire: (): Promise<string | null> => Promise.reject('acquire string failure'),
+      acquire: (): Promise<string | null> => {
+        acquires++;
+        return acquires === 1 ? Promise.resolve('token') : Promise.reject('acquire string failure');
+      },
       release: (): Promise<void> => Promise.resolve(),
     };
     const service = new SchedulerService(runtime, lock, { logger });

@@ -29,6 +29,16 @@ export type {
 // Export adapter classes
 export type { QueueLogger } from './services/queue-service.ts';
 
+/**
+ * The shape of the per-name depths the `queue` health indicator publishes.
+ *
+ * Exported because it appears in a PUBLIC signature — `MemoryQueue.depths` and
+ * `RedisQueue.depths` are methods on barrel-exported classes, and a type a
+ * consumer can see but cannot name is the defect M52c found on
+ * `NormalizedQuery`.
+ */
+export type { QueueDepths } from './adapters/queue-adapter.ts';
+
 export { MemoryQueue } from './adapters/memory-queue.ts';
 export { RedisQueue } from './adapters/redis-queue.ts';
 export { RabbitMqQueue } from './adapters/rabbitmq-queue.ts';

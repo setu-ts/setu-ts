@@ -253,6 +253,10 @@ describe('DecoratorPlugin internal paths', () => {
     const calls: unknown[] = [];
     await def.handler(
       {
+        // `state` is a required IRequestContext field the resolver now reads;
+        // an empty Map means no validated value exists and body resolution
+        // falls back to the raw request JSON.
+        state: new Map(),
         response: { json: (b: unknown) => (calls.push(b), null) },
         request: { json: () => Promise.resolve({ name: 'Alice' }) },
       } as unknown as Parameters<typeof def.handler>[0],

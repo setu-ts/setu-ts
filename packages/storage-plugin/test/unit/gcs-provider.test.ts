@@ -33,6 +33,8 @@ describe('validateGcsClient', () => {
 describe('adaptGcsModule', () => {
   function buildFakeGcs() {
     const store = new Map<string, Uint8Array>();
+    /** What `save` was handed alongside the bytes, per key — the X8-6 evidence. */
+    const savedOptions = new Map<string, Record<string, unknown>>();
 
     return {
       mod: {
@@ -44,7 +46,11 @@ describe('adaptGcsModule', () => {
             file(name: string): {
               getMetadata(): Promise<[Record<string, unknown>]>;
               download(): Promise<{ body: Uint8Array | NodeJS.ReadableStream }>;
-              save(data: Uint8Array, cb: (err: Error | null) => void): void;
+              save(
+                data: Uint8Array,
+                options: Record<string, unknown>,
+                cb: (err: Error | null) => void,
+              ): void;
               delete(cb?: (err: Error | null) => void): Promise<void>;
               getSignedUrl(
                 config: { action: string; expires: number },
@@ -65,8 +71,13 @@ describe('adaptGcsModule', () => {
                     if (data === undefined) throw new Error('ENOENT');
                     return Promise.resolve({ body: data });
                   },
-                  save(data: Uint8Array, cb: (err: Error | null) => void) {
+                  save(
+                    data: Uint8Array,
+                    options: Record<string, unknown>,
+                    cb: (err: Error | null) => void,
+                  ) {
                     store.set(name, data);
+                    savedOptions.set(name, options);
                     cb(null);
                   },
                   delete(cb?: (err: Error | null) => void) {
@@ -115,6 +126,7 @@ describe('adaptGcsModule', () => {
         },
       } as unknown as import('../../src/providers/gcs-provider.ts').GcsSdkModule,
       store,
+      savedOptions,
     };
   }
 
@@ -122,10 +134,16 @@ describe('adaptGcsModule', () => {
     const result = buildFakeGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
     const fileHandle = (facade.bucket() as unknown as {
-      file: (n: string) => { save: (d: Uint8Array, cb: (e: Error | null) => void) => void };
+      file: (n: string) => {
+        save: (
+          d: Uint8Array,
+          o: Record<string, unknown>,
+          cb: (e: Error | null) => void,
+        ) => void;
+      };
     }).file('cb-save.bin');
     let gotError: Error | null = null;
-    fileHandle.save(new Uint8Array([77]), (err: Error | null) => {
+    fileHandle.save(new Uint8Array([77]), {}, (err: Error | null) => {
       gotError = err;
     });
     expect(gotError).toBeNull();
@@ -136,9 +154,15 @@ describe('adaptGcsModule', () => {
     const result = buildFakeGcs();
     const facade = adaptGcsModule(result.mod, { bucket: 'my-bucket' });
     const bucketHandle = facade.bucket() as unknown as {
-      file: (n: string) => { save: (d: Uint8Array, cb: (e: Error | null) => void) => void };
+      file: (n: string) => {
+        save: (
+          d: Uint8Array,
+          o: Record<string, unknown>,
+          cb: (e: Error | null) => void,
+        ) => void;
+      };
     };
-    bucketHandle.file('test.bin').save(new Uint8Array([5, 6, 7]), () => {});
+    bucketHandle.file('test.bin').save(new Uint8Array([5, 6, 7]), {}, () => {});
     expect(result.store.get('test.bin')).toEqual(new Uint8Array([5, 6, 7]));
   });
 
@@ -194,7 +218,7 @@ describe('adaptGcsModule', () => {
               download() {
                 return Promise.resolve({ body: new Uint8Array() });
               },
-              save(_d: Uint8Array, cb: (e: Error | null) => void) {
+              save(_d: Uint8Array, _o: Record<string, unknown>, cb: (e: Error | null) => void) {
                 cb(null);
               },
               delete(cb: (e: Error | null) => void) {
@@ -266,7 +290,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, cb: (err: Error | null) => void) => {
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            cb: (err: Error | null) => void,
+          ) => {
             putCalled = true;
             cb(null);
           },
@@ -283,7 +311,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([77, 88]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -302,7 +334,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => {
             // Return an array-like object that is NOT instanceof Uint8Array but is array-convertible.
             return Promise.resolve({ body: [200, 210] as unknown as Uint8Array });
@@ -326,7 +362,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.reject(new Error('Not Found')),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -345,7 +385,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -364,7 +408,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.reject(new Error('network error')),
           getMetadata: () => Promise.resolve([{}]),
@@ -383,7 +431,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -402,7 +454,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.reject(new Error('ENOENT')),
@@ -421,7 +477,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -440,7 +500,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -484,7 +548,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, cb: (err: Error | null) => void) => {
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            cb: (err: Error | null) => void,
+          ) => {
             cb(new Error('save failed'));
           },
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
@@ -505,7 +573,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save(_data: Uint8Array, cb: (err: Error | null) => void) {
+          save(
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            cb: (err: Error | null) => void,
+          ) {
             // Store the callback and invoke it asynchronously, mimicking real GCS SDK behavior.
             saveCb = cb;
             queueMicrotask(() => cb(null));
@@ -528,7 +600,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           // Return a non-Uint8Array body (simulates Node.js Buffer which IS Uint8Array
           // in real Node but we use an array-like to force the wrapper).
           download: () => Promise.resolve({ body: Uint8Array.from([50, 60, 70]) }),
@@ -549,7 +625,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -584,7 +664,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, _cb: (err: Error | null) => void) => {},
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            _cb: (err: Error | null) => void,
+          ) => {},
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -652,7 +736,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, cb: (err: Error | null) => void) => cb(null),
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            cb: (err: Error | null) => void,
+          ) => cb(null),
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -696,7 +784,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save(data: Uint8Array, cb: (err: Error | null) => void) {
+          save(
+            data: Uint8Array,
+            _options: Record<string, unknown>,
+            cb: (err: Error | null) => void,
+          ) {
             savedData = data;
             cb(null);
           },
@@ -743,7 +835,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, cb: (err: Error | null) => void) => cb(null),
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            cb: (err: Error | null) => void,
+          ) => cb(null),
           download: () => Promise.resolve({ body: new Uint8Array([]) }),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -929,7 +1025,11 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
-          save: (_data: Uint8Array, cb: (err: Error | null) => void) => cb(null),
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            cb: (err: Error | null) => void,
+          ) => cb(null),
           download: () => Promise.reject('string-error'),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
@@ -1005,7 +1105,7 @@ describe('GcsProvider', () => {
                 download() {
                   return Promise.resolve({ body: new Uint8Array([]) });
                 },
-                save(_d: Uint8Array, cb: (e: Error | null) => void) {
+                save(_d: Uint8Array, _o: Record<string, unknown>, cb: (e: Error | null) => void) {
                   cb(null);
                 },
                 delete(cb: (e: Error | null) => void) {
@@ -1047,7 +1147,7 @@ describe('GcsProvider', () => {
                 download() {
                   return Promise.resolve({ body: new Uint8Array([]) });
                 },
-                save(_d: Uint8Array, cb: (e: Error | null) => void) {
+                save(_d: Uint8Array, _o: Record<string, unknown>, cb: (e: Error | null) => void) {
                   cb(null);
                 },
                 delete(cb: (e: Error | null) => void) {
@@ -1088,7 +1188,7 @@ describe('GcsProvider', () => {
                 download() {
                   return Promise.resolve({ body: new Uint8Array([]) });
                 },
-                save(_d: Uint8Array, cb: (e: Error | null) => void) {
+                save(_d: Uint8Array, _o: Record<string, unknown>, cb: (e: Error | null) => void) {
                   cb(null);
                 },
                 delete(cb: (e: Error | null) => void) {

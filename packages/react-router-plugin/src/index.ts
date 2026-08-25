@@ -22,7 +22,7 @@
 
 export { ReactRouterPlugin } from './plugin/react-router-plugin.ts';
 export { SsrService } from './services/ssr-service.ts';
-export { createStaticAssetHandler } from './assets/static-assets.ts';
+export { createPublicFileHandler, createStaticAssetHandler } from './assets/static-assets.ts';
 export {
   assembleHandler,
   assertSsrRuntime,
@@ -40,6 +40,14 @@ export type {
   SsrRuntime,
 } from './interfaces/index.ts';
 
-// Re-export common SSR contract for convenience.
-export type { ISsrService } from '@setu-ts/common';
+// Re-export common contracts for convenience — and so the exported handlers'
+// signatures (`IFileSystem`, `RouteHandler`, `IRequestContext`, `HandlerResult`)
+// name types this package itself exports, keeping `deno doc --lint` clean.
+export type {
+  HandlerResult,
+  IFileSystem,
+  IRequestContext,
+  ISsrService,
+  RouteHandler,
+} from '@setu-ts/common';
 export { CAPABILITIES } from '@setu-ts/common';

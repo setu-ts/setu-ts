@@ -99,7 +99,7 @@ describe('sessionMiddleware', () => {
     const cookies = response.setCookies();
     expect(cookies.length).toBe(2);
     expect(cookies.some((c) => c.startsWith('other=value'))).toBe(true);
-    expect(cookies.some((c) => c.startsWith('hono_session='))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('setu_session='))).toBe(true);
   });
 
   it('does not commit when the handler throws', async () => {
@@ -154,7 +154,7 @@ describe('sessionMiddleware', () => {
 
   it('treats a tampered cookie as a fresh session without throwing', async () => {
     const { middleware } = await makeMiddleware();
-    const { ctx } = makeContext({ headers: { cookie: 'hono_session=v1.bogus.AQID.AQID' } });
+    const { ctx } = makeContext({ headers: { cookie: 'setu_session=v1.bogus.AQID.AQID' } });
 
     let session: ISession | undefined;
     await middleware(ctx, () => {

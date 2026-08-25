@@ -51,6 +51,25 @@ export interface AddJobOptions {
 export interface ProcessOptions {
   /** Jobs processed concurrently by this worker (default 1). */
   readonly concurrency?: number;
+  /**
+   * Invoked once when a job has exhausted its attempts, immediately before it
+   * is dead-lettered — the only programmatic notice that work was permanently
+   * abandoned. It does NOT fire on an attempt that will be retried.
+   *
+   * Without it a dead-lettered job is reachable only by opening a Redis client:
+   * {@linkcode IQueue} has no `getJob` and no dead-letter accessor, and the
+   * adapters' dead-letter structures are internal.
+   *
+   * A callback that throws is reported through the application's logger and
+   * swallowed; the dead-letter still happens, because losing the job as well as
+   * the notification would be strictly worse than losing the notification.
+   *
+   * @param job - The job as its processor last received it, with the final
+   * `attempts` count
+   * @param error - The value the processor threw on the final attempt
+   * @since 0.3.0
+   */
+  readonly onFailed?: (job: IJob, error: unknown) => void | Promise<void>;
 }
 
 /**

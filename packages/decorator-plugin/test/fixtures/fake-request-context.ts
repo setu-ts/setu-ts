@@ -41,6 +41,7 @@ function createFakeResponse(): IResponse {
     appendHeader: () => r,
     json: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     text: () => ({ __handlerResult: true }) as unknown as HandlerResult,
+    html: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     send: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     redirect: () => ({ __handlerResult: true }) as unknown as HandlerResult,
     stream: () => ({ __handlerResult: true }) as unknown as HandlerResult,

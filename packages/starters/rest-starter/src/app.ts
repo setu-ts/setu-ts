@@ -40,7 +40,11 @@ export function buildRestPlugins(options: RestStarterOptions = {}): IPlugin[] {
     // Core infrastructure (always-on)
     ConfigPlugin(options.config),
     LoggerPlugin(options.logger),
-    ValidationPlugin(options.validation),
+    // `errorFormat: 'rfc9457'` makes a validation failure answer in the same
+    // Problem Details shape the `errorHandler` below emits for thrown errors
+    // (C3). `options.validation` spreads LAST so an explicit caller option —
+    // including its own `errorFormat` — still wins.
+    ValidationPlugin({ errorFormat: 'rfc9457', ...options.validation }),
     HttpSecurityPlugin(options.httpSecurity),
     HealthPlugin(options.health),
     MetricsPlugin(options.metrics),

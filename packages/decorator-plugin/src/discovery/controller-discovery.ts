@@ -163,6 +163,7 @@ export async function discoverControllers(
   options: DiscoveryOptions,
   runtime: IRuntimeServices,
   store: MetadataStore = metadataStore,
+  /* computed-specifier: application-supplied controller module path, not a package name */
   importer: ModuleImporter = (specifier: string): Promise<unknown> => import(specifier),
 ): Promise<DiscoveryResult> {
   const fs = runtime.fs;

@@ -572,3 +572,70 @@ describe('the app verb', () => {
     expect(h.out.text()).toContain('app <name>');
   });
 });
+
+describe('runGenerateCommand — collisions with installed plugins (M70g, A1)', () => {
+  it('refuses a health indicator whose name a plugin already claims', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('health-plugin', 'database-plugin') });
+
+    const code = await h.run(['health-indicator', 'database']);
+
+    expect(code).not.toBe(0);
+    // Refused BEFORE writing: the whole point is that the project never reaches the
+    // state where `app.start()` throws `Duplicate health indicator name: "database"`.
+    expect(h.fs.writes).toEqual([]);
+    const report = h.err.lines.join('\n');
+    expect(report).toContain('@setu-ts/database-plugin');
+    expect(report).toContain('app.start()');
+  });
+
+  it('allows the same name when that plugin is not installed', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('health-plugin') });
+
+    const code = await h.run(['health-indicator', 'database']);
+
+    expect(code).toBe(0);
+    expect(h.fs.writes.some((path) => path.includes('database'))).toBe(true);
+  });
+});
+
+describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2)', () => {
+  /** A project whose developer wrote and wired their own routes module. */
+  const handWired = {
+    '/app/deno.json': DENO_MANIFEST('kernel'),
+    '/app/setu.config.ts':
+      "import { registerAdminRoutes } from './src/controllers/admin.routes.ts';\n" +
+      'export function createApp() { registerAdminRoutes(app.router); }\n',
+    '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+  };
+
+  it('leaves a hand-registered module out of the barrel and reports why', async () => {
+    const h = harness(handWired);
+
+    const code = await h.run(['route', 'report']);
+
+    expect(code).toBe(0);
+    const barrel = h.fs.read('/app/src/controllers/index.ts');
+    expect(barrel).toContain('registerReportRoutes');
+    // Before this, the barrel adopted it and the application refused to boot with
+    // `Route 'GET /login' is already registered` — naming two files the developer
+    // had not touched.
+    expect(barrel).not.toContain('registerAdminRoutes');
+    const report = h.err.lines.join('\n');
+    expect(report).toContain('src/controllers/admin.routes.ts');
+    expect(report).toContain('setu.config.ts');
+  });
+
+  it('reports a hand-written module it adopts, when nothing registers it yet', async () => {
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST('kernel'),
+      '/app/setu.config.ts': 'export function createApp() {}\n',
+      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+    });
+
+    const code = await h.run(['route', 'report']);
+
+    expect(code).toBe(0);
+    expect(h.fs.read('/app/src/controllers/index.ts')).toContain('registerAdminRoutes');
+    expect(h.err.lines.join('\n')).toContain('Adopted src/controllers/admin.routes.ts');
+  });
+});

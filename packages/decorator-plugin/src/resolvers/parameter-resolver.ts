@@ -7,8 +7,8 @@
  *
  * @module
  */
-import type { IRequestContext } from '@setu-ts/common';
-import { parseCookie } from '@setu-ts/common';
+import type { IRequestContext, ValidationTarget } from '@setu-ts/common';
+import { parseCookie, validatedStateKey } from '@setu-ts/common';
 
 import { isContextParameter } from '../decorators/security.ts';
 import type { ParameterMetadata } from '../metadata/metadata-store.ts';
@@ -81,8 +81,59 @@ export function parseCookies(headers: Headers): Record<string, string> {
 }
 
 /**
+ * The validation target whose validated value each decorator-bound parameter
+ * type reads. Only the three targets a `@ValidateXxx` decorator can produce
+ * are mapped; `@Header`/`@Cookie` deliberately have no entry and always
+ * resolve raw.
+ */
+const VALIDATED_TARGETS: Readonly<Record<'body' | 'query' | 'param', ValidationTarget>> = {
+  body: 'body',
+  query: 'query',
+  param: 'params',
+};
+
+/**
+ * Extracts a single named member from a validated whole-part record — the
+ * documented NAMED-value contract of `@Query('page')`, `@Param('id')`, …:
+ * validation middleware validates the WHOLE request part, but a parameter
+ * bound WITH a name receives only its own member, exactly as the raw path
+ * resolves. A non-object validated value has no members to name into.
+ */
+function extractNamed(validated: unknown, name: string): unknown {
+  if (typeof validated === 'object' && validated !== null) {
+    return (validated as Record<string, unknown>)[name];
+  }
+  return undefined;
+}
+
+/**
+ * Resolves a `@Body`/`@Query`/`@Param` parameter from its RAW request source —
+ * the fallback used when no validated value was written for the request part.
+ */
+function resolveRaw(
+  ctx: IRequestContext,
+  type: 'body' | 'query' | 'param',
+  name: string | undefined,
+): unknown | Promise<unknown> {
+  switch (type) {
+    case 'body':
+      return ctx.request.json();
+    case 'query':
+      return name !== undefined ? ctx.query[name] : ctx.query;
+    case 'param':
+      return name !== undefined ? ctx.params[name] : undefined;
+  }
+}
+
+/**
  * Resolves a single parameter value from the request context. The result may
  * be a promise (for `body` and custom resolvers); callers should `await` it.
+ *
+ * For parameters bound to `@Body`, `@Query`, or `@Param`, a validated value
+ * written to request state under {@linkcode validatedStateKey} by validation
+ * middleware takes precedence over the raw request value; presence is checked
+ * with `ctx.state.has`, so a schema legitimately validating to `null` or `0`
+ * is still honoured. `@Header`/`@Cookie` always resolve raw.
  *
  * @param ctx - The request context
  * @param param - The parameter metadata
@@ -93,13 +144,21 @@ export function resolveParameter(
   ctx: IRequestContext,
   param: ParameterMetadata,
 ): unknown | Promise<unknown> {
+  if (
+    param.type === 'body' || param.type === 'query' || param.type === 'param'
+  ) {
+    const key = validatedStateKey(VALIDATED_TARGETS[param.type]);
+    if (ctx.state.has(key)) {
+      const validated = ctx.state.get(key);
+      // A parameter bound WITH a name (`@Query('page')`) receives its own
+      // member of the validated record; one without (`@Body()`) receives the
+      // whole validated object. Returning the record to a named parameter
+      // handed handlers `{ page: 2 }` where the contract says `2`.
+      return param.name !== undefined ? extractNamed(validated, param.name) : validated;
+    }
+    return resolveRaw(ctx, param.type, param.name);
+  }
   switch (param.type) {
-    case 'body':
-      return ctx.request.json();
-    case 'query':
-      return param.name !== undefined ? ctx.query[param.name] : ctx.query;
-    case 'param':
-      return param.name !== undefined ? ctx.params[param.name] : undefined;
     case 'header':
       return param.name !== undefined ? ctx.request.headers.get(param.name) : undefined;
     case 'cookie': {

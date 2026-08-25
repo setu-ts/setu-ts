@@ -68,6 +68,7 @@ export type {
   KvListResult,
   KvPutOptions,
   QueueSendOptions,
+  R2PutOptions,
 } from './bindings/facades.ts';
 export {
   isD1Database,

@@ -10,6 +10,20 @@
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 
 /**
+ * How many jobs are in each of one name's states.
+ *
+ * @since 0.3.0
+ */
+export interface QueueDepths {
+  /** Jobs available to be reserved now or later. */
+  readonly ready: number;
+  /** Jobs reserved and being processed. */
+  readonly processing: number;
+  /** Jobs that exhausted their attempts and were dead-lettered. */
+  readonly dead: number;
+}
+
+/**
  * Internal queue adapter interface.
  *
  * Provides the minimal storage primitives for a delayed-job queue.
@@ -55,6 +69,27 @@ export interface QueueAdapter {
    * @since 0.1.0
    */
   isHealthy?(): Promise<boolean>;
+
+  /**
+   * M70k (X8-4): reports how many jobs are sitting in each of this name's three
+   * states, for the service's health indicator.
+   *
+   * Optional, and its ABSENCE is reported rather than substituted with zeros:
+   * "this adapter cannot tell you" and "there is nothing there" are different
+   * answers, and an operator acting on a dead-letter alert needs to know which
+   * one they have. Implemented where the count is one cheap call (memory,
+   * redis `zcard`) and omitted where it needs a management API or
+   * `GetQueueAttributes` — that cost belongs to whoever needs it.
+   *
+   * This is the durable view the counters cannot give: `queue_jobs_total` is
+   * per-process and resets on restart, so a restarted replica would report zero
+   * dead letters while the backend still held them.
+   *
+   * @param name - Job name
+   * @returns The depth of each state
+   * @since 0.3.0
+   */
+  depths?(name: string): Promise<QueueDepths>;
 
   /**
    * Enqueues a job.

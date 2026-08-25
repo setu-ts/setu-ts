@@ -41,6 +41,21 @@ describe('grpc-plugin barrel', () => {
     }
   });
 
+  it('does not barrel-export the M70i internals (DEFAULT_BASE_PATH, refusal helpers)', () => {
+    // The M70i plan names them internal on purpose: publishing a default value
+    // or a refusal helper would commit the package to an implementation detail.
+    const names = Object.keys(barrel);
+    for (
+      const internal of [
+        'DEFAULT_BASE_PATH',
+        'isNativeGrpcContentType',
+        'trailersOnlyUnimplemented',
+      ]
+    ) {
+      expect(names).not.toContain(internal);
+    }
+  });
+
   it('exports no unexpected runtime value', () => {
     // A new export must be a deliberate, documented decision.
     expect(Object.keys(barrel).sort()).toEqual([

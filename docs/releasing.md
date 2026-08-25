@@ -132,6 +132,12 @@ env JSR_TOKEN=jsrp_… deno task release:publish
 **Publish before tagging.** The tag is a record of what shipped; if the publish fails partway you do
 not want a tag claiming otherwise. Once it succeeds:
 
+> **`0.1.0-alpha.9` announcement note.** The release notes must state that `@setu-ts/grpc-plugin`
+> now loads on Node and Bun (X7-3), and that the Connect/Protobuf-ES packages are installed with the
+> host runtime's package manager — the plugin no longer bundles them. The native
+> `application/grpc+proto` transport and the default `basePath` reachability are **not** claimed;
+> those are M70i's decision (register rows X7-2 / X7-4).
+
 ```fish
 git tag v0.1.0-alpha.1
 git push origin v0.1.0-alpha.1

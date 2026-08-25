@@ -12,7 +12,10 @@ const app = createGrpcApp();
 const port = unusedPort();
 await app.start({ port });
 try {
-  const client = createEchoClient(`http://127.0.0.1:${port}/grpc`);
+  // M70i: `basePath` defaults to the ROOT, so a Connect client points at the
+  // origin. Ordinary Hono routes (`/health` below) are untouched — at the root
+  // the plugin claims only registered procedure paths.
+  const client = createEchoClient(`http://127.0.0.1:${port}`);
   const response = await client.echo({ message: 'from the example' });
   if (response.response !== 'echo: from the example') {
     throw new Error(

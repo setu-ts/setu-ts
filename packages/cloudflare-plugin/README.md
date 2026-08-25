@@ -128,7 +128,10 @@ queue.process<{ to: string }>('send-welcome', async (job) => {
 }, { concurrency: 5 });
 
 // The expression must match wrangler.toml `[triggers] crons` exactly.
-const cron = new WorkersCron();
+// Pass a logger: an unmatched trigger is reported ONLY through it, so without
+// one that path is silent. A failing handler is different — it fails the
+// invocation whether or not a logger is configured.
+const cron = new WorkersCron({ logger });
 cron.on('0 3 * * *', () => queue.add('rebuild-reports', {}));
 
 export default {
@@ -355,7 +358,14 @@ other's frames.
 
 ### Distributed lock
 
+`DurableObjectLock` implements scheduler-plugin's `IDistributedLock` seam, so the lock can be handed
+to `SchedulerPlugin` on a **Node/Deno replica set** — the composition it exists for. Do not register
+`SchedulerPlugin` on Workers: `register()` refuses there with a `SchedulerUnavailableError`, naming
+`WorkersCron` and `[triggers] crons` as the replacement, because timers cannot fire on an isolate
+that is evicted between invocations. Workers use `WorkersCron`, above.
+
 ```typescript
+// On a Node/Deno replica set — where SchedulerPlugin runs.
 import { DurableObjectLock } from '@setu-ts/cloudflare-plugin';
 import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 
@@ -408,9 +418,10 @@ job.
   `wrangler.toml`. `WorkersCron` is a small honest surface instead of an `IScheduler` where six of
   eight methods throw.
 - **A cron expression registered here but absent from `wrangler.toml` never fires.** Nothing in the
-  process can read that file. `cron.expressions()` lets you assert your own coverage, and a trigger
-  that fires with nothing registered is logged every time. Matching is exact — whitespace is not
-  normalized.
+  process can read that file. `cron.expressions()` lets you assert your own coverage. An unmatched
+  trigger is reported through the logger you pass to `WorkersCron` — construct it without one and
+  the path is silent; a failing handler fails the invocation regardless of logging. Matching is
+  exact — whitespace is not normalized.
 - **Only GET requests touch the edge cache.** The cache key is a URL, which the Cache API resolves
   as a GET request, so a `POST` to a cached path would otherwise be served the cached GET body and
   never reach your handler. Non-GET requests pass through with `X-Cache-Api: BYPASS`. This matters
@@ -524,6 +535,7 @@ MIT
 | `MessagingHandlerOptions`                 | interface |
 | `QueueHandlerOptions`                     | interface |
 | `QueueSendOptions`                        | interface |
+| `R2PutOptions`                            | interface |
 | `R2StorageArm`                            | interface |
 | `R2StorageOptions`                        | interface |
 | `RealtimeBackplaneObjectCoreOptions`      | interface |

@@ -233,7 +233,12 @@ describe('notification-plugin integration (through a real kernel app)', () => {
     const agg = caught as AggregateError;
     expect(agg.message).toBe('One or more notification channels failed');
     expect(agg.errors.every((e: unknown) => e instanceof Error)).toBe(true);
+    // X8-12: each member names its channel; the original error rides on `cause`.
     expect((agg.errors as Error[]).map((e) => e.message)).toEqual([
+      "channel 'nonexistent' failed",
+      "channel 'slack' failed",
+    ]);
+    expect((agg.errors as Error[]).map((e) => (e.cause as Error).message)).toEqual([
       'Unknown notification channel: nonexistent',
       'Slack webhook error (400)',
     ]);

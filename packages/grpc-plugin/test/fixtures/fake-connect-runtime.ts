@@ -55,13 +55,22 @@ export function fakeService(
   typeName: string,
   methodNames: string[] = [],
   file?: FileDescriptorLike,
+  /**
+   * Maps a proto method name to its camelCase `localName` (the property
+   * Connect looks up on the implementation). Omitted when the local name
+   * matches the proto name, mirroring a method like `Echo`.
+   */
+  localNames: Record<string, string> = {},
 ): ServiceDescriptorLike {
-  // `exactOptionalPropertyTypes` is on: omit `file` rather than setting it to
-  // undefined.
+  // `exactOptionalPropertyTypes` is on: omit `file` and `localName` rather
+  // than setting them to undefined.
   return {
     kind: 'service',
     typeName,
-    methods: methodNames.map((name) => ({ name })),
+    methods: methodNames.map((name) => ({
+      name,
+      ...(localNames[name] !== undefined ? { localName: localNames[name] } : {}),
+    })),
     ...(file === undefined ? {} : { file }),
   };
 }
@@ -107,6 +116,8 @@ export interface FakeConnectRuntime extends ConnectRuntime {
   readonly serializedFiles: string[];
   /** Base64 constants passed to `reviveDescriptorSet`, in call order. */
   readonly revived: string[];
+  /** Options handed to `createConnectRouter`, in call order. */
+  readonly routerOptions: Record<string, unknown>[];
 }
 
 /** Options for {@linkcode createFakeConnectRuntime}. */
@@ -129,6 +140,7 @@ export function createFakeConnectRuntime(
   const registered: RegisteredService[] = [];
   const serializedFiles: string[] = [];
   const revived: string[] = [];
+  const routerOptions: Record<string, unknown>[] = [];
   const byName = new Map((options.services ?? []).map((s) => [s.typeName, s]));
 
   const router: ConnectRouterLike = {
@@ -148,8 +160,12 @@ export function createFakeConnectRuntime(
     registered,
     serializedFiles,
     revived,
+    routerOptions,
 
-    createConnectRouter: () => router,
+    createConnectRouter(options?: Record<string, unknown>) {
+      routerOptions.push(options ?? {});
+      return router;
+    },
 
     createFetchHandler(handler: UniversalHandlerLike) {
       const fetchHandler = (_request: Request): Promise<Response> =>

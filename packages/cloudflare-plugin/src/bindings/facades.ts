@@ -128,6 +128,18 @@ export interface IR2ObjectBody extends IR2Object {
  *
  * @since 0.2.0
  */
+/**
+ * The subset of R2's put options this package writes.
+ *
+ * @since 0.3.0
+ */
+export interface R2PutOptions {
+  /** HTTP metadata stored on the object; R2 serves `contentType` back on GET. */
+  readonly httpMetadata?: { readonly contentType?: string };
+  /** Arbitrary user metadata stored alongside the object. */
+  readonly customMetadata?: Readonly<Record<string, string>>;
+}
+
 export interface IR2Bucket {
   /**
    * Reads object metadata without transferring the body.
@@ -148,9 +160,17 @@ export interface IR2Bucket {
    *
    * @param key - The object key
    * @param value - The object bytes
+   * @param options - R2's own put options. The platform spells the content type
+   * `httpMetadata.contentType` and user metadata `customMetadata`, which is why
+   * {@linkcode R2Storage.put} translates rather than forwarding
+   * {@linkcode PutObjectOptions} unchanged.
    * @returns The stored object's metadata
    */
-  put(key: string, value: ArrayBuffer | ArrayBufferView): Promise<IR2Object | null>;
+  put(
+    key: string,
+    value: ArrayBuffer | ArrayBufferView,
+    options?: R2PutOptions,
+  ): Promise<IR2Object | null>;
   /**
    * Removes an object. Succeeds whether or not it existed, and reports nothing
    * about what was removed — which is why {@linkcode R2Storage.delete} heads

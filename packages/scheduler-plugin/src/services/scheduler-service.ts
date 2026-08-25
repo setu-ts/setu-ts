@@ -145,6 +145,12 @@ export class SchedulerService implements IScheduler {
 
   /**
    * Schedule a recurring job that fires every `intervalMs` milliseconds.
+   *
+   * The first fire is grid-aligned: it lands on the next epoch multiple of
+   * the interval rather than a full interval after registration, so replicas
+   * registered at different instants compute IDENTICAL fire times and agree
+   * on distributed-lock slot keys (M70l). The period is unchanged; only the
+   * phase moves, and never later than `intervalMs` after registration.
    */
   async every<T = unknown>(
     name: string,
@@ -157,7 +163,7 @@ export class SchedulerService implements IScheduler {
     }
 
     const now = this.#runtime.now();
-    const nextRunAtMs = now + intervalMs;
+    const nextRunAtMs = this.#gridAlignedNextRun(now, intervalMs);
 
     const entry: EveryRegistryEntry<unknown> = {
       name,
@@ -174,7 +180,8 @@ export class SchedulerService implements IScheduler {
 
     this.#registry.add(entry);
     this.#names.add(name);
-    this.#armInterval(entry);
+    // F1: arm for the delay to the grid boundary, not a full interval.
+    this.#armTimer(entry);
   }
 
   /**
@@ -202,11 +209,25 @@ export class SchedulerService implements IScheduler {
       nextRunAtMs,
       timerHandle: null,
       generation: 0,
+      slotClaimed: false,
+      slotToken: null,
       ...(options?.data !== undefined ? { data: options.data as unknown } : {}),
       ...(options?.retry !== undefined ? { retry: options.retry } : {}),
     };
 
     this.#registry.add(entry);
+    // F2: claim the fire slot at REGISTRATION, not at fire time. A delay's
+    // `nextRunAtMs` is `now + delayMs`, which carries per-replica startup
+    // skew — two replicas registering the same delay 700 ms apart would
+    // compute different fire times and a fire-time key on `nextRunAtMs`
+    // would never collide. The slot is therefore keyed on the job NAME
+    // (skew-independent): the first registration claims it, a later
+    // replica's registration finds it held and marks its entry
+    // not-claimed, so exactly one replica runs the handler when the
+    // timers fire. The slot is released when the entry leaves the
+    // registry (fire, `remove`, or the lock's own ttl expiry), so a
+    // re-registration under the same name gets a fresh slot.
+    await this.#claimDelaySlot(entry);
     this.#names.add(name);
     this.#armTimer(entry);
   }
@@ -241,7 +262,7 @@ export class SchedulerService implements IScheduler {
         nextRunAtMs = cronNextMs(entry.expression, now);
         break;
       case 'every':
-        nextRunAtMs = now + entry.intervalMs;
+        nextRunAtMs = this.#gridAlignedNextRun(now, entry.intervalMs);
         break;
       case 'delay':
         nextRunAtMs = now + entry.delayMs;
@@ -251,7 +272,7 @@ export class SchedulerService implements IScheduler {
     // C1 FIX: Assign nextRunAtMs BEFORE arming the timer so #armTimer uses the fresh value
     entry.nextRunAtMs = nextRunAtMs;
 
-    const timerHandle = entry.kind === 'every' ? this.#armInterval(entry) : this.#armTimer(entry);
+    const timerHandle = this.#armTimer(entry);
 
     entry.paused = false;
     // C4 FIX: Increment generation to prevent double-fire if pause()+resume() fires during an in-flight job
@@ -267,6 +288,11 @@ export class SchedulerService implements IScheduler {
     if (entry.timerHandle !== null) {
       this.#runtime.clearTimeout(entry.timerHandle);
     }
+    // F2: a delay entry leaving the registry through remove() releases its
+    // registration-time slot, so the name can be re-registered fresh.
+    if (entry.kind === 'delay') {
+      await this.#releaseDelaySlot(entry);
+    }
     this.#registry.remove(name);
     this.#names.delete(name);
   }
@@ -280,6 +306,17 @@ export class SchedulerService implements IScheduler {
 
   // --- Internal helpers ---
 
+  /**
+   * Arms the timer for the delay to `entry.nextRunAtMs`, for every kind.
+   *
+   * F1: an `every` entry must NOT be armed for a full `intervalMs` — its
+   * `nextRunAtMs` is grid-aligned (§3.3), so arming for the interval would
+   * run the job one full interval LATER than the boundary it was aligned to,
+   * defeating the grid alignment entirely. The delay is
+   * `Math.max(0, nextRunAtMs - now)`: the distance to the intended fire
+   * (the next epoch grid boundary for `every`), never later than that
+   * boundary and never negative for a timer armed after its time passed.
+   */
   #armTimer(entry: RegistryEntry<unknown>): TimerHandle {
     const now = this.#runtime.now();
     const delay = Math.max(0, entry.nextRunAtMs - now);
@@ -292,19 +329,119 @@ export class SchedulerService implements IScheduler {
     return handle;
   }
 
-  #armInterval(entry: EveryRegistryEntry<unknown>): TimerHandle {
-    const delay = entry.intervalMs;
-
-    const handle = this.#runtime.setTimeout(async () => {
-      await this.#fire(entry);
-    }, delay);
-
-    entry.timerHandle = handle;
-    return handle;
+  /**
+   * The next grid-aligned fire time for an `every` job.
+   *
+   * `(floor(now / interval) + 1) * interval` — the first epoch multiple of
+   * the interval strictly after `now`. Two replicas started any distance
+   * apart compute the SAME value in the same tick, which is what makes the
+   * slot key in {@linkcode #fire} collide across replicas (M70l §3.3).
+   *
+   * @param now - The current runtime time in epoch ms
+   * @param intervalMs - The job's fixed interval
+   * @returns The next epoch-multiple fire time
+   */
+  #gridAlignedNextRun(now: number, intervalMs: number): number {
+    return (Math.floor(now / intervalMs) + 1) * intervalMs;
   }
 
   /**
-   * Acquire the lock, run the handler, and release — containing every failure.
+   * The fire-slot key for a `delay` entry.
+   *
+   * F2: keyed on the job NAME, never on `nextRunAtMs`. A delay's intended
+   * fire time is `now + delayMs`, which carries per-replica startup skew —
+   * two replicas registering the same delay 700 ms apart would compute
+   * different instants, and a fire-time key on the instant would never
+   * collide, so both replicas would run. The name is what identifies "the
+   * same one-shot job" across replicas, and it is skew-independent.
+   *
+   * The `:once` suffix keeps the slot distinct from the per-handler
+   * OVERLAP mutex, which is keyed `scheduler:job:<name>`: the slot is held
+   * from registration until the fire settles, and a bare-name key would
+   * make the mutex acquire at fire time always lose to the slot's own
+   * claim.
+   */
+  #delaySlotKey(entry: DelayRegistryEntry<unknown>): string {
+    return `scheduler:job:${entry.name}:once`;
+  }
+
+  /**
+   * Claims the fire slot for a `delay` entry at REGISTRATION time (F2).
+   *
+   * The claim happens here, not in {@linkcode #fire}, because the dedup must
+   * be decided before either replica's timer fires: the first registration
+   * claims the name slot, a later replica's registration finds it held and
+   * marks its entry not-claimed, so exactly one replica runs the handler
+   * when the timers fire. The slot lives for the entry's whole life — the
+   * delay itself plus the handler's worst-case runtime (`ttlMs`) — and is
+   * released when the entry leaves the registry ({@linkcode #fire},
+   * {@linkcode remove}), so a re-registration under the same name gets a
+   * fresh slot. A lock failure is treated as not-claimed (skip the run),
+   * never as a reason to drop the schedule.
+   *
+   * **Known limitation — the job is LOST if this replica leaves before it
+   * fires.** Because the claim is decided here rather than at fire time, a
+   * replica that finds the slot held sets `slotClaimed = false` once and never
+   * re-attempts. If the claiming replica then dies — a crash, or a graceful
+   * {@linkcode disconnect}, which clears timers WITHOUT releasing the slot —
+   * between this registration and the fire, no replica runs the handler and
+   * nothing reports it. The exposure window is `delayMs`. `cron` and `every`
+   * do not share it: they claim at fire time, so the next fire re-contends.
+   */
+  async #claimDelaySlot(entry: DelayRegistryEntry<unknown>): Promise<void> {
+    const slotKey = this.#delaySlotKey(entry);
+    try {
+      const token = await this.#lock.acquire(slotKey, this.#ttlMs + entry.delayMs);
+      if (token === null) {
+        // Another replica registered this delay first; its fire runs the
+        // handler. This replica keeps its armed timer (it must still leave
+        // the registry cleanly) but skips the run.
+        entry.slotClaimed = false;
+        return;
+      }
+      entry.slotToken = token;
+      entry.slotClaimed = true;
+    } catch (error) {
+      // Lock backend unreachable — treat as not-claimed rather than risk a
+      // duplicate run; the schedule is kept, the run is skipped.
+      this.#logger?.error(`Job '${entry.name}': could not claim fire slot`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      entry.slotClaimed = false;
+    }
+  }
+
+  /**
+   * Releases the fire slot a `delay` entry claimed at registration (F2).
+   *
+   * Called on every path by which a delay entry leaves the registry. A
+   * failed release is contained: the slot expires on its own TTL, and a
+   * release failure must never kill the job.
+   */
+  async #releaseDelaySlot(entry: DelayRegistryEntry<unknown>): Promise<void> {
+    if (entry.slotToken === null) {
+      return; // This entry never held the slot — nothing to release.
+    }
+    const slotKey = this.#delaySlotKey(entry);
+    try {
+      await this.#lock.release(slotKey, entry.slotToken);
+    } catch (error) {
+      this.#logger?.error(`Job '${entry.name}': could not release fire slot`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Acquire the handler-mutex lock, run the handler, and release — containing
+   * every failure.
+   *
+   * This lock is the OVERLAP mutex: it skips a fire whose predecessor of the
+   * same job is still running. Per-fire dedup across replicas is a separate
+   * guarantee, owned by the never-released slot lock in {@linkcode #fire}
+   * (M70l C3): slot N+1 is a different key from slot N, so this mutex cannot
+   * see it — and dedup cannot see a still-running previous fire. Two locks,
+   * because they answer two different questions.
    *
    * A `null` token (another instance holds the lock) and a rejecting
    * `acquire`/`release` are all skip-this-fire conditions, never
@@ -323,7 +460,9 @@ export class SchedulerService implements IScheduler {
     }
 
     if (token === null) {
-      // Another instance holds the lock — it is running this fire.
+      // Another instance holds the handler mutex — a previous fire of this
+      // same job is still running there. This is overlap protection, NOT
+      // per-fire dedup; that is the slot lock's job (M70l C3).
       this.#logger?.debug(`Job '${entry.name}': lock held elsewhere, skipping this fire`);
       return;
     }
@@ -359,15 +498,75 @@ export class SchedulerService implements IScheduler {
     // C4 FIX: Capture generation at fire START to detect if pause()+resume() fires during await
     const fireGen = entry.generation ?? 0;
 
+    // The fire-slot lock — per-fire dedup across replicas (X10-2), distinct
+    // from the per-handler overlap mutex below. The keying differs by kind
+    // because the two kinds of "same fire" are different:
+    //
+    // `cron`/`every`: keyed on the time this fire was INTENDED for
+    // (`nextRunAtMs`, grid-aligned by §3.3), acquired HERE at fire time,
+    // never released, and expired by the shared ttlMs. Two replicas whose
+    // timers land anywhere in the same intended slot therefore agree that
+    // exactly ONE of them runs: the second `acquire` returns null and the
+    // fire is skipped locally while the local schedule still re-arms below.
+    // Keying on the intended instant rather than `runtime.now()` makes the
+    // slot immune to timer jitter — `#armTimer` uses
+    // `Math.max(0, nextRunAtMs - now)`, so a late timer still computes the
+    // slot it was armed for.
+    //
+    // `delay` (F2): keyed on the job NAME and claimed at REGISTRATION time
+    // in `delay()` — see {@linkcode #claimDelaySlot}. The name is what
+    // identifies "the same one-shot job" across replicas; `nextRunAtMs`
+    // cannot be the key because it carries per-replica skew. The slot is
+    // released when the entry leaves the registry, so re-registration gets
+    // a fresh slot.
+    let slotClaimed: boolean;
+    if (entry.kind === 'delay') {
+      slotClaimed = entry.slotClaimed;
+      if (!slotClaimed) {
+        // Another replica registered this delay first and will run it.
+        this.#logger?.debug(
+          `Job '${entry.name}': fire slot claimed by another instance, skipping`,
+        );
+      }
+    } else {
+      const slotKey = `scheduler:job:${entry.name}:${String(entry.nextRunAtMs)}`;
+      slotClaimed = true;
+      try {
+        const slotToken = await this.#lock.acquire(slotKey, this.#ttlMs);
+        if (slotToken === null) {
+          // Another replica claimed this exact fire. Skip the run — but keep
+          // the local re-arm logic below, or this replica would silently stop
+          // scheduling after the first contended tick.
+          this.#logger?.debug(
+            `Job '${entry.name}': fire slot already claimed by another instance, skipping`,
+          );
+          slotClaimed = false;
+        }
+      } catch (error) {
+        // Lock backend unreachable — treat as unclaimed-but-unprovable and skip
+        // the run rather than risk a duplicate; the schedule still re-arms.
+        this.#logger?.error(`Job '${entry.name}': could not claim fire slot`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        slotClaimed = false;
+      }
+    }
+
     const lockKey = `scheduler:job:${entry.name}`;
 
     // Skipping a fire must never cancel the schedule: a contended lock is the
     // NORMAL multi-instance path, and a lock backend blip is transient. Every
     // lock failure below is contained here so the re-arm logic still runs.
-    await this.#runWithLock(entry, lockKey);
+    if (slotClaimed) {
+      await this.#runWithLock(entry, lockKey);
+    }
 
     // One-shot delay jobs are removed after firing, regardless of pause state.
     if (entry.kind === 'delay') {
+      // F2: the entry is leaving the registry — release the slot it claimed
+      // at registration so a later re-registration under the same name gets
+      // a fresh slot. (No-op when this entry never held it.)
+      await this.#releaseDelaySlot(entry);
       // C6 FIX: Guard against mid-fire remove() — if remove() was called while
       // the handler was in flight, the entry is already gone; skip removing again.
       if (this.#registry.has(entry.name)) {
@@ -408,8 +607,10 @@ export class SchedulerService implements IScheduler {
       entry.nextRunAtMs = cronNextMs(entry.expression, this.#runtime.now());
       this.#armTimer(entry);
     } else {
-      entry.nextRunAtMs = this.#runtime.now() + entry.intervalMs;
-      this.#armInterval(entry);
+      entry.nextRunAtMs = this.#gridAlignedNextRun(this.#runtime.now(), entry.intervalMs);
+      // F1: re-arm for the delay to the NEXT grid boundary, not a full
+      // interval — the boundary is what `nextRunAtMs` already points at.
+      this.#armTimer(entry);
     }
   }
 }

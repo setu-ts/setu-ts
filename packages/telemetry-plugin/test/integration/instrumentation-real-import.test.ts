@@ -1,14 +1,33 @@
 /**
  * Guarded real-import integration test for auto-instrumentation packages.
  *
- * When the OTel npm packages are installed, this test exercises the real
- * imports and verifies the constructors resolve. When absent, it skips.
+ * Drives each of the five loaders through their **default** `importFn` (no
+ * injection), so the real literal `import()` path — the branch no unit test
+ * runs — is exercised. When the OTel npm packages are installed this proves
+ * the default loads; when absent it skips.
+ *
+ * **Deno-only caveat:** this test resolves the specifiers through Deno's own
+ * loader, so it passes on Deno whether or not the specifier survives JSR's
+ * static npm-compatibility rewrite. That is precisely why it could never have
+ * caught X7-3 (the `npm:` string shipping verbatim in the published artifact):
+ * the published shape is only observable in a published artifact, which the
+ * compat suite checks — see `compat/compat.test.mjs`. Do not mistake this file
+ * for coverage of the published artifact.
  *
  * @module
  * @since 0.2.0
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import {
+  loadFetchInstrumentation,
+  loadHttpInstrumentation,
+} from '../../src/instrumentation/http-instrumentation.ts';
+import { loadIORedisInstrumentation } from '../../src/instrumentation/database-instrumentation.ts';
+import {
+  loadAmqplibInstrumentation,
+  loadKafkaJsInstrumentation,
+} from '../../src/instrumentation/queue-instrumentation.ts';
 
 // Probe whether npm: imports are available
 function canImportNpm(): boolean {
@@ -20,91 +39,47 @@ function canImportNpm(): boolean {
   }
 }
 
+/** The instrumentation export name each loader's module must expose. */
+const EXPORT_BY_KIND = {
+  http: 'HttpInstrumentation',
+  fetch: 'UndiciInstrumentation',
+  ioredis: 'IORedisInstrumentation',
+  amqplib: 'AmqplibInstrumentation',
+  kafkajs: 'KafkaJsInstrumentation',
+} as const;
+
 describe('Auto-instrumentation real-imports', () => {
-  it(
-    {
-      name: 'should load @opentelemetry/instrumentation-http',
-      ignore: !canImportNpm(),
-    },
-    async () => {
-      const mod = await import('npm:@opentelemetry/instrumentation-http@^0.220.0');
-      expect(mod.HttpInstrumentation).toBeDefined();
-      expect(typeof mod.HttpInstrumentation).toBe('function');
+  const loaders: Array<{
+    kind: keyof typeof EXPORT_BY_KIND;
+    load: () => Promise<{ instance: unknown }>;
+  }> = [
+    { kind: 'http', load: () => loadHttpInstrumentation(undefined) },
+    { kind: 'fetch', load: () => loadFetchInstrumentation(undefined) },
+    { kind: 'ioredis', load: () => loadIORedisInstrumentation(undefined) },
+    { kind: 'amqplib', load: () => loadAmqplibInstrumentation(undefined) },
+    { kind: 'kafkajs', load: () => loadKafkaJsInstrumentation(undefined) },
+  ];
 
-      const instance = new mod.HttpInstrumentation();
-      expect(typeof instance.setTracerProvider).toBe('function');
-      expect(typeof instance.enable).toBe('function');
-      expect(typeof instance.disable).toBe('function');
-    },
-  );
-
-  it(
-    {
-      name: 'should load @opentelemetry/instrumentation-undici',
-      ignore: !canImportNpm(),
-    },
-    async () => {
-      const mod = await import('npm:@opentelemetry/instrumentation-undici@^0.30.0');
-      expect(mod.UndiciInstrumentation).toBeDefined();
-      expect(typeof mod.UndiciInstrumentation).toBe('function');
-
-      const instance = new mod.UndiciInstrumentation();
-      expect(typeof instance.setTracerProvider).toBe('function');
-      expect(typeof instance.enable).toBe('function');
-      expect(typeof instance.disable).toBe('function');
-    },
-  );
-
-  it(
-    {
-      name: 'should load @opentelemetry/instrumentation-ioredis',
-      ignore: !canImportNpm(),
-    },
-    async () => {
-      const mod = await import('npm:@opentelemetry/instrumentation-ioredis@^0.68.0');
-      expect(mod.IORedisInstrumentation).toBeDefined();
-      expect(typeof mod.IORedisInstrumentation).toBe('function');
-
-      const instance = new mod.IORedisInstrumentation();
-      expect(typeof instance.setTracerProvider).toBe('function');
-      expect(typeof instance.enable).toBe('function');
-      expect(typeof instance.disable).toBe('function');
-    },
-  );
-
-  it(
-    {
-      name: 'should load @opentelemetry/instrumentation-amqplib',
-      ignore: !canImportNpm(),
-    },
-    async () => {
-      const mod = await import('npm:@opentelemetry/instrumentation-amqplib@^0.67.0');
-      expect(mod.AmqplibInstrumentation).toBeDefined();
-      expect(typeof mod.AmqplibInstrumentation).toBe('function');
-
-      const instance = new mod.AmqplibInstrumentation();
-      expect(typeof instance.setTracerProvider).toBe('function');
-      expect(typeof instance.enable).toBe('function');
-      expect(typeof instance.disable).toBe('function');
-    },
-  );
-
-  it(
-    {
-      name: 'should load @opentelemetry/instrumentation-kafkajs',
-      ignore: !canImportNpm(),
-    },
-    async () => {
-      const mod = await import('npm:@opentelemetry/instrumentation-kafkajs@^0.29.0');
-      expect(mod.KafkaJsInstrumentation).toBeDefined();
-      expect(typeof mod.KafkaJsInstrumentation).toBe('function');
-
-      const instance = new mod.KafkaJsInstrumentation();
-      expect(typeof instance.setTracerProvider).toBe('function');
-      expect(typeof instance.enable).toBe('function');
-      expect(typeof instance.disable).toBe('function');
-    },
-  );
+  for (const { kind, load } of loaders) {
+    it(
+      {
+        name: `should load ${kind} through the default importer`,
+        ignore: !canImportNpm(),
+      },
+      async () => {
+        const { instance } = await load();
+        // The instance is a construction of the module's expected export, so a
+        // successful construction proves the default importer resolved it.
+        expect(instance).toBeInstanceOf(Object);
+        // The constructed instance must expose the OTel instrumentation surface.
+        expect(typeof (instance as { setTracerProvider?: unknown }).setTracerProvider).toBe(
+          'function',
+        );
+        expect(typeof (instance as { enable?: unknown }).enable).toBe('function');
+        expect(typeof (instance as { disable?: unknown }).disable).toBe('function');
+      },
+    );
+  }
 
   it(
     {

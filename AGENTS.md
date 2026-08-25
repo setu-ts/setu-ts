@@ -102,9 +102,11 @@ These are plain markdown and tool-agnostic; read and follow them directly.
   the tracking-table checks. It defers to `CLAUDE.md` as source of truth and is the step-by-step
   procedure. `.roo/rules-verify-milestone/01-verify-only.md` adds the policy that goes with it:
   verify the committed tree, report every defect as a finding, and never fix what you are verifying.
-- **Review before merge:** `.roo/rules-code-review/01-review-only.md` for the policy. Scope is
-  `git diff main...HEAD` on the milestone's `feat/…` branch. Correctness findings block the merge;
-  reuse / simplification / efficiency cleanups are advisory.
+- **Review before merge:** `.roo/rules-code-review/01-review-only.md` for the policy. Scope starts
+  at `git diff main...HEAD` on the milestone's `feat/…` branch and deliberately reads past it — that
+  file names the seams. Correctness findings block the merge; reuse / simplification / efficiency
+  cleanups are advisory. On any pass after the first, the previous round's fixes are the part you
+  have not reviewed.
 - **Commit before reporting done:** `.roo/rules-code/01-commit-before-done.md`.
 
 ## Evidence, not vibes
@@ -123,3 +125,15 @@ Passing gates is necessary but not sufficient. Before reporting anything done:
 
 Do not `git push` or open a PR unless the human explicitly asks in that turn. Commit on the
 milestone's `feat/…` branch and hand back the exact command to run.
+
+## Answering automated review comments
+
+**Reply to each finding in its own thread — never one bundled comment on the PR.**
+
+```bash
+gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment-id>/replies -f body='…'
+```
+
+`AI_GUIDELINES.md` **§16.5** is the rule, in full: verify before you agree, say plainly when a
+finding is wrong, and state the outcome in each reply. Read it there — this heading exists so you
+know the rule applies to you, not to restate it.

@@ -4,6 +4,7 @@
  * @module
  */
 import type { IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
+import { respondWithError } from '@setu-ts/common';
 
 import { SESSION_STATE_KEY } from '../services/session-service.ts';
 import type { SessionService } from '../services/session-service.ts';
@@ -45,18 +46,18 @@ export function sessionMiddleware(
     const session = await service.load(ctx);
 
     // Compare on load: a session bound to tenant A presented under tenant B is
-    // the cross-tenant write this binding exists to stop. The short-circuit is
-    // deliberately the same `{ error, message }` shape as the tenant rejection
-    // in the multi-tenancy middleware — no plugin may import
-    // `@setu-ts/exceptions`, so an `HttpError` is unavailable here, and M70f
-    // converges the two shapes in one place.
+    // the cross-tenant write this binding exists to stop. The short-circuit
+    // answers through the request-scoped error responder, so it carries the
+    // application's configured error format — the same convergence as the
+    // tenant rejection in the multi-tenancy middleware (M70f).
     if (tenantBinding) {
       const bound = readTenantBinding(session);
       const current = ctx.request.tenant?.id;
       if (bound !== undefined && current !== undefined && bound !== current) {
-        ctx.response.status(403).json({
-          error: 'Tenant Mismatch',
-          message: 'This session was created for a different tenant',
+        respondWithError(ctx, {
+          status: 403,
+          title: 'Tenant Mismatch',
+          detail: 'This session was created for a different tenant',
         });
         return;
       }

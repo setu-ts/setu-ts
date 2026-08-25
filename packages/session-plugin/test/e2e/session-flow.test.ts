@@ -128,7 +128,7 @@ describe('session e2e (real kernel app)', () => {
       expect(raw).toContain('Secure');
       expect(raw).toContain('SameSite=Lax');
       expect(raw).toContain('Path=/');
-      expect(raw).toContain('hono_session=');
+      expect(raw).toContain('setu_session=');
 
       await app.stop();
     });

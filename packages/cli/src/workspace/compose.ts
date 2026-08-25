@@ -137,12 +137,12 @@ COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 
 # Resolve the whole module graph at build time, so the container starts without
-# reaching the network for its own dependencies.
-RUN deno cache main.ts
-
-# The cache written above lives in DENO_DIR and must stay readable to the user the
-# container runs as.
-RUN chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
+# reaching the network for its own dependencies. The chown FOLDS into this same
+# RUN (X10-5): a standalone \`chown -R\` rewrites metadata on every file the cache
+# layer created, so overlayfs copies the ENTIRE module cache into a second
+# layer — measured at 563 MB vs 362 MB with the fold, paid on every push and
+# every node pull.
+RUN deno cache main.ts && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,

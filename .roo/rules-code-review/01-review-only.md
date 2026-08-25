@@ -19,6 +19,13 @@ probes never exercise.
 - **Scope is the whole milestone diff, `git diff main...HEAD`** on the milestone's `feat/…` branch —
   not just the latest commit. Confirm you are on the `feat/…` branch (`git branch --show-current`),
   never `main`, and that the tree is committed (`git status --short` empty) before reviewing.
+- **The diff is the floor of the scope, not the ceiling — read past it at two named seams.** For
+  every ADDED class member or field, read the type's whole lifecycle (constructor, `connect`/
+  `start`, `disconnect`/`stop`/`close`, `onClose`) even where those methods are unchanged: state
+  installed in one phase and never torn down in its mirror cannot be seen from the hunks. For every
+  new guard or limit, read the code that runs BEFORE it, because a bound applied after the cost it
+  exists to prevent has already been paid is not a bound. Both shipped here; in one the addition was
+  three lines and the defect was its interaction with an unchanged method eight lines above.
 - **Run only the read-only gates to inform findings** — `deno task lint`, `deno task check`, and the
   ANSI-stripped per-file coverage table
   (`deno task test:coverage 2>&1 | sed 's/\x1b\[[0-9;]*m//g'`). These are inputs to your review, not
@@ -50,9 +57,25 @@ drift into — it is a conclusion you may only reach after a deliberate hunt has
   the author's theory of their own work; a test that asserts a no-op passes forever. Verify claims
   against the code path that would have to execute for them to be true.
 - **For every changed function, ask what input breaks it** — empty, zero, `undefined`, duplicate,
-  out-of-order, concurrent, dependency absent, error thrown midway. Walk the error, rollback, and
-  not-found paths with the same care as the happy path: that is where this repo's bugs live, and
-  exactly where the behavioral probes never went.
+  out-of-order, dependency absent, error thrown midway. Walk the error, rollback, and not-found
+  paths with the same care as the happy path: that is where this repo's bugs live, and exactly where
+  the behavioral probes never went. Include the inputs that are pathological rather than merely
+  wrong, and note that the three numeric ones fail by three different mechanisms: `NaN`, where the
+  relational operators (`>`, `<`, `>=`, `<=`) and both equality forms all yield `false`, so a bound
+  stops rejecting anything — while `!=`/`!==` yield `true`, so an inequality guard beside it fires
+  exactly where the bound has gone silent; `Infinity` as an upper bound, which nothing can exceed,
+  disabling the same check by a different route; `-Infinity`, which inverts it into rejecting every
+  value a real measurement can produce. Then a negative or zero limit, a value whose
+  `toString`/`valueOf` throws, and a revoked `Proxy`. A limit option that disabled the very check it
+  configured, and an error serializer that threw while serializing, have both shipped here.
+- **For every sequence of two or more awaited operations against shared external state** — a Redis
+  key, a table row, a file, a shared registry — re-read it as though a second caller interleaves at
+  each `await`. Ask what that caller observes between a write and the read that depends on it, and
+  whether some ordering leaves a DURABLE inconsistency rather than a transient one. A dead-letter
+  path shipped here whose later sweep deleted an index entry before the earlier call had written the
+  payload it pointed at, stranding that payload beyond every later sweep. No sequential test can see
+  this class; demonstrating it takes a controlled interleave — park one call on a gate, drive the
+  other to completion — and that probe is what turns the suspicion into a finding.
 - **For every write, find the read-back.** If nothing in the code or its tests ever reads a
   persisted value back through the public surface, treat the write as unproven — that is the precise
   shape of the M10 no-op adapter.
@@ -111,7 +134,44 @@ README that documents behavior the code no longer has is exactly the defect this
 shipping. The third is required outright by CLAUDE.md's "Before reporting a task done". None of them
 is a cleanup, and none may be downgraded to one.
 
+## On a re-review, the fix diff is the least-reviewed code in the milestone
+
+When the orchestrator sends you back after a Code-mode subtask has fixed your findings, the scope is
+still `git diff main...HEAD` — but the part of it you have never seen is the fix, and that is the
+part most likely to be wrong. Those lines exist because something subtle was already wrong there,
+they were written last and under pressure to close the milestone, and the gates re-run after them
+cannot see a concurrency, lifecycle, or contract-honesty defect. **Two consecutive milestones here
+shipped a defect that lived only in their own review fix**, each found afterwards by an external
+reviewer on the PR; in one, the fix replaced two lines with a six-command sequence against shared
+Redis state and introduced an interleaving bug that stranded data permanently.
+
+So on any pass after the first, isolate the fix and hunt it as new code by someone else. The
+boundary is the commit hash the PREVIOUS review reported (see "The report you hand back" — recording
+it is what makes this step executable; `main...HEAD` cannot substitute, since it spans the whole
+milestone and, being a symmetric difference, also picks up commits unique to `main`):
+
+```bash
+PREV=<reviewed-commit-hash from the previous report>
+git log --oneline "$PREV"..HEAD   # every commit added since that review
+git diff "$PREV"..HEAD            # those commits as one reviewable diff
+```
+
+If no previous report recorded a hash, say so and fall back to the fix commits named in the
+orchestrator's subtask handoff — but treat the missing hash as a process defect worth reporting,
+because without it the next pass is guessing too.
+
+Apply the same dimensions, and weight the three the fix most likely introduced: a fix that adds
+awaited commands gets the interleaving question, a fix that adds a member gets the lifecycle-mirror
+check, a fix that changes behavior gets its JSDoc, README, and CHANGELOG re-read against what it now
+does. **Never treat "I reviewed this file last round" as covering lines that did not exist then.**
+Say in your report which range you re-reviewed; without it a reader cannot tell a real second pass
+from a rubber stamp.
+
 ## The report you hand back
+
+Open the report with the **commit hash you reviewed** (`git rev-parse HEAD`) and, on a re-review,
+the range you isolated. The next pass reads that hash as its boundary, so omitting it breaks the
+step above for whoever comes next.
 
 Return a ranked report (correctness first), each finding carrying: **category** (correctness |
 cleanup), **file:line**, a one-line **summary**, and for every correctness finding a concrete
@@ -120,8 +180,9 @@ cleanup), **file:line**, a one-line **summary**, and for every correctness findi
 - **merge-ready** — no confirmed correctness findings (cleanups may remain, recorded). This verdict
   is a claim you have to earn, so state what you hunted and came up empty on: the writes you traced
   to a read-back, the error/rollback paths you walked, the options you confirmed are read on a real
-  branch. A bare "merge-ready" with no account of the search is indistinguishable from not having
-  looked, and is not an acceptable report.
+  branch, the awaited sequences you interleaved, and — on a re-review — the fix range you hunted. A
+  bare "merge-ready" with no account of the search is indistinguishable from not having looked, and
+  is not an acceptable report.
 - **blocked** — one or more confirmed correctness findings. List them; each must go to a Code-mode
   subtask to fix, after which the milestone is re-verified and re-reviewed.
 

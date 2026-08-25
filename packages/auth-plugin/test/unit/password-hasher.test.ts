@@ -4,10 +4,32 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { PasswordHasher } from '../../src/services/password-hasher.ts';
+import { MalformedPasswordHashError, PasswordHasher } from '../../src/services/password-hasher.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('PasswordHasher', () => {
+  describe('iteration bounds (PR #183 review)', () => {
+    it('rejects a digit run that saturates parseInt to Infinity', async () => {
+      const hasher = new PasswordHasher(createFakeRuntime());
+      // 400 nines parses to Infinity, which passes every `<=` bound and would
+      // reach deriveBits — the disabled-bound case.
+      const stored = `pbkdf2$${'9'.repeat(400)}$c2FsdA$aGFzaA`;
+      await expect(hasher.verify(stored, 'pw')).rejects.toThrow(MalformedPasswordHashError);
+    });
+
+    it('rejects an iteration count above the supported work factor', async () => {
+      const hasher = new PasswordHasher(createFakeRuntime());
+      await expect(hasher.verify('pbkdf2$10000001$c2FsdA$aGFzaA', 'pw')).rejects.toThrow(
+        /exceeds the maximum supported work factor/,
+      );
+    });
+
+    it('accepts a real work factor at the cap', async () => {
+      const hasher = new PasswordHasher(createFakeRuntime());
+      // Not a valid hash, but it must fail on the HASH, never on the bound.
+      await expect(hasher.verify('pbkdf2$10000000$c2FsdA$aGFzaA', 'pw')).resolves.toBe(false);
+    });
+  });
   it('hashes and verifies a password round-trip', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
     const stored = await hasher.hash('mypassword123');
@@ -36,34 +58,81 @@ describe('PasswordHasher', () => {
     expect(await hasher.verify(hash2, 'samepassword')).toBe(true);
   });
 
-  it('returns false for a malformed stored string', async () => {
+  it('throws MalformedPasswordHashError for a plaintext password in the stored position (reversed arguments)', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
-    expect(await hasher.verify('not-a-valid-hash', 'password')).toBe(false);
+    await expect(hasher.verify('plaintext-password', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
   });
 
-  it('returns false for a stored string with wrong prefix', async () => {
+  it('throws MalformedPasswordHashError for a malformed stored string', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
-    expect(await hasher.verify('bcrypt$1000$salt$hash', 'password')).toBe(false);
+    await expect(hasher.verify('not-a-valid-hash', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
   });
 
-  it('returns false for a stored string with too few parts', async () => {
+  it('throws MalformedPasswordHashError for a stored string with wrong prefix', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
-    expect(await hasher.verify('pbkdf2$1000$salt', 'password')).toBe(false);
+    await expect(hasher.verify('bcrypt$1000$salt$hash', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
   });
 
-  it('returns false for a stored string with invalid iterations', async () => {
+  it('throws MalformedPasswordHashError for a stored string with too few parts', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
-    expect(await hasher.verify('pbkdf2$notanumber$salt$hash', 'password')).toBe(false);
+    await expect(hasher.verify('pbkdf2$1000$salt', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
   });
 
-  it('returns false for a stored string with zero iterations', async () => {
+  it('throws MalformedPasswordHashError for a stored string with invalid iterations', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
-    expect(await hasher.verify('pbkdf2$0$salt$hash', 'password')).toBe(false);
+    await expect(hasher.verify('pbkdf2$notanumber$salt$hash', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
   });
 
-  it('returns false for a stored string with negative iterations', async () => {
+  it('throws MalformedPasswordHashError for iterations with trailing junk', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
-    expect(await hasher.verify('pbkdf2$-1$salt$hash', 'password')).toBe(false);
+    // `parseInt` would silently accept `100000junk` as `100000` and verify a
+    // corrupted hash; the strict parse must reject it instead.
+    await expect(hasher.verify('pbkdf2$100000junk$salt$hash', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
+  });
+
+  it('still verifies a genuinely valid hash', async () => {
+    const hasher = new PasswordHasher(createFakeRuntime());
+    const stored = await hasher.hash('mypassword123');
+    expect(await hasher.verify(stored, 'mypassword123')).toBe(true);
+  });
+
+  it('throws MalformedPasswordHashError for a stored string with zero iterations', async () => {
+    const hasher = new PasswordHasher(createFakeRuntime());
+    await expect(hasher.verify('pbkdf2$0$salt$hash', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
+  });
+
+  it('throws MalformedPasswordHashError for a stored string with negative iterations', async () => {
+    const hasher = new PasswordHasher(createFakeRuntime());
+    await expect(hasher.verify('pbkdf2$-1$salt$hash', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
+  });
+
+  it('names both parameter positions when the stored value is not a hash', async () => {
+    const hasher = new PasswordHasher(createFakeRuntime());
+    let error: unknown;
+    try {
+      await hasher.verify('plaintext-password', 'password');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(MalformedPasswordHashError);
+    expect((error as MalformedPasswordHashError).message).toContain('STORED HASH');
+    expect((error as MalformedPasswordHashError).message).toContain('SECRET');
   });
 
   it('verifies against a manually constructed stored hash', async () => {
@@ -100,10 +169,12 @@ describe('PasswordHasher', () => {
     expect(await hasher.verify(stored, 'different')).toBe(false);
   });
 
-  it('returns false for a stored string with invalid base64 hash', async () => {
+  it('throws MalformedPasswordHashError for a stored string with invalid base64 hash', async () => {
     const hasher = new PasswordHasher(createFakeRuntime());
     // Valid prefix and iterations, but invalid base64 in salt/hash that throws
-    expect(await hasher.verify('pbkdf2$1000$!!!$@@@', 'password')).toBe(false);
+    await expect(hasher.verify('pbkdf2$1000$!!!$@@@', 'password')).rejects.toThrow(
+      MalformedPasswordHashError,
+    );
   });
 
   it('returns false when derived hash length differs from stored', async () => {

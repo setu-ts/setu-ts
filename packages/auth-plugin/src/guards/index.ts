@@ -5,7 +5,7 @@
  */
 
 import type { IAuthorizationService, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES, withSecurityMetadata } from '@setu-ts/common';
+import { CAPABILITIES, respondWithError, withSecurityMetadata } from '@setu-ts/common';
 import type { RouteSecurityMetadata } from '@setu-ts/common';
 
 /**
@@ -33,9 +33,10 @@ export function requireAuth(): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      await ctx.response.status(401).json({
-        error: 'Unauthorized',
-        message: 'Authentication required',
+      respondWithError(ctx, {
+        status: 401,
+        title: 'Unauthorized',
+        detail: 'Authentication required',
       });
       return;
     }
@@ -59,18 +60,20 @@ export function requireRole(role: string): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      await ctx.response.status(401).json({
-        error: 'Unauthorized',
-        message: 'Authentication required',
+      respondWithError(ctx, {
+        status: 401,
+        title: 'Unauthorized',
+        detail: 'Authentication required',
       });
       return;
     }
 
     const authService = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
     if (!authService.hasRole(user, role)) {
-      await ctx.response.status(403).json({
-        error: 'Forbidden',
-        message: `Role "${role}" is required`,
+      respondWithError(ctx, {
+        status: 403,
+        title: 'Forbidden',
+        detail: `Role "${role}" is required`,
       });
       return;
     }
@@ -95,18 +98,20 @@ export function requirePermission(permission: string): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      await ctx.response.status(401).json({
-        error: 'Unauthorized',
-        message: 'Authentication required',
+      respondWithError(ctx, {
+        status: 401,
+        title: 'Unauthorized',
+        detail: 'Authentication required',
       });
       return;
     }
 
     const authService = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
     if (!authService.hasPermission(user, permission)) {
-      await ctx.response.status(403).json({
-        error: 'Forbidden',
-        message: `Permission "${permission}" is required`,
+      respondWithError(ctx, {
+        status: 403,
+        title: 'Forbidden',
+        detail: `Permission "${permission}" is required`,
       });
       return;
     }
@@ -131,18 +136,20 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      await ctx.response.status(401).json({
-        error: 'Unauthorized',
-        message: 'Authentication required',
+      respondWithError(ctx, {
+        status: 401,
+        title: 'Unauthorized',
+        detail: 'Authentication required',
       });
       return;
     }
 
     const authService = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
     if (!authService.hasAnyRole(user, roles)) {
-      await ctx.response.status(403).json({
-        error: 'Forbidden',
-        message: `One of these roles is required: ${roles.join(', ')}`,
+      respondWithError(ctx, {
+        status: 403,
+        title: 'Forbidden',
+        detail: `One of these roles is required: ${roles.join(', ')}`,
       });
       return;
     }
@@ -170,18 +177,20 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      await ctx.response.status(401).json({
-        error: 'Unauthorized',
-        message: 'Authentication required',
+      respondWithError(ctx, {
+        status: 401,
+        title: 'Unauthorized',
+        detail: 'Authentication required',
       });
       return;
     }
 
     const authService = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
     if (!authService.hasAllPermissions(user, permissions)) {
-      await ctx.response.status(403).json({
-        error: 'Forbidden',
-        message: `All of these permissions are required: ${permissions.join(', ')}`,
+      respondWithError(ctx, {
+        status: 403,
+        title: 'Forbidden',
+        detail: `All of these permissions are required: ${permissions.join(', ')}`,
       });
       return;
     }

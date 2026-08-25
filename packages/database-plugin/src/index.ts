@@ -20,11 +20,16 @@ export type {
   DatabaseAdapterType,
   DatabaseConnectionOptions,
   DatabasePluginOptions,
+  DrizzleAdapterOptions,
+  DrizzleDatabaseOptions,
   FindOptions,
   IDatabaseService,
   IRepository,
   IUnitOfWork,
+  MemoryDatabaseOptions,
   OrderDirection,
+  PrismaAdapterOptions,
+  PrismaDatabaseOptions,
   PrismaSqlProvider,
 } from './interfaces/index.ts';
 

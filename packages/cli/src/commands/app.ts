@@ -460,6 +460,11 @@ export async function runAppCommand(
         // unknown name is refused by `planMember` before anything is written, so
         // a wrong value cannot reach disk (X2-7).
         healthProbes: typeof args.flags['template'] === 'string',
+        // Same question about a different capability (X10-6): every named
+        // template also reaches MetricsPlugin, and the k8s renderer needs this
+        // to decide whether Prometheus annotations would point at a real
+        // `/metrics` or at a 404.
+        metricsEndpoint: typeof args.flags['template'] === 'string',
       },
     ],
   };

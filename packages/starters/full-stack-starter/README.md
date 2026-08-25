@@ -62,10 +62,11 @@ const options: FullStackStarterOptions = {
   mail: {/* mail plugin options */},
 
   // Gated arms (only included when provided)
-  featureFlags: {/* feature flags plugin options */},
-  notifications: {/* notification plugin options */},
-  multiTenancy: {/* multi-tenancy plugin options */},
-  reactRouter: {/* react router plugin options */},
+  featureFlags: { provider: 'memory' },
+  notifications: { channels: {} },
+  multiTenancy: { resolver: 'header' },
+  reactRouter: { serverBuildPath: './build/server/index.js' },
+  static: { root: './build/client', urlPrefix: '/assets' },
 };
 
 const app = createFullStackApp(options);
@@ -84,7 +85,7 @@ const app = createApplication({
   plugins: buildFullStackPlugins({
     cache: {}, // provide options object; omit to use default memory store
     events: {}, // provide options object; omit to use in-memory bus default
-    reactRouter: {/* custom SSR config */},
+    reactRouter: { serverBuildPath: './build/server/index.js' },
     // Omit featureFlags, notifications, multiTenancy if not needed
   }),
 });
@@ -122,8 +123,13 @@ const app = createApplication({
 |                  | MultiTenancyPlugin | Tenant isolation               |
 |                  | ReactRouterPlugin  | React SSR & file-based routing |
 
-Gated plugins (`featureFlags`, `notifications`, `multiTenancy`, `reactRouter`) are only registered
-when explicitly provided in options.
+Gated plugins (`featureFlags`, `notifications`, `multiTenancy`, `reactRouter`, `static`) are only
+registered when explicitly provided in options. The `static` arm exists because this is the one tier
+that by definition serves a browser: supplying it registers `StaticPlugin` with the given options
+(typically `root: './build/client'` so hashed assets and `public/` files are served beside SSR);
+omitting it registers nothing, so the default composition stays byte-identical to before the option
+existed. A root-level `urlPrefix` claims the bare wildcard and would collide with the SSR catch-all
+— give static files their own prefix.
 
 ### Workers Portability
 
@@ -196,7 +202,9 @@ yet. `createFullStackAppFromConfig` closes that ordering gap for every option at
 import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig((config) => ({
-  database: { type: 'prisma', url: config.getOrThrow<string>('DATABASE_URL') },
+  // `prismaClient` is generated and constructed by the application — a Prisma v7
+  // client carries its own connection configuration, so `url` is not an option.
+  database: { type: 'prisma', options: { prismaClient } },
   session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
 }), { config: { envFilePath: ['.env.local', '.env'] } });
 
@@ -244,9 +252,12 @@ setu new my-app --template full-stack
 **The one difference that will bite you: constructor injection needs an explicit token.**
 
 ```typescript
+import { Inject, Injectable } from '@setu-ts/decorator-plugin';
+import { CAPABILITIES, type ILogger } from '@setu-ts/common';
+
 @Injectable({ token: 'user-service' })
 class UserService {
-  constructor(@Inject(CAPABILITIES.DATABASE) private db: IDatabase) {}
+  constructor(@Inject(CAPABILITIES.LOGGER) private logger: ILogger) {}
 }
 ```
 
@@ -278,6 +289,7 @@ Three consequences, each a startup throw rather than a silent misinjection:
 | `FromConfigOptions`            | interface |
 | `FullStackStarterOptions`      | interface |
 | `RealtimeArm`                  | interface |
+| `StaticPluginOptions`          | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

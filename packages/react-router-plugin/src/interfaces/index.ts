@@ -150,6 +150,21 @@ export interface ReactRouterPluginOptions {
   readonly assetUrlPrefix?: string;
 
   /**
+   * Also serves files from the client-build ROOT — where Vite copies `public/`
+   * (`robots.txt`, `favicon.ico`, …) — in addition to
+   * {@linkcode ReactRouterPluginOptions.assetUrlPrefix}, with
+   * `Cache-Control: public, max-age=0, must-revalidate`: root files are not
+   * content-hashed, so they must be revalidated rather than cached immutably.
+   * A request matching neither the root nor the prefix still falls through to
+   * the SSR catch-all.
+   *
+   * Default `true`. `false` preserves prefix-only serving exactly as before.
+   *
+   * @since 0.2.0
+   */
+  readonly publicFiles?: boolean;
+
+  /**
    * Mount prefix for the SSR catch-all route. Default `/`.
    * MUST match the app's `react-router.config.ts` `basename` for flat/nested
    * routes to resolve.

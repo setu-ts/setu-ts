@@ -145,8 +145,14 @@ export interface IScheduler {
    * Resume a paused job.
    *
    * For cron jobs the next fire is computed from `now()`. For `every`
-   * jobs the interval restarts from `now()`. For `delay` jobs the
-   * full original `delayMs` is re-armed from `now()`.
+   * jobs the next fire is the next epoch grid boundary of the interval —
+   * `(floor(now / intervalMs) + 1) * intervalMs` — NOT a full interval
+   * after `now()`: grid alignment is what makes replicas started at
+   * different instants agree on fire times and distributed-lock slot
+   * keys (M70l X10-2). **Breaking vs 0.1.0-alpha.8**: the released
+   * contract stated the interval "restarts from now"; the fire may now
+   * come sooner than one full interval after resume (never later). For
+   * `delay` jobs the full original `delayMs` is re-armed from `now()`.
    *
    * Idempotent — calling resume on a running job is a no-op.
    *

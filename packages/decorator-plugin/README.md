@@ -35,6 +35,37 @@ class UsersController {
 app.register(DecoratorPlugin({ controllers: [UsersController] }));
 ```
 
+## Validation is enforced
+
+`@ValidateBody(schema)` (and `@ValidateQuery` / `@ValidateParams`) do not merely describe a route
+for OpenAPI. When a `CAPABILITIES.VALIDATION` provider is registered — `ValidationPlugin`, or any
+replacement — and `enforceSchemas` is not `false`, the capability's middleware is appended LAST in
+the route's chain (innermost, after guards), so an invalid request is answered `400` before the
+handler runs while guard `401`/`403` precedence is preserved. `@Body()`, `@Query()` and `@Param()`
+then hand the handler the VALIDATED value — transforms, defaults and coercions included — falling
+back to the raw source when no validated value exists. Without a validation provider the schemas
+stay description-only and the plugin logs one warning per affected route naming `ValidationPlugin`.
+
+```typescript
+import { Body, Controller, DecoratorPlugin, Post, ValidateBody } from '@setu-ts/decorator-plugin';
+import { ValidationPlugin } from '@setu-ts/validation-plugin';
+import { z } from 'zod';
+
+const CreateUser = z.object({ email: z.string().email(), age: z.number().int().default(18) });
+
+@Controller('/users')
+class UsersController {
+  @Post('/')
+  @ValidateBody(CreateUser)
+  create(@Body() body: { email: string; age: number }) {
+    return body; // the TRANSFORMED value: `age` defaulted to 18 by the schema
+  }
+}
+
+app.register(ValidationPlugin());
+app.register(DecoratorPlugin({ controllers: [UsersController] }));
+```
+
 ## What it exports
 
 - **Routing** — `@Controller`, `@Version`,
@@ -50,12 +81,13 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
 
 ## Options
 
-| Option            | Type            | Default | Description                                   |
-| ----------------- | --------------- | ------- | --------------------------------------------- |
-| `controllers`     | `Constructor[]` | `[]`    | Controller classes to register explicitly.    |
-| `services`        | `Constructor[]` | `[]`    | Service classes to register explicitly.       |
-| `autoDiscover`    | `boolean`       | `false` | Scan `controllersPath` for decorated classes. |
-| `controllersPath` | `string`        | —       | Glob path used when `autoDiscover` is `true`. |
+| Option            | Type            | Default | Description                                                                                                                                                                       |
+| ----------------- | --------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `controllers`     | `Constructor[]` | `[]`    | Controller classes to register explicitly.                                                                                                                                        |
+| `services`        | `Constructor[]` | `[]`    | Service classes to register explicitly.                                                                                                                                           |
+| `autoDiscover`    | `boolean`       | `false` | Scan `controllersPath` for decorated classes.                                                                                                                                     |
+| `controllersPath` | `string`        | —       | Glob path used when `autoDiscover` is `true`.                                                                                                                                     |
+| `enforceSchemas`  | `boolean`       | `true`  | Append the validation capability's middleware for each present `@ValidateXxx` target. `false` keeps schemas description-only (OpenAPI) and silences the missing-provider warning. |
 
 Discovery failures are logged as warnings and never crash the application.
 

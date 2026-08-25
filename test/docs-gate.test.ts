@@ -1426,3 +1426,72 @@ describe('documentation gate — which runtimes host a workspace', () => {
     expect(refused, DOCUMENTS_STATING_THE_SET.join('; ')).toEqual(['cloudflare-workers']);
   });
 });
+
+/**
+ * M70i §3.10(b) — the X6-2 recurrence gate.
+ *
+ * X6-2's class: a package README (or PUBLIC_API.md) showing the nonexistent
+ * kernel API — `new Application()` / `app.use()` — that a scaffolded project
+ * structurally cannot run. The fence engine never compiled README fences, and
+ * `docs/` legitimately contains foreign-framework `app.use(` in migration
+ * guides, so the check is scoped to package READMEs + PUBLIC_API.md and to
+ * **code fences only**: prose may name the API to say it does not exist
+ * ("there is no `new Application()` / `app.use()` API" is the correction).
+ */
+describe('documentation gate — no nonexistent kernel API in package READMEs (M70i §3.10b)', () => {
+  const FORBIDDEN = [/\bnew\s+Application\s*\(/, /\bapp\.use\s*\(/];
+  const FILES = [
+    ...readPackageReadmes(),
+    'PUBLIC_API.md',
+  ];
+
+  /** Every package README on disk, discovered rather than enumerated. */
+  function readPackageReadmes(): string[] {
+    const out: string[] = [];
+    for (const entry of Deno.readDirSync('packages')) {
+      if (!entry.isDirectory) continue;
+      const candidate = `packages/${entry.name}/README.md`;
+      try {
+        Deno.statSync(candidate);
+        out.push(candidate);
+      } catch {
+        // No README in this package — nothing to check.
+      }
+    }
+    return out;
+  }
+
+  it('no code fence uses new Application() or app.use()', async () => {
+    const { scanFences } = await import('../scripts/check-docs.ts');
+    const { TS_ALIASES } = await import('./fixtures/snippets/fence-engine.ts');
+    expect(FILES.length).toBeGreaterThanOrEqual(5);
+    for (const file of FILES) {
+      const lines = (await Deno.readTextFile(file)).split('\n');
+      const { blocks, unclosedAt } = scanFences(lines);
+      // An UNCLOSED fence is omitted from `blocks` entirely (measured: a file
+      // whose only fence never closes yields 0 blocks), so its contents escape
+      // this scan. Fail on the malformed file instead of silently covering
+      // less than the file claims.
+      expect(unclosedAt, `${file} has an unclosed code fence at line ${unclosedAt}`)
+        .toBeNull();
+      for (const block of blocks) {
+        const lang = (block as { info: string }).info;
+        // Reuse the fence engine's alias set rather than a hardcoded pair: it
+        // includes `tsx`, and a `tsx` fence carrying the nonexistent API used to
+        // slip past this gate entirely.
+        if (!TS_ALIASES.has(lang)) continue;
+        const code = lines.slice(
+          (block as { bodyStart: number }).bodyStart,
+          (block as { bodyEnd: number }).bodyEnd,
+        ).join('\n');
+        for (const pattern of FORBIDDEN) {
+          expect(
+            pattern.test(code),
+            `${file} fence at line ${(block as { line: number }).line} uses the` +
+              ` nonexistent kernel API matching ${pattern}: ${pattern.source}`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
+});

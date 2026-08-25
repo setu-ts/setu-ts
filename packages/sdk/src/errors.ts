@@ -11,14 +11,22 @@
 /**
  * Thrown by `IHttpClient.request()` when the server returns a non-2xx status.
  *
+ * `TBody` is the parsed error payload. It defaults to `unknown`, so the bare
+ * name `HttpClientError` keeps meaning exactly what it did and every existing
+ * `catch (e) { if (e instanceof HttpClientError) … }` is unaffected. A
+ * generated client narrows it through its own per-operation error guard, which
+ * is how a document's declared 4xx schemas reach the caller — the throw site
+ * itself cannot know which operation it is serving.
+ *
+ * @typeParam TBody - The parsed error response body.
  * @since 0.1.0
  */
-export class HttpClientError extends Error {
+export class HttpClientError<TBody = unknown> extends Error {
   public readonly status: number;
   public readonly headers: Headers;
-  public readonly body: unknown;
+  public readonly body: TBody;
 
-  constructor(message: string, status: number, headers: Headers, body: unknown) {
+  constructor(message: string, status: number, headers: Headers, body: TBody) {
     super(message);
     this.name = 'HttpClientError';
     this.status = status;

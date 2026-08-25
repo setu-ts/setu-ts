@@ -73,7 +73,10 @@ describe('NotificationService', () => {
       expect(err).toBeInstanceOf(AggregateError);
       const aggErr = err as AggregateError;
       expect(aggErr.errors.length).toBe(1);
-      expect(aggErr.errors[0].message).toBe('boom');
+      // X8-12: the member names its channel; the original error rides on `cause`.
+      expect(aggErr.errors[0].message).toBe("channel 'fail' failed");
+      expect(aggErr.errors[0].cause).toBeInstanceOf(Error);
+      expect((aggErr.errors[0].cause as Error).message).toBe('boom');
       expect(otherCalled).toEqual(['ok']);
       return;
     }
@@ -105,7 +108,9 @@ describe('NotificationService', () => {
       const aggErr = err as AggregateError;
       expect(aggErr.errors.length).toBe(1);
       expect(aggErr.errors[0]).toBeInstanceOf(Error);
-      expect(aggErr.errors[0].message).toBe('string-rejection');
+      // X8-12: the member names its channel; the coerced original rides on `cause`.
+      expect(aggErr.errors[0].message).toBe("channel 'fail' failed");
+      expect((aggErr.errors[0].cause as Error).message).toBe('string-rejection');
       return;
     }
     throw new Error('expected to have thrown');
@@ -125,7 +130,11 @@ describe('NotificationService', () => {
       expect(err).toBeInstanceOf(AggregateError);
       const aggErr = err as AggregateError;
       expect(aggErr.errors.length).toBe(1);
-      expect(aggErr.errors[0].message).toContain('Unknown notification channel: nonexistent');
+      // X8-12: the member names its channel; the unknown-channel error rides on `cause`.
+      expect(aggErr.errors[0].message).toBe("channel 'nonexistent' failed");
+      expect((aggErr.errors[0].cause as Error).message).toContain(
+        'Unknown notification channel: nonexistent',
+      );
       return;
     }
     throw new Error('expected to have thrown');

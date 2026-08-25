@@ -16,6 +16,8 @@ export { GraphqlService } from './services/graphql-service.ts';
 
 // Options and types
 export type {
+  AnyFieldResolver,
+  AnySubscriptionResolver,
   DefaultGraphqlContext,
   FieldResolver,
   GraphqlApqOptions,

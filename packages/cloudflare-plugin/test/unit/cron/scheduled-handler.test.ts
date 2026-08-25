@@ -40,11 +40,16 @@ describe('createScheduledHandler', () => {
     expect(finished).toBe(true);
   });
 
-  it('resolves for an unmatched expression rather than rejecting', async () => {
-    // A trigger with no handler is a configuration gap the registry reports;
-    // throwing would additionally mark the whole invocation failed.
+  it('rejects for an unmatched expression, failing the invocation (M70l X9-5)', async () => {
+    // A trigger with no handler is a configuration gap. The registry reports
+    // it through the logger when one is configured — and the platform's own
+    // invocation-failed signal needs no configuration at all, so `dispatch`
+    // now propagates through the bare delegation `createScheduledHandler`
+    // returns.
     const handler = createScheduledHandler(new WorkersCron());
 
-    await expect(handler({ cron: '0 * * * *', scheduledTime: 1 })).resolves.toBeUndefined();
+    await expect(handler({ cron: '0 * * * *', scheduledTime: 1 })).rejects.toThrow(
+      /no handler registered/,
+    );
   });
 });

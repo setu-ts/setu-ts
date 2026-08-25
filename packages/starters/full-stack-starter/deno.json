@@ -35,6 +35,7 @@
     "@setu-ts/notification-plugin": "jsr:@setu-ts/notification-plugin@^0.1.0-alpha.8",
     "@setu-ts/multi-tenancy-plugin": "jsr:@setu-ts/multi-tenancy-plugin@^0.1.0-alpha.8",
     "@setu-ts/react-router-plugin": "jsr:@setu-ts/react-router-plugin@^0.1.0-alpha.8",
+    "@setu-ts/static-plugin": "jsr:@setu-ts/static-plugin@^0.1.0-alpha.8",
     "@setu-ts/graphql-plugin": "jsr:@setu-ts/graphql-plugin@^0.1.0-alpha.8",
     "@setu-ts/microservice-starter": "jsr:@setu-ts/microservice-starter@^0.1.0-alpha.8"
   }

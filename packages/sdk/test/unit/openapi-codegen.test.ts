@@ -3,6 +3,8 @@ import { expect } from '@std/expect';
 import { generateOpenApiClient, sanitizeIdentifier } from '../../src/codegen/openapi-codegen.ts';
 import { OpenApiCodegenError } from '../../src/errors.ts';
 import { paramsDocument } from '../fixtures/params-document.ts';
+import { usersDocument } from '../fixtures/users-document.ts';
+import { inlineShapesDocument } from '../fixtures/inline-shapes-document.ts';
 import type {
   SdkOpenApiDocument,
   SdkOpenApiOperation,
@@ -753,63 +755,323 @@ describe('component schemas', () => {
   });
 });
 
-describe('fixture equality', () => {
-  it('generateOpenApiClient output equals the committed fixture', () => {
-    const doc: SdkOpenApiDocument = {
+/**
+ * Inline (non-`$ref`) schemas are hoisted, so no use site carries a multi-line
+ * object literal (M70m/X11-9, found in verification).
+ *
+ * A rendered type lands at several indentation levels, and a success type lands
+ * at TWO of them at once — the `Api` signature and the `client.request<…>`
+ * argument — so no single indent is correct for a multi-line object and
+ * `deno fmt` reindented whatever was emitted. Both committed fixtures name
+ * every schema through `$ref`, which is why neither could show it.
+ */
+/**
+ * Findings from the automated review of PR #181.
+ */
+describe('review findings (PR #181)', () => {
+  const withResponses = (responses: Record<string, unknown>) =>
+    ({
       openapi: '3.1.0',
-      paths: {
-        '/users': {
-          get: {
-            operationId: 'listUsers',
-            parameters: [
-              { name: 'page', in: 'query', required: false, schema: { type: 'integer' } },
-              { name: 'limit', in: 'query', required: false, schema: { type: 'integer' } },
-              { name: 'X-API-Key', in: 'header', required: false, schema: { type: 'string' } },
-            ],
-            responses: {
-              '200': {
-                description: 'OK',
-                content: {
-                  'application/json': {
-                    schema: { type: 'array', items: { $ref: '#/components/schemas/User' } },
+      paths: { '/a': { get: { operationId: 'get-a', responses } } },
+    }) as unknown as SdkOpenApiDocument;
+
+  it('skips a range code instead of reading its leading digit as a status', () => {
+    // `parseInt('4XX', 10)` is 4, so the previous `Number.isFinite` guard let a
+    // range code through as a `status: 4` arm that no response can carry —
+    // leaving a real 404 unnarrowed.
+    const out = generateOpenApiClient(
+      withResponses({
+        '200': { description: 'ok' },
+        '4XX': {
+          description: 'range',
+          content: { 'application/json': { schema: { type: 'string' } } },
+        },
+        default: { description: 'def' },
+      }),
+      {},
+    );
+
+    expect(out).not.toMatch(/status: 4\b/);
+    expect(out).not.toContain('e.status === 4');
+    expect(out).not.toContain('GetAError');
+  });
+
+  it('does not read a 2xx range code as an error arm either', () => {
+    const out = generateOpenApiClient(
+      withResponses({
+        '2XX': {
+          description: 'range',
+          content: { 'application/json': { schema: { type: 'string' } } },
+        },
+      }),
+      {},
+    );
+
+    expect(out).not.toContain('e.status === 2');
+  });
+
+  it('wraps an over-width guard rather than emitting a 140-column line', () => {
+    const responses: Record<string, unknown> = { '200': { description: 'ok' } };
+    for (const code of ['400', '401', '403', '404', '409']) {
+      responses[code] = {
+        description: code,
+        content: { 'application/json': { schema: { type: 'string' } } },
+      };
+    }
+    const out = generateOpenApiClient(withResponses(responses), {});
+
+    expect(out.split('\n').filter((l) => l.length > 100)).toEqual([]);
+    expect(out).toContain('  if (!(e instanceof HttpClientError)) return false;');
+    expect(out).toContain('    e.status === 400 ||');
+    expect(out).toContain('    e.status === 409\n');
+  });
+
+  it('keeps a guard that fits on one line', () => {
+    const out = generateOpenApiClient(
+      withResponses({
+        '200': { description: 'ok' },
+        '404': {
+          description: 'nf',
+          content: { 'application/json': { schema: { type: 'string' } } },
+        },
+      }),
+      {},
+    );
+
+    expect(out).toContain('return e instanceof HttpClientError && (e.status === 404);');
+  });
+
+  const inlineErrorDoc = (operationId: string, codes: readonly string[]) => {
+    const responses: Record<string, unknown> = { '200': { description: 'ok' } };
+    for (const code of codes) {
+      responses[code] = {
+        description: code,
+        content: {
+          'application/json': {
+            schema: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+          },
+        },
+      };
+    }
+    return {
+      openapi: '3.1.0',
+      paths: { '/x': { get: { operationId, responses } } },
+    } as unknown as SdkOpenApiDocument;
+  };
+
+  it('breaks an over-width single-arm union into a leading-& block', () => {
+    // An operationId of ~17 characters with an inline error body already pushes
+    // the one-line declaration past 100 columns — this is an ordinary size, not
+    // an exotic one.
+    const out = generateOpenApiClient(inlineErrorDoc('createUserAccount', ['409']), {});
+
+    expect(out.split('\n').filter((l) => l.length > 100)).toEqual([]);
+    expect(out).toContain('export type CreateUserAccountError =\n');
+    expect(out).toContain('  & HttpClientError<CreateUserAccountError409Body>\n');
+    expect(out).toContain('  & { readonly status: 409 };');
+  });
+
+  it('keeps a single-arm union on one line when it fits', () => {
+    const out = generateOpenApiClient(inlineErrorDoc('getUser', ['409']), {});
+
+    expect(out).toContain(
+      'export type GetUserError = HttpClientError<GetUserError409Body> & { readonly status: 409 };',
+    );
+  });
+
+  it('breaks an over-width union ARM into a nested leading-& block', () => {
+    const out = generateOpenApiClient(
+      inlineErrorDoc('reconcileOutstandingInvoiceForCustomerAccountLedger', ['404', '409']),
+      {},
+    );
+
+    expect(out.split('\n').filter((l) => l.length > 100)).toEqual([]);
+    expect(out).toContain('  | (\n');
+    expect(out).toContain(
+      '    & HttpClientError<ReconcileOutstandingInvoiceForCustomerAccountLedgerError404Body>\n',
+    );
+    expect(out).toContain('    & { readonly status: 404 }\n');
+  });
+
+  it('wraps a guard signature that is over width on operationId length alone', () => {
+    // No inline schema is involved here: the signature line alone exceeds 100
+    // columns once the operationId is long enough.
+    const out = generateOpenApiClient(
+      inlineErrorDoc('reconcileOutstandingInvoiceForCustomerAccountLedger', ['409']),
+      {},
+    );
+
+    expect(out.split('\n').filter((l) => l.length > 100)).toEqual([]);
+    expect(out).toContain(
+      'export function isReconcileOutstandingInvoiceForCustomerAccountLedgerError(\n  e: unknown,\n)',
+    );
+  });
+
+  it('refuses a factoryName that collides with a generated error guard', () => {
+    // Both are module-level VALUES, so emitting them produced two exported
+    // functions of one name and the generated file did not compile.
+    expect(() =>
+      generateOpenApiClient(inlineErrorDoc('getUser', ['409']), {
+        factoryName: 'isGetUserError',
+      })
+    ).toThrow(/Duplicate generated name 'isGetUserError'/);
+  });
+
+  it('reserves the identifiers the emitted import lines bind', () => {
+    for (const name of ['ClientResponse', 'IHttpClient', 'HttpClientError']) {
+      const doc = {
+        openapi: '3.1.0',
+        components: { schemas: { [name]: { type: 'object', properties: {} } } },
+        paths: {
+          '/c': {
+            get: {
+              operationId: 'get-c',
+              responses: {
+                '200': {
+                  description: 'ok',
+                  content: {
+                    'application/json': { schema: { $ref: `#/components/schemas/${name}` } },
                   },
                 },
               },
             },
           },
         },
-        '/users/{id}': {
-          get: {
-            operationId: 'getUserById',
-            parameters: [
-              { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
-            ],
-            responses: {
-              '200': {
-                description: 'OK',
+      } as unknown as SdkOpenApiDocument;
+
+      expect(() => generateOpenApiClient(doc, {})).toThrow(
+        new RegExp(`Duplicate generated name '${name}'`),
+      );
+    }
+  });
+
+  it('honours additionalProperties on an object declaring an empty properties map', () => {
+    // Two spellings of one schema must not contradict each other: reading
+    // `properties: {}` as closed emitted `Record<PropertyKey, never>`, which
+    // rejects every payload the schema accepts.
+    const body = (schema: unknown) =>
+      ({
+        openapi: '3.1.0',
+        paths: {
+          '/b': {
+            post: {
+              operationId: 'post-b',
+              requestBody: { required: true, content: { 'application/json': { schema } } },
+              responses: { '200': { description: 'ok' } },
+            },
+          },
+        },
+      }) as unknown as SdkOpenApiDocument;
+
+    const empty = generateOpenApiClient(
+      body({ type: 'object', properties: {}, additionalProperties: true }),
+      {},
+    );
+    const absent = generateOpenApiClient(
+      body({ type: 'object', additionalProperties: true }),
+      {},
+    );
+
+    expect(empty).toContain('body: Record<string, unknown>;');
+    expect(absent).toContain('body: Record<string, unknown>;');
+  });
+
+  it('still emits the closed empty object when nothing else is allowed', () => {
+    const closed = (ap: unknown) =>
+      ({
+        openapi: '3.1.0',
+        paths: {
+          '/c': {
+            post: {
+              operationId: 'post-c',
+              requestBody: {
+                required: true,
                 content: {
-                  'application/json': { schema: { $ref: '#/components/schemas/User' } },
+                  'application/json': {
+                    schema: { type: 'object', properties: {}, ...(ap as object) },
+                  },
                 },
               },
+              responses: { '200': { description: 'ok' } },
             },
           },
         },
-      },
-      components: {
-        schemas: {
-          User: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              name: { type: 'string' },
-              email: { type: 'string' },
-            },
-            required: ['id', 'name'],
+      }) as unknown as SdkOpenApiDocument;
+
+    expect(generateOpenApiClient(closed({}), {}))
+      .toContain('body: Record<PropertyKey, never>;');
+    expect(generateOpenApiClient(closed({ additionalProperties: false }), {}))
+      .toContain('body: Record<PropertyKey, never>;');
+  });
+});
+
+describe('inline schemas are hoisted (X11-9)', () => {
+  it('emits the committed inline-shapes fixture byte-for-byte', () => {
+    const generated = generateOpenApiClient(inlineShapesDocument, {
+      sdkImport: '../../src/index.ts',
+    });
+    const fixture = Deno.readTextFileSync(
+      new URL('../fixtures/inline-shapes-client.ts', import.meta.url),
+    );
+    expect(generated).toBe(fixture);
+  });
+
+  it('hoists an inline request body out of the Args interface', () => {
+    const out = generateOpenApiClient(inlineShapesDocument, {});
+    expect(out).toContain('export type PlaceOrderBody = {');
+    expect(out).toContain('  body: PlaceOrderBody;');
+  });
+
+  it('hoists an inline 2xx response, which is used at two indent levels', () => {
+    const out = generateOpenApiClient(inlineShapesDocument, {});
+    expect(out).toContain('export type PlaceOrderResponse201 = {');
+    expect(out).toContain('Promise<ClientResponse<PlaceOrderResponse201>>');
+    expect(out).toContain('client.request<PlaceOrderResponse201>(');
+  });
+
+  it('hoists an inline parameter schema', () => {
+    const doc = {
+      openapi: '3.1.0',
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'run-search',
+            parameters: [{
+              name: 'filter',
+              in: 'query',
+              schema: {
+                type: 'object',
+                properties: { a: { type: 'string' } },
+                required: ['a'],
+              },
+            }],
+            responses: { '200': { description: 'ok' } },
           },
         },
       },
-    };
-    const generated = generateOpenApiClient(doc, { sdkImport: '../../src/index.ts' });
+    } as const;
+    const out = generateOpenApiClient(doc as unknown as SdkOpenApiDocument, {});
+    expect(out).toContain('export type RunSearchFilterParam = {');
+    expect(out).toContain('  filter?: RunSearchFilterParam;');
+  });
+
+  /**
+   * The property that makes the three cases above one rule rather than three
+   * patches: after hoisting, NO emitted use site opens an object literal, so
+   * there is no indentation for `deno fmt` to disagree with. A declaration
+   * opens one with `= {`, never `: {`.
+   */
+  it('leaves no use site opening a multi-line object literal', () => {
+    for (const doc of [inlineShapesDocument, usersDocument, paramsDocument]) {
+      const out = generateOpenApiClient(doc, {});
+      expect(out).not.toMatch(/: \{\n/);
+    }
+  });
+});
+
+describe('fixture equality', () => {
+  it('generateOpenApiClient output equals the committed fixture', () => {
+    const generated = generateOpenApiClient(usersDocument, { sdkImport: '../../src/index.ts' });
     const fixture = Deno.readTextFileSync(
       new URL('../fixtures/generated-client.ts', import.meta.url),
     );
@@ -843,8 +1105,11 @@ describe('compile regression', () => {
   it('stringifies a non-string (integer) header parameter', () => {
     // A header value must reach `Headers` as a string; `String(...)` is what makes
     // an `integer` header schema compile against `Record<string, string>`.
+    // M70m/X11-9: the guard is braced and 2-space indented, so the emitted
+    // source round-trips through `deno fmt` unchanged.
+    expect(generated).toContain('if (opts?.xRetryCount !== undefined) {');
     expect(generated).toContain(
-      "if (opts?.xRetryCount !== undefined) headers['X-Retry-Count'] = String(opts?.xRetryCount);",
+      "headers['X-Retry-Count'] = String(opts?.xRetryCount);",
     );
   });
 
@@ -853,8 +1118,8 @@ describe('compile regression', () => {
   });
 
   it('defaults schemaless query and header parameters to string', () => {
-    expect(generated).toContain('    q?: string;');
-    expect(generated).toContain('    xCustom?: string;');
+    expect(generated).toContain('\n  q?: string;');
+    expect(generated).toContain('\n  xCustom?: string;');
   });
 
   it('substitutes a placeholder that shares a segment with literal text', () => {
@@ -882,7 +1147,7 @@ describe('compile regression', () => {
 
   it('makes opts required when a query parameter or the body is required', () => {
     expect(generated).toContain('function createReport(opts: CreateReportArgs)');
-    expect(generated).toContain('    body: User;');
+    expect(generated).toContain('\n  body: User;');
     // Required fields are read without an optional chain.
     expect(generated).toContain("query: { 'format': opts.format },");
     expect(generated).toContain('json: opts.body,');
@@ -890,7 +1155,7 @@ describe('compile regression', () => {
 
   it('keeps opts optional when every field is optional', () => {
     expect(generated).toContain('function updateNote(opts?: UpdateNoteArgs)');
-    expect(generated).toContain('    body?: Record<string, unknown>;');
+    expect(generated).toContain('\n  body?: Record<string, unknown>;');
     expect(generated).toContain('json: opts?.body,');
   });
 
@@ -955,7 +1220,7 @@ describe('hostile path templates', () => {
           user: { type: 'object' },
         }),
       )
-    ).toThrow(/Duplicate component type name 'User'.*'User'.*'user'/);
+    ).toThrow(/Duplicate generated name 'User'.*'User'.*'user'/);
   });
 });
 
@@ -982,7 +1247,9 @@ describe('generated-source injection hardening', () => {
         get: makeOp('line1\nglobalThis.X=1;', { responses: { '204': { description: '' } } }),
       },
     }));
-    const comment = out.split('\n').find((l) => l.includes('line1'))!;
+    // The `Api` interface also carries a `line1…` member now, so match the
+    // COMMENT line specifically rather than the first line mentioning it.
+    const comment = out.split('\n').find((l) => l.trim().startsWith('/**') && l.includes('line1'))!;
     expect(comment).toContain('line1 globalThis.X=1;');
     expect(comment.trim().endsWith('*/')).toBe(true);
   });
@@ -1078,7 +1345,314 @@ describe('path-item level operations and parameters', () => {
         }),
       },
     }));
-    expect(out).toContain('    shared?: string;');
-    expect(out).toContain('    own?: string;');
+    expect(out).toContain('\n  shared?: string;');
+    expect(out).toContain('\n  own?: string;');
+  });
+});
+
+describe('Api interface and explicit return type (X11-4)', () => {
+  const doc = makeDoc({
+    '/users': { get: makeOp('listUsers', { responses: { '200': { description: 'OK' } } }) },
+  });
+
+  it('emits a named interface and returns it from the factory', () => {
+    // An INFERRED return type is a JSR slow type: it blocks `.d.ts`
+    // generation, so a consumer could not publish a package containing the
+    // generated file — while its own header tells them not to edit it.
+    const out = generateOpenApiClient(doc);
+
+    expect(out).toContain('export interface Api {');
+    expect(out).toContain('  listUsers(): Promise<ClientResponse<void>>;');
+    expect(out).toContain('export function createApi(client: IHttpClient): Api {');
+  });
+
+  it('renames both the interface and the return type through apiTypeName', () => {
+    const out = generateOpenApiClient(doc, { apiTypeName: 'OrdersClient' });
+
+    expect(out).toContain('export interface OrdersClient {');
+    expect(out).toContain('export function createApi(client: IHttpClient): OrdersClient {');
+    expect(out).not.toContain('export interface Api {');
+  });
+
+  it('sanitizes a hostile apiTypeName rather than emitting it raw', () => {
+    const out = generateOpenApiClient(doc, { apiTypeName: 'my api!' });
+
+    expect(out).toContain('export interface MyApi {');
+  });
+
+  it('throws when a component schema collides with the Api interface name', () => {
+    expect(() =>
+      generateOpenApiClient(
+        makeDoc({ '/x': { get: makeOp('x', { responses: {} }) } }, {
+          Api: { type: 'object' },
+        }),
+      )
+    ).toThrow(/Duplicate generated name 'Api'/);
+  });
+
+  it('throws when a component schema collides with a generated Args name', () => {
+    // The registry used to cover component schemas ALONE, so a component named
+    // `ListUsersArgs` beside an operation `listUsers` emitted two declarations
+    // of one name — a syntax error in the generated file.
+    expect(() =>
+      generateOpenApiClient(
+        makeDoc({
+          '/users': {
+            get: makeOp('listUsers', {
+              parameters: [{ name: 'page', in: 'query', schema: { type: 'string' } }],
+              responses: {},
+            }),
+          },
+        }, { ListUsersArgs: { type: 'object' } }),
+      )
+    ).toThrow(/Duplicate generated name 'ListUsersArgs'/);
+  });
+
+  it('claims no Args name for an operation that takes no args', () => {
+    // An operation with no `opts` emits no interface, so it must not reserve
+    // the name either — that would refuse a legitimate component schema.
+    const out = generateOpenApiClient(
+      makeDoc({ '/users': { get: makeOp('listUsers', { responses: {} }) } }, {
+        ListUsersArgs: { type: 'object', properties: { a: { type: 'string' } } },
+      }),
+    );
+
+    expect(out).toContain('export type ListUsersArgs = {');
+  });
+});
+
+describe('typed error responses (X11-7)', () => {
+  function errDoc(responses: Record<string, unknown>) {
+    return makeDoc({
+      '/users/{id}': {
+        get: makeOp('getUserById', {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: responses as never,
+        }),
+      },
+    });
+  }
+
+  it('emits a status-discriminated union and a narrowing guard', () => {
+    const out = generateOpenApiClient(errDoc({
+      '200': { description: 'OK' },
+      '404': {
+        description: 'Not found',
+        content: { 'application/json': { schema: { type: 'string' } } },
+      },
+      '409': {
+        description: 'Conflict',
+        content: { 'application/json': { schema: { type: 'number' } } },
+      },
+    }));
+
+    expect(out).toContain('export type GetUserByIdError =');
+    expect(out).toContain('  | (HttpClientError<string> & { readonly status: 404 })');
+    expect(out).toContain('  | (HttpClientError<number> & { readonly status: 409 });');
+    expect(out).toContain(
+      'export function isGetUserByIdError(e: unknown): e is GetUserByIdError {',
+    );
+    expect(out).toContain('return e instanceof HttpClientError && (e.status === 404 ||');
+  });
+
+  it('emits a single-arm error type WITHOUT union punctuation', () => {
+    // `deno fmt` strips the leading `|` and the parentheses from a one-arm
+    // union, so emitting them would fail the fmt gate (probed).
+    const out = generateOpenApiClient(errDoc({
+      '200': { description: 'OK' },
+      '404': {
+        description: 'Not found',
+        content: { 'application/json': { schema: { type: 'string' } } },
+      },
+    }));
+
+    expect(out).toContain(
+      'export type GetUserByIdError = HttpClientError<string> & { readonly status: 404 };',
+    );
+  });
+
+  it('hoists a MULTI-LINE error body into its own alias', () => {
+    // Keeps every union arm on one line; an inline object would make `deno fmt`
+    // rewrite the intersection into a leading-`&` block.
+    const out = generateOpenApiClient(errDoc({
+      '200': { description: 'OK' },
+      '422': {
+        description: 'Unprocessable',
+        content: {
+          'application/json': {
+            schema: { type: 'object', properties: { field: { type: 'string' } } },
+          },
+        },
+      },
+    }));
+
+    expect(out).toContain('export type GetUserByIdError422Body = {');
+    expect(out).toContain(
+      'export type GetUserByIdError = HttpClientError<GetUserByIdError422Body> & ' +
+        '{ readonly status: 422 };',
+    );
+  });
+
+  it('types a declared error with NO json content as unknown', () => {
+    const out = generateOpenApiClient(errDoc({
+      '200': { description: 'OK' },
+      '503': { description: 'Unavailable' },
+    }));
+
+    expect(out).toContain(
+      'export type GetUserByIdError = HttpClientError<unknown> & { readonly status: 503 };',
+    );
+  });
+
+  it('emits nothing for an operation with only 2xx responses', () => {
+    // An exported type nothing references is dead surface.
+    const out = generateOpenApiClient(errDoc({ '200': { description: 'OK' } }));
+
+    expect(out).not.toContain('GetUserByIdError');
+    expect(out).not.toContain('import { HttpClientError }');
+  });
+
+  it('ignores a `default` response, which names no single status', () => {
+    const out = generateOpenApiClient(errDoc({
+      '200': { description: 'OK' },
+      default: { description: 'Anything' },
+    }));
+
+    expect(out).not.toContain('GetUserByIdError');
+  });
+
+  it('imports HttpClientError as a VALUE, since the guard uses instanceof', () => {
+    const out = generateOpenApiClient(errDoc({
+      '404': {
+        description: 'Not found',
+        content: { 'application/json': { schema: { type: 'string' } } },
+      },
+    }));
+
+    expect(out).toContain("import { HttpClientError } from '@setu-ts/sdk';");
+    expect(out).toContain("import type { ClientResponse, IHttpClient } from '@setu-ts/sdk';");
+  });
+});
+
+describe('emitted formatting (X11-9)', () => {
+  it('emits no lint pragma at all', () => {
+    // A blanket ignore hid `{}`; a NARROWED one cannot be emitted
+    // unconditionally either, because `deno lint` reports an ignore that
+    // matches nothing as `ban-unused-ignore`.
+    const out = generateOpenApiClient(makeDoc({
+      '/x': { get: makeOp('x', { responses: {} }) },
+    }));
+
+    expect(out).not.toContain('deno-lint-ignore');
+  });
+
+  it('emits Record<PropertyKey, never> rather than the ban-types `{}`', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': { get: makeOp('x', { responses: {} }) },
+    }, {
+      Closed: { type: 'object', additionalProperties: false },
+      NoProps: { type: 'object', properties: {} },
+    }));
+
+    expect(out).toContain('export type Closed = Record<PropertyKey, never>;');
+    expect(out).toContain('export type NoProps = Record<PropertyKey, never>;');
+  });
+
+  it('indents a NESTED inline object type', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/x': { get: makeOp('x', { responses: {} }) },
+    }, {
+      Outer: {
+        type: 'object',
+        properties: {
+          inner: { type: 'object', properties: { deep: { type: 'string' } } },
+        },
+      },
+    }));
+
+    expect(out).toContain("  'inner'?: {\n    'deep'?: string;\n  };");
+  });
+
+  it('wraps a long signature one parameter per line, as deno fmt does', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/aaaaaaaaaaaaaaaaaaaaaaaaaaaa/{alphaIdentifier}/{betaIdentifier}/{gammaIdentifier}': {
+        get: makeOp('someVeryLongOperationNameIndeed', {
+          parameters: [
+            { name: 'alphaIdentifier', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'betaIdentifier', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'gammaIdentifier', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: {},
+        }),
+      },
+    }));
+
+    expect(out).toContain('  someVeryLongOperationNameIndeed(\n    alphaIdentifier: string,');
+    for (const line of out.split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('emits a long path as an array join rather than a template literal', () => {
+    // `deno fmt` rewraps a long template literal by breaking at whichever `${`
+    // happens to fit, which no generator can predict. An array `.join('')` is
+    // exactly equivalent and wraps one element per line, which fmt leaves
+    // alone.
+    const out = generateOpenApiClient(makeDoc({
+      '/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/{alphaIdentifier}/{betaIdentifier}/{gammaIdentifier}': {
+        get: makeOp('op', {
+          parameters: [
+            { name: 'alphaIdentifier', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'betaIdentifier', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'gammaIdentifier', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: {},
+        }),
+      },
+    }));
+
+    expect(out).toContain('path: [');
+    expect(out).toContain("      ].join(''),");
+    expect(out).toContain('        encodeURIComponent(alphaIdentifier),');
+    expect(out).not.toContain('path: `');
+  });
+
+  it('keeps a SHORT path as a template literal', () => {
+    const out = generateOpenApiClient(makeDoc({
+      '/users/{id}': {
+        get: makeOp('getUser', {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {},
+        }),
+      },
+    }));
+
+    expect(out).toContain('path: `users/${encodeURIComponent(id)}`,');
+    expect(out).not.toContain('path: [');
+  });
+
+  it('preserves a placeholder sharing a segment with literal text, in BOTH forms', () => {
+    // `/files/{id}.json` must not lose the `.json`, and the array form splits
+    // literal chunks the same way the template does.
+    const shortForm = generateOpenApiClient(makeDoc({
+      '/files/{id}.json': {
+        get: makeOp('getFile', {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {},
+        }),
+      },
+    }));
+    expect(shortForm).toContain('path: `files/${encodeURIComponent(id)}.json`,');
+
+    const longForm = generateOpenApiClient(makeDoc({
+      '/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/{id}.json': {
+        get: makeOp('getFile', {
+          parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: {},
+        }),
+      },
+    }));
+    expect(longForm).toContain('        encodeURIComponent(id),');
+    expect(longForm).toContain("        '.json',");
   });
 });

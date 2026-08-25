@@ -139,7 +139,7 @@ describe('SessionService.load', () => {
 
   it('creates a fresh session for an empty cookie value', async () => {
     const { service } = await makeService();
-    const { ctx } = makeContext({ headers: { cookie: 'hono_session=' } });
+    const { ctx } = makeContext({ headers: { cookie: 'setu_session=' } });
     expect((await service.load(ctx)).isNew).toBe(true);
   });
 
@@ -179,7 +179,7 @@ describe('SessionService.load', () => {
     );
 
     const { ctx } = makeContext({
-      headers: { cookie: `hono_session=${encodeURIComponent(bogus)}` },
+      headers: { cookie: `setu_session=${encodeURIComponent(bogus)}` },
     });
     expect((await service.load(ctx)).isNew).toBe(true);
   });

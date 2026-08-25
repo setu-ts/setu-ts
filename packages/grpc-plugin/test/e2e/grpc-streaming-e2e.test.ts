@@ -13,7 +13,13 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
-import { CAPABILITIES, type GrpcServiceDefinition, type IGrpcService } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  type GrpcServiceDefinition,
+  type IGrpcService,
+  type ILogger,
+  type IPlugin,
+} from '@setu-ts/common';
 import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
 
 /**
@@ -104,7 +110,7 @@ describe('gRPC Server Streaming E2E', () => {
     const requestBody = JSON.stringify({ prefix: 'item' });
     const envelopedRequest = encodeConnectEnvelope(requestBody);
 
-    const rpcRequest = new Request('http://localhost:0/grpc/example.StreamService/ServerStream', {
+    const rpcRequest = new Request('http://localhost:0/example.StreamService/ServerStream', {
       method: 'POST',
       headers: { 'content-type': 'application/connect+json' },
       body: envelopedRequest as unknown as BodyInit,
@@ -168,7 +174,7 @@ describe('gRPC Server Streaming E2E', () => {
     const requestBody = JSON.stringify({ prefix: 'test' });
     const envelopedRequest = encodeConnectEnvelope(requestBody);
 
-    const rpcRequest = new Request('http://localhost:0/grpc/example.StreamService/ServerStream', {
+    const rpcRequest = new Request('http://localhost:0/example.StreamService/ServerStream', {
       method: 'POST',
       headers: { 'content-type': 'application/connect+json' },
       body: envelopedRequest as unknown as BodyInit,
@@ -182,6 +188,80 @@ describe('gRPC Server Streaming E2E', () => {
 
     // ASSERT: stream yields exactly 1 message
     expect(rawMessages.length).toBe(1);
+
+    await app.stop();
+  });
+
+  it('logs a server-streaming failure that surfaces after the first yielded item', async () => {
+    // M70f re-review, finding 3: a server-streaming handler's common failure
+    // point is a later `next()` rejection, AFTER invocation has returned the
+    // AsyncIterable. Before the fix the wrapper returned every non-thenable
+    // unchanged, so that rejection was logged nowhere. Now the wrapper returns
+    // a transparent iterable that logs (and rethrows) the iteration failure,
+    // leaving Connect's masked wire response unchanged.
+    const errors: {
+      message: string;
+      metadata?: Readonly<Record<string, unknown>> | undefined;
+    }[] = [];
+    const logger: ILogger = {
+      level: 'error',
+      fatal(message, metadata) {
+        errors.push({ message, metadata });
+      },
+      error(message, metadata) {
+        errors.push({ message, metadata });
+      },
+      warn() {},
+      info() {},
+      debug() {},
+      trace() {},
+      child() {
+        return logger;
+      },
+    };
+    const loggerPlugin: IPlugin = {
+      name: 'capturing-logger',
+      version: '1.0.0',
+      provides: [CAPABILITIES.LOGGER],
+      register(ctx) {
+        ctx.services.register(CAPABILITIES.LOGGER, logger);
+      },
+    };
+
+    const app = createApplication({ plugins: [RuntimePlugin(), loggerPlugin, GrpcPlugin()] });
+    await app.start({ port: 0 });
+
+    const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+    grpc.addService(await reviveStreamService(), {
+      serverStream: async function* (_req: { prefix: string }) {
+        // Yield one item, then fail on the NEXT next() — the deferred failure
+        // the wrapper must now catch, log, and rethrow.
+        yield { message: 'first' };
+        throw new Error('stream failed after first item');
+      },
+    });
+
+    const requestBody = JSON.stringify({ prefix: 'item' });
+    const envelopedRequest = encodeConnectEnvelope(requestBody);
+    const rpcRequest = new Request('http://localhost:0/example.StreamService/ServerStream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/connect+json' },
+      body: envelopedRequest as unknown as BodyInit,
+    });
+    const rpcResponse = await app.fetch(rpcRequest);
+    // Consume the body: the server-streaming generator is pulled as the body
+    // is read, so the deferred failure only surfaces (and is logged) once the
+    // stream is driven.
+    await rpcResponse.arrayBuffer();
+
+    // Server-streaming sends the `200` headers before the body, so the deferred
+    // failure surfaces as a Connect error frame in the body, not the HTTP
+    // status. The load-bearing assertion is that the failure was LOGGED — the
+    // defect (finding 3) was that it was logged nowhere.
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('gRPC handler failed');
+    expect(errors[0].metadata?.procedure).toBe('example.StreamService/serverStream');
+    expect(errors[0].metadata?.message).toBe('stream failed after first item');
 
     await app.stop();
   });

@@ -124,7 +124,12 @@ Hono's `LinearRouter`; the kernel's custom `(ctx, next)` middleware pipeline run
 Hono dispatch, and the application's `#handleRequest` method calls `router.match()` which maps
 Hono's matched route back to `{ definition, params }`. The kernel maintains its own `RouteEntry` map
 so `getAll()`/`listRoutes()` introspection is unchanged, and the kernel applies its own
-deterministic tie-break (statics-count + registration order) on top of Hono's match result.
+deterministic tie-break on top of Hono's match result: more static segments first, then FEWER `*`
+wildcard segments, then earliest registration order. The wildcard key is what stops an application
+catch-all (`GET /*`) from owning every single-segment route registered after it — before M70g a `*`
+counted as a static segment, so `/*` tied with `/openapi.json` and won merely by registering first.
+The rule compares counts rather than positions, so `/a/*` loses to `/:x/b` on `/a/b`; that limit is
+documented in `Router.match` and pinned by a test.
 
 Hono is chosen for several reasons:
 
@@ -1573,11 +1578,11 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | Aspect               | Detail                                                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary Hono routes                                                           |
-| **Responsibilities** | Connect-ES core + Protobuf-ES; reflection and health over embedded descriptors; RPC handler interception                                |
+| **Responsibilities** | Connect-ES core + Protobuf-ES; reflection and health over embedded descriptors; RPC dispatch through the kernel pipeline              |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `GrpcPlugin()`; `IGrpcService`                                                                                                          |
 | **Extension Points** | Custom service definitions via embedded `FileDescriptorSet` constants                                                                   |
-| **Rules**            | Connect-ES + Protobuf-ES from `npm:`; detection is prefix-only; `setRpcHandler?` on `IHttpAdapter` is the interception seam             |
+| **Rules**            | Connect-ES + Protobuf-ES from `npm:`; detection is prefix-only; RPC dispatch runs in the kernel terminal handler after the middleware pipeline |
 
 #### @setu-ts/react-router-plugin
 
@@ -1837,6 +1842,13 @@ last outbound).
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
 
+These priorities are **conventional bands, not self-registrations**: no first-party middleware
+registers itself globally at the number this table names — the application (or a starter) adds it.
+`AuthMiddleware` is the consequential case: `AuthPlugin` registers only services, and every doc site
+therefore writes the global add explicitly with `{ priority: 300 }`. A bare
+`app.middleware.add(authMiddleware())` takes the kernel's default priority of **500**, which is
+after every row above (including the row named for it) and outside the table's range entirely.
+
 The session sits below authentication so an auth strategy can read it, and its commit phase (which
 runs after `next()` returns) therefore wraps everything inner. The two CSRF middlewares are
 different mechanisms rather than one feature configured twice: the stateless Origin/Referer check at
@@ -1930,10 +1942,10 @@ The `state` map allows middleware to pass data to downstream middleware and hand
 
 ```typescript
 // Validation middleware
-ctx.state.set('validatedBody', result.data);
+ctx.state.set('validated:body', result.data);
 
 // Handler
-const body = ctx.state.get('validatedBody');
+const body = ctx.state.get('validated:body');
 ```
 
 ### Request-Scoped Data
@@ -2209,6 +2221,43 @@ app.middleware.add(errorHandler({
   logErrors: true,
 }));
 ```
+
+### Error Responder Seam
+
+The kernel ships zero error formatting, but it does produce error responses of its own (a malformed
+request URL → `400`, an unmatched path → `404`, an unhandled error → `500`, a request during a
+shutdown drain → `503`), and so does every short-circuiting middleware. Before M70f each of those
+sites wrote its own ad-hoc body, so an application that configured
+`errorHandler({ format: 'rfc9457' })` still saw a mix of formats.
+
+The fix is a request-scoped seam in `@setu-ts/common` — not `exceptions`, because no plugin may
+import `exceptions` (where every formatter lives), and the kernel and every middleware that answers
+an error all need the same contract. `errorHandler` builds an `IErrorResponder` from the formatter
+and content type it already resolved at factory time and publishes it in `ctx.state` **before**
+`next()`; any site inside the pipeline then calls
+`respondWithError(ctx, { status, title, detail?,
+details? })`, which delegates to the published
+responder and answers in the application's configured format. The one first-party site deliberately
+outside the seam is `validation-plugin`, which owns its own `errorFormat` option and formats
+validation failures itself; an application sets the two to the same format, as the CLI templates and
+`rest-starter` do. The responder builds a real `HttpError` from the init (so `buildProblemDetails`
+sees a genuine `statusCode` and the validation `errors` extension, and `maskInternalErrors` never
+masks a deliberate 4xx), runs the resolved formatter over it, and writes status, `content-type`, and
+the serialized body — the same three-step tail `errorHandler`'s catch path performs. Three kernel
+sites run **before** the pipeline — the shutdown-drain `503`, the malformed-URL / undecodable-path
+`400`, and an `onRequest` lifecycle hook that throws (answered as the unhandled `500`) — so they
+cannot see `errorHandler`'s `ctx.state` publication; the kernel seeds the same resolved responder
+into their state from a cache it reads off the pipeline's `errorHandler` at startup, and the
+fallback below applies when no `errorHandler` is registered.
+
+With **no** `errorHandler` registered, `respondWithError` falls back to the no-handler shape
+`{ error, detail? }` — the framework's pre-formatter shape, written directly by the seam and **not**
+the same as the `default` formatter's `{ statusCode, message, details? }` body — so a site can never
+answer in a shape the application did not ask for. The unhandled-error `500` additionally logs the
+error through `CAPABILITIES.LOGGER` when a logger is registered (X11-2); the body stays opaque.
+`serializeError` (also in `common`) is the pure serializer the logger plugin uses to normalize a raw
+`Error` out of log metadata before redaction (X2-5) and the kernel, `exceptions`, `grpc-plugin`, and
+`notification-plugin` use to serialize a cause without importing one another.
 
 ### Plugin Error Handling
 

@@ -53,6 +53,13 @@ export class FakeResponse implements IResponse {
     return BRAND;
   }
 
+  html(body: string): HandlerResult {
+    this.body = body;
+    this.headers.set('content-type', 'text/html; charset=utf-8');
+    this.ended = true;
+    return BRAND;
+  }
+
   send(body?: Uint8Array): HandlerResult {
     this.body = body ?? null;
     this.ended = true;

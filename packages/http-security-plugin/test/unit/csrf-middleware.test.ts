@@ -99,9 +99,10 @@ describe('csrfMiddleware', () => {
       });
       expect(nextCalled).toHaveLength(0);
       expect(response.statuses).toContain(403);
-      const body = response.body as { error: string; message: string };
+      // M70f (X4-8): the rejection converges on the responder's `detail` key.
+      const body = response.body as { error: string; detail: string };
       expect(body.error).toBe('Forbidden');
-      expect(body.message).toBe('Cross-origin request not allowed');
+      expect(body.detail).toBe('Cross-origin request not allowed');
     });
 
     it('handler not run on 403 short-circuit', async () => {
@@ -207,9 +208,10 @@ describe('csrfMiddleware', () => {
       });
       expect(nextCalled).toHaveLength(0);
       expect(response.statuses).toContain(403);
-      const body = response.body as { error: string; message: string };
+      // M70f (X4-8): the rejection converges on the responder's `detail` key.
+      const body = response.body as { error: string; detail: string };
       expect(body.error).toBe('Forbidden');
-      expect(body.message).toContain('X-CSRF-Token');
+      expect(body.detail).toContain('X-CSRF-Token');
     });
 
     it('passes when custom header present', async () => {
