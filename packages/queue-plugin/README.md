@@ -252,43 +252,42 @@ the adapter has no liveness check.
 
 ## Exports
 
-| Export                         | Kind      |
-| ------------------------------ | --------- |
-| `adaptSnsModule`               | function  |
-| `adaptSqsModule`               | function  |
-| `loadSnsModule`                | function  |
-| `loadSqsModule`                | function  |
-| `QueuePlugin`                  | function  |
-| `MemoryQueue`                  | class     |
-| `QueueBackendUnavailableError` | class     |
-| `RabbitMqQueue`                | class     |
-| `RedisQueue`                   | class     |
-| `SnsPublisher`                 | class     |
-| `SqsDelayTooLongError`         | class     |
-| `SqsQueue`                     | class     |
-| `SqsQueueNotConfiguredError`   | class     |
-| `AddJobOptions`                | interface |
-| `IJob`                         | interface |
-| `IQueue`                       | interface |
-| `ISnsTransport`                | interface |
-| `ISqsTransport`                | interface |
-| `ProcessOptions`               | interface |
-| `QueueDepths`                  | interface |
-| `QueueLogger`                  | interface |
-| `QueuePluginOptions`           | interface |
-| `RabbitMqQueueOptions`         | interface |
-| `RecurringOptions`             | interface |
-| `RedisQueueOptions`            | interface |
-| `SnsPublisherOptions`          | interface |
-| `SnsSdkModule`                 | interface |
-| `SqsQueueOptions`              | interface |
-| `SqsReceivedMessage`           | interface |
-| `SqsSdkModule`                 | interface |
-| `JobProcessor`                 | type      |
-| `QueueAdapterType`             | type      |
+| Export | Kind |
+| --- | --- |
+| `adaptSnsModule` | function |
+| `adaptSqsModule` | function |
+| `loadSnsModule` | function |
+| `loadSqsModule` | function |
+| `QueuePlugin` | function |
+| `MemoryQueue` | class |
+| `QueueBackendUnavailableError` | class |
+| `RabbitMqQueue` | class |
+| `RedisQueue` | class |
+| `SnsPublisher` | class |
+| `SqsDelayTooLongError` | class |
+| `SqsQueue` | class |
+| `SqsQueueNotConfiguredError` | class |
+| `AddJobOptions` | interface |
+| `IJob` | interface |
+| `IQueue` | interface |
+| `ISnsTransport` | interface |
+| `ISqsTransport` | interface |
+| `ProcessOptions` | interface |
+| `QueueDepths` | interface |
+| `QueueLogger` | interface |
+| `QueuePluginOptions` | interface |
+| `RabbitMqQueueOptions` | interface |
+| `RecurringOptions` | interface |
+| `RedisQueueOptions` | interface |
+| `SnsPublisherOptions` | interface |
+| `SnsSdkModule` | interface |
+| `SqsQueueOptions` | interface |
+| `SqsReceivedMessage` | interface |
+| `SqsSdkModule` | interface |
+| `JobProcessor` | type |
+| `QueueAdapterType` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

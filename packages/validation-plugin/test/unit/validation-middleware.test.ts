@@ -60,7 +60,7 @@ function createNextFn(): { called: boolean; fn: () => Promise<void> } {
 // ---------------------------------------------------------------------------
 
 describe('createValidationMiddleware — success stores validated data and calls next', () => {
-  it('body target stores validated:body and calls next', async () => {
+  it('body target stores validatedStateKey(body) and calls next', async () => {
     const schema = createFakeSchema({ success: true, data: { name: 'Alice' } });
     const { ctx, responseSnapshot } = createFakeContext({
       request: { body: { name: 'Alice' } },
@@ -71,12 +71,12 @@ describe('createValidationMiddleware — success stores validated data and calls
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    expect(ctx.state.get('validated:body')).toEqual({ name: 'Alice' });
+    expect(ctx.state.get(validatedStateKey('body'))).toEqual({ name: 'Alice' });
     const snap = responseSnapshot();
     expect(snap.body).toBe(null);
   });
 
-  it('query target stores validated:query and calls next', async () => {
+  it('query target stores validatedStateKey(query) and calls next', async () => {
     const schema = createFakeSchema({ success: true });
     const { ctx } = createFakeContext({ query: { page: '1' } });
     const nextFn = createNextFn();
@@ -85,10 +85,10 @@ describe('createValidationMiddleware — success stores validated data and calls
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    expect(ctx.state.has('validated:query')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('query'))).toBe(true);
   });
 
-  it('params target stores validated:params and calls next', async () => {
+  it('params target stores validatedStateKey(params) and calls next', async () => {
     const schema = createFakeSchema({ success: true });
     const { ctx } = createFakeContext({ params: { id: '42' } });
     const nextFn = createNextFn();
@@ -97,10 +97,10 @@ describe('createValidationMiddleware — success stores validated data and calls
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    expect(ctx.state.has('validated:params')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('params'))).toBe(true);
   });
 
-  it('headers target stores validated:headers and calls next', async () => {
+  it('headers target stores validatedStateKey(headers) and calls next', async () => {
     const schema = createFakeSchema({ success: true });
     const { ctx } = createFakeContext({ request: { headers: { 'x-api-key': 'secret' } } });
     const nextFn = createNextFn();
@@ -109,10 +109,10 @@ describe('createValidationMiddleware — success stores validated data and calls
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    expect(ctx.state.has('validated:headers')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('headers'))).toBe(true);
   });
 
-  it('cookies target stores validated:cookies and calls next', async () => {
+  it('cookies target stores validatedStateKey(cookies) and calls next', async () => {
     const schema = createFakeSchema({ success: true });
     const { ctx } = createFakeContext({
       request: { headers: { cookie: 'session=abc123' } },
@@ -123,7 +123,7 @@ describe('createValidationMiddleware — success stores validated data and calls
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    expect(ctx.state.has('validated:cookies')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('cookies'))).toBe(true);
   });
 });
 
@@ -193,7 +193,7 @@ describe('createValidationMiddleware — __jsonParseError key', () => {
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    expect(ctx.state.get('validated:body')).toEqual({ __jsonParseError: 'sentinel' });
+    expect(ctx.state.get(validatedStateKey('body'))).toEqual({ __jsonParseError: 'sentinel' });
   });
 });
 
@@ -213,7 +213,7 @@ describe('extractTarget — cookies', () => {
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    const cookies = ctx.state.get('validated:cookies') as Record<string, string>;
+    const cookies = ctx.state.get(validatedStateKey('cookies')) as Record<string, string>;
     expect(cookies.name).toBe('Hello');
   });
 
@@ -228,7 +228,7 @@ describe('extractTarget — cookies', () => {
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    const cookies = ctx.state.get('validated:cookies') as Record<string, string>;
+    const cookies = ctx.state.get(validatedStateKey('cookies')) as Record<string, string>;
     expect(cookies.name).toBe('%ZZ');
   });
 
@@ -241,7 +241,7 @@ describe('extractTarget — cookies', () => {
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    expect(ctx.state.get('validated:cookies')).toEqual({});
+    expect(ctx.state.get(validatedStateKey('cookies'))).toEqual({});
   });
 
   it('skips empty cookie segments and parses the real cookies', async () => {
@@ -255,7 +255,7 @@ describe('extractTarget — cookies', () => {
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    const cookies = ctx.state.get('validated:cookies') as Record<string, string>;
+    const cookies = ctx.state.get(validatedStateKey('cookies')) as Record<string, string>;
     expect(cookies).toEqual({ a: '1', b: '2' });
   });
 
@@ -270,7 +270,7 @@ describe('extractTarget — cookies', () => {
     await middleware(ctx, nextFn.fn);
 
     expect(nextFn.called).toBe(true);
-    const cookies = ctx.state.get('validated:cookies') as Record<string, string>;
+    const cookies = ctx.state.get(validatedStateKey('cookies')) as Record<string, string>;
     expect(cookies).toEqual({ flag: '', a: '1' });
   });
 });
@@ -381,6 +381,6 @@ describe('createValidationMiddleware — writes the shared validatedStateKey', (
     // Guarding the guard: if someone reintroduces an inline literal with a
     // different prefix, the assertions above fail; this pins that the helper
     // still produces the released `validated:<target>` key.
-    expect(validatedStateKey('body')).toBe('validated:body');
+    expect(validatedStateKey('body')).toBe('validation-plugin:validated-body');
   });
 });

@@ -7,7 +7,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, validatedStateKey } from '@setu-ts/common';
 
 import {
   validateBody,
@@ -39,7 +39,7 @@ function createFakeSchema() {
 // ---------------------------------------------------------------------------
 
 describe('validate helpers — delegate to service middleware', () => {
-  it('validateBody stores validated:body in ctx.state', async () => {
+  it('validateBody stores validatedStateKey(body) in ctx.state', async () => {
     const servicesMap = new Map([[CAPABILITIES.VALIDATION, SERVICE]]);
     const { ctx } = createFakeContext({
       services: servicesMap,
@@ -50,10 +50,10 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:body')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('body'))).toBe(true);
   });
 
-  it('validateQuery stores validated:query in ctx.state', async () => {
+  it('validateQuery stores validatedStateKey(query) in ctx.state', async () => {
     const servicesMap = new Map([[CAPABILITIES.VALIDATION, SERVICE]]);
     const { ctx } = createFakeContext({
       services: servicesMap,
@@ -64,10 +64,10 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:query')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('query'))).toBe(true);
   });
 
-  it('validateParams stores validated:params in ctx.state', async () => {
+  it('validateParams stores validatedStateKey(params) in ctx.state', async () => {
     const servicesMap = new Map([[CAPABILITIES.VALIDATION, SERVICE]]);
     const { ctx } = createFakeContext({
       services: servicesMap,
@@ -78,10 +78,10 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:params')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('params'))).toBe(true);
   });
 
-  it('validateHeaders stores validated:headers in ctx.state', async () => {
+  it('validateHeaders stores validatedStateKey(headers) in ctx.state', async () => {
     const servicesMap = new Map([[CAPABILITIES.VALIDATION, SERVICE]]);
     const { ctx } = createFakeContext({
       services: servicesMap,
@@ -92,10 +92,10 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:headers')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('headers'))).toBe(true);
   });
 
-  it('validateCookies stores validated:cookies in ctx.state', async () => {
+  it('validateCookies stores validatedStateKey(cookies) in ctx.state', async () => {
     const servicesMap = new Map([[CAPABILITIES.VALIDATION, SERVICE]]);
     const { ctx } = createFakeContext({
       services: servicesMap,
@@ -106,6 +106,6 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:cookies')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('cookies'))).toBe(true);
   });
 });

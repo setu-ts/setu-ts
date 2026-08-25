@@ -102,8 +102,11 @@ package fits the plugin architecture.
 | `none`                       | function  |
 | `ok`                         | function  |
 | `parseCookie`                | function  |
+| `replacePrincipal`           | function  |
+| `replaceTenant`              | function  |
 | `resolveRegistryEntry`       | function  |
 | `respondWithError`           | function  |
+| `sealRequestIdentity`        | function  |
 | `securityMetadataOf`         | function  |
 | `serializeCookie`            | function  |
 | `serializeError`             | function  |
@@ -117,6 +120,7 @@ package fits the plugin architecture.
 | `withSecurityMetadata`       | function  |
 | `withValidationMetadata`     | function  |
 | `CAPABILITIES`               | const     |
+| `CLIENT_IP_STATE_KEY`        | const     |
 | `ERROR_RESPONDER_BRAND`      | const     |
 | `ERROR_RESPONDER_STATE_KEY`  | const     |
 | `PLUGIN_PRIORITY`            | const     |

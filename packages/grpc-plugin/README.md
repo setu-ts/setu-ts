@@ -200,21 +200,21 @@ base64 -w0 < reflection.binpb  # 2332 chars
 
 ## Exports
 
-| Export                  | Kind      |
-| ----------------------- | --------- |
-| `adaptConnectModule`    | function  |
-| `GrpcPlugin`            | function  |
-| `GrpcDescriptorError`   | class     |
-| `GrpcRuntimeLoadError`  | class     |
-| `GrpcService`           | class     |
-| `GrpcUnavailableError`  | class     |
-| `CAPABILITIES`          | const     |
-| `ConnectModuleLike`     | interface |
-| `GrpcPluginOptions`     | interface |
+| Export | Kind |
+| --- | --- |
+| `adaptConnectModule` | function |
+| `GrpcPlugin` | function |
+| `GrpcDescriptorError` | class |
+| `GrpcRuntimeLoadError` | class |
+| `GrpcService` | class |
+| `GrpcUnavailableError` | class |
+| `CAPABILITIES` | const |
+| `ConnectModuleLike` | interface |
+| `GrpcPluginOptions` | interface |
 | `GrpcServiceDefinition` | interface |
-| `IGrpcService`          | interface |
-| `GrpcServingStatus`     | type      |
-| `RpcFetchHandler`       | type      |
+| `IGrpcService` | interface |
+| `GrpcServingStatus` | type |
+| `RpcFetchHandler` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+
