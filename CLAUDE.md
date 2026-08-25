@@ -3345,7 +3345,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   request-mutable; startup overrides log at `info` and successful unregisters at `warn`; request
   `user` and `tenant` accept one implicit write with explicit replacement escapes; and every
   `ctx.state` key follows `<owner-package>:<kebab-key>` behind a recurrence gate — complete (PR
-  pending).
+  #190).
 - **Next milestone** — **the `v0.1.0-alpha.9` release**, once every alpha-9 workstream has merged
   ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch). M72
   (CLI transports + interactive scaffolding) and M73–M75 (realtime authentication, realtime reads
