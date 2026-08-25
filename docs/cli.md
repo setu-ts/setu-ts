@@ -108,6 +108,47 @@ emits the `queue` module handlers the platform invokes (`createMessagingHandler`
 `createQueueHandler`). See
 [Runtime Deployment — Cloudflare Workers](./runtime-deployment.md#cloudflare-workers-deployment).
 
+### Choosing a message broker and job queue
+
+A standalone project can select its own message broker and job queue at scaffold time instead of
+getting the in-memory defaults and hand-editing `setu.config.ts`. The accepted values are derived
+from the same transport registry the workspace `--transport` flag reads, so the two can never drift:
+
+```bash
+setu new svc --template microservice --broker redis --queue redis
+cd svc
+docker compose -f docker/compose.yaml up -d   # start the broker the flags named
+deno task start
+```
+
+`--broker` accepts every arm with messaging wiring plus `memory`: `memory`, `redis`, `rabbitmq`,
+`nats`, `kafka`, `pubsub`, `service-bus`. `--queue` accepts the smaller set the queue actually
+supports: `memory`, `redis`, `rabbitmq` (`sqs` has no arm a scaffold can configure). The selected
+arm rewrites the template's `MessagingPlugin`/`QueuePlugin` wiring to read its connection from the
+environment with a local default as fallback; the variable is added to the gitignored `.env` with
+that default and to the tracked `.env.example` empty. The project also gets `docker/compose.yaml`
+starting the broker it named — the messaging plugin connects during registration and does not retry,
+so nothing else would make the first boot succeed.
+
+Three refusals are worth knowing, because each names why silence would be a lie: on Cloudflare
+Workers (the runtime swap has already removed both wirings), on starter-composed templates like
+`full-stack` (the factory renders the whole plugin list, so a rewrite would be dropped), and on
+templates registering no messaging at all (`rest`, `class-based`, no template) — where the honest
+answer is "use `--template microservice`". `memory` is accepted everywhere the flags are and
+rewrites nothing, because stating the default is not a mistake.
+
+## Interactive scaffolding
+
+At an interactive terminal, `setu new` asks for the choices it already accepts as flags — runtime,
+template, broker and queue on a standalone project; runtime and transport on a workspace. It never
+invents a question whose answer no flag can express, and `--dry-run` stays exact because prompting
+only rewrites the flag record before the ordinary pipeline runs.
+
+It fails closed in three layers, so scripts, CI and editors are never blocked: programmatic callers
+pass no prompter at all; the installed executable supplies one only when stdin is a terminal; and
+Deno's own prompt returns `null` on a non-terminal anyway. `--yes` (or `-y`) is the explicit escape
+hatch: take every default and ask nothing.
+
 ## Generating code
 
 ```bash

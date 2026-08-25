@@ -41,6 +41,16 @@ import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 const RANGE = `^${VERSION}`;
 
 /**
+ * The per-project Compose file a broker-selected project carries, starting the
+ * backing services its selected transports connect to.
+ *
+ * Declared HERE and imported by `templates/broker.ts`, so the renderer that
+ * names the file in the generated README and the overlay that emits it cannot
+ * disagree about where it lives.
+ */
+export const BROKER_COMPOSE_FILE = 'docker/compose.yaml';
+
+/**
  * Where the entry module gets the port it binds, when it does not read `PORT`.
  *
  * A standalone project reads `PORT` from the environment, defaulting to `3000`,
@@ -1191,6 +1201,10 @@ export function projectFiles(
   port?: EntryPort,
 ): readonly GeneratedFile[] {
   const manifest = host.manifest;
+  // A broker-selected project ships the Compose file that starts its own
+  // backing services; without this line the scaffold cannot complete
+  // app.start() until the reader discovers the file on their own.
+  const hasBrokerServices = host.files.some((file) => file.path === BROKER_COMPOSE_FILE);
   const readme = `# ${projectName}
 
 A [Setu-TS](https://github.com/setu-ts/setu-ts) project targeting \`${runtime}\`.
@@ -1208,7 +1222,11 @@ ${
       : 'npm start'
   }
 \`\`\`
-
+${
+    hasBrokerServices
+      ? `\n## Local transport services\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n`
+      : ''
+  }
 ## Generate code
 
 \`\`\`bash

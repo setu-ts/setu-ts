@@ -1255,3 +1255,81 @@ describe('--workspace --transport', () => {
     }
   });
 });
+
+// The primary non-interactive guarantee is that `ask` is OPTIONAL, not TTY
+// detection: every gate reaches the CLI through an in-process runCli that
+// passes none. These tests pin what that guarantee promises.
+describe('the interactive seam on setu new', () => {
+  /** A prompter that would fail the test the moment it is consulted. */
+  const refusingPrompter = () => {
+    let calls = 0;
+    return {
+      get calls() {
+        return calls;
+      },
+      prompter: {
+        select(): Promise<string | undefined> {
+          calls++;
+          return Promise.resolve(undefined);
+        },
+      },
+    };
+  };
+
+  it('produces a byte-identical file set with no ask as with --yes', async () => {
+    // The default world must not depend on how it was reached: no prompter at
+    // all (every gate) and an explicit --yes are the same scaffold.
+    const plain = harness();
+    expect(await plain.run(['svc', '--template', 'microservice'])).toBe(0);
+    const yes = harness();
+    expect(await yes.run(['svc', '--template', 'microservice', '--yes'])).toBe(0);
+
+    const pathsOf = (h: Harness) =>
+      h.fs.writes.map((path) => [path, h.fs.read(path)] as const).sort(([a], [b]) =>
+        a < b ? -1 : 1
+      );
+    expect(pathsOf(yes)).toEqual(pathsOf(plain));
+  });
+
+  it('asks nothing under --yes even when a prompter is present', async () => {
+    const { prompter, calls } = refusingPrompter();
+    const fs = createFakeFs();
+    const out = createRecorder();
+    const err = createRecorder();
+    const code = await runNewCommand(parseArgs(['svc', '--yes']), {
+      fs,
+      cwd: '/work',
+      log: out.sink,
+      error: err.sink,
+      ask: prompter,
+    });
+    expect(code).toBe(0);
+    expect(calls).toBe(0);
+  });
+
+  it('still refuses --transport standalone and names the flags that do apply', async () => {
+    const h = harness();
+    expect(await h.run(['svc', '--transport', 'redis'])).toBe(2);
+    expect(h.err.text()).toContain('--broker');
+    expect(h.err.text()).toContain('--queue');
+  });
+
+  it('honors prompted answers by rewriting the flag record', async () => {
+    const scripted = {
+      select(question: string): Promise<string | undefined> {
+        return Promise.resolve(question.startsWith('Template?') ? 'microservice' : undefined);
+      },
+    };
+    const fs = createFakeFs();
+    const code = await runNewCommand(parseArgs(['svc']), {
+      fs,
+      cwd: '/work',
+      log: () => {},
+      error: () => {},
+      ask: scripted,
+    });
+    expect(code).toBe(0);
+    // The prompted template took effect through the ordinary pipeline.
+    expect(fs.read('/work/svc/setu.config.ts')).toContain('MessagingPlugin()');
+  });
+});

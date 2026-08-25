@@ -156,6 +156,9 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(2);
       expect(h.err.text()).toContain('createFullStackAppFromConfig');
       expect(h.err.text()).toContain('talking to nobody');
+      // C4: for a BROKER the advice names what actually delivers one standalone,
+      // since a standalone full-stack project still cannot take --broker.
+      expect(h.err.text()).toContain('--template microservice --broker redis');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -168,6 +171,17 @@ describe('runAppCommand', () => {
         expect(await h.run(['app', 'orders', flag, 'redis'])).toBe(2);
         expect(h.err.text()).toContain('workspace-wide choice');
         expect(h.err.text()).toContain('new <name> --workspace');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    // The standalone broker flags configure ONE project; a member inherits
+    // whatever the workspace already recorded.
+    for (const flag of ['--broker', '--queue']) {
+      it(`refuses ${flag} on a member, naming the workspace's --transport`, async () => {
+        const h = harness([]);
+        expect(await h.run(['app', 'orders', flag, 'redis'])).toBe(2);
+        expect(h.err.text()).toContain('--transport');
         expect(h.fs.writes).toEqual([]);
       });
     }

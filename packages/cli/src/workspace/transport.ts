@@ -591,6 +591,38 @@ export function listTransports(): readonly TransportSpec[] {
 }
 
 /**
+ * Lists every name `setu new --broker` accepts, derived from the registry.
+ *
+ * Every arm declaring a {@linkcode TransportSpec.messagingArgs} renderer, plus
+ * `memory` — the default the plugin already takes, which is accepted everywhere
+ * the flag is accepted and rewrites nothing. Derived rather than hand-written
+ * so help text, refusal text and validation cannot drift from the arms that
+ * exist.
+ *
+ * @returns Each accepted broker name, in registry order
+ */
+export function listBrokers(): readonly TransportName[] {
+  return TRANSPORTS.filter((name) =>
+    name === 'memory' || TRANSPORT_SPECS[name].messagingArgs !== undefined
+  );
+}
+
+/**
+ * Lists every name `setu new --queue` accepts, derived from the registry.
+ *
+ * Every arm declaring a {@linkcode TransportSpec.queueArgs} renderer, plus
+ * `memory`. A smaller set than {@linkcode listBrokers}: the queue supports
+ * fewer backends than the brokers.
+ *
+ * @returns Each accepted queue backend name, in registry order
+ */
+export function listQueues(): readonly TransportName[] {
+  return TRANSPORTS.filter((name) =>
+    name === 'memory' || TRANSPORT_SPECS[name].queueArgs !== undefined
+  );
+}
+
+/**
  * The name a user is most likely to reach for that this framework does not
  * have, mapped to what they actually want.
  *

@@ -195,4 +195,30 @@ describe('withWorkspaceMember — the transport overlay', () => {
       }
     }
   });
+
+  // M72 §3.3 moved the rewrite into `templates/plugin-args.ts` + `broker.ts`.
+  // These strings were captured from the PRE-refactor implementation; the two
+  // wirings must stay byte-identical across the refactor, or every shipped
+  // workspace's generated output changed silently.
+  it('renders a --transport rabbitmq member byte-identically to before the refactor', () => {
+    for (const url of [undefined, 'amqp://shared:5672']) {
+      const member = withWorkspaceMember(
+        hostOf('microservice'),
+        transportSpec('rabbitmq'),
+        'orders',
+        workspaceProfile('deno'),
+        url,
+      );
+      expect(member.plugins.find((p) => p.pkg === 'messaging-plugin')?.args).toBe(
+        "{\n        broker: 'rabbitmq',\n" +
+          "        url: Deno.env.get('RABBITMQ_URL') ??\n" +
+          `          '${url ?? 'amqp://127.0.0.1:5672'}',\n      }`,
+      );
+      expect(member.plugins.find((p) => p.pkg === 'queue-plugin')?.args).toBe(
+        "{\n        adapter: 'rabbitmq',\n" +
+          "        url: Deno.env.get('RABBITMQ_URL') ??\n" +
+          `          '${url ?? 'amqp://127.0.0.1:5672'}',\n      }`,
+      );
+    }
+  });
 });

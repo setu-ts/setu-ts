@@ -13,78 +13,13 @@
  */
 
 import type { ResolvedHost } from '../templates/project-files.ts';
+import { withBrokerArgs, withQueueArgs } from '../templates/broker.ts';
 import { DISCOVERY_SPECIFIER, SERVICE_ENDPOINTS_EXPORT } from './discovery-module.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
-import { renderConnection, type TransportSpec } from './transport.ts';
+import type { TransportSpec } from './transport.ts';
 
 /** The package whose wiring the discovery overlay rewrites. */
 const DISCOVERY_PACKAGE = 'service-discovery-plugin';
-
-/** The package whose wiring a broker transport rewrites. */
-const MESSAGING_PACKAGE = 'messaging-plugin';
-
-/** The package whose wiring a queue-capable transport rewrites (X2-3). */
-const QUEUE_PACKAGE = 'queue-plugin';
-
-/**
- * The column a rendered plugin call must stay inside.
- *
- * Six spaces of indent inside the generated `plugins: [` array, plus the
- * symbol and its parentheses — measured against the `fmt.lineWidth: 100` the
- * generated root manifest declares.
- */
-const ARGS_BUDGET = 60;
-
-/**
- * Wraps a rendered argument literal that would overflow the emitted line width.
- *
- * A broker connection read is long — `Deno.env.get('RABBITMQ_URL') ??
- * 'amqp://127.0.0.1:5672'` on its own is most of the budget — so the
- * single-line form pushed a fresh `--transport rabbitmq` scaffold past its own
- * formatter (X2-4). Emitting the wrapped form directly is what keeps a
- * generated project passing `deno fmt --check` with no edits, which is the bar
- * M63 set and this is the second place to miss it.
- *
- * Splits on TOP-LEVEL commas only: a nested `{ binding: 'X', rpc: {...} }` must
- * stay on its line, exactly as `deno fmt` leaves it.
- *
- * @param args - The rendered argument literal, without enclosing parentheses
- * @returns The literal, wrapped when it would overflow
- */
-function wrapPluginArgs(args: string): string {
-  if (args.length <= ARGS_BUDGET) return args;
-  if (!args.startsWith('{') || !args.endsWith('}')) return args;
-
-  const body = args.slice(1, -1).trim();
-  const parts: string[] = [];
-  let depth = 0;
-  let current = '';
-  let quote: string | undefined;
-
-  for (const char of body) {
-    if (quote !== undefined) {
-      current += char;
-      if (char === quote) quote = undefined;
-      continue;
-    }
-    if (char === "'" || char === '"') {
-      quote = char;
-      current += char;
-      continue;
-    }
-    if (char === '{' || char === '[' || char === '(') depth += 1;
-    if (char === '}' || char === ']' || char === ')') depth -= 1;
-    if (char === ',' && depth === 0) {
-      parts.push(current.trim());
-      current = '';
-      continue;
-    }
-    current += char;
-  }
-  if (current.trim() !== '') parts.push(current.trim());
-
-  return `{\n${parts.map((part) => `        ${part},`).join('\n')}\n      }`;
-}
 
 /**
  * Points a member's discovery wiring at its generated map.
@@ -158,6 +93,10 @@ function withDiscoveryMap(host: ResolvedHost): ResolvedHost {
  * left alone by the broker arms: there is no wiring to rewrite, and adding one
  * would hand a service a bus its template never asked for.
  *
+ * The rewrite itself is composed from `templates/broker.ts`, the SAME functions
+ * the standalone `--broker`/`--queue` overlay applies — so the workspace and
+ * standalone paths cannot drift on the first arm added.
+ *
  * @param host - The member's resolved host
  * @param transport - The workspace's transport
  * @param override - The workspace's `transportUrl`, when it set one
@@ -170,45 +109,28 @@ function withTransport(
   profile: WorkspaceRuntimeProfile,
   override?: string,
 ): ResolvedHost {
-  const connection = transport.connection;
-
   // Both or neither: a transport declaring arguments always declares where its
   // connection value comes from, which a unit test pins across the registry. The
-  // pair is checked rather than assumed so a future arm cannot render `url:
-  // undefined` into a member's config.
-  //
-  // The QUEUE is rewritten by the same pass and from the same connection value
+  // QUEUE is rewritten by the same pass and from the same connection value
   // (X2-3). Its arm is present on fewer transports than the broker's, because
   // `QueueAdapterType` supports fewer backends — so a NATS or Kafka workspace
   // keeps the in-memory queue, which is the honest outcome rather than a
   // silently wrong adapter.
-  const rewrites: readonly (readonly [string, (connection: string) => string])[] = connection ===
-      undefined
-    ? []
-    : [
-      ...(transport.messagingArgs === undefined
-        ? []
-        : [[MESSAGING_PACKAGE, transport.messagingArgs] as const]),
-      ...(transport.queueArgs === undefined ? [] : [[QUEUE_PACKAGE, transport.queueArgs] as const]),
-    ];
-
-  const rendered = connection === undefined ? '' : renderConnection(connection, profile, override);
-
-  const plugins = rewrites.length === 0 ? host.plugins : host.plugins.map((wiring) => {
-    const rewrite = rewrites.find(([pkg]) => pkg === wiring.pkg);
-    return rewrite === undefined
-      ? wiring
-      : { ...wiring, args: wrapPluginArgs(rewrite[1](rendered)) };
-  });
+  const next = withQueueArgs(
+    withBrokerArgs(host, transport, profile, override),
+    transport,
+    profile,
+    override,
+  );
 
   return {
-    ...host,
+    ...next,
     // The transport's own plugins are appended, so a template that already
     // registers one of them would collide — none does, and a unit test pins
     // that across the registry.
-    plugins: [...plugins, ...transport.plugins],
-    files: [...host.files, ...(transport.memberFiles?.(member) ?? [])],
-    extraTasks: { ...host.extraTasks, ...transport.memberTasks },
-    extraImports: { ...host.extraImports, ...transport.memberImports },
+    plugins: [...next.plugins, ...transport.plugins],
+    files: [...next.files, ...(transport.memberFiles?.(member) ?? [])],
+    extraTasks: { ...next.extraTasks, ...transport.memberTasks },
+    extraImports: { ...next.extraImports, ...transport.memberImports },
   };
 }

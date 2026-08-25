@@ -309,4 +309,28 @@ describe('runCli', () => {
     expect(code).toBe(0);
     expect(fs.read('/work/out.txt')).toBe('hi');
   });
+
+  it('forwards the prompter to `new`, which may ask and take the answers', async () => {
+    // Covers the ask-forwarding branch into runNewCommand: the prompted
+    // template reaches the ordinary pipeline, so the scaffold is the one the
+    // equivalent flag would have produced.
+    const fs = createFakeFs();
+    const asked: string[] = [];
+    const code = await runCli(['new', 'svc'], {
+      fs,
+      cwd: '/work',
+      now: () => 0,
+      log: () => {},
+      error: () => {},
+      ask: {
+        select(question) {
+          asked.push(question);
+          return Promise.resolve(question.startsWith('Template?') ? 'rest' : undefined);
+        },
+      },
+    });
+    expect(code).toBe(0);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(fs.read('/work/svc/setu.config.ts')).toContain('export function createApp');
+  });
 });

@@ -32,6 +32,26 @@ describe('@setu-ts/cli barrel', () => {
     }
   });
 
+  it('does not export the terminal prompter implementation', () => {
+    // Its only consumer is src/main.ts, which imports it directly; a second
+    // export with no reader is dead surface.
+    expect(Object.keys(barrel)).not.toContain('createTerminalPrompter');
+  });
+
+  // COMPILE-TIME, deliberately: a runtime assertion over a type export passes
+  // when the export is gone (the M56 defect class), because types vanish at
+  // runtime. These annotations fail `deno check` the moment the barrel stops
+  // exporting either type.
+  it('names Prompter and PromptChoice from the barrel', () => {
+    const prompter: barrel.Prompter = {
+      select: (_question: string, _choices: readonly barrel.PromptChoice[]) =>
+        Promise.resolve(undefined),
+    };
+    const choice: barrel.PromptChoice = { value: 'rest', label: 'REST set' };
+    expect(prompter).toBeDefined();
+    expect(choice.value).toBe('rest');
+  });
+
   it('does not leak the command implementations', () => {
     for (const name of ['runNewCommand', 'runGenerateCommand', 'writeFiles']) {
       expect(Object.keys(barrel)).not.toContain(name);
