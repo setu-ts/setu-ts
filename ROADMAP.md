@@ -7367,4 +7367,4 @@ branch during a version bump.
 | 70k       | ✅     | storage, queue, worker operability    |
 | 70l       | ✅     | deployment and operations             |
 | 70m       | ✅     | sdk and openapi                       |
-| 70n       | ⬜     | decorators, validation, closeout      |
+| 70n       | ✅     | decorators, validation, closeout      |

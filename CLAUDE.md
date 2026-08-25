@@ -3283,12 +3283,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   can gate, the emitted text; the register's kind measurements are not re-run here. Developed on a
   branch cut before M70m, so `origin/main` was merged in and the gates re-run against the merged
   tree before hand-off) — complete (PR #182)
-- **Next milestone** — **M70n** (decorators, DI and docs sweep: `decorator-plugin`,
-  `validation-plugin`, docs). `@ValidateBody(schema)` does not validate anything — it only feeds
-  OpenAPI (E1) — and `@Body()` re-reads the raw request, discarding validation transforms, defaults
-  and coercions (E2). Closes with the mechanical documentation rows the other workstreams do not
-  absorb (C1, C2, X3-1, X3-3, X3-4, X3-5, X3-6, X3-8, X3-9, X4-5, X4-7, X4-11, X5-5, X5-7, X5-9,
-  X7-9, X8-8, X9-10, D8, X2-6).
+- **Next milestone** — **the `v0.1.0-alpha.9` release**, which ships after every alpha-9 workstream
+  merges ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch).
 
 ## Verification (run before declaring any work done)
 
