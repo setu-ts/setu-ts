@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
+import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
@@ -1253,5 +1254,107 @@ describe('--workspace --transport', () => {
         expect(h.fs.writes).toEqual([]);
       });
     }
+  });
+});
+
+// The primary non-interactive guarantee is that `ask` is OPTIONAL, not TTY
+// detection: every gate reaches the CLI through an in-process runCli that
+// passes none. These tests pin what that guarantee promises.
+describe('the interactive seam on setu new', () => {
+  /** A prompter that would fail the test the moment it is consulted. */
+  const refusingPrompter = () => {
+    let calls = 0;
+    return {
+      get calls() {
+        return calls;
+      },
+      prompter: {
+        select(): Promise<string | undefined> {
+          calls++;
+          return Promise.resolve(undefined);
+        },
+      },
+    };
+  };
+
+  it('produces a byte-identical file set with no ask as with --yes', async () => {
+    // The default world must not depend on how it was reached: no prompter at
+    // all (every gate) and an explicit --yes are the same scaffold.
+    const plain = harness();
+    expect(await plain.run(['svc', '--template', 'microservice'])).toBe(0);
+    const yes = harness();
+    expect(await yes.run(['svc', '--template', 'microservice', '--yes'])).toBe(0);
+
+    const pathsOf = (h: Harness) =>
+      h.fs.writes.map((path) => [path, h.fs.read(path)] as const).sort(([a], [b]) =>
+        a < b ? -1 : 1
+      );
+    expect(pathsOf(yes)).toEqual(pathsOf(plain));
+  });
+
+  it('asks nothing under --yes even when a prompter is present', async () => {
+    // The tracker is kept WHOLE, never destructured: `calls` is a getter, so
+    // `const { calls } = …` snapshots it to 0 before the command runs and the
+    // assertion below would pass however many questions were asked.
+    const tracker = refusingPrompter();
+    const fs = createFakeFs();
+    const out = createRecorder();
+    const err = createRecorder();
+    const code = await runNewCommand(parseArgs(['svc', '--yes']), {
+      fs,
+      cwd: '/work',
+      log: out.sink,
+      error: err.sink,
+      ask: tracker.prompter,
+    });
+    expect(code).toBe(0);
+    expect(tracker.calls).toBe(0);
+  });
+
+  it('still refuses --transport standalone and names the flags that do apply', async () => {
+    const h = harness();
+    expect(await h.run(['svc', '--transport', 'redis'])).toBe(2);
+    expect(h.err.text()).toContain('--broker');
+    expect(h.err.text()).toContain('--queue');
+  });
+
+  it('honors prompted answers by rewriting the flag record', async () => {
+    const scripted = {
+      select(question: string): Promise<string | undefined> {
+        return Promise.resolve(question.startsWith('Template?') ? 'microservice' : undefined);
+      },
+    };
+    const fs = createFakeFs();
+    const code = await runNewCommand(parseArgs(['svc']), {
+      fs,
+      cwd: '/work',
+      log: () => {},
+      error: () => {},
+      ask: scripted,
+    });
+    expect(code).toBe(0);
+    // The prompted template took effect through the ordinary pipeline.
+    expect(fs.read('/work/svc/setu.config.ts')).toContain('MessagingPlugin()');
+  });
+
+  it('takes the same scaffold on bare Enter that --yes takes', async () => {
+    // The default must not depend on whether a TTY is present. Enter used to
+    // take listTemplates()'s first entry (`rest`) while `--yes` took
+    // MINIMAL_HOST; this drives the REAL terminal prompter with bare Enters
+    // and pins both worlds to one byte-identical file set.
+    const enter = createFakeFs();
+    const code = await runNewCommand(parseArgs(['svc']), {
+      fs: enter,
+      cwd: '/work',
+      log: () => {},
+      error: () => {},
+      ask: createTerminalPrompter(() => true, () => '', () => {}),
+    });
+    expect(code).toBe(0);
+    const yes = harness();
+    expect(await yes.run(['svc', '--yes'])).toBe(0);
+    const pathsOf = (fs: FakeFs) =>
+      fs.writes.map((path) => [path, fs.read(path)] as const).sort(([a], [b]) => a < b ? -1 : 1);
+    expect(pathsOf(enter)).toEqual(pathsOf(yes.fs));
   });
 });

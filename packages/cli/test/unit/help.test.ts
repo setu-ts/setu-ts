@@ -77,4 +77,21 @@ describe('help output', () => {
     }
     expect(text).toContain('custom <schematic-name>');
   });
+
+  it('documents --broker and --queue with the registry-derived lists', async () => {
+    const { listBrokers, listQueues } = await import('../../src/workspace/transport.ts');
+    const text = await helpText(['new', '--help']);
+    expect(text).toContain('--broker <name>');
+    expect(text).toContain('--queue <name>');
+    // Rendered from the registry, not hand-written, so they cannot drift.
+    expect(text).toContain(listBrokers().join(' | '));
+    expect(text).toContain(listQueues().join(' | '));
+  });
+
+  it('documents --yes as the escape hatch', async () => {
+    const text = await helpText(['new', '--help']);
+    expect(text).toContain('--yes, -y');
+    const top = await helpText(['--help']);
+    expect(top).toContain('--yes, -y');
+  });
 });

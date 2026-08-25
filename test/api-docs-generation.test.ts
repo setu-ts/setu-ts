@@ -365,6 +365,11 @@ error[private-type-ref]: public type references private type
       // making fifteen interface members newly reachable; documenting them plus
       // re-exporting the handlers' referenced types cleared sixteen more — the
       // ratchet recorded the measured 752.
+      // M72 added the `Prompter`/`PromptChoice` exports and held the line at
+      // 752: `Prompter.select` initially carried no JSDoc of its own (the
+      // block sat on the interface, so its @param/@returns described a member
+      // deno_doc never saw), which the ratchet caught as one `missing-jsdoc`.
+      // Documenting the member cleared it rather than raising the constant.
       // The ratchet refused the stale constant in BOTH directions and named
       // the new number, which is exactly the behaviour §3.10 specifies.
       expect(DOC_LINT_BASELINE).toBe(752);

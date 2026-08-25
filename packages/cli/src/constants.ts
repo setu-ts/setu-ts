@@ -71,6 +71,8 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'port',
   'transport',
   'transport-url',
+  'broker',
+  'queue',
   'env-file',
   'depends-on',
   'scope',

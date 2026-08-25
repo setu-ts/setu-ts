@@ -109,17 +109,20 @@ install, and `setu generate --help` lists only what is available here.
 
 ## Options
 
-| Option                | Behavior                                                                                             |
-| --------------------- | ---------------------------------------------------------------------------------------------------- |
-| `--dry-run`           | Prints `would create <path>` per file and writes absolutely nothing.                                 |
-| `--dir <path>`        | Operate on this directory instead of the working directory.                                          |
-| `--runtime <target>`  | On `new`, the entry shape and manifest; on `generate`, passed to the schematic. Default `deno`.      |
-| `--template <name>`   | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.         |
-| `--env-file <path>`   | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates. |
-| `--depends-on <name>` | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints.             |
-| `--config <path>`     | Load the app from this module instead of `./setu.config.ts`.                                         |
-| `--help`, `-h`        | Prints usage.                                                                                        |
-| `--version`, `-v`     | Prints the version.                                                                                  |
+| Option                | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--dry-run`           | Prints `would create <path>` per file and writes absolutely nothing.                                                                                                                                                                                                                                                                                                                                                        |
+| `--dir <path>`        | Operate on this directory instead of the working directory.                                                                                                                                                                                                                                                                                                                                                                 |
+| `--runtime <target>`  | On `new`, the entry shape and manifest; on `generate`, passed to the schematic. Default `deno`.                                                                                                                                                                                                                                                                                                                             |
+| `--template <name>`   | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.                                                                                                                                                                                                                                                                                                                                |
+| `--env-file <path>`   | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                        |
+| `--broker <name>`     | `new` only: the standalone project's message broker (`memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). Rewrites the template's `MessagingPlugin` wiring, adds the connection variable to the dotenv pair, and emits `docker/compose.yaml` starting the broker. Refused wherever it would be a silent no-op: Cloudflare Workers, starter-composed templates, and templates registering no messaging. |
+| `--queue <name>`      | `new` only: the job queue backend (`memory`, `redis`, `rabbitmq`). Same overlay as `--broker`, for the queue wiring.                                                                                                                                                                                                                                                                                                        |
+| `--yes`, `-y`         | `new` only: take every default and ask nothing. A no-op when no prompter is present.                                                                                                                                                                                                                                                                                                                                        |
+| `--depends-on <name>` | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints.                                                                                                                                                                                                                                                                                                                                    |
+| `--config <path>`     | Load the app from this module instead of `./setu.config.ts`.                                                                                                                                                                                                                                                                                                                                                                |
+| `--help`, `-h`        | Prints usage.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `--version`, `-v`     | Prints the version.                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
 error (unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot
@@ -210,12 +213,29 @@ const code = await runCli(['generate', 'service', 'billing'], {
 `runCli` returns an exit code and never calls `Deno.exit`. The dependency bundle has no default on
 purpose: `src/main.ts` owns the process boundary, so every other path stays testable.
 
+## Interactive scaffolding
+
+When run at an interactive terminal, `setu new` asks for the choices it already accepts as flags —
+runtime and template on a standalone project, runtime and transport on a workspace. The broker and
+queue questions follow only when the answers already given can actually take them: they are skipped
+for a template registering no messaging (the minimal default, `rest`, `class-based`), for the
+starter-composed `full-stack`, and on Cloudflare Workers, which are the same cases the flags
+themselves refuse. So `--template microservice` is asked four questions and the default is asked
+two. Every prompted value is expressible as a flag, so prompts are never a second way to configure a
+project, and `--dry-run` stays exact.
+
+Non-interactive by construction in three layers: `runCli`'s dependency bundle takes prompting as an
+OPTIONAL `ask` member no programmatic caller passes; the installed executable supplies it only when
+stdin is a terminal; and Deno's own prompt returns `null` on a non-terminal. All three fail closed
+to the documented defaults. `--yes` is the explicit escape hatch.
+
 ## Not yet supported
 
 - **A general `--starter` flag.** `full-stack` composes through `@setu-ts/full-stack-starter`, but
   the other templates emit inline wiring and there is no flag to pick a starter for them.
 - **Flags for plugin commands.** Handlers receive positionals only; use `--` to forward flags.
-- **Plugin installation.** `setu` generates and dispatches; it does not edit your manifest.
+- **Prompting inside `setu generate`.** A generate runs inside scripts and editor hooks; only
+  `setu new` asks questions.
 
 ## License
 
@@ -234,6 +254,8 @@ MIT
 | `CliDependencies`  | interface |
 | `DerivedNames`     | interface |
 | `GeneratedFile`    | interface |
+| `PromptChoice`     | interface |
+| `Prompter`         | interface |
 | `SchematicOptions` | interface |
 | `AppLoader`        | type      |
 | `ModuleLoader`     | type      |
