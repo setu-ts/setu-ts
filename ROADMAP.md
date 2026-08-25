@@ -6852,13 +6852,18 @@ application's own instance type, since a seam that type-checks as `unknown` has 
 
 ---
 
-## Milestone 70: Alpha-9 Defect Closeout ⬜ PLANNED
+## Milestone 70: Alpha-9 Defect Closeout ✅ COMPLETE
 
 **Objective:** Close the defects the alpha.8 smoke programme found, and ship them as one
 `v0.1.0-alpha.9`. The programme drove the **published** packages through twelve exercises (X1–X12)
-and produced **118 verified defects — 38 High, 52 Medium, 28 Low — none of them closed**. The
-register is `smoke/DEFECTS.md`, which stays the authority for the full row set and the per-row
-reproduction; this section is the work breakdown.
+and produced **118 verified defects — 38 High, 52 Medium, 28 Low**, none of them closed when this
+milestone opened. The register is `smoke/DEFECTS.md`, which stays the authority for the full row set
+and the per-row reproduction; this section is the work breakdown. **The register's Status column is
+the authority on what remains, not this section.** It was reconciled on 2026-08-25 after this
+milestone closed: 35 rows still read `open` while their fixes were on `main`, because a workstream
+was expected to update the register but `smoke/` is excluded from the repository, so that update
+could never ship in a PR. Every row was re-checked against the workstream entry claiming it. **X2-6
+is the only row still open**, carried to M73.
 
 > **The register is NOT in this repository.** `smoke/` is excluded locally (`.git/info/exclude`, so
 > not even shared through `.gitignore`), which means the rows, reproductions and mechanisms behind
@@ -7244,6 +7249,37 @@ Ordered by the sequence they should be worked, not by severity alone.
   the breakage accepted and a fix agreed. It went to M70h because that milestone already rewrites
   the seam registry for A2, X5-8 and E4, so a second pass would rework the same files.
 
+### Closed — what shipped, and what was carried out
+
+All fourteen workstreams (M70a–M70n) are complete and merged, M70n last (PR #183). The `70` row
+flips with this section.
+
+**Three items were deliberately carried OUT of this milestone rather than closed in it.** Each is a
+capability gap rather than a defect in shipped code, which is why none of them is a `fix/…` branch:
+a `fix/…` is scoped to a defect in already-merged `main`, and adding an absent capability is
+milestone work with a plan, a `PUBLIC_API.md` edit and (for two of them) §10.2 approval.
+
+| Carried out                                                                       | From                          | Now     |
+| --------------------------------------------------------------------------------- | ----------------------------- | ------- |
+| Trace context across the broker (`traceparent` on publish, extracted on delivery) | X2-6, assigned to M70n        | **M73** |
+| A cookie-reading auth strategy, and a caller-supplied strategy hatch              | X3-5, doc half closed in M70n | **M71** |
+| A read-only room/channel lookup (`peek`)                                          | X3-8, docs closed in M70n     | **M72** |
+
+Two smaller deferrals came out of M70n's own PR review (#183) and are **not** milestones:
+
+- **Windows path handling in `react-router-plugin`'s asset serving.** `createContainedReader` joins
+  with a hardcoded `/` and the containment and request-path handling are POSIX-shaped throughout, so
+  a backslash-aware `clientBuildRoot` alone changes nothing end to end. A `fix/…` branch once M70n
+  merges, scoped to the whole module — the one item here that IS defect-shaped.
+- **`SseMessage.data` narrowed to a recursive JSON-safe type.** Declined as a breaking change
+  unrelated to the row it was raised on: the pre-existing `Record<string, unknown>` arm already
+  admits `{ x: 10n }`, which `JSON.stringify` throws on, so M70n's `readonly unknown[]` addition
+  introduced no new exposure. Folded into **M72**, which is already touching this contract.
+
+The register's own **Deferred follow-ons** section carries the same list with a source citation
+proving each gap is real, because two of its Status columns previously said "tracked separately"
+while nothing tracked them.
+
 ### Release
 
 `v0.1.0-alpha.9` ships after every workstream merges. The release itself follows
@@ -7258,6 +7294,69 @@ branch during a version bump.
 - ⬜ **CHANGELOG.md** — an entry per behaviour change, with migration text for each breaking one.
 - ⬜ **ROADMAP.md** — the workstream's `⬜` flipped to `✅` with its PR number.
 - ⬜ **PUBLIC_API.md** — for any contract, option or export the workstream changes.
+
+---
+
+## Milestone 71: Realtime Authentication ⬜ PLANNED
+
+**Objective:** Let a browser authenticate over the two realtime transports it can actually use.
+Carried out of M70n, which closed X3-5's documentation half only.
+
+**The gap, verified from source.** A browser can send exactly one credential over an `EventSource`
+request or a WebSocket upgrade: a cookie. `AuthPluginOptions`
+(`packages/auth-plugin/src/interfaces/index.ts:66`) declares exactly `jwt`, `apiKey`, `local` and
+`rbac` — there is no caller-supplied strategy hatch, and the internal `strategies` array
+(`plugin/auth-plugin.ts:101`) is built from those options alone. Both shipped strategies read a
+header. So `EventSource` is `401`ed, and a socket's cookie session cannot be read in `onOpen` — the
+callback `websocket-plugin`'s README nominates for exactly this. **The two transports cannot
+authenticate a browser at all**, and no application-side workaround exists short of replacing the
+capability.
+
+- **In scope:** a cookie-reading `IAuthStrategy`; an `AuthPluginOptions` hatch accepting
+  caller-supplied strategies (a public API addition — §10.2 approval + `PUBLIC_API.md` in the same
+  PR); whatever bridge lets `ISessionService` be read from an upgrade request, given
+  `ISessionService.from(ctx)` needs a request context a WebSocket has none of.
+- **NOT this milestone:** the pipeline-bypass question — M70a already routes upgrades through the
+  kernel pipeline, so a guard CAN refuse an upgrade today; what is missing is a strategy that can
+  read the credential.
+- **Packages:** `auth-plugin`, `session-plugin`, `websocket-plugin`, `sse-plugin`, docs.
+
+## Milestone 72: Realtime Registry Reads and the SSE Contract ⬜ PLANNED
+
+**Objective:** A non-mutating way to read realtime registry state, and the `SseMessage.data`
+narrowing deferred from M70n's review.
+
+**The gap, verified from source.** `room()` and `channel()` are get-or-create with no read-only
+counterpart — `grep` finds no `peek`, `hasRoom`, `getRoom` or `hasChannel` in either plugin's `src`.
+So a presence endpoint reading `size` for a caller-supplied name **allocates**, and an
+unauthenticated scan grows the registry until the next disconnect sweep reclaims it. M70n documented
+the semantics in both READMEs and `PUBLIC_API.md`; it did not add the read.
+
+- **In scope:** a read-only lookup on both plugins (public API addition — §10.2 + `PUBLIC_API.md`);
+  narrowing `SseMessage.data` to a recursive JSON-safe type, which is **breaking** and needs
+  CHANGELOG migration text naming what a caller passing a non-JSON value does instead.
+- **Note on the narrowing:** it fixes a pre-existing exposure, not one M70n introduced — the
+  `Record<string, unknown>` arm has always admitted `{ x: 10n }`, which `JSON.stringify` throws on.
+- **Packages:** `websocket-plugin`, `sse-plugin`, `common`.
+
+## Milestone 73: Broker Trace Propagation ⬜ PLANNED
+
+**Objective:** Carry W3C trace context across the message broker, so a trace survives a publish.
+
+**The gap, verified from source.** `MessageMetadata.headers`
+(`packages/common/src/services/messaging.ts:21`) is declared and **no broker populates it**, so
+`headers` is `{}` on every delivered message and a consumer span is orphaned from its producer. The
+OTel auto-instrumentation that would inject it is Node-gated (M24b), while the CLI's default
+scaffold runtime is Deno — so the one mechanism that could close this is unavailable exactly where
+the framework points a new project.
+
+- **In scope:** `traceparent` injected on publish and extracted on delivery across all seven
+  `messaging-plugin` brokers; a `telemetry-plugin` seam that works off Node; the decision on whether
+  `MessageMetadata.headers` becomes a populated contract rather than an optional passthrough.
+- **Why it was not a documentation row:** it was assigned to M70n as one, and source-checking
+  refused that framing — seven brokers, a runtime-gated seam and a contract decision is a milestone
+  with its own design and real-backend gates.
+- **Packages:** `messaging-plugin`, `telemetry-plugin`, `common`.
 
 ---
 
@@ -7354,7 +7453,7 @@ branch during a version bump.
 | 67        | ✅     | cli + starters (scaffold defaults)    |
 | 68        | ✅     | common + kernel (contract gaps)       |
 | 69        | ✅     | database-plugin (drizzle query seam)  |
-| 70        | ⬜     | alpha-9 defect closeout (umbrella)    |
+| 70        | ✅     | alpha-9 defect closeout (umbrella)    |
 | 70a       | ✅     | pipeline bypass (security)            |
 | 70b       | ✅     | tenant isolation, data exposure (sec) |
 | 70c       | ✅     | health-signal sweep (6 packages)      |
@@ -7369,3 +7468,6 @@ branch during a version bump.
 | 70l       | ✅     | deployment and operations             |
 | 70m       | ✅     | sdk and openapi                       |
 | 70n       | ✅     | decorators, validation, closeout      |
+| 71        | ⬜     | realtime authentication               |
+| 72        | ⬜     | realtime reads + sse contract         |
+| 73        | ⬜     | broker trace propagation              |
