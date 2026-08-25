@@ -24,14 +24,15 @@ describe('parameter resolver — validated values', () => {
     expect(value).toBe(transformed);
   });
 
-  it('resolves @Query(name) from the validated state key when present', async () => {
+  it('resolves @Query(name) to its OWN member of the validated record', async () => {
     const ctx = createFakeRequestContext({ query: { page: '2' } });
-    // The middleware validates the WHOLE request part, so the named
-    // parameter receives the validated record itself.
+    // The middleware validates the WHOLE request part, but a parameter bound
+    // WITH a name receives only its own member — `@Query('page')` is `2`,
+    // never the `{ page: 2 }` record (the documented NAMED-value contract).
     const validated = { page: 2 };
     ctx.state.set(validatedStateKey('query'), validated);
     expect(await resolveParameter(ctx, { index: 0, type: 'query', name: 'page' })).toBe(
-      validated,
+      validated.page,
     );
   });
 
@@ -42,11 +43,20 @@ describe('parameter resolver — validated values', () => {
     expect(await resolveParameter(ctx, { index: 0, type: 'query' })).toBe(validated);
   });
 
-  it('resolves @Param(name) from the validated state key when present', async () => {
+  it('resolves @Param(name) to its OWN member of the validated record', async () => {
     const ctx = createFakeRequestContext({ params: { id: 'raw-id' } });
     const validated = { id: 'coerced-id' };
     ctx.state.set(validatedStateKey('params'), validated);
-    expect(await resolveParameter(ctx, { index: 0, type: 'param', name: 'id' })).toBe(validated);
+    expect(await resolveParameter(ctx, { index: 0, type: 'param', name: 'id' })).toBe(
+      validated.id,
+    );
+  });
+
+  it('resolves @Body() (no name) to the whole validated object', async () => {
+    const ctx = createFakeRequestContext({ body: { name: 'Alice' } });
+    const validated = { name: 'ALICE' };
+    ctx.state.set(validatedStateKey('body'), validated);
+    expect(await resolveParameter(ctx, { index: 0, type: 'body' })).toBe(validated);
   });
 
   it('falls back to the raw body when no validated value was written', async () => {
@@ -91,12 +101,8 @@ describe('parameter resolver — validated values', () => {
     await expect(resolveParameter(ctx, { index: 0, type: 'body' })).toEqual({
       name: 'validated-body',
     });
-    expect(await resolveParameter(ctx, { index: 0, type: 'query', name: 'page' })).toBe(
-      validatedQuery,
-    );
-    expect(await resolveParameter(ctx, { index: 0, type: 'param', name: 'id' })).toBe(
-      validatedParams,
-    );
+    expect(await resolveParameter(ctx, { index: 0, type: 'query', name: 'page' })).toBe(9);
+    expect(await resolveParameter(ctx, { index: 0, type: 'param', name: 'id' })).toBe('nine');
   });
 
   it('leaves @Header resolving raw even when a headers value is in state', async () => {
