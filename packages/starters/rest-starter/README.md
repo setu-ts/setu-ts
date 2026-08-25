@@ -291,12 +291,12 @@ accepts additional registrations.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `buildRestPlugins` | function |
-| `createRestApp` | function |
-| `RealtimeArm` | interface |
+| Export               | Kind      |
+| -------------------- | --------- |
+| `buildRestPlugins`   | function  |
+| `createRestApp`      | function  |
+| `RealtimeArm`        | interface |
 | `RestStarterOptions` | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
-
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

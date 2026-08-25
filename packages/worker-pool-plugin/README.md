@@ -180,19 +180,20 @@ The gauges are written from the same snapshot the health indicator reads, on eve
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `WorkerPoolPlugin` | function |
-| `WorkerExitError` | class |
-| `WorkerPoolService` | class |
-| `WorkerPoolUnavailableError` | class |
-| `WorkerQueueFullError` | class |
-| `WorkerTaskError` | class |
-| `WorkerTaskTimeoutError` | class |
-| `TaskPoolOptions` | interface |
-| `WorkerPoolPluginOptions` | interface |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `WorkerPoolPlugin`           | function  |
+| `WorkerExitError`            | class     |
+| `WorkerPoolService`          | class     |
+| `WorkerPoolUnavailableError` | class     |
+| `WorkerQueueFullError`       | class     |
+| `WorkerTaskError`            | class     |
+| `WorkerTaskTimeoutError`     | class     |
+| `TaskPoolOptions`            | interface |
+| `WorkerPoolPluginOptions`    | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

@@ -12,7 +12,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IValidationService, MiddlewareFunction, ValidationTarget } from '@setu-ts/common';
-import { CAPABILITIES, validatedStateKey, validationMetadataOf } from '@setu-ts/common';
+import { CAPABILITIES, validationMetadataOf } from '@setu-ts/common';
 
 import {
   createValidationMiddleware,
@@ -126,6 +126,6 @@ describe('validation metadata brand', () => {
     });
 
     expect(nextRan).toBe(true);
-    expect(ctx.state.get(validatedStateKey('body'))).toEqual({ a: 1 });
+    expect(ctx.state.get('validated:body')).toEqual({ a: 1 });
   });
 });

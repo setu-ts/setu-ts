@@ -7,7 +7,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES, validatedStateKey } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IPluginContext, IRequestContext, IRuntimeServices } from '@setu-ts/common';
 
 import { createApplication, type IKernelApplication } from '@setu-ts/kernel';
@@ -89,7 +89,7 @@ describe('ValidationPlugin E2E — with real application', () => {
         }),
       ],
       handler: (ctx: IRequestContext) => {
-        const body = ctx.state.get(validatedStateKey('body'));
+        const body = ctx.state.get('validated:body');
         return ctx.response.json({ received: body });
       },
     });
@@ -245,7 +245,7 @@ describe('ValidationPlugin E2E — with real application', () => {
         }),
       ],
       handler: (ctx: IRequestContext) => {
-        const query = ctx.state.get(validatedStateKey('query'));
+        const query = ctx.state.get('validated:query');
         return ctx.response.json({ query });
       },
     });

@@ -61,15 +61,16 @@ mistake, not a silent no-op.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `ResiliencePlugin` | function |
-| `BulkheadFullError` | class |
-| `CircuitOpenError` | class |
-| `TimeoutError` | class |
+| Export                    | Kind      |
+| ------------------------- | --------- |
+| `ResiliencePlugin`        | function  |
+| `BulkheadFullError`       | class     |
+| `CircuitOpenError`        | class     |
+| `TimeoutError`            | class     |
 | `ResiliencePluginOptions` | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 
