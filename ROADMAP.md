@@ -7231,11 +7231,12 @@ Ordered by the sequence they should be worked, not by severity alone.
   **X2-6 (no trace context crosses the broker) is recommended for reassignment, not landed here.**
   `MessageMetadata.headers` exists (`packages/common/src/services/messaging.ts:21`) and no broker
   populates it, so closing the row means W3C `traceparent` injection on publish and extraction on
-  delivery across all ten brokers, a `telemetry-plugin` seam that works off Node (the row's own
-  point is that the OTel instrumentation is Node-gated while the template default runtime is Deno),
-  and a decision about whether that field becomes a populated contract. That is a milestone with its
-  own design and real-backend gates; folding it into a closeout sweep is how a feature ships without
-  one. Maintainer's call — the plan proceeds on the assumption it moves.
+  delivery across all seven `messaging-plugin` brokers, a `telemetry-plugin` seam that works off
+  Node (the row's own point is that the OTel instrumentation is Node-gated while the template
+  default runtime is Deno), and a decision about whether that field becomes a populated contract.
+  That is a milestone with its own design and real-backend gates; folding it into a closeout sweep
+  is how a feature ships without one. Maintainer's call — the plan proceeds on the assumption it
+  moves.
 
   **E8 (`routes/` and `controllers/` as parallel mechanisms) moved to M70h** and shipped there. This
   line previously called it maintainer-class — "a decision to take, not a defect to fix" — which was

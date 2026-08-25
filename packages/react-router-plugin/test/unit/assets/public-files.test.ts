@@ -240,7 +240,10 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
   }
 
   /** Registers the plugin against a fake context that CAPTURES GET handlers. */
-  function makeHarness(fileMap: Record<string, Uint8Array>): PluginHarness {
+  function makeHarness(
+    fileMap: Record<string, Uint8Array>,
+    warnings?: Array<{ message: string; meta?: Record<string, unknown> }>,
+  ): PluginHarness {
     const getHandlers: Array<{ pattern: string; handler: unknown }> = [];
     const assetPatterns: string[] = [];
     const registered = new Map<string, unknown>();
@@ -266,6 +269,11 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
         const plugin = ReactRouterPlugin(options as never);
         await plugin.register({
           runtime: { uuid: () => 'id', fs: makeMapFs(fileMap) },
+          logger: warnings === undefined ? undefined : {
+            warn: (message: string, meta?: Record<string, unknown>): void => {
+              warnings.push(meta === undefined ? { message } : { message, meta });
+            },
+          },
           services: {
             has: (t: string): boolean => registered.has(t),
             get: <T>(t: string): T => registered.get(t) as T,
@@ -320,6 +328,93 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
     );
     // The hashed-asset route is unchanged.
     expect(harness.assetPatterns).toContain('/assets/*');
+  });
+
+  // M70n code review: `clientBuildRoot` derives the served root by chopping the
+  // last path segment. Three inputs derive a root that CONTAINS the whole
+  // application rather than the build output, and the containment guard cannot
+  // catch them — containment holds, the root itself is wrong. Each case below
+  // serves a real file from the widened root WITHOUT the refusal.
+  describe('degenerate derived roots are refused', () => {
+    async function catchAllFor(
+      assetsDir: string,
+      fileMap: Record<string, Uint8Array>,
+      warnings?: Array<{ message: string; meta?: Record<string, unknown> }>,
+    ): Promise<{ handler: RouteHandler; harness: PluginHarness }> {
+      const harness = makeHarness(fileMap, warnings);
+      await harness.register({ ...baseOptions, assetsDir });
+      const catchAll = harness.getHandlers.find((r) => r.pattern === '/*');
+      return { handler: catchAll?.handler as RouteHandler, harness };
+    }
+
+    it("refuses '.' — does not serve the process working directory", async () => {
+      // './assets' derives '.', so a cwd file is one unauthenticated GET away.
+      const { handler } = await catchAllFor('./assets', {
+        './.env': encoder.encode('SESSION_SECRET=super-secret'),
+      });
+      const mockResp = buildMockResponse();
+      await handler(buildMockCtx('/.env', mockResp));
+
+      expect(mockResp.sentBody).toBeNull();
+      expect(mockResp.sentStream).not.toBeNull();
+      expect(await streamText(mockResp.sentStream!)).toContain('ssr');
+    });
+
+    it("refuses '' — does not serve the filesystem root", async () => {
+      // '/assets' derives '', so `${''}/${'etc/passwd'}` is an absolute read.
+      const { handler } = await catchAllFor('/assets', {
+        '/etc/passwd': encoder.encode('root:x:0:0'),
+      });
+      const mockResp = buildMockResponse();
+      await handler(buildMockCtx('/etc/passwd', mockResp));
+
+      expect(mockResp.sentBody).toBeNull();
+      expect(await streamText(mockResp.sentStream!)).toContain('ssr');
+    });
+
+    it('refuses an assetsDir that names no parent at all', async () => {
+      const { handler } = await catchAllFor('assets', {
+        'assets/robots.txt': encoder.encode('User-agent: *'),
+      });
+      const mockResp = buildMockResponse();
+      await handler(buildMockCtx('/robots.txt', mockResp));
+
+      expect(mockResp.sentBody).toBeNull();
+      expect(await streamText(mockResp.sentStream!)).toContain('ssr');
+    });
+
+    it("refuses '..' — does not serve a directory ABOVE the working directory", async () => {
+      // '../assets' derives '..'. Broader than the cwd case, same mechanism.
+      const { handler } = await catchAllFor('../assets', {
+        '../secrets.txt': encoder.encode('token'),
+      });
+      const mockResp = buildMockResponse();
+      await handler(buildMockCtx('/secrets.txt', mockResp));
+
+      expect(mockResp.sentBody).toBeNull();
+      expect(await streamText(mockResp.sentStream!)).toContain('ssr');
+    });
+
+    it('names the refused assetsDir instead of failing silently', async () => {
+      const warnings: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+      await catchAllFor('./assets', {}, warnings);
+
+      const warned = warnings.find((w) => w.message.includes('client-build root'));
+      expect(warned).toBeDefined();
+      expect(warned?.meta?.assetsDir).toBe('./assets');
+    });
+
+    it('still derives a real parent for a normal build layout', async () => {
+      const { handler } = await catchAllFor('/srv/app/build/client/assets', {
+        '/srv/app/build/client/robots.txt': encoder.encode('User-agent: *'),
+      });
+      const mockResp = buildMockResponse();
+      await handler(buildMockCtx('/robots.txt', mockResp));
+
+      expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe(
+        'User-agent: *',
+      );
+    });
   });
 
   it('falls through to SSR for a root miss', async () => {

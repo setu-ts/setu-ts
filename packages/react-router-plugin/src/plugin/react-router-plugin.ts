@@ -63,14 +63,42 @@ function joinWildcard(prefix: string): string {
  * directory's PARENT. Probing `assetsDir` directly looked for
  * `./build/client/assets/robots.txt` and missed every public file.
  *
+ * Returns `undefined` when the parent cannot be named WITHOUT widening the
+ * served root far past the build directory. Three derivations are refused
+ * rather than used, because each one hands the public-file handler a root that
+ * contains the whole application rather than the build output:
+ *
+ * - no separator (`'assets'`) — the input names no parent at all;
+ * - `''` (from `'/assets'`) — the filesystem root;
+ * - a parent built only from `.` / `..` segments (`'.'` from `'./assets'`,
+ *   `'..'` from `'../assets'`) — the process working directory or a directory
+ *   ABOVE it, so every readable file beside the server, `.env` included,
+ *   becomes one unauthenticated GET away.
+ *
+ * The containment guard cannot catch these: the derived root legitimately
+ * CONTAINS those files, so containment holds while the root itself is wrong.
+ * A caller wanting a build root at one of those locations names it with a
+ * deeper `assetsDir` (`'./build/client/assets'`).
+ *
  * @param assetsDir - The configured assets directory (`<root>/assets`)
- * @returns The client-build root directory (`<root>`)
+ * @returns The client-build root directory (`<root>`), or `undefined` when it
+ * cannot be derived without widening the root
  * @since 0.2.0
  */
-function clientBuildRoot(assetsDir: string): string {
+function clientBuildRoot(assetsDir: string): string | undefined {
   const trimmed = assetsDir.replace(/\/+$/, '');
   const lastSlash = trimmed.lastIndexOf('/');
-  return lastSlash === -1 ? trimmed : trimmed.slice(0, lastSlash);
+  if (lastSlash === -1) {
+    return undefined;
+  }
+  const parent = trimmed.slice(0, lastSlash);
+  if (parent === '') {
+    return undefined;
+  }
+  // Every segment being `.`/`..` means the parent names the working directory
+  // or one above it, never a build output directory.
+  const onlyDotSegments = parent.split('/').every((seg) => seg === '.' || seg === '..');
+  return onlyDotSegments ? undefined : parent;
 }
 
 /**
@@ -142,13 +170,32 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
         options.publicFiles !== false && options.assetsDir != null &&
         runtime.fs != null
       ) {
-        const servePublicFile = createPublicFileHandler({
-          fs: runtime.fs,
-          // Probe the client-build ROOT, not the assets subdir — `public/`
-          // copies land beside `assets/`, inside them.
-          assetsDir: clientBuildRoot(options.assetsDir),
-        });
-        getRoute = async (routeCtx) => (await servePublicFile(routeCtx)) ?? renderRoute(routeCtx);
+        // Probe the client-build ROOT, not the assets subdir — `public/`
+        // copies land beside `assets/`, not inside them. A root that cannot be
+        // derived without widening past the build directory is REFUSED: the
+        // handler is not registered and the reason is named, because silently
+        // serving the working directory is worse than not serving
+        // `/robots.txt`.
+        const publicRoot = clientBuildRoot(options.assetsDir);
+        if (publicRoot === undefined) {
+          ctx.logger?.warn(
+            'react-router: publicFiles is on but the client-build root cannot be derived from ' +
+              'assetsDir without widening the served root to the working directory or the ' +
+              'filesystem root; public files are NOT served',
+            {
+              assetsDir: options.assetsDir,
+              hint:
+                "Point assetsDir at the assets directory INSIDE the build output (e.g. './build/" +
+                "client/assets'), or set publicFiles: false to silence this.",
+            },
+          );
+        } else {
+          const servePublicFile = createPublicFileHandler({
+            fs: runtime.fs,
+            assetsDir: publicRoot,
+          });
+          getRoute = async (routeCtx) => (await servePublicFile(routeCtx)) ?? renderRoute(routeCtx);
+        }
       }
 
       for (const verb of ALL_VERBS) {

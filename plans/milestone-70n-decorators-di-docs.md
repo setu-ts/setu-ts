@@ -463,12 +463,13 @@ see a defect in the only real entry point.
 
 - **X2-6 (no trace context crosses the broker)** — assigned to this milestone by `ROADMAP.md:7195`
   and recommended here for reassignment rather than landed. It is not a documentation row: closing
-  it means W3C `traceparent` injection on publish and extraction on delivery across all ten brokers,
-  a `telemetry-plugin` seam that works off Node (the register's own point is that the OTel
-  instrumentation is Node-gated while the template default runtime is Deno), and a decision about
-  whether `MessageMetadata.headers` becomes a populated contract. That is a milestone with its own
-  design, real-backend gates and a `common` question, and folding it into a sweep is how a feature
-  ships without one. The maintainer's call; this plan proceeds on the assumption it moves.
+  it means W3C `traceparent` injection on publish and extraction on delivery across all seven
+  `messaging-plugin` brokers, a `telemetry-plugin` seam that works off Node (the register's own
+  point is that the OTel instrumentation is Node-gated while the template default runtime is Deno),
+  and a decision about whether `MessageMetadata.headers` becomes a populated contract. That is a
+  milestone with its own design, real-backend gates and a `common` question, and folding it into a
+  sweep is how a feature ships without one. The maintainer's call; this plan proceeds on the
+  assumption it moves.
 - **`IAuditLogger` gaining a read method** — §3.9 records why the storage classes, not the logger,
   own the read path.
 - **The kernel defaulting `authMiddleware()` to priority 300** — C4 records why the doc sites are
