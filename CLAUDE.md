@@ -3283,6 +3283,63 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   can gate, the emitted text; the register's kind measurements are not re-run here. Developed on a
   branch cut before M70m, so `origin/main` was merged in and the gates re-run against the merged
   tree before hand-off) — complete (PR #182)
+- **Milestone 70n** (`decorator-plugin` + `validation-plugin` + `common` + `kernel` + `testing` +
+  `static-plugin` + `auth-plugin` + `session-plugin` + `audit-plugin` + `react-router-plugin` +
+  `realtime-backplane-plugin` + `sse-plugin` + `starters` — decorators, validation, and the alpha.8
+  closeout. `@ValidateBody(schema)` validated NOTHING — it only fed OpenAPI, because
+  `composeMiddleware` reads guards/interceptors/middleware/filters and never `route.schema` (E1) —
+  and `@Body()` re-read the raw request, discarding every transform, default and coercion the schema
+  beside it had just applied (E2). The decorator surface the framework advertises as its
+  NestJS-familiar path therefore could not validate a request at all. E1 resolves
+  `CAPABILITIES.VALIDATION` once at `register()` and appends `service.middleware(schema, target)`
+  per present target — the SAME implementation `validateBody(...)` reaches, so a decorated route and
+  a middleware-configured route share one error format — **appended LAST**, so a guard's `401`/`403`
+  still precedes any `400` rather than a schema's field paths leaking to an unauthorised caller.
+  E2's key is promoted to `common` as `validatedStateKey`, because two packages must agree on it
+  byte-for-byte and §2.2 forbids the import that would let one read the other's constant (the M47
+  frame-codec precedent); presence is tested with `state.has`, so a schema validating to `null` or
+  `0` is still honoured. `@Header`/`@Cookie` are deliberately EXCLUDED: `headers.get` is
+  case-INSENSITIVE while the validated record is a plain object keyed by `headers.entries()`, so
+  preferring it would make `@Header('Content-Type')` case-sensitive — trading a discarded transform
+  for a silent regression.
+
+  **The ROADMAP's row list did not survive source-checking, and correcting it was half the
+  milestone.** It assigned twenty rows and called them "mechanical documentation": **C1 and X8-8
+  were already closed** (M70m PR #181, M70k PR #178), and **ten of the remaining seventeen were code
+  changes** across thirteen packages, three widening a committed `common` contract
+  (`validatedStateKey`, `SseMessage.data` to the union its own encoder already handled, and a
+  REQUIRED `IResponse.html`). Only six were genuinely doc-only. X2-6 (broker trace propagation) is
+  **recommended for reassignment** rather than landed — closing it means W3C `traceparent` across
+  all seven `messaging-plugin` brokers plus a telemetry seam that works off Node, which is a
+  milestone with its own design. The "Scope realities" bullet's claim that X4-7 is a `common`
+  widening was also struck: `StoredAuditEntry`/`AuditQuery` are declared in `audit-plugin`'s own
+  `interfaces/index.ts` and merely absent from its barrel, so the fix is two type exports.
+
+  **Four breaking changes**, each with CHANGELOG migration text: enforcement is on by default
+  (`enforceSchemas: false` restores the old inert behaviour, and a startup warning names every route
+  whose schemas are unenforced when no validation capability is registered); the session cookie is
+  renamed `hono_session` → `setu_session` in a framework that is not Hono; `IResponse` gains a
+  required `html(body)`; and the `static-plugin` `cacheControl` callback receives a leading-slash
+  path. `X4-5` was the sharpest of the closeout rows — `SessionPlugin({ csrf: {} })`, the
+  registration `PUBLIC_API.md` itself shows, `403`d every JSON mutation forever because `headerName`
+  had no default, so the CSRF feature was inoperative in its own documented configuration.
+
+  **Code review then found a defect that the four gates, both publish gates and the per-file bar had
+  all passed, and it was in the milestone's own review fix.** `clientBuildRoot` — added to derive
+  the client-build root for X5-5 — chopped the last path segment unconditionally, so
+  `assetsDir: './assets'` derived `'.'` and the public-file handler served the **whole process
+  working directory**: driven against the real handler and real filesystem, `GET /.env` returned the
+  session secret. The `realPath` containment guard cannot catch it, which is the instructive part —
+  the derived root legitimately CONTAINS those files, so containment holds while the root itself is
+  wrong — and `publicFiles` defaults on, so nothing had to be opted into. It survived because the
+  suite only ever passed well-formed values (`/client`, `/srv/app/build/client/assets`) and never a
+  degenerate one. Re-reviewing that fix then found the same class INSIDE it: the first version
+  refused `''` and `'.'` but let `'..'` through, a root ABOVE the cwd. Now any all-dot-segment
+  parent is refused and the plugin names the offending `assetsDir` instead of serving silently. Also
+  corrected: the `IMMUTABLE_PATTERN` over-match caveat (the class spans hyphens, so
+  `report-2024-01-15.pdf` would be cached for a year — the doc was sharpened rather than the regex,
+  since base64url hashes legitimately contain `-`), and a "ten brokers" count that is seven) —
+  complete (PR pending)
 - **Next milestone** — **the `v0.1.0-alpha.9` release**, which ships after every alpha-9 workstream
   merges ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch).
 

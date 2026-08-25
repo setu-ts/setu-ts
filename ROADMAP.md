@@ -7196,11 +7196,11 @@ Ordered by the sequence they should be worked, not by severity alone.
   with no parentheses; a long parameter list wraps one per line; and a long template literal is
   rewrapped at whichever `${` happens to fit, which no generator can predict — so a path too long
   for one line is emitted as an equivalent `[…].join('')`, a shape fmt leaves alone.
-- ⬜ **M70n — Decorators, validation and the alpha.8 closeout** (`decorator-plugin`,
-  `validation-plugin`, `common`, `kernel`, `testing`, `static-plugin`, `auth-plugin`,
-  `session-plugin`, `audit-plugin`, `react-router-plugin`, `realtime-backplane-plugin`,
-  `sse-plugin`, `starters`, docs). Plan:
-  [`plans/milestone-70n-decorators-di-docs.md`](plans/milestone-70n-decorators-di-docs.md).
+- ✅ **M70n — Decorators, validation and the alpha.8 closeout** — complete (PR pending)
+  (`decorator-plugin`, `validation-plugin`, `common`, `kernel`, `testing`, `static-plugin`,
+  `auth-plugin`, `session-plugin`, `audit-plugin`, `react-router-plugin`,
+  `realtime-backplane-plugin`, `sse-plugin`, `starters`, docs). Plan:
+  [`plans/archive/milestone-70n-decorators-di-docs.md`](plans/archive/milestone-70n-decorators-di-docs.md).
   `@ValidateBody(schema)` does not validate anything — it only feeds OpenAPI (E1) — and `@Body()`
   re-reads the raw request, discarding validation transforms, defaults and coercions (E2). Closes
   with the remaining rows no other workstream absorbs (C2, X3-1, X3-3, X3-4, X3-5, X3-6, X3-8, X3-9,
