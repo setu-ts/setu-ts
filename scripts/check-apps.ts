@@ -34,6 +34,30 @@ export function unexpectedSkips(
 }
 
 /**
+ * Returns the task an app must run BEFORE it is type-checked, or `null`.
+ *
+ * An app carrying a `package.json` makes Deno resolve `npm:` specifiers from
+ * `node_modules` rather than from its global cache. The type check runs first
+ * in this script, so on a COLD checkout it runs against an empty directory and
+ * fails with `Could not find a matching package for 'npm:ws@^8.18.0'` — the
+ * specifier being whatever the app's import graph reaches first through the
+ * framework's lazily-imported optional drivers, none of which belong in the
+ * example's own `package.json`. Every local run passes once `node_modules`
+ * exists from any earlier build, so only a cold runner sees it (M37c hit this
+ * on the first CI run after four clean local gate passes).
+ *
+ * The app's own `install` task is what creates that directory, and it is
+ * DECLARED, so this script never has to guess a package manager or a flag.
+ * `test/apps-gate.test.ts` pins that an app carrying a `package.json` declares
+ * one, because without it this returns `null` and the ordering bug is back.
+ */
+export function prerequisiteTask(
+  tasks: Readonly<Record<string, string>> | undefined,
+): string | null {
+  return tasks?.install === undefined ? null : 'install';
+}
+
+/**
  * Returns a human-readable message for a malformed application directory, or
  * `null` when the error should be rethrown.
  */
@@ -108,6 +132,16 @@ async function checkApps(): Promise<boolean> {
     } catch (error) {
       if (!(error instanceof Deno.errors.NotFound)) {
         throw error;
+      }
+    }
+
+    const prerequisite = prerequisiteTask(config.tasks);
+    if (prerequisite !== null) {
+      console.log(`\n==> ${directory}: ${prerequisite}`);
+      const prepared = await run(['deno', 'task', prerequisite], cwd);
+      if (!prepared.success) {
+        failed = true;
+        continue;
       }
     }
 

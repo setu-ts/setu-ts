@@ -3,6 +3,7 @@ import { describe, it } from '@std/testing/bdd';
 import {
   classifySmokeExitCode,
   malformedAppDirMessage,
+  prerequisiteTask,
   unexpectedSkips,
 } from '../scripts/check-apps.ts';
 
@@ -60,6 +61,46 @@ describe('unexpectedSkips', () => {
     // Not the ALLOW_SKIP-unset case: checkApps() never calls this function when
     // the variable is absent, so warn-only mode is the caller's branch, not this one.
     expect(unexpectedSkips(['cloudflare'], [])).toEqual(['cloudflare']);
+  });
+});
+
+describe('prerequisiteTask', () => {
+  it('returns null when the app declares no install task', () => {
+    expect(prerequisiteTask({ start: 'deno run main.ts', smoke: 'deno run smoke.ts' }))
+      .toBeNull();
+  });
+
+  it('returns null when the app declares no tasks at all', () => {
+    expect(prerequisiteTask(undefined)).toBeNull();
+  });
+
+  it('returns the install task when one is declared', () => {
+    expect(prerequisiteTask({ install: 'deno install --allow-scripts' }))
+      .toBe('install');
+  });
+});
+
+describe('cold-checkout npm resolution', () => {
+  it('gives every app carrying a package.json an install task to run first', async () => {
+    // `check-apps.ts` type-checks an app BEFORE running the smoke that would
+    // create `node_modules`, and a `package.json` switches Deno to
+    // node_modules resolution — so on a cold checkout the check fails on an
+    // npm specifier the example never declared, reached through the
+    // framework's lazily-imported optional drivers. `prerequisiteTask` fixes
+    // the ordering by running the app's OWN declared install task first, which
+    // means an app with a `package.json` and no such task silently keeps the
+    // bug. Asserted here because a warm tree proves nothing: every local run
+    // passes once `node_modules` exists from any earlier build.
+    for await (const entry of Deno.readDir('apps')) {
+      if (!entry.isDirectory) continue;
+      const hasPackageJson = await Deno.stat(`apps/${entry.name}/package.json`)
+        .then(() => true)
+        .catch(() => false);
+      if (!hasPackageJson) continue;
+
+      const config = await readJson<AppConfig>(`apps/${entry.name}/deno.json`);
+      expect(prerequisiteTask(config.tasks)).toBe('install');
+    }
   });
 });
 
