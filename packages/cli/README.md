@@ -216,8 +216,12 @@ purpose: `src/main.ts` owns the process boundary, so every other path stays test
 ## Interactive scaffolding
 
 When run at an interactive terminal, `setu new` asks for the choices it already accepts as flags —
-on a standalone project: runtime, template, broker and queue; on a workspace: runtime and transport.
-Every prompted value is expressible as a flag, so prompts are never a second way to configure a
+runtime and template on a standalone project, runtime and transport on a workspace. The broker and
+queue questions follow only when the answers already given can actually take them: they are skipped
+for a template registering no messaging (the minimal default, `rest`, `class-based`), for the
+starter-composed `full-stack`, and on Cloudflare Workers, which are the same cases the flags
+themselves refuse. So `--template microservice` is asked four questions and the default is asked
+two. Every prompted value is expressible as a flag, so prompts are never a second way to configure a
 project, and `--dry-run` stays exact.
 
 Non-interactive by construction in three layers: `runCli`'s dependency bundle takes prompting as an

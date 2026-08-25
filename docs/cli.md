@@ -139,10 +139,14 @@ rewrites nothing, because stating the default is not a mistake.
 
 ## Interactive scaffolding
 
-At an interactive terminal, `setu new` asks for the choices it already accepts as flags — runtime,
-template, broker and queue on a standalone project; runtime and transport on a workspace. It never
-invents a question whose answer no flag can express, and `--dry-run` stays exact because prompting
-only rewrites the flag record before the ordinary pipeline runs.
+At an interactive terminal, `setu new` asks for the choices it already accepts as flags — runtime
+and template on a standalone project, runtime and transport on a workspace. Broker and queue are
+asked only when the answers already given can take them, which is the same test the flags apply: a
+template registering no messaging (the minimal default, `rest`, `class-based`), the starter-composed
+`full-stack`, and Cloudflare Workers are all skipped, so a `microservice` answer gets four questions
+and the default gets two. It never invents a question whose answer no flag can express, and
+`--dry-run` stays exact because prompting only rewrites the flag record before the ordinary pipeline
+runs.
 
 It fails closed in three layers, so scripts, CI and editors are never blocked: programmatic callers
 pass no prompter at all; the installed executable supplies one only when stdin is a terminal; and
