@@ -1,7 +1,7 @@
 # Milestone 72 — CLI transport selection and interactive scaffolding (`@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m72-cli-transport-interactive`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #191). Archived on completion. Branch:
+> `feat/m72-cli-transport-interactive`; all work (implementation + fixes) stayed on this one branch.
 
 ## 0. Objective & scope
 
