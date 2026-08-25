@@ -19,7 +19,9 @@
  *     },
  *   },
  * }));
- * app.middleware.add(authMiddleware());
+ * // Priority 300 is the band ARCHITECTURE.md §10 reserves for authentication;
+ * // a bare add() would take the kernel default of 500 and run after it.
+ * app.middleware.add(authMiddleware(), { priority: 300 });
  * app.router.get('/protected', { middleware: [requireAuth()], handler });
  * ```
  */
@@ -34,7 +36,7 @@ export type { ApiKeyOptions } from './interfaces/index.ts';
 export type { LocalOptions } from './interfaces/index.ts';
 
 // Exported utilities
-export { PasswordHasher } from './services/password-hasher.ts';
+export { MalformedPasswordHashError, PasswordHasher } from './services/password-hasher.ts';
 
 // Middleware
 export { authMiddleware } from './middleware/auth-middleware.ts';

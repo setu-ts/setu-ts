@@ -56,7 +56,10 @@ app.register(AuthPlugin({
 }));
 
 // Global middleware: authenticates every request and populates ctx.request.user.
-app.middleware.add(authMiddleware());
+// The priority is explicit and deliberate: ARCHITECTURE.md §10 reserves 300 for
+// authentication, but a bare add() takes the kernel's default of 500 — AFTER
+// every band in that table, including the row named for it.
+app.middleware.add(authMiddleware(), { priority: 300 });
 ```
 
 ## Login (Issue Token)
@@ -70,7 +73,7 @@ import type { IAuthService, IJwtService } from '@setu-ts/common';
 app.router.post('/auth/login', async (ctx) => {
   const auth = ctx.services.get<IAuthService>('authentication');
   const jwt = ctx.services.get<IJwtService>('jwt');
-  const { username, password } = await ctx.request.json();
+  const { username, password } = await ctx.request.json<{ username: string; password: string }>();
 
   const principal = await auth.verifyCredentials({ identifier: username, secret: password });
   if (!principal) {
@@ -273,42 +276,43 @@ MIT
 
 ## Exports
 
-| Export                    | Kind      |
-| ------------------------- | --------- |
-| `authMiddleware`          | function  |
-| `AuthPlugin`              | function  |
-| `defaultRateLimitKey`     | function  |
-| `publicRoute`             | function  |
-| `rateLimitMiddleware`     | function  |
-| `requireAllPermissions`   | function  |
-| `requireAnyRole`          | function  |
-| `requireAuth`             | function  |
-| `requirePermission`       | function  |
-| `requireRole`             | function  |
-| `MemoryRateLimitStore`    | class     |
-| `MemoryRefreshTokenStore` | class     |
-| `PasswordHasher`          | class     |
-| `RedisRateLimitStore`     | class     |
-| `RefreshTokenService`     | class     |
-| `ApiKeyOptions`           | interface |
-| `AuthPluginOptions`       | interface |
-| `IAuthorizationService`   | interface |
-| `IAuthService`            | interface |
-| `IAuthStrategy`           | interface |
-| `IJwtService`             | interface |
-| `IPrincipal`              | interface |
-| `JwtOptions`              | interface |
-| `JwtSignOptions`          | interface |
-| `LocalOptions`            | interface |
-| `RateLimitOptions`        | interface |
-| `RateLimitResult`         | interface |
-| `RateLimitStore`          | interface |
-| `RbacConfig`              | interface |
-| `RefreshTokenOptions`     | interface |
-| `RefreshTokenRecord`      | interface |
-| `RefreshTokenStore`       | interface |
-| `RoleDefinition`          | interface |
-| `TokenPair`               | interface |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `authMiddleware`             | function  |
+| `AuthPlugin`                 | function  |
+| `defaultRateLimitKey`        | function  |
+| `publicRoute`                | function  |
+| `rateLimitMiddleware`        | function  |
+| `requireAllPermissions`      | function  |
+| `requireAnyRole`             | function  |
+| `requireAuth`                | function  |
+| `requirePermission`          | function  |
+| `requireRole`                | function  |
+| `MalformedPasswordHashError` | class     |
+| `MemoryRateLimitStore`       | class     |
+| `MemoryRefreshTokenStore`    | class     |
+| `PasswordHasher`             | class     |
+| `RedisRateLimitStore`        | class     |
+| `RefreshTokenService`        | class     |
+| `ApiKeyOptions`              | interface |
+| `AuthPluginOptions`          | interface |
+| `IAuthorizationService`      | interface |
+| `IAuthService`               | interface |
+| `IAuthStrategy`              | interface |
+| `IJwtService`                | interface |
+| `IPrincipal`                 | interface |
+| `JwtOptions`                 | interface |
+| `JwtSignOptions`             | interface |
+| `LocalOptions`               | interface |
+| `RateLimitOptions`           | interface |
+| `RateLimitResult`            | interface |
+| `RateLimitStore`             | interface |
+| `RbacConfig`                 | interface |
+| `RefreshTokenOptions`        | interface |
+| `RefreshTokenRecord`         | interface |
+| `RefreshTokenStore`          | interface |
+| `RoleDefinition`             | interface |
+| `TokenPair`                  | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

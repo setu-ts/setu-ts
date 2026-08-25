@@ -673,6 +673,9 @@ describe('SseConnection', () => {
       text(_body?: string) {
         return { __handlerResult: true };
       },
+      html(_body?: string) {
+        return { __handlerResult: true };
+      },
       send(_body?: Uint8Array) {
         return { __handlerResult: true };
       },

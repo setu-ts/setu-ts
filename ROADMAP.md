@@ -6891,11 +6891,15 @@ all merge before the release branch is cut.
 
 ### Scope realities to plan around
 
-- **Several fixes are `common` widenings**, so alpha.9 carries multiple breaking changes: the audit
-  read surface (X4-7), storage object metadata (X8-6), the no-argument registration seams (D4),
-  ~~resolver typing (X6-4)~~ (M70i closed X6-4 inside `graphql-plugin` — a generic `FieldResolver`
-  and a typed `DefaultGraphqlContext` needed no `common` change). Each needs its own CHANGELOG entry
-  with migration text — not one lumped release note.
+- **Several fixes are `common` widenings**, so alpha.9 carries multiple breaking changes: storage
+  object metadata (X8-6), the no-argument registration seams (D4), and M70n's three — the
+  `validatedStateKey` cross-package state key, `SseMessage.data` (X3-6) and a required
+  `IResponse.html` (X4-11). ~~the audit read surface (X4-7)~~ and ~~resolver typing (X6-4)~~ are NOT
+  `common` changes: `StoredAuditEntry` and `AuditQuery` are declared in
+  `packages/audit-plugin/src/interfaces/index.ts:21,38` and merely absent from that package's
+  barrel, so X4-7 is two type exports; and M70i closed X6-4 inside `graphql-plugin`, where a generic
+  `FieldResolver` and a typed `DefaultGraphqlContext` needed no `common` change. Each real widening
+  needs its own CHANGELOG entry with migration text — not one lumped release note.
 - **`packages/grpc-plugin` may not be salvageable within this milestone.** X7-2 and X7-4 together
   say the default `basePath` is unreachable by any native client and native gRPC-binary works on no
   runtime it can run on. M70i decides repair-versus-withdraw explicitly rather than inheriting it.
@@ -7192,11 +7196,48 @@ Ordered by the sequence they should be worked, not by severity alone.
   with no parentheses; a long parameter list wraps one per line; and a long template literal is
   rewrapped at whichever `${` happens to fit, which no generator can predict — so a path too long
   for one line is emitted as an equivalent `[…].join('')`, a shape fmt leaves alone.
-- ⬜ **M70n — Decorators, DI and docs sweep** (`decorator-plugin`, `validation-plugin`, docs).
+- ✅ **M70n — Decorators, validation and the alpha.8 closeout** — complete (PR #183)
+  (`decorator-plugin`, `validation-plugin`, `common`, `kernel`, `testing`, `static-plugin`,
+  `auth-plugin`, `session-plugin`, `audit-plugin`, `react-router-plugin`,
+  `realtime-backplane-plugin`, `sse-plugin`, `starters`, docs). Plan:
+  [`plans/archive/milestone-70n-decorators-di-docs.md`](plans/archive/milestone-70n-decorators-di-docs.md).
   `@ValidateBody(schema)` does not validate anything — it only feeds OpenAPI (E1) — and `@Body()`
   re-reads the raw request, discarding validation transforms, defaults and coercions (E2). Closes
-  with the mechanical documentation rows the other workstreams do not absorb (C1, C2, X3-1, X3-3,
-  X3-4, X3-5, X3-6, X3-8, X3-9, X4-5, X4-7, X4-11, X5-5, X5-7, X5-9, X7-9, X8-8, X9-10, D8, X2-6).
+  with the remaining rows no other workstream absorbs (C2, X3-1, X3-3, X3-4, X3-5, X3-6, X3-8, X3-9,
+  X4-5, X4-7, X4-11, X5-5, X5-7, X5-9, X7-9, X9-10, D8).
+
+  **Two rows this line assigned are already closed, and the row list is corrected rather than left
+  to be re-done**: **C1** (the `validatedBody` state key that does not exist) shipped in **M70m**
+  (PR #181), which corrected 11 sites — `grep -rn "validatedBody" packages/ docs/` now returns
+  nothing — and **X8-8** (the storage README's Uploads example) shipped in **M70k** (PR #178) behind
+  `test/package-readme-fence-compiler.test.ts`. The register's C1 Status column was stale and is
+  corrected in this workstream's PR.
+
+  **"Mechanical documentation rows" did not survive source-checking, and the package list is
+  corrected from the row's original two**, mirroring the M70b, M70g, M70h, M70k and M70m
+  corrections. **Ten of the seventeen are code changes**, and three of those widen a committed
+  `common` contract: `validatedStateKey` (the cross-package state key E2 needs, which §2.2 forbids
+  either plugin from reading off the other — the M47 frame-codec precedent), `SseMessage.data`
+  widened to the union its own encoder already handles (X3-6), and a new required `IResponse.html`
+  (X4-11). The other seven touch `static-plugin` (C2's hash detector is hex-only, so M55's headline
+  `immutable` default never fires for a Vite build; D8's callback argument), `auth-plugin` (X3-9),
+  `session-plugin` (X4-5's CSRF header has no default, so the `csrf: {}` registration
+  `PUBLIC_API.md` shows can never accept a JSON mutation; X9-10's cookie rename), `audit-plugin`
+  (X4-7), `react-router-plugin` (X5-5), `realtime-backplane-plugin` (X3-4) and `starters` (X5-9).
+  Only X3-1, X3-3, X3-5, X3-8, X5-7 and X7-9 are genuinely doc-only, and each one's corrected README
+  example is folded into M70k's fence compiler rather than a second gate — M70i showed that fold is
+  strictly stronger, and an uncompiled example is what produced C1 and X8-8 in the first place.
+
+  **X2-6 (no trace context crosses the broker) is recommended for reassignment, not landed here.**
+  `MessageMetadata.headers` exists (`packages/common/src/services/messaging.ts:21`) and no broker
+  populates it, so closing the row means W3C `traceparent` injection on publish and extraction on
+  delivery across all seven `messaging-plugin` brokers, a `telemetry-plugin` seam that works off
+  Node (the row's own point is that the OTel instrumentation is Node-gated while the template
+  default runtime is Deno), and a decision about whether that field becomes a populated contract.
+  That is a milestone with its own design and real-backend gates; folding it into a closeout sweep
+  is how a feature ships without one. Maintainer's call — the plan proceeds on the assumption it
+  moves.
+
   **E8 (`routes/` and `controllers/` as parallel mechanisms) moved to M70h** and shipped there. This
   line previously called it maintainer-class — "a decision to take, not a defect to fix" — which was
   stale: `smoke/X1-FINDINGS.md` records the maintainer having already classified it a defect, with
@@ -7327,4 +7368,4 @@ branch during a version bump.
 | 70k       | ✅     | storage, queue, worker operability    |
 | 70l       | ✅     | deployment and operations             |
 | 70m       | ✅     | sdk and openapi                       |
-| 70n       | ⬜     | decorators, di, docs sweep            |
+| 70n       | ✅     | decorators, validation, closeout      |

@@ -69,6 +69,9 @@ export function createFakeContext(opts?: {
     text(_body?: string): HandlerResult {
       return state.result;
     },
+    html(_body?: string): HandlerResult {
+      return state.result;
+    },
     send(_body?: Uint8Array): HandlerResult {
       return state.result;
     },

@@ -175,9 +175,10 @@ app.router.get('/login', (ctx) => {
 });
 ```
 
-Options: `fieldName` (default `_csrf`), `headerName` (for `fetch` posts, and **required for
-`multipart/form-data`**, which this package does not parse), and `ignoreMethods` (default
-`GET`/`HEAD`/`OPTIONS`).
+Options: `fieldName` (default `_csrf`), `headerName` (defaults to `x-csrf-token`, so a `fetch` post
+can present the token in that header without further configuration; an explicit name still wins, and
+it is **required knowledge for `multipart/form-data`**, which this package does not parse — the
+token must arrive in that header), and `ignoreMethods` (default `GET`/`HEAD`/`OPTIONS`).
 
 To validate inside a handler or a React Router action instead of via middleware, call the same
 function the middleware uses:
@@ -195,7 +196,7 @@ The session reaches loaders and actions through the SSR plugin's existing `popul
 
 ```typescript
 ReactRouterPlugin({
-  build,
+  serverBuildPath: './build/server/index.js',
   populateLoadContext: (ctx, context) => {
     context.set(sessionContext, getSession(ctx));
   },
@@ -217,23 +218,23 @@ must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareM
 
 ## Options
 
-| Option            | Default          | Notes                                                                     |
-| ----------------- | ---------------- | ------------------------------------------------------------------------- |
-| `secret`          | resolved         | `string` or rotation list; index 0 seals                                  |
-| `secretName`      | `SESSION_SECRET` | Looked up in the secrets manager and the environment                      |
-| `mode`            | `'encrypt'`      | `'sign'` exposes its payload                                              |
-| `store`           | —                | `'memory'`, `'cache'`, or an `ISessionStore`                              |
-| `maxAge`          | `7200`           | Seconds; also the cookie's `Max-Age`                                      |
-| `rolling`         | `false`          | Re-issue on every response                                                |
-| `idleTimeoutMs`   | —                | No-request expiry; any request refreshes it, so it commits every response |
-| `maxCookieBytes`  | `4096`           | Throws `SessionTooLargeError` rather than dropping silently               |
-| `cookie.name`     | `hono_session`   |                                                                           |
-| `cookie.path`     | `/`              |                                                                           |
-| `cookie.domain`   | —                | Omitted means a host-only cookie                                          |
-| `cookie.sameSite` | `'lax'`          | `'none'` forces `Secure`                                                  |
-| `cookie.secure`   | `true`           | Set `false` only for plain-HTTP local development                         |
-| `cookie.httpOnly` | `true`           |                                                                           |
-| `csrf`            | —                | Presence enables form CSRF                                                |
+| Option            | Default          | Notes                                                                        |
+| ----------------- | ---------------- | ---------------------------------------------------------------------------- |
+| `secret`          | resolved         | `string` or rotation list; index 0 seals                                     |
+| `secretName`      | `SESSION_SECRET` | Looked up in the secrets manager and the environment                         |
+| `mode`            | `'encrypt'`      | `'sign'` exposes its payload                                                 |
+| `store`           | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                 |
+| `maxAge`          | `7200`           | Seconds; also the cookie's `Max-Age`                                         |
+| `rolling`         | `false`          | Re-issue on every response                                                   |
+| `idleTimeoutMs`   | —                | No-request expiry; any request refreshes it, so it commits every response    |
+| `maxCookieBytes`  | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                  |
+| `cookie.name`     | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions |
+| `cookie.path`     | `/`              |                                                                              |
+| `cookie.domain`   | —                | Omitted means a host-only cookie                                             |
+| `cookie.sameSite` | `'lax'`          | `'none'` forces `Secure`                                                     |
+| `cookie.secure`   | `true`           | Set `false` only for plain-HTTP local development                            |
+| `cookie.httpOnly` | `true`           |                                                                              |
+| `csrf`            | —                | Presence enables form CSRF                                                   |
 
 ## Health
 

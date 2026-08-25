@@ -6,7 +6,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IValidationService } from '@setu-ts/common';
+import type { IValidationService, ValidationTarget } from '@setu-ts/common';
+import { validatedStateKey } from '@setu-ts/common';
 
 import { createValidationMiddleware } from '../../src/middleware/validation-middleware.ts';
 import { defaultFormatter } from '../../src/formatters/default-formatter.ts';
@@ -339,5 +340,47 @@ describe('createValidationMiddleware — Problem Details media type', () => {
 
   it('does NOT serve problem+json for a custom formatter', async () => {
     expect(await contentTypeFor(() => ({ errors: [] }))).not.toBe('application/problem+json');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shared state key — the middleware must write through `validatedStateKey`,
+// never an inline literal, so readers in other packages cannot drift (M70n)
+// ---------------------------------------------------------------------------
+describe('createValidationMiddleware — writes the shared validatedStateKey', () => {
+  const TARGETS: readonly ValidationTarget[] = ['body', 'query', 'params', 'headers', 'cookies'];
+
+  for (const target of TARGETS) {
+    it(`stores the validated value under validatedStateKey('${target}')`, async () => {
+      const schema = createFakeSchema({ success: true, data: { ok: true } });
+      const { ctx } = createFakeContext({
+        request: target === 'body'
+          ? { body: { ok: true } }
+          : target === 'cookies'
+          ? { headers: { cookie: 'session=abc' } }
+          : target === 'headers'
+          ? { headers: { 'x-api-key': 'k' } }
+          : {},
+        ...(target === 'query' ? { query: { page: '1' } } : {}),
+        ...(target === 'params' ? { params: { id: '1' } } : {}),
+      });
+      const nextFn = createNextFn();
+      const middleware = createValidationMiddleware(schema, target, SERVICE, defaultFormatter);
+
+      await middleware(ctx, nextFn.fn);
+
+      expect(nextFn.called).toBe(true);
+      // The key the middleware wrote MUST be the one `validatedStateKey`
+      // builds — this is what stops the writer here and a reader in another
+      // package from disagreeing byte-for-byte.
+      expect(ctx.state.has(validatedStateKey(target))).toBe(true);
+    });
+  }
+
+  it('pins the released wire format of the helper itself', () => {
+    // Guarding the guard: if someone reintroduces an inline literal with a
+    // different prefix, the assertions above fail; this pins that the helper
+    // still produces the released `validated:<target>` key.
+    expect(validatedStateKey('body')).toBe('validated:body');
   });
 });

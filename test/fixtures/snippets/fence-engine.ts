@@ -151,6 +151,46 @@ export const FRAGMENT_GLOBALS = new Set([
   'resolvers',
   'metrics',
   'reportUsage',
+  // Plugin factories and accessors README fragments reference without their
+  // import line (M70n folded these READMEs into this gate).
+  'SessionPlugin',
+  'WebSocketPlugin',
+  'RealtimeBackplanePlugin',
+  'StaticPlugin',
+  'AuditPlugin',
+  'DecoratorPlugin',
+  'ResiliencePlugin',
+  'ReactRouterPlugin',
+  'createRestApp',
+  'createMicroserviceApp',
+  'createFullStackApp',
+  'Injectable',
+  'Inject',
+  'getSession',
+  'getCsrfToken',
+  // Illustrative placeholders in those same READMEs.
+  'ws',
+  'sse',
+  'runtime',
+  'config',
+  'jwt',
+  'mySecret',
+  'principal',
+  'currentUser',
+  'externalApi',
+  'apiKeyService',
+  'userService',
+  'sessionContext',
+  'prismaClient',
+  'myOwnStore',
+  'secret',
+  'newSecret',
+  'oldSecret',
+  'user',
+  'handlers',
+  'client',
+  'subscriber',
+  'myDbClient',
   // Setu-TS type names interface-sketch blocks reference without importing.
   'IRequest',
   'IResponse',
@@ -261,6 +301,20 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
   IRepository: '@setu-ts/database-plugin',
   HttpMethod: '@setu-ts/common',
   ITenant: '@setu-ts/common',
+  IAuthService: '@setu-ts/common',
+  IAuthorizationService: '@setu-ts/common',
+  IAuditLogger: '@setu-ts/common',
+  IJwtService: '@setu-ts/common',
+  IResilienceService: '@setu-ts/common',
+  ISession: '@setu-ts/common',
+  ISseService: '@setu-ts/common',
+  IWebSocketService: '@setu-ts/common',
+  RouterContextKey: '@setu-ts/react-router-plugin',
+  RouterLoadContext: '@setu-ts/react-router-plugin',
+  IAuditDbClient: '@setu-ts/audit-plugin',
+  IRedisBackplaneClient: '@setu-ts/realtime-backplane-plugin',
+  WebSocketHandlers: '@setu-ts/common',
+  ISessionStore: '@setu-ts/common',
 };
 
 /**
@@ -291,6 +345,21 @@ const VALUE_EXPORTS: Readonly<Record<string, string>> = {
   ValidationPlugin: '@setu-ts/validation-plugin',
   GrpcPlugin: '@setu-ts/grpc-plugin',
   GraphqlPlugin: '@setu-ts/graphql-plugin',
+  SessionPlugin: '@setu-ts/session-plugin',
+  WebSocketPlugin: '@setu-ts/websocket-plugin',
+  RealtimeBackplanePlugin: '@setu-ts/realtime-backplane-plugin',
+  StaticPlugin: '@setu-ts/static-plugin',
+  AuditPlugin: '@setu-ts/audit-plugin',
+  DecoratorPlugin: '@setu-ts/decorator-plugin',
+  ResiliencePlugin: '@setu-ts/resilience-plugin',
+  ReactRouterPlugin: '@setu-ts/react-router-plugin',
+  Injectable: '@setu-ts/decorator-plugin',
+  Inject: '@setu-ts/decorator-plugin',
+  getSession: '@setu-ts/session-plugin',
+  getCsrfToken: '@setu-ts/session-plugin',
+  createRestApp: '@setu-ts/rest-starter',
+  createMicroserviceApp: '@setu-ts/microservice-starter',
+  createFullStackApp: '@setu-ts/full-stack-starter',
   CAPABILITIES: '@setu-ts/common',
   createApplication: '@setu-ts/kernel',
   createTestApp: '@setu-ts/testing',
@@ -328,8 +397,33 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
   IMyService: 'declare type IMyService = { doSomething(): void }',
   IValidator: 'declare type IValidator = { validate(data: unknown): unknown }',
   MyValidator: 'declare class MyValidator { validate(data: unknown): unknown }',
-  handler: 'declare const handler: (ctx: IRequestContext) => Promise<void>',
+  handler:
+    'declare const handler: (ctx: IRequestContext) => HandlerResult | Promise<HandlerResult>',
   data: 'declare const data: unknown',
+  runtime: 'declare const runtime: IRuntimeServices',
+  config: 'declare const config: { get<T>(key: string): T }',
+  jwt: 'declare const jwt: IJwtService',
+  mySecret: 'declare const mySecret: string',
+  principal: 'declare const principal: IPrincipal',
+  currentUser: 'declare const currentUser: { id: string }',
+  externalApi: 'declare const externalApi: { call(): Promise<unknown> }',
+  apiKeyService:
+    'declare const apiKeyService: { validate(key: string): Promise<IPrincipal | null> }',
+  userService:
+    'declare const userService: { checkPassword(identifier: string, secret: string): Promise<IPrincipal | null> }',
+  sse: 'declare const sse: ISseService',
+  ws: 'declare const ws: IWebSocketService',
+  sessionContext: 'declare const sessionContext: RouterContextKey<ISession>',
+  prismaClient: 'declare const prismaClient: unknown',
+  secret: 'declare const secret: string',
+  newSecret: 'declare const newSecret: string',
+  oldSecret: 'declare const oldSecret: string',
+  user: 'declare const user: { id: string }',
+  handlers: 'declare const handlers: WebSocketHandlers',
+  client: 'declare const client: IRedisBackplaneClient',
+  subscriber: 'declare const subscriber: IRedisBackplaneClient',
+  myDbClient: 'declare const myDbClient: IAuditDbClient',
+  myOwnStore: 'declare const myOwnStore: ISessionStore',
   userRepository:
     'declare const userRepository: { findByName(name: string): Promise<unknown | null>; save(entity: unknown): Promise<unknown> }',
   UserRepository:
@@ -362,7 +456,23 @@ export function importsFromSetuTs(code: string): boolean {
 export function importsIdentifier(code: string, name: string): boolean {
   const importBlockRe = /import\s+(?:type\s+)?\{([^}]*)\}\s+from/g;
   for (const match of code.matchAll(importBlockRe)) {
-    if ((match[1] as string).includes(name)) return true;
+    // Exact per-specifier comparison, never a substring of the whole block:
+    // `includes('Inject')` is true for a block importing only `Injectable`,
+    // which would suppress the prelude declaration for a name the fence never
+    // imported.
+    //
+    // Two specifier forms have to be unwrapped before comparing, and BOTH have
+    // produced a wrong answer here. An inline `type` modifier is stripped
+    // first, so `{ type IRequest }` resolves to `IRequest` — without that the
+    // prelude emits a second `import type { IRequest }` and the fence fails
+    // with a duplicate identifier. Then `X as Y` resolves to `Y`, because the
+    // alias is the local binding. Order matters: `type Foo as Bar` is `Bar`.
+    const specifiers = (match[1] as string).split(',').map((raw) => {
+      const withoutTypeModifier = raw.trim().replace(/^type\s+/, '');
+      const parts = withoutTypeModifier.split(/\s+as\s+/);
+      return (parts[parts.length - 1] ?? '').trim();
+    });
+    if (specifiers.includes(name)) return true;
   }
   return false;
 }

@@ -18,6 +18,27 @@ import type { MiddlewareFunction } from '../http.ts';
 export type ValidationTarget = 'body' | 'query' | 'params' | 'headers' | 'cookies';
 
 /**
+ * Builds the `ctx.state` key under which the validated value for a target is
+ * stored — the cross-package wire format between the writer
+ * (`validation-plugin`'s middleware) and any reader (e.g. `decorator-plugin`'s
+ * parameter resolvers). Both sides import this helper so the key can never
+ * drift between the package that writes it and the one that reads it back.
+ *
+ * @example
+ * ```typescript
+ * ctx.state.set(validatedStateKey('body'), parsedValue);
+ * const validated = ctx.state.get(validatedStateKey('body'));
+ * ```
+ *
+ * @param target - The request part the value was validated from
+ * @returns The state key — `` `validated:${target}` ``
+ * @since 0.2.0
+ */
+export function validatedStateKey(target: ValidationTarget): string {
+  return `validated:${target}`;
+}
+
+/**
  * A single validation failure.
  *
  * @since 0.1.0

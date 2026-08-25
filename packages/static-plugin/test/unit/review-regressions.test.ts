@@ -208,7 +208,7 @@ describe('review regression — Cache-Control follows the original resource', ()
     expect(captured.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
-  it('passes the ROOT-RELATIVE path to a cacheControl function', async () => {
+  it('passes the ROOT-RELATIVE path with a LEADING SLASH to a cacheControl function', async () => {
     const counters = { opened: 0, cancelled: 0, stats: 0 };
     const seen: string[] = [];
     const handler = createStaticHandler({
@@ -227,10 +227,11 @@ describe('review regression — Cache-Control follows the original resource', ()
 
     // Without the fix this is the absolute '/srv/assets/app.js', which both
     // breaks the documented contract and leaks the server's directory layout.
-    expect(seen).toEqual(['assets/app.js']);
+    // M70n normalizes the callback argument to a leading-slash request path.
+    expect(seen).toEqual(['/assets/app.js']);
   });
 
-  it('passes the index path relative to the root when a directory resolves', async () => {
+  it('passes the leading-slash index path when a directory resolves', async () => {
     const counters = { opened: 0, cancelled: 0, stats: 0 };
     const seen: string[] = [];
     const handler = createStaticHandler({
@@ -250,7 +251,7 @@ describe('review regression — Cache-Control follows the original resource', ()
     const { ctx } = makeCtx('GET', '/docs');
     await handler(ctx);
 
-    expect(seen).toEqual(['docs/index.html']);
+    expect(seen).toEqual(['/docs/index.html']);
   });
 });
 

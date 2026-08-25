@@ -188,9 +188,12 @@ for the full description of each arm.
 **The one difference that will bite you: constructor injection needs an explicit token.**
 
 ```typescript
+import { Inject, Injectable } from '@setu-ts/decorator-plugin';
+import { CAPABILITIES, type ILogger } from '@setu-ts/common';
+
 @Injectable({ token: 'user-service' })
 class UserService {
-  constructor(@Inject(CAPABILITIES.DATABASE) private db: IDatabase) {}
+  constructor(@Inject(CAPABILITIES.LOGGER) private logger: ILogger) {}
 }
 ```
 
