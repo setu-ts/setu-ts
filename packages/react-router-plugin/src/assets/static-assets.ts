@@ -149,9 +149,11 @@ export function createStaticAssetHandler(options: {
 }
 
 /**
- * Creates a handler that ATTEMPTS to serve a file from the client-build ROOT
- * (where Vite copies `public/`), resolving the request path relative to
- * {@linkcode createPublicFileHandler.options.assetsDir}.
+ * Creates a handler that ATTEMPTS to serve a file from a directory, resolving
+ * the request path relative to {@linkcode createPublicFileHandler.options.assetsDir}.
+ * The plugin passes the CLIENT-BUILD ROOT here (the parent of the assets dir,
+ * where Vite copies `public/`) — probing the assets subdir itself missed every
+ * public file.
  *
  * Returns the served {@linkcode HandlerResult} on a hit — including the
  * `400` answer for an undecodable request path — and `undefined` on a miss so

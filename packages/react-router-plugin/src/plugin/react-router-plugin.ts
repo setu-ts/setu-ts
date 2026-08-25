@@ -57,6 +57,23 @@ function joinWildcard(prefix: string): string {
 }
 
 /**
+ * Derives the client-build ROOT from the configured assets dir. Vite lays out
+ * hashed bundles at `<root>/assets/*` and copies `public/` into `<root>/`
+ * itself, so the root holding `robots.txt` / `favicon.ico` is the assets
+ * directory's PARENT. Probing `assetsDir` directly looked for
+ * `./build/client/assets/robots.txt` and missed every public file.
+ *
+ * @param assetsDir - The configured assets directory (`<root>/assets`)
+ * @returns The client-build root directory (`<root>`)
+ * @since 0.2.0
+ */
+function clientBuildRoot(assetsDir: string): string {
+  const trimmed = assetsDir.replace(/\/+$/, '');
+  const lastSlash = trimmed.lastIndexOf('/');
+  return lastSlash === -1 ? trimmed : trimmed.slice(0, lastSlash);
+}
+
+/**
  * Creates the ReactRouterPlugin.
  *
  * Registers an `ISsrService` under `CAPABILITIES.SSR`, mounts a catch-all
@@ -113,12 +130,13 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       const catchAllPattern = joinWildcard(basename);
       const renderRoute: RouteHandler = (routeCtx) => ssrService.render(routeCtx);
 
-      // M70n X5-5: Vite copies `public/` into the client-build ROOT, outside
-      // `assetUrlPrefix`, so `/robots.txt` and `/favicon.ico` would otherwise
-      // reach this SSR catch-all and answer an HTML-shaped miss under a
-      // 200-shaped page. When enabled, a GET naming an existing build-root
-      // file is served with `must-revalidate` caching (those files are not
-      // content-hashed); every miss falls through to SSR unchanged.
+      // M70n X5-5: Vite copies `public/` into the client-build ROOT — the
+      // PARENT of the assets dir — outside `assetUrlPrefix`, so `/robots.txt`
+      // and `/favicon.ico` would otherwise reach this SSR catch-all and answer
+      // an HTML-shaped miss under a 200-shaped page. When enabled, a GET
+      // naming an existing build-root file is served with `must-revalidate`
+      // caching (those files are not content-hashed); every miss falls through
+      // to SSR unchanged.
       let getRoute = renderRoute;
       if (
         options.publicFiles !== false && options.assetsDir != null &&
@@ -126,7 +144,9 @@ export function ReactRouterPlugin(options: ReactRouterPluginOptions): IPlugin {
       ) {
         const servePublicFile = createPublicFileHandler({
           fs: runtime.fs,
-          assetsDir: options.assetsDir,
+          // Probe the client-build ROOT, not the assets subdir — `public/`
+          // copies land beside `assets/`, inside them.
+          assetsDir: clientBuildRoot(options.assetsDir),
         });
         getRoute = async (routeCtx) => (await servePublicFile(routeCtx)) ?? renderRoute(routeCtx);
       }
