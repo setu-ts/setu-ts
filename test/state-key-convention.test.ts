@@ -25,7 +25,7 @@ function isConventional(key: string): boolean {
   const match = KEY_PATTERN.exec(key);
   return match !== null && packageNames.has(match[1]);
 }
-const STATE_LITERAL = /ctx\.state\.(?:get|set|has|delete)\(\s*['"]/g;
+const STATE_LITERAL = /ctx\.state\.(?:get|set|has|delete)\(\s*['"`]/g;
 
 async function sourceFiles(directory: string): Promise<string[]> {
   const result: string[] = [];

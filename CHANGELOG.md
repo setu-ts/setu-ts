@@ -348,7 +348,8 @@ All notable changes to this project are documented here. The format follows
   `'setu.error.responder'` to `'exceptions:error-responder'`, and `'setu-ts:session'` to
   `'session-plugin:session'`. Prefer `CLIENT_IP_STATE_KEY`, `TELEMETRY_SPAN_KEY`,
   `validatedStateKey`, and `ERROR_RESPONDER_STATE_KEY` where those exports are available;
-  `SESSION_STATE_KEY` remains module-private.
+  `SESSION_STATE_KEY` is exported from its own module but is not a public package export, so read a
+  session through `getSession(ctx)` rather than the key.
 - **Breaking: application-scoped registry mutation now stops after bootstrap** (M71). Plugins that
   retain a context and call `register`, `registerFactory`, or `unregister` after `runBootstrap()`
   now receive an error. Register during `register()`, `onInit`, or `onBootstrap`; use the
