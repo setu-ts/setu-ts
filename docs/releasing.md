@@ -229,6 +229,30 @@ packages already published are complete and resolvable, provided nothing in the 
 depends on something in the unpublished set. Only `common` and `kernel` are depended upon in-repo,
 and the publish order puts them first, so a partial run is always internally consistent.
 
+## The GitHub Release object
+
+The tag-triggered workflow creates it automatically, as the LAST step — after the publish, so a
+failure there cannot cost the publish. The body comes from `scripts/release-notes.ts`, which lifts
+this version's `CHANGELOG.md` section and wraps it in the two things a Releases-tab reader needs and
+the changelog does not carry: a **pinned** install line (see the `latest` gotcha below — an unpinned
+instruction installs nothing on a prerelease) and a note that the earlier tags have no Release
+object. The `--prerelease` flag is derived from the version, so `1.0.0` stops being marked one
+without anyone remembering to edit the workflow.
+
+Tags `v0.1.0-alpha.1` … `v0.1.0-alpha.7` carry no Release object by decision and are not backfilled;
+their notes live in `CHANGELOG.md`. `v0.1.0-alpha.8`'s was created by hand.
+
+**If that step goes red, do NOT re-run the job.** The packages are already on JSR by then, versions
+there are immutable, and a re-run fails on every package in the list. Create the object by hand:
+
+```bash
+deno run --allow-read scripts/release-notes.ts 0.1.0-alpha.9 > /tmp/notes.md
+gh release create v0.1.0-alpha.9 --title v0.1.0-alpha.9 --notes-file /tmp/notes.md --prerelease
+```
+
+The step is idempotent — it exits early when the release already exists — so a re-run for any other
+reason will not collide with an object created this way.
+
 ## Prerelease gotchas
 
 Both of these bite on any `-alpha`/`-beta`/`-rc` release and neither is a defect.
