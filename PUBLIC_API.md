@@ -1279,8 +1279,9 @@ app.router.get('/analytics', async (ctx) => {
 
 Provides JWT and API-key authentication, local credential verification, RBAC authorization with role
 hierarchy, and short-circuiting route guards. All cryptography (HS256/RS256 JWT, PBKDF2-SHA256
-password hashing) runs through Web Crypto via `IRuntimeServices`, so the package has **zero npm
-dependencies**.
+password hashing) runs through Web Crypto via `IRuntimeServices`, so **no npm package is involved in
+issuing or verifying a token, or in hashing a password**. The package declares one optional driver —
+`RedisRateLimitStore` lazy-loads `ioredis` — which nothing imports unless that store is constructed.
 
 Registers JWT and authentication services under existing capability tokens, plus authorization when
 RBAC is configured:

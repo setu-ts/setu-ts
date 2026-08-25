@@ -4,8 +4,15 @@ Authentication and authorization plugin for Setu-TS: JWT and API-key authenticat
 credential verification, RBAC authorization with role hierarchy, and short-circuiting route guards.
 
 All cryptography (HS256/RS256 JWT signing/verification and PBKDF2-SHA256 password hashing) runs
-through Web Crypto via `IRuntimeServices` (`runtime.subtle` / `runtime.randomBytes`), so the package
-has **zero npm dependencies** and is cross-runtime (Deno / Node 20+ / Bun).
+through Web Crypto via `IRuntimeServices` (`runtime.subtle` / `runtime.randomBytes`), so **no npm
+package is involved in issuing or verifying a token, or in hashing a password**, and every one of
+those paths is cross-runtime (Deno / Node 20+ / Bun).
+
+The package does declare one optional driver: `RedisRateLimitStore` lazy-loads `ioredis`, which npm
+therefore installs alongside this package. Nothing imports it unless you construct that store — the
+default `MemoryRateLimitStore` needs no driver. See
+[Optional npm drivers](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-npm-drivers)
+for what that means on npm versus Deno.
 
 The plugin always registers JWT and authentication services. It registers authorization only when
 the optional `rbac` configuration is supplied:
