@@ -65,6 +65,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/static-plugin/README.md': 3,
   'packages/session-plugin/README.md': 10,
   'packages/audit-plugin/README.md': 3,
+  'packages/common/README.md': 2,
   'packages/decorator-plugin/README.md': 3,
   'packages/validation-plugin/README.md': 2,
   'packages/sse-plugin/README.md': 5,
@@ -93,7 +94,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(19);
+    expect(Object.keys(READMES)).toHaveLength(20);
 
     const counts: Record<string, number> = {};
     for (const readme of Object.keys(READMES)) {

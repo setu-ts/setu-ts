@@ -13,14 +13,18 @@
  * one digit — requiring the digit keeps ordinary words like `production` from
  * acquiring an unrecoverable one-year `immutable` cache. The heuristic can
  * under-match (a hash with no digit and no hex shape) and over-match (an 8+
- * character run containing a digit). The run may span hyphens, so a dated name
- * like `report-2024-01-15.pdf` matches and would be cached for a year; pass an
- * explicit `cacheControl` value or callback for a deterministic policy on any
- * directory holding files that are not content-hashed.
+ * character run containing a digit). The run may span hyphens, so an
+ * ISO-date suffix (`report-2024-01-15.pdf`) is excluded explicitly — a dated
+ * file is republished at the same URL, and an unrecoverable one-year cache is
+ * the worst outcome this heuristic can produce. Other over-matches remain
+ * possible; pass an explicit `cacheControl` value or callback for a
+ * deterministic policy on any directory holding files that are not
+ * content-hashed.
  *
  * @since 0.1.0
  */
-export const IMMUTABLE_PATTERN = /[.-](?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i;
+export const IMMUTABLE_PATTERN =
+  /[.-](?![0-9]{4}-[0-9]{2}-[0-9]{2}\.)(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i;
 
 /**
  * Default immutable cache control for hashed assets.

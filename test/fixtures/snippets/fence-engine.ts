@@ -456,7 +456,15 @@ export function importsFromSetuTs(code: string): boolean {
 export function importsIdentifier(code: string, name: string): boolean {
   const importBlockRe = /import\s+(?:type\s+)?\{([^}]*)\}\s+from/g;
   for (const match of code.matchAll(importBlockRe)) {
-    if ((match[1] as string).includes(name)) return true;
+    // Exact per-specifier comparison, never a substring of the whole block:
+    // `includes('Inject')` is true for a block importing only `Injectable`,
+    // which would suppress the prelude declaration for a name the fence never
+    // imported. `X as Y` binds Y locally, so the alias is what counts.
+    const specifiers = (match[1] as string).split(',').map((raw) => {
+      const parts = raw.trim().split(/\s+as\s+/);
+      return (parts[parts.length - 1] ?? '').trim();
+    });
+    if (specifiers.includes(name)) return true;
   }
   return false;
 }

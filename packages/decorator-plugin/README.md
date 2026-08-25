@@ -58,7 +58,7 @@ class UsersController {
   @Post('/')
   @ValidateBody(CreateUser)
   create(@Body() body: { email: string; age: number }) {
-    return body; // the TRANSFORMED value: age defaulted, email trimmed by the schema
+    return body; // the TRANSFORMED value: `age` defaulted to 18 by the schema
   }
 }
 
