@@ -281,9 +281,11 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
     };
   }
 
+  // Realistic Vite layout: hashed bundles under `<root>/assets/`, `public/`
+  // copies at the `<root>` itself.
   const baseOptions = {
     serverBuildPath: './build/server/index.js',
-    assetsDir: '/client',
+    assetsDir: '/srv/app/build/client/assets',
     loadRequestHandler: (_path: string, _mode: string) =>
       Promise.resolve({
         handler: () =>
@@ -298,7 +300,9 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
 
   it('serves a build-root file ahead of the SSR catch-all by default', async () => {
     const harness = makeHarness({
-      '/client/robots.txt': encoder.encode('User-agent: *'),
+      // `public/robots.txt` is copied to the client-build ROOT — the PARENT of
+      // the assets dir, NOT inside it.
+      '/srv/app/build/client/robots.txt': encoder.encode('User-agent: *'),
     });
     await harness.register(baseOptions);
 
@@ -336,7 +340,7 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
 
   it('publicFiles: false reproduces prefix-only behavior', async () => {
     const harness = makeHarness({
-      '/client/robots.txt': encoder.encode('User-agent: *'),
+      '/srv/app/build/client/robots.txt': encoder.encode('User-agent: *'),
     });
     await harness.register({ ...baseOptions, publicFiles: false });
 
@@ -350,5 +354,29 @@ describe('ReactRouterPlugin publicFiles wiring', () => {
     expect(mockResp.sentStream).not.toBeNull();
     expect(await streamText(mockResp.sentStream!)).toContain('ssr');
     expect(mockResp.headers.get('Cache-Control')).toBeUndefined();
+  });
+
+  it('still serves asset files from the assets dir under the asset prefix', async () => {
+    const harness = makeHarness({
+      '/srv/app/build/client/assets/app-A9acsx54.js': encoder.encode('console.log(1)'),
+    });
+    await harness.register(baseOptions);
+
+    const assetRoute = harness.assetPatterns.length > 0
+      ? harness.getHandlers.find((r) => r.pattern === '/assets/*')
+      : undefined;
+    expect(assetRoute).toBeDefined();
+
+    const mockResp = buildMockResponse();
+    const ctx = buildMockCtx('/assets/app-A9acsx54.js', mockResp);
+    await (assetRoute?.handler as RouteHandler)(ctx);
+
+    expect(mockResp.sentBody).not.toBeNull();
+    expect(new TextDecoder().decode(mockResp.sentBody ?? new Uint8Array())).toBe(
+      'console.log(1)',
+    );
+    expect(mockResp.headers.get('Cache-Control')).toBe(
+      'public, max-age=31536000, immutable',
+    );
   });
 });
