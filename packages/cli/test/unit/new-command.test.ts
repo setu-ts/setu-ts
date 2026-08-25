@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
+import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
@@ -1331,5 +1332,26 @@ describe('the interactive seam on setu new', () => {
     expect(code).toBe(0);
     // The prompted template took effect through the ordinary pipeline.
     expect(fs.read('/work/svc/setu.config.ts')).toContain('MessagingPlugin()');
+  });
+
+  it('takes the same scaffold on bare Enter that --yes takes', async () => {
+    // The default must not depend on whether a TTY is present. Enter used to
+    // take listTemplates()'s first entry (`rest`) while `--yes` took
+    // MINIMAL_HOST; this drives the REAL terminal prompter with bare Enters
+    // and pins both worlds to one byte-identical file set.
+    const enter = createFakeFs();
+    const code = await runNewCommand(parseArgs(['svc']), {
+      fs: enter,
+      cwd: '/work',
+      log: () => {},
+      error: () => {},
+      ask: createTerminalPrompter(() => true, () => '', () => {}),
+    });
+    expect(code).toBe(0);
+    const yes = harness();
+    expect(await yes.run(['svc', '--yes'])).toBe(0);
+    const pathsOf = (fs: FakeFs) =>
+      fs.writes.map((path) => [path, fs.read(path)] as const).sort(([a], [b]) => a < b ? -1 : 1);
+    expect(pathsOf(enter)).toEqual(pathsOf(yes.fs));
   });
 });

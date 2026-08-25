@@ -118,4 +118,27 @@ describe('resolveNewChoices', () => {
     expect(args.flags['template']).toBeUndefined();
     expect(args.flags['broker']).toBeUndefined();
   });
+
+  it('defaults the Template question to the minimal arm, not the first registry entry', async () => {
+    // Bare Enter takes the FIRST choice, so the default arm must be spelled
+    // first and must record NOTHING: an absent --template is how the pipeline
+    // reaches MINIMAL_HOST, exactly what --yes takes. The registry starts with
+    // `rest`, which used to leak through as the interactive default.
+    const seen: Record<string, readonly PromptChoice[]> = {};
+    const prompter: Prompter = {
+      select(question, choices) {
+        seen[question] = choices;
+        return Promise.resolve('minimal');
+      },
+    };
+    const args = await resolveNewChoices(parseArgs(['svc']), prompter, () => {});
+    expect(seen['Template?']?.map((choice) => choice.value)).toEqual([
+      'minimal',
+      'rest',
+      'microservice',
+      'class-based',
+      'full-stack',
+    ]);
+    expect(args.flags['template']).toBeUndefined();
+  });
 });
