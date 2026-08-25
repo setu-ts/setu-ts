@@ -18,8 +18,8 @@ Packages are organized into tiers based on their role in the framework:
 
 ## Optional npm drivers
 
-Most packages here declare **no npm dependencies at all**. Nearly all of the ones that do declare
-them because they offer an OPTIONAL driver — a Redis client, a cloud SDK, a database ORM — where the
+Most packages here declare **no npm dependencies at all**. Nearly all packages that declare them do
+so because they offer an OPTIONAL driver — a Redis client, a cloud SDK, a database ORM — where the
 rule is always the same: **nothing is imported until you select the arm that needs it.** Choosing
 `MemoryStore` never loads `ioredis`; choosing `LogProvider` never loads `nodemailer`.
 
