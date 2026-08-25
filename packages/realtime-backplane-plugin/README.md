@@ -81,15 +81,16 @@ without a `subscriber` throws at construction rather than failing at the first p
 
 ## Options
 
-| Option                  | Applies to     | Default                  | Description                                                         |
-| ----------------------- | -------------- | ------------------------ | ------------------------------------------------------------------- |
-| `topic`                 | all but memory | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it        |
-| `origin`                | all            | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic |
-| `bus`                   | `'memory'`     | `'default'`              | Named in-process bus; separate names stay isolated                  |
-| `url`                   | `'redis'`      | —                        | Connection URL, used only on the lazy-load path                     |
-| `client` / `subscriber` | `'redis'`      | —                        | Injected client pair; required together                             |
-| `module`                | `'redis'`      | —                        | An `ioredis`-shaped module, for testing without the real driver     |
-| `instance`              | `'custom'`     | —                        | The transport to register, used as-is                               |
+| Option                  | Applies to     | Default                  | Description                                                                                                                                    |
+| ----------------------- | -------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                 | all but memory | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                   |
+| `origin`                | all            | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                            |
+| `bus`                   | `'memory'`     | `'default'`              | Named in-process bus; separate names stay isolated                                                                                             |
+| `url`                   | `'redis'`      | —                        | Connection URL, used only on the lazy-load path                                                                                                |
+| `client` / `subscriber` | `'redis'`      | —                        | Injected client pair; required together                                                                                                        |
+| `module`                | `'redis'`      | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                |
+| `instance`              | `'custom'`     | —                        | The transport to register, used as-is                                                                                                          |
+| `localNotice`           | `'memory'`     | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it |
 
 ## Limitations
 
@@ -101,8 +102,22 @@ without a `subscriber` throws at construction rather than failing at the first p
 IDs come from `runtime.uuid()` and are globally unique, so the frame carries the excluded ID and
 each replica skips the matching member.
 
-Delivery is at-most-once and inherits the transport's guarantees: a replica that is partitioned from
-Redis or the broker misses frames sent during the partition. Frames are not persisted or replayed.
+Delivery is at-most-once and inherits the transport's guarantees — and the guarantee has a shape
+worth knowing. On `'redis'`, ioredis's own defaults govern what a partition does:
+
+- **A short partition (up to roughly 11 seconds): frames are buffered and delivered LATE, not
+  dropped.** The publisher connection is created with ioredis's default `enableOfflineQueue: true`,
+  so publishes issued while disconnected are held and flushed on reconnect. The receiving side sees
+  stale ops seconds after the fact — measured at ~5.9 s in this framework's two-replica exercise —
+  which an application told "frames during a partition are missed" will not defend against. A
+  collaborative board should treat out-of-order late arrivals as possible.
+- **A longer partition: the buffered commands reject** when ioredis's `maxRetriesPerRequest` budget
+  (default 20 retries, ~11 s on the default backoff) exhausts, and both consumers log one `warn` per
+  dropped frame.
+
+Frames are never persisted or replayed beyond that buffer, and neither ioredis default is reachable
+through this plugin's options — an application that needs different behaviour constructs its own
+`client`/`subscriber` pair and injects it.
 
 ## Documentation
 

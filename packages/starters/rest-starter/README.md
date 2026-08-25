@@ -41,6 +41,11 @@ You can customize plugin configuration through the optional `options` parameter:
 import { createRestApp } from '@setu-ts/rest-starter';
 import type { RestStarterOptions } from '@setu-ts/rest-starter';
 
+// Read from wherever the host supplies secrets: `Deno.env.get(...)` on Deno,
+// `process.env...` on Node/Bun, or the `env` argument on Cloudflare Workers.
+declare const jwtSecret: string;
+declare const sessionSecret: string;
+
 const options: RestStarterOptions = {
   config: {/* config plugin options */},
   logger: {/* logger plugin options */},
@@ -51,9 +56,10 @@ const options: RestStarterOptions = {
   openapi: {/* openapi plugin options */},
   serviceDiscovery: { provider: 'static', services: {/* service endpoint map */} },
   decorators: {/* decorator plugin options */},
-  database: {/* database plugin options */},
-  auth: {/* auth plugin options */},
-  session: {/* session plugin options */},
+  database: { type: 'memory' },
+  // `jwt` is required on the auth arm; `rbac` is optional.
+  auth: { jwt: { secret: jwtSecret } },
+  session: { secret: sessionSecret },
   di: {/* di plugin options */},
   realtime: {
     websocket: {/* websocket plugin options */},
@@ -223,9 +229,12 @@ exactly as it did before the option existed.
 **The one difference that will bite you: constructor injection needs an explicit token.**
 
 ```typescript
+import { Inject, Injectable } from '@setu-ts/decorator-plugin';
+import { CAPABILITIES, type ILogger } from '@setu-ts/common';
+
 @Injectable({ token: 'user-service' })
 class UserService {
-  constructor(@Inject(CAPABILITIES.DATABASE) private db: IDatabase) {}
+  constructor(@Inject(CAPABILITIES.LOGGER) private logger: ILogger) {}
 }
 ```
 

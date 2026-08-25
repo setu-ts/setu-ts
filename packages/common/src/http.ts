@@ -153,6 +153,17 @@ export interface IResponse {
    */
   text(body: string): HandlerResult;
   /**
+   * Sends an HTML response.
+   *
+   * The `text/html; charset=utf-8` media type is set explicitly — a bare
+   * `text/html` lets a browser sniff the encoding.
+   *
+   * @param body - The HTML document text
+   * @returns The handler result
+   * @since 0.2.0
+   */
+  html(body: string): HandlerResult;
+  /**
    * Sends a raw byte response.
    *
    * @param body - The response bytes; omit for an empty body

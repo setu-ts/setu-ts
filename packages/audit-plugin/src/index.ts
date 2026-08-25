@@ -22,6 +22,16 @@ export { LogAuditStorage } from './storage/log-audit.ts';
 export { DatabaseAuditStorage } from './storage/database-audit.ts';
 export { FileAuditStorage } from './storage/file-audit.ts';
 
+// ── Storage record / query types ────────────────────────────────────────────
+
+/**
+ * M70n X4-7: the return and parameter types of the already-exported storage
+ * classes' `query` members. Exported so a consumer holding a
+ * `MemoryAuditStorage`/`FileAuditStorage`/`DatabaseAuditStorage` can name them;
+ * NOT a `common` widening — `IAuditLogger` is unchanged.
+ */
+export type { AuditQuery, StoredAuditEntry } from './interfaces/index.ts';
+
 // ── Structural client interface (database backend) ──────────────────────────
 
 export type { IAuditDbClient } from './interfaces/index.ts';

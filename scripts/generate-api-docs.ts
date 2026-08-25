@@ -56,7 +56,7 @@ export const CLEAN_PACKAGES = new Set([
  * `missing-jsdoc`/`private-type-ref` diagnostics on the old narrow facade
  * members with documented, `unknown`-typed ones.
  */
-export const DOC_LINT_BASELINE = 760;
+export const DOC_LINT_BASELINE = 752;
 
 /** One parsed `deno doc --lint` diagnostic. */
 export interface DocLintDiagnostic {

@@ -20,6 +20,7 @@ import { FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
 import { NotificationPlugin } from '@setu-ts/notification-plugin';
 import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
 import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
+import { StaticPlugin } from '@setu-ts/static-plugin';
 
 /**
  * Builds the canonical full-stack plugin set. Composes from {@linkcode buildMicroservicePlugins}
@@ -47,6 +48,7 @@ export function buildFullStackPlugins(options: FullStackStarterOptions = {}): IP
     ...(options.notifications ? [NotificationPlugin(options.notifications)] : []),
     ...(options.multiTenancy ? [MultiTenancyPlugin(options.multiTenancy)] : []),
     ...(options.reactRouter ? [ReactRouterPlugin(options.reactRouter)] : []),
+    ...(options.static ? [StaticPlugin(options.static)] : []),
   ];
 
   return plugins;

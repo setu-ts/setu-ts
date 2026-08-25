@@ -53,6 +53,12 @@ function fakeResponse(): { response: IResponse; record: { status?: number; body?
       record.body = new TextEncoder().encode(body);
       return { __handlerResult: true };
     },
+    html(body: string) {
+      record.body = new TextEncoder().encode(body);
+      // Mirrors the kernel builder, which sets this header.
+      record.headers.set('content-type', 'text/html; charset=utf-8');
+      return { __handlerResult: true };
+    },
     send(body?: Uint8Array) {
       if (body !== undefined) {
         record.body = body;

@@ -49,6 +49,19 @@ export class ResponseBuilder implements IResponse {
     return HANDLER_RESULT;
   }
 
+  /**
+   * Sends an HTML response with the `text/html; charset=utf-8` media type.
+   *
+   * @param body - The HTML document text
+   * @returns The handler result
+   */
+  html(body: string): HandlerResult {
+    this.#body = body;
+    this.#headers.set('content-type', 'text/html; charset=utf-8');
+    this.#ended = true;
+    return HANDLER_RESULT;
+  }
+
   send(body?: Uint8Array): HandlerResult {
     this.#body = body ?? null;
     if (body !== undefined && !this.#headers.has('content-type')) {

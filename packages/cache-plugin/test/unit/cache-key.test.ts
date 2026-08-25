@@ -171,6 +171,7 @@ function fakeContext(opts: {
     appendHeader: () => respStub,
     json: () => hr,
     text: () => hr,
+    html: () => hr,
     send: () => hr,
     redirect: () => hr,
     stream: () => hr,

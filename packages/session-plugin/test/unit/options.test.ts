@@ -12,7 +12,7 @@ describe('resolveSessionConfig', () => {
   it('applies secure defaults', () => {
     expect(resolveSessionConfig()).toEqual({
       mode: 'encrypt',
-      cookieName: 'hono_session',
+      cookieName: 'setu_session',
       cookiePath: '/',
       cookieSameSite: 'lax',
       cookieSecure: true,
@@ -86,10 +86,10 @@ describe('resolveSessionConfig', () => {
 });
 
 describe('resolveCsrfConfig', () => {
-  it('applies defaults', () => {
+  it('applies defaults, including the x-csrf-token header', () => {
     const config = resolveCsrfConfig();
     expect(config.fieldName).toBe('_csrf');
-    expect('headerName' in config).toBe(false);
+    expect(config.headerName).toBe('x-csrf-token');
     expect([...config.ignoreMethods].sort()).toEqual(['GET', 'HEAD', 'OPTIONS']);
   });
 

@@ -19,6 +19,14 @@ describe('barrel exports', () => {
     expect(typeof auth.PasswordHasher).toBe('function');
   });
 
+  it('exports MalformedPasswordHashError', () => {
+    expect(auth.MalformedPasswordHashError).toBeDefined();
+    expect(typeof auth.MalformedPasswordHashError).toBe('function');
+    const error = new auth.MalformedPasswordHashError('test');
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('MalformedPasswordHashError');
+  });
+
   it('exports authMiddleware', () => {
     expect(auth.authMiddleware).toBeDefined();
     expect(typeof auth.authMiddleware).toBe('function');

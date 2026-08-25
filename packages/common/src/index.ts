@@ -149,6 +149,7 @@ export type {
 // Domain service contracts
 export type { ILogger, LogMetadata } from './services/logger.ts';
 export type { IConfig } from './services/config.ts';
+export { validatedStateKey } from './services/validation.ts';
 export type {
   IValidationService,
   ValidationIssue,

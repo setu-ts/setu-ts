@@ -272,6 +272,20 @@ export class MockResponse implements IResponse {
     return { __handlerResult: true };
   }
 
+  /**
+   * Terminal HTML response — mirrors the kernel builder's `html()`, so a test
+   * asserting on the double cannot pass where the real builder would fail.
+   *
+   * @param _body - The HTML document text
+   * @returns The handler result brand
+   */
+  html(_body: string): HandlerResult {
+    this.#body = _body;
+    this.#headers.set('content-type', 'text/html; charset=utf-8');
+    this.#ended = true;
+    return { __handlerResult: true };
+  }
+
   send(_body?: Uint8Array): HandlerResult {
     this.#body = _body ?? null;
     if (_body !== undefined && !this.#headers.has('content-type')) {

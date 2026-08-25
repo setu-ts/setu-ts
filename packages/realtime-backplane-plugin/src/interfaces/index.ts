@@ -84,8 +84,20 @@ export interface IRedisModule {
   create(url: string): IRedisBackplaneClient;
 }
 
-/** Options shared by every transport arm. */
+/**
+ * Options shared by every transport arm.
+ */
 export interface BackplaneCommonOptions {
+  /**
+   * M70n X3-4: when the resolved transport is `'memory'`, the plugin logs a
+   * process-local notice at `register()` — frames fan out only within this
+   * process, which looks like partial delivery behind more than one replica.
+   * Default `true`; `false` suppresses the notice, matching the existing
+   * `scalingNotice` opt-out shape on the SSE and WebSocket plugins.
+   *
+   * @since 0.2.0
+   */
+  readonly localNotice?: boolean;
   /**
    * The broker topic / Redis channel every instance publishes and subscribes
    * on. Defaults to `'setu-ts.realtime'`. Instances must agree on it

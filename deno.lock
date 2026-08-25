@@ -2508,6 +2508,7 @@
           "jsr:@setu-ts/scheduler-plugin@~0.1.0-alpha.8",
           "jsr:@setu-ts/secrets-plugin@~0.1.0-alpha.8",
           "jsr:@setu-ts/session-plugin@~0.1.0-alpha.8",
+          "jsr:@setu-ts/static-plugin@~0.1.0-alpha.8",
           "jsr:@setu-ts/storage-plugin@~0.1.0-alpha.8",
           "jsr:@setu-ts/telemetry-plugin@~0.1.0-alpha.8",
           "jsr:@setu-ts/validation-plugin@~0.1.0-alpha.8"

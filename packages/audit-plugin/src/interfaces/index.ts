@@ -19,15 +19,25 @@ import type { ILogger } from '@setu-ts/common';
  * compiles cleanly.
  */
 export interface StoredAuditEntry {
+  /** Internally assigned unique identifier (UUID v4). */
   readonly id: string;
+  /** Wall-clock epoch milliseconds, assigned by the storage at append. */
   readonly timestamp: number;
+  /** The audited action (e.g. `'user.login'`). */
   readonly action: string;
+  /** The audited resource type (e.g. `'session'`). */
   readonly resource: string;
+  /** The affected resource instance identifier, when known. */
   readonly resourceId?: string | undefined;
+  /** The acting principal's identifier, when authenticated. */
   readonly userId?: string | undefined;
+  /** Whether the audited operation succeeded or failed. */
   readonly result: 'success' | 'failure';
+  /** Resource state before the operation, when captured. */
   readonly before?: Readonly<Record<string, unknown>> | undefined;
+  /** Resource state after the operation, when captured. */
   readonly after?: Readonly<Record<string, unknown>> | undefined;
+  /** Free-form structured context attached by the caller. */
   readonly metadata?: Readonly<Record<string, unknown>> | undefined;
 }
 
@@ -36,10 +46,15 @@ export interface StoredAuditEntry {
  * and combines as AND. An omitted field does not constrain.
  */
 export interface AuditQuery {
+  /** Matches entries whose `action` equals this value exactly. */
   action?: string;
+  /** Matches entries whose `resource` equals this value exactly. */
   resource?: string;
+  /** Matches entries whose `resourceId` equals this value exactly. */
   resourceId?: string;
+  /** Matches entries whose `userId` equals this value exactly. */
   userId?: string;
+  /** Matches entries whose outcome equals this value. */
   result?: 'success' | 'failure';
   /** Lower time bound, inclusive (epoch ms). */
   from?: number;

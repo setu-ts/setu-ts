@@ -47,6 +47,38 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Decorated validation schemas can be enforced without hand-wiring middleware** (M70n, E1/E2) —
+  see **Changed** for the breaking default. `DecoratorPluginOptions.enforceSchemas` controls it, and
+  `@Body()`/`@Query()`/`@Param()` read the VALIDATED value (transforms, defaults and coercions
+  included) via the new `validatedStateKey(target)` helper exported from `@setu-ts/common` — the
+  cross-package state-key wire format both plugins must agree on byte-for-byte, replacing two
+  hardcoded literals. Presence-tested with `ctx.state.has`, so a validated `null` or `0` is
+  honoured; falls back to the raw source when no validated value exists. `@Header`/`@Cookie`
+  deliberately unchanged (case-insensitive header lookup; no cookies schema key).
+- **`PasswordHasher.verify(stored, secret)` throws `MalformedPasswordHashError`** (M70n, X3-9) when
+  `stored` is not a well-formed `pbkdf2$…` string, instead of returning `false`. Both parameters are
+  plain strings, so a reversed call used to fail closed silently — every correct password answered
+  `401 Invalid credentials` with nothing logged. Exported for `instanceof`; a genuinely wrong
+  password still returns `false`.
+- **`StoredAuditEntry` and `AuditQuery` exported from the audit-plugin barrel** (M70n, X4-7). They
+  are the return and parameter types of every exported storage class's `query` member, which were
+  previously unnameable by any consumer (the M52c `NormalizedQuery` class).
+- **`SseMessage.data` accepts any JSON-serializable value** (M70n, X3-6):
+  `string | number | boolean
+  | null | readonly unknown[] | Record<string, unknown>`. The encoder
+  already handled all of them; the type rejected what the implementation accepted, so named
+  interfaces needed casts.
+- **A process-local notice on `RealtimeBackplanePlugin`** (M70n, X3-4). Registering bare defaults to
+  the single-process `'memory'` transport AND silenced the consumers' startup notices — worse than
+  not registering it. The plugin now logs the notice itself at `register()` naming `'redis'`/
+  `'messaging'`; `localNotice: false` suppresses it.
+- **`ReactRouterPluginOptions.publicFiles`** (M70n, X5-5), default `true`: files Vite copies to the
+  client build root (`public/robots.txt`, `favicon.ico`) are served with `must-revalidate` instead
+  of answering an HTML 404 through the SSR catch-all. `false` restores prefix-only behaviour.
+- **`FullStackStarterOptions.static`** (M70n, X5-9): a gated arm registering `StaticPlugin` — the
+  browser-serving tier could not compose static files through configuration. Absent, the plugin list
+  is unchanged.
+
 - **The OpenAPI document is derived from validation middleware** (M70m, X11-5). A route carrying
   `validateBody(schema)` contributed **nothing** to the document, so the generated client for an
   API's only write took no argument and answered `400` against the live server, and every response
@@ -309,6 +341,36 @@ All notable changes to this project are documented here. The format follows
   the replacement.
 
 ### Changed
+
+- **BREAKING: `@ValidateBody(schema)` (and `@ValidateQuery`/`@ValidateParams`) now enforce their
+  schema by default** (M70n, E1). The decorators shipped as inert metadata — a decorated route
+  accepted any body — so an application upgrading that carries a decorated route whose body its
+  schema rejects starts answering `400` with no configuration change. Enforcement appends the
+  validation capability's middleware LAST in the route's chain (innermost, after guards), preserving
+  guard `401`/`403` precedence; with no validation provider registered the schema stays
+  description-only and ONE warning per route names the controller, handler, targets and
+  `ValidationPlugin`. **Migration:** pass `DecoratorPlugin({ enforceSchemas: false })` to keep the
+  previous description-only behaviour.
+
+- **BREAKING: the default session cookie is renamed `hono_session` → `setu_session`** (M70n, X9-10).
+  The framework is not Hono, and the rename only gets more expensive with every release that ships
+  it. In-flight sessions are invalidated at deploy: every user is logged out once. **Migration:**
+  pin `SessionPlugin({ cookie: { name: 'hono_session' } })` for one `maxAge` window to preserve live
+  sessions, then drop the pin.
+
+- **BREAKING: `IResponse` gains a REQUIRED `html(body)` member** (M70n, X4-11), implemented in the
+  kernel's `ResponseBuilder` and `testing`'s `MockResponse`. It sets
+  `content-type: text/html; charset=utf-8` — the charset is not optional, because a bare `text/html`
+  lets a browser sniff the encoding. **Migration:** an out-of-repo `IResponse` implementor adds the
+  member; every caller-side use is source-compatible.
+
+- **BREAKING: the `cacheControl` callback receives a leading-slash path** (M70n, C5/D8). The value
+  was slash-less for a file (`assets/app.js`) but the literal `'/'` at the prefix root, while the
+  docs said only "root-relative" — a callback written against one observed shape was silently wrong
+  for the other. Both shapes are now normalised to a leading slash (`/assets/app-A9acsx54.js`, `'/'`
+  at the root) and documented as such. **Migration:** a callback comparing against a slash-less form
+  (e.g. `path.startsWith('assets/')`) changes to `/assets/`; one matching on extensions or the root
+  literal is unaffected.
 
 - **`WorkersCron.dispatch` now rejects on failure instead of always resolving** (M70l, X9-5).
   **Breaking.** A firing trigger with no registered handler throws naming the expression; one or
@@ -754,6 +816,40 @@ All notable changes to this project are documented here. The format follows
   produced (`404` for a path with no WebSocket route) rather than a fixed `400`.
 
 ### Fixed
+
+- **Every doc site showed `authMiddleware()` registered at a priority its own architecture table
+  does not grant it** (M70n, X3-1). `ARCHITECTURE.md` §10 reserves 300 for authentication, but a
+  bare `app.middleware.add(authMiddleware())` takes the kernel default of 500 — AFTER every band in
+  that table, so a hand-written global guard in any documented band rejected valid credentials while
+  route guards worked. The README, both JSDoc examples and `PUBLIC_API.md` now write the explicit
+  `{ priority: 300 }`, and §10 states that its priorities are conventional bands, not
+  self-registrations, with 500 outside the table's range.
+- **The backplane's documented partition guarantee was wrong for the first ~11 seconds** (M70n,
+  X3-3). ioredis's default offline queue holds publishes during a short partition and delivers them
+  LATE (measured ~5.9 s) — which an application told "frames during a partition are missed" will not
+  defend against — until the `maxRetriesPerRequest` budget exhausts and drops them with a warn per
+  frame. Both READMEs and `PUBLIC_API.md` document the actual shape; neither ioredis default is
+  reachable through plugin options (inject a client pair to change it).
+- **The websocket README nominated a cookie as the first credential to verify in `onOpen` — and a
+  cookie cannot be verified there** (M70n, X3-5). `ISessionService.from(ctx)` needs the request
+  context an upgrade bypasses, and no open-from-headers seam exists. The README now says what works:
+  a signed query parameter or subprotocol nonce, with the composition gap tracked in
+  `smoke/DEFECTS.md`.
+- **`room()`/`channel()` are get-or-create, and nothing public said so** (M70n, X3-8). A presence
+  endpoint reading `size` for caller-supplied names created one room/channel per distinct name,
+  reclaimed only on some other connection's disconnect. Both READMEs and `PUBLIC_API.md` document
+  the semantics.
+- **A hand-written `RouterContextKey` literal silently returns its default** (M70n, X5-7) — keys
+  match by identity and the declaring module reliably exists twice in a framework-mode build. The
+  react-router README now carries the `contextKeyFor` warning (and its loader example, which read a
+  nonexistent `context.services`, actually compiles).
+- **`resilience.wrap()` rebuilt per request silently disables the circuit breaker** (M70n, X7-9).
+  Retry and timeout keep working, so the broken shape looks identical to the working one. The
+  resilience README and `PUBLIC_API.md` say to hoist the wrapped call to module or plugin scope.
+- **`SessionPlugin({ csrf: {} })` — the registration every doc shows — could not accept a JSON
+  mutation** (M70n, X4-5): `csrf.headerName` had no default, so the token was readable only from a
+  urlencoded body. It defaults to `'x-csrf-token'` (the name the package's own JSDoc example already
+  used); an explicit name still wins.
 
 - **`every` jobs armed their timer for a full interval instead of the delay to the grid boundary**
   (M70l, X10-2). `every()` computed a grid-aligned `nextRunAtMs` but armed the timer for the whole
