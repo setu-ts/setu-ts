@@ -127,6 +127,50 @@ describe('a --broker scaffold', () => {
   });
 });
 
+describe('a broker and queue naming the same arm', () => {
+  // One arm can serve BOTH flags. Its Compose service and its dotenv row must
+  // appear exactly once — a duplicated `redis:` key makes the stack refuse to
+  // start, and a duplicated variable is a file the reader has to reconcile by
+  // hand. Both dedups exist in `brokerComposeFiles` and `applyBrokerOverlay`;
+  // asserting the presence of a block cannot tell one from two, so these count.
+  it('emits its Compose service and dotenv row exactly once', async () => {
+    const h = harness();
+    expect(
+      await h.run(['svc', '--template', 'microservice', '--broker', 'redis', '--queue', 'redis']),
+    ).toBe(0);
+
+    const compose = h.fs.read('/work/svc/docker/compose.yaml');
+    expect(compose.match(/^ {2}redis:$/gm)?.length).toBe(1);
+    expect(h.fs.read('/work/svc/.env').match(/^REDIS_URL=/gm)?.length).toBe(1);
+    expect(h.fs.read('/work/svc/.env.example').match(/^REDIS_URL=/gm)?.length).toBe(1);
+  });
+
+  it('keeps both services when the two flags name different arms', async () => {
+    const h = harness();
+    expect(
+      await h.run([
+        'svc',
+        '--template',
+        'microservice',
+        '--broker',
+        'rabbitmq',
+        '--queue',
+        'redis',
+      ]),
+    ).toBe(0);
+
+    const compose = h.fs.read('/work/svc/docker/compose.yaml');
+    expect(compose.match(/^ {2}rabbitmq:$/gm)?.length).toBe(1);
+    expect(compose.match(/^ {2}redis:$/gm)?.length).toBe(1);
+    // And each wiring reads its OWN variable, not the other's.
+    const config = h.fs.read('/work/svc/setu.config.ts');
+    expect(config).toContain("broker: 'rabbitmq'");
+    expect(config).toContain('RABBITMQ_URL');
+    expect(config).toContain("adapter: 'redis'");
+    expect(config).toContain('REDIS_URL');
+  });
+});
+
 describe('broker and queue refusals', () => {
   it('refuses an unknown broker name', async () => {
     const h = harness();
