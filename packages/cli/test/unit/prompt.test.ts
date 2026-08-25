@@ -2,6 +2,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createTerminalPrompter, type PromptChoice } from '../../src/prompt.ts';
 
+// Generic fallback contract only: Enter takes the FIRST choice. WHICH value
+// that first choice is for the template question is pinned where the question
+// is built — new-interactive.test.ts and new-command.test.ts pin Enter to the
+// same default `--yes` takes (no --template flag, MINIMAL_HOST).
 const CHOICES: readonly PromptChoice[] = [
   { value: 'rest', label: 'REST set' },
   { value: 'microservice', label: 'microservice set' },

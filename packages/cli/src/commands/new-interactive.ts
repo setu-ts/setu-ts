@@ -26,6 +26,20 @@ import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { getTransport, listBrokers, listQueues, listTransports } from '../workspace/transport.ts';
 
 /**
+ * The interactive template prompt's default arm.
+ *
+ * Bare Enter takes the FIRST choice offered, and {@linkcode listTemplates}
+ * starts with `rest` — but the documented default (what `--yes` takes, and
+ * what a non-terminal takes) is NO `--template` flag, which the pipeline
+ * resolves through `choice.template ?? MINIMAL_HOST`. So the prompt spells its
+ * own default arm FIRST and selecting it records nothing, making Enter produce
+ * exactly what `--yes` produces regardless of registry ordering. It is
+ * deliberately not a registry name — `getTemplate('minimal')` is undefined —
+ * which is why the arm is consumed here rather than written into the flag.
+ */
+const TEMPLATE_PROMPT_DEFAULT = 'minimal';
+
+/**
  * The host a standalone project would render with, given the answers so far.
  *
  * Shared by the broker/queue eligibility checks: the predicate §3.4 refuses on
@@ -103,11 +117,28 @@ export async function resolveNewChoices(
     return { positionals: args.positionals, flags };
   }
 
-  await ask(
-    'template',
-    'Template?',
-    listTemplates().map((template) => ({ value: template.name, label: template.description })),
-  );
+  // The template question does not go through `ask`: its default arm is NOT
+  // the first registry entry. Enter must yield the same scaffold `--yes`
+  // yields, which is an ABSENT flag resolved to MINIMAL_HOST downstream —
+  // see TEMPLATE_PROMPT_DEFAULT.
+  if (flags['template'] === undefined) {
+    const answer = await select.select('Template?', [
+      {
+        value: TEMPLATE_PROMPT_DEFAULT,
+        label: 'Runtime plugin alone — the scaffold --yes produces',
+      },
+      ...listTemplates().map((template) => ({
+        value: template.name,
+        label: template.description,
+      })),
+    ]);
+    if (answer !== undefined) {
+      // The default arm records NOTHING: an absent flag is exactly how the
+      // pipeline — and `--yes` — reach MINIMAL_HOST.
+      if (answer !== TEMPLATE_PROMPT_DEFAULT) flags['template'] = answer;
+      log(`Template? ${answer}`);
+    }
+  }
 
   // The broker and queue questions fire only when the collected answers make
   // the flag legal — derived from the SAME refusal the command enforces, so a
