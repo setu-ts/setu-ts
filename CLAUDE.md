@@ -3339,7 +3339,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   corrected: the `IMMUTABLE_PATTERN` over-match caveat (the class spans hyphens, so
   `report-2024-01-15.pdf` would be cached for a year — the doc was sharpened rather than the regex,
   since base64url hashes legitimately contain `-`), and a "ten brokers" count that is seven) —
-  complete (PR pending)
+  complete (PR #183)
 - **Next milestone** — **the `v0.1.0-alpha.9` release**, which ships after every alpha-9 workstream
   merges ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch).
 
