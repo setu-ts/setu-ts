@@ -113,6 +113,15 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # actions/checkout writes the job token into the local git config by
+          # default, so every step after it can push. This job now requests
+          # `contents: write` for the release step at the very end, and nothing
+          # here does a networked git operation — the suite's only git call is a
+          # local `git ls-files` — so the gates and the publish run with no
+          # write-capable credential in reach. The release step gets its token
+          # explicitly through GH_TOKEN instead.
+          persist-credentials: false
 
       - uses: denoland/setup-deno@v2
         with:
@@ -196,7 +205,11 @@ jobs:
           deno run --allow-read scripts/release-notes.ts "$version" > "$RUNNER_TEMP/notes.md"
           prerelease=''
           case "$version" in *-*) prerelease='--prerelease' ;; esac
+          # --verify-tag: without it `gh release create` CREATES a missing tag
+          # from the default branch, so a deleted or mistyped tag would produce
+          # a release pointing at a commit other than the one just published.
           gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
             --title "$GITHUB_REF_NAME" \
             --notes-file "$RUNNER_TEMP/notes.md" \
             $prerelease

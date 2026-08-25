@@ -247,8 +247,13 @@ there are immutable, and a re-run fails on every package in the list. Create the
 
 ```bash
 deno run --allow-read scripts/release-notes.ts 0.1.0-alpha.9 > /tmp/notes.md
-gh release create v0.1.0-alpha.9 --title v0.1.0-alpha.9 --notes-file /tmp/notes.md --prerelease
+gh release create v0.1.0-alpha.9 --verify-tag --title v0.1.0-alpha.9 \
+  --notes-file /tmp/notes.md --prerelease
 ```
+
+`--verify-tag` matters more here than in the workflow: without it `gh release create` creates a
+missing tag from the default branch, so a mistyped version would publish a release pointing at
+whatever `main` happens to be rather than at the commit that was released.
 
 The step is idempotent — it exits early when the release already exists — so a re-run for any other
 reason will not collide with an object created this way.
