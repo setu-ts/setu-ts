@@ -459,9 +459,17 @@ export function importsIdentifier(code: string, name: string): boolean {
     // Exact per-specifier comparison, never a substring of the whole block:
     // `includes('Inject')` is true for a block importing only `Injectable`,
     // which would suppress the prelude declaration for a name the fence never
-    // imported. `X as Y` binds Y locally, so the alias is what counts.
+    // imported.
+    //
+    // Two specifier forms have to be unwrapped before comparing, and BOTH have
+    // produced a wrong answer here. An inline `type` modifier is stripped
+    // first, so `{ type IRequest }` resolves to `IRequest` — without that the
+    // prelude emits a second `import type { IRequest }` and the fence fails
+    // with a duplicate identifier. Then `X as Y` resolves to `Y`, because the
+    // alias is the local binding. Order matters: `type Foo as Bar` is `Bar`.
     const specifiers = (match[1] as string).split(',').map((raw) => {
-      const parts = raw.trim().split(/\s+as\s+/);
+      const withoutTypeModifier = raw.trim().replace(/^type\s+/, '');
+      const parts = withoutTypeModifier.split(/\s+as\s+/);
       return (parts[parts.length - 1] ?? '').trim();
     });
     if (specifiers.includes(name)) return true;
