@@ -16,6 +16,70 @@ Packages are organized into tiers based on their role in the framework:
 | **Tier 5**  | Platform-specific plugins (Cloudflare, gRPC, GraphQL, etc.)          |
 | **Tooling** | CLI, SDK, and starters                                               |
 
+## Optional npm drivers
+
+Most packages here declare **no npm dependencies at all**. Nearly all packages that declare them do
+so because they offer an OPTIONAL driver — a Redis client, a cloud SDK, a database ORM — where the
+rule is always the same: **nothing is imported until you select the arm that needs it.** Choosing
+`MemoryStore` never loads `ioredis`; choosing `LogProvider` never loads `nodemailer`.
+
+Three packages are the exception, and the table marks them `always`: for `graphql-plugin`,
+`grpc-plugin` and `react-router-plugin` the driver **is** the capability rather than one choice
+among several, so there is nothing to select and nothing that stays unloaded.
+
+What differs is what "declare" means in each ecosystem, and it is worth being precise because the
+two answers are genuinely different:
+
+|                        | Deno / JSR                                    | Node / Bun (npm)                         |
+| ---------------------- | --------------------------------------------- | ---------------------------------------- |
+| Adding the package     | fetches nothing extra                         | installs the declared drivers            |
+| Selecting a driver arm | resolves the `npm:` specifier on first import | already present                          |
+| Never selecting one    | the driver is never fetched                   | the driver sits unused in `node_modules` |
+
+The npm column is not a packaging choice we made. JSR's npm-compatibility build turns every `npm:`
+specifier it finds into a `dependencies` entry of the published package, and npm has no concept of
+an optional-but-declared runtime dependency that fits this pattern. So on npm, installing
+`@setu-ts/messaging-plugin` does bring its six broker clients with it, even if your application only
+ever uses the in-memory broker.
+
+### Which packages declare drivers
+
+Every package NOT listed here declares zero npm dependencies — that includes `common`, `kernel`,
+`exceptions`, `sdk`, `cloudflare-plugin`, `session-plugin`, `validation-plugin`, `openapi-plugin`,
+`static-plugin`, `websocket-plugin`, `worker-pool-plugin`, and the three starters. `cli` is on that
+list too, which is worth saying out loud because its source is full of `npm:` strings: those are
+DATA it writes into a generated project's manifest, not specifiers it imports, so nothing follows
+them into its own dependency graph.
+
+| Package                     | Declared npm drivers                                                                                                                                | Arm that needs them                                                           |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `auth-plugin`               | `ioredis`                                                                                                                                           | `RedisRateLimitStore`                                                         |
+| `cache-plugin`              | `ioredis`                                                                                                                                           | `store: 'redis'`                                                              |
+| `database-plugin`           | `drizzle-orm`                                                                                                                                       | `type: 'drizzle'` (Prisma and D1 are inject-only — neither declares a driver) |
+| `feature-flags-plugin`      | `@launchdarkly/node-server-sdk`                                                                                                                     | `provider: 'launchdarkly'`                                                    |
+| `graphql-plugin`            | `graphql`                                                                                                                                           | always (the execution engine)                                                 |
+| `grpc-plugin`               | `@connectrpc/connect`, `@bufbuild/protobuf`                                                                                                         | always (the RPC runtime)                                                      |
+| `logger-plugin`             | `pino`                                                                                                                                              | `PinoLogger`                                                                  |
+| `mail-plugin`               | `nodemailer`, `@aws-sdk/client-sesv2`                                                                                                               | `smtp` / `ses` providers                                                      |
+| `messaging-plugin`          | `ioredis`, `amqplib`, `kafkajs`, `nats`, `@google-cloud/pubsub`, `@azure/service-bus`                                                               | the matching broker                                                           |
+| `queue-plugin`              | `ioredis`, `amqplib`, `@aws-sdk/client-sqs`, `@aws-sdk/client-sns`                                                                                  | the matching adapter                                                          |
+| `react-router-plugin`       | `react-router`                                                                                                                                      | always (SSR request handler)                                                  |
+| `realtime-backplane-plugin` | `ioredis`                                                                                                                                           | `transport: 'redis'`                                                          |
+| `runtime`                   | `@hono/node-server`, `ws`                                                                                                                           | the Node HTTP and WebSocket adapters                                          |
+| `scheduler-plugin`          | `ioredis`                                                                                                                                           | `RedisLock`                                                                   |
+| `secrets-plugin`            | `@aws-sdk/client-secrets-manager`, `@google-cloud/secret-manager`, `@azure/identity`, `@azure/keyvault-secrets`                                     | the matching cloud provider                                                   |
+| `storage-plugin`            | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`, `@google-cloud/storage`, `@azure/storage-blob`                                               | the matching provider                                                         |
+| `telemetry-plugin`          | `@opentelemetry/{api,resources,sdk-trace-base,exporter-trace-otlp-http}` and `@opentelemetry/instrumentation-{http,undici,ioredis,amqplib,kafkajs}` | any non-noop exporter, or `instrumentations`                                  |
+
+The three `always` rows — `graphql-plugin`, `grpc-plugin` and `react-router-plugin` — have no
+zero-driver arm, and none of them claims one. Everything else here is genuinely optional: the arm
+named beside it is the only thing that loads it.
+
+Every driver above can also be supplied by **injection** instead, through the plugin's own options
+(`DatabasePlugin({ client })`, `CachePlugin({ client })`, and so on). An application that injects
+its own client never triggers the lazy import at all — see
+[AI_GUIDELINES §12.2](https://github.com/setu-ts/setu-ts/blob/main/AI_GUIDELINES.md).
+
 ## Tier 1: Core Infrastructure
 
 ### @setu-ts/common
