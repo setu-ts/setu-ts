@@ -671,6 +671,31 @@ describe('createStaticHandler', () => {
     expect(received).toEqual(['/test.txt']);
   });
 
+  it('should pass the FULL request path INCLUDING the urlPrefix to the cacheControl callback', async () => {
+    const content = new TextEncoder().encode('console.log(1)');
+    await fs.writeFile('/root/app.js', content);
+
+    const received: string[] = [];
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/assets',
+      index: 'index.html',
+      cacheControl: (path) => {
+        received.push(path);
+        return 'public, max-age=60';
+      },
+    }) as RouteHandler;
+
+    ctx.request.path = '/assets/app.js';
+    await handler(ctx as never);
+
+    expect(ctx.response._status).toBe(200);
+    // The documented contract: the callback receives the leading-slash path
+    // WITH the prefix — `/assets/app.js`, not the stripped `/app.js`.
+    expect(received).toEqual(['/assets/app.js']);
+  });
+
   it('should pass a leading-slash path to the cacheControl callback for directory index and fallback', async () => {
     const indexContent = new TextEncoder().encode('<html>index</html>');
     await fs.writeFile('/root/index.html', indexContent);

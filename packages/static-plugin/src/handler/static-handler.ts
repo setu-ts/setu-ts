@@ -102,6 +102,13 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     // Normalize the path
     const normalizedPath = relativePath === '' ? '/' : relativePath;
 
+    // The path handed to a user-supplied `cacheControl` callback: the FULL
+    // leading-slash request path INCLUDING the URL prefix, per the documented
+    // contract (`/assets/app.js`, never the prefix-stripped `/app.js`).
+    // Internal resolution below keeps using the stripped form.
+    const callbackPath = (rootRelative: string): string =>
+      normalizedPrefix === '/' ? rootRelative : `${normalizedPrefix}${rootRelative}`;
+
     // Reject path traversal
     if (!isLexicallyContained(normalizedPath)) {
       return ctx.response.status(404).send();
@@ -128,13 +135,13 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
       }
     }
 
-    // Root-relative form of the resolved path, normalized to a LEADING SLASH —
-    // the documented shape of the path handed to `resolveCacheControl` and to a
-    // user-supplied `cacheControl` callback. This — never the absolute
-    // filesystem path and never a `.br`/`.gz` sidecar path — is what drives
-    // Cache-Control, so a hashed asset keeps its `immutable` policy whichever
-    // encoding is negotiated, and the callback receives the request path rather
-    // than the server's directory layout.
+    // Prefix-stripped, root-relative form of the resolved path, normalized to
+    // a LEADING SLASH — the INTERNAL shape used for filesystem resolution.
+    // `callbackPath` above prepends the URL prefix before this reaches
+    // `resolveCacheControl`, so a user-supplied callback sees the full request
+    // path (`/assets/app.js`) rather than the server's directory layout or an
+    // absolute filesystem path, and a hashed asset keeps its `immutable`
+    // policy whichever encoding is negotiated.
     const rootRelative = normalizedPath === '/' ? '/' : `/${normalizedPath}`;
 
     // Stat the file
@@ -152,7 +159,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
             if (fallbackStat.isFile) {
               return serveFile(ctx, fs, fallbackPath, fallbackStat, {
                 cacheControl,
-                relativePath: `/${fallback}`,
+                relativePath: callbackPath(`/${fallback}`),
                 etag,
                 ranges,
                 maxBufferBytes,
@@ -175,7 +182,9 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
           if (indexStat.isFile) {
             return serveFile(ctx, fs, indexPath, indexStat, {
               cacheControl,
-              relativePath: rootRelative === '/' ? `/${index}` : `${rootRelative}/${index}`,
+              relativePath: callbackPath(
+                rootRelative === '/' ? `/${index}` : `${rootRelative}/${index}`,
+              ),
               etag,
               ranges,
               maxBufferBytes,
@@ -191,7 +200,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     // Serve the file
     return serveFile(ctx, fs, fullPath, stat, {
       cacheControl,
-      relativePath: rootRelative,
+      relativePath: callbackPath(rootRelative),
       etag,
       ranges,
       maxBufferBytes,
