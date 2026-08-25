@@ -85,8 +85,15 @@ export class PasswordHasher {
       );
     }
 
+    // Strict digits-only parse: `parseInt` would accept trailing junk
+    // (`100000junk` → `100000`) and treat a corrupted hash as well-formed.
+    if (!/^\d+$/.test(parts[1])) {
+      throw new MalformedPasswordHashError(
+        `the stored credential's iterations part '${parts[1]}' is not a positive integer`,
+      );
+    }
     const iterations = parseInt(parts[1], 10);
-    if (isNaN(iterations) || iterations <= 0) {
+    if (iterations <= 0) {
       throw new MalformedPasswordHashError(
         `the stored credential's iterations part '${parts[1]}' is not a positive integer`,
       );
