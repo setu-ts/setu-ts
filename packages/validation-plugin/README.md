@@ -16,6 +16,7 @@ import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
 
 ```typescript
 import { z } from 'zod';
+import { validatedStateKey } from '@setu-ts/common';
 import { validateBody, ValidationPlugin } from '@setu-ts/validation-plugin';
 
 const CreateUser = z.object({ email: z.string().email(), age: z.number().int() });

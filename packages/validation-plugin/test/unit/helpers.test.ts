@@ -7,7 +7,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, validatedStateKey } from '@setu-ts/common';
 
 import {
   validateBody,
@@ -50,7 +50,7 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:body')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('body'))).toBe(true);
   });
 
   it('validateQuery stores validated:query in ctx.state', async () => {
@@ -64,7 +64,7 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:query')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('query'))).toBe(true);
   });
 
   it('validateParams stores validated:params in ctx.state', async () => {
@@ -78,7 +78,7 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:params')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('params'))).toBe(true);
   });
 
   it('validateHeaders stores validated:headers in ctx.state', async () => {
@@ -92,7 +92,7 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:headers')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('headers'))).toBe(true);
   });
 
   it('validateCookies stores validated:cookies in ctx.state', async () => {
@@ -106,6 +106,6 @@ describe('validate helpers — delegate to service middleware', () => {
 
     await mw(ctx, async () => {});
 
-    expect(ctx.state.has('validated:cookies')).toBe(true);
+    expect(ctx.state.has(validatedStateKey('cookies'))).toBe(true);
   });
 });

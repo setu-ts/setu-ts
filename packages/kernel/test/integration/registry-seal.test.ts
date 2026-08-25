@@ -36,6 +36,37 @@ function recordingLogger(entries: string[]): ILogger {
   };
 }
 
+function throwingLogger(): ILogger {
+  return {
+    level: 'info',
+    fatal: (): void => {},
+    error: (): void => {},
+    warn: (): void => {
+      throw new Error('logger failed');
+    },
+    info: (): void => {
+      throw new Error('logger failed');
+    },
+    debug: (): void => {},
+    trace: (): void => {},
+    child(): ILogger {
+      return this;
+    },
+  };
+}
+
+function mutationPlugin(): IPlugin {
+  return {
+    name: 'mutator',
+    version: '1.0.0',
+    register(ctx): void {
+      ctx.services.register('replaceable', { first: true });
+      ctx.services.register('replaceable', { first: false }, { override: true });
+      ctx.services.unregister('replaceable');
+    },
+  };
+}
+
 describe('application registry sealing', () => {
   it('seals the application registry after bootstrap but leaves request children mutable', async () => {
     const app = createApplication({
@@ -77,15 +108,7 @@ describe('application registry sealing', () => {
             ctx.services.register(CAPABILITIES.LOGGER, recordingLogger(entries));
           },
         },
-        {
-          name: 'mutator',
-          version: '1.0.0',
-          register(ctx): void {
-            ctx.services.register('replaceable', { first: true });
-            ctx.services.register('replaceable', { first: false }, { override: true });
-            ctx.services.unregister('replaceable');
-          },
-        },
+        mutationPlugin(),
       ],
     });
     await app.start();
@@ -94,5 +117,28 @@ describe('application registry sealing', () => {
       "warn:Capability 'replaceable' was unregistered by mutator.",
     ]);
     await app.stop();
+  });
+
+  it('does not let an absent or throwing logger block registry mutations', async () => {
+    const withoutLogger = createApplication({ plugins: [runtimePlugin(), mutationPlugin()] });
+    await withoutLogger.start();
+    await withoutLogger.stop();
+
+    const withThrowingLogger = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'logger',
+          version: '1.0.0',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx): void {
+            ctx.services.register(CAPABILITIES.LOGGER, throwingLogger());
+          },
+        },
+        mutationPlugin(),
+      ],
+    });
+    await withThrowingLogger.start();
+    await withThrowingLogger.stop();
   });
 });
