@@ -14,7 +14,7 @@ import {
 } from '../../src/middleware/rate-limit-middleware.ts';
 import type { RateLimitResult, RateLimitStore } from '../../src/stores/rate-limit-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, CLIENT_IP_STATE_KEY } from '@setu-ts/common';
 import type {
   HandlerResult,
   IPrincipal,
@@ -298,7 +298,7 @@ describe('rateLimitMiddleware', () => {
 
     it('falls back to the clientIp published by ipSecurityMiddleware', () => {
       const { ctx } = createContext(createFakeRuntime(0));
-      ctx.state.set('clientIp', '9.9.9.9');
+      ctx.state.set(CLIENT_IP_STATE_KEY, '9.9.9.9');
       expect(defaultRateLimitKey(ctx)).toBe('ip:9.9.9.9');
     });
 

@@ -45,11 +45,21 @@ export interface IRequest {
   /**
    * The authenticated principal, populated by authentication middleware.
    * Absent when the request is unauthenticated.
+   *
+   * It accepts one implicit write per request; a second assignment throws so
+   * independent identity writers fail loudly. Use {@linkcode replacePrincipal}
+   * for an intentional replacement such as step-up authentication. This is
+   * not an authorization control: a write before authentication is still the
+   * first write and is allowed.
    */
   user?: IPrincipal;
   /**
    * The resolved tenant, populated by the multi-tenancy middleware.
    * Absent when no tenant could be resolved or multi-tenancy is not enabled.
+   *
+   * It accepts one implicit write per request; use {@linkcode replaceTenant}
+   * for an intentional replacement. Like `user`, this detects late accidental
+   * overwrites and is not an authorization control.
    */
   tenant?: ITenant;
   /**

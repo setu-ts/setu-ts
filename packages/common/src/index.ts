@@ -65,6 +65,10 @@ export type {
   ServiceFactory,
 } from './registry.ts';
 
+// Request identity and cross-package state keys
+export { replacePrincipal, replaceTenant, sealRequestIdentity } from './request-identity.ts';
+export { CLIENT_IP_STATE_KEY } from './state-keys.ts';
+
 // HTTP abstractions
 export type {
   HandlerResult,

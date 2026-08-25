@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { sealRequestIdentity } from '@setu-ts/common';
 import type { IRequest, IRequestContext } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 
@@ -58,6 +59,7 @@ export function createRequestContext(
   registry: ServiceRegistry,
   runtime: IRuntimeServices,
 ): RequestContextHandle {
+  sealRequestIdentity(request);
   const child = registry.createChild();
   const response = new ResponseBuilder();
   const url = new URL(request.url);

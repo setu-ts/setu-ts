@@ -12,7 +12,7 @@ import type {
   MiddlewareFunction,
   NextFunction,
 } from '@setu-ts/common';
-import { respondWithError } from '@setu-ts/common';
+import { replaceTenant, respondWithError } from '@setu-ts/common';
 
 /**
  * State key for the cache prefix — consumers should use `getTenantCachePrefix`
@@ -142,7 +142,7 @@ export function tenantMiddleware({
     }
 
     if (resolved) {
-      ctx.request.tenant = resolved;
+      replaceTenant(ctx.request, resolved);
 
       // Stamp cache prefix into ctx.state when configured.
       if (cacheConfig?.prefix) {

@@ -33,6 +33,8 @@ export class ServiceRegistry implements IServiceRegistry {
   readonly #single = new Map<CapabilityToken, Registration>();
   readonly #multi = new Map<CapabilityToken, Registration[]>();
   readonly #parent: ServiceRegistry | undefined;
+  #sealed = false;
+  #observer: ((kind: 'override' | 'unregister', token: CapabilityToken) => void) | undefined;
 
   constructor(parent?: ServiceRegistry) {
     this.#parent = parent;
@@ -41,6 +43,18 @@ export class ServiceRegistry implements IServiceRegistry {
   /** Creates a request-scoped child registry that falls back to this one. */
   createChild(): ServiceRegistry {
     return new ServiceRegistry(this);
+  }
+
+  /** Prevents future application-scoped registrations. */
+  seal(): void {
+    this.#sealed = true;
+  }
+
+  /** Installs the application-owned callback for startup-time mutations. */
+  setObserver(
+    observer: (kind: 'override' | 'unregister', token: CapabilityToken) => void,
+  ): void {
+    this.#observer = observer;
   }
 
   register<T extends object>(
@@ -86,9 +100,14 @@ export class ServiceRegistry implements IServiceRegistry {
   }
 
   unregister(token: CapabilityToken): boolean {
+    this.#assertMutable(token, 'unregister');
     const hadSingle = this.#single.delete(token);
     const hadMulti = this.#multi.delete(token);
-    return hadSingle || hadMulti;
+    const removed = hadSingle || hadMulti;
+    if (removed) {
+      this.#observer?.('unregister', token);
+    }
+    return removed;
   }
 
   #lookup(token: CapabilityToken): Registration | undefined {
@@ -103,6 +122,7 @@ export class ServiceRegistry implements IServiceRegistry {
   }
 
   #store(token: CapabilityToken, registration: Registration, options?: RegisterOptions): void {
+    this.#assertMutable(token, 'register');
     if (options?.multi) {
       const providers = this.#multi.get(token) ?? [];
       providers.push(registration);
@@ -116,6 +136,19 @@ export class ServiceRegistry implements IServiceRegistry {
         `Capability '${token}' is already registered. Use { override: true } to replace it.`,
       );
     }
+    if (this.#single.has(token) && options?.override) {
+      this.#observer?.('override', token);
+    }
     this.#single.set(token, registration);
+  }
+
+  #assertMutable(token: CapabilityToken, operation: 'register' | 'unregister'): void {
+    if (this.#sealed) {
+      throw new Error(
+        `Cannot ${operation} capability '${token}' after runBootstrap() has completed. ` +
+          `Register during a plugin's register(), onInit, or onBootstrap hook, or use ` +
+          `request-scoped ctx.services inside middleware.`,
+      );
+    }
   }
 }
