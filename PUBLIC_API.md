@@ -737,6 +737,7 @@ are stored in `ctx.state` under `validatedStateKey(target)`.
 
 ```typescript
 import { z } from 'zod';
+import { validatedStateKey } from '@setu-ts/common';
 import {
   validateBody,
   validateCookies,
@@ -6414,6 +6415,7 @@ A complete REST API using the REST starter:
 
 ```typescript
 import { createRestApp } from '@setu-ts/rest-starter';
+import { validatedStateKey } from '@setu-ts/common';
 import { z } from 'zod';
 
 const app = createRestApp({
