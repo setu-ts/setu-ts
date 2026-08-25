@@ -113,21 +113,20 @@ resume from where it dropped.
 
 ## Exports
 
-| Export             | Kind      |
-| ------------------ | --------- |
-| `SsePlugin`        | function  |
-| `SseConnection`    | class     |
-| `SseService`       | class     |
-| `CAPABILITIES`     | const     |
-| `ISseConnection`   | interface |
-| `ISseService`      | interface |
-| `SseChannel`       | interface |
-| `SseMessage`       | interface |
+| Export | Kind |
+| --- | --- |
+| `SsePlugin` | function |
+| `SseConnection` | class |
+| `SseService` | class |
+| `CAPABILITIES` | const |
+| `ISseConnection` | interface |
+| `ISseService` | interface |
+| `SseChannel` | interface |
+| `SseMessage` | interface |
 | `SsePluginOptions` | interface |
-| `ChannelPublisher` | type      |
+| `ChannelPublisher` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

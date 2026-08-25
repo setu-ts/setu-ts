@@ -277,56 +277,55 @@ imperative begin/commit.
 
 ## Exports
 
-| Export                           | Kind      |
-| -------------------------------- | --------- |
-| `createDrizzleDatabase`          | function  |
-| `createDrizzleDataSource`        | function  |
-| `createPrismaDataSource`         | function  |
-| `DatabasePlugin`                 | function  |
-| `getDrizzleDatabase`             | function  |
-| `getDrizzleTransaction`          | function  |
-| `BaseRepository`                 | class     |
-| `DatabaseService`                | class     |
-| `DrizzleAdapter`                 | class     |
-| `DrizzleRepository`              | class     |
-| `MemoryAdapter`                  | class     |
-| `PrismaAdapter`                  | class     |
-| `PrismaRepository`               | class     |
-| `UnitOfWork`                     | class     |
-| `UnsupportedFilterOperatorError` | class     |
-| `CountOptions`                   | interface |
-| `CustomDatabaseOptions`          | interface |
-| `DatabaseAdapterOptions`         | interface |
-| `DatabaseConnectionOptions`      | interface |
-| `DrizzleAdapterOptions`          | interface |
-| `DrizzleDatabase`                | interface |
-| `DrizzleDatabaseIdentity`        | interface |
-| `DrizzleDatabaseOptions`         | interface |
-| `FindOptions`                    | interface |
-| `IAdapterTransaction`            | interface |
-| `IDatabaseAdapter`               | interface |
-| `IDatabaseService`               | interface |
-| `IDataSource`                    | interface |
-| `IRepository`                    | interface |
-| `IUnitOfWork`                    | interface |
-| `MemoryDatabaseOptions`          | interface |
-| `NormalizedQuery`                | interface |
-| `PrismaAdapterOptions`           | interface |
-| `PrismaDatabaseOptions`          | interface |
-| `BuiltInDatabaseOptions`         | type      |
-| `DatabaseAdapterType`            | type      |
-| `DatabasePluginOptions`          | type      |
-| `DataSource`                     | type      |
-| `DrizzleTransaction`             | type      |
-| `DrizzleTransactionBridge`       | type      |
-| `FilterComparison`               | type      |
-| `FilterExpression`               | type      |
-| `FilterOperator`                 | type      |
-| `OrderDirection`                 | type      |
-| `PrismaSqlProvider`              | type      |
+| Export | Kind |
+| --- | --- |
+| `createDrizzleDatabase` | function |
+| `createDrizzleDataSource` | function |
+| `createPrismaDataSource` | function |
+| `DatabasePlugin` | function |
+| `getDrizzleDatabase` | function |
+| `getDrizzleTransaction` | function |
+| `BaseRepository` | class |
+| `DatabaseService` | class |
+| `DrizzleAdapter` | class |
+| `DrizzleRepository` | class |
+| `MemoryAdapter` | class |
+| `PrismaAdapter` | class |
+| `PrismaRepository` | class |
+| `UnitOfWork` | class |
+| `UnsupportedFilterOperatorError` | class |
+| `CountOptions` | interface |
+| `CustomDatabaseOptions` | interface |
+| `DatabaseAdapterOptions` | interface |
+| `DatabaseConnectionOptions` | interface |
+| `DrizzleAdapterOptions` | interface |
+| `DrizzleDatabase` | interface |
+| `DrizzleDatabaseIdentity` | interface |
+| `DrizzleDatabaseOptions` | interface |
+| `FindOptions` | interface |
+| `IAdapterTransaction` | interface |
+| `IDatabaseAdapter` | interface |
+| `IDatabaseService` | interface |
+| `IDataSource` | interface |
+| `IRepository` | interface |
+| `IUnitOfWork` | interface |
+| `MemoryDatabaseOptions` | interface |
+| `NormalizedQuery` | interface |
+| `PrismaAdapterOptions` | interface |
+| `PrismaDatabaseOptions` | interface |
+| `BuiltInDatabaseOptions` | type |
+| `DatabaseAdapterType` | type |
+| `DatabasePluginOptions` | type |
+| `DataSource` | type |
+| `DrizzleTransaction` | type |
+| `DrizzleTransactionBridge` | type |
+| `FilterComparison` | type |
+| `FilterExpression` | type |
+| `FilterOperator` | type |
+| `OrderDirection` | type |
+| `PrismaSqlProvider` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

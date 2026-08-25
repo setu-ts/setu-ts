@@ -157,15 +157,14 @@ When `validationSchema` is not provided, all values remain as strings from the e
 
 ## Exports
 
-| Export                | Kind      |
-| --------------------- | --------- |
-| `ConfigPlugin`        | function  |
-| `loadConfig`          | function  |
+| Export | Kind |
+| --- | --- |
+| `ConfigPlugin` | function |
+| `loadConfig` | function |
 | `ConfigPluginOptions` | interface |
-| `StructuralSchema`    | interface |
+| `StructuralSchema` | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

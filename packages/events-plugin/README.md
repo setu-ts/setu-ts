@@ -55,24 +55,23 @@ otherwise a no-op. **A failing handler never makes `publish` reject** in either 
 
 ## Exports
 
-| Export                     | Kind      |
-| -------------------------- | --------- |
-| `defineDomainEvent`        | function  |
-| `EventsPlugin`             | function  |
-| `subscribeHandler`         | function  |
-| `DomainEvent`              | class     |
-| `InMemoryEventBus`         | class     |
-| `IntegrationEvent`         | class     |
+| Export | Kind |
+| --- | --- |
+| `defineDomainEvent` | function |
+| `EventsPlugin` | function |
+| `subscribeHandler` | function |
+| `DomainEvent` | class |
+| `InMemoryEventBus` | class |
+| `IntegrationEvent` | class |
 | `EventHandlerRegistration` | interface |
-| `EventsPluginOptions`      | interface |
-| `IDomainEvent`             | interface |
-| `IEventBus`                | interface |
-| `IEventHandler`            | interface |
-| `EventHandler`             | type      |
-| `Unsubscribe`              | type      |
+| `EventsPluginOptions` | interface |
+| `IDomainEvent` | interface |
+| `IEventBus` | interface |
+| `IEventHandler` | interface |
+| `EventHandler` | type |
+| `Unsubscribe` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 
