@@ -40,9 +40,13 @@ import type { IResponse } from '../http.ts';
  * the seam is a string constant rather than a `Symbol.for` brand. Exported so a
  * third-party error handler can publish a responder too.
  *
+ * Follows the `<owner-package>:<kebab-key>` convention documented in
+ * `state-keys.ts`; the owner is `@setu-ts/exceptions`,
+ * whose `errorHandler` writes it.
+ *
  * @since 0.1.0
  */
-export const ERROR_RESPONDER_STATE_KEY = 'setu.error.responder';
+export const ERROR_RESPONDER_STATE_KEY = 'exceptions:error-responder';
 
 /**
  * The brand under which an `errorHandler` middleware function carries its

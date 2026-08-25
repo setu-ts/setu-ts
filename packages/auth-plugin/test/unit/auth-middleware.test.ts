@@ -5,6 +5,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
+import { sealRequestIdentity } from '@setu-ts/common';
 import type {
   HandlerResult,
   IAuthService,
@@ -88,6 +89,24 @@ describe('authMiddleware', () => {
 
     expect(request.user).toEqual(principal);
     expect(nextCalled).toBe(true);
+  });
+
+  it('can run twice over a sealed request through the deliberate replacement escape', async () => {
+    const principals: IPrincipal[] = [
+      { id: 'first', roles: [] },
+      { id: 'second', roles: [] },
+    ];
+    let index = 0;
+    const authService: IAuthService = {
+      authenticate: (): Promise<IPrincipal> => Promise.resolve(principals[index++]),
+      verifyCredentials: () => Promise.resolve(null),
+    };
+    const { ctx, request } = createContext(authService);
+    sealRequestIdentity(ctx.request);
+    const middleware = authMiddleware();
+    await middleware(ctx, () => Promise.resolve());
+    await middleware(ctx, () => Promise.resolve());
+    expect(request.user).toBe(principals[1]);
   });
 
   it('does not set user when authenticate returns null', async () => {

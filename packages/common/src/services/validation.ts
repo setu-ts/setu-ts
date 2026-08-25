@@ -31,11 +31,11 @@ export type ValidationTarget = 'body' | 'query' | 'params' | 'headers' | 'cookie
  * ```
  *
  * @param target - The request part the value was validated from
- * @returns The state key — `` `validated:${target}` ``
+ * @returns The state key — `` `validation-plugin:validated-${target}` ``
  * @since 0.2.0
  */
 export function validatedStateKey(target: ValidationTarget): string {
-  return `validated:${target}`;
+  return `validation-plugin:validated-${target}`;
 }
 
 /**
@@ -58,7 +58,7 @@ export interface ValidationIssue {
  * @example
  * ```typescript
  * const validation = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
- * const result = validation.validate<User>(UserSchema, ctx.state.get('rawBody'));
+ * const result = validation.validate<User>(UserSchema, await ctx.request.json());
  * if (result.success) {
  *   save(result.value);
  * }

@@ -15,7 +15,7 @@ import type { TelemetryContext } from '@setu-ts/common';
  *
  * @since 0.2.0
  */
-export const TELEMETRY_SPAN_KEY = '__he_telemetry_span';
+export const TELEMETRY_SPAN_KEY = 'telemetry-plugin:span';
 
 /**
  * Which span exporter to use.

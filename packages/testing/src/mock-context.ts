@@ -11,6 +11,7 @@ import type {
 import type { HttpMethod } from '@setu-ts/common';
 import type { IPrincipal } from '@setu-ts/common';
 import type { ITenant } from '@setu-ts/common';
+import { sealRequestIdentity } from '@setu-ts/common';
 
 import { MockServiceRegistry } from './mock-registry.ts';
 
@@ -375,6 +376,7 @@ export function createTestContext(options?: TestContextOptions): IRequestContext
     ...(reqOptions.user !== undefined ? { user: reqOptions.user } : {}),
     ...(reqOptions.tenant !== undefined ? { tenant: reqOptions.tenant } : {}),
   });
+  sealRequestIdentity(mockRequest);
 
   // Signal precedence: options.request.signal (propagated via mockRequest) >
   // options.signal (top-level override) > live never-aborting AbortController.

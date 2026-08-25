@@ -7,6 +7,7 @@ import { getTenantCachePrefix, tenantMiddleware } from '../../src/middleware/ten
 import { SubdomainResolver } from '../../src/resolvers/subdomain-resolver.ts';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
 import type { ITenantResolver } from '@setu-ts/common';
+import { sealRequestIdentity } from '@setu-ts/common';
 
 // Fake ITenantResolver for tests that need a custom one.
 type FakeResolverResult = { present: boolean; value?: { id: string } };
@@ -439,6 +440,53 @@ describe('tenant middleware', () => {
       const second = makeContext({ path: '/live' });
       await mw(second.ctx as never, second.next);
       expect(second.getNextCalled()).toBeTruthy();
+    });
+  });
+
+  describe('single-write identity guard (M71)', () => {
+    // Every other test in this file drives a hand-rolled request whose
+    // `tenant` is a plain accessor pair, i.e. UNSEALED — so `replaceTenant`
+    // takes its plain-assignment branch there and the path the kernel
+    // actually runs is never exercised. These two seal the request the way
+    // `createRequestContext` does.
+    function sealedContext() {
+      const made = makeContext();
+      sealRequestIdentity(made.ctx.request as never);
+      return made;
+    }
+
+    it('resolves a tenant onto a sealed request', async () => {
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [toITenantResolver({
+          resolve: () => Promise.resolve({ present: true, value: { id: 'acme' } }),
+        })],
+        options: {},
+      });
+      const made = sealedContext();
+      await mw(made.ctx as never, made.next);
+      expect((made.ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('acme');
+      expect(made.getNextCalled()).toBeTruthy();
+    });
+
+    it('runs twice over one sealed request through the deliberate replacement escape', async () => {
+      // A global registration plus a route-level one is a supported
+      // composition; without `replaceTenant` the second run would throw.
+      let n = 0;
+      const mw = tenantMiddleware({
+        service: makeService(),
+        resolvers: [toITenantResolver({
+          resolve: () => {
+            n += 1;
+            return Promise.resolve({ present: true, value: { id: `tenant-${n}` } });
+          },
+        })],
+        options: {},
+      });
+      const made = sealedContext();
+      await mw(made.ctx as never, made.next);
+      await mw(made.ctx as never, made.next);
+      expect((made.ctx.request as { tenant?: { id: string } }).tenant?.id).toBe('tenant-2');
     });
   });
 });
