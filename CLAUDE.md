@@ -3610,8 +3610,11 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with
   the commit), refuted (with the evidence), or deferred (with the owning milestone). Verify before
   agreeing — several such findings have been correct about the defect and wrong about the mechanism,
-  and one was wholly refuted. AI_GUIDELINES §16.5 is canonical and binds every agent (Claude,
-  ChatGPT/Codex, Roo).
+  and one was wholly refuted. **A finding whose entire subject is a plan under `plans/` is
+  DECLINED** once that milestone has shipped — a plan is an archived design record, not a spec the
+  code is checked against — unless the finding ALSO lands on the implementation, in which case the
+  implementation half is fixed and the plan is left alone. AI_GUIDELINES §16.5 is canonical and
+  binds every agent (Claude, ChatGPT/Codex, Roo).
 - **Record the PR number in the same PR.** The CLAUDE.md "Current status" entry needs the number,
   which does not exist until the PR does, so the order is: commit the status entry as "complete (PR
   pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again.
