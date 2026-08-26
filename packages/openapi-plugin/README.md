@@ -3,6 +3,31 @@
 OpenAPI 3.1 generation from registered routes, plus Swagger UI. Registers an `IOpenApiService` under
 `CAPABILITIES.OPENAPI` (`'openapi'`).
 
+## Zod version support
+
+Both **zod v3 and zod v4** are supported. The plugin imports neither: each schema is recognized by
+duck typing (`toJSONSchema` marks a zod v4 schema), so an application may use either major — or both
+in one process.
+
+- **Zod v3** is converted by the historical `_def.typeName` recursion.
+- **Zod v4** is converted wholesale through `schema.toJSONSchema()` (JSON Schema draft 2020-12,
+  which OpenAPI 3.1 speaks natively) and adapted: the dialect `$schema` key is dropped, reused
+  schemas land in `components/schemas` with their pointers rewritten, and a recursive schema's
+  root-cycle pointer forces the schema into `components` so no bare `#` ref survives.
+- **Unrepresentable nodes degrade, never throw.** A type zod cannot represent in JSON Schema
+  (`z.date()`, `z.bigint()`, …) becomes an empty schema, and the operation that owns it carries a
+  machine-readable `x-setu-unrepresentable` extension naming the operation and the reason:
+
+  ```json
+  {
+    "x-setu-unrepresentable": [
+      { "at": "post-events-body", "reason": "zod v4 type 'date' has no JSON Schema representation" }
+    ]
+  }
+  ```
+
+  The extension is absent when every schema is representable, so valid documents are unchanged.
+
 Zod schemas are transformed to OpenAPI schema objects, and a schema reused across request and
 response bodies — including one nested inside another — is hoisted into `components` and referenced
 by `$ref` from each of those sites.
