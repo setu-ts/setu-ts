@@ -1,14 +1,14 @@
 {
   "name": "@setu-ts/openapi-plugin",
-  "version": "0.1.0-alpha.8",
+  "version": "0.1.0-alpha.9",
   "license": "MIT",
   "exports": "./src/index.ts",
   "compilerOptions": {
     "experimentalDecorators": true
   },
   "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.8",
-    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.8",
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.9",
+    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.9",
     "npm:zod@^3.24.0": "npm:zod@^3.24.0"
   }
 }

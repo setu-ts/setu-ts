@@ -48,6 +48,8 @@ request.
 The socket checks are the reason the job exists at all: the HTTP adapters are per-runtime
 implementations selected by detection, so the Deno-hosted suite never executes them.
 
+<!-- version:history -->
+
 The final check — `npm:` never reaches `import()` — audits the published `grpc-plugin` and
 `telemetry-plugin` artifacts for the X7-3 shape. JSR's npm-compatibility rewrite is static and
 reaches only a literal `import('npm:…')` argument, so it refuses two shapes: a literal `npm:` inside

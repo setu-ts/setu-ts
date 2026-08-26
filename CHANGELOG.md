@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.9] — 2026-08-26
+
+**A security release, and the closeout of the alpha.8 smoke programme.** Driving the published
+packages through twelve exercises — real projects, real brokers, a real cluster — produced a
+register of verified defects rather than a list of suspicions, and this release closes it. The five
+that change what an application is exposed to are listed first: no middleware ran before a WebSocket
+upgrade or a gRPC request, so a guard could not refuse either; a cached response crossed tenants; a
+session minted under one tenant authenticated a write into another; an unhandled error returned the
+failing SQL and its bound values to the caller; and feature flags had no tenant dimension at all.
+
+The rest is what the register kept finding once it looked. Capabilities reported `up` with their
+backends stopped, so a dead dependency triggered no restart and no rolling-deploy gate. The default
+branch of an injectable seam was the one line no test ever ran, because every test injects — which
+is how `@setu-ts/grpc-plugin` shipped unable to load on Node or Bun, and how the SDK's own default
+transport died on a browser's first request. Generated artifacts compiled and were wired to nothing.
+Database adapters reported success while doing something other than what their contract said.
+
+Two contracts tightened as a result. The kernel's application registry seals after bootstrap and a
+duplicate route is refused rather than silently overwriting — one of the two handlers used to become
+permanently unreachable with no diagnostic. And `@setu-ts/common` gained the optional runtime seams
+(`onSignal`, `onExit`) that let a generated entry point stop hard-coding the runtime it was
+scaffolded for: one `main.ts` body now serves Deno, Node and Bun byte-identically.
+
+Nothing here requires an application change unless it is named **Breaking** below.
+
 ### Security
 
 - **The middleware pipeline now runs before every WebSocket upgrade and gRPC request** (M70a).
@@ -1033,18 +1058,6 @@ All notable changes to this project are documented here. The format follows
   the edge is optional, so an app without a logger plugin still boots with no lines emitted. A
   kernel-level e2e test with the real `LoggerPlugin` pins both directions. **Migration:** none — the
   standard configuration now reports as documented.
-
-### Deprecated
-
-- `IHttpAdapter.setRpcHandler?` — the kernel resolves `IGrpcService` from the service registry and
-  dispatches after the pipeline, so nothing calls this. All four first-party adapters accept it as a
-  no-op. To be removed in the next major release.
-- `RpcInterceptorStore` (`@setu-ts/runtime`), `GrpcUnavailableError` and
-  `GrpcService.createFetchHandler` (`@setu-ts/grpc-plugin`) — all reachable only through the retired
-  pre-pipeline seam. Retained as published surface; nothing throws or installs them.
-
-### Fixed
-
 - **A non-cloneable worker task input no longer kills the host process** (M45b, X8-2).
   `@setu-ts/worker-pool-plugin` documents that task inputs travel by structured clone, so passing a
   function or a class instance is a documented misuse that should reject the returned promise — and
@@ -1057,14 +1070,25 @@ All notable changes to this project are documented here. The format follows
   freed slot takes the next queued task instead of stalling behind the bad one. Both paths now
   behave identically. No application change is required.
 
+### Deprecated
+
+- `IHttpAdapter.setRpcHandler?` — the kernel resolves `IGrpcService` from the service registry and
+  dispatches after the pipeline, so nothing calls this. All four first-party adapters accept it as a
+  no-op. To be removed in the next major release.
+- `RpcInterceptorStore` (`@setu-ts/runtime`), `GrpcUnavailableError` and
+  `GrpcService.createFetchHandler` (`@setu-ts/grpc-plugin`) — all reachable only through the retired
+  pre-pipeline seam. Retained as published surface; nothing throws or installs them.
+
 ### Known limitations
 
-- **`WorkerPoolPlugin({ taskTimeoutMs: 0 })` also disables crash detection for a self-terminated
-  worker** (X8-7, owned by M70k). Worker termination is not delivered as a host event, so the
-  timeout is the only thing that settles the task of a worker that ended itself; with the timeout
-  off, that `run()` never settles and its pool slot is never released, which wedges a `size: 1` pool
-  permanently. Set a timeout on any pool whose task module can call `self.close()`. The durable fix
-  needs a worker exit signal on `IWorkerHandle`, which `@setu-ts/common` does not currently declare.
+- **On Deno, `WorkerPoolPlugin({ taskTimeoutMs: 0 })` disables crash detection for a self-terminated
+  worker** (X8-7). Node and Bun report a worker's exit, so the pool settles the task with
+  `WorkerExitError` and frees the slot regardless of the timeout (see **Fixed**). Deno emits no
+  event at all for a worker that ends its own thread, so `IWorkerHost.reportsExit?` is omitted
+  there, the timeout remains the only thing that settles such a task, and `0` leaves that `run()`
+  unsettled with its slot held — which wedges a `size: 1` pool permanently. The plugin reports
+  `exitDetection: false` in its health payload and warns once at `register()`, but set a timeout on
+  any Deno pool whose task module can call `self.close()`.
 
 ## [0.1.0-alpha.8] — 2026-08-14
 
@@ -3084,6 +3108,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.1.0-alpha.9]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.9
 [0.1.0-alpha.8]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.6
