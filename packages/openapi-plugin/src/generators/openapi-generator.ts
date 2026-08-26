@@ -361,6 +361,20 @@ export class OpenApiGenerator {
   readonly #parameterTransformer: ZodToOpenApi;
   /** How many sites reference each schema identity, filled by the counting pass. */
   readonly #schemaCounts: Map<unknown, number>;
+  /**
+   * Component names claimed but not yet delivered.
+   *
+   * A single zod v4 conversion claims EVERY surviving `$def`'s name BEFORE
+   * delivering any of them (`#adaptDocument` must know all names to rewrite
+   * internal pointers first), so `#componentSchemas` is still empty when the
+   * second claim runs — checking it alone handed two distinct definitions the
+   * same name and the later delivery silently overwrote the earlier one. A
+   * claimed name is reserved here until delivery lands it in
+   * `#componentSchemas`, so two distinct `$defs` never share a component.
+   * Cleared at the top of each `generate` call alongside the other per-document
+   * state.
+   */
+  readonly #reservedNames = new Set<string>();
   /** Guards hoisting reentrancy: the node being hoisted must transform normally. */
   readonly #hoisting: Set<unknown>;
   /** `'count'` fills `#schemaCounts`; `'emit'` hoists anything counted twice. */
@@ -475,6 +489,7 @@ export class OpenApiGenerator {
     // which is what made one shape appear both inline and as a `$ref`.
     this.#operationIds.clear();
     this.#schemaCounts.clear();
+    this.#reservedNames.clear();
     this.#pass = 'count';
     for (const route of routes) {
       if (this.#isExcluded(route)) continue;
@@ -1109,11 +1124,17 @@ export class OpenApiGenerator {
    * @returns A component name not already in use
    */
   #claimComponentName(): string {
+    const taken = (candidate: string): boolean =>
+      this.#componentSchemas.has(candidate) || this.#reservedNames.has(candidate);
+    const reserve = (candidate: string): string => {
+      this.#reservedNames.add(candidate);
+      return candidate;
+    };
     const base = toPascalCase(this.#nameHint);
-    if (!this.#componentSchemas.has(base)) return base;
+    if (!taken(base)) return reserve(base);
     for (let n = 2;; n++) {
       const candidate = `${base}${n}`;
-      if (!this.#componentSchemas.has(candidate)) return candidate;
+      if (!taken(candidate)) return reserve(candidate);
     }
   }
 }
