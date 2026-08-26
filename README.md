@@ -19,7 +19,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: all 47 packages are published in `v0.1.0-alpha.8` and are live on JSR.**
+> **Status: all 47 packages are published in `v0.1.0-alpha.9` and are live on JSR.**
 >
 > <!-- version:history -->
 >
@@ -189,21 +189,21 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Deno
-deno add jsr:@setu-ts/kernel@^0.1.0-alpha.8 jsr:@setu-ts/runtime@^0.1.0-alpha.8
+deno add jsr:@setu-ts/kernel@^0.1.0-alpha.9 jsr:@setu-ts/runtime@^0.1.0-alpha.9
 
 # Node
-npx jsr add @setu-ts/kernel@^0.1.0-alpha.8 @setu-ts/runtime@^0.1.0-alpha.8
+npx jsr add @setu-ts/kernel@^0.1.0-alpha.9 @setu-ts/runtime@^0.1.0-alpha.9
 
 # Bun
-bunx jsr add @setu-ts/kernel@^0.1.0-alpha.8 @setu-ts/runtime@^0.1.0-alpha.8
+bunx jsr add @setu-ts/kernel@^0.1.0-alpha.9 @setu-ts/runtime@^0.1.0-alpha.9
 ```
 
-**The `@^0.1.0-alpha.8` is required, not decorative.** JSR does not point `latest` at a prerelease,
+**The `@^0.1.0-alpha.9` is required, not decorative.** JSR does not point `latest` at a prerelease,
 so omitting the version fails outright:
 
 ```
 error: jsr:@setu-ts/kernel has only pre-release versions available.
-Try specifying a version: deno add jsr:@setu-ts/kernel@^0.1.0-alpha.8
+Try specifying a version: deno add jsr:@setu-ts/kernel@^0.1.0-alpha.9
 ```
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
@@ -212,7 +212,7 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.1.0-alpha.8/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.1.0-alpha.9/main
 
 setu new my-app
 cd my-app && setu generate service billing
@@ -220,7 +220,7 @@ cd my-app && setu generate service billing
 
 The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 47 workspace members are published on JSR, in `v0.1.0-alpha.8`: the core (`common`, `kernel`,
+All 47 workspace members are published on JSR, in `v0.1.0-alpha.9`: the core (`common`, `kernel`,
 `runtime`, `exceptions`, `testing`), every plugin in the tables above, the three starters, the
 `sdk`, and the `cli`.
 
