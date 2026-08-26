@@ -22,6 +22,9 @@ import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
  */
 const DEFAULT_EXCLUDED_OWNERS: readonly string[] = ['health-plugin', 'metrics-plugin'];
 
+/** Prefix of a component reference in the generated document. */
+const COMPONENT_REF_PREFIX = '#/components/schemas/';
+
 /**
  * Schema emitted for a path parameter the route's `params` schema does not
  * describe: every path segment arrives as a string.
@@ -342,12 +345,20 @@ export class OpenApiGenerator {
    */
   readonly #registered = new Set<unknown>();
   /**
-   * Transformer WITHOUT the dedup hook, used where the caller reads the
-   * transformed object's own `properties` (parameter destructuring). A `$ref`
-   * there would have no `properties` to destructure, so those sites must never
-   * be hoisted.
+   * Transformer WITH definition channels but WITHOUT the dedup hook, used at
+   * the parameter sites (`params` / `query` / `headers`). The plain
+   * transformer that served these sites before had NO channels, so the zod v4
+   * path returned inline `$defs` + `#/$defs/__schemaN` pointers and the
+   * builder — which keeps only `.properties` — left dangling references in
+   * the emitted parameters (and no diagnostics for unrepresentable nodes).
+   *
+   * No hook deliberately, for two reasons: the caller must read
+   * `.properties`/`.required` off the result to enumerate individual
+   * parameters, so the ROOT must never be answered with a `$ref`; and routing
+   * these sites through the counting/dedup hook would change which nodes zod
+   * v3 documents inline versus reference there.
    */
-  readonly #plainTransformer: ZodToOpenApi;
+  readonly #parameterTransformer: ZodToOpenApi;
   /** How many sites reference each schema identity, filled by the counting pass. */
   readonly #schemaCounts: Map<unknown, number>;
   /** Guards hoisting reentrancy: the node being hoisted must transform normally. */
@@ -393,17 +404,17 @@ export class OpenApiGenerator {
     };
     this.#excluded = new Set(options.exclude ?? []);
     this.#excludedOwners = new Set(options.excludeOwners ?? DEFAULT_EXCLUDED_OWNERS);
-    this.#transformer = new ZodToOpenApi((schema) => this.#hook(schema), {
+    const channels = {
       // Zod v4 $defs surviving a transform are hoisted into components under
       // the CURRENT site's name hint. During the COUNT pass nothing may be
       // stored — the transformer still needs A name to rewrite pointers with,
       // so it gets a throwaway that `onDefinition` refuses to deliver.
-      onDefinitionClaim: (hint) =>
+      onDefinitionClaim: (hint: string): string =>
         this.#pass === 'count' ? `\u0000count:${hint}` : this.#claimComponentName(),
-      onDefinition: (name, schema) => {
+      onDefinition: (name: string, schema: OpenApiSchemaObject): void => {
         if (this.#pass === 'emit') this.#componentSchemas.set(name, schema);
       },
-      onUnrepresentable: (diagnostic) => {
+      onUnrepresentable: (diagnostic: { readonly reason: string }): void => {
         if (this.#pass === 'emit') {
           this.#operationDiagnostics.push({
             at: this.#currentOperationId,
@@ -411,8 +422,9 @@ export class OpenApiGenerator {
           });
         }
       },
-    });
-    this.#plainTransformer = new ZodToOpenApi();
+    };
+    this.#transformer = new ZodToOpenApi((schema) => this.#hook(schema), channels);
+    this.#parameterTransformer = new ZodToOpenApi(undefined, channels);
     this.#schemaMap = new Map();
     this.#componentSchemas = new Map();
     this.#schemaCounts = new Map();
@@ -557,7 +569,7 @@ export class OpenApiGenerator {
     const { schema, derived } = this.#effectiveSchema(route);
 
     // Build parameters from params and query schemas
-    const parameters = this.#buildParameters(route, schema);
+    const parameters = this.#buildParameters(route, schema, operationId);
 
     // Build request body from body schema
     const requestBody = schema?.body
@@ -753,6 +765,7 @@ export class OpenApiGenerator {
   #buildParameters(
     route: RouteInfo,
     schema: RouteSchema | undefined,
+    operationId: string,
   ): readonly OpenApiParameter[] {
     const parameters: OpenApiParameter[] = [];
 
@@ -762,7 +775,9 @@ export class OpenApiGenerator {
     // Hoist transform of params schema to avoid repeated transforms
     let paramsTransformed: Record<string, OpenApiSchemaObject> | undefined;
     if (schema?.params) {
-      const paramsObj = this.#plainTransformer.transform(schema.params);
+      const paramsObj = this.#unwrapComponentRef(
+        this.#transformParameterSchema(schema.params, `${operationId}Params`),
+      );
       paramsTransformed = paramsObj.properties ?? {};
     }
 
@@ -786,7 +801,9 @@ export class OpenApiGenerator {
 
     // Hoist transform of query schema to avoid repeated transforms
     if (schema?.query) {
-      const queryObj = this.#plainTransformer.transform(schema.query);
+      const queryObj = this.#unwrapComponentRef(
+        this.#transformParameterSchema(schema.query, `${operationId}Query`),
+      );
       const queryProps = queryObj.properties ?? {};
       const queryRequired = queryObj.required ?? [];
       for (const [name, propSchema] of Object.entries(queryProps)) {
@@ -805,7 +822,9 @@ export class OpenApiGenerator {
     // `Content-Type`, and `Authorization`, so filtering them here would only
     // hide what the route actually declared.
     if (schema?.headers) {
-      const headerObj = this.#plainTransformer.transform(schema.headers);
+      const headerObj = this.#unwrapComponentRef(
+        this.#transformParameterSchema(schema.headers, `${operationId}Headers`),
+      );
       const headerProps = headerObj.properties ?? {};
       const headerRequired = headerObj.required ?? [];
       for (const [name, propSchema] of Object.entries(headerProps)) {
@@ -941,8 +960,9 @@ export class OpenApiGenerator {
    * `Schema<n>`) and every one of those sites emits a `$ref`; a schema used
    * exactly once is inlined. Reuse is keyed on schema object IDENTITY, so two
    * structurally identical but separately constructed schemas are two schemas.
-   * Only structural shapes are hoisted — see `isStructuralShape` — and
-   * parameter schemas never are, because they reach `#plainTransformer`.
+   * Only structural shapes are hoisted — see `isStructuralShape`. Parameter
+   * sites go through `#parameterTransformer` instead, whose results carry no
+   * dedup identity.
    *
    * Pre-registered named schemas (from addSchema/OPENAPI_SCHEMA contributions)
    * keep their contributor-chosen name and are always hoisted.
@@ -954,10 +974,74 @@ export class OpenApiGenerator {
     const previous = this.#nameHint;
     this.#nameHint = nameHint;
     try {
-      return this.#transformer.transform(schema);
+      return this.#recordHoistedRoot(schema, this.#transformer.transform(schema));
     } finally {
       this.#nameHint = previous;
     }
+  }
+
+  /**
+   * Transforms a parameter-site schema (`params` / `query` / `headers`)
+   * through {@linkcode #parameterTransformer}, setting the name hint first so
+   * any `$def` the zod v4 path hoists claims a name derived from THIS site
+   * rather than from whichever body/response was resolved last.
+   *
+   * @param schema - The parameter-site schema to convert
+   * @param nameHint - Name hint derived from the owning operation
+   * @returns The transformed schema object
+   */
+  #transformParameterSchema(schema: unknown, nameHint: string): OpenApiSchemaObject {
+    const previous = this.#nameHint;
+    this.#nameHint = nameHint;
+    try {
+      return this.#parameterTransformer.transform(schema);
+    } finally {
+      this.#nameHint = previous;
+    }
+  }
+
+  /**
+   * Follows ONE level of `#/components/schemas/<name>` indirection.
+   *
+   * A RECURSIVE parameter-site schema triggers the transformer's root-cycle
+   * force-hoist, which hands back a bare `$ref` instead of an object — reading
+   * `.properties` off THAT would silently drop every parameter. The delivered
+   * component carries the actual object shape, so dereference it before
+   * destructuring.
+   *
+   * @param schema - The transformed schema
+   * @returns The dereferenced component, or the input unchanged
+   */
+  #unwrapComponentRef(schema: OpenApiSchemaObject): OpenApiSchemaObject {
+    const ref = typeof schema.$ref === 'string' ? schema.$ref : undefined;
+    if (ref === undefined || !ref.startsWith(COMPONENT_REF_PREFIX)) return schema;
+    return this.#componentSchemas.get(ref.slice(COMPONENT_REF_PREFIX.length)) ?? schema;
+  }
+
+  /**
+   * Records a force-hoisted root so its identity dedups.
+   *
+   * When the zod v4 adapter hits a root-cycle pointer it hoists the WHOLE
+   * schema into `components/schemas` itself and hands back a bare `$ref` —
+   * the per-node hook never sees that decision, so without this record the
+   * mapping from schema identity to component name is lost and a second site
+   * re-converts and re-hoists a byte-identical copy under a fresh name.
+   *
+   * Count-pass results are never recorded: their claimed names are throwaways
+   * (`onDefinition` refuses delivery), so a recorded ref would dangle.
+   *
+   * @param schema - The schema identity that was transformed
+   * @param result - The transform result
+   * @returns The result unchanged
+   */
+  #recordHoistedRoot(schema: unknown, result: OpenApiSchemaObject): OpenApiSchemaObject {
+    if (this.#pass !== 'emit') return result;
+    const ref = typeof result.$ref === 'string' ? result.$ref : undefined;
+    if (ref === undefined || !ref.startsWith(COMPONENT_REF_PREFIX)) return result;
+    if (!this.#schemaMap.has(schema)) {
+      this.#schemaMap.set(schema, ref.slice(COMPONENT_REF_PREFIX.length));
+    }
+    return result;
   }
 
   /**
@@ -998,7 +1082,7 @@ export class OpenApiGenerator {
     if ((this.#schemaCounts.get(schema) ?? 0) < 2) return undefined;
 
     this.#hoisting.add(schema);
-    const transformed = this.#transformer.transform(schema);
+    const transformed = this.#recordHoistedRoot(schema, this.#transformer.transform(schema));
     this.#hoisting.delete(schema);
 
     // Only a structural shape earns a component. A `$ref` to `{type:'string'}`

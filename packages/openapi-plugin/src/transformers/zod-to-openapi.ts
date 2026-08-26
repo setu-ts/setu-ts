@@ -198,7 +198,12 @@ export class ZodToOpenApi {
    * Optional outbound channels. They exist so a document generator can hoist
    * surviving zod v4 `$defs` into `components/schemas` and learn about nodes
    * the transformer could not represent. Omitting them keeps every `$def`
-   * INLINE with `#/$defs/…` pointers — itself legal OpenAPI 3.1.
+   * INLINE with `#/$defs/…` pointers — valid draft 2020-12 ONLY while the
+   * caller keeps the returned tree intact, `$defs` section included. A
+   * consumer that embeds the fragment elsewhere (a parameter object, another
+   * document) strands those pointers with no `$defs` to resolve against, so
+   * attach these channels whenever the result is embedded rather than kept
+   * self-contained.
    */
   readonly #channels:
     | {
@@ -386,8 +391,12 @@ export class ZodToOpenApi {
    * hoisted into `components/schemas` through the channels and their pointers
    * rewritten; a `$def` that a hook splice already turned into a bare alias
    * `$ref` is REMAPPED to its target and dropped rather than delivered as a
-   * pointless one-key component. Without channels the `$defs` stay inline —
-   * legal 2020-12/OAS 3.1 and self-contained.
+   * pointless one-key component. Without channels the `$defs` stay inline,
+   * which is self-contained only while the caller keeps the whole returned
+   * tree intact — see the {@linkcode ZodToOpenApi} constructor note. The
+   * document generator always attaches channels (both its deduplicating and
+   * its parameter-site transformer), so this plain path is reachable only by
+   * a direct `ZodToOpenApi` consumer.
    *
    * A `$ref: '#'` (zod breaks root cycles with a document-root pointer) forces
    * the whole schema to be hoisted under a claimed component name, because an
