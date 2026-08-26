@@ -248,15 +248,49 @@ there are immutable, and a re-run fails on every package in the list. Create the
 ```bash
 version=0.1.0-alpha.9   # the version that just published — the ONLY line to edit
 prerelease=$(case "$version" in *-*) echo --prerelease ;; esac)
-deno run --allow-read scripts/release-notes.ts "$version" > /tmp/notes.md &&
+mkdir -p .tmp &&
+deno task release:resolved-set "$version" .tmp/resolved-set.json &&
+deno run --allow-read scripts/release-notes.ts "$version" > .tmp/notes.md &&
 gh release create "v$version" --verify-tag --title "v$version" \
-  --notes-file /tmp/notes.md $prerelease
+  --notes-file .tmp/notes.md \
+  .tmp/resolved-set.json#resolved-set.json \
+  $prerelease
 ```
 
 Everything after the first line is derived, deliberately: hardcoding the flag would mark the first
 stable release a prerelease, and hardcoding the version in three places invites the one typo this
 recovery path cannot afford. The `case` is the same idiom the workflow step uses, so the manual path
 and the automatic one cannot disagree about what counts as a prerelease.
+
+### Resolved dependency set
+
+Every GitHub Release also carries `resolved-set.json`. It wraps the complete committed `deno.lock`
+under the release version, including exact transitive versions and integrity hashes. That is the
+framework's reproducibility guarantee: rebuilding the tagged framework tree with its lockfile uses
+the reviewed resolution. It does **not** freeze an application's own dependency graph — Node/Bun
+resolve JSR's npm-compatible dependencies with the application's package manager, and Deno resolves
+the application's ranges with its lockfile.
+
+The workflow creates the artifact before publish using:
+
+```bash
+deno task release:resolved-set <version> .tmp/resolved-set.json
+```
+
+The post-publish recovery command above runs the same task and attaches the same asset, so a
+manually recovered release preserves this guarantee.
+
+`release:verify` checks the workflow contract for both generation and attachment, so deleting either
+side is a release-blocking error rather than a missing asset discovered after publication.
+
+### Dependency drift
+
+The scheduled **Dependency drift** workflow runs weekly. It resolves all workspace ranges with
+`--reload` into a temporary lockfile, compares that lockfile's direct resolutions with the committed
+one, then runs format, lint, type-check, and test gates against the fresh lock. It never modifies
+`deno.lock` and cannot block a pull request or release. A changed resolution or failed gate creates
+or updates one `dependency-drift` GitHub issue whose table names each package, specifier, and
+committed→fresh version.
 
 The `&&` is load-bearing rather than stylistic. The workflow step runs under `set -euo pipefail`; a
 block pasted into an interactive shell does not, so without it a failed extraction still leaves a

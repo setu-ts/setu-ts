@@ -105,6 +105,12 @@ jobs:
         with:
           deno-version: 2.9.5
 
+      # Requires the committed lockfile and refuses a dependency graph that
+      # would alter it. The tests below therefore run only against the reviewed
+      # resolution rather than silently absorbing a new range result.
+      - name: Frozen dependency install
+        run: deno ci
+
       - name: Format check
         run: deno task fmt:check
 
@@ -132,6 +138,25 @@ jobs:
       # on top, so a separate `Test` step only re-ran everything.
       - name: Test with coverage
         run: deno task test:coverage
+
+  boundary-compatibility:
+    name: Boundary compatibility matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.5
+
+      - name: Install frozen dependencies
+        run: deno ci
+
+      # The ordinary suite can pass with only one supported third-party major
+      # installed. This targeted matrix makes the declared boundary claims
+      # independently visible in CI.
+      - name: Boundary compatibility matrix
+        run: deno task check:compat
 
   # Deployment artifacts are YAML and Dockerfiles: `deno fmt`, `deno lint` and
   # `deno check` cannot see a defect in any of them. Only building the images
