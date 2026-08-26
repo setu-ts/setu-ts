@@ -719,6 +719,15 @@ A public API is any export from a package's `src/index.ts` file.
     error if it is not installed.
 - The framework never installs a database driver by default.
 - Users install the driver for the adapter they choose.
+- **Boundary-type compatibility.** When a public option accepts an application-created third-party
+  value as `unknown` or an opaque value and framework code subsequently inspects it, the owning
+  package must declare a tested support range in its README and `PUBLIC_API.md`. Prefer the third
+  party's public API. A private member (including underscore-prefixed fields) is never a
+  compatibility surface: remove the read when a public API exists; when no public API exists, the
+  declared range is a hard compatibility claim and the compatibility matrix must test both declared
+  endpoints. A9-1 is the required example: OpenAPI's old Zod path read private `_def.typeName`,
+  while Zod v4's public `toJSONSchema()` was available. A structural facade the framework itself
+  declares is not an opaque boundary type; it is validated at the call site instead.
 - **Build-time app tooling is NOT a §12.2 dependency.** A frontend build tool (e.g. Vite for the
   React Router SSR plugin, M44) is never imported by a plugin and never appears in a JSR package's
   dependency graph. It lives in the consuming application's `devDependencies` and runs at build time

@@ -6,6 +6,15 @@ Database access with the repository pattern and Unit of Work. Registers an `IDat
 Three adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, and
 `DrizzleAdapter`. The application owns the optional ORM clients and injects them into the plugin.
 
+## ORM compatibility
+
+Drizzle's current tested baseline is `0.45.2`; a broader application-instance range is pending
+removal of the adapter's exact lazy-loader pin and tests at both declared endpoints. Prisma v7 is
+the current integration, but its formal support range is also pending a boundary repair. Pass
+`options.provider` for connector-sensitive `contains` filters rather than relying on automatic
+connector detection: that fallback is not a compatibility promise. This distinction is deliberate —
+a documented range is a tested compatibility claim, not a guess.
+
 ## Installation
 
 ```typescript
