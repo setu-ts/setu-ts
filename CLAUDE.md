@@ -3362,10 +3362,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `--transport rabbitmq` member. Two stale ROADMAP claims were corrected in the same PR: the bare
   grep evidence for "the CLI prompts nowhere" (an emitted-source hit) and "the broker is not
   selectable at all" (true of a standalone project only) — complete (PR #191)
-- **Next milestone** — **the `v0.1.0-alpha.9` release**, once every alpha-9 workstream has merged
-  ([`docs/releasing.md`](docs/releasing.md) owns it; it is not part of any milestone branch).
-  M73–M75 (realtime authentication, realtime reads - the SSE contract, broker trace propagation)
-  follow it.
+- **Alpha release `v0.1.0-alpha.9`** — on `release/v0.1.0-alpha.9`, published 2026-08-26 (PR #192,
+  tag at the merge commit `3d8c83a4`; CI published it, one green `Publish to JSR` job). **47
+  packages** — the list is unchanged from alpha.8, so no package published for the first time and
+  neither `release:create-packages` nor `release:link-repos` was needed. Scope was M70a–M70n, M45b,
+  M71 and M72, plus the release-tooling fixes in #187–#189. Verified after publishing by querying
+  all 47 on the registry (none yanked), then installing `kernel` + `runtime` from JSR into a
+  throwaway dir and serving a request (`200 {"ok":true}`); `common` resolved transitively at
+  alpha.9, which is the only real evidence the cross-package specifier bump landed inside the
+  published tarballs. The GitHub Release object was created by the workflow rather than by hand —
+  the first one the automation from PR #189 produced. **Two CHANGELOG defects were caught while
+  cutting the release, both of which would otherwise have shipped**: the `Unreleased` section
+  carried two `### Fixed` headings, and its X8-7 known limitation still stated that
+  `@setu-ts/common` declares no worker exit signal, which **M70k had shipped** — the fix was
+  recorded seven entries above it in the same section. A release spanning many milestones needs the
+  whole `Unreleased` section read for internal contradictions, not just for per-milestone coverage.
+- **Next milestone** — **M73–M75** (realtime authentication, realtime reads - the SSE contract,
+  broker trace propagation).
 
 ## Verification (run before declaring any work done)
 
