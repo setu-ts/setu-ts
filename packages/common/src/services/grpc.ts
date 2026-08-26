@@ -20,13 +20,16 @@
  * otherwise returns {@linkcode null} so the adapter falls through to normal
  * Hono handling.
  *
- * **A handler that returns `null` MUST leave the request body unread.** The
- * adapter consults this handler before mapping the request, and then maps the
- * same `Request` for the Hono pipeline; a body consumed here cannot be read
- * again, so the fall-through would fail with "Body already consumed". Decide
- * from the method, URL and headers — as the first-party gRPC plugin does, which
- * matches on a path prefix alone. A handler that genuinely must inspect the
- * body first has to read `request.clone()` and leave the original intact.
+ * Retained only for the deprecated {@linkcode IHttpAdapter.setRpcHandler}
+ * seam, which no adapter consults. Since M70a gRPC is dispatched from the
+ * kernel's terminal handler, after the middleware pipeline has run and before
+ * route matching: the kernel resolves {@linkcode IGrpcService}, asks
+ * `claims()` whether the path belongs to gRPC, and calls `handleRequest`
+ * directly with a `Request` rebuilt from the already-mapped body.
+ *
+ * Historically the adapter consulted a handler of this shape **before** mapping
+ * the request, which is why the contract required one returning `null` to leave
+ * the body unread. Nothing calls it on that path any more.
  *
  * @since 0.3.0
  */
