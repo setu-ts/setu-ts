@@ -138,6 +138,47 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
     }
   });
 
+  it('reserves a DISTINCT component name for each of TWO reused schemas in one body', () => {
+    // THE DEFECT: `#claimComponentName()` checked only delivered components,
+    // but one zod v4 conversion claims every surviving $def BEFORE delivering
+    // any — so A's def and B's def were both claimed `PostXBody` and the
+    // second delivery silently overwrote the first, leaving b1/b2 pointing at
+    // A's shape (or vice versa).
+    const A = z4.object({ a: z4.string() });
+    const B = z4.object({ b: z4.string() });
+    const doc = generator().generate([
+      route('POST', '/x', { body: z4.object({ a1: A, a2: A, b1: B, b2: B }) }),
+    ]);
+
+    // Exactly two components survive — one per distinct reused schema.
+    const names = Object.keys(doc.components?.schemas ?? {});
+    expect(names).toHaveLength(2);
+
+    const body = bodySchema(doc, '/x') as {
+      properties?: Record<string, { $ref?: string }>;
+    };
+    const refOf = (field: string): string => body.properties?.[field]?.$ref ?? '';
+    expect(refOf('a1')).toBe(refOf('a2'));
+    expect(refOf('b1')).toBe(refOf('b2'));
+    expect(refOf('a1')).not.toBe(refOf('b1'));
+
+    // Each pair resolves to ITS OWN schema's component, not the other's.
+    const aName = refOf('a1').split('/').pop()!;
+    const bName = refOf('b1').split('/').pop()!;
+    expect(doc.components?.schemas?.[aName]).toEqual({
+      type: 'object',
+      properties: { a: { type: 'string' } },
+      required: ['a'],
+      additionalProperties: false,
+    });
+    expect(doc.components?.schemas?.[bName]).toEqual({
+      type: 'object',
+      properties: { b: { type: 'string' } },
+      required: ['b'],
+      additionalProperties: false,
+    });
+  });
+
   it('drops a $def that a hook splice already turned into an alias', () => {
     // When the hook replaces a REUSED node, the splice lands INSIDE the
     // mechanical $def, turning it into a bare `$ref` to the hook's component.
