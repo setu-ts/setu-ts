@@ -19,6 +19,8 @@
  * @since 0.2.0
  */
 
+import type { IPrincipal } from './auth.ts';
+
 /**
  * Lifecycle state of a WebSocket, normalized across runtimes to names rather
  * than the numeric codes the web API uses.
@@ -268,6 +270,16 @@ export interface WebSocketConnectionContext {
   readonly headers: Headers;
   /** The negotiated subprotocol, when one was selected. */
   readonly protocol?: string;
+  /**
+   * The authenticated principal, when one authenticated the upgrade. Populated
+   * by threading `ctx.request.user` through
+   * {@linkcode IWebSocketService.routeUpgrade}; omitted when the upgrade was
+   * not authenticated. Read this in `onOpen` to identify the peer rather than
+   * re-deriving it from the headers.
+   *
+   * @since 0.3.0
+   */
+  readonly user?: IPrincipal;
 }
 
 /**
@@ -387,10 +399,14 @@ export interface IWebSocketService {
    * pipeline runs.
    *
    * @param request - The native, undisturbed upgrade request
+   * @param principal - The authenticated principal, when the middleware pipeline
+   *   produced one (`ctx.request.user`). Absent when the upgrade was not
+   *   authenticated; implementations must treat a missing principal as
+   *   anonymous and must not throw on its absence.
    * @returns The decision, or `null` to fall through
    * @since 0.3.0
    */
-  routeUpgrade?(request: Request): Promise<WebSocketUpgradeDecision | null>;
+  routeUpgrade?(request: Request, principal?: IPrincipal): Promise<WebSocketUpgradeDecision | null>;
   /** Whether the underlying HTTP adapter can perform WebSocket upgrades. */
   readonly available: boolean;
   /** Current number of open connections across all routes. */
