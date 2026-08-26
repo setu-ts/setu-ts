@@ -8,7 +8,7 @@
  */
 
 /** The lockfile fields preserved verbatim in a release resolved-set artifact. */
-export interface LockfileContents {
+export interface ILockfileContents {
   readonly version: string;
   readonly specifiers: Readonly<Record<string, string>>;
   readonly jsr?: Readonly<Record<string, unknown>>;
@@ -19,10 +19,10 @@ export interface LockfileContents {
 }
 
 /** The versioned, self-describing artifact attached to each GitHub Release. */
-export interface ReleaseResolvedSet {
+export interface IReleaseResolvedSet {
   readonly schemaVersion: 1;
   readonly release: string;
-  readonly lockfile: LockfileContents;
+  readonly lockfile: ILockfileContents;
 }
 
 /**
@@ -35,8 +35,8 @@ export interface ReleaseResolvedSet {
  */
 export function createReleaseResolvedSet(
   release: string,
-  lockfile: LockfileContents,
-): ReleaseResolvedSet {
+  lockfile: ILockfileContents,
+): IReleaseResolvedSet {
   if (release === '') throw new TypeError('release version must not be empty');
   if (lockfile.version === '') throw new TypeError('deno.lock version must not be empty');
 
@@ -53,7 +53,7 @@ export function createReleaseResolvedSet(
  * @param resolvedSet - Artifact content to serialize.
  * @returns Indented JSON ending in one newline.
  */
-export function serializeReleaseResolvedSet(resolvedSet: ReleaseResolvedSet): string {
+export function serializeReleaseResolvedSet(resolvedSet: IReleaseResolvedSet): string {
   return `${JSON.stringify(resolvedSet, null, 2)}\n`;
 }
 
@@ -64,7 +64,7 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  const parsed = JSON.parse(await Deno.readTextFile('deno.lock')) as LockfileContents;
+  const parsed = JSON.parse(await Deno.readTextFile('deno.lock')) as ILockfileContents;
   const artifact = createReleaseResolvedSet(release, parsed);
   await Deno.writeTextFile(output, serializeReleaseResolvedSet(artifact));
   console.log(`Wrote resolved dependency set for ${release} to ${output}.`);
