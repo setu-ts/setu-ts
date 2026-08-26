@@ -12,7 +12,9 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { z as z3Floor } from 'npm:zod@3.24.0';
 import { z as z4 } from 'npm:zod@^4.4.0';
+import { z as z4Floor } from 'npm:zod@4.4.0';
 import { z as z3 } from 'npm:zod@^3.24.0';
 
 import type { OpenApiSchemaObject, SchemaNodeHook } from '../../src/transformers/zod-to-openapi.ts';
@@ -205,6 +207,24 @@ describe('ZodToOpenApi — zod v4 (plain transform)', () => {
     };
     expect(root.properties?.name).toEqual({ type: 'string' });
     expect(root.properties?.children).toBeDefined();
+  });
+});
+
+describe('ZodToOpenApi — declared Zod range floors', () => {
+  it('transforms the supported Zod v3.24.0 floor', () => {
+    const result = new ZodToOpenApi().transform(
+      z3Floor.object({ id: z3Floor.string() }),
+    ) as { properties?: Record<string, OpenApiSchemaObject> };
+
+    expect(result.properties?.id).toEqual({ type: 'string' });
+  });
+
+  it('transforms the supported Zod v4.4.0 floor', () => {
+    const result = new ZodToOpenApi().transform(
+      z4Floor.object({ id: z4Floor.string() }),
+    ) as { properties?: Record<string, OpenApiSchemaObject> };
+
+    expect(result.properties?.id).toEqual({ type: 'string' });
   });
 });
 

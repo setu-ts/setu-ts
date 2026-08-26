@@ -248,9 +248,13 @@ there are immutable, and a re-run fails on every package in the list. Create the
 ```bash
 version=0.1.0-alpha.9   # the version that just published — the ONLY line to edit
 prerelease=$(case "$version" in *-*) echo --prerelease ;; esac)
-deno run --allow-read scripts/release-notes.ts "$version" > /tmp/notes.md &&
+mkdir -p .tmp &&
+deno task release:resolved-set "$version" .tmp/resolved-set.json &&
+deno run --allow-read scripts/release-notes.ts "$version" > .tmp/notes.md &&
 gh release create "v$version" --verify-tag --title "v$version" \
-  --notes-file /tmp/notes.md $prerelease
+  --notes-file .tmp/notes.md \
+  .tmp/resolved-set.json#resolved-set.json \
+  $prerelease
 ```
 
 Everything after the first line is derived, deliberately: hardcoding the flag would mark the first
@@ -272,6 +276,9 @@ The workflow creates the artifact before publish using:
 ```bash
 deno task release:resolved-set <version> .tmp/resolved-set.json
 ```
+
+The post-publish recovery command above runs the same task and attaches the same asset, so a
+manually recovered release preserves this guarantee.
 
 `release:verify` checks the workflow contract for both generation and attachment, so deleting either
 side is a release-blocking error rather than a missing asset discovered after publication.
