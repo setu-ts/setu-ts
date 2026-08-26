@@ -57,6 +57,11 @@ export function serializeReleaseResolvedSet(resolvedSet: IReleaseResolvedSet): s
   return `${JSON.stringify(resolvedSet, null, 2)}\n`;
 }
 
+/**
+ * Runs the command-line artifact writer.
+ *
+ * @returns Process exit status for the command-line caller.
+ */
 async function main(): Promise<number> {
   const [release, output] = Deno.args;
   if (release === undefined || output === undefined || release === '' || output === '') {
