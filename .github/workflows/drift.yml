@@ -1,0 +1,137 @@
+name: Dependency drift
+
+on:
+  schedule:
+    # Weekly: upstream releases become visible during their first full week.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fresh-resolution:
+    name: Fresh resolution and gates
+    runs-on: ubuntu-latest
+    # Drift is diagnostic: it must never block ordinary pull requests or a
+    # release, but it must remain visibly red when a fresh graph is unhealthy.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.5
+
+      - name: Resolve every source and test range fresh
+        id: resolve
+        run: |
+          sources="$RUNNER_TEMP/dependency-drift-sources.txt"
+          rg --files -g '*.ts' packages test scripts > "$sources"
+          if xargs deno cache --reload --frozen=false \
+            --lock="$RUNNER_TEMP/dependency-drift.lock" < "$sources"; then
+            exit 0
+          fi
+
+          # `deno cache` reports the broken specifier, but resolving the
+          # entries one at a time also names the owning workspace package.
+          # That makes a bad range actionable rather than merely a red job.
+          while IFS= read -r source; do
+            if ! deno cache --reload --frozen=false \
+              --lock="$RUNNER_TEMP/dependency-drift.lock" "$source"; then
+              case "$source" in
+                packages/*/*)
+                  package="@setu-ts/${source#packages/}"
+                  package="${package%%/*}"
+                  ;;
+                *) package="workspace root" ;;
+              esac
+              echo "::error title=Dependency range resolution failed for $package::$source"
+              exit 1
+            fi
+          done < "$sources"
+          exit 1
+
+      - name: Format check against fresh resolution
+        id: fmt
+        if: always() && steps.resolve.outcome == 'success'
+        continue-on-error: true
+        env:
+          DENO_FLAGS: --lock=${{ runner.temp }}/dependency-drift.lock --frozen
+        run: deno task fmt:check
+
+      - name: Lint against fresh resolution
+        id: lint
+        if: always() && steps.resolve.outcome == 'success'
+        continue-on-error: true
+        env:
+          DENO_FLAGS: --lock=${{ runner.temp }}/dependency-drift.lock --frozen
+        run: deno task lint
+
+      - name: Type check against fresh resolution
+        id: check
+        if: always() && steps.resolve.outcome == 'success'
+        continue-on-error: true
+        env:
+          DENO_FLAGS: --lock=${{ runner.temp }}/dependency-drift.lock --frozen
+        run: deno task check
+
+      - name: Test against fresh resolution
+        id: test
+        if: always() && steps.resolve.outcome == 'success'
+        continue-on-error: true
+        env:
+          DENO_FLAGS: --lock=${{ runner.temp }}/dependency-drift.lock --frozen
+        run: deno task test
+
+      - name: Attribute drift and summarize gates
+        id: report
+        if: always()
+        env:
+          RESOLUTION_OUTCOME: ${{ steps.resolve.outcome }}
+          FORMAT_OUTCOME: ${{ steps.fmt.outcome }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+          TEST_OUTCOME: ${{ steps.test.outcome }}
+        run: |
+          report="$RUNNER_TEMP/dependency-drift.md"
+          if [ "$RESOLUTION_OUTCOME" = success ]; then
+            deno task dependency:drift deno.lock "$RUNNER_TEMP/dependency-drift.lock" > "$report"
+          else
+            printf '%s\n' '## Dependency drift' '' \
+              'Fresh resolution failed before the gates could run. The resolve step emits an error annotation naming the owning workspace package and source file.' > "$report"
+          fi
+          printf '%s\n' '' '## Fresh-resolution gates' '' \
+            '| Gate | Result |' '| --- | --- |' \
+            "| resolve | $RESOLUTION_OUTCOME |" \
+            "| fmt | $FORMAT_OUTCOME |" \
+            "| lint | $LINT_OUTCOME |" \
+            "| check | $CHECK_OUTCOME |" \
+            "| test | $TEST_OUTCOME |" >> "$report"
+          if grep -q '^| `' "$report" || [ "$RESOLUTION_OUTCOME" != success ] || \
+            [ "$FORMAT_OUTCOME" = failure ] || [ "$LINT_OUTCOME" = failure ] || \
+            [ "$CHECK_OUTCOME" = failure ] || [ "$TEST_OUTCOME" = failure ]; then
+            echo 'action_required=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'action_required=false' >> "$GITHUB_OUTPUT"
+          fi
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create or update dependency-drift issue
+        if: always() && steps.report.outputs.action_required == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create dependency-drift --color B60205 --description 'Fresh dependency resolution changed or failed' --force
+          issue=$(gh issue list --label dependency-drift --state open --limit 1 --json number --jq '.[0].number')
+          if [ -z "$issue" ]; then
+            gh issue create --title 'Dependency drift detected' --label dependency-drift \
+              --body-file "$RUNNER_TEMP/dependency-drift.md"
+          else
+            gh issue edit "$issue" --body-file "$RUNNER_TEMP/dependency-drift.md"
+          fi
+
+      - name: Mark dependency drift as detected
+        if: always() && steps.report.outputs.action_required == 'true'
+        run: exit 1

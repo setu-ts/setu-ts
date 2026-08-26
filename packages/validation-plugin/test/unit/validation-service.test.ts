@@ -192,6 +192,20 @@ describe('ValidationService — real Zod schema', () => {
     }
   });
 
+  it('validates a real Zod v4 schema through its public safeParse API', async () => {
+    const { z } = await import('npm:zod@^4.4.0');
+    const service = new ValidationService(defaultFormatter);
+    const schema = z.object({ email: z.string().email() });
+
+    const result = service.validate(schema, { email: 'not-an-email' });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toHaveLength(1);
+      expect(result.error[0].path).toBe('email');
+    }
+  });
+
   describe('applySchemaPolicy', () => {
     it('returns non-object schemas unchanged', () => {
       // A primitive or null can carry no `.strip()` / `.strict()`.

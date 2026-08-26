@@ -64,7 +64,8 @@
 55. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
 56. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
 57. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
-58. [Summary](#summary)
+58. [Boundary-Type Compatibility](#boundary-type-compatibility)
+59. [Summary](#summary)
 
 ---
 
@@ -9717,6 +9718,21 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
 - Health indicator: reports `up`/`down`/`degraded` based on root directory accessibility
 
 ---
+
+## Boundary-Type Compatibility
+
+Applications own their third-party dependency resolution. Setu-TS therefore does not freeze a
+consumer's dependency graph; it declares the third-party values it accepts at an application
+boundary and tests those claims in `deno task check:compat`.
+
+| Third-party value                  | Owning packages                                           | Supported versions                 | Boundary and compatibility rule                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------- | --------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zod schemas                        | `validation-plugin`, `openapi-plugin`, `decorator-plugin` | zod `>=3.24.0 <4` and `>=4.4.0 <5` | Validation uses public `safeParse`; OpenAPI uses Zod v4's public `toJSONSchema()`. The legacy Zod v3 transformer has no equivalent public conversion API, so its private-internal compatibility is limited to the stated v3 range and tested separately. Decorators forward schemas to the validation/OpenAPI boundaries without inspecting them. |
+| Drizzle database and table objects | `database-plugin`                                         | `0.45.2` baseline; range pending   | The application creates the database configuration and tables; the plugin loads its own query operators. Its exact lazy-loader import is a separate resolution-policy repair, so no broader application-instance range is claimed until that pin is removed and both endpoints are tested.                                                        |
+| Prisma client                      | `database-plugin`                                         | **Pending boundary repair**        | Prisma v7 is the current application integration, but no formal range is claimed until the adapter stops its `_activeProvider` fallback and relies solely on the documented `provider` option plus public client methods.                                                                                                                         |
+
+GraphQL is intentionally absent: `graphqlModule` is a package-declared `GraphqlModuleLike` facade,
+not an opaque `unknown` value. Its compile-time shape and adapter tests cover that boundary.
 
 ## Summary
 
