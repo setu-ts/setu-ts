@@ -8,12 +8,12 @@
  */
 
 /** The lockfile subset needed to attribute a range resolution. */
-export interface DriftLockfile {
+export interface IDriftLockfile {
   readonly specifiers: Readonly<Record<string, string>>;
 }
 
 /** One changed direct resolution, identified by its original specifier. */
-export interface DependencyDrift {
+export interface IDependencyDrift {
   readonly specifier: string;
   readonly packageName: string;
   readonly previous: string | null;
@@ -39,9 +39,9 @@ export function packageNameOf(specifier: string): string {
  * @returns Deterministically ordered changed and newly resolved ranges.
  */
 export function findDependencyDrift(
-  committed: DriftLockfile,
-  fresh: DriftLockfile,
-): readonly DependencyDrift[] {
+  committed: IDriftLockfile,
+  fresh: IDriftLockfile,
+): readonly IDependencyDrift[] {
   const specifiers = new Set([
     ...Object.keys(committed.specifiers),
     ...Object.keys(fresh.specifiers),
@@ -49,7 +49,7 @@ export function findDependencyDrift(
 
   return [...specifiers]
     .sort()
-    .flatMap((specifier): DependencyDrift[] => {
+    .flatMap((specifier): IDependencyDrift[] => {
       const previous = committed.specifiers[specifier] ?? null;
       const current = fresh.specifiers[specifier] ?? null;
       // Deno lockfiles are additive. A specifier present only in the committed
@@ -66,7 +66,7 @@ export function findDependencyDrift(
  * @param changes - Attributed resolution changes.
  * @returns Complete Markdown report.
  */
-export function formatDependencyDrift(changes: readonly DependencyDrift[]): string {
+export function formatDependencyDrift(changes: readonly IDependencyDrift[]): string {
   if (changes.length === 0) {
     return '## Dependency drift\n\nNo direct dependency resolution changed.\n';
   }
@@ -85,8 +85,8 @@ export function formatDependencyDrift(changes: readonly DependencyDrift[]): stri
   ].join('\n');
 }
 
-async function readLockfile(path: string): Promise<DriftLockfile> {
-  return JSON.parse(await Deno.readTextFile(path)) as DriftLockfile;
+async function readLockfile(path: string): Promise<IDriftLockfile> {
+  return JSON.parse(await Deno.readTextFile(path)) as IDriftLockfile;
 }
 
 async function main(): Promise<number> {

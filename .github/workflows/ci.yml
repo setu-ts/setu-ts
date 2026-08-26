@@ -149,6 +149,9 @@ jobs:
         with:
           deno-version: 2.9.5
 
+      - name: Install frozen dependencies
+        run: deno ci
+
       # The ordinary suite can pass with only one supported third-party major
       # installed. This targeted matrix makes the declared boundary claims
       # independently visible in CI.
