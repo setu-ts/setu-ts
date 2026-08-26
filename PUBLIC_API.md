@@ -5442,6 +5442,33 @@ app.router.post('/users', {
 });
 ```
 
+### Zod Version Support
+
+Both **zod v3 and zod v4** are supported, detected per schema by duck typing — `toJSONSchema`
+presence marks a v4 schema; the plugin imports neither major.
+
+- **Zod v4** is converted through `schema.toJSONSchema()` and adapted from JSON Schema draft 2020-12
+  to OpenAPI 3.1: the dialect `$schema` key is dropped, formats and constraints pass through
+  verbatim (`format`, `pattern`, `contentEncoding`, …), reused schemas are hoisted into
+  `components/schemas` with their pointers rewritten, and a recursive schema's root-cycle pointer
+  forces that schema into `components` so no bare `#` ref survives in the document.
+- **Unrepresentable nodes degrade, never throw.** A type zod cannot represent in JSON Schema
+  (`z.date()`, `z.bigint()`) still becomes an empty schema, but the operation owning it now carries
+  a machine-readable vendor extension:
+
+  ```json
+  {
+    "x-setu-unrepresentable": [
+      { "at": "post-events-body", "reason": "zod v4 type 'date' has no JSON Schema representation" }
+    ]
+  }
+  ```
+
+  `at` names the operationId, so the affected route is identifiable without diffing documents. The
+  extension is absent when every schema is representable.
+- **Zod v3 output is unchanged** — the same schemas produce byte-identical documents as before this
+  support existed.
+
 ### Notes
 
 - Every `RouteSchema` position the generator reads becomes part of the operation: `body` becomes the

@@ -134,6 +134,20 @@ export interface OpenApiOperation {
   /** Response codes. */
   readonly responses: Record<string, OpenApiResponse>;
   /**
+   * Machine-readable vendor extension naming the schema nodes on THIS
+   * operation the transformer could not represent (a zod `z.date()` field,
+   * for example). Each entry names the operation (`at`) and why (`reason`).
+   * The node itself still degrades to an empty schema — never a throw — so a
+   * single unrepresentable field cannot take down `/openapi.json`. Absent
+   * when empty.
+   *
+   * @since 0.1.0-alpha.10
+   */
+  readonly 'x-setu-unrepresentable'?: readonly {
+    readonly at: string;
+    readonly reason: string;
+  }[];
+  /**
    * Security requirements for this operation — declared on the route's
    * `schema.security`, or derived from its branded guards when
    * {@linkcode OpenApiGeneratorOptions.deriveSecurity} is configured
@@ -342,6 +356,15 @@ export class OpenApiGenerator {
   #pass: 'count' | 'emit';
   /** Name hint for the schema currently being resolved, e.g. `PostOrdersBody`. */
   #nameHint: string;
+  /**
+   * Diagnostics reported by the transformer for the operation CURRENTLY being
+   * built; attached as the `x-setu-unrepresentable` extension and reset per
+   * operation. Only the emit pass records — the counting pass runs the same
+   * transforms and would double every entry.
+   */
+  readonly #operationDiagnostics: { at: string; reason: string }[] = [];
+  /** The operationId of the operation currently being built. */
+  #currentOperationId = '';
 
   /**
    * Creates a new OpenAPI generator.
@@ -370,7 +393,25 @@ export class OpenApiGenerator {
     };
     this.#excluded = new Set(options.exclude ?? []);
     this.#excludedOwners = new Set(options.excludeOwners ?? DEFAULT_EXCLUDED_OWNERS);
-    this.#transformer = new ZodToOpenApi((schema) => this.#hook(schema));
+    this.#transformer = new ZodToOpenApi((schema) => this.#hook(schema), {
+      // Zod v4 $defs surviving a transform are hoisted into components under
+      // the CURRENT site's name hint. During the COUNT pass nothing may be
+      // stored — the transformer still needs A name to rewrite pointers with,
+      // so it gets a throwaway that `onDefinition` refuses to deliver.
+      onDefinitionClaim: (hint) =>
+        this.#pass === 'count' ? `\u0000count:${hint}` : this.#claimComponentName(),
+      onDefinition: (name, schema) => {
+        if (this.#pass === 'emit') this.#componentSchemas.set(name, schema);
+      },
+      onUnrepresentable: (diagnostic) => {
+        if (this.#pass === 'emit') {
+          this.#operationDiagnostics.push({
+            at: this.#currentOperationId,
+            reason: diagnostic.reason,
+          });
+        }
+      },
+    });
     this.#plainTransformer = new ZodToOpenApi();
     this.#schemaMap = new Map();
     this.#componentSchemas = new Map();
@@ -505,6 +546,11 @@ export class OpenApiGenerator {
   #createOperation(route: RouteInfo, openApiPath: string): OpenApiOperation {
     // Generate operationId from method and path
     const operationId = this.#generateOperationId(route.method, openApiPath);
+    // Diagnostics reported while THIS operation's schemas are resolved are
+    // attached to it; reset per operation (and per pass — the emit pass is
+    // the only one that records).
+    this.#currentOperationId = operationId;
+    this.#operationDiagnostics.length = 0;
 
     // Declared schema merged with what the route's validation middleware
     // enforces; declared wins per field.
@@ -541,6 +587,11 @@ export class OpenApiGenerator {
       ...(parameters.length > 0 ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
       responses,
+      // Absent when empty, so a document full of representable schemas is
+      // byte-identical with the pre-annotation output.
+      ...(this.#operationDiagnostics.length > 0
+        ? { 'x-setu-unrepresentable': [...this.#operationDiagnostics] }
+        : {}),
       // Precedence: a DECLARED requirement wins, then a DERIVED one, then
       // nothing — which leaves the operation inheriting the document-level
       // default. The declared test is deliberately `!== undefined` rather than
@@ -846,8 +897,13 @@ export class OpenApiGenerator {
       return { schema: undefined, description: fallback };
     }
 
-    // Bare Zod schema (programmatic convention) — identified by `_def`.
-    if ('_def' in value) {
+    // Bare Zod schema (programmatic convention) — identified by `_def` on
+    // zod v3, or the public `toJSONSchema` method on zod v4 (which has no
+    // `_def` at all).
+    if (
+      '_def' in value ||
+      typeof (value as { toJSONSchema?: unknown }).toJSONSchema === 'function'
+    ) {
       return { schema: value, description: fallback };
     }
 
