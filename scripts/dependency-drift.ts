@@ -85,10 +85,21 @@ export function formatDependencyDrift(changes: readonly IDependencyDrift[]): str
   ].join('\n');
 }
 
+/**
+ * Reads the lockfile portion used by the drift comparison.
+ *
+ * @param path - Lockfile path supplied by the workflow.
+ * @returns Parsed lockfile specifier resolutions.
+ */
 async function readLockfile(path: string): Promise<IDriftLockfile> {
   return JSON.parse(await Deno.readTextFile(path)) as IDriftLockfile;
 }
 
+/**
+ * Runs the command-line drift report.
+ *
+ * @returns Process exit status for the command-line caller.
+ */
 async function main(): Promise<number> {
   const [committedPath, freshPath] = Deno.args;
   if (committedPath === undefined || freshPath === undefined) {
