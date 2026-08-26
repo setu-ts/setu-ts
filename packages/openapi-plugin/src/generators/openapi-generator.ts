@@ -375,6 +375,22 @@ export class OpenApiGenerator {
    * state.
    */
   readonly #reservedNames = new Set<string>();
+  /**
+   * Component names delivered through the zod v4 `$defs` channel DURING the
+   * current {@linkcode generate} call.
+   *
+   * These components are written straight to `#componentSchemas` and never
+   * enter `#schemaMap`, so the map-based sweep at the top of `generate`
+   * cannot see them — without this tracking a second `generate()` leaked the
+   * first document's `$defs` components (e.g. a repeated zod v4 child hoisted
+   * as `PostFirstBody`) into a second, unrelated document. Purged on every
+   * `generate` reset. Deliveries made OUTSIDE a `generate` call — by
+   * `addSchema`, whose transformed output may legitimately reference them —
+   * are deliberately NOT tracked, so contributor registrations survive.
+   */
+  readonly #perDocComponents = new Set<string>();
+  /** Whether a `generate` call is in flight; gates `#perDocComponents` recording. */
+  #generating = false;
   /** Guards hoisting reentrancy: the node being hoisted must transform normally. */
   readonly #hoisting: Set<unknown>;
   /** `'count'` fills `#schemaCounts`; `'emit'` hoists anything counted twice. */
@@ -426,7 +442,10 @@ export class OpenApiGenerator {
       onDefinitionClaim: (hint: string): string =>
         this.#pass === 'count' ? `\u0000count:${hint}` : this.#claimComponentName(),
       onDefinition: (name: string, schema: OpenApiSchemaObject): void => {
-        if (this.#pass === 'emit') this.#componentSchemas.set(name, schema);
+        if (this.#pass === 'emit') {
+          this.#componentSchemas.set(name, schema);
+          if (this.#generating) this.#perDocComponents.add(name);
+        }
       },
       onUnrepresentable: (diagnostic: { readonly reason: string }): void => {
         if (this.#pass === 'emit') {
@@ -482,6 +501,13 @@ export class OpenApiGenerator {
       this.#componentSchemas.delete(name);
     }
 
+    // Zod v4 `$defs` components were delivered straight to `#componentSchemas`
+    // without ever entering `#schemaMap`, so the sweep above cannot remove
+    // them; purge the separately-tracked per-document names instead.
+    for (const name of this.#perDocComponents) this.#componentSchemas.delete(name);
+    this.#perDocComponents.clear();
+    this.#generating = true;
+
     // Pass 1 counts how many sites reference each schema identity, INCLUDING
     // nested ones, because the counting hook is consulted at every node the
     // transformer visits. Pass 2 can then hoist on FIRST use: without the
@@ -536,6 +562,8 @@ export class OpenApiGenerator {
     ) {
       components.securitySchemes = this.#options.securitySchemes;
     }
+
+    this.#generating = false;
 
     return {
       openapi: '3.1.0',

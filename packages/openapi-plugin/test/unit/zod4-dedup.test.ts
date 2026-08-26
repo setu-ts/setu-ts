@@ -387,3 +387,59 @@ describe('OpenApiGenerator — zod v4 parameter sites (review round 2)', () => {
     assertEveryRefResolves(doc);
   });
 });
+
+describe('OpenApiGenerator — per-document component reset', () => {
+  it('purges $defs-delivered components from a previous generate() call', () => {
+    // THE DEFECT: a repeated zod v4 child is extracted by zod into a
+    // mechanical `$def` and delivered straight to `#componentSchemas` — never
+    // recorded in `#schemaMap` — so the per-document reset (which only removes
+    // map-tracked components) left it behind and a second generate() leaked
+    // the first document's `PostFirstBody` into an unrelated document.
+    const gen = generator();
+    const child = z4.object({ tag: z4.string() });
+    const first = gen.generate([
+      route('POST', '/first', { body: z4.object({ a: child, b: child }) }),
+    ]);
+    expect(first.components?.schemas?.PostFirstBody).toEqual({
+      type: 'object',
+      properties: { tag: { type: 'string' } },
+      required: ['tag'],
+      additionalProperties: false,
+    });
+
+    const second = gen.generate([
+      route('POST', '/second', { body: z4.object({ id: z4.string() }) }),
+    ]);
+    expect(second.components?.schemas?.PostFirstBody).toBeUndefined();
+    expect(second.components).toBeUndefined();
+  });
+
+  it('keeps addSchema registrations across resets, including their sub-components', () => {
+    // A component delivered at addSchema time (outside any generate call) is
+    // NOT per-document state: Person's own properties point at it, so purging
+    // it would dangle every registration that references it.
+    const gen = generator();
+    const address = z4.object({ city: z4.string() });
+    const person = z4.object({ home: address, billing: address });
+    gen.addSchema('Person', person);
+    const routes = [route('GET', '/p', { response: { 200: person } })];
+
+    const first = gen.generate(routes);
+    const homeRef = (
+      (
+        first.components?.schemas?.Person as {
+          properties?: Record<string, { $ref?: string }>;
+        }
+      ).properties?.home?.$ref ?? ''
+    ).split('/').pop();
+    expect(homeRef).toBeTruthy();
+    expect(first.components?.schemas?.[homeRef as string]).toBeDefined();
+
+    const second = gen.generate(routes);
+    expect(responseSchema(second, '/p', '200')).toEqual({
+      $ref: '#/components/schemas/Person',
+    });
+    expect(second.components?.schemas?.Person).toBeDefined();
+    expect(second.components?.schemas?.[homeRef as string]).toBeDefined();
+  });
+});
