@@ -507,78 +507,86 @@ export class OpenApiGenerator {
     for (const name of this.#perDocComponents) this.#componentSchemas.delete(name);
     this.#perDocComponents.clear();
     this.#generating = true;
+    try {
+      // Pass 1 counts how many sites reference each schema identity, INCLUDING
+      // nested ones, because the counting hook is consulted at every node the
+      // transformer visits. Pass 2 can then hoist on FIRST use: without the
+      // count, the first occurrence has to be inlined and is never rewritten,
+      // which is what made one shape appear both inline and as a `$ref`.
+      this.#operationIds.clear();
+      this.#schemaCounts.clear();
+      this.#reservedNames.clear();
+      this.#pass = 'count';
+      for (const route of routes) {
+        if (this.#isExcluded(route)) continue;
+        this.#createOperation(route, this.#convertPath(route.path));
+      }
+      this.#pass = 'emit';
 
-    // Pass 1 counts how many sites reference each schema identity, INCLUDING
-    // nested ones, because the counting hook is consulted at every node the
-    // transformer visits. Pass 2 can then hoist on FIRST use: without the
-    // count, the first occurrence has to be inlined and is never rewritten,
-    // which is what made one shape appear both inline and as a `$ref`.
-    this.#operationIds.clear();
-    this.#schemaCounts.clear();
-    this.#reservedNames.clear();
-    this.#pass = 'count';
-    for (const route of routes) {
-      if (this.#isExcluded(route)) continue;
-      this.#createOperation(route, this.#convertPath(route.path));
-    }
-    this.#pass = 'emit';
+      const paths: Record<string, {
+        get?: OpenApiOperation;
+        post?: OpenApiOperation;
+        put?: OpenApiOperation;
+        patch?: OpenApiOperation;
+        delete?: OpenApiOperation;
+        head?: OpenApiOperation;
+        options?: OpenApiOperation;
+      }> = {};
 
-    const paths: Record<string, {
-      get?: OpenApiOperation;
-      post?: OpenApiOperation;
-      put?: OpenApiOperation;
-      patch?: OpenApiOperation;
-      delete?: OpenApiOperation;
-      head?: OpenApiOperation;
-      options?: OpenApiOperation;
-    }> = {};
+      // Group routes by path
+      for (const route of routes) {
+        // Excluded paths are dropped for every method registered on them. The
+        // plugin's own `/docs` and `/openapi.json` arrive here pre-excluded, so
+        // a document never advertises the endpoints that serve it.
+        if (this.#isExcluded(route)) continue;
 
-    // Group routes by path
-    for (const route of routes) {
-      // Excluded paths are dropped for every method registered on them. The
-      // plugin's own `/docs` and `/openapi.json` arrive here pre-excluded, so
-      // a document never advertises the endpoints that serve it.
-      if (this.#isExcluded(route)) continue;
+        const openApiPath = this.#convertPath(route.path);
+        const method = route.method.toLowerCase() as keyof typeof paths;
 
-      const openApiPath = this.#convertPath(route.path);
-      const method = route.method.toLowerCase() as keyof typeof paths;
+        if (!paths[openApiPath]) {
+          paths[openApiPath] = {};
+        }
 
-      if (!paths[openApiPath]) {
-        paths[openApiPath] = {};
+        const operation = this.#createOperation(route, openApiPath);
+        (paths[openApiPath] as Record<string, OpenApiOperation>)[method] = operation;
       }
 
-      const operation = this.#createOperation(route, openApiPath);
-      (paths[openApiPath] as Record<string, OpenApiOperation>)[method] = operation;
-    }
+      // Build components section
+      const components: Record<string, unknown> = {};
+      if (this.#componentSchemas.size > 0) {
+        components.schemas = Object.fromEntries(this.#componentSchemas);
+      }
+      if (
+        this.#options.securitySchemes &&
+        Object.keys(this.#options.securitySchemes).length > 0
+      ) {
+        components.securitySchemes = this.#options.securitySchemes;
+      }
 
-    // Build components section
-    const components: Record<string, unknown> = {};
-    if (this.#componentSchemas.size > 0) {
-      components.schemas = Object.fromEntries(this.#componentSchemas);
+      return {
+        openapi: '3.1.0',
+        info: {
+          title: this.#options.title,
+          version: this.#options.version,
+          ...(this.#options.description !== undefined
+            ? { description: this.#options.description }
+            : {}),
+        },
+        ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
+        ...(this.#options.security !== undefined ? { security: this.#options.security } : {}),
+        paths,
+        ...(Object.keys(components).length > 0 ? { components } : {}),
+      };
+    } finally {
+      // Restored even when a schema throws mid-pass. A stranded
+      // `#pass === 'count'` makes a later `addSchema` claim the count-pass
+      // sentinel name and emit it as a `$ref` — a literal NUL byte in the
+      // document — while a stranded `#generating` makes that registration
+      // look per-document, so the next `generate` purges components the
+      // registration still points at.
+      this.#pass = 'emit';
+      this.#generating = false;
     }
-    if (
-      this.#options.securitySchemes &&
-      Object.keys(this.#options.securitySchemes).length > 0
-    ) {
-      components.securitySchemes = this.#options.securitySchemes;
-    }
-
-    this.#generating = false;
-
-    return {
-      openapi: '3.1.0',
-      info: {
-        title: this.#options.title,
-        version: this.#options.version,
-        ...(this.#options.description !== undefined
-          ? { description: this.#options.description }
-          : {}),
-      },
-      ...(this.#options.servers !== undefined ? { servers: this.#options.servers } : {}),
-      ...(this.#options.security !== undefined ? { security: this.#options.security } : {}),
-      paths,
-      ...(Object.keys(components).length > 0 ? { components } : {}),
-    };
   }
 
   /**

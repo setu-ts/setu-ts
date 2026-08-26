@@ -5459,7 +5459,7 @@ presence marks a v4 schema; the plugin imports neither major.
   ```json
   {
     "x-setu-unrepresentable": [
-      { "at": "post-events-body", "reason": "zod v4 type 'date' has no JSON Schema representation" }
+      { "at": "post-events", "reason": "zod v4 type 'date' has no JSON Schema representation" }
     ]
   }
   ```
