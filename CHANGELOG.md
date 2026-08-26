@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Three committed docs still said WebSocket upgrades and gRPC requests bypass the middleware
+  pipeline**, which M70a made false. `packages/websocket-plugin/README.md` claimed "the adapter
+  therefore consults the plugin's upgrade router first", and the `ARCHITECTURE.md` package-diagram
+  notes said the §10 pipeline "is likewise bypassed for upgrade requests, by design" and that RPC is
+  "intercepted inside the HTTP adapter's `fetch` path". Since M70a the kernel's terminal handler
+  decides both, after the pipeline has run and before route matching; the adapter stores the upgrade
+  router without consulting it, and `setRpcHandler` is deprecated and consulted by nothing. Each
+  correction now matches the canonical prose in `ARCHITECTURE.md` §10 and `PUBLIC_API.md`. Both
+  documents were reachable by a reader deciding whether a guard protects a socket, which is exactly
+  the question M70a exists to answer. Two further copies were found in `@setu-ts/common`'s own
+  JSDoc, which jsr.io renders: `IHttpAdapter.setUpgradeRouter` said the handshake happens "when the
+  pipeline does not short-circuit **and route matching returns no match**" — the pre-review ordering
+  that M70a's code review inverted, because a catch-all was shadowing every upgrade — and
+  `RpcFetchHandler` still described the adapter consulting it before mapping the request.
+  `ARCHITECTURE.md` also claimed `grpc-plugin` depends on the `http-adapter` capability; it resolves
+  no adapter at all since M70a. Documentation only — no behaviour, signature or export changed.
+
 - **`@setu-ts/openapi-plugin` produced an EMPTY OpenAPI schema for every zod v4 schema.** Zod v4
   removed the private `_def.typeName` marker the transformer dispatched on, so every v4 schema fell
   through to `{}` and `/openapi.json` served `{"schema":{}}` for any route documented with one. Zod

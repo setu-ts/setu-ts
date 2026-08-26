@@ -488,10 +488,13 @@ export interface IHttpAdapter {
    */
   close(handle: ServerHandle): Promise<void>;
   /**
-   * Installs a WebSocket upgrade router. The adapter stores the router for
-   * later use by the kernel: the middleware pipeline runs first on every
-   * inbound request, and the handshake is performed only when the pipeline
-   * does not short-circuit and route matching returns no match.
+   * Installs a WebSocket upgrade router. The adapter stores the router but does
+   * not consult it: since M70a the kernel's terminal handler resolves
+   * {@linkcode IWebSocketService} and calls `routeUpgrade` itself, after the
+   * middleware pipeline has run without short-circuiting and **before** route
+   * matching — so an application catch-all cannot shadow an upgrade. What the
+   * adapter needs from this setter is the bare fact that a router was
+   * installed: Node attaches its raw `upgrade` listener only then.
    *
    * Optional: absent on adapters that cannot perform a WebSocket handshake.
    * Callers MUST degrade gracefully when it is not provided — see the
@@ -499,10 +502,10 @@ export interface IHttpAdapter {
    * but fails `route()` with a typed error. Because the member is optional,
    * adapters written before this seam existed remain valid implementations.
    *
-   * An adapter that implements this must call the router only for requests
-   * carrying a WebSocket upgrade header, and must fall through to normal HTTP
-   * handling whenever the router returns `null`, so installing a router never
-   * changes the behavior of non-WebSocket traffic.
+   * Upgrade detection is the router's own job — it returns `null` for anything
+   * that is not an upgrade on a path it owns, and the kernel falls through to
+   * normal HTTP handling — so installing a router never changes the behavior of
+   * non-WebSocket traffic.
    *
    * @param router - Decides accept, reject, or fall-through per upgrade request
    * @since 0.2.0

@@ -190,20 +190,32 @@ ws.route('/ws', handlers, { protocols: ['chat', 'json'] });
 
 ## Semantics
 
-- **Upgrades bypass the middleware pipeline, by design.** A handshake needs the _native_ `Request`,
-  and the framework's request mapping pre-reads the body — which makes `Deno.upgradeWebSocket` fail
-  outright. The adapter therefore consults the plugin's upgrade router first, and only for requests
-  carrying WebSocket upgrade headers. Non-WebSocket traffic is untouched, and a request on an
-  unregistered path falls straight through to your normal routes.
+- **The middleware pipeline runs before the handshake.** Since M70a an upgrade goes through the same
+  chain as a `GET /users`. A handshake does need the _native_ `Request`, which the framework's
+  request mapping pre-reads — so the kernel keeps an undisturbed copy on `IRequest.raw` and consults
+  `IWebSocketService.routeUpgrade` from its terminal handler, after the pipeline has run without
+  short-circuiting and **before** route matching, so an application catch-all such as the SSR one
+  `ReactRouterPlugin` mounts cannot shadow the upgrade. A guard that answers `401` therefore refuses
+  it, metrics apply, and a draining application answers `503`. `setUpgradeRouter` is still the
+  adapter seam, but the adapter no longer consults the router: it only needs to know one was
+  installed, which is what makes Node attach its raw `upgrade` listener. Non-WebSocket traffic is
+  untouched, and a request on an unregistered path falls straight through to your normal routes.
+- **An accepted upgrade carries no response headers a middleware wrote.** The adapter answers with
+  the runtime's own `101`, so security headers and `Set-Cookie` set on `ctx.response` are not
+  carried onto the handshake response. The pipeline still _runs_, which is what lets a guard refuse;
+  it just has no response left to decorate once the socket is taken over. A refused upgrade is an
+  ordinary HTTP response and carries everything.
 - **Authenticate inside `onOpen` — and know that a cookie session is not yet verifiable there.**
   Browsers cannot set headers on a `WebSocket` constructor, so a bearer header never arrives. A
   cookie does arrive, but this framework cannot read it in `onOpen` today:
-  `ISessionService.from(ctx)` needs the request context an upgrade bypasses, and the service exposes
-  no open-from-headers seam. Carrying a session cookie therefore authenticates nothing here — verify
-  instead a credential you can check directly: a signed token in the query string (keep it
-  short-lived; it lands in URLs and access logs) or a subprotocol carrying a nonce your HTTP layer
-  issued. `conn.close(1008)` refuses a peer whose credential fails. A cookie-backed strategy that
-  composes with sessions is tracked as a defect in `smoke/DEFECTS.md` (X3-5).
+  `ISessionService.from(ctx)` needs a request context, and `onOpen` is handed a
+  `WebSocketConnectionContext` rather than one — the pipeline's context is gone by the time the
+  callback fires — and the service exposes no open-from-headers seam. Carrying a session cookie
+  therefore authenticates nothing here — verify instead a credential you can check directly: a
+  signed token in the query string (keep it short-lived; it lands in URLs and access logs) or a
+  subprotocol carrying a nonce your HTTP layer issued. `conn.close(1008)` refuses a peer whose
+  credential fails. A cookie-backed strategy that composes with sessions is tracked as a defect in
+  `smoke/DEFECTS.md` (X3-5).
 - **The heartbeat is an application-level frame, not an RFC 6455 ping.** Deno and Cloudflare Workers
   expose no `ping()` on their web `WebSocket`, so a protocol ping would silently no-op on half the
   supported runtimes. Your client should treat `heartbeatPayload` as a keep-alive and may reply to
