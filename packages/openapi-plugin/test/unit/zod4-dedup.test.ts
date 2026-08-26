@@ -414,6 +414,45 @@ describe('OpenApiGenerator — per-document component reset', () => {
     expect(second.components).toBeUndefined();
   });
 
+  it('restores pass state when generate() throws, so a later addSchema stays clean', () => {
+    // THE DEFECT: `generate` set `#pass = 'count'` and `#generating = true`
+    // without a `finally`, so a schema throwing mid-pass stranded both. The
+    // next `addSchema` then transformed under the COUNT pass, where
+    // `onDefinitionClaim` hands out the throwaway `\u0000count:` sentinel that
+    // is never meant to escape — and `#adaptDocument` had already rewritten
+    // the pointers to it, so the sentinel reached the document as a `$ref`
+    // carrying a literal NUL byte, while the real component was purged.
+    const gen = generator();
+    const address = z4.object({ city: z4.string() });
+    const person = z4.object({ home: address, billing: address });
+
+    // A schema that duck-types as zod v4 and throws during the count pass.
+    const hostile = {
+      toJSONSchema: () => {
+        throw new Error('boom');
+      },
+    };
+    expect(() => gen.generate([route('POST', '/boom', { body: hostile })])).toThrow('boom');
+
+    gen.addSchema('Person', person);
+    const doc = gen.generate([]);
+
+    const schemas = (doc.components?.schemas ?? {}) as Record<string, unknown>;
+    const refs: string[] = [];
+    JSON.stringify(schemas, (key, value) => {
+      if (key === '$ref' && typeof value === 'string') refs.push(value);
+      return value;
+    });
+    const dangling = refs
+      .filter((ref) => ref.startsWith('#/components/schemas/'))
+      .map((ref) => ref.slice('#/components/schemas/'.length))
+      .filter((name) => !(name in schemas));
+
+    expect(dangling).toEqual([]);
+    expect(refs.some((ref) => ref.includes('\u0000'))).toBe(false);
+    expect(schemas.Person).toBeDefined();
+  });
+
   it('keeps addSchema registrations across resets, including their sub-components', () => {
     // A component delivered at addSchema time (outside any generate call) is
     // NOT per-document state: Person's own properties point at it, so purging
