@@ -8,7 +8,13 @@
  *
  * @module
  */
-import type { IRequestContext, ISession, ISessionService, ISessionStore } from '@setu-ts/common';
+import type {
+  IRequestContext,
+  ISession,
+  ISessionService,
+  ISessionStore,
+  SessionView,
+} from '@setu-ts/common';
 import { parseCookie, serializeCookie } from '@setu-ts/common';
 
 import type { KeyRing } from '../codec/crypto.ts';
@@ -105,7 +111,7 @@ export class SessionService implements ISessionService {
    */
   async load(ctx: IRequestContext): Promise<Session> {
     const now = this.#deps.now();
-    const raw = parseCookie(ctx.request.headers.get('cookie'))[this.#config.cookieName];
+    const raw = this.#readCookieValue(ctx.request.headers);
 
     if (raw !== undefined && raw !== '') {
       const restored = await this.#restore(raw, now);
@@ -115,6 +121,37 @@ export class SessionService implements ISessionService {
     }
 
     return createSession(now, this.#config.maxAgeMs, this.#deps.uuid);
+  }
+
+  /**
+   * Opens a session from a `Headers` object alone — the headers-only read for
+   * non-HTTP entry points that have no request context to commit onto (a
+   * WebSocket `onOpen` handler, an auth strategy reading a cookie).
+   *
+   * Read-only by contract: it runs the same envelope-open, snapshot-parse, and
+   * store-read path as {@linkcode SessionService.load} but never advances the
+   * session's `seen` stamp, never commits, and never writes to the store. It
+   * returns `null` for every condition `load` treats as "no usable session" —
+   * the cookie is absent or empty, the envelope cannot be opened, the snapshot
+   * cannot be parsed, the absolute expiry or idle timeout has passed, or (on
+   * the store strategy) the stored entry is gone.
+   *
+   * @param headers - The request headers to read the session cookie from
+   * @returns A read-only {@linkcode SessionView}, or `null` when there is no usable session
+   * @since 0.3.0
+   */
+  async fromHeaders(headers: Headers): Promise<SessionView | null> {
+    const raw = this.#readCookieValue(headers);
+    if (raw === undefined || raw === '') {
+      return null;
+    }
+
+    const restored = await this.#restore(raw, this.#deps.now());
+    if (restored === null) {
+      return null;
+    }
+
+    return { id: restored.id, data: restored.toJSON() };
   }
 
   /**
@@ -216,6 +253,17 @@ export class SessionService implements ISessionService {
   /** Releases store resources; called from the plugin's `onClose`. */
   async close(): Promise<void> {
     await this.#store?.close?.();
+  }
+
+  /**
+   * Reads the session cookie value from a `Headers` object.
+   *
+   * The single cookie read both entry points — {@linkcode SessionService.load}
+   * and {@linkcode SessionService.fromHeaders} — delegate through, so the two
+   * can never observe a differently-named cookie.
+   */
+  #readCookieValue(headers: Headers): string | undefined {
+    return parseCookie(headers.get('cookie'))[this.#config.cookieName];
   }
 
   /**
