@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`@setu-ts/openapi-plugin` produced an EMPTY OpenAPI schema for every zod v4 schema.** Zod v4
+  removed the private `_def.typeName` marker the transformer dispatched on, so every v4 schema fell
+  through to `{}` and `/openapi.json` served `{"schema":{}}` for any route documented with one. Zod
+  v4 schemas are now converted through `schema.toJSONSchema()` (draft 2020-12, adapted to OpenAPI
+  3.1), with dedup, `$ref`/`components` extraction and recursive-schema hoisting working on both
+  majors. Both zod v3 and v4 are supported; the plugin imports neither — detection is by duck-typing
+  `toJSONSchema`. Zod v3 output is byte-identical.
+
+### Changed
+
+- **`@setu-ts/openapi-plugin`: an unrepresentable schema node is now REPORTED instead of silently
+  emitting `{}`.** A type zod cannot represent in JSON Schema (`z.date()`, `z.bigint()`, …) still
+  degrades to an empty schema — never a throw — but the operation owning it now carries a
+  machine-readable vendor extension naming the route:
+  `"x-setu-unrepresentable": [{ "at": "<operationId>", "reason": "…" }]`. The extension is absent
+  when every schema is representable, so valid documents are unchanged.
+
 ## [0.1.0-alpha.9] — 2026-08-26
 
 **A security release, and the closeout of the alpha.8 smoke programme.** Driving the published
