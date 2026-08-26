@@ -3629,12 +3629,15 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   milestone's implementation work — opening a new ROADMAP milestone, correcting a committed doc,
   amending these conventions. Use `docs/…` rather than `feat/…` for those: a `feat/[milestone]-…`
   branch asserts that the milestone is being BUILT on it, so `feat/37c-…` carrying only a ROADMAP
-  section is a lie about the branch's contents (M37c was opened this way, PR #124). A doc edit that
-  belongs to a milestone still ships on that milestone's own `feat/…` branch — the status flip, the
-  PUBLIC_API correction, and the plan archival are part of the milestone, not separate work.
-  Commits: conventional format (`feat(scope): subject`); **no commit message may exceed 100 words**
-  in total (AI_GUIDELINES §15.1) — the plan, the PR body, and the code comments are where the long
-  reasoning goes; no direct commits to `main`.
+  section is a lie about the branch's contents (M37c was opened this way, PR #124). A maintainer may
+  approve `chore/[description]` for a cross-cutting repository concern that is neither a milestone,
+  a defect in merged code, nor documentation-only work (for example, CI/release reproducibility
+  across several packages). Record that approval and the scope in the PR; do not silently invent a
+  `chore/…` branch type. A doc edit that belongs to a milestone still ships on that milestone's own
+  `feat/…` branch — the status flip, the PUBLIC_API correction, and the plan archival are part of
+  the milestone, not separate work. Commits: conventional format (`feat(scope): subject`); **no
+  commit message may exceed 100 words** in total (AI_GUIDELINES §15.1) — the plan, the PR body, and
+  the code comments are where the long reasoning goes; no direct commits to `main`.
 - **Pushing and opening the PR are yours to do — but only when asked.** Remote credentials ARE
   available (`gh auth status` reports a logged-in account; SSH for git operations), so `git push`
   and `gh pr create` work. This bullet previously said the opposite — that no credentials existed

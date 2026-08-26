@@ -8,6 +8,13 @@ and middleware with the kernel. Decorators are inert unless the plugin is regist
 
 The store itself is registered under `CAPABILITIES.METADATA_STORE` (`'metadata-store'`).
 
+## Schema compatibility
+
+`@ValidateBody`, `@ValidateQuery`, and `@ValidateParams` preserve application-created schemas and
+hand them to the validation/OpenAPI boundaries; this package does not inspect Zod internals. The
+supported Zod ranges are therefore the shared validation contract: `>=3.24.0 <4` and `>=4.4.0 <5`.
+`deno task check:compat` exercises both majors through the validation and OpenAPI owners.
+
 ## Installation
 
 ```typescript

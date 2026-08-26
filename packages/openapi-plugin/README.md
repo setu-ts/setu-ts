@@ -5,9 +5,10 @@ OpenAPI 3.1 generation from registered routes, plus Swagger UI. Registers an `IO
 
 ## Zod version support
 
-Both **zod v3 and zod v4** are supported. The plugin imports neither: each schema is recognized by
-duck typing (`toJSONSchema` marks a zod v4 schema), so an application may use either major — or both
-in one process.
+Both **zod v3 and zod v4** are supported: `>=3.24.0 <4` and `>=4.4.0 <5`. The plugin imports
+neither: each schema is recognized by duck typing (`toJSONSchema` marks a zod v4 schema), so an
+application may use either major — or both in one process. `deno task check:compat` exercises each
+declared major independently.
 
 - **Zod v3** is converted by the historical `_def.typeName` recursion.
 - **Zod v4** is converted wholesale through `schema.toJSONSchema()` (JSON Schema draft 2020-12,

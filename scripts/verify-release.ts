@@ -8,7 +8,7 @@
  * deno run --allow-read scripts/verify-release.ts 0.1.0-alpha.1
  * ```
  *
- * Verifies seven things a green test suite cannot:
+ * Verifies eight things a green test suite cannot:
  *
  * 1. Every publishable package carries exactly the expected version — so the
  *    tag, the CHANGELOG entry, and what lands on JSR all agree.
@@ -34,6 +34,9 @@
  *    JSR version cannot be republished — so a missing section must fail here,
  *    before anything is uploaded, rather than leaving a red job over packages
  *    that are already live.
+ * 8. The release workflow generates and attaches `resolved-set.json`. That
+ *    artifact preserves the complete lockfile resolved set for the published
+ *    version; a workflow edit that silently drops it must fail before release.
  *
  * Exits non-zero and prints every problem found, rather than stopping at the
  * first — a release is easier to fix in one pass.
@@ -236,6 +239,29 @@ if (changelog === null) {
       `Release body is built from it, and that step runs after the publish, ` +
       `which cannot be repeated.`,
   );
+}
+
+// ── 8: the GitHub Release must carry the lockfile resolved-set artifact ────
+
+const releaseWorkflow = await Deno.readTextFile('.github/workflows/release.yml').catch(() => null);
+if (releaseWorkflow === null) {
+  problems.push(
+    '.github/workflows/release.yml is missing — cannot verify release artifact wiring.',
+  );
+} else {
+  const requiredWorkflowFragments = [
+    'name: Generate resolved-set artifact',
+    'release:resolved-set',
+    'resolved-set.json#resolved-set.json',
+  ];
+  for (const fragment of requiredWorkflowFragments) {
+    if (!releaseWorkflow.includes(fragment)) {
+      problems.push(
+        `.github/workflows/release.yml is missing ${JSON.stringify(fragment)} — ` +
+          'release:verify requires the resolved-set artifact to be generated and attached.',
+      );
+    }
+  }
 }
 
 // ── Report ──────────────────────────────────────────────────────────────────
