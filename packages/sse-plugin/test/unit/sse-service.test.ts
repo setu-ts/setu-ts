@@ -170,3 +170,87 @@ describe('SseService opening the backplane transport on first connection', () =>
     expect(warnings[0]).toMatchObject({ error: 'transport gone' });
   });
 });
+
+describe('SseService.peek (M74 / X3-8)', () => {
+  it('returns undefined before channel() has ever been called for that name', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+
+    expect(service.peek('deploys')).toBeUndefined();
+  });
+
+  it('returns the identical channel object channel() returns', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+    const created = service.channel('deploys');
+
+    expect(service.peek('deploys')).toBe(created);
+  });
+
+  it('reads a caller-supplied name without registering it', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+
+    for (let i = 0; i < 50; i++) {
+      expect(service.peek(`build:${i}`)).toBeUndefined();
+    }
+
+    // Nothing was created, so the one name that IS created afterwards is the
+    // only one the registry holds.
+    expect(service.channel('deploys').size).toBe(0);
+    expect(service.peek('build:0')).toBeUndefined();
+  });
+});
+
+describe('SseService.channelCount (M74)', () => {
+  it('starts at zero and counts each distinct channel created', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+
+    expect(service.channelCount).toBe(0);
+
+    service.channel('deploys');
+    service.channel('builds');
+    service.channel('deploys');
+
+    expect(service.channelCount).toBe(2);
+  });
+
+  it('is not moved by peek', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+
+    service.peek('deploys');
+
+    expect(service.channelCount).toBe(0);
+  });
+
+  it('does not fall while the application runs — an emptied channel is still counted', () => {
+    // The property that makes this number worth watching rather than merely
+    // reporting. Nothing reclaims an SSE channel while the app is up.
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+    service.channel('deploys');
+
+    expect(service.channelCount).toBe(1);
+    expect(service.peek('deploys')?.size).toBe(0);
+    expect(service.channelCount).toBe(1);
+  });
+
+  it('is reset to zero by closeAll, which is the one thing that lowers it', () => {
+    // Pins the single exception the contract names. `SseService` is barrel
+    // exported, so `closeAll` is publicly reachable as well as being what the
+    // plugin's onClose calls — an unqualified "never decreases" would be a
+    // documentation lie, and this is the case that makes it one.
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+    service.channel('a');
+    service.channel('b');
+    expect(service.channelCount).toBe(2);
+
+    service.closeAll();
+
+    expect(service.channelCount).toBe(0);
+    expect(service.peek('a')).toBeUndefined();
+  });
+});

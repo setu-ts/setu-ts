@@ -80,7 +80,15 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
         (): Promise<HealthCheckResult> =>
           Promise.resolve({
             status: 'up',
-            data: { connections: sseService.connectionCount },
+            data: {
+              connections: sseService.connectionCount,
+              // Rises for the life of the application (see
+              // ISseService.channelCount) — a climbing count is the
+              // operator-visible signal that channel names are being derived
+              // from unbounded input. Only `onClose` lowers it, by discarding
+              // every channel.
+              channels: sseService.channelCount,
+            },
           }),
       );
 

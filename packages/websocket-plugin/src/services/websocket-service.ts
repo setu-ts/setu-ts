@@ -252,6 +252,22 @@ export class WebSocketService implements IWebSocketService {
   }
 
   /**
+   * Returns the named room if one already exists, without creating it.
+   *
+   * The non-allocating counterpart to {@linkcode WebSocketService.room}. A
+   * presence endpoint reading `size` for a request-supplied name must use this:
+   * `room()` registers one room per distinct name polled, and a room nobody
+   * joined is reclaimed only on the next disconnection.
+   *
+   * @param name - Room name
+   * @returns The room, or `undefined` when no room of that name exists
+   * @since 0.4.0
+   */
+  peek(name: string): WebSocketRoom | undefined {
+    return this.#rooms.peek(name);
+  }
+
+  /**
    * Delivers a frame that arrived from another replica to this replica's local
    * room members.
    *
