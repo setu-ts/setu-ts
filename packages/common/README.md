@@ -83,12 +83,14 @@ package fits the plugin architecture.
 | `assertRealPathContained`    | function  |
 | `brandErrorResponder`        | function  |
 | `contentTypeFor`             | function  |
+| `contextToTraceparent`       | function  |
 | `createCachedProbe`          | function  |
 | `createCapabilityToken`      | function  |
 | `decodeFrameData`            | function  |
 | `encodeFrameData`            | function  |
 | `err`                        | function  |
 | `errorResponderOf`           | function  |
+| `extractContextFromHeaders`  | function  |
 | `fromNullable`               | function  |
 | `isErr`                      | function  |
 | `isLexicallyContained`       | function  |
@@ -102,6 +104,7 @@ package fits the plugin architecture.
 | `none`                       | function  |
 | `ok`                         | function  |
 | `parseCookie`                | function  |
+| `parseTraceparentToContext`  | function  |
 | `replacePrincipal`           | function  |
 | `replaceTenant`              | function  |
 | `resolveRegistryEntry`       | function  |
@@ -126,6 +129,8 @@ package fits the plugin architecture.
 | `PLUGIN_PRIORITY`            | const     |
 | `SECURITY_METADATA`          | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`   | const     |
+| `TRACEPARENT_HEADER`         | const     |
+| `TRACESTATE_HEADER`          | const     |
 | `UPGRADE_INTENT`             | const     |
 | `VALIDATION_METADATA`        | const     |
 | `AddJobOptions`              | interface |

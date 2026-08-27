@@ -132,7 +132,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
-      publish: (topic, message) => this.publish(topic, message),
+      publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
       setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
@@ -318,6 +318,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     return this.publishWithHeaders(topic, message, {});
   }
 
+  /** Publishes a message with framework-owned transport headers. @internal */
   async publishWithHeaders<T>(
     topic: string,
     message: T,
@@ -438,6 +439,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     };
   }
 
+  /** Subscribes through the header-aware internal path. @internal */
   subscribeWithHeaders<T>(
     topic: string,
     handler: MessageHandler<T>,
@@ -467,7 +469,17 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
-    return this.#rr.request<TRes>(topic, message, options);
+    return this.requestWithHeaders(topic, message, {}, options);
+  }
+
+  /** Sends request-reply traffic with framework-owned headers. @internal */
+  requestWithHeaders<TReq, TRes>(
+    topic: string,
+    message: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options, headers);
   }
 
   /**

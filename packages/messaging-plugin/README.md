@@ -156,6 +156,7 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 | `CustomMessagingOptions`       | interface |
 | `EventsMessagingBridgeOptions` | interface |
 | `IMessageBroker`               | interface |
+| `INatsHeaders`                 | interface |
 | `IPubSubSubscription`          | interface |
 | `IPubSubTransport`             | interface |
 | `ISerializer`                  | interface |

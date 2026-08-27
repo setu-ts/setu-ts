@@ -2,6 +2,7 @@ import type {
   IMessageBroker,
   ISubscription,
   MessageHandler,
+  RequestOptions,
   SubscribeOptions,
 } from '@setu-ts/common';
 
@@ -48,6 +49,13 @@ export interface MessageBrokerAdapter extends IMessageBroker {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription>;
+  /** Sends RPC traffic with framework-owned transport headers. */
+  requestWithHeaders<TReq, TRes>(
+    topic: string,
+    message: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes>;
   /**
    * Checks if the broker is connected and ready (lifecycle).
    *

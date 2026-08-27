@@ -23,6 +23,7 @@ describe('asBrokerAdapter', () => {
       isHealthy: () => Promise.resolve(true),
       publishWithHeaders: () => Promise.resolve(),
       subscribeWithHeaders: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      requestWithHeaders: () => Promise.resolve(null),
     });
     const adapter = asBrokerAdapter(broker);
     expect(adapter).toBe(broker);
@@ -127,6 +128,7 @@ describe('asBrokerAdapter', () => {
     });
     const adapter = asBrokerAdapter(broker);
     await adapter.subscribe('topic', () => {});
+    await adapter.subscribeWithHeaders('topic', () => {}, {});
     expect(subscribed).toBe(true);
   });
 
@@ -140,6 +142,7 @@ describe('asBrokerAdapter', () => {
     });
     const adapter = asBrokerAdapter(broker);
     await adapter.request('topic', {});
+    await adapter.requestWithHeaders('topic', {}, { traceparent: '00-parent' });
     expect(requested).toBe(true);
   });
 

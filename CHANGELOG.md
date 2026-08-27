@@ -46,7 +46,21 @@ All notable changes to this project are documented here. The format follows
 
 - **Telemetry spans now nest.** Real OTel `withSpan` callbacks run with their span active using an
   async-local context manager (unless `contextPropagation: false`), so work initiated in a request
-  becomes a child of its request span rather than a detached root.
+  becomes a child of its request span rather than a detached root. **This changes exported trace
+  shape for every application already using `exporter: 'otlp'` or `'console'`:** spans that arrived
+  as separate roots now arrive as one tree, so dashboards or alerts keyed on root-span counts will
+  see fewer roots and deeper traces. Nothing needs changing to adopt it; set
+  `TelemetryPlugin({ contextPropagation: false })` to keep the previous flat shape. Activation needs
+  `npm:@opentelemetry/context-async-hooks`; when that package is absent, or the runtime supplies no
+  async-context store, the plugin logs one `warn` and degrades to the previous behaviour rather than
+  failing startup.
+
+- **`MessageMetadata.headers` is now populated by every first-party broker.** It was already read by
+  the RabbitMQ and Kafka brokers and omitted entirely by the memory, Redis Streams, Pub/Sub and
+  Service Bus brokers; all seven now report the transport headers they read, and `{}` — not
+  `undefined` — when the transport carried none. **A consumer that branches on the member's presence
+  changes behaviour:** `if (metadata.headers)` was falsy on those four brokers and is now truthy.
+  Test emptiness instead (`Object.keys(metadata.headers ?? {}).length === 0`).
 
 - **`@setu-ts/common`: `ISessionService.fromHeaders` is a REQUIRED member.** Callers are unaffected
   — the addition is source-compatible for every consumer. But an application that implements
@@ -89,6 +103,21 @@ All notable changes to this project are documented here. The format follows
   failing, so an optional field still assigns.
 
 ### Fixed
+
+- **`@setu-ts/messaging-plugin`: the Kafka producer put the entire message payload into Kafka
+  transport headers.** `publish` passed the payload object itself as `headers` whenever it was
+  non-null, so every field of every message was duplicated into the record's headers — and a
+  non-string field is not a legal `IHeaders` value (`Buffer | string | (Buffer | string)[]`), so
+  kafkajs had to coerce it. Only framework-owned headers are sent now. A consumer reading payload
+  fields off `metadata.headers` was relying on the defect and must read them off the message.
+
+- **`@setu-ts/messaging-plugin`: `metadata.headers` on the NATS broker exposed the client's private
+  internals instead of the message headers.** The delivered `MsgHdrs` was cast to
+  `Record<string, string>`; probed against real `npm:nats@2.x`, that yields `undefined` for every
+  real key and `Object.keys` of `['_code', '_description', 'headers']`. Headers are now read through
+  the object's own `keys()`/`get()`. `NatsOptions.headersFactory` supplies the `MsgHdrs` constructor
+  when the connection is injected (a lazily-loaded module provides its own); with neither available
+  the broker publishes without headers and reports it once.
 
 - **Three committed docs still said WebSocket upgrades and gRPC requests bypass the middleware
   pipeline**, which M70a made false. `packages/websocket-plugin/README.md` claimed "the adapter

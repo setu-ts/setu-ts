@@ -176,6 +176,15 @@ describe('RedisStreamsBroker', () => {
     // Wait for poll loop to process
     await new Promise((r) => setTimeout(r, 50));
 
+    // The handler MUST have run: this test previously asserted nothing about
+    // `callCount`, and the fake's XREADGROUP reply shape meant the handler was
+    // never invoked at all — so it passed while covering none of its subject.
+    expect(callCount).toBeGreaterThan(0);
+    // A thrown handler leaves the entry unacked, which is the behaviour named
+    // in the title.
+    const ackCalls = fakeClient.calls.filter((c) => c.method === 'xack');
+    expect(ackCalls).toHaveLength(0);
+
     await broker.disconnect();
   });
 
@@ -194,15 +203,20 @@ describe('RedisStreamsBroker', () => {
     await broker.connect();
 
     // The broker will poll for messages on subscribe
-    await broker.subscribe('test.stream', () => {});
+    const delivered: Array<{ userId: number; name: string }> = [];
+    await broker.subscribe<{ userId: number; name: string }>('test.stream', (message) => {
+      delivered.push(message);
+    });
 
     // Wait for poll loop to process seeded messages
     await new Promise((r) => setTimeout(r, 50));
 
-    // Verify xreadgroup was called
-    const calls = fakeClient.calls;
-    const xreadgroupCall = calls.find((c) => c.method === 'xreadgroup');
-    expect(xreadgroupCall).toBeDefined();
+    // A test titled READ-BACK must actually read the payload back. It used to
+    // assert only that `xreadgroup` had been CALLED, which is true whether or
+    // not a single message is ever delivered.
+    expect(delivered).toEqual([{ userId: 456, name: 'test' }]);
+    // Delivery succeeded, so the entry is acked.
+    expect(fakeClient.calls.filter((c) => c.method === 'xack')).toHaveLength(1);
 
     await broker.disconnect();
   });

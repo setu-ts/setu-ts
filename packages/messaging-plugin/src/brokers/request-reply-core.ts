@@ -67,7 +67,11 @@ interface ReplyEnvelope {
  */
 export interface RequestReplyDeps {
   /** Publish a serialized message to a topic (the broker's own `publish`). */
-  publish(topic: string, message: unknown): Promise<void>;
+  publish(
+    topic: string,
+    message: unknown,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<void>;
   /** Subscribe to a topic (the broker's own `subscribe`). */
   subscribe(
     topic: string,
@@ -146,7 +150,12 @@ export class RequestReplyCore {
    * @throws {RemoteHandlerError} When the responder throws
    * @since 0.1.0
    */
-  async request<TRes>(topic: string, message: unknown, options?: RequestOptions): Promise<TRes> {
+  async request<TRes>(
+    topic: string,
+    message: unknown,
+    options?: RequestOptions,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<TRes> {
     const { inbox, generation } = await this.#ensureInboxWithGeneration();
 
     // Check if we're still in an active generation after inbox initialization.
@@ -179,7 +188,7 @@ export class RequestReplyCore {
     };
 
     try {
-      await this.#deps.publish(requestChannel(topic), envelope);
+      await this.#deps.publish(requestChannel(topic), envelope, headers);
     } catch (err) {
       const pending = this.#pending.get(correlationId);
       if (pending) {

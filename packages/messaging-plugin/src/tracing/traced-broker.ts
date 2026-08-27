@@ -103,7 +103,32 @@ export class TracedBroker implements MessageBrokerAdapter {
   }
 
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
-    return this.#broker.request(topic, message, options);
+    return this.requestWithHeaders(topic, message, {}, options);
+  }
+
+  requestWithHeaders<TReq, TRes>(
+    topic: string,
+    message: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes> {
+    return this.#telemetry.withSpan(
+      `publish rr.req.${topic}`,
+      (span) => {
+        const context = span.spanContext();
+        const traceparent = contextToTraceparent({
+          _opaque: TELEMETRY_CONTEXT_OPAQUE,
+          ...context,
+        });
+        return this.#broker.requestWithHeaders(
+          topic,
+          message,
+          traceparent ? { ...headers, [TRACEPARENT_HEADER]: traceparent } : headers,
+          options,
+        );
+      },
+      { kind: 'producer', attributes: this.#attributes(`rr.req.${topic}`, 'publish') },
+    );
   }
 
   respond<TReq, TRes>(
@@ -111,7 +136,25 @@ export class TracedBroker implements MessageBrokerAdapter {
     handler: RequestHandler<TReq, TRes>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
-    return this.#broker.respond(topic, handler, options);
+    return this.#broker.respond(
+      topic,
+      (message, metadata) =>
+        this.#telemetry.withSpan(
+          `receive ${metadata.topic}`,
+          async () => await handler(message as TReq, metadata),
+          {
+            kind: 'consumer',
+            attributes: {
+              ...this.#attributes(metadata.topic, 'receive'),
+              ...(metadata.messageId ? { 'messaging.message.id': metadata.messageId } : {}),
+            },
+            parentContext: parseTraceparentToContext(
+              metadata.headers?.[TRACEPARENT_HEADER] ?? null,
+            ),
+          },
+        ),
+      options,
+    );
   }
 
   #attributes(topic: string, operation: 'publish' | 'receive'): Readonly<Record<string, string>> {

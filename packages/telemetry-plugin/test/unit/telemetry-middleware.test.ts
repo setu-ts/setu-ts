@@ -61,8 +61,8 @@ describe('telemetryMiddleware', () => {
           _attrs: {},
           _status: null,
           _ended: false,
-          _traceId: '0'.repeat(32),
-          _spanId: '0'.repeat(16),
+          _traceId: '1'.repeat(32),
+          _spanId: '2'.repeat(16),
           _traceFlagsNum: numericTraceFlags ? 1 : 0,
           setAttribute(key, value) {
             this._attrs[key] = value;
@@ -320,8 +320,8 @@ describe('telemetryMiddleware', () => {
       _attrs: {} as Record<string, unknown>,
       _status: null as string | null,
       _ended: false as boolean,
-      _traceId: '0'.repeat(32),
-      _spanId: '0'.repeat(16),
+      _traceId: '1'.repeat(32),
+      _spanId: '2'.repeat(16),
       setAttribute(key: string, value: unknown) {
         this._attrs[key] = value;
         return this;

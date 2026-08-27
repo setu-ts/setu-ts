@@ -445,8 +445,11 @@ export interface NatsOptions {
 
 /** Public members used from NATS `MsgHdrs`. */
 export interface INatsHeaders {
+  /** Stores one header value. */
   set(key: string, value: string): void;
+  /** Reads one header value. */
   get(key: string): string | undefined;
+  /** Lists the header names. */
   keys(): Iterable<string>;
 }
 

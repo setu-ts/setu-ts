@@ -13,7 +13,12 @@ export const TRACEPARENT_HEADER = 'traceparent';
 /** The W3C header carrying vendor trace state. @since 0.2.0 */
 export const TRACESTATE_HEADER = 'tracestate';
 
-const TRACEPARENT_RE = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
+const TRACEPARENT_RE = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/;
+const ZERO_TRACE_ID = '00000000000000000000000000000000';
+const ZERO_SPAN_ID = '0000000000000000';
+const TRACE_ID_RE = /^[0-9a-f]{32}$/;
+const SPAN_ID_RE = /^[0-9a-f]{16}$/;
+const TRACE_FLAGS_RE = /^[0-9a-f]{2}$/;
 
 /**
  * Parses a W3C `traceparent` value.
@@ -25,14 +30,14 @@ const TRACEPARENT_RE = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2
 export function parseTraceparentToContext(header: string | null): TelemetryContext {
   if (!header) return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
   const match = TRACEPARENT_RE.exec(header);
-  if (!match || match[1].toLowerCase() !== '00') {
+  if (!match || match[1] !== '00' || match[2] === ZERO_TRACE_ID || match[3] === ZERO_SPAN_ID) {
     return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
   }
   return {
     _opaque: TELEMETRY_CONTEXT_OPAQUE,
-    traceId: match[2].toLowerCase(),
-    spanId: match[3].toLowerCase(),
-    traceFlags: match[4].toLowerCase(),
+    traceId: match[2],
+    spanId: match[3],
+    traceFlags: match[4],
   };
 }
 
@@ -44,8 +49,16 @@ export function parseTraceparentToContext(header: string | null): TelemetryConte
  * @since 0.2.0
  */
 export function contextToTraceparent(context: TelemetryContext): string | null {
-  if (!context.traceId || !context.spanId) return null;
-  return `00-${context.traceId}-${context.spanId}-${context.traceFlags ?? '01'}`;
+  const traceId = context.traceId;
+  const spanId = context.spanId;
+  const traceFlags = context.traceFlags ?? '01';
+  if (
+    !traceId || !spanId || !TRACE_ID_RE.test(traceId) || !SPAN_ID_RE.test(spanId) ||
+    !TRACE_FLAGS_RE.test(traceFlags) || traceId === ZERO_TRACE_ID || spanId === ZERO_SPAN_ID
+  ) {
+    return null;
+  }
+  return `00-${traceId}-${spanId}-${traceFlags}`;
 }
 
 /**

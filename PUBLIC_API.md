@@ -3627,6 +3627,42 @@ export type {
 
 ---
 
+### Trace context across the broker
+
+When `CAPABILITIES.TELEMETRY` is registered, the plugin wraps the broker so `publish`, `subscribe`,
+`request` and `respond` create producer and consumer spans, writing a W3C `traceparent` on publish
+and parenting delivery from the header it reads back. `MessagingPlugin({ tracing: false })` opts
+out; with no telemetry capability registered, behaviour is unchanged.
+
+Each broker uses the header channel its transport actually provides:
+
+| Broker          | Channel                                         | Notes                                                          |
+| --------------- | ----------------------------------------------- | -------------------------------------------------------------- |
+| `memory`        | in-process metadata                             | No wire; headers are handed straight to the subscriber.        |
+| `redis-streams` | extra `XADD` field/value pairs beside `payload` | Any non-`payload` field is read back as a header.              |
+| `rabbitmq`      | AMQP `properties.headers`                       | —                                                              |
+| `nats`          | `MsgHdrs`                                       | Needs a header factory — see the caveat below.                 |
+| `kafka`         | record `headers`                                | String values; a delivered `Buffer` value is decoded as UTF-8. |
+| `pubsub`        | message `attributes`                            | Pub/Sub attribute values must be strings.                      |
+| `service-bus`   | `applicationProperties`                         | —                                                              |
+
+`MessageMetadata.headers` is populated by every first-party broker: it carries the headers the
+broker read, and `{}` when the transport carried none. It is absent only for a `'custom'` broker
+that does not supply it. Branch on emptiness rather than on the member's presence.
+
+Two cases drop the header rather than propagating, both by construction:
+
+- **NATS with an injected `client`.** A `MsgHdrs` can only be built by the nats module's `headers()`
+  function, and an injected connection carries no module. Pass `NatsOptions.headersFactory` (for
+  example `() => nats.headers()`) alongside the client. Without it the broker publishes normally and
+  reports the dropped headers once through its logger.
+- **A Pub/Sub or Service Bus transport injected via `client` that predates this release.**
+  `IPubSubTransport.publish` and `IServiceBusTransport.send` gained an optional third parameter
+  (`attributes` / `applicationProperties`), and their delivered-message callbacks gained a matching
+  optional member. A two-parameter implementation stays assignable and simply ignores the header.
+
+---
+
 ### Health status
 
 Since M70c the indicator reports two signals: the broker's lifecycle (`isReady()`) and its

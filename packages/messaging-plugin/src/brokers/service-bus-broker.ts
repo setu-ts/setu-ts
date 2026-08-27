@@ -375,7 +375,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     this.#logger = options?.logger;
     this.#subscriptions = new Map();
     this.#rr = new RequestReplyCore({
-      publish: (topic, message) => this.publish(topic, message),
+      publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, opts) => this.subscribe(topic, handler, opts),
       uuid: () => this.#runtime.uuid(),
       setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
@@ -527,6 +527,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     return this.publishWithHeaders(topic, message, {});
   }
 
+  /** Publishes a message with framework-owned transport headers. @internal */
   async publishWithHeaders<T>(
     topic: string,
     message: T,
@@ -589,6 +590,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     };
   }
 
+  /** Subscribes through the header-aware internal path. @internal */
   subscribeWithHeaders<T>(
     topic: string,
     handler: MessageHandler<T>,
@@ -598,7 +600,17 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   }
 
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
-    return this.#rr.request<TRes>(topic, message, options);
+    return this.requestWithHeaders(topic, message, {}, options);
+  }
+
+  /** Sends request-reply traffic with framework-owned headers. @internal */
+  requestWithHeaders<TReq, TRes>(
+    topic: string,
+    message: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options, headers);
   }
 
   respond<TReq, TRes>(

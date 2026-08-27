@@ -15,6 +15,7 @@ import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 import { createSpanProcessor } from '../services/span-processor-factory.ts';
 import { loadAsyncLocalStorageContextManager, registerContextManager } from './context-manager.ts';
+import type { ContextManagerOutcome } from './context-manager.ts';
 
 // OTel API handle — populated by loadOtelTracerProvider when the SDK is loaded.
 let _otelApi: OtelApi | null = null;
@@ -49,6 +50,15 @@ export function setOtelApi(api: OtelApi): void {
 function getOtelApi(): OtelApi | null {
   return _otelApi;
 }
+
+/**
+ * Receives the span-activation outcome so the plugin can report it through its
+ * logger. Declared as a callback rather than taking an `ILogger` so this module
+ * stays free of the logger contract and the branch is unit-testable with a spy.
+ *
+ * @internal
+ */
+export type ContextActivationReporter = (outcome: ContextManagerOutcome) => void;
 
 /**
  * Module handle returned by lazy-loading `npm:@opentelemetry/sdk-trace-base`.
@@ -321,6 +331,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
  */
 export async function loadOtelTracerProvider(
   options: TelemetryPluginOptions,
+  reportActivation?: ContextActivationReporter,
 ): Promise<TracerHost> {
   // Validate options BEFORE lazy-loading (fail fast, avoid unnecessary imports)
   if (options.exporter === 'otlp' && !options.endpoint) {
@@ -343,11 +354,20 @@ export async function loadOtelTracerProvider(
   const apiMod = await import('npm:@opentelemetry/api@^1.9.0');
   setOtelApi(apiMod as OtelApi);
 
-  const contextActivation = options.contextPropagation !== false &&
-    await registerContextManager(
+  // Span activation is opt-out. When it is attempted the outcome is reported,
+  // so a runtime that cannot supply an async-context store degrades to unnested
+  // spans loudly rather than silently (the M24b never-throw-but-never-silent
+  // policy). `contextPropagation: false` is a deliberate choice, so nothing is
+  // reported for it.
+  let contextActivation = false;
+  if (options.contextPropagation !== false) {
+    const outcome = await registerContextManager(
       (apiMod as OtelApi).context,
       options.contextManagerFactory ?? loadAsyncLocalStorageContextManager,
     );
+    contextActivation = outcome.activated;
+    reportActivation?.(outcome);
+  }
 
   // Build exporter constructors from loaded modules
   let otlpExporterCtor: OtlpExporterCtor | undefined;
