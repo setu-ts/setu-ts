@@ -67,6 +67,105 @@ All notable changes to this project are documented here. The format follows
   `undefined` — when the transport carried none. **A consumer that branches on the member's presence
   changes behaviour:** `if (metadata.headers)` was falsy on those four brokers and is now truthy.
   Test emptiness instead (`Object.keys(metadata.headers ?? {}).length === 0`).
+- **BREAKING — `@setu-ts/decorator-plugin`: the decorator surface moves to TC39 standard decorators,
+  and the legacy form is removed.** Every shipped decorator was a legacy TypeScript decorator, which
+  requires the `experimentalDecorators` compiler option. Deno deprecates that option and warns on
+  every `check` and `lint` run, and its removal would not merely untype the parameter decorators —
+  it would make them **unparseable**, because the Stage 3 proposal has no parameter position at all.
+  The surface is therefore migrated deliberately now rather than under time pressure later.
+
+  **No compiler option is required any more, anywhere.** `experimentalDecorators` is removed from
+  all eight declaration sites — the `decorator-plugin`, `openapi-plugin` and `rest-starter`
+  manifests, `apps/di-decorators`, the guide-snippet fixture, both CLI template stamps, and the
+  generated Node `tsconfig.json`. Do not add it back: declaring **any** compiler option replaces
+  Deno's entire default set (see M63's `full-stack` JSX failure), so a project needing none should
+  declare none.
+
+  **Parameter decorators become positional sources inside `@Params(...)`.** `@Body`, `@Query`,
+  `@Param`, `@Header`, `@Cookie`, `@CurrentUser` and `@Ctx` keep their names but change kind, from
+  parameter decorator to source descriptor. Each stale call site is a compile error rather than a
+  silent behaviour change, because the returned value is no longer a decorator.
+
+  ```typescript
+  // Before
+  @Get('/:id')
+  show(@Param('id') id: string, @Ctx() ctx: IRequestContext) {}
+
+  // After — sources listed in argument order
+  @Get('/:id')
+  @Params(Param('id'), Ctx())
+  show(id: string, ctx: IRequestContext) {}
+  ```
+
+  The declaration is now **type-checked against the handler's own signature**, which the legacy form
+  never was: a source whose value type disagrees with the parameter it binds fails `deno check`.
+
+  **`createParameterDecorator(name, metadata?)` is replaced by `Custom(name, metadata?)`**, used
+  inside `@Params`. Resolvers registered with `registerParameterResolver` are unchanged.
+
+  ```typescript
+  // Before
+  export const TenantId = () => createParameterDecorator('tenant-id');
+  async list(@TenantId() tenantId: unknown) {}
+
+  // After
+  export const TenantId = () => Custom<string | undefined>('tenant-id');
+  @Params(TenantId())
+  async list(tenantId: string | undefined) {}
+  ```
+
+  **Constructor injection collapses onto the class-position `@Inject(...)` list**, which already
+  shipped and is no longer deprecated; the parameter position is removed. `@Optional()` changes kind
+  the same way, becoming `Optional(token)` used inside that list.
+
+  ```typescript
+  // Before
+  @Injectable()
+  class Repo {
+    constructor(
+      @Inject('database') private db: Db,
+      @Optional() @Inject('cache') private cache?: ICacheStore,
+    ) {}
+  }
+
+  // After — one entry per constructor argument, in argument order
+  @Injectable()
+  @Inject('database', Optional('cache'))
+  class Repo {
+    constructor(private db: Db, private cache?: ICacheStore) {}
+  }
+  ```
+
+  Two startup refusals disappear with the form that caused them, because no input can reach them any
+  more: "declares both `@Inject` forms" and "parameter N has no `@Inject` token". The
+  `MetadataStore.mergeCtorParam` and `MetadataStore.ctorInject` methods are removed with them — a
+  class-position list is positional and cannot have gaps, so `services.inject` is the one place a
+  token list lives. A list shorter than the constructor simply leaves the trailing arguments
+  `undefined`.
+
+  **One `IMetadataStore` read narrows.** A standard member decorator never receives the constructor,
+  so it records onto `context.metadata` and the store replays those writes when the class is read by
+  target. A carrier holds no reference back to its class, so the target-less reads — the
+  `controllers`/`services`/`routes` getters and `getCustomDecorators()` — cannot replay: a class
+  carrying member decorators and NO class decorator is absent from them until something reads it by
+  target, where the legacy form recorded it eagerly. Every class the plugin registers carries
+  `@Controller` or `@Injectable`, and a class decorator flushes eagerly, so this is confined to a
+  class the plugin never registers either.
+
+  **New exports:** `Params`, `Custom`, `Optional` (new kind), `ParamSource`, `SourceValues`,
+  `InjectToken`, `OptionalToken`, and the three decorator-kind types `SetuClassDecorator`,
+  `SetuMethodDecorator`, `SetuClassOrMethodDecorator`.
+
+  **Generated projects change shape.** `setu generate controller` and `setu generate module` emit
+  `@Params(...)` and the class-position `@Inject`, and no scaffolded project stamps a decorator
+  compiler option. A project generated before this release keeps working only until it is
+  regenerated; migrate its decorated sources with the transformations above.
+
+  **Node is unaffected in requirement but not in reason.** A generated Node project still runs
+  through `tsx`, because V8 has not shipped decorators — measured on Node v24, both `node` and
+  `node --experimental-strip-types` answer a **standard** decorator with
+  `SyntaxError: Invalid or unexpected token`. Its `tsconfig.json` no longer sets any decorator
+  option.
 
 - **`@setu-ts/common`: `ISessionService.fromHeaders` is a REQUIRED member.** Callers are unaffected
   — the addition is source-compatible for every consumer. But an application that implements
@@ -107,6 +206,33 @@ All notable changes to this project are documented here. The format follows
 - **`JsonValue` in `@setu-ts/common`** (M74) — a recursive JSON-safe value type. Its object arm
   admits `undefined` deliberately, because `JSON.stringify` drops such a property rather than
   failing, so an optional field still assigns.
+
+- **`SseMessage.data` is narrowed to `JsonValue`** (M74, X3-8). **Breaking.** The member was
+  `string | number | boolean | null | readonly unknown[] | Record<string, unknown>`, whose last two
+  arms admitted values `JSON.stringify` cannot represent — while `PUBLIC_API.md` claimed the member
+  "accepts any JSON-serializable value". It now does. What this rejects, and what to do instead:
+
+  - **A `bigint` anywhere in the payload** (`{ balance: 10n }`, `[10n]`). `JSON.stringify` throws on
+    it, and the throw surfaced differently depending on configuration: `conn.send` threw to the
+    caller, `channel.publish` with no backplane delivered to nobody and reported nothing, and
+    `channel.publish` with a backplane threw synchronously. Convert the value first —
+    `{ balance: String(balance) }`.
+  - **A function or symbol value.** `JSON.stringify` silently drops the key, so the data never
+    arrived. Remove it from the payload.
+  - **An `interface` that extends `Record<string, unknown>`** to satisfy the old object arm. Change
+    it to `extends Record<string, JsonValue | undefined>`. A named `interface` still does not assign
+    without an index signature — TypeScript grants implicit ones only to object-literal types, which
+    was equally true before this change — so a `type` alias remains the simpler option.
+
+  A property written `T | undefined` is unaffected. A **circular structure** still throws at
+  runtime; no type can express acyclicity.
+
+- **`@setu-ts/openapi-plugin`: an unrepresentable schema node is now REPORTED instead of silently
+  emitting `{}`.** A type zod cannot represent in JSON Schema (`z.date()`, `z.bigint()`, …) still
+  degrades to an empty schema — never a throw — but the operation owning it now carries a
+  machine-readable vendor extension naming the route:
+  `"x-setu-unrepresentable": [{ "at": "<operationId>", "reason": "…" }]`. The extension is absent
+  when every schema is representable, so valid documents are unchanged.
 
 ### Fixed
 
@@ -162,34 +288,30 @@ All notable changes to this project are documented here. The format follows
   majors. Both zod v3 and v4 are supported; the plugin imports neither — detection is by duck-typing
   `toJSONSchema`. Zod v3 output is byte-identical.
 
-### Changed
+- **Three committed docs still said WebSocket upgrades and gRPC requests bypass the middleware
+  pipeline**, which M70a made false. `packages/websocket-plugin/README.md` claimed "the adapter
+  therefore consults the plugin's upgrade router first", and the `ARCHITECTURE.md` package-diagram
+  notes said the §10 pipeline "is likewise bypassed for upgrade requests, by design" and that RPC is
+  "intercepted inside the HTTP adapter's `fetch` path". Since M70a the kernel's terminal handler
+  decides both, after the pipeline has run and before route matching; the adapter stores the upgrade
+  router without consulting it, and `setRpcHandler` is deprecated and consulted by nothing. Each
+  correction now matches the canonical prose in `ARCHITECTURE.md` §10 and `PUBLIC_API.md`. Both
+  documents were reachable by a reader deciding whether a guard protects a socket, which is exactly
+  the question M70a exists to answer. Two further copies were found in `@setu-ts/common`'s own
+  JSDoc, which jsr.io renders: `IHttpAdapter.setUpgradeRouter` said the handshake happens "when the
+  pipeline does not short-circuit **and route matching returns no match**" — the pre-review ordering
+  that M70a's code review inverted, because a catch-all was shadowing every upgrade — and
+  `RpcFetchHandler` still described the adapter consulting it before mapping the request.
+  `ARCHITECTURE.md` also claimed `grpc-plugin` depends on the `http-adapter` capability; it resolves
+  no adapter at all since M70a. Documentation only — no behaviour, signature or export changed.
 
-- **`SseMessage.data` is narrowed to `JsonValue`** (M74, X3-8). **Breaking.** The member was
-  `string | number | boolean | null | readonly unknown[] | Record<string, unknown>`, whose last two
-  arms admitted values `JSON.stringify` cannot represent — while `PUBLIC_API.md` claimed the member
-  "accepts any JSON-serializable value". It now does. What this rejects, and what to do instead:
-
-  - **A `bigint` anywhere in the payload** (`{ balance: 10n }`, `[10n]`). `JSON.stringify` throws on
-    it, and the throw surfaced differently depending on configuration: `conn.send` threw to the
-    caller, `channel.publish` with no backplane delivered to nobody and reported nothing, and
-    `channel.publish` with a backplane threw synchronously. Convert the value first —
-    `{ balance: String(balance) }`.
-  - **A function or symbol value.** `JSON.stringify` silently drops the key, so the data never
-    arrived. Remove it from the payload.
-  - **An `interface` that extends `Record<string, unknown>`** to satisfy the old object arm. Change
-    it to `extends Record<string, JsonValue | undefined>`. A named `interface` still does not assign
-    without an index signature — TypeScript grants implicit ones only to object-literal types, which
-    was equally true before this change — so a `type` alias remains the simpler option.
-
-  A property written `T | undefined` is unaffected. A **circular structure** still throws at
-  runtime; no type can express acyclicity.
-
-- **`@setu-ts/openapi-plugin`: an unrepresentable schema node is now REPORTED instead of silently
-  emitting `{}`.** A type zod cannot represent in JSON Schema (`z.date()`, `z.bigint()`, …) still
-  degrades to an empty schema — never a throw — but the operation owning it now carries a
-  machine-readable vendor extension naming the route:
-  `"x-setu-unrepresentable": [{ "at": "<operationId>", "reason": "…" }]`. The extension is absent
-  when every schema is representable, so valid documents are unchanged.
+- **`@setu-ts/openapi-plugin` produced an EMPTY OpenAPI schema for every zod v4 schema.** Zod v4
+  removed the private `_def.typeName` marker the transformer dispatched on, so every v4 schema fell
+  through to `{}` and `/openapi.json` served `{"schema":{}}` for any route documented with one. Zod
+  v4 schemas are now converted through `schema.toJSONSchema()` (draft 2020-12, adapted to OpenAPI
+  3.1), with dedup, `$ref`/`components` extraction and recursive-schema hoisting working on both
+  majors. Both zod v3 and v4 are supported; the plugin imports neither — detection is by duck-typing
+  `toJSONSchema`. Zod v3 output is byte-identical.
 
 ## [0.1.0-alpha.9] — 2026-08-26
 

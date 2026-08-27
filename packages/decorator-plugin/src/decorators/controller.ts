@@ -4,9 +4,8 @@
  *
  * @module
  */
-import type { Constructor } from '@setu-ts/common';
-
-import { metadataStore } from '../metadata/metadata-store.ts';
+import { classDecorator } from '../metadata/context-bridge.ts';
+import type { SetuClassDecorator } from '../metadata/context-bridge.ts';
 
 /**
  * Marks a class as a controller and assigns a base path prefix for all its
@@ -24,11 +23,10 @@ import { metadataStore } from '../metadata/metadata-store.ts';
  * ```
  * @since 0.1.0
  */
-export function Controller(path: string): ClassDecorator {
-  return (target) => {
-    metadataStore.mergeController(target as unknown as Constructor, { path });
-    return target;
-  };
+export function Controller(path: string): SetuClassDecorator {
+  return classDecorator((store, target) => {
+    store.mergeController(target, { path });
+  });
 }
 
 /**
@@ -46,9 +44,8 @@ export function Controller(path: string): ClassDecorator {
  * ```
  * @since 0.1.0
  */
-export function Version(version: string): ClassDecorator {
-  return (target) => {
-    metadataStore.mergeController(target as unknown as Constructor, { version });
-    return target;
-  };
+export function Version(version: string): SetuClassDecorator {
+  return classDecorator((store, target) => {
+    store.mergeController(target, { version });
+  });
 }

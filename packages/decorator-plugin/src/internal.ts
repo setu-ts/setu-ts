@@ -88,18 +88,6 @@ export function isHandlerResult(value: unknown): value is HandlerResult {
 }
 
 /**
- * Resolves the class constructor from the prototype handed to a method or
- * parameter decorator (legacy decorators pass the prototype as `target`).
- *
- * @param target - The prototype object from a decorator callback
- * @returns The class constructor
- * @since 0.1.0
- */
-export function protoToCtor(target: object): Constructor {
-  return (target as { constructor: Constructor }).constructor;
-}
-
-/**
  * Returns a class's name, or `'anonymous'` when unavailable (e.g. a class
  * created without a binding). Used to derive a default service token.
  *

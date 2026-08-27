@@ -11,7 +11,7 @@ import type {
 import { createApplication } from '@setu-ts/kernel';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
 
-import { Body, Controller, Ctx, Post, UseGuards, ValidateBody } from '../../src/index.ts';
+import { Body, Controller, Ctx, Params, Post, UseGuards, ValidateBody } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -71,7 +71,8 @@ describeEnforcement('decorator validation enforcement (integration)', () => {
     class OrderController {
       @Post('/')
       @ValidateBody(Schema)
-      create(@Ctx() ctx: IRequestContext) {
+      @Params(Ctx())
+      create(ctx: IRequestContext) {
         seenViaState = ctx.state.get(validatedStateKey('body'));
         return null;
       }
@@ -117,7 +118,8 @@ describeEnforcement('decorator validation enforcement (integration)', () => {
     class StateController {
       @Post('/')
       @ValidateBody(Schema)
-      read(@Ctx() ctx: IRequestContext) {
+      @Params(Ctx())
+      read(ctx: IRequestContext) {
         seenViaState = ctx.state.get(validatedStateKey('body'));
         return null;
       }
@@ -149,7 +151,8 @@ describeEnforcement('decorator validation enforcement (integration)', () => {
       @Post('/')
       @UseGuards(rejectingGuard)
       @ValidateBody(Schema)
-      create(@Ctx() ctx: IRequestContext) {
+      @Params(Ctx())
+      create(ctx: IRequestContext) {
         // The guard short-circuits; this must never run.
         return ctx.response.status(200).json({ ran: true });
       }
@@ -182,7 +185,8 @@ describeEnforcement('decorator validation enforcement (integration)', () => {
     class OptOutController {
       @Post('/')
       @ValidateBody(Schema)
-      create(@Body() body: unknown) {
+      @Params(Body())
+      create(body: unknown) {
         return body;
       }
     }
@@ -218,7 +222,8 @@ describeEnforcement('decorator validation enforcement (integration)', () => {
     class RoundTripController {
       @Post('/')
       @ValidateBody(Schema)
-      create(@Body() body: unknown) {
+      @Params(Body())
+      create(body: unknown) {
         seenAsArgument = body;
         return null;
       }

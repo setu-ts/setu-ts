@@ -27,7 +27,7 @@ import { renderHttpModule } from './http-module.ts';
  * @returns The module contents
  */
 function renderControllerClass(names: DerivedNames): string {
-  return `import { Body, Controller, Ctx, Get, Post } from '@setu-ts/decorator-plugin';
+  return `import { Body, Controller, Ctx, Get, Params, Post } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
 /**
@@ -37,11 +37,12 @@ import type { IRequestContext } from '@setu-ts/common';
  * \`${HTTP_SEAM_DIR}/index.ts\`, which \`setu.config.ts\` passes to \`DecoratorPlugin\` —
  * so this class needs no further wiring.
  *
- * A decorated handler receives ONLY its decorated parameters: the plugin builds
- * the argument list from parameter metadata alone and never passes the request
- * context positionally, so a bare \`ctx\` parameter would arrive \`undefined\`.
- * Return a plain value and the plugin serializes it as JSON, or take \`@Ctx()\`
- * when the handler needs the context itself — to set a status code or stream.
+ * A decorated handler receives ONLY the arguments its \`@Params(...)\` names, in
+ * that order: the plugin builds the argument list from that declaration alone
+ * and never passes the request context positionally, so an undeclared \`ctx\`
+ * parameter would arrive \`undefined\`. Return a plain value and the plugin
+ * serializes it as JSON, or declare \`Ctx()\` when the handler needs the context
+ * itself — to set a status code or stream.
  *
  * A resource this shape cannot express — a wildcard, a proxy, a route table
  * built in a loop — belongs in a \`.routes.ts\` module in this same directory.
@@ -66,7 +67,8 @@ export class ${names.pascal}Controller {
    * @returns The created record, serialized as JSON
    */
   @Post('/')
-  create(@Body() body: Record<string, unknown>, @Ctx() ctx: IRequestContext): unknown {
+  @Params(Body<Record<string, unknown>>(), Ctx())
+  create(body: Record<string, unknown>, ctx: IRequestContext): unknown {
     return ctx.response.status(201).json({ created: body });
   }
 }

@@ -5,12 +5,11 @@ import { Controller } from '../../src/decorators/controller.ts';
 import { Get } from '../../src/decorators/http.ts';
 import {
   CONTEXT_PARAMETER_METADATA,
-  Ctx,
-  CurrentUser,
   Permissions,
   Public,
   Roles,
 } from '../../src/decorators/security.ts';
+import { Body, Ctx, CurrentUser, Params } from '../../src/decorators/params.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 
 describe('Security decorators', () => {
@@ -85,7 +84,8 @@ describe('Security decorators', () => {
     @Controller('/x')
     class C {
       @Get('/me')
-      me(@CurrentUser() user: unknown) {
+      @Params(CurrentUser())
+      me(user: unknown) {
         return user;
       }
     }
@@ -93,15 +93,22 @@ describe('Security decorators', () => {
     expect(p).toMatchObject({ type: 'custom', customType: 'current-user' });
   });
 
-  it('@Ctx stores a custom context parameter at its declared index', () => {
+  it('Ctx() stores a custom context parameter at its declared index', () => {
     @Controller('/x')
     class C {
       @Get('/create')
-      create(_ignored: unknown, @Ctx() ctx: unknown) {
+      // Positional binding is explicit: to reach argument 1, argument 0 must
+      // name a source too. The legacy form inferred the index from where the
+      // decorator sat, which is exactly the information a parameter position
+      // no longer carries.
+      @Params(Body(), Ctx())
+      create(_ignored: unknown, ctx: unknown) {
         return ctx;
       }
     }
-    const p = metadataStore.getRoutesFor(C)[0].params[0];
+    const params = metadataStore.getRoutesFor(C)[0].params;
+    const p = params[1];
+    expect(params[0]).toMatchObject({ index: 0, type: 'body' });
     expect(p).toMatchObject({ index: 1, type: 'custom', customType: 'context' });
     expect(p.metadata).toBe(CONTEXT_PARAMETER_METADATA);
   });

@@ -13,9 +13,9 @@
  * @module
  */
 import type { Constructor, IMetadataStore, MiddlewareFunction } from '@setu-ts/common';
-import type { HttpMethod } from '@setu-ts/common';
 
-import { className } from '../internal.ts';
+import { takePending } from './pending.ts';
+import type { HttpMethod } from '@setu-ts/common';
 
 /**
  * Where a request parameter is sourced from.
@@ -37,7 +37,7 @@ export interface ParameterMetadata {
   type: ParameterType;
   /** Name for named sources (`@Query('page')`, `@Param('id')`, …). */
   name?: string;
-  /** Custom parameter type name (from {@linkcode createParameterDecorator}). */
+  /** Custom parameter type name (from a `Custom(name)` source). */
   customType?: string;
   /** Extra payload captured by a custom parameter decorator. */
   metadata?: Readonly<Record<string, unknown>>;
@@ -255,7 +255,6 @@ export class MetadataStore implements IMetadataStore {
   private readonly _services = new Map<Constructor, ServiceMetadata>();
   private readonly _methods = new Map<Constructor, Map<string, MethodMeta>>();
   private readonly _custom: CustomDecoratorRecord[] = [];
-  private readonly _ctorParams = new Map<Constructor, Map<number, string>>();
   private readonly _ctorOptional = new Map<Constructor, Set<number>>();
 
   /** Controllers keyed by class. */
@@ -323,12 +322,34 @@ export class MetadataStore implements IMetadataStore {
   }
 
   /**
+   * Applies any writes this class's member decorators deferred.
+   *
+   * A standard member decorator never receives the constructor, so it records
+   * its write on the class's `Symbol.metadata` object instead; this replays
+   * those writes the first time the class is read. Draining on read rather than
+   * from a class decorator is what records a class carrying member decorators
+   * but no class decorator at all; only the target-less reads below cannot do
+   * it, for the reason `context-bridge.ts` states.
+   *
+   * Cheap and idempotent: the pending list is spliced empty as it is applied, so
+   * every later read finds nothing to do.
+   *
+   * @param target - The class being read
+   */
+  #drain(target: Constructor): void {
+    for (const write of takePending(target)) {
+      write(this, target);
+    }
+  }
+
+  /**
    * Returns a class's controller metadata, or `undefined`.
    *
    * @param target - The class to look up
    * @returns The metadata, if any
    */
   getController(target: Constructor): ControllerMetadata | undefined {
+    this.#drain(target);
     return this._controllers.get(target);
   }
 
@@ -339,6 +360,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns `true` if decorated with `@Controller`
    */
   hasController(target: Constructor): boolean {
+    this.#drain(target);
     return this._controllers.has(target);
   }
 
@@ -361,28 +383,6 @@ export class MetadataStore implements IMetadataStore {
       merged.inject = partial.inject;
     }
     this._services.set(target, merged);
-  }
-
-  /**
-   * Records one constructor-parameter injection token, keyed by its argument
-   * index.
-   *
-   * Indexed rather than appended because constructor parameter decorators
-   * evaluate in **reverse** argument order: appending in call order would
-   * reverse the token list and inject the wrong service into every argument.
-   *
-   * When one parameter carries two `@Inject` decorators the leftmost wins,
-   * because decorators on a single parameter also apply right-to-left, so the
-   * leftmost is written last.
-   *
-   * @param target - The decorated class
-   * @param index - Zero-based constructor argument index
-   * @param token - Capability token to resolve for that argument
-   */
-  mergeCtorParam(target: Constructor, index: number, token: string): void {
-    const params = this._ctorParams.get(target) ?? new Map<number, string>();
-    params.set(index, token);
-    this._ctorParams.set(target, params);
   }
 
   /**
@@ -409,39 +409,31 @@ export class MetadataStore implements IMetadataStore {
    * @returns The optional argument indices; empty when the class marked none
    */
   ctorOptional(target: Constructor): ReadonlySet<number> {
+    this.#drain(target);
     return this._ctorOptional.get(target) ?? EMPTY_INDICES;
   }
 
   /**
-   * Assembles a class's constructor-parameter tokens into a dense array in
-   * ascending argument order.
+   * Replaces a class's optional-argument set outright.
    *
-   * @param target - The class to look up
-   * @returns The tokens in argument order, or `undefined` when the class has no
-   * parameter-level `@Inject`
-   * @throws {Error} When an argument below the highest decorated index carries
-   * no token — a hole would shift every later argument, so it is refused loudly
-   * rather than filled with `undefined`.
+   * `mergeService` REPLACES `inject` while {@linkcode mergeCtorOptional}
+   * ACCUMULATES, so two stacked `@Inject(...)` decorators would leave the
+   * winning token list paired with the loser's optional indices — silently
+   * marking a required dependency absent-tolerant, or naming an index the
+   * shorter replacement list cannot cover, which `effectiveOptional` then
+   * refuses at startup. `Inject` writes both fields through one call each so the
+   * last decorator to apply owns the whole declaration.
+   *
+   * @param target - The decorated class
+   * @param indices - The complete set of optional argument indices
    */
-  ctorInject(target: Constructor): readonly string[] | undefined {
-    const params = this._ctorParams.get(target);
-    if (params === undefined || params.size === 0) {
-      return undefined;
+  setCtorOptional(target: Constructor, indices: Iterable<number>): void {
+    const set = new Set(indices);
+    if (set.size === 0) {
+      this._ctorOptional.delete(target);
+      return;
     }
-    const highest = Math.max(...params.keys());
-    const tokens: string[] = [];
-    for (let i = 0; i <= highest; i += 1) {
-      const token = params.get(i);
-      if (token === undefined) {
-        throw new Error(
-          `${className(target)} constructor parameter ${i} has no @Inject token, but parameter ` +
-            `${highest} does. Every parameter up to the last injected one must carry @Inject — ` +
-            `type-inferred injection needs emitDecoratorMetadata, which Deno does not support.`,
-        );
-      }
-      tokens.push(token);
-    }
-    return tokens;
+    this._ctorOptional.set(target, set);
   }
 
   /**
@@ -451,6 +443,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns The metadata, if any
    */
   getService(target: Constructor): ServiceMetadata | undefined {
+    this.#drain(target);
     return this._services.get(target);
   }
 
@@ -541,6 +534,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns Method name → accumulator
    */
   getMethods(target: Constructor): ReadonlyMap<string, MethodMeta> {
+    this.#drain(target);
     return this._methods.get(target) ?? new Map();
   }
 
@@ -555,6 +549,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns Materialized route metadata (empty when none)
    */
   getRoutesFor(target: Constructor): RouteMetadata[] {
+    this.#drain(target);
     const methods = this._methods.get(target);
     if (methods === undefined) {
       return [];
@@ -596,7 +591,6 @@ export class MetadataStore implements IMetadataStore {
     this._services.clear();
     this._methods.clear();
     this._custom.length = 0;
-    this._ctorParams.clear();
     this._ctorOptional.clear();
   }
 

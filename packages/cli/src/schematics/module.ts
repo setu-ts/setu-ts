@@ -86,15 +86,16 @@ export class ${names.pascal}Service {
 }
 
 function classController(names: DerivedNames): string {
-  return `import { Body, Controller, Ctx, Get, Inject, Post } from '@setu-ts/decorator-plugin';
+  return `import { Body, Controller, Ctx, Get, Inject, Params, Post } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
 import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 
 /** HTTP controller for the ${names.kebab} resource. */
 @Controller('/${names.kebab}')
+@Inject('${serviceToken(names)}')
 export class ${names.pascal}Controller {
-  constructor(@Inject('${serviceToken(names)}') private readonly service: ${names.pascal}Service) {}
+  constructor(private readonly service: ${names.pascal}Service) {}
 
   /** Lists ${names.kebab} records. */
   @Get('/')
@@ -104,10 +105,8 @@ export class ${names.pascal}Controller {
 
   /** Creates a ${names.kebab} record. */
   @Post('/')
-  create(
-    @Body() body: Record<string, unknown>,
-    @Ctx() ctx: IRequestContext,
-  ): unknown {
+  @Params(Body<Record<string, unknown>>(), Ctx())
+  create(body: Record<string, unknown>, ctx: IRequestContext): unknown {
     return ctx.response.status(201).json({ created: body });
   }
 }

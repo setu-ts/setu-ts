@@ -87,14 +87,12 @@ provider on the container when one is present and never touches the kernel regis
 
 **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
 support (`--experimental-strip-types`) erases types without transforming code, so it cannot run a
-legacy decorator — a bare `SyntaxError` — or the constructor parameter property
-`setu generate
-module` emits (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). `--experimental-transform-types`
-handles the parameter property and still rejects the decorator, because it does not enable
-`experimentalDecorators`. A generated Node project therefore declares `tsx` in `devDependencies` and
-starts with `tsx main.ts`, reading the `experimentalDecorators` its own `tsconfig.json` already
-sets. Bun compiles TypeScript outright and Deno and Workers never invoke a runner, so no other
-target carries the dependency.
+decorator — V8 has not shipped them, so even a TC39 standard decorator is a bare `SyntaxError` — or
+the constructor parameter property `setu generate module` emits
+(`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). A generated Node project therefore declares `tsx` in
+`devDependencies` and starts with `tsx main.ts`, which transforms both. Its `tsconfig.json` needs no
+decorator option. Bun compiles TypeScript outright and Deno and Workers never invoke a runner, so no
+other target carries the dependency.
 
 **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
 `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, so the
@@ -265,9 +263,9 @@ is installed.
 
 **A decorated handler receives only its decorated parameters.** The plugin builds the argument list
 from parameter metadata alone and never passes the request context positionally, so a bare `ctx`
-parameter would arrive `undefined` — a `500` on every request. Use `@Ctx()`, the built-in parameter
-decorator, when a handler needs the context itself; that is how the generated `create` method sets a
-real `201`. Return a plain value and the plugin serializes it as JSON. See
+parameter would arrive `undefined` — a `500` on every request. Declare `Ctx()` in `@Params`, the
+built-in decorator, when a handler needs the context itself; that is how the generated `create`
+method sets a real `201`. Return a plain value and the plugin serializes it as JSON. See
 [Decorators — The Authenticated Principal](./decorators.md#the-authenticated-principal).
 
 ## Monorepos

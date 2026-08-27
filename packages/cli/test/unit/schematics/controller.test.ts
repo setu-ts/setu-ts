@@ -62,13 +62,20 @@ describe('controller schematic', () => {
 
   it('imports the decorators it uses', () => {
     expect(file.contents).toContain(
-      "import { Body, Controller, Ctx, Get, Post } from '@setu-ts/decorator-plugin';",
+      "import { Body, Controller, Ctx, Get, Params, Post } from '@setu-ts/decorator-plugin';",
     );
   });
 
-  it('uses the built-in context decorator for a status-sensitive write handler', () => {
+  it('binds the request context positionally for a status-sensitive write handler', () => {
+    // Under TC39 standard decorators there is no parameter position, so the
+    // context is declared as a source in @Params rather than on the parameter.
     expect(file.contents).toContain('import type { IRequestContext }');
-    expect(file.contents).toContain('@Ctx() ctx: IRequestContext');
+    expect(file.contents).toContain('@Params(Body<Record<string, unknown>>(), Ctx())');
+    expect(file.contents).toContain('create(body: Record<string, unknown>, ctx: IRequestContext)');
     expect(file.contents).toContain('ctx.response.status(201)');
+    // The legacy parameter form must not reappear: it is a PARSE error without
+    // a compiler option this project no longer sets.
+    expect(file.contents).not.toContain('@Ctx() ctx');
+    expect(file.contents).not.toContain('@Body() body');
   });
 });

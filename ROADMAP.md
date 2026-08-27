@@ -7521,7 +7521,7 @@ default; the telemetry activation seam does.
 
 ---
 
-## Milestone 76: Standard Decorators and the `experimentalDecorators` Deprecation ⬜ PLANNED
+## Milestone 76: Standard Decorators and the `experimentalDecorators` Deprecation ✅ COMPLETE
 
 **Objective:** Decide and execute the framework's answer to Deno deprecating
 `experimentalDecorators`, the compiler option the entire decorator surface is built on.
@@ -7567,6 +7567,34 @@ it as a requirement (`ARCHITECTURE.md` §, `PUBLIC_API.md` ×3, `docs/decorators
   default, so decorators are opt-in; this milestone keeps the opt-in working, it does not retire it.
 - **Packages:** `decorator-plugin`, `openapi-plugin`, `starters/rest-starter`, `cli`, plus
   `apps/di-decorators` and the eleven doc sites.
+
+### Explicitly out of scope
+
+Both were found by this milestone's own verification pass and are recorded here rather than absorbed
+into whatever touches these files next.
+
+- **A fence gate over `PUBLIC_API.md`.** Two of its decorator examples still used parameter-position
+  decorators — the form this milestone makes **unparseable** — and compiling them verbatim gave
+  `TS1206` twice. Doing so also surfaced a duplicate import this milestone introduced, a class-only
+  `@ApiTags` applied to a method, and a string passed to `@ApiOperation`. All four are fixed, but
+  they survived because **nothing compiles that file**: the fence engine covers ten `docs/` guides
+  (`test/guide-fence-compiler.test.ts`), one guide in depth
+  (`test/decorator-fence-compiler.test.ts`) and twenty package READMEs
+  (`test/package-readme-fence-compiler.test.ts`), and `PUBLIC_API.md` is in none of them. Measured
+  with the repo's own `scanFences`: **232 fenced blocks, 202 TypeScript, 109 importing
+  `@setu-ts/`**. That is a milestone rather than a follow-up — M70k declined the same surface with
+  cause, and the `docs/decorators.md` precedent found 12 of 16 fences broken, so expect a real crop
+  of failures rather than a formality. Unowned.
+- **A decorated class in the Node/Bun compat suite.** `Symbol.metadata` is `undefined` on Node,
+  where the transform installs metadata under `Symbol.for('Symbol.metadata')` instead, so
+  `resolveMetadataSymbol`'s fallback arm is load-bearing on that runtime — collapsing it would break
+  every Node project while the Deno suite stayed green. Nothing gates it: `compat/` installs the
+  **published** packages (`latest`, no committed lockfile), so its jobs test the previous release
+  rather than the branch under review, and `compat.test.mjs` imports no decorator symbol at all. The
+  evidence for the fallback is a local probe on Node v24 under `tsx` — a measurement, not a gate.
+  Closing it means adding a decorated controller to that suite, which can only run once a release
+  carrying this milestone is published. Belongs with the alpha.10 release or immediately after.
+  Unowned.
 
 ---
 
@@ -7683,4 +7711,4 @@ it as a requirement (`ARCHITECTURE.md` §, `PUBLIC_API.md` ×3, `docs/decorators
 | 73        | ✅     | realtime authentication (PR #197)              |
 | 74        | ✅     | realtime reads + sse contract (PR #196)        |
 | 75        | ✅     | broker trace propagation (PR #201)             |
-| 76        | ⬜     | standard decorators / experimentalDecorators   |
+| 76        | ✅     | standard decorators / experimentalDecorators   |

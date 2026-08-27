@@ -31,15 +31,18 @@ deno add jsr:@setu-ts/decorator-plugin jsr:@setu-ts/di-plugin
 
 ### Enable Decorators
 
-In your `deno.json`:
+Nothing to enable. Setu-TS uses **TC39 standard decorators**, which Deno, Bun and every current
+bundler parse with no `compilerOptions` entry at all — so a project's `deno.json` needs no decorator
+setting, and adding one is actively unhelpful, because declaring any compiler option replaces Deno's
+default set.
 
-```json
-{
-  "compilerOptions": {
-    "experimentalDecorators": true
-  }
-}
-```
+The one exception is Node, where V8 has not shipped decorators: run the project through a transform
+(`setu new --runtime node` emits `tsx`, which handles them) rather than through `node`'s built-in
+type stripping. See [Runtime & Deployment](runtime-deployment.md).
+
+> The legacy `experimentalDecorators` option is **not** used and must not be set. It is deprecated
+> in Deno, and the surface it enabled — parameter decorators — has no place in the standard proposal
+> at all.
 
 ### Register Plugins
 
@@ -80,6 +83,7 @@ import {
   Inject,
   Injectable,
   Param,
+  Params,
   Post,
   Query,
 } from '@setu-ts/decorator-plugin';
@@ -100,10 +104,9 @@ export class UserService {
 }
 
 @Controller('/users')
+@Inject('user-service')
 export class UserController {
-  constructor(
-    @Inject('user-service') private readonly userService: UserService,
-  ) {}
+  constructor(private readonly userService: UserService) {}
 
   @Get()
   findAll() {
@@ -111,12 +114,14 @@ export class UserController {
   }
 
   @Get('/:id')
-  findOne(@Param('id') id: string) {
+  @Params(Param('id'))
+  findOne(id: string) {
     return this.userService.findById(id);
   }
 
   @Post()
-  create(@Body() dto: { name: string }) {
+  @Params(Body())
+  create(dto: { name: string }) {
     return this.userService.create(dto);
   }
 }
@@ -129,8 +134,17 @@ routes and DI registrations:
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { DiPlugin } from '@setu-ts/di-plugin';
-import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
-import { Body, Controller, Get, Inject, Injectable, Param, Post } from '@setu-ts/decorator-plugin';
+import {
+  Body,
+  Controller,
+  DecoratorPlugin,
+  Get,
+  Inject,
+  Injectable,
+  Param,
+  Params,
+  Post,
+} from '@setu-ts/decorator-plugin';
 
 @Injectable({ token: 'user-service' })
 class UserService {
@@ -140,18 +154,19 @@ class UserService {
 }
 
 @Controller('/users')
+@Inject('user-service')
 class UserController {
-  constructor(
-    @Inject('user-service') private readonly userService: UserService,
-  ) {}
+  constructor(private readonly userService: UserService) {}
 
   @Get('/:id')
-  findOne(@Param('id') id: string) {
+  @Params(Param('id'))
+  findOne(id: string) {
     return this.userService.findById(id);
   }
 
   @Post()
-  create(@Body() dto: { name: string }) {
+  @Params(Body())
+  create(dto: { name: string }) {
     return { id: '2', ...dto };
   }
 }
@@ -220,11 +235,9 @@ interface UserRepository {
 }
 
 @Injectable({ token: 'user-service' })
+@Inject('user-repository', CAPABILITIES.CACHE)
 export class UserService {
-  constructor(
-    @Inject('user-repository') private readonly repo: UserRepository,
-    @Inject(CAPABILITIES.CACHE) private readonly cache: ICacheStore,
-  ) {}
+  constructor(private readonly repo: UserRepository, private readonly cache: ICacheStore) {}
 
   async findAll() {
     // Check cache first
@@ -244,26 +257,14 @@ in that case — so `ctx.services.get('user-service')` resolves an `@Injectable`
 project without `DiPlugin`**. With a container, reach it by injecting it
 (`@Inject('user-service')`), which is the path that works under both compositions.
 
-### Parameter-Level Injection
+### Constructor Injection
 
-Setu-TS requires explicit tokens for parameter injection because type-inferred injection needs
-`emitDecoratorMetadata`, which Deno does not support:
+`@Inject(...)` sits on the **class** and takes one token per constructor argument, in argument order
+— the Nth entry binds the Nth parameter. There is no parameter-level form: the TC39 proposal has no
+parameter position, so a decorator cannot be attached to an argument at all.
 
-```typescript
-import { Inject, Injectable } from '@setu-ts/decorator-plugin';
-import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
-
-@Injectable()
-export class UserRepository {
-  // Preferred: one token per constructor parameter, bound by position.
-  constructor(
-    @Inject(CAPABILITIES.CACHE) private readonly cache: ICacheStore,
-  ) {}
-}
-```
-
-The deprecated class-level form takes a positional token list matching the constructor arguments and
-is mutually exclusive with the parameter form (a class carrying both fails at `register()`):
+A token is always explicit, because type-inferred injection needs `emitDecoratorMetadata`, which
+Deno does not support — so a parameter's type cannot be read.
 
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
@@ -276,20 +277,23 @@ export class UserRepository {
 }
 ```
 
+Because the list is positional, reordering the constructor without reordering the tokens misinjects
+every argument — the list and the signature are one declaration and move together.
+
 ### Optional Dependencies
 
-`@Optional` pairs with `@Inject` on the same constructor parameter: when the token has no provider,
-the argument receives `undefined` instead of failing construction. A token is still required.
+`Optional(token)` wraps an entry **inside** the `@Inject(...)` list, in the position of the argument
+it describes: when the token has no provider, that argument receives `undefined` instead of failing
+construction. A token is still required.
 
 ```typescript
 import { Inject, Injectable, Optional } from '@setu-ts/decorator-plugin';
 import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 
 @Injectable()
+@Inject(Optional(CAPABILITIES.CACHE))
 export class MyService {
-  constructor(
-    @Optional() @Inject(CAPABILITIES.CACHE) private readonly cache?: ICacheStore,
-  ) {}
+  constructor(private readonly cache?: ICacheStore) {}
 }
 ```
 
@@ -316,7 +320,7 @@ export class RequestScopedService {}
 ### Body
 
 ```typescript
-import { Body, Controller, Post } from '@setu-ts/decorator-plugin';
+import { Body, Controller, Params, Post, ValidateBody } from '@setu-ts/decorator-plugin';
 
 interface CreateUserDto {
   name: string;
@@ -325,7 +329,8 @@ interface CreateUserDto {
 @Controller('/users')
 export class UserController {
   @Post()
-  async create(@Body() dto: CreateUserDto) {
+  @Params(Body())
+  async create(dto: CreateUserDto) {
     // dto is the parsed JSON body; validated when a schema is attached
     // with @ValidateBody and the ValidationPlugin is registered.
     return dto;
@@ -336,15 +341,13 @@ export class UserController {
 ### Query Parameters
 
 ```typescript
-import { Controller, Get, Query } from '@setu-ts/decorator-plugin';
+import { Controller, Get, Params, Query } from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
 export class UserController {
   @Get()
-  async findAll(
-    @Query('page') page: string = '1',
-    @Query('limit') limit: string = '10',
-  ) {
+  @Params(Query('page'), Query('limit'))
+  async findAll(page: string = '1', limit: string = '10') {
     return { page: parseInt(page), limit: parseInt(limit) };
   }
 }
@@ -353,12 +356,13 @@ export class UserController {
 ### Path Parameters
 
 ```typescript
-import { Controller, Get, Param } from '@setu-ts/decorator-plugin';
+import { Controller, Get, Param, Params } from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
 export class UserController {
   @Get('/:id')
-  async findOne(@Param('id') id: string) {
+  @Params(Param('id'))
+  async findOne(id: string) {
     return { id };
   }
 }
@@ -367,12 +371,13 @@ export class UserController {
 ### Headers
 
 ```typescript
-import { Controller, Get, Header } from '@setu-ts/decorator-plugin';
+import { Controller, Get, Header, Params } from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
 export class UserController {
   @Get()
-  async list(@Header('Authorization') auth: string) {
+  @Params(Header('Authorization'))
+  async list(auth: string) {
     // auth contains "Bearer <token>" or "Basic <credentials>"
     return { hasAuth: auth !== null };
   }
@@ -382,12 +387,13 @@ export class UserController {
 ### Cookies
 
 ```typescript
-import { Controller, Cookie, Get } from '@setu-ts/decorator-plugin';
+import { Controller, Cookie, Get, Params } from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
 export class UserController {
   @Get()
-  async list(@Cookie('session') session: string) {
+  @Params(Cookie('session'))
+  async list(session: string) {
     return { session };
   }
 }
@@ -395,18 +401,20 @@ export class UserController {
 
 ### The Authenticated Principal
 
-`@CurrentUser` injects `ctx.request.user` (populated by authentication middleware). There is no
-`@Request()` or `@Context()` parameter decorator — to read the full context, use a custom parameter
-decorator (see [Custom Decorators](#custom-decorators)).
+`CurrentUser()` binds `ctx.request.user` (populated by authentication middleware). To read the full
+request context, declare `Ctx()` — it resolves the live `IRequestContext`, so a handler can set a
+status code, add a header, or stream. For anything else, register a resolver and bind it with
+`Custom()` (see [Custom Decorators](#custom-decorators)).
 
 ```typescript
-import { Controller, CurrentUser, Get } from '@setu-ts/decorator-plugin';
+import { Controller, CurrentUser, Get, Params } from '@setu-ts/decorator-plugin';
 import type { IPrincipal } from '@setu-ts/common';
 
 @Controller('/me')
 export class MeController {
   @Get()
-  async info(@CurrentUser() user: IPrincipal) {
+  @Params(CurrentUser())
+  async info(user: IPrincipal) {
     return { user };
   }
 }
@@ -423,6 +431,7 @@ import {
   Body,
   Controller,
   Get,
+  Params,
   Post,
   Query,
   ValidateBody,
@@ -445,7 +454,8 @@ interface CreateUserDto {
 export class UserController {
   @Post()
   @ValidateBody(createUserSchema)
-  async create(@Body() dto: CreateUserDto) {
+  @Params(Body())
+  async create(dto: CreateUserDto) {
     // dto is already validated
     return dto;
   }
@@ -455,7 +465,8 @@ export class UserController {
     page: { type: 'number', optional: true, default: 1 },
     limit: { type: 'number', optional: true, default: 10 },
   })
-  async list(@Query() query: Record<string, unknown>) {
+  @Params(Query())
+  async list(query: Record<string, unknown>) {
     // query is validated
     return query;
   }
@@ -607,31 +618,35 @@ export class RiskyController {
 
 ## Custom Decorators
 
-### Parameter Decorator
+### Parameter Source
 
-`createParameterDecorator(name, metadata?)` stores a custom parameter resolved at request time by a
-resolver registered under the same `name` via `registerParameterResolver`. There is no
-`ExecutionContext`/`switchToHttp` surface — the resolver receives the `IRequestContext` directly:
+`Custom(name, metadata?)` declares a parameter resolved at request time by a resolver registered
+under the same `name` via `registerParameterResolver`. Declare it inside `@Params(...)` like any
+built-in source. There is no `ExecutionContext`/`switchToHttp` surface — the resolver receives the
+`IRequestContext` directly:
 
 ```typescript
 import {
   Controller,
-  createParameterDecorator,
+  Custom,
   Get,
+  Params,
   registerParameterResolver,
 } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
-export const TenantId = () => createParameterDecorator('tenant-id');
-
 // Register the resolver that reads the tenant id from the request context.
-// The registered name must match the decorator's name.
+// The registered name must match the source's name.
 registerParameterResolver('tenant-id', (ctx: IRequestContext) => ctx.request.tenant?.id);
+
+// A named helper keeps call sites readable and gives the value a type.
+export const TenantId = () => Custom<string | undefined>('tenant-id');
 
 @Controller('/items')
 export class ItemController {
   @Get()
-  async list(@TenantId() tenantId: unknown) {
+  @Params(TenantId())
+  async list(tenantId: string | undefined) {
     return { tenantId };
   }
 }
@@ -724,8 +739,9 @@ class UserRepository {
 
 // ✅ Provide explicit token
 @Injectable()
+@Inject(CAPABILITIES.CACHE)
 class UserRepositoryOk {
-  constructor(@Inject(CAPABILITIES.CACHE) private readonly cache: ICacheStore) {}
+  constructor(private readonly cache: ICacheStore) {}
 }
 ```
 
@@ -786,6 +802,7 @@ import {
   Inject,
   Injectable,
   Param,
+  Params,
   Post,
   Put,
   Query,
@@ -839,34 +856,38 @@ const authGuard: MiddlewareFunction = async (ctx: IRequestContext, next) => {
 @Controller('/api/users')
 @UseGuards(authGuard)
 @Roles('admin')
+@Inject('user-service')
 export class UserController {
-  constructor(
-    @Inject('user-service') private readonly userService: UserService,
-  ) {}
+  constructor(private readonly userService: UserService) {}
 
   @Get()
-  async findAll(@Query('page') page: string = '1') {
+  @Params(Query('page'))
+  async findAll(page: string = '1') {
     return this.userService.findAll({ page: parseInt(page) });
   }
 
   @Get('/:id')
-  async findOne(@Param('id') id: string) {
+  @Params(Param('id'))
+  async findOne(id: string) {
     return this.userService.findById(id);
   }
 
   @Post()
   @ValidateBody(createUserSchema)
-  async create(@Body() dto: CreateUserDto) {
+  @Params(Body())
+  async create(dto: CreateUserDto) {
     return this.userService.create(dto);
   }
 
   @Put('/:id')
-  async update(@Param('id') id: string, @Body() dto: CreateUserDto) {
+  @Params(Param('id'), Body())
+  async update(id: string, dto: CreateUserDto) {
     return this.userService.update(id, dto);
   }
 
   @Delete('/:id')
-  async delete(@Param('id') id: string) {
+  @Params(Param('id'))
+  async delete(id: string) {
     await this.userService.delete(id);
     return { deleted: true };
   }

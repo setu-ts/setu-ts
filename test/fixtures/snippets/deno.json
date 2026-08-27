@@ -4,8 +4,7 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
-    "useUnknownInCatchVariables": true,
-    "experimentalDecorators": true
+    "useUnknownInCatchVariables": true
   },
   "imports": {
     "@setu-ts/common": "../../../packages/common/src/index.ts",

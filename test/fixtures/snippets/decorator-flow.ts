@@ -1,8 +1,9 @@
 // Decorator flow from docs/decorators.md - must compile against the workspace.
-// Mirrors the "Basic Controller" example: a real @Injectable service injected
-// via parameter-level @Inject into a @Controller with @Get, wired through
-// DecoratorPlugin({ controllers, services }). Decorators require
-// experimentalDecorators (see test/fixtures/snippets/deno.json).
+// Mirrors the "Basic Controller" example: a real @Injectable service named in
+// the class-position @Inject list of a @Controller with @Get, whose handler
+// arguments are declared with @Params, wired through
+// DecoratorPlugin({ controllers, services }). These are TC39 STANDARD
+// decorators: no compilerOptions entry is required to compile this file.
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { DiPlugin } from '@setu-ts/di-plugin';
@@ -13,6 +14,7 @@ import {
   Inject,
   Injectable,
   Param,
+  Params,
 } from '@setu-ts/decorator-plugin';
 
 /**
@@ -29,6 +31,7 @@ const REQUIRED_SYMBOLS = {
   Inject,
   Injectable,
   Param,
+  Params,
 } as const;
 
 @Injectable({ token: 'user-service' })
@@ -39,13 +42,13 @@ export class UserService {
 }
 
 @Controller('/users')
+@Inject('user-service')
 export class UserController {
-  constructor(
-    @Inject('user-service') private readonly userService: UserService,
-  ) {}
+  constructor(private readonly userService: UserService) {}
 
   @Get('/:id')
-  findOne(@Param('id') id: string): { id: string; name: string } {
+  @Params(Param('id'))
+  findOne(id: string): { id: string; name: string } {
     return this.userService.findById(id);
   }
 }

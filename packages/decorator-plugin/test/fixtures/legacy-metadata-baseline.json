@@ -1,0 +1,242 @@
+{
+  "controllers": [
+    [
+      "WidgetService",
+      null
+    ],
+    [
+      "OtherService",
+      null
+    ],
+    [
+      "WidgetController",
+      {
+        "path": "/widgets",
+        "middleware": [],
+        "guards": [],
+        "interceptors": [],
+        "filters": [],
+        "tags": [
+          "widgets"
+        ],
+        "version": "v1",
+        "roles": [
+          "admin"
+        ]
+      }
+    ]
+  ],
+  "services": [
+    [
+      "WidgetService",
+      {
+        "inject": [
+          "database",
+          "logger"
+        ],
+        "scope": "singleton",
+        "token": "widget-service"
+      }
+    ],
+    [
+      "OtherService",
+      {}
+    ],
+    [
+      "WidgetController",
+      null
+    ]
+  ],
+  "routes": [
+    [
+      "WidgetService",
+      []
+    ],
+    [
+      "OtherService",
+      []
+    ],
+    [
+      "WidgetController",
+      [
+        {
+          "method": "GET",
+          "path": "/",
+          "handler": "list",
+          "params": [
+            {
+              "index": 2,
+              "type": "custom",
+              "customType": "context",
+              "metadata": {}
+            },
+            {
+              "index": 1,
+              "type": "query"
+            },
+            {
+              "index": 0,
+              "type": "query",
+              "name": "page"
+            }
+          ],
+          "middleware": [],
+          "guards": [],
+          "interceptors": [],
+          "filters": [],
+          "openapi": {
+            "operationId": "listWidgets",
+            "summary": "list"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/:id",
+          "handler": "show",
+          "params": [
+            {
+              "index": 2,
+              "type": "cookie",
+              "name": "sid"
+            },
+            {
+              "index": 1,
+              "type": "header",
+              "name": "x-trace"
+            },
+            {
+              "index": 0,
+              "type": "param",
+              "name": "id"
+            }
+          ],
+          "middleware": [],
+          "guards": [],
+          "interceptors": [],
+          "filters": [],
+          "isPublic": true
+        },
+        {
+          "method": "POST",
+          "path": "/",
+          "handler": "create",
+          "params": [
+            {
+              "index": 2,
+              "type": "custom",
+              "customType": "tenant",
+              "metadata": {
+                "scope": "request"
+              }
+            },
+            {
+              "index": 1,
+              "type": "custom",
+              "customType": "current-user"
+            },
+            {
+              "index": 0,
+              "type": "body"
+            }
+          ],
+          "middleware": [],
+          "guards": [
+            "[fn guard]"
+          ],
+          "interceptors": [],
+          "filters": [],
+          "schema": {
+            "body": {
+              "kind": "schema"
+            }
+          },
+          "openapi": {
+            "responses": {
+              "201": {
+                "description": "created"
+              }
+            }
+          },
+          "permissions": [
+            "widgets:write"
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/legacy-alias",
+          "handler": "remove",
+          "params": [
+            {
+              "index": 0,
+              "type": "param",
+              "name": "id"
+            }
+          ],
+          "middleware": [],
+          "guards": [],
+          "interceptors": [],
+          "filters": []
+        },
+        {
+          "method": "DELETE",
+          "path": "/:id",
+          "handler": "remove",
+          "params": [
+            {
+              "index": 0,
+              "type": "param",
+              "name": "id"
+            }
+          ],
+          "middleware": [],
+          "guards": [],
+          "interceptors": [],
+          "filters": []
+        }
+      ]
+    ]
+  ],
+  "ctorInject": [
+    [
+      "WidgetService",
+      null
+    ],
+    [
+      "OtherService",
+      [
+        "database",
+        "cache"
+      ]
+    ],
+    [
+      "WidgetController",
+      null
+    ]
+  ],
+  "ctorOptional": [
+    [
+      "WidgetService",
+      []
+    ],
+    [
+      "OtherService",
+      [
+        1
+      ]
+    ],
+    [
+      "WidgetController",
+      []
+    ]
+  ],
+  "custom": [
+    {
+      "name": "cache:cacheable",
+      "metadata": {
+        "ttl": 60
+      },
+      "target": "[fn WidgetController]",
+      "propertyKey": "list"
+    }
+  ]
+}

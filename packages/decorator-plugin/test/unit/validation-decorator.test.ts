@@ -3,7 +3,7 @@ import { expect } from '@std/expect';
 
 import { Controller } from '../../src/decorators/controller.ts';
 import { Post } from '../../src/decorators/http.ts';
-import { Body } from '../../src/decorators/request.ts';
+import { Body, Params } from '../../src/decorators/params.ts';
 import { ValidateBody, ValidateParams, ValidateQuery } from '../../src/decorators/validation.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 
@@ -21,7 +21,8 @@ describe('Validation decorators', () => {
     class C {
       @Post('/')
       @ValidateBody(bodySchema)
-      create(@Body() body: unknown) {
+      @Params(Body())
+      create(body: unknown) {
         return body;
       }
     }

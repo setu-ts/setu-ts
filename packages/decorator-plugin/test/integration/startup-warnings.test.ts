@@ -15,9 +15,11 @@ import { createApplication } from '@setu-ts/kernel';
 import {
   clearParameterResolvers,
   Controller,
-  createParameterDecorator,
   Ctx,
+  CurrentUser,
+  Custom,
   Get,
+  Params,
   registerParameterResolver,
 } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
@@ -116,12 +118,11 @@ describe('startup warnings', () => {
   });
 
   it('warns about a custom parameter that no registered resolver can satisfy', async () => {
-    const Unregistered = (): ParameterDecorator => createParameterDecorator('never-registered');
-
     @Controller('/params')
     class ParamController {
       @Get('/')
-      read(@Unregistered() value: string) {
+      @Params(Custom<string>('never-registered'))
+      read(value: string) {
         return { value };
       }
     }
@@ -159,13 +160,13 @@ describe('startup warnings', () => {
   });
 
   it('does not warn for @Ctx, @CurrentUser, or a registered custom parameter', async () => {
-    const Tenant = (): ParameterDecorator => createParameterDecorator('current-tenant');
     registerParameterResolver('current-tenant', () => 'tenant-1');
 
     @Controller('/mixed')
     class MixedController {
       @Get('/')
-      read(@Ctx() _ctx: IRequestContext, @Tenant() tenant: string) {
+      @Params(Ctx(), CurrentUser(), Custom<string>('current-tenant'))
+      read(_ctx: IRequestContext, _user: unknown, tenant: string) {
         return { tenant };
       }
     }

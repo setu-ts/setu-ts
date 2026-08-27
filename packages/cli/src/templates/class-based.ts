@@ -63,24 +63,30 @@ export class GreetingService {
 `;
 
 /**
- * The example controller: routes by decorator, and its dependency declared with
- * parameter-level `@Inject`.
+ * The example controller: routes by decorator, its dependency declared in the
+ * class-position `@Inject` list, and its handler arguments in `@Params`.
  */
 const CONTROLLER_SOURCE =
-  `import { Controller, Get, Inject, Param } from '@setu-ts/decorator-plugin';
+  `import { Controller, Get, Inject, Param, Params } from '@setu-ts/decorator-plugin';
 import { GreetingService } from '../services/greeting.service.ts';
 
 /**
  * A decorated controller.
  *
- * The token in \`@Inject\` is required: type-inferred injection needs
- * \`emitDecoratorMetadata\`, which Deno does not support, so the parameter's type
- * cannot be read. The token binds to THIS argument by position, so reordering
- * the constructor cannot misinject.
+ * These are TC39 **standard** decorators, so the project needs no compiler
+ * option — and there is no parameter position in the proposal, which is why a
+ * dependency is named in the class-level \`@Inject\` list and a handler's
+ * arguments in \`@Params\`. Both are positional: the Nth entry binds the Nth
+ * argument.
+ *
+ * The token in \`@Inject\` is required because type-inferred injection needs
+ * \`emitDecoratorMetadata\`, which Deno does not support, so the parameter's
+ * type cannot be read.
  */
 @Controller('/greetings')
+@Inject('greeting-service')
 export class GreetingController {
-  constructor(@Inject('greeting-service') private readonly greetings: GreetingService) {}
+  constructor(private readonly greetings: GreetingService) {}
 
   @Get('/')
   index(): { message: string } {
@@ -88,7 +94,8 @@ export class GreetingController {
   }
 
   @Get('/:name')
-  byName(@Param('name') name: string): { message: string } {
+  @Params(Param('name'))
+  byName(name: string): { message: string } {
     return { message: this.greetings.greet(name) };
   }
 }

@@ -142,7 +142,7 @@ Dependency injection and decorators.
 - `@Controller` and `@Get` decorators
 - `@Injectable()` for service registration
 - `@Inject('token')` for constructor injection
-- Parameter decorators (`@Param`, `@Body`, `@Query`)
+- Positional parameter binding (`@Params(Param(…), Body(), Query(…))`)
 
 **Key code:**
 
@@ -157,10 +157,9 @@ class UserService {
 }
 
 @Controller('/users')
+@Inject('UserService')
 class UserController {
-  constructor(
-    @Inject('UserService') private readonly userService: UserService,
-  ) {}
+  constructor(private readonly userService: UserService) {}
 
   @Get()
   async list() {

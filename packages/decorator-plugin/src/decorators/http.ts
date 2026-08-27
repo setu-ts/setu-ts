@@ -9,8 +9,8 @@
  */
 import type { HttpMethod } from '@setu-ts/common';
 
-import { metadataStore } from '../metadata/metadata-store.ts';
-import { protoToCtor } from '../internal.ts';
+import { methodDecorator } from '../metadata/context-bridge.ts';
+import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
 
 /**
  * A factory producing a method decorator that registers a route for a given
@@ -18,7 +18,7 @@ import { protoToCtor } from '../internal.ts';
  *
  * @since 0.1.0
  */
-export type HttpMethodDecorator = (path?: string) => MethodDecorator;
+export type HttpMethodDecorator = (path?: string) => SetuMethodDecorator;
 
 /**
  * Creates an HTTP method decorator for the given verb.
@@ -27,11 +27,10 @@ export type HttpMethodDecorator = (path?: string) => MethodDecorator;
  * @returns A decorator factory
  */
 function createMethodDecorator(method: HttpMethod): HttpMethodDecorator {
-  return (path?: string): MethodDecorator => {
-    return (target, propertyKey) => {
-      metadataStore.addRouteBinding(protoToCtor(target), String(propertyKey), method, path ?? '');
-    };
-  };
+  return (path?: string): SetuMethodDecorator =>
+    methodDecorator((store, target, handler) => {
+      store.addRouteBinding(target, handler, method, path ?? '');
+    });
 }
 
 /**

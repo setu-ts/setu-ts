@@ -1562,7 +1562,7 @@ app.router.get('/health', {
 
 `authMiddleware` writes the authenticated principal to `ctx.request.user` (one of the two
 middleware-written fields on `IRequest` — the other is `tenant`, written by the multi-tenancy plugin
-— so the shipped `@CurrentUser` decorator resolves it).
+— so the shipped `CurrentUser()` parameter source resolves it).
 
 ```typescript
 app.router.get('/me', {
@@ -5815,13 +5815,13 @@ function is needed. In a class-based project the same path holds the `APP_SERVIC
 
 > **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
 > support (`--experimental-strip-types`) ERASES types without transforming code, so it cannot run a
-> legacy decorator — a bare `SyntaxError: Invalid or unexpected token` — or the constructor
-> parameter property `setu generate module` emits (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`).
-> `--experimental-transform-types` does not close it either: it handles the parameter property and
-> still rejects the decorator, because it does not enable `experimentalDecorators`. A generated Node
-> project therefore declares `tsx` in `devDependencies` and starts with `tsx main.ts`, reading the
-> `experimentalDecorators` its own `tsconfig.json` already sets. Bun compiles TypeScript outright
-> and Deno and Workers never invoke it, so no other target carries the dependency.
+> decorator — V8 has not shipped them, so even a TC39 **standard** decorator is a bare
+> `SyntaxError: Invalid or unexpected token` there — or the constructor parameter property
+> `setu generate module` emits (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). A generated Node project
+> therefore declares `tsx` in `devDependencies` and starts with `tsx main.ts`, which transforms
+> both; its `tsconfig.json` sets no decorator option, because standard decorators need none. Bun
+> compiles TypeScript outright and Deno and Workers never invoke it, so no other target carries the
+> dependency.
 
 > **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
 > `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, so a
@@ -6210,7 +6210,7 @@ Class-based (`--template class-based`, or any project holding `decorator-plugin`
 
 ```
 src/modules/<name>/<name>.service.ts        @Injectable, token '<name>-service'
-src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), parameter-level @Inject, @Ctx()
+src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), class-level @Inject, @Params(…, Ctx())
 src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
 src/modules/<name>/index.ts                 the module's own re-exports
 src/modules/index.ts                        the aggregate barrel  (managed — regenerated)
@@ -6242,13 +6242,13 @@ holding both `<name>.controller.ts` and `<name>.service.ts` is treated as a modu
 folders under `src/modules/` (a shared-helpers directory, say) are left out of the barrel rather
 than breaking it.
 
-The emitted controller's handlers take **only decorated parameters** and return plain values, which
-the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a style choice: it
-builds a handler's argument list from parameter metadata alone and never passes the request context
-positionally, so a `ctx: IRequestContext` parameter arrives `undefined` and the first `ctx.response`
-throws — a 500 on every request. There is no built-in decorator for the context, so a handler that
-needs it (to set a status code, or to stream) belongs on `app.router.get(...)` — see
-`setu generate route`.
+The emitted controller's handlers take **only the arguments their `@Params(...)` names** and return
+plain values, which the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a
+style choice: it builds a handler's argument list from that declaration alone and never passes the
+request context positionally, so an undeclared `ctx: IRequestContext` parameter arrives `undefined`
+and the first `ctx.response` throws — a 500 on every request. A handler that needs the context (to
+set a status code, or to stream) declares `Ctx()` among its sources, which is how the generated
+`create` answers `201`.
 
 The service's `@Injectable` token is explicit (`'<name>-service'`) and the controller's `@Inject`
 names that exact string, because `emitDecoratorMetadata` is unavailable under Deno, so a parameter's
@@ -7083,28 +7083,40 @@ app.middleware.add(new AuthMiddleware(auth));
 ### Using Built-in Decorators
 
 ```typescript
-import { Body, Controller, Get, Params, Post } from '@setu-ts/decorator-plugin';
-import { CurrentUser, UseGuards } from '@setu-ts/auth-plugin';
+import {
+  ApiOperation,
+  ApiTags,
+  Body,
+  Controller,
+  CurrentUser,
+  Get,
+  Param,
+  Params,
+  Post,
+  UseGuards,
+} from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
+@ApiTags('Users')
 class UserController {
   constructor(private userService: UserService) {}
 
   @Get('/')
-  @ApiTags('Users')
-  @ApiOperation('List all users')
+  @ApiOperation({ summary: 'List all users' })
   async list() {
     return this.userService.findAll();
   }
 
   @Get('/:id')
-  async getById(@Params('id') id: string) {
+  @Params(Param('id'))
+  async getById(id: string) {
     return this.userService.findById(id);
   }
 
   @Post('/')
   @UseGuards(requireAuth())
-  async create(@Body() body: CreateUserDto, @CurrentUser() user: User) {
+  @Params(Body(), CurrentUser())
+  async create(body: CreateUserDto, user: User) {
     return this.userService.create(body, user.id);
   }
 }
@@ -7113,21 +7125,22 @@ class UserController {
 ### Defining Custom Decorators
 
 ```typescript
-import { createDecorator } from '@setu-ts/decorator-plugin';
+import { Controller, createDecorator, Custom, Get, Params } from '@setu-ts/decorator-plugin';
 
 // Method decorator
 export const Cacheable = (ttl: number) => createDecorator('cacheable', { ttl });
 
-// Parameter decorator
-export const CurrentTenant = () => createParameterDecorator('current-tenant');
+// Parameter source, declared inside @Params(...)
+export const CurrentTenant = () => Custom<string>('current-tenant');
 
 // Usage
 @Controller('/api')
 class ApiController {
   @Get('/data')
   @Cacheable(3600)
-  async getData(@CurrentTenant() tenant: Tenant) {
-    return this.service.getDataForTenant(tenant.id);
+  @Params(CurrentTenant())
+  async getData(tenantId: string) {
+    return this.service.getDataForTenant(tenantId);
   }
 }
 ```
@@ -7403,7 +7416,8 @@ class UserController {
   @UseGuards(requireAuth())
   @ValidateBody(CreateUserSchema)
   @ApiResponse(201, UserSchema)
-  async create(@Body() body: CreateUserDto) {
+  @Params(Body())
+  async create(body: CreateUserDto) {
     return this.userService.create(body);
   }
 }
@@ -7665,7 +7679,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `encodeFrameData(data)`                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                           |
 | `decodeFrameData(payload)`             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `createCachedProbe(options)`           | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false` |
-| `parseCookie(header)`                  | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `@Cookie` both need it and no plugin may import another                                                                                                                                                                                                                                |
+| `parseCookie(header)`                  | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `Cookie()` source both need it and no plugin may import another                                                                                                                                                                                                                        |
 | `serializeCookie(n, v, a?)`            | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                                                                                                                                                                                                |
 | `isWorkerReadySignal(m)`               | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `isWorkerTaskRequest(m)`               | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -7683,7 +7697,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `brandErrorResponder(fn, r)`           | function | Attaches `errorHandler`'s resolved `IErrorResponder` to its middleware function under `ERROR_RESPONDER_BRAND`, so the kernel — which runs the drain `503`, the malformed-request `400`, and the request hooks BEFORE the pipeline — can read the same responder at startup (M70f re-review)                                                                                                                                                                           |
 | `errorResponderOf(fn)`                 | function | Reads the brand off a middleware function, returning the attached `IErrorResponder` (or `undefined`). The kernel's only route to the resolved formatter for the pre-pipeline sites                                                                                                                                                                                                                                                                                    |
 | `ERROR_RESPONDER_BRAND`                | const    | A `Symbol.for` brand pairing with the two functions above; `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                             |
-| `validatedStateKey(target)`            | function | Returns `` `validation-plugin:validated-${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `@Body`/`@Query`/`@Param` read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                             |
+| `validatedStateKey(target)`            | function | Returns `` `validation-plugin:validated-${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `Body()`/`Query()`/`Param()` sources read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                  |
 | `CLIENT_IP_STATE_KEY`                  | const    | `http-security-plugin:client-ip`, the cross-package key `ipSecurityMiddleware` writes and `rateLimitMiddleware` reads                                                                                                                                                                                                                                                                                                                                                 |
 | `sealRequestIdentity(request)`         | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                        |
 | `replacePrincipal(request, principal)` | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -8310,57 +8324,70 @@ they write to the shared singleton regardless, but only the plugin reads it. Imp
 **Milestone 9**; this section is the authoritative export list (AI_GUIDELINES §10.5). All exports
 carry full JSDoc.
 
-> Requires `experimentalDecorators` compiler support (enabled in the package `deno.json`). Legacy
-> TypeScript decorator semantics are used; no reflection metadata (`emitDecoratorMetadata`) is
-> required.
+> **TC39 standard decorators — no compiler option required.** The surface needs no
+> `experimentalDecorators`, no `emitDecoratorMetadata`, and no `compilerOptions` entry of any kind:
+> Deno and Bun parse standard decorators unconfigured, and declaring an option would replace Deno's
+> default set. Node needs a transform (`tsx`) because V8 has not shipped decorators.
+>
+> The standard proposal has **no parameter position**, so handler arguments are declared at the
+> method level with `@Params(...)` and constructor dependencies at the class level with
+> `@Inject(...)`; both are positional, the Nth entry binding the Nth argument. `@Params` is checked
+> against the handler's own signature, which the legacy parameter decorators never were.
 
 ### Values (decorator-plugin exports)
 
-| Export                                               | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPlugin`                                    | function | Plugin factory — registers `MetadataStore` and routes/services                                                                                                                                                                                                                                                                                                                                                                               |
-| `MetadataStore`                                      | class    | `IMetadataStore` implementation (the concrete store)                                                                                                                                                                                                                                                                                                                                                                                         |
-| `metadataStore`                                      | value    | The process-wide singleton decorators write to and the plugin reads                                                                                                                                                                                                                                                                                                                                                                          |
-| `Controller`                                         | function | Class decorator — base path prefix                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `Version`                                            | function | Class decorator — API version prefix                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options` | function | HTTP method decorators                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `Body`/`Query`/`Param`/`Header`/`Cookie`/`Ctx`       | function | Request parameter decorators; `Ctx` injects the active `IRequestContext` without reserving the application custom type name `context`                                                                                                                                                                                                                                                                                                        |
-| `Injectable`                                         | function | Class decorator — marks a class for DI registration                                                                                                                                                                                                                                                                                                                                                                                          |
-| `Inject`                                             | function | Constructor-parameter decorator (preferred) OR class decorator (deprecated) — declares constructor injection tokens                                                                                                                                                                                                                                                                                                                          |
-| `Optional`                                           | function | Constructor-parameter decorator — pairs with `@Inject`; injects `undefined` when the token has no provider                                                                                                                                                                                                                                                                                                                                   |
-| `Roles`/`Permissions`                                | function | Class/method decorator — authorization requirements                                                                                                                                                                                                                                                                                                                                                                                          |
-| `CurrentUser`                                        | function | Parameter decorator — injects `ctx.request.user`                                                                                                                                                                                                                                                                                                                                                                                             |
-| `Public`                                             | function | Method decorator — bypasses auth                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `UseGuards`/`UseInterceptors`/`UseFilters`           | function | Class/method pipeline decorators                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `ValidateBody`/`ValidateQuery`/`ValidateParams`      | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route |
-| `ApiTags`                                            | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `ApiOperation`/`ApiResponse`                         | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                               |
-| `createDecorator`                                    | function | Custom class/method decorator factory                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `createParameterDecorator`                           | function | Custom parameter decorator factory                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `resolveParameters`                                  | function | Resolves an ordered argument array from parameter metadata                                                                                                                                                                                                                                                                                                                                                                                   |
-| `resolveParameter`                                   | function | Resolves a single parameter value                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `registerParameterResolver`                          | function | Registers a resolver for a custom parameter type                                                                                                                                                                                                                                                                                                                                                                                             |
-| `getParameterResolver`                               | function | Looks up a custom parameter resolver                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `clearParameterResolvers`                            | function | Clears the custom resolver registry (tests)                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `parseCookies`                                       | function | Parses a `Cookie` header into a name→value record                                                                                                                                                                                                                                                                                                                                                                                            |
-| `discoverControllers`                                | function | Auto-discovers decorated classes from a directory                                                                                                                                                                                                                                                                                                                                                                                            |
+| Export                                                       | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPlugin`                                            | function | Plugin factory — registers `MetadataStore` and routes/services                                                                                                                                                                                                                                                                                                                                                                               |
+| `MetadataStore`                                              | class    | `IMetadataStore` implementation (the concrete store)                                                                                                                                                                                                                                                                                                                                                                                         |
+| `metadataStore`                                              | value    | The process-wide singleton decorators write to and the plugin reads                                                                                                                                                                                                                                                                                                                                                                          |
+| `Controller`                                                 | function | Class decorator — base path prefix                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `Version`                                                    | function | Class decorator — API version prefix                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `Get`/`Post`/`Put`/`Patch`/`Delete`/`Head`/`Options`         | function | HTTP method decorators                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `Params`                                                     | function | Method decorator binding handler arguments to sources, positionally; type-checked against the handler's signature                                                                                                                                                                                                                                                                                                                            |
+| `Injectable`                                                 | function | Class decorator — marks a class for DI registration                                                                                                                                                                                                                                                                                                                                                                                          |
+| `Inject`                                                     | function | Class decorator declaring constructor injection tokens, one per argument in argument order                                                                                                                                                                                                                                                                                                                                                   |
+| `Optional`                                                   | function | Wraps a token inside `@Inject(...)`; that argument receives `undefined` when the token has no provider                                                                                                                                                                                                                                                                                                                                       |
+| `Roles`/`Permissions`                                        | function | Class/method decorator — authorization requirements                                                                                                                                                                                                                                                                                                                                                                                          |
+| `Public`                                                     | function | Method decorator — bypasses auth                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `UseGuards`/`UseInterceptors`/`UseFilters`                   | function | Class/method pipeline decorators                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `ValidateBody`/`ValidateQuery`/`ValidateParams`              | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route |
+| `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `ApiOperation`/`ApiResponse`                                 | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                               |
+| `createDecorator`                                            | function | Custom class/method decorator factory                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `Body`/`Query`/`Param`/`Header`/`Cookie`/`CurrentUser`/`Ctx` | function | Built-in parameter SOURCES, declared inside `@Params(...)`; `Ctx` yields the active `IRequestContext` without reserving the application custom type name `context`                                                                                                                                                                                                                                                                           |
+| `Custom`                                                     | function | Declares a parameter source resolved by a resolver registered under the same name                                                                                                                                                                                                                                                                                                                                                            |
+| `resolveParameters`                                          | function | Resolves an ordered argument array from parameter metadata                                                                                                                                                                                                                                                                                                                                                                                   |
+| `resolveParameter`                                           | function | Resolves a single parameter value                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `registerParameterResolver`                                  | function | Registers a resolver for a custom parameter type                                                                                                                                                                                                                                                                                                                                                                                             |
+| `getParameterResolver`                                       | function | Looks up a custom parameter resolver                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `clearParameterResolvers`                                    | function | Clears the custom resolver registry (tests)                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `parseCookies`                                               | function | Parses a `Cookie` header into a name→value record                                                                                                                                                                                                                                                                                                                                                                                            |
+| `discoverControllers`                                        | function | Auto-discovers decorated classes from a directory                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### Types
 
-| Export                    | Kind | Purpose                                                                                                               |
-| ------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPluginOptions`  | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `enforceSchemas?`) |
-| `InjectableOptions`       | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                      |
-| `ApiOperationConfig`      | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                             |
-| `ApiResponseConfig`       | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                     |
-| `HttpMethodDecorator`     | type | `(path?: string) => MethodDecorator`                                                                                  |
-| `MiddlewareLike`          | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                     |
-| `CustomParameterResolver` | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                     |
-| `ParameterMetadata`       | type | Parameter metadata captured by parameter decorators                                                                   |
-| `ParameterType`           | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                    |
-| `DiscoveryOptions`        | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                |
-| `DiscoveryResult`         | type | Result of discovery (`controllers`, `services`, `errors`)                                                             |
-| `ModuleImporter`          | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                  |
+| Export                       | Kind | Purpose                                                                                                               |
+| ---------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`     | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `enforceSchemas?`) |
+| `InjectableOptions`          | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                      |
+| `ApiOperationConfig`         | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                             |
+| `ApiResponseConfig`          | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                     |
+| `HttpMethodDecorator`        | type | `(path?: string) => SetuMethodDecorator`                                                                              |
+| `ParamSource`                | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                            |
+| `SourceValues`               | type | Maps a source tuple onto the handler parameter tuple it binds                                                         |
+| `InjectToken`                | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                       |
+| `OptionalToken`              | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                             |
+| `SetuClassDecorator`         | type | A standard class decorator that records metadata and leaves the class unchanged                                       |
+| `SetuMethodDecorator`        | type | A standard method decorator that records metadata and leaves the method unchanged                                     |
+| `SetuClassOrMethodDecorator` | type | A standard decorator valid in either position, discriminating on `context.kind`                                       |
+| `MiddlewareLike`             | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                     |
+| `CustomParameterResolver`    | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                     |
+| `ParameterMetadata`          | type | Parameter metadata captured by a `@Params(...)` source                                                                |
+| `ParameterType`              | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                    |
+| `DiscoveryOptions`           | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                |
+| `DiscoveryResult`            | type | Result of discovery (`controllers`, `services`, `errors`)                                                             |
+| `ModuleImporter`             | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                  |
 
 Contract notes:
 
@@ -8376,30 +8403,30 @@ Contract notes:
   decorated schema stays description-only (OpenAPI) and ONE warning per route names the controller,
   handler, affected targets and `ValidationPlugin`; nothing throws. `enforceSchemas: false` keeps
   schemas description-only and silences the warning.
-- **`@Body()`/`@Query()`/`@Param()` read the VALIDATED value when one exists.** Each checks
-  `ctx.state` under `validatedStateKey(target)` first — presence-tested with `has`, so a validated
-  `null` or `0` is honoured — and falls back to today's raw source when absent. A Zod `transform` or
-  `default` therefore reaches the handler instead of being discarded. `@Header` and `@Cookie`
-  deliberately read their raw sources: headers resolve case-insensitively through
-  `headers.get(name)`, which the validated record would break, and no schema key exists for cookies.
+- **`Body()`/`Query()`/`Param()` read the VALIDATED value when one exists.** Each checks `ctx.state`
+  under `validatedStateKey(target)` first — presence-tested with `has`, so a validated `null` or `0`
+  is honoured — and falls back to the raw source when absent. A Zod `transform` or `default`
+  therefore reaches the handler instead of being discarded. `Header()` and `Cookie()` deliberately
+  read their raw sources: headers resolve case-insensitively through `headers.get(name)`, which the
+  validated record would break, and no schema key exists for cookies.
 - **No reflection**: metadata is stored in plain `Map`s keyed by class reference, not via
   `Reflect.getMetadata()`. No `reflect-metadata` dependency.
-- **Decorator composition**: parameter and cross-cutting decorators (`@Body`, `@ValidateBody`,
-  `@Roles`, …) run before the HTTP-verb decorator; the store accumulates per-method and derives one
-  `RouteMetadata` per (method, HTTP verb) at read time, so metadata is correct regardless of
-  application order. Class-level guards/interceptors/middleware run before method-level;
-  method-level `@Roles`/`@Permissions` override class-level; `@Public` sets a bypass flag.
+- **Decorator composition**: cross-cutting decorators (`@Params`, `@ValidateBody`, `@Roles`, …) run
+  before the HTTP-verb decorator; the store accumulates per-method and derives one `RouteMetadata`
+  per (method, HTTP verb) at read time, so metadata is correct regardless of application order.
+  Class-level guards/interceptors/middleware run before method-level; method-level
+  `@Roles`/`@Permissions` override class-level; `@Public` sets a bypass flag.
 - **Handler return values**: a controller method either returns a value (serialized as JSON by the
   plugin's handler wrapper) or returns a `HandlerResult` from `ctx.response.*`.
 - **Discovery**: `discoverControllers` walks via `IRuntimeServices.fs` (absent on edge platforms →
   empty result with a warning) and loads modules with `await import()` (no `require`/`eval`).
   Snapshot-diff against the store attributes newly-decorated classes to each file. Discovery
   failures never crash the application.
-- **`@Ctx` response control**: `Ctx` resolves the live `IRequestContext`, so a decorated handler can
-  configure `ctx.response` (status, headers, or a stream) and return its `HandlerResult`; it is a
-  built-in custom parameter type and needs no resolver registration. It is recognised by a marker
+- **`Ctx()` response control**: `Ctx` resolves the live `IRequestContext`, so a decorated handler
+  can configure `ctx.response` (status, headers, or a stream) and return its `HandlerResult`; it is
+  a built-in custom parameter type and needs no resolver registration. It is recognised by a marker
   registered with `Symbol.for`, so it keeps working if two copies of the package share a process,
-  and an application's own `createParameterDecorator('context')` still reaches its own resolver.
+  and an application's own `Custom('context')` still reaches its own resolver.
 - **Startup diagnostics**: when a logger is registered, `DecoratorPlugin.register()` warns (never
   throws) about two silent misconfigurations. A class passed in `controllers` that carries no
   `@Controller` metadata registers no routes — the usual cause is two copies of the package, where
@@ -8410,68 +8437,65 @@ Contract notes:
   `app.start()`.
 - **Custom decorators**: `createDecorator` records class/method metadata replayed against
   `DecoratorHandler`s registered via `ctx.decorators.register()` (collected under
-  `CAPABILITIES.DECORATOR_HANDLER`). `createParameterDecorator` records parameter metadata resolved
+  `CAPABILITIES.DECORATOR_HANDLER`). `Custom(name, metadata?)` declares a parameter source resolved
   by `resolveParameters` via `registerParameterResolver`; the `context` and `current-user` built-ins
   resolve directly to `ctx` and `ctx.request.user`, respectively.
-- **`@Inject` has two positions, and a token is always required.** The preferred form is on each
-  constructor parameter, binding one token to that argument by position:
+- **`@Inject` is a class decorator, and a token is always required.** The list is positional: the
+  Nth entry names the Nth constructor argument. The TC39 proposal has no parameter position, so
+  there is nowhere else to put it.
 
   ```typescript
   @Injectable({ token: 'user-repository' })
+  @Inject(CAPABILITIES.DATABASE, CAPABILITIES.LOGGER)
   class UserRepository {
-    constructor(
-      @Inject(CAPABILITIES.DATABASE) private db: IDatabase,
-      @Inject(CAPABILITIES.LOGGER) private logger: ILogger,
-    ) {}
+    constructor(private db: IDatabase, private logger: ILogger) {}
   }
   ```
 
-  The class-level positional list is **deprecated** but keeps working for the whole `0.x` line
-  (AI_GUIDELINES §9.2):
+  Wrap an entry in `Optional(...)` to let that argument receive `undefined` when the token has no
+  provider. `Optional` means the dependency is **absent**, not that construction may fail: an error
+  raised while building a token that IS provided propagates rather than being swallowed.
 
   ```typescript
-  @Injectable({ token: 'user-repository' })
-  @Inject('database', 'logger') // deprecated — reordering the constructor misinjects silently
-  class UserRepository {
-    constructor(db: IDatabase, logger: ILogger) {}
+  @Injectable()
+  @Inject(CAPABILITIES.DATABASE, Optional(CAPABILITIES.CACHE))
+  class ReportService {
+    constructor(private db: IDatabase, private cache?: ICacheStore) {}
   }
   ```
 
   A token cannot be inferred from the parameter's type: that needs `emitDecoratorMetadata`, which
-  Deno does not support, and no source in this repo reads `design:paramtypes`. Three rules follow,
-  each a throw rather than a silent misinjection:
-  - Mixing the two forms on one class throws at `register()`, naming the class. `mergeService`
-    replaces `inject` wholesale, so any precedence rule would be invisible at the call site.
-  - Leaving a constructor parameter undecorated below the last injected one throws, naming the class
-    and the index — a hole would shift every later argument.
-  - `@Inject` on a **method** parameter throws; method parameters bind with
-    `@Body`/`@Query`/`@Param`/`@Header`/`@Cookie`.
+  Deno does not support, and no source in this repo reads `design:paramtypes`. A list shorter than
+  the constructor leaves the trailing arguments `undefined` — a positional list cannot have gaps, so
+  the legacy "parameter N has no `@Inject` token" and "declares both `@Inject` forms" refusals no
+  longer have any reachable input and are gone. Method parameters bind with `@Params(...)`.
 
-  Constructor parameter decorators evaluate in reverse argument order, so tokens are stored keyed by
-  index and assembled ascending; declaration order is what reaches the constructor.
+  The list is read in declaration order and reaches the constructor in that order. The legacy
+  index-keyed assembly is gone with the parameter form it existed for: parameter decorators
+  evaluated in REVERSE argument order, so tokens had to be stored by index and re-sorted.
 - **The container is preferred whenever the class is registered in it**, with or without
   `@Injectable`. A `@Controller` carries no `@Injectable`, so a constructor-injected controller in a
   `DiPlugin` application resolves through the container — where its dependencies live.
-- **`@Optional` marks an injected dependency absent-tolerant, not construction fallible.** It pairs
-  with `@Inject` on the same parameter (either order) and never replaces it — a token is still
-  required, for the same `emitDecoratorMetadata` reason above:
+- **`Optional(token)` marks an injected dependency absent-tolerant, not construction fallible.** It
+  wraps an entry inside the class-level `@Inject(...)` list, in the position of the argument it
+  describes, and never replaces the token — one is still required, for the same
+  `emitDecoratorMetadata` reason above:
 
   ```typescript
   @Injectable({ token: 'report-service' })
+  @Inject(CAPABILITIES.DATABASE, Optional(CAPABILITIES.CACHE))
   class ReportService {
-    constructor(
-      @Inject(CAPABILITIES.DATABASE) private db: IDatabase,
-      @Optional() @Inject(CAPABILITIES.CACHE) private cache?: ICacheService,
-    ) {}
+    constructor(private db: IDatabase, private cache?: ICacheService) {}
   }
   ```
 
   When the token has no provider the argument receives `undefined`; when it HAS one it is resolved
   normally, so an error raised while building it — a circular dependency, a throwing factory —
-  propagates rather than being masked as absence. Two misuses throw at `register()`: `@Optional` on
-  a parameter with no `@Inject` (it names no dependency), and `@Optional` combined with the
-  deprecated class-level `@Inject(...)` list (which cannot express per-argument optionality).
-  `@Optional` on a **method** parameter throws at class-definition time.
+  propagates rather than being masked as absence. `Optional` cannot be misplaced any more — it is an
+  argument to `@Inject(...)` rather than a decorator, so the three legacy refusals it needed have no
+  reachable input and are gone. One throw remains, for a caller writing to the store directly: an
+  optional index that the `@Inject(...)` list names no token for is refused at `register()`, since
+  it would otherwise pass `undefined` for an argument nothing declares.
 
   Both construction paths honor it identically — the DI container when one is registered, the
   kernel's service registry otherwise. One consequence is worth knowing on the container path: a

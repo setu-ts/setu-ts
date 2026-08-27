@@ -76,16 +76,31 @@ describe('generated start-task permissions', () => {
 });
 
 describe('generated Deno compiler options', () => {
-  it('gives the decorator-hosting templates the decorator option', () => {
+  it('gives the decorator-hosting templates NO compiler option at all', () => {
+    // The decorator surface is TC39 standard decorators, which Deno parses
+    // unconfigured. Declaring any option here would also replace Deno's whole
+    // default set (M63 D3), so a template needing none declares none.
     for (const name of ['class-based'] as const) {
-      expect(compilerOptionsOf(getTemplate(name)!)?.['experimentalDecorators']).toBe(true);
+      expect(compilerOptionsOf(getTemplate(name)!)).toBeUndefined();
     }
+  });
+
+  it('stamps experimentalDecorators nowhere', () => {
+    // The option is deprecated in Deno and its removal would make a legacy
+    // parameter decorator UNPARSEABLE, not merely untyped. Nothing this CLI
+    // writes may depend on it.
+    // Iterating the registry rather than a hardcoded list, so a template added
+    // later cannot reintroduce the option unnoticed.
+    for (const { name } of listTemplates()) {
+      expect(compilerOptionsOf(getTemplate(name)!)?.['experimentalDecorators'])
+        .toBeUndefined();
+    }
+    expect(compilerOptionsOf(MINIMAL_HOST)?.['experimentalDecorators']).toBeUndefined();
   });
 
   it('gives full-stack the JSX options and NOT the decorator one', () => {
     // Vite reads tsconfig.json and `deno check` reads deno.json; a project
-    // carrying only the first fails to type-check every .tsx route. The
-    // decorator option is absent because this template emits no decorated class.
+    // carrying only the first fails to type-check every .tsx route.
     const options = compilerOptionsOf(getTemplate('full-stack')!);
 
     expect(options?.['jsx']).toBe('react-jsx');
@@ -93,11 +108,10 @@ describe('generated Deno compiler options', () => {
     expect(options?.['experimentalDecorators']).toBeUndefined();
   });
 
-  it('keeps the decorator option on the no-template host', () => {
-    // Nothing this host emits is decorated, but a developer who adds
-    // decorator-plugin by hand should not have to discover a manifest edit.
-    // It is free here precisely because this host emits no JSX.
-    expect(compilerOptionsOf(MINIMAL_HOST)?.['experimentalDecorators']).toBe(true);
+  it('gives the no-template host no compiler options', () => {
+    // A developer who adds decorator-plugin by hand needs no manifest edit:
+    // standard decorators need no compiler option on any supported runtime.
+    expect(compilerOptionsOf(MINIMAL_HOST)).toBeUndefined();
   });
 
   it('omits the key entirely when a host declares none', () => {

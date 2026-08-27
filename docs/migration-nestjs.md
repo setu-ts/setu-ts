@@ -130,13 +130,12 @@ app.router.post('/users', async (ctx) => {
 ### Setu-TS (With Decorators)
 
 ```typescript
-import { Body, Controller, Get, Inject, Param, Post } from '@setu-ts/decorator-plugin';
+import { Body, Controller, Get, Inject, Param, Params, Post } from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
+@Inject('UserService')
 export class UsersController {
-  constructor(
-    @Inject('UserService') private readonly userService: UserService,
-  ) {}
+  constructor(private readonly userService: UserService) {}
 
   @Get()
   async findAll() {
@@ -144,12 +143,14 @@ export class UsersController {
   }
 
   @Get('/:id')
-  async findOne(@Param('id') id: string) {
+  @Params(Param('id'))
+  async findOne(id: string) {
     return this.userService.findById(id);
   }
 
   @Post()
-  async create(@Body() dto: CreateUserDto) {
+  @Params(Body())
+  async create(dto: CreateUserDto) {
     return this.userService.create(dto);
   }
 }
@@ -162,9 +163,7 @@ export class UsersController {
 ```typescript
 @Injectable()
 export class UserService {
-  constructor(
-    @InjectRepository(User) private readonly userRepository: Repository<User>,
-  ) {}
+  constructor(@InjectRepository(User) private readonly userRepository: Repository<User>) {}
 }
 ```
 
@@ -174,10 +173,9 @@ export class UserService {
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 
 @Injectable({ token: 'UserService' })
+@Inject('UserRepository')
 export class UserService {
-  constructor(
-    @Inject('UserRepository') private readonly userRepository: UserRepository,
-  ) {}
+  constructor(private readonly userRepository: UserRepository) {}
 }
 
 // Register the service with the DecoratorPlugin, or programmatically:
@@ -439,9 +437,7 @@ export class User {
 
 @Injectable()
 export class UserService {
-  constructor(
-    @InjectRepository(User) private readonly repo: Repository<User>,
-  ) {}
+  constructor(@InjectRepository(User) private readonly repo: Repository<User>) {}
 
   async findAll() {
     return this.repo.find();

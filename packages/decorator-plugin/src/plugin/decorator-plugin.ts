@@ -93,66 +93,28 @@ function serviceToken(meta: ServiceMetadata | undefined, target: Constructor): s
 }
 
 /**
- * Resolves the constructor injection tokens for a class, from whichever
- * `@Inject` form it uses.
+ * Resolves which constructor arguments a class marked optional, validating that
+ * each one names an argument the `@Inject` list actually covers.
  *
- * The parameter-level form is preferred; the class-level list is the deprecated
- * fallback. Carrying both throws, because `mergeService` replaces `inject`
- * wholesale, so any precedence rule would be invisible at the call site and
- * would depend on decorator evaluation order.
+ * `@Inject(a, Optional(b))` cannot produce an out-of-range index — the marker
+ * sits in the position of the argument it describes — but `mergeCtorOptional`
+ * is public store API, so a direct caller can, and an index past the end would
+ * otherwise pass `undefined` for an argument no token names.
  *
- * @throws {Error} When the class carries both `@Inject` forms.
- */
-function effectiveInject(
-  target: Constructor,
-  meta: ServiceMetadata | undefined,
-): readonly string[] | undefined {
-  const fromParams = metadataStore.ctorInject(target);
-  if (fromParams !== undefined && meta?.inject !== undefined) {
-    throw new Error(
-      `${className(target)} declares both a class-level @Inject(...) and parameter-level @Inject ` +
-        `decorators. Use one form — prefer @Inject on each constructor parameter; the class-level ` +
-        `token list is deprecated.`,
-    );
-  }
-  return fromParams ?? meta?.inject;
-}
-
-/**
- * Resolves which constructor arguments a class marked `@Optional`, validating
- * that each one also carries an `@Inject` token.
- *
- * A token can never be inferred (`emitDecoratorMetadata` is unsupported on
- * Deno), so `@Optional` alone names no dependency. It is refused at `register()`
- * rather than silently passing `undefined`, which would look identical to a
- * genuinely absent optional dependency.
- *
- * @throws {Error} When a parameter is `@Optional` without `@Inject`, or when the
- * class uses the deprecated class-level `@Inject(...)` list, which has no way to
- * express per-argument optionality.
+ * @throws {Error} When an optional index names no injected argument.
  */
 function effectiveOptional(
   target: Constructor,
-  meta: ServiceMetadata | undefined,
   inject: readonly string[] | undefined,
 ): ReadonlySet<number> {
   const optional = metadataStore.ctorOptional(target);
-  if (optional.size === 0) {
-    return optional;
-  }
-  if (meta?.inject !== undefined) {
-    throw new Error(
-      `${className(target)} combines @Optional with the deprecated class-level @Inject(...) ` +
-        `list, which cannot express per-argument optionality. Move to parameter-level @Inject.`,
-    );
-  }
   for (const index of optional) {
     if (inject === undefined || inject[index] === undefined) {
       throw new Error(
-        `${className(target)} constructor parameter ${index} is @Optional but carries no ` +
-          `@Inject token. @Optional marks an injected dependency as absent-tolerant; it does ` +
-          `not name one — type-inferred injection needs emitDecoratorMetadata, which Deno ` +
-          `does not support.`,
+        `${className(target)} marks constructor parameter ${index} optional, but the ` +
+          `@Inject(...) list names no token for it. Optional marks an injected dependency as ` +
+          `absent-tolerant; it does not name one — type-inferred injection needs ` +
+          `emitDecoratorMetadata, which Deno does not support.`,
       );
     }
   }
@@ -214,8 +176,8 @@ function registerInContainer(
   if (container.has(token)) {
     return;
   }
-  const inject = effectiveInject(target, meta);
-  const optional = effectiveOptional(target, meta, inject);
+  const inject = meta?.inject;
+  const optional = effectiveOptional(target, inject);
   const opts: ProviderOptions | undefined = meta?.scope !== undefined
     ? { scope: meta.scope }
     : undefined;
@@ -262,9 +224,9 @@ function instantiate(target: Constructor, ctx: IPluginContext): unknown {
       return container.resolve<unknown>(token);
     }
   }
-  const inject = effectiveInject(target, meta);
+  const inject = meta?.inject;
   if (inject !== undefined && inject.length > 0) {
-    const optional = effectiveOptional(target, meta, inject);
+    const optional = effectiveOptional(target, inject);
     const deps = resolveDeps(
       inject,
       optional,

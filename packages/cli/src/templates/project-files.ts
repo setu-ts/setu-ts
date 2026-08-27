@@ -975,8 +975,6 @@ function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
     module: 'ESNext',
     moduleResolution: 'bundler',
     strict: true,
-    // Required by the decorator and OpenAPI plugins.
-    experimentalDecorators: true,
     verbatimModuleSyntax: true,
     skipLibCheck: true,
     ...manifest?.tsconfigCompilerOptions,
@@ -989,10 +987,10 @@ function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
  * Kept apart from {@linkcode tsconfigOptions} because the two files are read by
  * different toolchains: Vite and `tsc` read `tsconfig.json`, while `deno check`
  * and `deno task start` read this one. The options are entirely the template's
- * to declare — a template emitting decorated classes needs
- * `experimentalDecorators` and one emitting JSX needs `jsx`, and neither needs
- * either setting.
- * use for the other's.
+ * to declare — a template emitting JSX needs `jsx`, and one emitting decorated
+ * classes needs nothing at all, because the decorator surface is TC39 standard
+ * decorators. Declaring any option REPLACES Deno's default set (M63 D3), so a
+ * template that needs none declares none rather than an empty object.
  *
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The compiler options, or undefined when the template declares none,
@@ -1037,17 +1035,17 @@ function npmScripts(
  *
  * NOT `node --experimental-strip-types`. Node's built-in TypeScript support
  * ERASES types without transforming code, so it cannot run the decorated half
- * of this framework: a legacy decorator is a bare
- * `SyntaxError: Invalid or unexpected token`, and the constructor parameter
- * property `setu generate module` emits is
- * `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. `--experimental-transform-types` does
- * not close it either — it handles the parameter property but still rejects the
- * decorator, because it does not enable `experimentalDecorators`.
+ * of this framework: V8 has not shipped decorators, so even a TC39 STANDARD
+ * decorator is a bare `SyntaxError: Invalid or unexpected token` there, and the
+ * constructor parameter property `setu generate module` emits needs a transform
+ * of its own.
  *
- * Measured on Node v24: with `--experimental-strip-types` a scaffolded Node
- * project boots until the first `setu generate service|controller|module`, and
- * the former class template never booted at all. `tsx` runs all of them, reading the
- * `experimentalDecorators` the generated `tsconfig.json` already sets.
+ * Re-measured on Node v24 after the move to standard decorators: plain `node`
+ * and `node --experimental-strip-types` both reject a standard method decorator
+ * outright, while `tsx` runs the decorator, the parameter property, and
+ * `context.metadata` correctly. The generated `tsconfig.json` needs no
+ * `experimentalDecorators` — nothing this framework emits is a legacy decorator
+ * any more.
  */
 const NODE_RUNNER = 'tsx';
 
@@ -1289,7 +1287,8 @@ ${PROGRAM_NAME} generate --help
               : {}),
             // Declared by the template rather than fixed here: `deno check` reads
             // this file, and what it needs depends on what the template emits —
-            // decorated classes need `experimentalDecorators`, JSX needs `jsx`.
+            // JSX needs `jsx`, and decorated classes need nothing, because the
+            // decorator surface is TC39 standard decorators.
             ...(compilerOptions === undefined ? {} : { compilerOptions }),
             imports: jsrImports(host, runtime),
           },

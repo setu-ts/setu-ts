@@ -155,12 +155,12 @@ console.log('Server running on http://localhost:3000');
 ```
 
 > **Node needs a transform, not just type stripping.** `--experimental-strip-types` erases types
-> without transforming code, so it cannot run a legacy decorator (a bare `SyntaxError`) or a
-> constructor parameter property (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`), and
-> `--experimental-transform-types` still rejects the decorator because it does not enable
-> `experimentalDecorators`. `tsx` reads the `experimentalDecorators` in your `tsconfig.json` and
-> runs all of it, which is why `setu new --runtime node` emits exactly this. Compiling ahead of time
-> with `tsc` and running the JavaScript works equally well.
+> without transforming code, so it cannot run a decorator or a constructor parameter property
+> (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). That applies to TC39 **standard** decorators too, which is
+> what this framework uses: V8 has not shipped them, so `node` answers a decorated class with a bare
+> `SyntaxError: Invalid or unexpected token`. `tsx` transforms both and needs no compiler option,
+> which is why `setu new --runtime node` emits exactly this. Compiling ahead of time with `tsc` and
+> running the JavaScript works equally well.
 
 ### Deployment
 
