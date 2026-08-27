@@ -6179,13 +6179,13 @@ holding both `<name>.controller.ts` and `<name>.service.ts` is treated as a modu
 folders under `src/modules/` (a shared-helpers directory, say) are left out of the barrel rather
 than breaking it.
 
-The emitted controller's handlers take **only decorated parameters** and return plain values, which
-the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a style choice: it
-builds a handler's argument list from parameter metadata alone and never passes the request context
-positionally, so a `ctx: IRequestContext` parameter arrives `undefined` and the first `ctx.response`
-throws — a 500 on every request. There is no built-in decorator for the context, so a handler that
-needs it (to set a status code, or to stream) belongs on `app.router.get(...)` — see
-`setu generate route`.
+The emitted controller's handlers take **only the arguments their `@Params(...)` names** and return
+plain values, which the plugin serializes as JSON. That is a constraint of `DecoratorPlugin`, not a
+style choice: it builds a handler's argument list from that declaration alone and never passes the
+request context positionally, so an undeclared `ctx: IRequestContext` parameter arrives `undefined`
+and the first `ctx.response` throws — a 500 on every request. A handler that needs the context (to
+set a status code, or to stream) declares `Ctx()` among its sources, which is how the generated
+`create` answers `201`.
 
 The service's `@Injectable` token is explicit (`'<name>-service'`) and the controller's `@Inject`
 names that exact string, because `emitDecoratorMetadata` is unavailable under Deno, so a parameter's
@@ -8407,14 +8407,16 @@ Contract notes:
   the legacy "parameter N has no `@Inject` token" and "declares both `@Inject` forms" refusals no
   longer have any reachable input and are gone. Method parameters bind with `@Params(...)`.
 
-  Constructor parameter decorators evaluate in reverse argument order, so tokens are stored keyed by
-  index and assembled ascending; declaration order is what reaches the constructor.
+  The list is read in declaration order and reaches the constructor in that order. The legacy
+  index-keyed assembly is gone with the parameter form it existed for: parameter decorators
+  evaluated in REVERSE argument order, so tokens had to be stored by index and re-sorted.
 - **The container is preferred whenever the class is registered in it**, with or without
   `@Injectable`. A `@Controller` carries no `@Injectable`, so a constructor-injected controller in a
   `DiPlugin` application resolves through the container — where its dependencies live.
-- **`@Optional` marks an injected dependency absent-tolerant, not construction fallible.** It pairs
-  with `@Inject` on the same parameter (either order) and never replaces it — a token is still
-  required, for the same `emitDecoratorMetadata` reason above:
+- **`Optional(token)` marks an injected dependency absent-tolerant, not construction fallible.** It
+  wraps an entry inside the class-level `@Inject(...)` list, in the position of the argument it
+  describes, and never replaces the token — one is still required, for the same
+  `emitDecoratorMetadata` reason above:
 
   ```typescript
   @Injectable({ token: 'report-service' })
@@ -8426,10 +8428,11 @@ Contract notes:
 
   When the token has no provider the argument receives `undefined`; when it HAS one it is resolved
   normally, so an error raised while building it — a circular dependency, a throwing factory —
-  propagates rather than being masked as absence. Two misuses throw at `register()`: `@Optional` on
-  a parameter with no `@Inject` (it names no dependency), and `@Optional` combined with the
-  deprecated class-level `@Inject(...)` list (which cannot express per-argument optionality).
-  `@Optional` on a **method** parameter throws at class-definition time.
+  propagates rather than being masked as absence. `Optional` cannot be misplaced any more — it is an
+  argument to `@Inject(...)` rather than a decorator, so the three legacy refusals it needed have no
+  reachable input and are gone. One throw remains, for a caller writing to the store directly: an
+  optional index that the `@Inject(...)` list names no token for is refused at `register()`, since
+  it would otherwise pass `undefined` for an argument nothing declares.
 
   Both construction paths honor it identically — the DI container when one is registered, the
   kernel's service registry otherwise. One consequence is worth knowing on the container path: a

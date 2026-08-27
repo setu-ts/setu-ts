@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 
 import { Inject, Injectable, Optional } from '../../src/decorators/injection.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
+import type { Constructor } from '@setu-ts/common';
 
 describe('@Injectable', () => {
   beforeEach(() => {
@@ -99,5 +100,36 @@ describe('@Inject', () => {
       constructor(readonly dep: unknown) {}
     }
     expect(metadataStore.getService(Doubled)?.inject).toEqual(['winner']);
+  });
+});
+
+describe('stacked @Inject declarations', () => {
+  /**
+   * `mergeService` REPLACES `inject` while the optional set used to ACCUMULATE,
+   * so the winning token list could inherit the loser's optional indices. Class
+   * decorators apply bottom-up, so the TOP `@Inject` is the one that wins.
+   */
+  it('lets the last-applied @Inject own both the tokens and the optional set', () => {
+    @Inject('a', 'b', 'c')
+    @Inject(Optional('x'))
+    class Stacked {}
+
+    const target = Stacked as unknown as Constructor;
+    expect(metadataStore.getService(target)?.inject).toEqual(['a', 'b', 'c']);
+    // Without the replacement, index 0 would still be marked optional here and
+    // 'a' would silently resolve to `undefined` when it has no provider.
+    expect([...metadataStore.ctorOptional(target)]).toEqual([]);
+  });
+
+  it('does not strand an optional index the winning list cannot cover', () => {
+    @Inject('only')
+    @Inject('p', 'q', Optional('r'))
+    class Narrowed {}
+
+    const target = Narrowed as unknown as Constructor;
+    expect(metadataStore.getService(target)?.inject).toEqual(['only']);
+    // Index 2 would otherwise survive against a one-entry list, which
+    // `effectiveOptional` refuses at startup.
+    expect([...metadataStore.ctorOptional(target)]).toEqual([]);
   });
 });

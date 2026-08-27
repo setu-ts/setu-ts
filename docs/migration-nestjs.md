@@ -95,14 +95,12 @@ export class UsersController {
   }
 
   @Get(':id')
-  @Params(Param('id'))
-  findOne(id: string) {
+  findOne(@Param('id') id: string) {
     return this.userService.findById(id);
   }
 
   @Post()
-  @Params(Body())
-  create(dto: CreateUserDto) {
+  create(@Body() dto: CreateUserDto) {
     return this.userService.create(dto);
   }
 }
@@ -366,8 +364,7 @@ export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
 ```typescript
 @Post()
 @UsePipes(new ValidationPipe())
-@Params(Body())
-async create(createDto: CreateCatDto) {
+async create(@Body() createDto: CreateCatDto) {
   // dto is validated
 }
 ```

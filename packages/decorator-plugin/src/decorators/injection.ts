@@ -97,9 +97,10 @@ export function Inject(...tokens: readonly InjectToken[]): SetuClassDecorator {
   }, []);
   return classDecorator((store, target) => {
     store.mergeService(target, { inject: names });
-    for (const index of optional) {
-      store.mergeCtorOptional(target, index);
-    }
+    // Replaces rather than accumulates: `mergeService` replaces `inject`, so two
+    // stacked `@Inject(...)` decorators must not leave the winner's token list
+    // paired with the loser's optional indices.
+    store.setCtorOptional(target, optional);
   });
 }
 

@@ -37,7 +37,7 @@ export interface ParameterMetadata {
   type: ParameterType;
   /** Name for named sources (`@Query('page')`, `@Param('id')`, …). */
   name?: string;
-  /** Custom parameter type name (from {@linkcode createParameterDecorator}). */
+  /** Custom parameter type name (from a `Custom(name)` source). */
   customType?: string;
   /** Extra payload captured by a custom parameter decorator. */
   metadata?: Readonly<Record<string, unknown>>;
@@ -411,6 +411,29 @@ export class MetadataStore implements IMetadataStore {
   ctorOptional(target: Constructor): ReadonlySet<number> {
     this.#drain(target);
     return this._ctorOptional.get(target) ?? EMPTY_INDICES;
+  }
+
+  /**
+   * Replaces a class's optional-argument set outright.
+   *
+   * `mergeService` REPLACES `inject` while {@linkcode mergeCtorOptional}
+   * ACCUMULATES, so two stacked `@Inject(...)` decorators would leave the
+   * winning token list paired with the loser's optional indices — silently
+   * marking a required dependency absent-tolerant, or naming an index the
+   * shorter replacement list cannot cover, which `effectiveOptional` then
+   * refuses at startup. `Inject` writes both fields through one call each so the
+   * last decorator to apply owns the whole declaration.
+   *
+   * @param target - The decorated class
+   * @param indices - The complete set of optional argument indices
+   */
+  setCtorOptional(target: Constructor, indices: Iterable<number>): void {
+    const set = new Set(indices);
+    if (set.size === 0) {
+      this._ctorOptional.delete(target);
+      return;
+    }
+    this._ctorOptional.set(target, set);
   }
 
   /**

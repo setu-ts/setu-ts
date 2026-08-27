@@ -102,7 +102,7 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
 - **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse`
-- **Extension** — `createDecorator`, `createParameterDecorator`, `registerParameterResolver`
+- **Extension** — `createDecorator`, `Custom`, `registerParameterResolver`
 - **Discovery** — `discoverControllers`
 
 ## Options

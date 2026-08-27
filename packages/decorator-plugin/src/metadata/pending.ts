@@ -76,6 +76,33 @@ const METADATA_SYMBOL: symbol = resolveMetadataSymbol(
 );
 
 /**
+ * Reads a carrier's OWN pending list, never an inherited one.
+ *
+ * **The own-property check is load-bearing on Node, not defensive.** The TC39
+ * proposal links a subclass's `context.metadata` to its superclass's by
+ * PROTOTYPE, and the two supported runtimes disagree: measured on Deno 2.9.5 a
+ * subclass carrier's prototype is `null`, while on Node v24 under `tsx`
+ * `Object.getPrototypeOf(child) === parent` holds, matching the proposal.
+ *
+ * Reading through the chain would therefore let a subclass's member decorator
+ * append onto its PARENT's array, so a later drain of either class would replay
+ * the other's writes against the wrong constructor — a base controller's routes
+ * landing on its subclass, or the reverse. Invisible to a Deno-only suite, which
+ * is why `pending.test.ts` builds the prototype chain by hand with
+ * `Object.create` rather than relying on the runtime to produce one.
+ *
+ * @param carrier - The metadata carrier to read
+ * @returns The carrier's own pending list, or `null` when it has none of its own
+ */
+function ownPending(carrier: MetadataCarrier): PendingWrite[] | null {
+  if (!Object.prototype.hasOwnProperty.call(carrier, PENDING_KEY)) {
+    return null;
+  }
+  const pending = carrier[PENDING_KEY];
+  return Array.isArray(pending) ? pending as PendingWrite[] : null;
+}
+
+/**
  * Records a store write from a member decorator, to be replayed when the class
  * is first read.
  *
@@ -89,9 +116,9 @@ const METADATA_SYMBOL: symbol = resolveMetadataSymbol(
  * @since 0.2.0
  */
 export function defer(metadata: MetadataCarrier, write: PendingWrite): void {
-  const existing = metadata[PENDING_KEY];
-  if (Array.isArray(existing)) {
-    (existing as PendingWrite[]).push(write);
+  const existing = ownPending(metadata);
+  if (existing !== null) {
+    existing.push(write);
     return;
   }
   metadata[PENDING_KEY] = [write];
@@ -136,9 +163,9 @@ export function takePendingFrom(carrier: unknown): readonly PendingWrite[] {
   if (typeof carrier !== 'object' || carrier === null) {
     return [];
   }
-  const pending = (carrier as MetadataCarrier)[PENDING_KEY];
-  if (!Array.isArray(pending)) {
+  const pending = ownPending(carrier as MetadataCarrier);
+  if (pending === null) {
     return [];
   }
-  return (pending as PendingWrite[]).splice(0, pending.length);
+  return pending.splice(0, pending.length);
 }

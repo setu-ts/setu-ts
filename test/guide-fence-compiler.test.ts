@@ -94,11 +94,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 3,
   },
   'docs/decorators.md': {
-    // 29 rather than 30 since M76: the guide's `deno.json` "Enable Decorators"
-    // block is gone, because TC39 standard decorators need no compiler option.
-    total: 29,
-    ts: 28,
-    compile: 28,
+    // 28 since M76. Two blocks left the guide: the `deno.json` "Enable
+    // Decorators" block, because TC39 standard decorators need no compiler
+    // option; and a duplicated `@Inject` example, which the migration had
+    // turned into a byte-identical copy of the one above it while the prose
+    // still called one of them "the deprecated class-level form".
+    total: 28,
+    ts: 27,
+    compile: 27,
     external: 0,
     pseudocode: 0,
     skipped: 1,
@@ -130,11 +133,12 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
-  // 255 since M76: docs/decorators.md lost its `deno.json` "Enable Decorators"
-  // block, because TC39 standard decorators need no compiler option at all.
-  total: 255,
-  ts: 209,
-  compile: 177,
+  // 254 since M76: docs/decorators.md lost its `deno.json` "Enable Decorators"
+  // block (standard decorators need no compiler option) and a duplicated
+  // `@Inject` example the migration had collapsed into a copy of its neighbour.
+  total: 254,
+  ts: 208,
+  compile: 176,
   external: 32,
   pseudocode: 0,
   skipped: 46,

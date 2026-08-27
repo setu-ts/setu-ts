@@ -40,6 +40,20 @@ describe('pending-write accumulator', () => {
     expect(takePendingFrom({})).toEqual([]);
   });
 
+  it('reports nothing when the carrier owns the key but not an array', () => {
+    // Reachable because the accumulator key is a REGISTERED symbol (so two
+    // copies of this package agree on it), which also makes it writable by
+    // anything else sharing the process.
+    const key = Symbol.for('@setu-ts/decorator-plugin:pending-writes');
+    const carrier: Record<PropertyKey, unknown> = { [key]: 'not-an-array' };
+    expect(takePendingFrom(carrier)).toEqual([]);
+
+    // …and a later defer replaces the junk rather than trying to push onto it.
+    const write = () => {};
+    defer(carrier, write);
+    expect(takePendingFrom(carrier)).toEqual([write]);
+  });
+
   it('accumulates in order and drains exactly once', () => {
     const carrier: Record<PropertyKey, unknown> = {};
     const calls: string[] = [];
@@ -58,5 +72,39 @@ describe('pending-write accumulator', () => {
       w(store, target);
     }
     expect(calls).toEqual(['first', 'second']);
+  });
+});
+
+describe('pending writes are owned by their own carrier', () => {
+  /**
+   * The TC39 proposal links a subclass's `context.metadata` to its superclass's
+   * by prototype, and the runtimes disagree: Deno 2.9.5 gives a subclass carrier
+   * a `null` prototype, while Node v24 under `tsx` links it to the parent. The
+   * chain is therefore built by hand here — a Deno-only suite cannot otherwise
+   * reach the case, which is exactly why it could ship green.
+   */
+  it('never appends a child write onto an inherited parent list', () => {
+    const parent: Record<PropertyKey, unknown> = {};
+    const parentWrite = () => {};
+    defer(parent, parentWrite);
+
+    const child: Record<PropertyKey, unknown> = Object.create(parent);
+    const childWrite = () => {};
+    defer(child, childWrite);
+
+    // Draining the child must not consume the parent's write...
+    expect(takePendingFrom(child)).toEqual([childWrite]);
+    // ...and the parent's own write must still be there afterwards.
+    expect(takePendingFrom(parent)).toEqual([parentWrite]);
+  });
+
+  it('reports no writes for a carrier whose only list is inherited', () => {
+    const parent: Record<PropertyKey, unknown> = {};
+    defer(parent, () => {});
+    const child: Record<PropertyKey, unknown> = Object.create(parent);
+
+    expect(takePendingFrom(child)).toEqual([]);
+    // The parent keeps its write: the child's drain consumed nothing.
+    expect(takePendingFrom(parent)).toHaveLength(1);
   });
 });

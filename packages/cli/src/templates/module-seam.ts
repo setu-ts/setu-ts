@@ -44,10 +44,11 @@ export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
 /** Manifest additions unique to the class-based module composition. */
 export const CLASS_BASED_MODULE_MANIFEST: TemplateManifest = {
   ...FUNCTIONAL_MODULE_MANIFEST,
-  // Decorated classes need no compiler option: the surface is TC39 standard
-  // decorators, which every supported runtime parses unconfigured. Declaring
-  // one would also REPLACE Deno's default set (M63 D3), so adding nothing is
-  // both correct and the safer default.
+  // Deno needs no `denoCompilerOptions` entry for decorated classes: it parses
+  // TC39 standard decorators unconfigured, and declaring ANY option would
+  // REPLACE its default set (M63 D3), so adding nothing is both correct and the
+  // safer default. This says nothing about the other targets — Node still runs
+  // through `tsx`, because V8 has not shipped decorators.
 };
 
 /**

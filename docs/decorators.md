@@ -257,25 +257,14 @@ in that case — so `ctx.services.get('user-service')` resolves an `@Injectable`
 project without `DiPlugin`**. With a container, reach it by injecting it
 (`@Inject('user-service')`), which is the path that works under both compositions.
 
-### Parameter-Level Injection
+### Constructor Injection
 
-Setu-TS requires explicit tokens for parameter injection because type-inferred injection needs
-`emitDecoratorMetadata`, which Deno does not support:
+`@Inject(...)` sits on the **class** and takes one token per constructor argument, in argument order
+— the Nth entry binds the Nth parameter. There is no parameter-level form: the TC39 proposal has no
+parameter position, so a decorator cannot be attached to an argument at all.
 
-```typescript
-import { Inject, Injectable } from '@setu-ts/decorator-plugin';
-import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
-
-@Injectable()
-@Inject(CAPABILITIES.CACHE)
-export class UserRepository {
-  // Preferred: one token per constructor parameter, bound by position.
-  constructor(private readonly cache: ICacheStore) {}
-}
-```
-
-The deprecated class-level form takes a positional token list matching the constructor arguments and
-is mutually exclusive with the parameter form (a class carrying both fails at `register()`):
+A token is always explicit, because type-inferred injection needs `emitDecoratorMetadata`, which
+Deno does not support — so a parameter's type cannot be read.
 
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
@@ -287,11 +276,15 @@ export class UserRepository {
   constructor(private readonly cache: ICacheStore) {}
 }
 ```
+
+Because the list is positional, reordering the constructor without reordering the tokens misinjects
+every argument — the list and the signature are one declaration and move together.
 
 ### Optional Dependencies
 
-`@Optional` pairs with `@Inject` on the same constructor parameter: when the token has no provider,
-the argument receives `undefined` instead of failing construction. A token is still required.
+`Optional(token)` wraps an entry **inside** the `@Inject(...)` list, in the position of the argument
+it describes: when the token has no provider, that argument receives `undefined` instead of failing
+construction. A token is still required.
 
 ```typescript
 import { Inject, Injectable, Optional } from '@setu-ts/decorator-plugin';

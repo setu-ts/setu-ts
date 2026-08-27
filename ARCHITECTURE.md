@@ -2134,6 +2134,12 @@ Every decorator has a programmatic equivalent:
 | `@UseGuards(requireAuth())` | `middleware: [requireAuth()]`                 |
 | `@Injectable()`             | `ctx.services.register(token, new Service())` |
 
+The three parameter rows show the **raw** equivalent. `Body()`, `Query()` and `Param()` prefer the
+value validation middleware wrote for the request (`validatedStateKey(...)`) and fall back to the
+raw request only when there is none — so on a route carrying `@ValidateBody(schema)` they yield the
+parsed-and-transformed value, where `ctx.request.body` yields what the client sent. A schema with a
+coercion or a default therefore makes the two differ.
+
 ### Reflection
 
 Reflection is **not required**. The `DecoratorPlugin` reads metadata from the `MetadataStore`, not
