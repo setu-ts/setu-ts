@@ -407,3 +407,62 @@ describe('Room exclusion across the backplane', () => {
     expect(a.transport.sent).toEqual(['hi']);
   });
 });
+
+describe('RoomRegistry.peek (M74 / X3-8)', () => {
+  it('returns undefined for a name no room was ever created for', () => {
+    const registry = new RoomRegistry();
+
+    expect(registry.peek('board:acme')).toBeUndefined();
+    expect(registry.size).toBe(0);
+  });
+
+  it('returns the identical instance a prior get() created', () => {
+    const registry = new RoomRegistry();
+    const created = registry.get('lobby');
+
+    expect(registry.peek('lobby')).toBe(created);
+  });
+
+  it('creates nothing across many lookups of distinct unknown names', () => {
+    // The X3-8 exposure, at the registry level: a presence endpoint reading
+    // `size` for a caller-supplied name used to allocate one room per distinct
+    // name polled. The register measured 3 -> 53 over 50 requests.
+    const registry = new RoomRegistry();
+    registry.get('lobby').add(makeConnection('member').conn);
+
+    for (let i = 0; i < 50; i++) {
+      expect(registry.peek(`board:${i}`)).toBeUndefined();
+    }
+
+    expect(registry.size).toBe(1);
+  });
+
+  it('does not mark a never-joined room as in use, so eviction still reclaims it', () => {
+    // peek must not touch #neverJoined in EITHER direction. Adding to it would
+    // mark a live room abandoned; removing from it would make a read dispose
+    // rooms. Here: get() creates and abandons 'ghost', peek() observes it, and
+    // the next eviction must still reclaim it.
+    const registry = new RoomRegistry();
+    const joined = makeConnection('joined');
+    registry.get('lobby').add(joined.conn);
+    registry.get('ghost');
+
+    expect(registry.peek('ghost')).toBeDefined();
+    expect(registry.size).toBe(2);
+
+    registry.evict(joined.conn);
+
+    expect(registry.peek('ghost')).toBeUndefined();
+    expect(registry.size).toBe(0);
+  });
+
+  it('does not resurrect a room that emptying already disposed', () => {
+    const registry = new RoomRegistry();
+    const member = makeConnection('member');
+    registry.get('lobby').add(member.conn);
+    registry.get('lobby').remove(member.conn);
+
+    expect(registry.peek('lobby')).toBeUndefined();
+    expect(registry.size).toBe(0);
+  });
+});

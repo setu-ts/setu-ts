@@ -14,6 +14,7 @@
  */
 
 import type { HandlerResult, IRequestContext } from '../http.ts';
+import type { JsonValue } from '../types.ts';
 
 /**
  * A single SSE event payload.
@@ -29,14 +30,20 @@ export interface SseMessage {
    * Event data. A `string` is written literally (split on `\n` into multiple
    * `data:` lines); any non-string is `JSON.stringify`-ed. `undefined` is
    * forbidden — use `{}` or omit the message instead.
+   *
+   * Typed {@linkcode JsonValue}, so the compiler admits exactly what the
+   * encoder can write. A `bigint` makes `JSON.stringify` throw, and a function
+   * or symbol value makes it silently drop the key; both are refused here
+   * rather than at runtime, where the local delivery path swallows the failure
+   * per member and the backplane path throws out of `publish`.
+   *
+   * A circular structure still throws at runtime — no type can express
+   * acyclicity — and a named `interface` does not assign, because TypeScript
+   * grants implicit index signatures only to object-literal types. Declare the
+   * payload with a `type` alias, or extend `Record<string, JsonValue |
+   * undefined>`.
    */
-  readonly data:
-    | string
-    | number
-    | boolean
-    | null
-    | readonly unknown[]
-    | Record<string, unknown>;
+  readonly data: JsonValue;
   /** Reconnection time in milliseconds — sent as `retry:` field. */
   readonly retry?: number;
 }
@@ -145,10 +152,32 @@ export interface ISseService {
   /**
    * Returns or creates a named channel.
    *
+   * Creating is the point: the first call for a name registers a channel that
+   * lives until the process stops. Use {@linkcode ISseService.peek} to read a
+   * caller-supplied name without registering anything.
+   *
    * @param name - Channel name
    * @returns The named channel
    */
   channel(name: string): SseChannel;
+  /**
+   * Returns the named channel if one already exists, without creating it.
+   *
+   * The non-allocating counterpart to {@linkcode ISseService.channel}. A
+   * presence or dashboard endpoint that reports `size` for a name taken from a
+   * request must use this: `channel(name)` would register one channel per
+   * distinct name polled, and an SSE channel is never reclaimed before
+   * shutdown.
+   *
+   * @param name - Channel name
+   * @returns The channel, or `undefined` when no channel of that name exists
+   * @example
+   * ```typescript
+   * const subscribers = sse.peek(`build:${id}`)?.size ?? 0;
+   * ```
+   * @since 0.4.0
+   */
+  peek(name: string): SseChannel | undefined;
   /** Current number of open connections. */
   readonly connectionCount: number;
 }

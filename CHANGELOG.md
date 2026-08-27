@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A non-mutating read on both realtime registries: `IWebSocketService.peek(name)` and
+  `ISseService.peek(name)`** (M74, X3-8). `room(name)` and `channel(name)` are get-or-create, so a
+  presence or dashboard endpoint reporting `size` for a name taken from a request registered one
+  entry per distinct name polled — measured at 3 → 53 rooms across 50 read-only requests, with
+  nothing to reclaim them until an unrelated socket disconnected. `peek` returns the room or channel
+  when one exists and `undefined` otherwise, registering nothing:
+
+  ```typescript
+  const present = ws.peek(`board:${boardId}`)?.size ?? 0;
+  ```
+
+  This is **breaking for anyone implementing either service contract outside this repository**:
+  `peek` is a required member, not an optional one, because an optional `peek?` returning
+  `undefined` cannot distinguish "no such room" from "this implementation does not offer the read".
+  Add a lookup that does not create; both first-party services delegate to a single map read.
+  Consumers are unaffected.
+
+- **`JsonValue` in `@setu-ts/common`** (M74) — a recursive JSON-safe value type. Its object arm
+  admits `undefined` deliberately, because `JSON.stringify` drops such a property rather than
+  failing, so an optional field still assigns.
+
 ### Fixed
 
 - **`@setu-ts/openapi-plugin` produced an EMPTY OpenAPI schema for every zod v4 schema.** Zod v4
@@ -17,6 +40,26 @@ All notable changes to this project are documented here. The format follows
   `toJSONSchema`. Zod v3 output is byte-identical.
 
 ### Changed
+
+- **`SseMessage.data` is narrowed to `JsonValue`** (M74, X3-8). **Breaking.** The member was
+  `string | number | boolean | null | readonly unknown[] | Record<string, unknown>`, whose last two
+  arms admitted values `JSON.stringify` cannot represent — while `PUBLIC_API.md` claimed the member
+  "accepts any JSON-serializable value". It now does. What this rejects, and what to do instead:
+
+  - **A `bigint` anywhere in the payload** (`{ balance: 10n }`, `[10n]`). `JSON.stringify` throws on
+    it, and the throw surfaced differently depending on configuration: `conn.send` threw to the
+    caller, `channel.publish` with no backplane delivered to nobody and reported nothing, and
+    `channel.publish` with a backplane threw synchronously. Convert the value first —
+    `{ balance: String(balance) }`.
+  - **A function or symbol value.** `JSON.stringify` silently drops the key, so the data never
+    arrived. Remove it from the payload.
+  - **An `interface` that extends `Record<string, unknown>`** to satisfy the old object arm. Change
+    it to `extends Record<string, JsonValue | undefined>`. A named `interface` still does not assign
+    without an index signature — TypeScript grants implicit ones only to object-literal types, which
+    was equally true before this change — so a `type` alias remains the simpler option.
+
+  A property written `T | undefined` is unaffected. A **circular structure** still throws at
+  runtime; no type can express acyclicity.
 
 - **`@setu-ts/openapi-plugin`: an unrepresentable schema node is now REPORTED instead of silently
   emitting `{}`.** A type zod cannot represent in JSON Schema (`z.date()`, `z.bigint()`, …) still

@@ -48,11 +48,30 @@ const deploys = sse.channel('deploys');
 deploys.publish({ data: JSON.stringify({ build: 412, status: 'live' }) });
 ```
 
-**`channel(name)` is get-or-create.** First call creates the channel; every later call with the same
-name returns it. There is no non-creating lookup, so code that reads `channel(name).size` for an
-arbitrary caller-supplied name creates one channel per distinct name — and a never-published channel
-is reclaimed only when another connection closes somewhere in this process. Keep polled names to a
-fixed set.
+**`channel(name)` is get-or-create; `peek(name)` is the read that is not.** The first call to
+`channel(name)` creates the channel and every later call with the same name returns it — so reading
+`channel(name).size` for an arbitrary caller-supplied name registers one channel per distinct name
+polled. **Nothing reclaims a channel before shutdown**: the registry has no removal path outside the
+one that runs when the application stops, so unlike a WebSocket room (which is swept on the next
+disconnection) a leaked channel lives for the life of the process.
+
+Use `peek` wherever the name comes from a request. It returns the channel if one exists and
+`undefined` otherwise, and registers nothing:
+
+```typescript
+app.router.get('/subscribers/:build', (ctx) => {
+  const build = ctx.params.build ?? '';
+  return ctx.response.json({ subscribers: sse.peek(`build:${build}`)?.size ?? 0 });
+});
+```
+
+**`SseMessage.data` is typed `JsonValue`** — a recursive JSON-safe type, so the compiler admits
+exactly what the frame encoder can write. A `bigint` (which `JSON.stringify` throws on) and a
+function or symbol value (which it silently drops) are compile errors rather than runtime surprises.
+A property written `T | undefined` is fine: `JSON.stringify` drops the key. Two limits remain — a
+circular structure still throws at runtime, and a named `interface` does not assign, because
+TypeScript grants implicit index signatures only to object-literal types. Declare the payload with a
+`type` alias, or extend `Record<string, JsonValue | undefined>`.
 
 ## Scaling beyond one replica
 

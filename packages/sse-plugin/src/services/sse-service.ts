@@ -147,6 +147,11 @@ export class SseService implements IService {
     return this.#registry.get(name);
   }
 
+  /** Return the named channel if it already exists, without creating it. */
+  peek(name: string): SseChannel | undefined {
+    return this.#registry.peek(name);
+  }
+
   /** Current number of open connections. */
   get connectionCount(): number {
     return this.#connections.size;

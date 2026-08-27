@@ -514,3 +514,46 @@ describe('WebSocketService', () => {
     expect(service.roomCount).toBe(1);
   });
 });
+
+describe('WebSocketService.peek (M74 / X3-8)', () => {
+  function build() {
+    const runtime = createFakeRuntime();
+    return new WebSocketService(runtime, resolveOptions(), true);
+  }
+
+  it('returns undefined before room() has ever been called for that name', () => {
+    const service = build();
+
+    expect(service.peek('board:acme')).toBeUndefined();
+    expect(service.roomCount).toBe(0);
+  });
+
+  it('returns the identical room object room() returns', () => {
+    const service = build();
+    const created = service.room('board:acme');
+
+    expect(service.peek('board:acme')).toBe(created);
+  });
+
+  it('leaves roomCount unchanged across lookups of unknown names', () => {
+    const service = build();
+
+    for (let i = 0; i < 50; i++) {
+      service.peek(`board:${i}`);
+    }
+
+    expect(service.roomCount).toBe(0);
+  });
+
+  it('is the non-allocating read room() is not', () => {
+    // Both halves in one test, so the difference is the assertion rather than
+    // an inference across two files: room() grows the registry, peek() does not.
+    const service = build();
+
+    service.peek('a');
+    expect(service.roomCount).toBe(0);
+
+    service.room('a');
+    expect(service.roomCount).toBe(1);
+  });
+});
