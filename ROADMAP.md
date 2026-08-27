@@ -7631,6 +7631,6 @@ the framework points a new project.
 | 70n       | ✅     | decorators, validation, closeout               |
 | 71        | ✅     | kernel + contract boundary hardening (PR #190) |
 | 72        | ✅     | cli (transports + interactive, PR #191)        |
-| 73        | ✅     | realtime authentication (PR pending)           |
+| 73        | ✅     | realtime authentication (PR #197)              |
 | 74        | ✅     | realtime reads + sse contract (PR #196)        |
 | 75        | ⬜     | broker trace propagation                       |
