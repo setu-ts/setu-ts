@@ -252,7 +252,11 @@ describe('SessionService shared path (load and fromHeaders)', () => {
     session.set('userId', 'u-1');
     session.set('plan', 'pro');
     await service.commit(write.ctx, session);
-    const cookie = write.response.setCookies()[0].split(';')[0];
+    const setCookie = write.response.setCookies()[0];
+    if (setCookie === undefined) {
+      throw new Error('expected session commit to set a cookie');
+    }
+    const cookie = setCookie.split(';')[0];
 
     // The two entry points, one cookie: the context-backed HTTP read and the
     // headers-only read must agree on identity and payload.

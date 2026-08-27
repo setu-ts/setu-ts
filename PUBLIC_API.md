@@ -1306,7 +1306,7 @@ does not register an authorization service or advertise the authorization capabi
 > `register()`. The assembled order is fixed — **jwt → api-key → session → caller-supplied** — and
 > the first non-null principal wins, so a request carrying both a bearer header and a session cookie
 > authenticates by the JWT.
-
+>
 > **Phasing (M16b, shipped):** **refresh tokens** and **rate limiting** shipped in M16b as
 > standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a
 > refresh token arrives in the request body, not as a passive header credential) and
@@ -7786,7 +7786,8 @@ Contract notes:
   exists for anonymous visitors too. Added in Milestone 48.
 - `CAPABILITIES.GRPC` (`'grpc'`) — the capability token under which `GrpcPlugin` registers the
   `IGrpcService`. The service provides gRPC/Connect co-serving on the same port as ordinary Hono
-  routes, using the optional `IHttpAdapter.setRpcHandler?` seam. Added in Milestone 49.
+  routes through the kernel terminal handler. The deprecated optional `IHttpAdapter.setRpcHandler?`
+  seam is no longer consulted. Added in Milestone 49.
 - `CAPABILITIES.CLOUDFLARE` (`'cloudflare'`) — the capability token under which `CloudflarePlugin`
   registers `ICloudflareBindings`: typed access to a Worker's KV, R2, D1, Queues, service and
   Durable Object bindings, its string variables, and `waitUntil`. Added in Milestone 52.
