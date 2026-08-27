@@ -24,17 +24,27 @@ import { Controller, DecoratorPlugin, Get } from '@setu-ts/decorator-plugin';
 ## Usage
 
 ```typescript
-import { Body, Controller, DecoratorPlugin, Get, Param, Post } from '@setu-ts/decorator-plugin';
+import {
+  Body,
+  Controller,
+  DecoratorPlugin,
+  Get,
+  Param,
+  Params,
+  Post,
+} from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
 class UsersController {
   @Get('/:id')
-  findOne(@Param('id') id: string) {
+  @Params(Param('id'))
+  findOne(id: string) {
     return { id };
   }
 
   @Post('/')
-  create(@Body() body: unknown) {
+  @Params(Body())
+  create(body: unknown) {
     return body;
   }
 }
@@ -54,7 +64,14 @@ back to the raw source when no validated value exists. Without a validation prov
 stay description-only and the plugin logs one warning per affected route naming `ValidationPlugin`.
 
 ```typescript
-import { Body, Controller, DecoratorPlugin, Post, ValidateBody } from '@setu-ts/decorator-plugin';
+import {
+  Body,
+  Controller,
+  DecoratorPlugin,
+  Params,
+  Post,
+  ValidateBody,
+} from '@setu-ts/decorator-plugin';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
 import { z } from 'zod';
 
@@ -64,7 +81,8 @@ const CreateUser = z.object({ email: z.string().email(), age: z.number().int().d
 class UsersController {
   @Post('/')
   @ValidateBody(CreateUser)
-  create(@Body() body: { email: string; age: number }) {
+  @Params(Body())
+  create(body: { email: string; age: number }) {
     return body; // the TRANSFORMED value: `age` defaulted to 18 by the schema
   }
 }
@@ -100,66 +118,73 @@ Discovery failures are logged as warnings and never crash the application.
 
 ## Exports
 
-| Export                      | Kind      |
-| --------------------------- | --------- |
-| `ApiOperation`              | function  |
-| `ApiResponse`               | function  |
-| `ApiTags`                   | function  |
-| `Body`                      | function  |
-| `clearParameterResolvers`   | function  |
-| `Controller`                | function  |
-| `Cookie`                    | function  |
-| `createDecorator`           | function  |
-| `createParameterDecorator`  | function  |
-| `Ctx`                       | function  |
-| `CurrentUser`               | function  |
-| `DecoratorPlugin`           | function  |
-| `discoverControllers`       | function  |
-| `getParameterResolver`      | function  |
-| `Header`                    | function  |
-| `Inject`                    | function  |
-| `Injectable`                | function  |
-| `Optional`                  | function  |
-| `Param`                     | function  |
-| `parseCookies`              | function  |
-| `Permissions`               | function  |
-| `Public`                    | function  |
-| `Query`                     | function  |
-| `registerParameterResolver` | function  |
-| `resolveParameter`          | function  |
-| `resolveParameters`         | function  |
-| `Roles`                     | function  |
-| `UseFilters`                | function  |
-| `UseGuards`                 | function  |
-| `UseInterceptors`           | function  |
-| `ValidateBody`              | function  |
-| `ValidateParams`            | function  |
-| `ValidateQuery`             | function  |
-| `Version`                   | function  |
-| `MetadataStore`             | class     |
-| `Delete`                    | const     |
-| `Get`                       | const     |
-| `Head`                      | const     |
-| `metadataStore`             | const     |
-| `Options`                   | const     |
-| `Patch`                     | const     |
-| `Post`                      | const     |
-| `Put`                       | const     |
-| `ApiOperationConfig`        | interface |
-| `ApiResponseConfig`         | interface |
-| `DecoratorPluginOptions`    | interface |
-| `DiscoveryOptions`          | interface |
-| `DiscoveryResult`           | interface |
-| `InjectableOptions`         | interface |
-| `ParameterMetadata`         | interface |
-| `CustomParameterResolver`   | type      |
-| `HttpMethodDecorator`       | type      |
-| `MiddlewareLike`            | type      |
-| `ModuleImporter`            | type      |
-| `ParameterType`             | type      |
+| Export | Kind |
+| --- | --- |
+| `ApiOperation` | function |
+| `ApiResponse` | function |
+| `ApiTags` | function |
+| `Body` | function |
+| `clearParameterResolvers` | function |
+| `Controller` | function |
+| `Cookie` | function |
+| `createDecorator` | function |
+| `Ctx` | function |
+| `CurrentUser` | function |
+| `Custom` | function |
+| `DecoratorPlugin` | function |
+| `discoverControllers` | function |
+| `getParameterResolver` | function |
+| `Header` | function |
+| `Inject` | function |
+| `Injectable` | function |
+| `Optional` | function |
+| `Param` | function |
+| `Params` | function |
+| `parseCookies` | function |
+| `Permissions` | function |
+| `Public` | function |
+| `Query` | function |
+| `registerParameterResolver` | function |
+| `resolveParameter` | function |
+| `resolveParameters` | function |
+| `Roles` | function |
+| `UseFilters` | function |
+| `UseGuards` | function |
+| `UseInterceptors` | function |
+| `ValidateBody` | function |
+| `ValidateParams` | function |
+| `ValidateQuery` | function |
+| `Version` | function |
+| `MetadataStore` | class |
+| `Delete` | const |
+| `Get` | const |
+| `Head` | const |
+| `metadataStore` | const |
+| `Options` | const |
+| `Patch` | const |
+| `Post` | const |
+| `Put` | const |
+| `ApiOperationConfig` | interface |
+| `ApiResponseConfig` | interface |
+| `DecoratorPluginOptions` | interface |
+| `DiscoveryOptions` | interface |
+| `DiscoveryResult` | interface |
+| `InjectableOptions` | interface |
+| `OptionalToken` | interface |
+| `ParameterMetadata` | interface |
+| `ParamSource` | interface |
+| `CustomParameterResolver` | type |
+| `HttpMethodDecorator` | type |
+| `InjectToken` | type |
+| `MiddlewareLike` | type |
+| `ModuleImporter` | type |
+| `ParameterType` | type |
+| `SetuClassDecorator` | type |
+| `SetuClassOrMethodDecorator` | type |
+| `SetuMethodDecorator` | type |
+| `SourceValues` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

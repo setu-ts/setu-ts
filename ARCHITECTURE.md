@@ -2072,9 +2072,10 @@ register(ctx) {
 
 ### Why Decorators Are Optional
 
-Decorators are a TypeScript feature that requires compiler support (`experimentalDecorators` or the
-new TC39 decorators proposal). Some environments and bundlers do not support decorators.
-Additionally, some developers prefer functional style over OOP decorators.
+Decorators are a language feature not every environment or bundler supports, and some developers
+prefer a functional style over OOP decorators. Setu-TS uses **TC39 standard decorators**, so no
+compiler option is required — but a runtime whose toolchain does not transform them (Node, for
+instance, where V8 has not shipped them) still needs one that does.
 
 Setu-TS makes decorators optional by:
 
@@ -2127,9 +2128,9 @@ Every decorator has a programmatic equivalent:
 | --------------------------- | --------------------------------------------- |
 | `@Controller('/users')`     | `app.router.group('/users', ...)`             |
 | `@Get('/')`                 | `app.router.get('/', handler)`                |
-| `@Body()`                   | `ctx.request.body`                            |
-| `@Query('name')`            | `ctx.query.name`                              |
-| `@Param('id')`              | `ctx.params.id`                               |
+| `@Params(Body())`           | `ctx.request.body`                            |
+| `@Params(Query('name'))`    | `ctx.query.name`                              |
+| `@Params(Param('id'))`      | `ctx.params.id`                               |
 | `@UseGuards(requireAuth())` | `middleware: [requireAuth()]`                 |
 | `@Injectable()`             | `ctx.services.register(token, new Service())` |
 
@@ -2652,7 +2653,7 @@ function myMiddleware(options?: MyOptions): MiddlewareFunction {
 ### Creating a Custom Decorator
 
 ```typescript
-import { createDecorator } from '@setu-ts/decorator-plugin';
+import { Controller, createDecorator, Get } from '@setu-ts/decorator-plugin';
 
 export const Cacheable = (ttl: number) => createDecorator('cacheable', { ttl });
 

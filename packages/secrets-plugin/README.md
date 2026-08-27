@@ -120,31 +120,30 @@ cannot be mutated at runtime.
 
 ## Exports
 
-| Export                            | Kind      |
-| --------------------------------- | --------- |
-| `SecretsPlugin`                   | function  |
-| `AwsKmsProvider`                  | class     |
-| `AzureKeyVaultProvider`           | class     |
-| `EnvProvider`                     | class     |
-| `GcpSecretManagerProvider`        | class     |
-| `HashiCorpVaultProvider`          | class     |
-| `SecretsService`                  | class     |
-| `AwsKmsProviderOptions`           | interface |
-| `AzureKeyVaultProviderOptions`    | interface |
+| Export | Kind |
+| --- | --- |
+| `SecretsPlugin` | function |
+| `AwsKmsProvider` | class |
+| `AzureKeyVaultProvider` | class |
+| `EnvProvider` | class |
+| `GcpSecretManagerProvider` | class |
+| `HashiCorpVaultProvider` | class |
+| `SecretsService` | class |
+| `AwsKmsProviderOptions` | interface |
+| `AzureKeyVaultProviderOptions` | interface |
 | `GcpSecretManagerProviderOptions` | interface |
-| `HashiCorpVaultProviderOptions`   | interface |
-| `IAwsSecretsClient`               | interface |
-| `IAzureSecretsClient`             | interface |
-| `IGcpSecretsClient`               | interface |
-| `ISecretManager`                  | interface |
-| `SecretsPluginOptions`            | interface |
-| `SecretsProviderOptions`          | interface |
-| `SecretsServiceOptions`           | interface |
-| `IVaultHttp`                      | type      |
-| `SecretsProviderType`             | type      |
+| `HashiCorpVaultProviderOptions` | interface |
+| `IAwsSecretsClient` | interface |
+| `IAzureSecretsClient` | interface |
+| `IGcpSecretsClient` | interface |
+| `ISecretManager` | interface |
+| `SecretsPluginOptions` | interface |
+| `SecretsProviderOptions` | interface |
+| `SecretsServiceOptions` | interface |
+| `IVaultHttp` | type |
+| `SecretsProviderType` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

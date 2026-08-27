@@ -94,12 +94,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 3,
   },
   'docs/decorators.md': {
-    total: 30,
+    // 29 rather than 30 since M76: the guide's `deno.json` "Enable Decorators"
+    // block is gone, because TC39 standard decorators need no compiler option.
+    total: 29,
     ts: 28,
     compile: 28,
     external: 0,
     pseudocode: 0,
-    skipped: 2,
+    skipped: 1,
   },
   'docs/migration-fastify.md': {
     total: 32,
@@ -128,12 +130,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
-  total: 256,
+  // 255 since M76: docs/decorators.md lost its `deno.json` "Enable Decorators"
+  // block, because TC39 standard decorators need no compiler option at all.
+  total: 255,
   ts: 209,
   compile: 177,
   external: 32,
   pseudocode: 0,
-  skipped: 47,
+  skipped: 46,
 };
 
 describe('actual-fence compiler — all ten guides (shared engine)', () => {

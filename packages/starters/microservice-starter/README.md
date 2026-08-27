@@ -192,8 +192,9 @@ import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 import { CAPABILITIES, type ILogger } from '@setu-ts/common';
 
 @Injectable({ token: 'user-service' })
+@Inject(CAPABILITIES.LOGGER)
 class UserService {
-  constructor(@Inject(CAPABILITIES.LOGGER) private logger: ILogger) {}
+  constructor(private logger: ILogger) {}
 }
 ```
 
@@ -216,12 +217,12 @@ Three consequences, each a startup throw rather than a silent misinjection:
 
 ## Exports
 
-| Export                       | Kind      |
-| ---------------------------- | --------- |
-| `buildMicroservicePlugins`   | function  |
-| `createMicroserviceApp`      | function  |
+| Export | Kind |
+| --- | --- |
+| `buildMicroservicePlugins` | function |
+| `createMicroserviceApp` | function |
 | `MicroserviceStarterOptions` | interface |
-| `RealtimeArm`                | interface |
+| `RealtimeArm` | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+

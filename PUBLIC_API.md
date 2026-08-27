@@ -5752,13 +5752,13 @@ function is needed. In a class-based project the same path holds the `APP_SERVIC
 
 > **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
 > support (`--experimental-strip-types`) ERASES types without transforming code, so it cannot run a
-> legacy decorator — a bare `SyntaxError: Invalid or unexpected token` — or the constructor
-> parameter property `setu generate module` emits (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`).
-> `--experimental-transform-types` does not close it either: it handles the parameter property and
-> still rejects the decorator, because it does not enable `experimentalDecorators`. A generated Node
-> project therefore declares `tsx` in `devDependencies` and starts with `tsx main.ts`, reading the
-> `experimentalDecorators` its own `tsconfig.json` already sets. Bun compiles TypeScript outright
-> and Deno and Workers never invoke it, so no other target carries the dependency.
+> decorator — V8 has not shipped them, so even a TC39 **standard** decorator is a bare
+> `SyntaxError: Invalid or unexpected token` there — or the constructor parameter property
+> `setu generate module` emits (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). A generated Node project
+> therefore declares `tsx` in `devDependencies` and starts with `tsx main.ts`, which transforms
+> both; its `tsconfig.json` sets no decorator option, because standard decorators need none. Bun
+> compiles TypeScript outright and Deno and Workers never invoke it, so no other target carries the
+> dependency.
 
 > **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
 > `src/index.ts` with esbuild, which resolves neither `jsr:` specifiers nor a Deno import map, so a
@@ -6147,7 +6147,7 @@ Class-based (`--template class-based`, or any project holding `decorator-plugin`
 
 ```
 src/modules/<name>/<name>.service.ts        @Injectable, token '<name>-service'
-src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), parameter-level @Inject, @Ctx()
+src/modules/<name>/<name>.controller.ts     @Controller('/<name>'), class-level @Inject, @Params(…, Ctx())
 src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
 src/modules/<name>/index.ts                 the module's own re-exports
 src/modules/index.ts                        the aggregate barrel  (managed — regenerated)
@@ -7020,7 +7020,17 @@ app.middleware.add(new AuthMiddleware(auth));
 ### Using Built-in Decorators
 
 ```typescript
-import { Body, Controller, Get, Params, Post } from '@setu-ts/decorator-plugin';
+import {
+  ApiOperation,
+  ApiTags,
+  Body,
+  Controller,
+  CurrentUser,
+  Get,
+  Params,
+  Post,
+  UseGuards,
+} from '@setu-ts/decorator-plugin';
 import { CurrentUser, UseGuards } from '@setu-ts/auth-plugin';
 
 @Controller('/users')
@@ -7041,7 +7051,8 @@ class UserController {
 
   @Post('/')
   @UseGuards(requireAuth())
-  async create(@Body() body: CreateUserDto, @CurrentUser() user: User) {
+  @Params(Body(), CurrentUser())
+  async create(body: CreateUserDto, user: User) {
     return this.userService.create(body, user.id);
   }
 }
@@ -7050,7 +7061,7 @@ class UserController {
 ### Defining Custom Decorators
 
 ```typescript
-import { createDecorator } from '@setu-ts/decorator-plugin';
+import { Controller, createDecorator, Get } from '@setu-ts/decorator-plugin';
 
 // Method decorator
 export const Cacheable = (ttl: number) => createDecorator('cacheable', { ttl });
@@ -7340,7 +7351,8 @@ class UserController {
   @UseGuards(requireAuth())
   @ValidateBody(CreateUserSchema)
   @ApiResponse(201, UserSchema)
-  async create(@Body() body: CreateUserDto) {
+  @Params(Body())
+  async create(body: CreateUserDto) {
     return this.userService.create(body);
   }
 }
@@ -8247,9 +8259,15 @@ they write to the shared singleton regardless, but only the plugin reads it. Imp
 **Milestone 9**; this section is the authoritative export list (AI_GUIDELINES §10.5). All exports
 carry full JSDoc.
 
-> Requires `experimentalDecorators` compiler support (enabled in the package `deno.json`). Legacy
-> TypeScript decorator semantics are used; no reflection metadata (`emitDecoratorMetadata`) is
-> required.
+> **TC39 standard decorators — no compiler option required.** The surface needs no
+> `experimentalDecorators`, no `emitDecoratorMetadata`, and no `compilerOptions` entry of any kind:
+> Deno and Bun parse standard decorators unconfigured, and declaring an option would replace Deno's
+> default set. Node needs a transform (`tsx`) because V8 has not shipped decorators.
+>
+> The standard proposal has **no parameter position**, so handler arguments are declared at the
+> method level with `@Params(...)` and constructor dependencies at the class level with
+> `@Inject(...)`; both are positional, the Nth entry binding the Nth argument. `@Params` is checked
+> against the handler's own signature, which the legacy parameter decorators never were.
 
 ### Values (decorator-plugin exports)
 
@@ -8313,19 +8331,19 @@ Contract notes:
   decorated schema stays description-only (OpenAPI) and ONE warning per route names the controller,
   handler, affected targets and `ValidationPlugin`; nothing throws. `enforceSchemas: false` keeps
   schemas description-only and silences the warning.
-- **`@Body()`/`@Query()`/`@Param()` read the VALIDATED value when one exists.** Each checks
-  `ctx.state` under `validatedStateKey(target)` first — presence-tested with `has`, so a validated
-  `null` or `0` is honoured — and falls back to today's raw source when absent. A Zod `transform` or
-  `default` therefore reaches the handler instead of being discarded. `@Header` and `@Cookie`
-  deliberately read their raw sources: headers resolve case-insensitively through
-  `headers.get(name)`, which the validated record would break, and no schema key exists for cookies.
+- **`Body()`/`Query()`/`Param()` read the VALIDATED value when one exists.** Each checks `ctx.state`
+  under `validatedStateKey(target)` first — presence-tested with `has`, so a validated `null` or `0`
+  is honoured — and falls back to the raw source when absent. A Zod `transform` or `default`
+  therefore reaches the handler instead of being discarded. `Header()` and `Cookie()` deliberately
+  read their raw sources: headers resolve case-insensitively through `headers.get(name)`, which the
+  validated record would break, and no schema key exists for cookies.
 - **No reflection**: metadata is stored in plain `Map`s keyed by class reference, not via
   `Reflect.getMetadata()`. No `reflect-metadata` dependency.
-- **Decorator composition**: parameter and cross-cutting decorators (`@Body`, `@ValidateBody`,
-  `@Roles`, …) run before the HTTP-verb decorator; the store accumulates per-method and derives one
-  `RouteMetadata` per (method, HTTP verb) at read time, so metadata is correct regardless of
-  application order. Class-level guards/interceptors/middleware run before method-level;
-  method-level `@Roles`/`@Permissions` override class-level; `@Public` sets a bypass flag.
+- **Decorator composition**: cross-cutting decorators (`@Params`, `@ValidateBody`, `@Roles`, …) run
+  before the HTTP-verb decorator; the store accumulates per-method and derives one `RouteMetadata`
+  per (method, HTTP verb) at read time, so metadata is correct regardless of application order.
+  Class-level guards/interceptors/middleware run before method-level; method-level
+  `@Roles`/`@Permissions` override class-level; `@Public` sets a bypass flag.
 - **Handler return values**: a controller method either returns a value (serialized as JSON by the
   plugin's handler wrapper) or returns a `HandlerResult` from `ctx.response.*`.
 - **Discovery**: `discoverControllers` walks via `IRuntimeServices.fs` (absent on edge platforms →
@@ -8355,11 +8373,9 @@ Contract notes:
 
   ```typescript
   @Injectable({ token: 'user-repository' })
+  @Inject(CAPABILITIES.DATABASE, CAPABILITIES.LOGGER)
   class UserRepository {
-    constructor(
-      @Inject(CAPABILITIES.DATABASE) private db: IDatabase,
-      @Inject(CAPABILITIES.LOGGER) private logger: ILogger,
-    ) {}
+    constructor(private db: IDatabase, private logger: ILogger) {}
   }
   ```
 
@@ -8395,11 +8411,9 @@ Contract notes:
 
   ```typescript
   @Injectable({ token: 'report-service' })
+  @Inject(CAPABILITIES.DATABASE, Optional(CAPABILITIES.CACHE))
   class ReportService {
-    constructor(
-      @Inject(CAPABILITIES.DATABASE) private db: IDatabase,
-      @Optional() @Inject(CAPABILITIES.CACHE) private cache?: ICacheService,
-    ) {}
+    constructor(private db: IDatabase, private cache?: ICacheService) {}
   }
   ```
 
