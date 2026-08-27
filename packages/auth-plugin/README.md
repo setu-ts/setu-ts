@@ -319,6 +319,7 @@ MIT
 | `RefreshTokenRecord`         | interface |
 | `RefreshTokenStore`          | interface |
 | `RoleDefinition`             | interface |
+| `SessionAuthOptions`         | interface |
 | `TokenPair`                  | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

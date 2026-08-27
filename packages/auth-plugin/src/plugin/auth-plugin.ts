@@ -6,13 +6,14 @@
 
 import type { IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
-import type { IAuthStrategy, IPrincipal } from '@setu-ts/common';
+import type { IAuthStrategy, IPrincipal, ISessionService } from '@setu-ts/common';
 import type { AuthPluginOptions } from '../interfaces/index.ts';
 import { JwtService } from '../services/jwt-service.ts';
 import { AuthService, LocalStrategy } from '../services/auth-service.ts';
 import { RbacService } from '../services/rbac-service.ts';
 import { JwtStrategy } from '../strategies/jwt-strategy.ts';
 import { ApiKeyStrategy } from '../strategies/api-key-strategy.ts';
+import { SessionStrategy } from '../strategies/session-strategy.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -60,6 +61,10 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       CAPABILITIES.AUTH,
       ...(options.rbac === undefined ? [] : [CAPABILITIES.AUTHORIZATION]),
     ],
+    // The session strategy reads the session service, but only when
+    // `options.session` is configured — the edge orders SessionPlugin before
+    // AuthPlugin within the shared NORMAL priority band.
+    optionalDependencies: [CAPABILITIES.SESSION],
     priority: PLUGIN_PRIORITY.NORMAL,
 
     register(ctx: IPluginContext): void {
@@ -124,6 +129,39 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           apiKeyOpts.header = options.apiKey.header;
         }
         strategies.push(new ApiKeyStrategy(apiKeyOpts));
+      }
+
+      // Session strategy (optional). Fails at register() rather than per
+      // request: the session service is resolved once, and a misconfiguration
+      // (session arm without SessionPlugin) is a startup error, not a 401.
+      if (options.session !== undefined) {
+        if (!ctx.services.has(CAPABILITIES.SESSION)) {
+          throw new Error(
+            'auth-plugin: options.session requires the session capability — register the session-plugin (SessionPlugin), or drop options.session',
+          );
+        }
+        const sessionService = ctx.services.get<ISessionService>(CAPABILITIES.SESSION);
+        strategies.push(
+          new SessionStrategy({ sessionService, toPrincipal: options.session.toPrincipal }),
+        );
+      }
+
+      // Caller-supplied strategies, appended in declaration order after every
+      // built-in (jwt → api-key → session → caller).
+      if (options.strategies !== undefined) {
+        for (const strategy of options.strategies) {
+          strategies.push(strategy);
+        }
+      }
+
+      // A strategy's name is its only identity; a duplicate makes the later
+      // entry unreachable for anything that reasons about the chain by name.
+      const seenNames = new Set<string>();
+      for (const strategy of strategies) {
+        if (seenNames.has(strategy.name)) {
+          throw new Error(`auth-plugin: duplicate strategy name '${strategy.name}'`);
+        }
+        seenNames.add(strategy.name);
       }
 
       // Local strategy (optional, defaults to always-null). When no `local`
