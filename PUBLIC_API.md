@@ -1562,7 +1562,7 @@ app.router.get('/health', {
 
 `authMiddleware` writes the authenticated principal to `ctx.request.user` (one of the two
 middleware-written fields on `IRequest` — the other is `tenant`, written by the multi-tenancy plugin
-— so the shipped `@CurrentUser` decorator resolves it).
+— so the shipped `CurrentUser()` parameter source resolves it).
 
 ```typescript
 app.router.get('/me', {
@@ -7027,25 +7027,26 @@ import {
   Controller,
   CurrentUser,
   Get,
+  Param,
   Params,
   Post,
   UseGuards,
 } from '@setu-ts/decorator-plugin';
-import { CurrentUser, UseGuards } from '@setu-ts/auth-plugin';
 
 @Controller('/users')
+@ApiTags('Users')
 class UserController {
   constructor(private userService: UserService) {}
 
   @Get('/')
-  @ApiTags('Users')
-  @ApiOperation('List all users')
+  @ApiOperation({ summary: 'List all users' })
   async list() {
     return this.userService.findAll();
   }
 
   @Get('/:id')
-  async getById(@Params('id') id: string) {
+  @Params(Param('id'))
+  async getById(id: string) {
     return this.userService.findById(id);
   }
 
@@ -7061,7 +7062,7 @@ class UserController {
 ### Defining Custom Decorators
 
 ```typescript
-import { Controller, createDecorator, Get } from '@setu-ts/decorator-plugin';
+import { Controller, createDecorator, Custom, Get, Params } from '@setu-ts/decorator-plugin';
 
 // Method decorator
 export const Cacheable = (ttl: number) => createDecorator('cacheable', { ttl });
@@ -7074,8 +7075,9 @@ export const CurrentTenant = () => Custom<string>('current-tenant');
 class ApiController {
   @Get('/data')
   @Cacheable(3600)
-  async getData(@CurrentTenant() tenant: Tenant) {
-    return this.service.getDataForTenant(tenant.id);
+  @Params(CurrentTenant())
+  async getData(tenantId: string) {
+    return this.service.getDataForTenant(tenantId);
   }
 }
 ```
@@ -7614,7 +7616,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `encodeFrameData(data)`                | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                           |
 | `decodeFrameData(payload)`             | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `createCachedProbe(options)`           | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false` |
-| `parseCookie(header)`                  | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `@Cookie` both need it and no plugin may import another                                                                                                                                                                                                                                |
+| `parseCookie(header)`                  | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `Cookie()` source both need it and no plugin may import another                                                                                                                                                                                                                        |
 | `serializeCookie(n, v, a?)`            | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                                                                                                                                                                                                |
 | `isWorkerReadySignal(m)`               | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `isWorkerTaskRequest(m)`               | function | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -7632,7 +7634,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `brandErrorResponder(fn, r)`           | function | Attaches `errorHandler`'s resolved `IErrorResponder` to its middleware function under `ERROR_RESPONDER_BRAND`, so the kernel — which runs the drain `503`, the malformed-request `400`, and the request hooks BEFORE the pipeline — can read the same responder at startup (M70f re-review)                                                                                                                                                                           |
 | `errorResponderOf(fn)`                 | function | Reads the brand off a middleware function, returning the attached `IErrorResponder` (or `undefined`). The kernel's only route to the resolved formatter for the pre-pipeline sites                                                                                                                                                                                                                                                                                    |
 | `ERROR_RESPONDER_BRAND`                | const    | A `Symbol.for` brand pairing with the two functions above; `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                             |
-| `validatedStateKey(target)`            | function | Returns `` `validation-plugin:validated-${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `@Body`/`@Query`/`@Param` read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                             |
+| `validatedStateKey(target)`            | function | Returns `` `validation-plugin:validated-${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `Body()`/`Query()`/`Param()` sources read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                  |
 | `CLIENT_IP_STATE_KEY`                  | const    | `http-security-plugin:client-ip`, the cross-package key `ipSecurityMiddleware` writes and `rateLimitMiddleware` reads                                                                                                                                                                                                                                                                                                                                                 |
 | `sealRequestIdentity(request)`         | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                        |
 | `replacePrincipal(request, principal)` | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -8358,9 +8360,9 @@ Contract notes:
   empty result with a warning) and loads modules with `await import()` (no `require`/`eval`).
   Snapshot-diff against the store attributes newly-decorated classes to each file. Discovery
   failures never crash the application.
-- **`@Ctx` response control**: `Ctx` resolves the live `IRequestContext`, so a decorated handler can
-  configure `ctx.response` (status, headers, or a stream) and return its `HandlerResult`; it is a
-  built-in custom parameter type and needs no resolver registration. It is recognised by a marker
+- **`Ctx()` response control**: `Ctx` resolves the live `IRequestContext`, so a decorated handler
+  can configure `ctx.response` (status, headers, or a stream) and return its `HandlerResult`; it is
+  a built-in custom parameter type and needs no resolver registration. It is recognised by a marker
   registered with `Symbol.for`, so it keeps working if two copies of the package share a process,
   and an application's own `Custom('context')` still reaches its own resolver.
 - **Startup diagnostics**: when a logger is registered, `DecoratorPlugin.register()` warns (never

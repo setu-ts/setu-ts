@@ -1217,8 +1217,8 @@ graph TB
 | **Purpose**          | Optional decorator and metadata system                                                                                                |
 | **Responsibilities** | Store decorator metadata in plain objects; read metadata and register routes/services/middleware with kernel                          |
 | **Dependencies**     | `common`, `kernel`                                                                                                                    |
-| **Public API**       | `DecoratorPlugin()`; `@Controller`, `@Get`, `@Post`, etc.; `@Injectable`, `@Inject`; `@Body`, `@Query`, `@Param`; `createDecorator()` |
-| **Extension Points** | Custom decorators via `createDecorator()`; custom parameter decorators                                                                |
+| **Public API**       | `DecoratorPlugin()`; `@Controller`, `@Get`, `@Post`, etc.; `@Injectable`, `@Inject`; `@Params(...)` with the `Body`/`Query`/`Param` sources; `createDecorator()` |
+| **Extension Points** | Custom decorators via `createDecorator()`; custom parameter sources via `Custom()`                                                                |
 | **Rules**            | Optional; no reflection required; metadata stored in plain objects; decorators are syntactic sugar over programmatic API              |
 
 #### @setu-ts/logger-plugin

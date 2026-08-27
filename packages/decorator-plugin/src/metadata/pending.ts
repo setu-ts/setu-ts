@@ -104,9 +104,9 @@ export function defer(metadata: MetadataCarrier, write: PendingWrite): void {
  * This is why the bridge needs no cooperation from the class decorator: the
  * standard runtime installs `context.metadata` on the constructor itself, so
  * the pending writes are reachable from the class alone. The store drains on
- * read, which keeps a class carrying member decorators but NO class decorator
- * behaving exactly as it did under the legacy form — its routes were recorded
- * there, and they are recorded here.
+ * read, so a class carrying member decorators but NO class decorator is
+ * recorded on any TARGETED read — which is every path the plugin takes. See
+ * `context-bridge.ts` for the one case that differs from the legacy form.
  *
  * Splices rather than copying, so a write is applied exactly once no matter how
  * many times the class is read.

@@ -408,9 +408,10 @@ export class UserController {
 
 ### The Authenticated Principal
 
-`@CurrentUser` injects `ctx.request.user` (populated by authentication middleware). There is no
-`@Request()` or `@Context()` parameter decorator — to read the full context, use a custom parameter
-decorator (see [Custom Decorators](#custom-decorators)).
+`CurrentUser()` binds `ctx.request.user` (populated by authentication middleware). To read the full
+request context, declare `Ctx()` — it resolves the live `IRequestContext`, so a handler can set a
+status code, add a header, or stream. For anything else, register a resolver and bind it with
+`Custom()` (see [Custom Decorators](#custom-decorators)).
 
 ```typescript
 import { Controller, CurrentUser, Get, Params } from '@setu-ts/decorator-plugin';

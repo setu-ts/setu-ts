@@ -62,6 +62,20 @@ describe('@Params type checking', () => {
     expect(typeof C).toBe('function');
   });
 
+  it('rejects fewer sources than the handler has parameters', () => {
+    // The list must name EVERY parameter. The legacy form left an undecorated
+    // parameter silently `undefined` at runtime; this is a compile error, and
+    // the JSDoc on `Params` says so.
+    @Controller('/x')
+    class C {
+      @Get('/:id')
+      // @ts-expect-error one source declared, two parameters to bind.
+      @Params(Param('id'))
+      show(_id: string, _page: string): void {}
+    }
+    expect(typeof C).toBe('function');
+  });
+
   it('rejects more sources than the handler has parameters', () => {
     @Controller('/x')
     class C {

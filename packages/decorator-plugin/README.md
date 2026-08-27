@@ -95,9 +95,10 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
 
 - **Routing** — `@Controller`, `@Version`,
   `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`/`@Head`/`@Options`
-- **Parameters** — `@Body`, `@Query`, `@Param`, `@Header`, `@Cookie`, `@Ctx`
+- **Parameters** — `@Params(...)`, taking the sources `Body`, `Query`, `Param`, `Header`, `Cookie`,
+  `CurrentUser`, `Ctx`, `Custom`
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
-- **Security** — `@Roles`, `@Permissions`, `@Public`, `@CurrentUser`
+- **Security** — `@Roles`, `@Permissions`, `@Public`
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
 - **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse`

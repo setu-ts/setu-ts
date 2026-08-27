@@ -3,7 +3,7 @@
  *
  * Optional decorator and metadata system plugin.
  *
- * Provides NestJS-style decorators (`@Controller`, `@Get`, `@Body`, …) as
+ * Provides NestJS-style decorators (`@Controller`, `@Get`, `@Params`, …) as
  * syntactic sugar over the kernel's programmatic API. Decorators capture
  * metadata in a plain {@linkcode MetadataStore}; the `DecoratorPlugin` reads
  * that store at registration time and registers routes, services, and

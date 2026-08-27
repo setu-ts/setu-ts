@@ -255,7 +255,6 @@ export class MetadataStore implements IMetadataStore {
   private readonly _services = new Map<Constructor, ServiceMetadata>();
   private readonly _methods = new Map<Constructor, Map<string, MethodMeta>>();
   private readonly _custom: CustomDecoratorRecord[] = [];
-  private readonly _ctorParams = new Map<Constructor, Map<number, string>>();
   private readonly _ctorOptional = new Map<Constructor, Set<number>>();
 
   /** Controllers keyed by class. */
@@ -328,9 +327,9 @@ export class MetadataStore implements IMetadataStore {
    * A standard member decorator never receives the constructor, so it records
    * its write on the class's `Symbol.metadata` object instead; this replays
    * those writes the first time the class is read. Draining on read rather than
-   * from a class decorator is what keeps a class carrying member decorators but
-   * no class decorator behaving as it did under the legacy form — its routes
-   * are recorded either way.
+   * from a class decorator is what records a class carrying member decorators
+   * but no class decorator at all; only the target-less reads below cannot do
+   * it, for the reason `context-bridge.ts` states.
    *
    * Cheap and idempotent: the pending list is spliced empty as it is applied, so
    * every later read finds nothing to do.
@@ -569,7 +568,6 @@ export class MetadataStore implements IMetadataStore {
     this._services.clear();
     this._methods.clear();
     this._custom.length = 0;
-    this._ctorParams.clear();
     this._ctorOptional.clear();
   }
 

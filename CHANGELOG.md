@@ -115,6 +115,15 @@ All notable changes to this project are documented here. The format follows
   token list lives. A list shorter than the constructor simply leaves the trailing arguments
   `undefined`.
 
+  **One `IMetadataStore` read narrows.** A standard member decorator never receives the constructor,
+  so it records onto `context.metadata` and the store replays those writes when the class is read by
+  target. A carrier holds no reference back to its class, so the target-less reads — the
+  `controllers`/`services`/`routes` getters and `getCustomDecorators()` — cannot replay: a class
+  carrying member decorators and NO class decorator is absent from them until something reads it by
+  target, where the legacy form recorded it eagerly. Every class the plugin registers carries
+  `@Controller` or `@Injectable`, and a class decorator flushes eagerly, so this is confined to a
+  class the plugin never registers either.
+
   **New exports:** `Params`, `Custom`, `Optional` (new kind), `ParamSource`, `SourceValues`,
   `InjectToken`, `OptionalToken`, and the three decorator-kind types `SetuClassDecorator`,
   `SetuMethodDecorator`, `SetuClassOrMethodDecorator`.

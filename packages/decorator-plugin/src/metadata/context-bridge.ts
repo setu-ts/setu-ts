@@ -14,7 +14,19 @@
  * installs on the constructor itself — so the store can drain those closures on
  * its first read of the class, with no cooperation from any class decorator.
  * That is what keeps a class carrying member decorators but no class decorator
- * behaving as it did under the legacy form.
+ * recorded at all.
+ *
+ * **One case differs from the legacy form, and it cannot be closed by this
+ * design.** Draining needs a constructor, and a carrier holds no reference back
+ * to its class, so only a TARGETED read can drain — `getController`,
+ * `hasController`, `getService`, `ctorOptional`, `getMethods`, `getRoutesFor`.
+ * The target-less reads (`IMetadataStore`'s `controllers`/`services`/`routes`
+ * getters and `getCustomDecorators`) therefore do not see a class carrying
+ * member decorators and NO class decorator until something has read it by
+ * target, where the legacy form recorded it eagerly. Every class the plugin
+ * registers carries `@Controller` or `@Injectable`, and a class decorator
+ * flushes eagerly below, so the gap is confined to a class no class decorator
+ * marks — which the plugin never registers either.
  *
  * The store's write API is unchanged, and `IMetadataStore` (`@setu-ts/common`)
  * stays keyed by `Constructor` exactly as it is committed — this milestone
@@ -30,10 +42,6 @@ import { metadataStore } from './metadata-store.ts';
 import type { MetadataStore } from './metadata-store.ts';
 import { defer, takePendingFrom } from './pending.ts';
 
-/**
- * A store write captured by a member decorator and replayed once the class
- * decorator supplies the constructor.
- */
 /**
  * A standard class decorator that records metadata and leaves the class as it
  * is. Returning nothing means the class is never replaced, which is what keeps

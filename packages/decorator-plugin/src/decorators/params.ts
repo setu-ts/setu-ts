@@ -66,8 +66,13 @@ function source<T>(descriptor: Omit<ParameterMetadata, 'index'>): ParamSource<T>
  * Binds handler arguments to request sources, positionally.
  *
  * Each source is stored as {@linkcode ParameterMetadata} whose `index` is the
- * source's position in this call. Arguments the list does not cover receive
- * `undefined`, matching an undecorated parameter under the legacy form.
+ * source's position in this call.
+ *
+ * The list is checked against the handler's own signature, so it must name
+ * EVERY parameter — one source per argument, in argument order. A shorter or
+ * longer list is a compile error rather than the silently-`undefined` argument
+ * the legacy parameter decorators produced. A handler that genuinely wants
+ * nothing bound simply carries no `@Params`.
  *
  * @param sources - One source per handler argument, in argument order
  * @returns A method decorator
