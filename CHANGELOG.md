@@ -55,6 +55,12 @@ All notable changes to this project are documented here. The format follows
   async-context store, the plugin logs one `warn` and degrades to the previous behaviour rather than
   failing startup.
 
+- **`traceparent` parsing is stricter.** The codec promoted to `@setu-ts/common` rejects two inputs
+  the telemetry plugin's private copy accepted: an UPPERCASE-hex header (the previous regex carried
+  the `i` flag, while W3C Trace Context defines the value as lowercase hex), and an all-zero trace
+  or span id, which is not a valid parent. Both now yield "no extractable parent", so a request from
+  a non-conformant upstream starts a new trace instead of continuing an invalid one.
+
 - **`MessageMetadata.headers` is now populated by every first-party broker.** It was already read by
   the RabbitMQ and Kafka brokers and omitted entirely by the memory, Redis Streams, Pub/Sub and
   Service Bus brokers; all seven now report the transport headers they read, and `{}` — not

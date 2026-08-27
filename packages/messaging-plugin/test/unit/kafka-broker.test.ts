@@ -277,6 +277,62 @@ describe('KafkaBroker', () => {
     await broker.disconnect();
   });
 
+  it('normalizes every IHeaders arm kafkajs can deliver', async () => {
+    // kafkajs types a header value as `Buffer | string | (Buffer | string)[] |
+    // undefined`. Decoding unconditionally corrupts a plain string, and
+    // ignoring the array arm silently drops a repeated header — so every arm
+    // needs a case. The fake passes non-string values through untouched.
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const encode = (text: string) => new TextEncoder().encode(text);
+    const fakeFactory = new FakeKafkaFactory({
+      seededMessages: [{
+        topic: 'arms',
+        value: JSON.stringify({ x: 1 }),
+        partition: 0,
+        offset: '1',
+        timestamp: String(Date.now()),
+        headers: {
+          // Encoded by the fake, as real kafkajs delivers a Buffer.
+          fromString: 'plain',
+          // Already bytes.
+          fromBytes: encode('bytes'),
+          // A value real kafkajs hands over as a raw string.
+          rawString: 'raw' as unknown as Uint8Array,
+          // A repeated header: first value wins, like `Headers.get`.
+          repeated: [encode('first'), encode('second')],
+          repeatedStrings: ['one', 'two'],
+          // Absent and empty arms contribute no key at all.
+          absent: undefined,
+          emptyArray: [],
+          // A shape kafkajs's types forbid but a hostile/foreign producer could
+          // still surface. It must be DROPPED: `TextDecoder.decode` throws on a
+          // non-BufferSource, and this runs inside `eachMessage`, where a throw
+          // blocks the offset commit and the record is redelivered forever.
+          malformed: { not: 'a header' } as unknown as Uint8Array,
+          malformedInArray: [{ nested: true }] as unknown as Uint8Array[],
+        },
+      }],
+    });
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    let headers: Readonly<Record<string, string>> | undefined;
+    await broker.connect();
+    await broker.subscribe('arms', (_data, metadata) => {
+      headers = metadata.headers;
+    });
+    await fakeFactory.deliverAll();
+
+    expect(headers).toEqual({
+      fromString: 'plain',
+      fromBytes: 'bytes',
+      rawString: 'raw',
+      repeated: 'first',
+      repeatedStrings: 'one',
+    });
+    await broker.disconnect();
+  });
+
   // K2: unsubscribe closure
   it('unsubscribe stops the consumer and removes the active subscription', async () => {
     const runtime = createFakeRuntime();

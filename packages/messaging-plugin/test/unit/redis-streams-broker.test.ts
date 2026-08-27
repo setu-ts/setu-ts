@@ -221,6 +221,65 @@ describe('RedisStreamsBroker', () => {
     await broker.disconnect();
   });
 
+  it('reserves the payload field, so a header cannot shadow the message body', async () => {
+    // Headers ride as extra XADD fields beside `payload`. A header literally
+    // named `payload` used to emit a SECOND field with that name; the reader
+    // took the last occurrence, handed the header value to the deserializer,
+    // and the message was silently lost (JSON.parse threw inside the poll, so
+    // the entry was never acked and the handler never ran).
+    const client = new FakeRedisStreamsClient();
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      pollIntervalMs: 5,
+      blockSizeMs: 5,
+    });
+    await broker.connect();
+    const delivered: Array<
+      { body: unknown; headers: Readonly<Record<string, string>> | undefined }
+    > = [];
+    await broker.subscribeWithHeaders('reserved', (message, metadata) => {
+      delivered.push({ body: message, headers: metadata.headers });
+    });
+
+    await broker.publishWithHeaders(
+      'reserved',
+      { real: 'body' },
+      { payload: 'HIJACKED', traceparent: '00-tp' },
+    );
+    await new Promise((r) => setTimeout(r, 120));
+
+    // The body survives, and the reserved name is dropped rather than written.
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.body).toEqual({ real: 'body' });
+    expect(delivered[0]?.headers).toEqual({ traceparent: '00-tp' });
+    await broker.disconnect();
+  });
+
+  it('takes the first payload field when a foreign producer wrote two', async () => {
+    const client = new FakeRedisStreamsClient({
+      seededMessages: [{
+        id: '1-0',
+        payload: '{"real":"body"}',
+        // A duplicate `payload` field, as only a foreign producer could write.
+        fields: { payload: 'HIJACKED' },
+      }],
+    });
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      pollIntervalMs: 5,
+      blockSizeMs: 5,
+    });
+    await broker.connect();
+    const delivered: unknown[] = [];
+    await broker.subscribeWithHeaders('reserved', (message) => {
+      delivered.push(message);
+    });
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(delivered).toEqual([{ real: 'body' }]);
+    await broker.disconnect();
+  });
+
   it('unsubscribe clears poll interval', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();

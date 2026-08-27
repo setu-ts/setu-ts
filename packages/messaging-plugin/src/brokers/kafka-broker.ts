@@ -401,7 +401,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
           key: Uint8Array | null;
           value: Uint8Array | null;
           timestamp: string;
-          headers?: Record<string, Uint8Array | string | readonly Uint8Array[] | undefined>;
+          headers?: Record<
+            string,
+            Uint8Array | string | readonly (Uint8Array | string)[] | undefined
+          >;
           partition: number;
           offset: string;
         };
@@ -507,18 +510,41 @@ export class KafkaBroker implements MessageBrokerAdapter {
   }
 }
 
+/**
+ * Normalizes kafkajs headers to a string record.
+ *
+ * kafkajs types a header value as `Buffer | string | (Buffer | string)[] |
+ * undefined` (`IHeaders`), so every arm has to be handled: decoding
+ * unconditionally corrupts a `string` value, and ignoring the array arm drops
+ * a repeated header. For a repeated header the FIRST value is taken, matching
+ * how `Headers.get` reports one value for a name.
+ *
+ * A value in none of those shapes is DROPPED rather than decoded. This is not
+ * defensive noise: `TextDecoder.decode` throws on anything that is not a
+ * BufferSource, and this runs inside `eachMessage`, where a throw prevents the
+ * offset commit and the broker redelivers the same record — so one malformed
+ * header from a foreign producer would become an unbounded redelivery loop.
+ *
+ * @param headers - The delivered kafkajs header record, if any
+ * @returns The headers as a string record; `{}` when none were carried
+ */
 function normalizeKafkaHeaders(
-  headers: Record<string, Uint8Array | string | readonly Uint8Array[] | undefined> | undefined,
+  headers:
+    | Record<string, Uint8Array | string | readonly (Uint8Array | string)[] | undefined>
+    | undefined,
 ): Readonly<Record<string, string>> {
   const decoder = new TextDecoder();
+  const decode = (value: unknown): string | undefined => {
+    if (typeof value === 'string') return value;
+    if (value instanceof Uint8Array) return decoder.decode(value);
+    return undefined;
+  };
   return Object.fromEntries(
     Object.entries(headers ?? {}).flatMap(([key, value]) => {
-      if (typeof value === 'string') return [[key, value]];
-      if (value instanceof Uint8Array) return [[key, decoder.decode(value)]];
-      if (Array.isArray(value) && value[0] instanceof Uint8Array) {
-        return [[key, decoder.decode(value[0])]];
-      }
-      return [];
+      if (value === undefined) return [];
+      const candidate = Array.isArray(value) ? value[0] : value;
+      const text = decode(candidate);
+      return text === undefined ? [] : [[key, text]];
     }),
   );
 }

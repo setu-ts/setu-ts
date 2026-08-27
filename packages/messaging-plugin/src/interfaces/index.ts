@@ -245,6 +245,20 @@ export interface NatsMessagingOptions extends MessagingCommonOptions {
   broker: 'nats';
   url?: string;
   client?: INatsConnection;
+  /**
+   * Factory building the NATS `MsgHdrs` used to carry transport headers.
+   *
+   * Required alongside {@link client} for trace propagation: an injected
+   * connection carries no nats module, so the broker has no `headers()` to call.
+   * A lazily-loaded connection supplies its own and needs nothing here.
+   *
+   * @example
+   * ```typescript
+   * import * as nats from 'npm:nats@2.x';
+   * MessagingPlugin({ broker: 'nats', client, headersFactory: () => nats.headers() });
+   * ```
+   */
+  headersFactory?: () => INatsHeaders;
   streamName?: string;
   defaultQueue?: string;
 }

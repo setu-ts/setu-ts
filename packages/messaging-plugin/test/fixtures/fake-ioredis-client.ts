@@ -34,6 +34,14 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
   #streams: Map<string, Array<{ id: string; payload: string; fields: string[] }>>;
   #groups: Map<string, Set<string>>; // stream -> consumer groups
   #pending: Map<string, Map<string, { groupId: string; messageId: string }>>; // stream -> groupId -> messageId -> pending
+  // Entries already handed to a group, tracked SEPARATELY from the PEL.
+  // In real Redis, `XREADGROUP ... STREAMS key >` returns only entries never
+  // delivered to that group, and `XACK` removes an entry from the PEL without
+  // making it eligible for `>` again. Conflating the two (deleting the pending
+  // entry on ack, and treating "not pending" as "deliverable") redelivers every
+  // successfully-acked message on the next poll — the opposite of the real
+  // server, and invisible until the fake could deliver at all.
+  #deliveredToGroup: Map<string, Set<string>>; // stream -> `${group}:${id}`
   #calls: Array<{ method: string; args: unknown[] }>;
   #quitCalled = false;
   #connectCalled = false;
@@ -43,6 +51,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     this.#streams = new Map();
     this.#groups = new Map();
     this.#pending = new Map();
+    this.#deliveredToGroup = new Map();
     this.#calls = [];
   }
 
@@ -88,6 +97,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
    */
   resetStreams(): void {
     this.#streams.clear();
+    this.#deliveredToGroup.clear();
     this.#groups.clear();
     this.#pending.clear();
   }
@@ -218,22 +228,25 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
 
     const streamData = this.#streams.get(stream)!;
 
-    // Get messages after the last ID (simulated as '>')
-    // For simplicity, return all messages not yet acked by this group.
+    // '>' semantics: entries never delivered to this group.
     const entries: unknown[][] = [];
+    let delivered = this.#deliveredToGroup.get(stream);
+    if (!delivered) {
+      delivered = new Set();
+      this.#deliveredToGroup.set(stream, delivered);
+    }
+    if (!this.#pending.has(stream)) {
+      this.#pending.set(stream, new Map());
+    }
+    const streamPending = this.#pending.get(stream)!;
 
-    // Return new messages (not yet acked)
-    const streamPending = this.#pending.get(stream);
     for (const entry of streamData) {
       const key = `${group}:${entry.id}`;
-      if (!streamPending || !streamPending.has(key)) {
-        entries.push([entry.id, entry.fields]);
-        // Mark as pending after returning
-        if (!streamPending) {
-          this.#pending.set(stream, new Map());
-        }
-        this.#pending.get(stream)!.set(key, { groupId: group, messageId: entry.id });
-      }
+      if (delivered.has(key)) continue;
+      entries.push([entry.id, entry.fields]);
+      delivered.add(key);
+      // Delivered entries enter the PEL until acked.
+      streamPending.set(key, { groupId: group, messageId: entry.id });
     }
 
     // Real XREADGROUP nests entries one level deeper, per stream:
@@ -257,14 +270,10 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     let acked = 0;
     for (const id of ids) {
       const key = `${group}:${id}`;
-      if (streamPending.has(key)) {
-        streamPending.delete(key);
-        acked++;
-      } else {
-        // Mark as pending for future ack
-        streamPending.set(key, { groupId: group, messageId: id });
-        acked++;
-      }
+      // XACK removes the entry from the PEL. It does NOT make the entry
+      // eligible for a later `>` read — that is what `#deliveredToGroup`
+      // records, and it is deliberately left untouched here.
+      if (streamPending.delete(key)) acked++;
     }
 
     return acked;

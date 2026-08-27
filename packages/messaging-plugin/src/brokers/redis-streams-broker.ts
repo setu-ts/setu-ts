@@ -15,6 +15,12 @@ import { RequestReplyCore } from './request-reply-core.ts';
 import type { IRedisStreamsClient, RedisStreamsOptions } from '../interfaces/index.ts';
 
 /**
+ * The stream field carrying the serialized message body. Reserved: it is never
+ * written as a transport header, and the first occurrence wins on read.
+ */
+const PAYLOAD_FIELD = 'payload';
+
+/**
  * Lazily load ioredis at runtime. Pin to 5.x for stability.
  *
  * @returns The ioredis constructor
@@ -272,9 +278,14 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       throw new Error('RedisStreamsBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
-    // XADD with '*' for auto-generated ID
-    const fields = Object.entries(headers).flatMap(([key, value]) => [key, value]);
-    await this.#client.xadd(topic, '*', 'payload', serialized, ...fields);
+    // XADD with '*' for auto-generated ID. Headers ride as extra field/value
+    // pairs beside `payload`, so `payload` is RESERVED: emitting a second field
+    // with that name would shadow the body, and the reader would hand the
+    // header value to the deserializer instead of the message.
+    const fields = Object.entries(headers)
+      .filter(([key]) => key !== PAYLOAD_FIELD)
+      .flatMap(([key, value]) => [key, value]);
+    await this.#client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields);
   }
 
   /**
@@ -347,8 +358,10 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
             let payload: string | null = null;
             const headers: Record<string, string> = {};
             for (let i = 0; i < fields.length; i += 2) {
-              if (fields[i] === 'payload') {
-                payload = fields[i + 1] as string;
+              if (fields[i] === PAYLOAD_FIELD) {
+                // First occurrence wins, so a foreign producer that wrote a
+                // duplicate `payload` field cannot shadow the real body.
+                payload ??= fields[i + 1] as string;
               } else {
                 headers[fields[i]] = fields[i + 1];
               }
