@@ -37,11 +37,12 @@ export interface SseMessage {
    * rather than at runtime, where the local delivery path swallows the failure
    * per member and the backplane path throws out of `publish`.
    *
-   * A circular structure still throws at runtime — no type can express
-   * acyclicity — and a named `interface` does not assign, because TypeScript
-   * grants implicit index signatures only to object-literal types. Declare the
-   * payload with a `type` alias, or extend `Record<string, JsonValue |
-   * undefined>`.
+   * Three things the type cannot catch: a circular structure throws at runtime;
+   * a named `interface` does not assign, because TypeScript grants implicit
+   * index signatures only to object-literal types (declare the payload with a
+   * `type` alias, or extend `Record<string, JsonValue | undefined>`); and
+   * `NaN` / `Infinity` / `-Infinity` reach the wire as `null`, because
+   * `JSON.stringify` normalizes them rather than failing.
    */
   readonly data: JsonValue;
   /** Reconnection time in milliseconds — sent as `retry:` field. */

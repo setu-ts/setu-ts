@@ -100,7 +100,7 @@ export const PLUGIN_PRIORITY = {
 export type PluginPriority = (typeof PLUGIN_PRIORITY)[keyof typeof PLUGIN_PRIORITY];
 
 /**
- * A value that survives a `JSON.stringify` round trip.
+ * A value `JSON.stringify` can serialize.
  *
  * Recursive: an array's elements and an object's property values are
  * themselves `JsonValue`s, so a nested payload is checked all the way down
@@ -114,11 +114,17 @@ export type PluginPriority = (typeof PLUGIN_PRIORITY)[keyof typeof PLUGIN_PRIORI
  * functions and symbols (which it silently drops, losing data the caller
  * believed it was sending).
  *
- * **Two limits are worth knowing before you reach them.** A circular structure
- * still throws at runtime; no type can express acyclicity. And a named
- * `interface` is not assignable to this type, because TypeScript grants
- * implicit index signatures only to object-literal types — declare the payload
- * with a `type` alias, or extend `Record<string, JsonValue | undefined>`.
+ * **Three limits are worth knowing before you reach them, and none is
+ * expressible in a type.** A circular structure throws at runtime; no type can
+ * express acyclicity. A named `interface` is not assignable, because TypeScript
+ * grants implicit index signatures only to object-literal types — declare the
+ * payload with a `type` alias, or extend `Record<string, JsonValue |
+ * undefined>`. And `NaN`, `Infinity` and `-Infinity` are members of `number`
+ * that JSON has no representation for: `JSON.stringify` normalizes each of them
+ * to `null` rather than failing, so the value is silently changed rather than
+ * refused. TypeScript cannot exclude them from `number`, and a runtime check
+ * would mean walking every payload on the hot path — send the number as a
+ * string when the distinction matters.
  *
  * @example
  * ```typescript

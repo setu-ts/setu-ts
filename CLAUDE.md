@@ -3378,7 +3378,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   recorded seven entries above it in the same section. A release spanning many milestones needs the
   whole `Unreleased` section read for internal contradictions, not just for per-milestone coverage.
 - **Milestone 74** (`packages/common` + `packages/websocket-plugin` + `packages/sse-plugin` —
-  realtime registry reads and the SSE contract). Two committed contracts could only be read by
+  realtime registry reads and the SSE contract. Two committed contracts could only be read by
   writing to them, and a third advertised a guarantee its own type did not hold. `room(name)` and
   `channel(name)` are get-or-create with no counterpart, so a presence endpoint reporting `size` for
   a request-supplied name **allocated** one registry entry per distinct name polled — the register

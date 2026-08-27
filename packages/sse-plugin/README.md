@@ -73,10 +73,12 @@ app.router.get('/subscribers/:build', (ctx) => {
 **`SseMessage.data` is typed `JsonValue`** — a recursive JSON-safe type, so the compiler admits
 exactly what the frame encoder can write. A `bigint` (which `JSON.stringify` throws on) and a
 function or symbol value (which it silently drops) are compile errors rather than runtime surprises.
-A property written `T | undefined` is fine: `JSON.stringify` drops the key. Two limits remain — a
-circular structure still throws at runtime, and a named `interface` does not assign, because
-TypeScript grants implicit index signatures only to object-literal types. Declare the payload with a
-`type` alias, or extend `Record<string, JsonValue | undefined>`.
+A property written `T | undefined` is fine: `JSON.stringify` drops the key. Three limits remain: a
+circular structure still throws at runtime; `NaN`, `Infinity` and `-Infinity` reach the wire as
+`null`, because `JSON.stringify` normalizes them rather than failing, so send the number as a string
+when that distinction matters; and a named `interface` does not assign, because TypeScript grants
+implicit index signatures only to object-literal types. Declare the payload with a `type` alias, or
+extend `Record<string, JsonValue | undefined>`.
 
 ## Scaling beyond one replica
 
