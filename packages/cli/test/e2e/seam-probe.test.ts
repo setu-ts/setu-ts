@@ -82,8 +82,9 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig } from '@setu-ts/common';
 
 @Injectable({ token: 'gadget-svc-service' })
+@Inject(CAPABILITIES.CONFIG)
 export class GadgetSvcService {
-  constructor(@Inject(CAPABILITIES.CONFIG) private readonly config: IConfig) {}
+  constructor(private readonly config: IConfig) {}
 
   /** Reports through the injected capability, so a stub cannot satisfy it. */
   describe(): string {
