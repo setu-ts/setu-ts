@@ -201,3 +201,39 @@ describe('SseService.peek (M74 / X3-8)', () => {
     expect(service.peek('build:0')).toBeUndefined();
   });
 });
+
+describe('SseService.channelCount (M74)', () => {
+  it('starts at zero and counts each distinct channel created', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+
+    expect(service.channelCount).toBe(0);
+
+    service.channel('deploys');
+    service.channel('builds');
+    service.channel('deploys');
+
+    expect(service.channelCount).toBe(2);
+  });
+
+  it('is not moved by peek', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+
+    service.peek('deploys');
+
+    expect(service.channelCount).toBe(0);
+  });
+
+  it('never decreases — a channel whose members all left is still counted', () => {
+    // The property that makes this number worth watching rather than merely
+    // reporting. Nothing reclaims an SSE channel before shutdown.
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+    service.channel('deploys');
+
+    expect(service.channelCount).toBe(1);
+    expect(service.peek('deploys')?.size).toBe(0);
+    expect(service.channelCount).toBe(1);
+  });
+});
