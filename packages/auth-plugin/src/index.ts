@@ -34,6 +34,7 @@ export type { AuthPluginOptions } from './interfaces/index.ts';
 export type { JwtOptions } from './interfaces/index.ts';
 export type { ApiKeyOptions } from './interfaces/index.ts';
 export type { LocalOptions } from './interfaces/index.ts';
+export type { SessionAuthOptions } from './interfaces/index.ts';
 
 // Exported utilities
 export { MalformedPasswordHashError, PasswordHasher } from './services/password-hasher.ts';

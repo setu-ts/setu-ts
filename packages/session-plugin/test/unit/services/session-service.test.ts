@@ -238,6 +238,40 @@ describe('SessionService.load', () => {
   });
 });
 
+describe('SessionService shared path (load and fromHeaders)', () => {
+  it('returns the same id and payload from both entry points under a non-default config', async () => {
+    const store = new RecordingStore();
+    const { service } = await makeService(
+      { cookie: { name: 'sid' } },
+      store,
+      'sign',
+    );
+
+    const write = makeContext();
+    const session = await service.load(write.ctx);
+    session.set('userId', 'u-1');
+    session.set('plan', 'pro');
+    await service.commit(write.ctx, session);
+    const setCookie = write.response.setCookies()[0];
+    if (setCookie === undefined) {
+      throw new Error('expected session commit to set a cookie');
+    }
+    const cookie = setCookie.split(';')[0];
+
+    // The two entry points, one cookie: the context-backed HTTP read and the
+    // headers-only read must agree on identity and payload.
+    const readCtx = makeContext({ headers: { cookie } });
+    const viaLoad = await service.load(readCtx.ctx);
+    const viaHeaders = await service.fromHeaders(readCtx.ctx.request.headers);
+
+    expect(viaHeaders).not.toBeNull();
+    expect(viaHeaders?.id).toBe(viaLoad.id);
+    expect(viaHeaders?.id).toBe(session.id);
+    expect(viaHeaders?.data).toEqual(viaLoad.toJSON());
+    expect(viaHeaders?.data).toEqual({ userId: 'u-1', plan: 'pro' });
+  });
+});
+
 describe('SessionService.commit', () => {
   it('emits nothing for a clean session', async () => {
     const { service } = await makeService();

@@ -137,6 +137,41 @@ That suppresses the message only. Channel delivery is identical either way.
 A reconnecting browser sends `Last-Event-ID`. Set `id` on the messages you send so a client can
 resume from where it dropped.
 
+## Authentication
+
+`EventSource` is the only browser API for this transport, and it can send exactly one credential: a
+cookie — no `Authorization` header, no custom header at all. So an `EventSource` behind
+`requireAuth()` is `401`ed unless a strategy reads the cookie. The plugin needs no source change for
+this: `SsePlugin.register` registers no kernel route, the application owns the route, and
+`SseService.open(ctx)` receives the live `IRequestContext` — so once a cookie-bearing request
+produces a principal, `requireAuth()` on the route admits an `EventSource` exactly as it admits a
+`fetch`.
+
+Configure the session arm on `@setu-ts/auth-plugin` and guard the route:
+
+- `SessionPlugin` (from `@setu-ts/session-plugin`) registers the session middleware at priority 260.
+- `AuthPlugin({ jwt: { … }, session: { toPrincipal } })` — `toPrincipal(view)` maps the opened
+  `SessionView` to the principal it carries, or returns `null` when the session holds no identity.
+  Without `SessionPlugin` registered, `AuthPlugin` throws at `register()` naming both plugins.
+- `app.middleware.add(authMiddleware(), { priority: 300 })` — the authentication band; a bare
+  `add()` would take the kernel default of 500 and run after it.
+- The route itself: `app.router.get('/events', { middleware: [requireAuth()], handler })`, where the
+  handler opens the stream with `sse.open(ctx)`.
+
+The client must opt in to sending the cookie cross-origin:
+`new EventSource('/events', { withCredentials: true })` — and the server must answer with a named
+origin plus `Access-Control-Allow-Credentials: true`, which
+`corsMiddleware({ origin: 'https://example.com', credentials: true })` from
+`@setu-ts/http-security-plugin` does. `origin: true` (reflect any origin) cannot be combined with
+`credentials: true`; the middleware throws at registration, because that combination lets every site
+the user visits read credentialed responses.
+
+The session cookie defaults to `sameSite: 'lax'`, and an `EventSource` request is not a top-level
+navigation, so a `Lax` cookie is not sent on a cross-site `EventSource` request. Setting
+`cookie.sameSite: 'none'` on `SessionPlugin` removes that protection and exposes the stream to
+cross-site reads; if you must run `none`, the `credentials` CORS rule above is the minimum, and
+checking `Origin` in the authentication band is the stronger form.
+
 ## Exports
 
 | Export             | Kind      |

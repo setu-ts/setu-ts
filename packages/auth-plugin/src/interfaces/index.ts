@@ -4,7 +4,7 @@
  * @module
  */
 
-import type { IPrincipal, RbacConfig } from '@setu-ts/common';
+import type { IAuthStrategy, IPrincipal, RbacConfig, SessionView } from '@setu-ts/common';
 
 /**
  * JWT configuration options.
@@ -59,6 +59,23 @@ export interface LocalOptions {
 }
 
 /**
+ * Session authentication configuration options.
+ *
+ * The session payload is application data, so the framework picks no
+ * conventional key: `toPrincipal` is the one place that knows where an
+ * identity lives inside the payload, and it is required.
+ *
+ * @since 0.1.0
+ */
+export interface SessionAuthOptions {
+  /**
+   * Maps an opened session to the principal it carries. Return `null` when
+   * the session holds no identity — the strategy chain then continues.
+   */
+  readonly toPrincipal: (view: SessionView) => IPrincipal | null;
+}
+
+/**
  * Auth plugin configuration options.
  *
  * @since 0.1.0
@@ -75,4 +92,16 @@ export interface AuthPluginOptions {
    * only and does not provide the authorization capability.
    */
   readonly rbac?: RbacConfig;
+  /**
+   * Session authentication configuration. When present, the plugin appends an
+   * internal session strategy after the API-key strategy and requires the
+   * `session` capability (SessionPlugin) to be registered.
+   */
+  readonly session?: SessionAuthOptions;
+  /**
+   * Caller-supplied strategies, appended after every built-in in declaration
+   * order. A strategy whose `name` collides with any other strategy in the
+   * assembled chain makes `register()` throw.
+   */
+  readonly strategies?: readonly IAuthStrategy[];
 }

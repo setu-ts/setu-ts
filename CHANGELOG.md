@@ -8,6 +8,48 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common`: a headers-only session read and the authenticated-principal bridge for
+  WebSocket upgrades.** `ISessionService.fromHeaders(headers)` opens a session from a `Headers`
+  object alone — the read for non-HTTP entry points (a WebSocket `onOpen` handler, an auth strategy
+  reading a cookie) that have no request context to commit onto — and returns a new read-only
+  `SessionView` (`{ id, data }`) or `null`. It runs the same envelope-open, snapshot-parse, and
+  store-read path as the load behind `from(ctx)`, so it inherits real revocation on the store
+  strategy, but it never commits and never writes. `WebSocketConnectionContext` gains an optional
+  `user?: IPrincipal` — the principal that authenticated the upgrade, omitted when it was anonymous
+  — and `IWebSocketService.routeUpgrade` gains an optional second parameter
+  (`principal?: IPrincipal`) that carries it. Both additions are optional members, so existing
+  implementors and consumers compile unchanged.
+- **`@setu-ts/auth-plugin`: a cookie-backed `SessionStrategy` and a caller-supplied strategy
+  hatch.** `AuthPluginOptions.session` takes a `SessionAuthOptions` whose single required member,
+  `toPrincipal(view)`, maps the opened `SessionView` to the principal it carries (returning `null`
+  continues the chain). When present, the plugin appends an internal `SessionStrategy` — the
+  strategy that reads the session cookie through `ISessionService.fromHeaders` — after the API-key
+  strategy, and requires the `session` capability (`SessionPlugin`) to be registered, or
+  `register()` throws naming both plugins. `AuthPluginOptions.strategies` accepts caller-supplied
+  `IAuthStrategy`s, appended after every built-in in declaration order; a `name` colliding with any
+  other strategy in the assembled chain throws at `register()`. The assembled order is fixed — **jwt
+  → api-key → session → caller-supplied** — and the first non-null principal wins. This closes X3-5:
+  a browser can now authenticate over `EventSource` and a WebSocket upgrade, the two transports that
+  can send only a cookie.
+- **`@setu-ts/session-plugin`, `@setu-ts/kernel`, and `@setu-ts/websocket-plugin`: the bridge wired
+  end to end.** `SessionService` implements `fromHeaders`; the kernel's terminal handler passes
+  `ctx.request.user` to `routeUpgrade`; and `WebSocketService` threads that principal into
+  `buildContext`, so `onOpen`'s `context.user` is the authenticated peer. No adapter change is
+  needed: since M70a `routeUpgrade` is the only live upgrade-routing path on every runtime.
+
+### Changed
+
+- **`@setu-ts/common`: `ISessionService.fromHeaders` is a REQUIRED member.** Callers are unaffected
+  — the addition is source-compatible for every consumer. But an application that implements
+  `ISessionService` itself (not the framework's `SessionService`) now fails to type-check until it
+  adds `fromHeaders(headers: Headers): Promise<SessionView | null>`. It is required rather than
+  optional because a strategy in another package must call it without a capability-shaped guard, and
+  the framework's `SessionService` is the only in-repo implementor (the M51b
+  `IGraphqlService.subscribe` precedent). Migration: add the member to your implementation; the
+  contract is read-only — it must open the session from the supplied headers, return `null` for
+  every condition the load path treats as "no usable session" (absent cookie, unopenable envelope,
+  unparseable snapshot, absolute expiry or idle timeout passed, or a gone store entry), and never
+  commit, advance the `seen` stamp, or write.
 - **A non-mutating read on both realtime registries: `IWebSocketService.peek(name)` and
   `ISseService.peek(name)`** (M74, X3-8). `room(name)` and `channel(name)` are get-or-create, so a
   presence or dashboard endpoint reporting `size` for a name taken from a request registered one
@@ -38,6 +80,23 @@ All notable changes to this project are documented here. The format follows
   failing, so an optional field still assigns.
 
 ### Fixed
+
+- **Three committed docs still said WebSocket upgrades and gRPC requests bypass the middleware
+  pipeline**, which M70a made false. `packages/websocket-plugin/README.md` claimed "the adapter
+  therefore consults the plugin's upgrade router first", and the `ARCHITECTURE.md` package-diagram
+  notes said the §10 pipeline "is likewise bypassed for upgrade requests, by design" and that RPC is
+  "intercepted inside the HTTP adapter's `fetch` path". Since M70a the kernel's terminal handler
+  decides both, after the pipeline has run and before route matching; the adapter stores the upgrade
+  router without consulting it, and `setRpcHandler` is deprecated and consulted by nothing. Each
+  correction now matches the canonical prose in `ARCHITECTURE.md` §10 and `PUBLIC_API.md`. Both
+  documents were reachable by a reader deciding whether a guard protects a socket, which is exactly
+  the question M70a exists to answer. Two further copies were found in `@setu-ts/common`'s own
+  JSDoc, which jsr.io renders: `IHttpAdapter.setUpgradeRouter` said the handshake happens "when the
+  pipeline does not short-circuit **and route matching returns no match**" — the pre-review ordering
+  that M70a's code review inverted, because a catch-all was shadowing every upgrade — and
+  `RpcFetchHandler` still described the adapter consulting it before mapping the request.
+  `ARCHITECTURE.md` also claimed `grpc-plugin` depends on the `http-adapter` capability; it resolves
+  no adapter at all since M70a. Documentation only — no behaviour, signature or export changed.
 
 - **`@setu-ts/openapi-plugin` produced an EMPTY OpenAPI schema for every zod v4 schema.** Zod v4
   removed the private `_def.typeName` marker the transformer dispatched on, so every v4 schema fell
