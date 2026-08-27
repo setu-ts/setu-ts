@@ -180,4 +180,17 @@ export interface ISseService {
   peek(name: string): SseChannel | undefined;
   /** Current number of open connections. */
   readonly connectionCount: number;
+  /**
+   * Number of channels the registry currently holds.
+   *
+   * The counterpart to {@linkcode IWebSocketService.roomCount}, and worth
+   * watching rather than merely reporting: a channel is created by
+   * {@linkcode ISseService.channel} and **never reclaimed before shutdown**, so
+   * this number only rises. A steadily climbing count means channel names are
+   * being derived from unbounded input — use {@linkcode ISseService.peek} on
+   * any path that reads a caller-supplied name.
+   *
+   * @since 0.4.0
+   */
+  readonly channelCount: number;
 }

@@ -7441,6 +7441,16 @@ the semantics in both READMEs and `PUBLIC_API.md`; it did not add the read.
   `Record<string, unknown>` arm has always admitted `{ x: 10n }`, which `JSON.stringify` throws on.
 - **Packages:** `websocket-plugin`, `sse-plugin`, `common`.
 
+**Public API approval (§10.2).** The maintainer approved the three additions and the two breaking
+changes on 2026-08-27: `IWebSocketService.peek`, `ISseService.peek` and `ISseService.channelCount`
+as **required** members (breaking for an out-of-repo implementor of either contract), the new
+`JsonValue` export in `common`, and the `SseMessage.data` narrowing (breaking for a caller passing a
+non-JSON payload). `PUBLIC_API.md` and `CHANGELOG.md` carry the surface and the migration text in
+this same PR. `channelCount` was added at the maintainer's direction after the first implementation
+pass flagged the asymmetry: `IWebSocketService` publishes `roomCount` and its health indicator
+reports `rooms`, while the SSE indicator reported `connections` alone, so the never-reclaimed growth
+this milestone documents had no operator-visible signal at all.
+
 **Shipped.** `peek(name)` is a **required** member on both `IWebSocketService` and `ISseService`,
 returning the live room/channel or `undefined`. Required rather than optional because an optional
 `peek?` returning `undefined` cannot distinguish "no such room" from "this implementation does not
@@ -7474,9 +7484,9 @@ closes the read path X3-8 names, which is this milestone's scope.
 Each integration guard ships beside a control that reproduces the defect through the same entry
 point: 50 requests answered by `peek` leave the registry at its starting size, while the identical
 endpoint written with `room()`/`channel()` grows it to 50 — so the guards are known to discriminate
-rather than merely to pass. `ISseService` publishes no channel count (the SSE health indicator
-reports `connections` only, with no counterpart to `IWebSocketService.roomCount`), so the SSE guard
-reads the registry through `peek` itself, which the leaky control proves detects creation.
+rather than merely to pass. The SSE guard reads the registry through the new
+`ISseService.channelCount`, whose control is that same leaky case: the identical reading answers 50
+when the endpoint is written with `channel()`.
 
 ## Milestone 75: Broker Trace Propagation ⬜ PLANNED
 

@@ -176,7 +176,7 @@ describe('SsePlugin registration', () => {
       expect(result.status).toBe('up');
       // Assert the full documented shape (§3.9), not just that data exists:
       // the indicator surfaces the live connection count (0 at registration).
-      expect(result.data).toEqual({ connections: 0 });
+      expect(result.data).toEqual({ connections: 0, channels: 0 });
     }
 
     expect(onCloseHandler).not.toBeNull();

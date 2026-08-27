@@ -157,6 +157,11 @@ export class SseService implements IService {
     return this.#connections.size;
   }
 
+  /** Number of channels the registry currently holds; never decreases. */
+  get channelCount(): number {
+    return this.#registry.size;
+  }
+
   /**
    * Opens the backplane transport, once, on first local use.
    *
