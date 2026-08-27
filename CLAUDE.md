@@ -3433,7 +3433,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   swallowed per-member by `publishLocal` with no backplane, and throws synchronously out of
   `publish` with one, because the backplane publisher builds its frame with `JSON.stringify(msg)`
   outside any `try`. Developed in an isolated worktree off `main`, in parallel with M73, which it
-  does not depend on) — complete (PR pending)
+  does not depend on) — complete (PR #196)
 - **Next milestone** — **M73** (realtime authentication) and **M75** (broker trace propagation).
 
 ## Verification (run before declaring any work done)
