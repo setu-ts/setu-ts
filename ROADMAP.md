@@ -7682,5 +7682,5 @@ it as a requirement (`ARCHITECTURE.md` §, `PUBLIC_API.md` ×3, `docs/decorators
 | 72        | ✅     | cli (transports + interactive, PR #191)        |
 | 73        | ✅     | realtime authentication (PR #197)              |
 | 74        | ✅     | realtime reads + sse contract (PR #196)        |
-| 75        | ✅     | broker trace propagation                       |
+| 75        | ✅     | broker trace propagation (PR #201)             |
 | 76        | ⬜     | standard decorators / experimentalDecorators   |

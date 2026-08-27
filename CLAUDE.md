@@ -3565,7 +3565,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the Redis one was shown to discriminate against a live server. Also fixed: my own insertion split
   `TelemetryPlugin` from its JSDoc so the block documented the new function instead (the M70m
   stacked-docblock defect), caught by the M38 ratchet — which the previous commit had left failing
-  at 769 against a 752 baseline) — complete (PR pending)
+  at 769 against a 752 baseline) — complete (PR #201)
 - **Next milestone** — **M76** (standard decorators / `experimentalDecorators` deprecation).
 
 ## Verification (run before declaring any work done)
