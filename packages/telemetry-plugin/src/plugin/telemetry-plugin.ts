@@ -19,7 +19,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
-import { contextToTraceparent, extractContextFromHeaders } from '../tracing/tracer.ts';
+import { contextToTraceparent, extractContextFromHeaders } from '@setu-ts/common';
 import {
   buildInstrumentationRegistry,
   type InstrumentationReporter,

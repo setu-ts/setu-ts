@@ -107,7 +107,11 @@ export interface ServiceBusSdkModule {
  */
 export interface IServiceBusTransport {
   /** Send a body to a topic. */
-  send(topic: string, body: string): Promise<void>;
+  send(
+    topic: string,
+    body: string,
+    applicationProperties?: Readonly<Record<string, string>>,
+  ): Promise<void>;
   /**
    * Open a receiver on a topic subscription.
    * @param onMessage - Called per delivered message
@@ -116,7 +120,12 @@ export interface IServiceBusTransport {
     topic: string,
     subscription: string,
     onMessage: (
-      msg: { payload: string; ack: () => void; nack: () => void },
+      msg: {
+        payload: string;
+        ack: () => void;
+        nack: () => void;
+        applicationProperties?: Readonly<Record<string, string>>;
+      },
     ) => void | Promise<void>,
   ): Promise<IServiceBusSubscription>;
   /** Create a subscription (for RPC inbox). */
@@ -220,19 +229,29 @@ export function adaptServiceBusModule(
   const receivers = new Map<string, OpenReceiver[]>();
 
   return {
-    send: async (topic: string, body: string): Promise<void> => {
+    send: async (
+      topic: string,
+      body: string,
+      applicationProperties?: Readonly<Record<string, string>>,
+    ): Promise<void> => {
       let sender = senders.get(topic);
       if (!sender) {
         sender = client.createSender(topic);
         senders.set(topic, sender);
       }
-      await sender.sendMessages({ body });
+      const message = applicationProperties ? { body, applicationProperties } : { body };
+      await sender.sendMessages(message);
     },
     open: async (
       topic: string,
       subscription: string,
       onMessage: (
-        msg: { payload: string; ack: () => void; nack: () => void },
+        msg: {
+          payload: string;
+          ack: () => void;
+          nack: () => void;
+          applicationProperties?: Readonly<Record<string, string>>;
+        },
       ) => void | Promise<void>,
     ): Promise<IServiceBusSubscription> => {
       // createReceiver(topicName, subscriptionName) — two positional strings.
@@ -241,7 +260,10 @@ export function adaptServiceBusModule(
       const subHandle = receiver.subscribe(
         {
           processMessage: async (rawMessage) => {
-            const msg = rawMessage as { body?: unknown };
+            const msg = rawMessage as {
+              body?: unknown;
+              applicationProperties?: Readonly<Record<string, string>>;
+            };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
 
             // Create settlement functions that return promises
@@ -258,6 +280,7 @@ export function adaptServiceBusModule(
               payload: body,
               ack,
               nack,
+              applicationProperties: msg.applicationProperties ?? {},
             });
           },
           processError: (args: IServiceBusProcessErrorArgs) =>
@@ -500,12 +523,20 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     return reachable !== false;
   }
 
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#transport) {
       throw new Error('ServiceBusBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
-    await this.#transport.send(topic, serialized);
+    await this.#transport.send(topic, serialized, headers);
   }
 
   async subscribe<T>(
@@ -528,6 +559,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
         const deserialized = this.#serializer.deserialize<T>(msg.payload);
         const metadata: MessageMetadata = {
           topic,
+          headers: msg.applicationProperties ?? {},
         };
         await handler(deserialized, metadata);
       } catch (err) {
@@ -555,6 +587,14 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
   }
 
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {

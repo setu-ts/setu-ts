@@ -1,6 +1,6 @@
 import type { HealthIndicatorFn, IPlugin, IPluginContext } from '@setu-ts/common';
 import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
-import type { IMessageBroker } from '@setu-ts/common';
+import type { IMessageBroker, ITelemetryService } from '@setu-ts/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
 import { RabbitMqBroker } from '../brokers/rabbitmq-broker.ts';
@@ -10,6 +10,7 @@ import { GcpPubSubBroker } from '../brokers/pubsub-broker.ts';
 import { ServiceBusBroker } from '../brokers/service-bus-broker.ts';
 import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
 import { asBrokerAdapter } from '../brokers/custom-adapter.ts';
+import { TracedBroker } from '../tracing/traced-broker.ts';
 import { JsonSerializer } from '../serializers/json-serializer.ts';
 import type {
   IAmqpConnection,
@@ -100,7 +101,7 @@ export function MessagingPlugin(
     name: pluginName,
     version: denoJson.version,
     provides: [token],
-    optionalDependencies: ['logger'],
+    optionalDependencies: ['logger', CAPABILITIES.TELEMETRY],
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
@@ -109,6 +110,9 @@ export function MessagingPlugin(
       if (ctx.services.has('logger')) {
         logger = ctx.services.get('logger');
       }
+      const telemetry = options.tracing !== false && ctx.services.has(CAPABILITIES.TELEMETRY)
+        ? ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY)
+        : undefined;
 
       // Build the broker based on type
       let broker: MessageBrokerAdapter;
@@ -151,12 +155,14 @@ export function MessagingPlugin(
           client?: INatsConnection;
           streamName?: string;
           defaultQueue?: string;
+          headersFactory?: NatsOptions['headersFactory'];
         };
         const natsOptions: NatsOptions = {};
         if (opts.url !== undefined) natsOptions.url = opts.url;
         if (opts.client !== undefined) natsOptions.client = opts.client;
         if (opts.streamName !== undefined) natsOptions.streamName = opts.streamName;
         if (opts.defaultQueue !== undefined) natsOptions.defaultQueue = opts.defaultQueue;
+        if (opts.headersFactory !== undefined) natsOptions.headersFactory = opts.headersFactory;
         if (logger !== undefined) natsOptions.logger = logger;
         broker = new NatsBroker(ctx.runtime, serializer, natsOptions);
       } else if (brokerType === 'kafka') {
@@ -228,6 +234,10 @@ export function MessagingPlugin(
 
       // Connect the broker (async for Redis)
       await broker.connect();
+
+      if (telemetry) {
+        broker = new TracedBroker(broker, telemetry, brokerType);
+      }
 
       // Register the broker as IMessageBroker
       ctx.services.register<IMessageBroker>(token, broker);

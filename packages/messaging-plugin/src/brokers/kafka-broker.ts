@@ -314,7 +314,15 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#producer) {
       throw new Error('KafkaBroker is not connected');
     }
@@ -328,9 +336,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
       topic,
       messages: [{
         value: serialized,
-        headers: typeof message === 'object' && message !== null
-          ? (message as Record<string, string>)
-          : undefined,
+        headers,
       }],
     });
   }
@@ -394,7 +400,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
           key: Uint8Array | null;
           value: Uint8Array | null;
           timestamp: string;
-          headers: Record<string, Uint8Array>;
+          headers?: Record<string, Uint8Array | string | readonly Uint8Array[] | undefined>;
           partition: number;
           offset: string;
         };
@@ -407,9 +413,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
           topic,
           messageId: `${msgTyped.partition}:${msgTyped.offset}`,
           timestamp: new Date(parseInt(msgTyped.timestamp, 10)),
-          headers: Object.fromEntries(
-            Object.entries(msgTyped.headers).map(([k, v]) => [k, new TextDecoder().decode(v)]),
-          ),
+          headers: normalizeKafkaHeaders(msgTyped.headers),
         };
 
         // Handler success triggers auto-commit; failure prevents commit
@@ -432,6 +436,14 @@ export class KafkaBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
   }
 
   /**
@@ -481,4 +493,20 @@ export class KafkaBroker implements MessageBrokerAdapter {
       options,
     );
   }
+}
+
+function normalizeKafkaHeaders(
+  headers: Record<string, Uint8Array | string | readonly Uint8Array[] | undefined> | undefined,
+): Readonly<Record<string, string>> {
+  const decoder = new TextDecoder();
+  return Object.fromEntries(
+    Object.entries(headers ?? {}).flatMap(([key, value]) => {
+      if (typeof value === 'string') return [[key, value]];
+      if (value instanceof Uint8Array) return [[key, decoder.decode(value)]];
+      if (Array.isArray(value) && value[0] instanceof Uint8Array) {
+        return [[key, decoder.decode(value[0])]];
+      }
+      return [];
+    }),
+  );
 }

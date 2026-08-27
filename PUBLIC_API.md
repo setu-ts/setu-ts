@@ -3217,6 +3217,8 @@ interface MessagingCommonOptions {
   name?: string;
   /** Serializer for message payloads. @defaultValue new JsonSerializer() */
   serializer?: ISerializer;
+  /** Create producer and consumer spans when telemetry is registered. @defaultValue true */
+  tracing?: boolean;
 }
 
 // ── Default (in-memory). `broker` is optional so MessagingPlugin() and {} are valid. ──
@@ -3259,6 +3261,8 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
   url?: string;
   /** Injected NATS connection. */
   client?: INatsConnection;
+  /** Header factory required for propagation on an injected NATS connection. */
+  headersFactory?: () => INatsHeaders;
   /** JetStream stream name. @defaultValue 'MESSAGING' */
   streamName?: string;
   /** Default consumer group / queue name. */
@@ -5172,6 +5176,16 @@ bypass the lazy import entirely.
 | `middleware`            | `boolean`                                 | No              | Register request-span middleware (default: `true`) |
 | `spanProcessor`         | `'simple' \| 'batch'`                     | No              | Span processor (`'simple'` by default)             |
 | `instrumentations`      | `InstrumentationsConfig`                  | No              | Auto-instrumentation config (runtime-gated no-op)  |
+| `contextPropagation`    | `boolean`                                 | No              | Activate real OTel spans (default: `true`)         |
+| `contextManagerFactory` | `() => Promise<ContextManager>`           | No              | Injectable context-manager loader                  |
+
+### Span nesting and broker propagation
+
+In real OTel mode, `withSpan` activates the span while its callback runs. Nested work therefore
+inherits the active parent. When `MessagingPlugin` finds telemetry, it creates `publish <topic>`
+producer spans and `receive <topic>` consumer spans, writes W3C `traceparent` on the transport, and
+parents delivery from the header. Set `tracing: false` to opt out. All first-party brokers expose
+the read transport headers through `MessageMetadata.headers`, using `{}` when the channel is empty.
 
 ### Auto-instrumentation
 

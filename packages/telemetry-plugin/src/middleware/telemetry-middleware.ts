@@ -18,7 +18,7 @@ import type {
 } from '@setu-ts/common';
 import type { TracerHost } from '../interfaces/index.ts';
 import { TELEMETRY_SPAN_KEY } from '../interfaces/index.ts';
-import { contextToTraceparent } from '../tracing/tracer.ts';
+import { contextToTraceparent } from '@setu-ts/common';
 
 /**
  * Creates the request-span middleware.

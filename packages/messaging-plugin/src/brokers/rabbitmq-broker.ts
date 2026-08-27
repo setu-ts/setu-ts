@@ -277,7 +277,15 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }
@@ -298,6 +306,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     // Build properties
     const properties: Record<string, unknown> = {};
     properties.messageId = this.#runtime.uuid();
+    properties.headers = headers;
     if (typeof message === 'object' && message !== null) {
       // Try to extract existing messageId/timestamp/headers if present
       const msg = message as Record<string, unknown>;
@@ -396,6 +405,14 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
   }
 
   /**
@@ -504,8 +521,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
               this.#runtime.uuid(),
             timestamp: msgTyped.properties?.timestamp as Date ??
               new Date(this.#runtime.now()),
-            headers: (msgTyped.properties?.headers as Readonly<Record<string, string>>) ??
-              undefined,
+            headers: (msgTyped.properties?.headers as Readonly<Record<string, string>>) ?? {},
           };
 
           await handler(deserialized, metadata);

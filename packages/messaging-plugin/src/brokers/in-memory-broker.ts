@@ -131,7 +131,15 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * @returns Resolves when all handlers have been invoked
    * @since 0.1.0
    */
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     const subs = this.#subscribers.get(topic) ?? [];
     if (subs.length === 0) {
       return;
@@ -141,6 +149,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
       topic,
       messageId: this.#runtime.uuid(),
       timestamp: new Date(this.#runtime.now()),
+      headers,
     };
 
     const serialized = this.#serializer.serialize(message);
@@ -233,6 +242,14 @@ export class InMemoryBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
   }
 
   /**

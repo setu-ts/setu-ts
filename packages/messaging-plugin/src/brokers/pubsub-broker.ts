@@ -43,13 +43,23 @@ const DEFAULT_QUEUE = 'messaging-consumers';
 export interface PubSubSdkModule {
   PubSub: new (options: { projectId: string; credentials?: unknown }) => {
     topic(topicName: string): {
-      publishMessage(message: { data: Uint8Array }): Promise<string>;
+      publishMessage(
+        message: { data: Uint8Array; attributes?: Record<string, string> },
+      ): Promise<string>;
       createSubscription(subscriptionName: string): Promise<unknown[]>;
     };
     subscription(subscriptionName: string): {
       on(
         event: 'message',
-        handler: (msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string }) => void,
+        handler: (
+          msg: {
+            ack: () => void;
+            nack: () => void;
+            data: Uint8Array;
+            id: string;
+            attributes?: Record<string, string>;
+          },
+        ) => void,
       ): void;
       on(event: 'error', handler: (err: unknown) => void): void;
       close(): Promise<void>;
@@ -65,7 +75,11 @@ export interface PubSubSdkModule {
  */
 export interface IPubSubTransport {
   /** Publish bytes to a topic. */
-  publish(topic: string, bytes: Uint8Array): Promise<void>;
+  publish(
+    topic: string,
+    bytes: Uint8Array,
+    attributes?: Readonly<Record<string, string>>,
+  ): Promise<void>;
   /**
    * Open a subscription on a topic. Creates the subscription when absent.
    * @param onMessage - Called per delivered message
@@ -73,7 +87,14 @@ export interface IPubSubTransport {
   open(
     topic: string,
     subscription: string,
-    onMessage: (msg: { payload: string; ack: () => void; nack: () => void }) => void,
+    onMessage: (
+      msg: {
+        payload: string;
+        ack: () => void;
+        nack: () => void;
+        attributes?: Readonly<Record<string, string>>;
+      },
+    ) => void,
   ): Promise<IPubSubSubscription>;
   /** Explicitly create a subscription (for RPC inbox). */
   createSubscription(topic: string, subscription: string): Promise<void>;
@@ -145,13 +166,25 @@ export function adaptPubSubModule(
   const pubsub = new mod.PubSub({ projectId: options.projectId, credentials: options.credentials });
 
   return {
-    publish: async (topic: string, bytes: Uint8Array): Promise<void> => {
-      await pubsub.topic(topic).publishMessage({ data: bytes });
+    publish: async (
+      topic: string,
+      bytes: Uint8Array,
+      attributes?: Readonly<Record<string, string>>,
+    ): Promise<void> => {
+      const message = attributes ? { data: bytes, attributes: { ...attributes } } : { data: bytes };
+      await pubsub.topic(topic).publishMessage(message);
     },
     open: async (
       topic: string,
       subscription: string,
-      onMessage: (msg: { payload: string; ack: () => void; nack: () => void }) => void,
+      onMessage: (
+        msg: {
+          payload: string;
+          ack: () => void;
+          nack: () => void;
+          attributes?: Readonly<Record<string, string>>;
+        },
+      ) => void,
     ): Promise<IPubSubSubscription> => {
       // Create subscription on the topic if absent.
       try {
@@ -180,6 +213,7 @@ export function adaptPubSubModule(
           payload: text,
           ack: () => raw.ack(),
           nack: () => raw.nack(),
+          attributes: raw.attributes ?? {},
         });
       });
 
@@ -389,13 +423,21 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     return reachable !== false;
   }
 
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#transport) {
       throw new Error('GcpPubSubBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
     const bytes = new TextEncoder().encode(serialized);
-    await this.#transport.publish(topic, bytes);
+    await this.#transport.publish(topic, bytes, headers);
   }
 
   async subscribe<T>(
@@ -419,6 +461,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
           const deserialized = this.#serializer.deserialize<T>(msg.payload);
           const metadata: MessageMetadata = {
             topic,
+            headers: msg.attributes ?? {},
           };
           await handler(deserialized, metadata);
         } catch (err) {
@@ -447,6 +490,14 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
         }
       },
     };
+  }
+
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
   }
 
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {

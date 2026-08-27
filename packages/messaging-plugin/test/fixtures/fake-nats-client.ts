@@ -12,6 +12,7 @@ export interface FakeNatsOptions {
     data: string;
     seq: number;
     timestamp: string;
+    headers?: { keys(): Iterable<string>; get(key: string): string | undefined };
   }>;
   /** Whether streams.info should throw a generic error (not 'stream not found'). */
   rejectStreamInfo?: boolean;
@@ -25,14 +26,22 @@ export class FakeNatsMessage {
   #seq: number;
   #timestamp: string;
   #subject: string;
+  #headers: unknown;
   #acked = false;
   #naked = false;
 
-  constructor(data: string, seq: number, timestamp: string, subject: string) {
+  constructor(
+    data: string,
+    seq: number,
+    timestamp: string,
+    subject: string,
+    headers?: { keys(): Iterable<string>; get(key: string): string | undefined },
+  ) {
     this.#data = new TextEncoder().encode(data);
     this.#seq = seq;
     this.#timestamp = timestamp;
     this.#subject = subject;
+    this.#headers = headers;
   }
 
   get data(): Uint8Array {
@@ -52,7 +61,7 @@ export class FakeNatsMessage {
   }
 
   get headers(): unknown {
-    return undefined;
+    return this.#headers;
   }
 
   ack(): void {
@@ -202,7 +211,13 @@ export class FakeNatsJetStream {
   #seededMessages: Map<string, FakeNatsMessage[]>; // subject -> messages
 
   constructor(
-    seedMessages: Array<{ subject: string; data: string; seq: number; timestamp: string }>,
+    seedMessages: Array<{
+      subject: string;
+      data: string;
+      seq: number;
+      timestamp: string;
+      headers?: { keys(): Iterable<string>; get(key: string): string | undefined };
+    }>,
   ) {
     this.#calls = [];
     this.#seededMessages = new Map();
@@ -211,7 +226,7 @@ export class FakeNatsJetStream {
         this.#seededMessages.set(msg.subject, []);
       }
       this.#seededMessages.get(msg.subject)!.push(
-        new FakeNatsMessage(msg.data, msg.seq, msg.timestamp, msg.subject),
+        new FakeNatsMessage(msg.data, msg.seq, msg.timestamp, msg.subject, msg.headers),
       );
     }
   }
@@ -233,8 +248,8 @@ export class FakeNatsJetStream {
     return [...this.#seededMessages.values()].flat();
   }
 
-  publish(subject: string, data: Uint8Array): void {
-    this.#record('publish', [subject, data]);
+  publish(subject: string, data: Uint8Array, options?: unknown): void {
+    this.#record('publish', options === undefined ? [subject, data] : [subject, data, options]);
   }
 
   consumers: {

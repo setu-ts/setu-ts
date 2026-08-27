@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Broker trace propagation (M75).** `@setu-ts/common` now provides the W3C trace-context codec and
+  header-name constants. When telemetry is registered, every first-party messaging broker writes
+  `traceparent` on publish and exposes delivered transport headers; the messaging plugin creates
+  producer/consumer spans around that path. `MessagingPlugin({ tracing: false })` opts out.
+
 - **`@setu-ts/common`: a headers-only session read and the authenticated-principal bridge for
   WebSocket upgrades.** `ISessionService.fromHeaders(headers)` opens a session from a `Headers`
   object alone — the read for non-HTTP entry points (a WebSocket `onOpen` handler, an auth strategy
@@ -38,6 +43,10 @@ All notable changes to this project are documented here. The format follows
   needed: since M70a `routeUpgrade` is the only live upgrade-routing path on every runtime.
 
 ### Changed
+
+- **Telemetry spans now nest.** Real OTel `withSpan` callbacks run with their span active using an
+  async-local context manager (unless `contextPropagation: false`), so work initiated in a request
+  becomes a child of its request span rather than a detached root.
 
 - **`@setu-ts/common`: `ISessionService.fromHeaders` is a REQUIRED member.** Callers are unaffected
   — the addition is source-compatible for every consumer. But an application that implements

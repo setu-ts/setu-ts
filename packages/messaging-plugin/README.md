@@ -40,6 +40,7 @@ await broker.publish('user.created', { userId: '123' });
 | `broker`     | `MessagingBrokerType` | `'memory'`       | Selects the arm. Optional only on the memory arm, so `MessagingPlugin()` stays valid. |
 | `name`       | `string`              | —                | Instance name for multi-instance setups.                                              |
 | `serializer` | `ISerializer`         | `JsonSerializer` | Payload serializer.                                                                   |
+| `tracing`    | `boolean`             | `true`           | Create broker producer/consumer spans when telemetry is registered.                   |
 
 Omitting `name` registers under the bare `CAPABILITIES.MESSAGING` token as plugin
 `messaging-plugin`. Supplying one derives both — token `messaging.<name>`, plugin
@@ -95,6 +96,14 @@ high-traffic service its own `replyTopic` to bound the fan-out.
 `RequestTimeoutError` and `RemoteHandlerError` are exported for `instanceof` handling.
 `MessagingNotSupportedError` is also still exported but **deprecated** — it existed for the Kafka
 broker's former refusal and no broker throws it now.
+
+## Trace propagation
+
+With `TelemetryPlugin` registered, every first-party broker sends W3C `traceparent` with published
+messages and reads it on delivery. The plugin creates `publish <topic>` producer and
+`receive <topic>` consumer spans. `MessageMetadata.headers` is always an object for the first-party
+transports (`{}` when the message has no headers); custom brokers retain their own metadata
+behavior. An injected NATS client must supply `headersFactory` to construct NATS headers.
 
 ## Bridging in-process events
 

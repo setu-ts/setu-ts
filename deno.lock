@@ -31,6 +31,7 @@
     "npm:@hono/node-server@2": "2.1.0_hono@4.13.0",
     "npm:@launchdarkly/node-server-sdk@9": "9.13.0",
     "npm:@opentelemetry/api@^1.9.0": "1.9.1",
+    "npm:@opentelemetry/context-async-hooks@2": "2.9.0_@opentelemetry+api@1.9.1",
     "npm:@opentelemetry/exporter-trace-otlp-http@0.220": "0.220.0_@opentelemetry+api@1.9.1",
     "npm:@opentelemetry/instrumentation-amqplib@0.67": "0.67.0_@opentelemetry+api@1.9.1",
     "npm:@opentelemetry/instrumentation-http@0.220": "0.220.0_@opentelemetry+api@1.9.1",
@@ -799,6 +800,12 @@
     },
     "@opentelemetry/api@1.9.1": {
       "integrity": "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="
+    },
+    "@opentelemetry/context-async-hooks@2.9.0_@opentelemetry+api@1.9.1": {
+      "integrity": "sha512-OQ0vzvbZBiUhjqLnUaoNfYmP8553Crr3aggB4y0ZUi815mZ7idpdJXQmoKdeBKJelYttoBlLSSHubmyw3wvX4w==",
+      "dependencies": [
+        "@opentelemetry/api"
+      ]
     },
     "@opentelemetry/core@1.30.1_@opentelemetry+api@1.9.1": {
       "integrity": "sha512-OOCM2C/QIURhJMuKaekP3TRBxBKxG/TWWA0TL2J6nXUtDnuCtccy49LUJF8xPFXMX+0LMcxFpCo8M9cGY1W6rQ==",

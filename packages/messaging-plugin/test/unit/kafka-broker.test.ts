@@ -299,7 +299,7 @@ describe('KafkaBroker', () => {
   });
 
   // K3: publish with non-object payload
-  it('publish with a non-object payload sends headers undefined', async () => {
+  it('publish with a non-object payload sends an empty header map', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
     const fakeFactory = new FakeKafkaFactory();
@@ -314,7 +314,7 @@ describe('KafkaBroker', () => {
 
     expect(sendCall).toBeDefined();
     const messages = (sendCall?.args[0] as { messages: unknown[] }).messages;
-    expect(messages[0]).toEqual({ value: '42', headers: undefined });
+    expect(messages[0]).toEqual({ value: '42', headers: {} });
 
     await broker.disconnect();
   });

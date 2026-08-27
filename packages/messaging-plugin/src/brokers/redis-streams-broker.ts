@@ -258,13 +258,22 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisStreamsBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
     // XADD with '*' for auto-generated ID
-    await this.#client.xadd(topic, '*', 'payload', serialized);
+    const fields = Object.entries(headers).flatMap(([key, value]) => [key, value]);
+    await this.#client.xadd(topic, '*', 'payload', serialized, ...fields);
   }
 
   /**
@@ -335,10 +344,12 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
             const fields = entry[1];
             // fields is array of [field, value, field, value, ...]
             let payload: string | null = null;
+            const headers: Record<string, string> = {};
             for (let i = 0; i < fields.length; i += 2) {
               if (fields[i] === 'payload') {
                 payload = fields[i + 1] as string;
-                break;
+              } else {
+                headers[fields[i]] = fields[i + 1];
               }
             }
 
@@ -351,6 +362,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
               topic,
               messageId: entryId,
               timestamp: new Date(parseInt(entryId.split('-')[0])),
+              headers,
             };
 
             try {
@@ -393,6 +405,14 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     return {
       unsubscribe,
     };
+  }
+
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
   }
 
   /**

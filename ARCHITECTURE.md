@@ -2284,6 +2284,11 @@ ctx.lifecycle.onError((error, ctx) => {
 
 ### Logging and Observability
 
+Telemetry spans nest through the telemetry host's activation seam. In a real OTel configuration the
+plugin registers an async-local context manager and executes `withSpan` callbacks with their span
+active. This is what makes spans produced by downstream work, including broker publishing, children
+of the request span; without activation they are unrelated siblings.
+
 Errors are:
 
 1. **Logged** — Via the logger plugin (if registered).

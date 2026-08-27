@@ -71,6 +71,7 @@ export {
 export type {
   CustomMessagingOptions,
   EventsMessagingBridgeOptions,
+  INatsHeaders,
   KafkaMessagingOptions,
   KafkaOptions,
   MemoryMessagingOptions,

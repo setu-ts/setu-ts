@@ -3495,7 +3495,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `publish` with one, because the backplane publisher builds its frame with `JSON.stringify(msg)`
   outside any `try`. Developed in an isolated worktree off `main`, in parallel with M73, which it
   does not depend on) — complete (PR #196)
-- **Next milestone** — **M75** (broker trace propagation).
+- **Milestone 75** (`packages/common`, `packages/telemetry-plugin`, `packages/messaging-plugin` —
+  W3C trace-context codec, active OTel span nesting, and producer/consumer broker propagation
+  across all seven first-party brokers) — complete (PR pending)
+- **Next milestone** — **M76** (standard decorators / `experimentalDecorators` deprecation).
 
 ## Verification (run before declaring any work done)
 

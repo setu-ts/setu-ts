@@ -82,6 +82,19 @@ describe('NoopTelemetryService', () => {
 });
 
 describe('TelemetryService', () => {
+  it('activates a span when the host provides an activation seam', async () => {
+    const fakeHost = createFakeTracerHost();
+    let activated = false;
+    fakeHost.activate = async (_span, fn) => {
+      activated = true;
+      return await fn();
+    };
+    const service = new TelemetryService(fakeHost);
+
+    await service.withSpan('active', async () => {});
+    expect(activated).toBe(true);
+  });
+
   it('should wrap the TracerHost startSpan calls', async () => {
     const fakeHost = createFakeTracerHost();
     const service = new TelemetryService(fakeHost);

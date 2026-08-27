@@ -29,11 +29,15 @@ export function asBrokerAdapter(instance: IMessageBroker): MessageBrokerAdapter 
     isReady?: unknown;
     reachability?: unknown;
     isHealthy?: unknown;
+    publishWithHeaders?: unknown;
+    subscribeWithHeaders?: unknown;
   };
   if (
     typeof candidate.isReady === 'function' &&
     typeof candidate.reachability === 'function' &&
-    typeof candidate.isHealthy === 'function'
+    typeof candidate.isHealthy === 'function' &&
+    typeof candidate.publishWithHeaders === 'function' &&
+    typeof candidate.subscribeWithHeaders === 'function'
   ) {
     // Instance already carries the full internal seam — return unchanged.
     return instance as MessageBrokerAdapter;
@@ -62,7 +66,9 @@ export function asBrokerAdapter(instance: IMessageBroker): MessageBrokerAdapter 
       connected = false;
     },
     publish: (topic, message) => instance.publish(topic, message),
+    publishWithHeaders: (topic, message, _headers) => instance.publish(topic, message),
     subscribe: (topic, handler, options) => instance.subscribe(topic, handler, options),
+    subscribeWithHeaders: (topic, handler, options) => instance.subscribe(topic, handler, options),
     request: (topic, message, options) => instance.request(topic, message, options),
     respond: (topic, handler, options) => instance.respond(topic, handler, options),
     isReady: (): boolean => {

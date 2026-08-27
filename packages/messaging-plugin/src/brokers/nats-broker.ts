@@ -13,7 +13,7 @@ import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
-import type { INatsConnection, NatsOptions } from '../interfaces/index.ts';
+import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
 
 /**
  * Lazily load nats at runtime.
@@ -91,6 +91,7 @@ export class NatsBroker implements MessageBrokerAdapter {
   #url: string;
   #injectedClient: INatsConnection | undefined;
   #streamName: string;
+  #headersFactory: (() => INatsHeaders) | undefined;
   #connection: INatsConnection | null = null;
   #js: unknown | null = null;
   #ready = false;
@@ -116,6 +117,7 @@ export class NatsBroker implements MessageBrokerAdapter {
     this.#url = options?.url ?? 'nats://localhost:4222';
     this.#injectedClient = options?.client;
     this.#streamName = options?.streamName ?? 'MESSAGING';
+    this.#headersFactory = options?.headersFactory;
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
       publish: (topic, message) => this.publish(topic, message),
@@ -171,7 +173,13 @@ export class NatsBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
-    this.#connection = await resolveClient(this.#url, this.#injectedClient);
+    if (this.#injectedClient !== undefined) {
+      this.#connection = await resolveClient(this.#url, this.#injectedClient);
+    } else {
+      const nats = await loadNats();
+      this.#connection = await nats.connect({ servers: this.#url }) as unknown as INatsConnection;
+      this.#headersFactory ??= () => nats.headers() as unknown as INatsHeaders;
+    }
 
     // Ensure stream exists (unconditional for both injected and real connections)
     const realConn = this.#connection as unknown as { jetstreamManager(): Promise<unknown> };
@@ -320,6 +328,14 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#connection) {
       return Promise.reject(new Error('NatsBroker is not connected'));
     }
@@ -327,8 +343,16 @@ export class NatsBroker implements MessageBrokerAdapter {
     const encoder = new TextEncoder();
     const data = encoder.encode(serialized);
 
-    const realJs = this.#js as unknown as { publish(subject: string, data: Uint8Array): void };
-    realJs.publish(topic, data);
+    const realJs = this.#js as unknown as {
+      publish(subject: string, data: Uint8Array, options?: { headers: INatsHeaders }): void;
+    };
+    const natsHeaders = this.#headersFactory?.();
+    if (natsHeaders) {
+      for (const [key, value] of Object.entries(headers)) natsHeaders.set(key, value);
+      realJs.publish(topic, data, { headers: natsHeaders });
+    } else {
+      realJs.publish(topic, data);
+    }
     return Promise.resolve();
   }
 
@@ -406,7 +430,7 @@ export class NatsBroker implements MessageBrokerAdapter {
           topic,
           messageId: String(msgTyped.seq),
           timestamp: new Date(msgTyped.info.timestamp),
-          headers: (msgTyped.headers as Readonly<Record<string, string>>) ?? undefined,
+          headers: toHeaderRecord(msgTyped.headers),
         };
 
         const handlerResult = handler(deserialized, metadata);
@@ -446,6 +470,14 @@ export class NatsBroker implements MessageBrokerAdapter {
     };
   }
 
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
+  }
+
   /**
    * Sends a request and awaits a single correlated reply.
    *
@@ -483,4 +515,16 @@ export class NatsBroker implements MessageBrokerAdapter {
       options,
     );
   }
+}
+
+function toHeaderRecord(headers: unknown): Readonly<Record<string, string>> {
+  if (!headers || typeof headers !== 'object') return {};
+  const candidate = headers as { keys?: unknown; get?: unknown };
+  if (typeof candidate.keys !== 'function' || typeof candidate.get !== 'function') return {};
+  const values: Record<string, string> = {};
+  for (const key of candidate.keys() as Iterable<string>) {
+    const value = (candidate.get as (name: string) => unknown)(key);
+    if (typeof value === 'string') values[key] = value;
+  }
+  return values;
 }

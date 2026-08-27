@@ -37,17 +37,19 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option             | Type                     | Default    | Description                                          |
-| ------------------ | ------------------------ | ---------- | ---------------------------------------------------- |
-| `serviceName`      | `string`                 | —          | Required when an exporter is configured.             |
-| `serviceVersion`   | `string`                 | `'1.0.0'`  | Reported to the exporter.                            |
-| `exporter`         | `SpanExporterKind`       | —          | Absent means noop mode.                              |
-| `endpoint`         | `string`                 | —          | Required when `exporter: 'otlp'`.                    |
-| `headers`          | `Record<string, string>` | —          | Sent with OTLP requests.                             |
-| `sampling`         | `SamplingConfig`         | —          | Sampling configuration.                              |
-| `spanProcessor`    | `'simple' \| 'batch'`    | `'simple'` | Use `'batch'` in production.                         |
-| `middleware`       | `boolean`                | `true`     | Register the request-span middleware.                |
-| `instrumentations` | `InstrumentationsConfig` | none       | Per-instrumentation auto-instrumentation; see below. |
+| Option                  | Type                            | Default    | Description                                          |
+| ----------------------- | ------------------------------- | ---------- | ---------------------------------------------------- |
+| `serviceName`           | `string`                        | —          | Required when an exporter is configured.             |
+| `serviceVersion`        | `string`                        | `'1.0.0'`  | Reported to the exporter.                            |
+| `exporter`              | `SpanExporterKind`              | —          | Absent means noop mode.                              |
+| `endpoint`              | `string`                        | —          | Required when `exporter: 'otlp'`.                    |
+| `headers`               | `Record<string, string>`        | —          | Sent with OTLP requests.                             |
+| `sampling`              | `SamplingConfig`                | —          | Sampling configuration.                              |
+| `spanProcessor`         | `'simple' \| 'batch'`           | `'simple'` | Use `'batch'` in production.                         |
+| `middleware`            | `boolean`                       | `true`     | Register the request-span middleware.                |
+| `instrumentations`      | `InstrumentationsConfig`        | none       | Per-instrumentation auto-instrumentation; see below. |
+| `contextPropagation`    | `boolean`                       | `true`     | Activate real spans for nested work.                 |
+| `contextManagerFactory` | `() => Promise<ContextManager>` | —          | Injectable async-local context manager loader.       |
 
 ## Auto-instrumentation
 
@@ -68,7 +70,8 @@ logger plugin still boots, with nothing emitted.
 ## Propagation
 
 The request-span middleware reads and writes the W3C `traceparent` header, so traces join across
-services without extra configuration.
+services without extra configuration. In real OTel mode, `withSpan` also activates its span with an
+async-local context manager: nested work, including messaging publishes, becomes a child span.
 
 ## Multiple backends
 

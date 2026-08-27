@@ -1,4 +1,9 @@
-import type { IMessageBroker } from '@setu-ts/common';
+import type {
+  IMessageBroker,
+  ISubscription,
+  MessageHandler,
+  SubscribeOptions,
+} from '@setu-ts/common';
 
 /**
  * Internal broker adapter interface extending IMessageBroker with readiness check.
@@ -31,6 +36,18 @@ import type { IMessageBroker } from '@setu-ts/common';
  * @since 0.1.0
  */
 export interface MessageBrokerAdapter extends IMessageBroker {
+  /** Publishes a message with framework-owned transport headers. */
+  publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void>;
+  /** Subscribes through the header-aware internal path. */
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription>;
   /**
    * Checks if the broker is connected and ready (lifecycle).
    *
