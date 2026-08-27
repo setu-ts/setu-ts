@@ -3576,7 +3576,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   self-injection; all five were found by scanning for the shape rather than by the one failure that
   surfaced. Also fixed two pre-existing defects found in passing: a garbled doc paragraph at the
   tsconfig emitter, and a **duplicate `### Changed` heading in the CHANGELOG's `Unreleased`
-  section** — the exact defect the alpha.9 release caught once already) — complete (PR pending)
+  section** — the exact defect the alpha.9 release caught once already) — complete (PR #200)
 - **Next milestone** — **M75** (broker trace propagation).
 
 ## Verification (run before declaring any work done)
