@@ -87,6 +87,34 @@ describe('non-serializable SSE data (M74 / X3-8)', () => {
     }).toThrow(TypeError);
   });
 
+  it('normalizes the non-finite numbers to null on the wire, silently', () => {
+    // The one category the narrowed type ADMITS and JSON does not round-trip.
+    // No cast is needed — `NaN`/`Infinity`/`-Infinity` are members of `number`
+    // and TypeScript cannot subset it — so this is not a rejection path but a
+    // silent value change, which is exactly why the JsonValue JSDoc names it.
+    expect(encodeSseMessage({ data: NaN })).toBe('data: null\n\n');
+    expect(encodeSseMessage({ data: Infinity })).toBe('data: null\n\n');
+    expect(encodeSseMessage({ data: -Infinity })).toBe('data: null\n\n');
+    expect(encodeSseMessage({ data: { ratio: NaN, cap: Infinity } })).toBe(
+      'data: {"ratio":null,"cap":null}\n\n',
+    );
+    expect(encodeSseMessage({ data: [1, NaN, Infinity] })).toBe('data: [1,null,null]\n\n');
+  });
+
+  it('delivers a non-finite payload rather than dropping it', () => {
+    // Contrast with the bigint case above: nothing throws, so every member
+    // receives the frame — with the value changed. A publisher that needs the
+    // distinction must send the number as a string.
+    const received: SseMessage[] = [];
+    const channel = new SseChannelImpl('metrics');
+    channel.add(recordingConn(received));
+
+    channel.publish({ data: { ratio: NaN } });
+
+    expect(received).toHaveLength(1);
+    expect(encodeSseMessage(received[0] as SseMessage)).toBe('data: {"ratio":null}\n\n');
+  });
+
   it('delivers every JSON-safe payload the narrowed type admits', () => {
     // The positive half: what the type accepts, the encoder writes.
     const received: SseMessage[] = [];

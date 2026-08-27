@@ -2049,12 +2049,15 @@ Omitting an option disables that behaviour (no timer created).
   member "accepts any JSON-serializable value" was an aspiration rather than a guarantee. It is now
   enforced: a `bigint` (which throws) and a function or symbol value (which is silently dropped) are
   compile errors. A property written `T | undefined` still assigns, because `JSON.stringify` drops
-  the key. Two limits remain and no type can close them: a **circular structure** throws at runtime,
-  and a named `interface` does not assign — TypeScript grants implicit index signatures only to
-  object-literal types, which was true before the M70n widening and after it, so declare the payload
-  with a `type` alias or extend `Record<string, JsonValue | undefined>`. What M70n's widening
-  actually bought was arrays, primitives and `null`. `SseChannelImpl.publishLocal` is the local-only
-  delivery path the backplane subscriber uses; applications call `publish`.
+  the key. Three limits remain and no type can close them: a **circular structure** throws at
+  runtime; `NaN`, `Infinity` and `-Infinity` are members of `number` that JSON cannot represent, so
+  `JSON.stringify` normalizes each to `null` and the value reaches the wire silently changed rather
+  than refused (send it as a string when the distinction matters); and a named `interface` does not
+  assign — TypeScript grants implicit index signatures only to object-literal types, which was true
+  before the M70n widening and after it, so declare the payload with a `type` alias or extend
+  `Record<string, JsonValue | undefined>`. What M70n's widening actually bought was arrays,
+  primitives and `null`. `SseChannelImpl.publishLocal` is the local-only delivery path the backplane
+  subscriber uses; applications call `publish`.
 - Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
 - The `inject()` method cannot read a streaming body and throws when it meets one; SSE integration

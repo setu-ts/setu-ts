@@ -116,6 +116,16 @@ const withDeepNesting: SseMessage = {
   data: { a: { b: [1, { c: null }] } },
 };
 
+// Accepted BUT normalized: `NaN`, `Infinity` and `-Infinity` are members of
+// `number`, which TypeScript cannot subset, and `JSON.stringify` turns each
+// into `null` rather than failing. They are pinned here as accepted so the
+// documented limit is a checked claim rather than prose — the wire-level
+// consequence is asserted in sse-plugin's sse-nonserializable.test.ts.
+const withNaN: SseMessage = { data: NaN };
+const withInfinity: SseMessage = { data: Infinity };
+const withNegativeInfinity: SseMessage = { data: -Infinity };
+const withNestedNonFinite: SseMessage = { data: { ratio: NaN, cap: Infinity } };
+
 // --- M74 / X3-8: peek is a REQUIRED member with the committed signature ---
 type HasRequiredRoomPeek = IWebSocketService extends {
   peek(name: string): WebSocketRoom | undefined;
@@ -147,6 +157,21 @@ describe('SseMessage.data narrowed to JsonValue (M74 / X3-8)', () => {
 
   it('accepts arbitrary nesting', () => {
     expect(withDeepNesting.data).toEqual({ a: { b: [1, { c: null }] } });
+  });
+
+  it('accepts the non-finite numbers, which JSON.stringify normalizes to null', () => {
+    // Not a gap in the type — `number` cannot be narrowed to the finite
+    // numbers in TypeScript. The point of pinning it is that these are the one
+    // category the type admits and JSON does NOT round-trip: they are changed
+    // rather than rejected, which the JsonValue JSDoc now states.
+    expect(Number.isNaN(withNaN.data)).toBe(true);
+    expect(withInfinity.data).toBe(Infinity);
+    expect(withNegativeInfinity.data).toBe(-Infinity);
+
+    expect(JSON.stringify(withNaN.data)).toBe('null');
+    expect(JSON.stringify(withInfinity.data)).toBe('null');
+    expect(JSON.stringify(withNegativeInfinity.data)).toBe('null');
+    expect(JSON.stringify(withNestedNonFinite.data)).toBe('{"ratio":null,"cap":null}');
   });
 
   it('serializes every accepted shape without throwing', () => {
