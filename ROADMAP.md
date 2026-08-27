@@ -7521,6 +7521,55 @@ the framework points a new project.
 
 ---
 
+## Milestone 76: Standard Decorators and the `experimentalDecorators` Deprecation ⬜ PLANNED
+
+**Objective:** Decide and execute the framework's answer to Deno deprecating
+`experimentalDecorators`, the compiler option the entire decorator surface is built on.
+
+**The gap, established by probe on Deno 2.9.5 rather than from the warning text.** Every
+`deno task lint` and `deno task check` run now prints
+`Warning experimentalDecorators compiler option is deprecated and may be removed at any time`. Three
+facts decide the shape of the work, and the third is the one that makes this a redesign:
+
+1. TC39 **standard** decorators already run under Deno 2.9.5 with **no flag and no `compilerOptions`
+   at all** — a method decorator in a project whose `deno.json` is `{}` executes correctly.
+2. The framework does not use them. Every shipped decorator is the legacy form.
+3. A **parameter** decorator without the flag is a **parse** error —
+   `SyntaxError: Invalid or unexpected token`, not a type error — because the Stage 3 proposal has
+   no parameter position at all. So the option's removal does not degrade the parameter surface, it
+   makes it **unparseable**: `@Body`, `@Query`, `@Param`, `@Header`, `@Cookie` and `@CurrentUser`
+   (`decorator-plugin/src/decorators/request.ts`), `@Ctx` (M64), the parameter form of `@Inject`
+   (M36b), and the published `createParameterDecorator` all stop being syntax on the day the flag
+   goes.
+
+**Blast radius, verified by `grep` rather than estimated.** Three published packages set the option
+in their own manifest — `decorator-plugin`, `openapi-plugin` and `starters/rest-starter` — plus
+`apps/di-decorators`; and `packages/cli/src/templates/module-seam.ts:48` stamps
+`denoCompilerOptions: { experimentalDecorators: true }` into every scaffolded project that installs
+the decorated style, so already-generated projects carry it too. Eleven documentation sites describe
+it as a requirement (`ARCHITECTURE.md` §, `PUBLIC_API.md` ×3, `docs/decorators.md`, `docs/cli.md`
+×2, `docs/runtime-deployment.md`, and the CHANGELOG/CLAUDE.md history entries).
+
+- **In scope:** the decision itself, then its execution. The parameter decorators are **published
+  API**, so AI_GUIDELINES §9.2 governs — removal needs a deprecation path with a **working**
+  replacement, which standard decorators do not supply on their own. The candidate replacements are
+  a class- or method-level declaration that maps parameters positionally (no parameter syntax
+  needed), an accessor/context-object form that drops parameter injection in favour of reading from
+  `@Ctx()`-style access, or retaining the legacy form behind a documented, tested pin for as long as
+  Deno accepts it. Also in scope: whether `emitDecoratorMetadata` — absent repo-wide and unsupported
+  by Deno — changes the calculus, since without it no replacement can infer a parameter's type.
+- **Why it is not a config flip:** removing the option today makes `decorator-plugin` fail to parse,
+  not merely fail to type-check. And per M63's D3 finding, declaring **any** `compilerOptions`
+  replaces Deno's default set, so a manifest that drops this one key also drops the `react-jsx`
+  default it was silently relying on — the trap that produced 79 `TS2686` errors in a `full-stack`
+  scaffold.
+- **Not in scope:** removing the decorator surface. M65 already made the functional style the
+  default, so decorators are opt-in; this milestone keeps the opt-in working, it does not retire it.
+- **Packages:** `decorator-plugin`, `openapi-plugin`, `starters/rest-starter`, `cli`, plus
+  `apps/di-decorators` and the eleven doc sites.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                        |
@@ -7634,3 +7683,4 @@ the framework points a new project.
 | 73        | ✅     | realtime authentication (PR #197)              |
 | 74        | ✅     | realtime reads + sse contract (PR #196)        |
 | 75        | ⬜     | broker trace propagation                       |
+| 76        | ⬜     | standard decorators / experimentalDecorators   |
