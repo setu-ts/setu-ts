@@ -282,15 +282,15 @@ Three consequences, each a startup throw rather than a silent misinjection:
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `buildFullStackPlugins` | function |
-| `createFullStackApp` | function |
-| `createFullStackAppFromConfig` | function |
-| `FromConfigOptions` | interface |
-| `FullStackStarterOptions` | interface |
-| `RealtimeArm` | interface |
-| `StaticPluginOptions` | type |
+| Export                         | Kind      |
+| ------------------------------ | --------- |
+| `buildFullStackPlugins`        | function  |
+| `createFullStackApp`           | function  |
+| `createFullStackAppFromConfig` | function  |
+| `FromConfigOptions`            | interface |
+| `FullStackStarterOptions`      | interface |
+| `RealtimeArm`                  | interface |
+| `StaticPluginOptions`          | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
-
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

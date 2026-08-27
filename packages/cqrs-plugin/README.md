@@ -54,26 +54,27 @@ bus with no registered handler.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `CqrsPlugin` | function |
-| `CommandBus` | class |
-| `HandlerNotFoundError` | class |
-| `QueryBus` | class |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `CqrsPlugin`                 | function  |
+| `CommandBus`                 | class     |
+| `HandlerNotFoundError`       | class     |
+| `QueryBus`                   | class     |
 | `CommandHandlerRegistration` | interface |
-| `CqrsCommand` | interface |
-| `CqrsPluginOptions` | interface |
-| `CqrsQuery` | interface |
-| `CqrsRequest` | interface |
-| `ICommandBus` | interface |
-| `ICommandHandler` | interface |
-| `ICqrsFacade` | interface |
-| `IPipelineBehavior` | interface |
-| `IQueryBus` | interface |
-| `IQueryHandler` | interface |
-| `QueryHandlerRegistration` | interface |
+| `CqrsCommand`                | interface |
+| `CqrsPluginOptions`          | interface |
+| `CqrsQuery`                  | interface |
+| `CqrsRequest`                | interface |
+| `ICommandBus`                | interface |
+| `ICommandHandler`            | interface |
+| `ICqrsFacade`                | interface |
+| `IPipelineBehavior`          | interface |
+| `IQueryBus`                  | interface |
+| `IQueryHandler`              | interface |
+| `QueryHandlerRegistration`   | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

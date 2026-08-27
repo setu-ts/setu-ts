@@ -232,53 +232,54 @@ MIT
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `adaptGraphqlModule` | function |
-| `createDepthLimitRule` | function |
-| `encodeSseComment` | function |
-| `encodeSseComplete` | function |
-| `encodeSseEvent` | function |
-| `extractPersistedQuery` | function |
-| `graphiqlHtml` | function |
-| `GraphqlPlugin` | function |
-| `loadGraphqlModule` | function |
-| `persistedQueryHash` | function |
-| `ApqResolver` | class |
-| `GraphqlRuntimeLoadError` | class |
-| `GraphqlSchemaError` | class |
-| `GraphqlService` | class |
-| `GRAPHQL_TRANSPORT_WS` | const |
-| `AnySubscriptionResolver` | interface |
-| `DefaultGraphqlContext` | interface |
-| `GraphqlApqOptions` | interface |
-| `GraphqlCodeFirstOptions` | interface |
-| `GraphqlConnectionInfo` | interface |
-| `GraphqlContextInput` | interface |
-| `GraphqlExecutionResult` | interface |
-| `GraphqlFormattedError` | interface |
-| `GraphqlModuleLike` | interface |
-| `GraphqlOperationContext` | interface |
-| `GraphqlRequestParams` | interface |
-| `GraphqlScalarResolver` | interface |
-| `GraphqlScalarTypeLike` | interface |
-| `GraphqlSchemaFirstOptions` | interface |
-| `GraphqlSchemaLike` | interface |
-| `GraphqlSseTransportOptions` | interface |
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `adaptGraphqlModule`          | function  |
+| `createDepthLimitRule`        | function  |
+| `encodeSseComment`            | function  |
+| `encodeSseComplete`           | function  |
+| `encodeSseEvent`              | function  |
+| `extractPersistedQuery`       | function  |
+| `graphiqlHtml`                | function  |
+| `GraphqlPlugin`               | function  |
+| `loadGraphqlModule`           | function  |
+| `persistedQueryHash`          | function  |
+| `ApqResolver`                 | class     |
+| `GraphqlRuntimeLoadError`     | class     |
+| `GraphqlSchemaError`          | class     |
+| `GraphqlService`              | class     |
+| `GRAPHQL_TRANSPORT_WS`        | const     |
+| `AnySubscriptionResolver`     | interface |
+| `DefaultGraphqlContext`       | interface |
+| `GraphqlApqOptions`           | interface |
+| `GraphqlCodeFirstOptions`     | interface |
+| `GraphqlConnectionInfo`       | interface |
+| `GraphqlContextInput`         | interface |
+| `GraphqlExecutionResult`      | interface |
+| `GraphqlFormattedError`       | interface |
+| `GraphqlModuleLike`           | interface |
+| `GraphqlOperationContext`     | interface |
+| `GraphqlRequestParams`        | interface |
+| `GraphqlScalarResolver`       | interface |
+| `GraphqlScalarTypeLike`       | interface |
+| `GraphqlSchemaFirstOptions`   | interface |
+| `GraphqlSchemaLike`           | interface |
+| `GraphqlSseTransportOptions`  | interface |
 | `GraphqlSubscriptionsOptions` | interface |
-| `GraphqlWsTransportOptions` | interface |
-| `IApqResolver` | interface |
-| `IGraphqlService` | interface |
-| `SubscriptionResolver` | interface |
-| `AnyFieldResolver` | type |
-| `ApqResolveResult` | type |
-| `FieldResolver` | type |
-| `GraphqlPluginOptions` | type |
-| `GraphqlSubscriptionOutcome` | type |
-| `ResolverMap` | type |
-| `TypeResolverMap` | type |
+| `GraphqlWsTransportOptions`   | interface |
+| `IApqResolver`                | interface |
+| `IGraphqlService`             | interface |
+| `SubscriptionResolver`        | interface |
+| `AnyFieldResolver`            | type      |
+| `ApqResolveResult`            | type      |
+| `FieldResolver`               | type      |
+| `GraphqlPluginOptions`        | type      |
+| `GraphqlSubscriptionOutcome`  | type      |
+| `ResolverMap`                 | type      |
+| `TypeResolverMap`             | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

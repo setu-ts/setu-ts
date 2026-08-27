@@ -80,29 +80,30 @@ and the reference config in
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `telemetryMiddleware` | function |
-| `TelemetryPlugin` | function |
-| `NoopTelemetryService` | class |
-| `TELEMETRY_SPAN_KEY` | const |
-| `InstrumentationConfig` | interface |
+| Export                   | Kind      |
+| ------------------------ | --------- |
+| `telemetryMiddleware`    | function  |
+| `TelemetryPlugin`        | function  |
+| `NoopTelemetryService`   | class     |
+| `TELEMETRY_SPAN_KEY`     | const     |
+| `InstrumentationConfig`  | interface |
 | `InstrumentationsConfig` | interface |
-| `ISpan` | interface |
-| `ITelemetryService` | interface |
-| `SamplingConfig` | interface |
-| `SpanOptions` | interface |
-| `TelemetryContext` | interface |
+| `ISpan`                  | interface |
+| `ITelemetryService`      | interface |
+| `SamplingConfig`         | interface |
+| `SpanOptions`            | interface |
+| `TelemetryContext`       | interface |
 | `TelemetryPluginOptions` | interface |
-| `TracerHost` | interface |
-| `InstrumentationKind` | type |
-| `SpanAttributeValue` | type |
-| `SpanExporterKind` | type |
-| `SpanKind` | type |
-| `SpanProcessorKind` | type |
-| `SpanStatus` | type |
+| `TracerHost`             | interface |
+| `InstrumentationKind`    | type      |
+| `SpanAttributeValue`     | type      |
+| `SpanExporterKind`       | type      |
+| `SpanKind`               | type      |
+| `SpanProcessorKind`      | type      |
+| `SpanStatus`             | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

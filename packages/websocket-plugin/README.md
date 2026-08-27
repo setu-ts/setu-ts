@@ -318,44 +318,45 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `buildContext` | function |
-| `frameByteLength` | function |
-| `parseRequestedProtocols` | function |
-| `resolveOptions` | function |
-| `selectProtocol` | function |
-| `WebSocketPlugin` | function |
-| `HeartbeatSweeper` | class |
-| `Room` | class |
-| `RoomRegistry` | class |
-| `WebSocketConnection` | class |
-| `WebSocketService` | class |
-| `WebSocketUnavailableError` | class |
-| `WsRouteTable` | class |
-| `CAPABILITIES` | const |
-| `HeartbeatOptions` | interface |
-| `IWebSocketConnection` | interface |
-| `IWebSocketService` | interface |
-| `IWebSocketTransport` | interface |
-| `LocalBroadcastOptions` | interface |
-| `RoomBroadcastOptions` | interface |
-| `RoomMembershipListener` | interface |
-| `WebSocketCloseEvent` | interface |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `buildContext`               | function  |
+| `frameByteLength`            | function  |
+| `parseRequestedProtocols`    | function  |
+| `resolveOptions`             | function  |
+| `selectProtocol`             | function  |
+| `WebSocketPlugin`            | function  |
+| `HeartbeatSweeper`           | class     |
+| `Room`                       | class     |
+| `RoomRegistry`               | class     |
+| `WebSocketConnection`        | class     |
+| `WebSocketService`           | class     |
+| `WebSocketUnavailableError`  | class     |
+| `WsRouteTable`               | class     |
+| `CAPABILITIES`               | const     |
+| `HeartbeatOptions`           | interface |
+| `IWebSocketConnection`       | interface |
+| `IWebSocketService`          | interface |
+| `IWebSocketTransport`        | interface |
+| `LocalBroadcastOptions`      | interface |
+| `RoomBroadcastOptions`       | interface |
+| `RoomMembershipListener`     | interface |
+| `WebSocketCloseEvent`        | interface |
 | `WebSocketConnectionContext` | interface |
-| `WebSocketEventSink` | interface |
-| `WebSocketHandlers` | interface |
-| `WebSocketPluginOptions` | interface |
-| `WebSocketRoom` | interface |
-| `WebSocketRouteOptions` | interface |
-| `WsRoute` | interface |
-| `RoomPublisher` | type |
-| `WebSocketReadyState` | type |
-| `WebSocketUpgradeDecision` | type |
-| `WebSocketUpgradeRouter` | type |
-| `WsRouteMatch` | type |
+| `WebSocketEventSink`         | interface |
+| `WebSocketHandlers`          | interface |
+| `WebSocketPluginOptions`     | interface |
+| `WebSocketRoom`              | interface |
+| `WebSocketRouteOptions`      | interface |
+| `WsRoute`                    | interface |
+| `RoomPublisher`              | type      |
+| `WebSocketReadyState`        | type      |
+| `WebSocketUpgradeDecision`   | type      |
+| `WebSocketUpgradeRouter`     | type      |
+| `WsRouteMatch`               | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 
