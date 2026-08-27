@@ -26,11 +26,12 @@ All notable changes to this project are documented here. The format follows
   Consumers are unaffected.
 
 - **`ISseService.channelCount`** (M74) — the counterpart to `IWebSocketService.roomCount`, reported
-  by the `sse` health indicator as `channels`. It never decreases, because nothing reclaims a
-  channel before shutdown, so a climbing value is the signal that channel names are being derived
-  from unbounded input. **Breaking for an out-of-repo implementor of `ISseService`** in the same way
-  `peek` is: add a getter returning the registry size. The health payload gains a field, which is
-  additive for consumers.
+  by the `sse` health indicator as `channels`. Nothing reclaims a channel, so the value only rises
+  for the life of a running application — a climbing value is the signal that channel names are
+  being derived from unbounded input. Shutdown discards every channel and resets it to zero.
+  **Breaking for an out-of-repo implementor of `ISseService`** in the same way `peek` is: add a
+  getter returning the registry size. The health payload gains a field, which is additive for
+  consumers.
 
 - **`JsonValue` in `@setu-ts/common`** (M74) — a recursive JSON-safe value type. Its object arm
   admits `undefined` deliberately, because `JSON.stringify` drops such a property rather than

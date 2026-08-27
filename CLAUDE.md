@@ -3398,8 +3398,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   indicator reports `rooms`, while the SSE indicator reported `connections` alone — so the
   never-reclaimed growth this milestone documents had no operator-visible signal, and the SSE
   integration guard had to read the registry through `peek` itself for want of a count. The number
-  **never decreases**, which is what makes it worth watching rather than merely reporting; the
-  health payload gains a `channels` field, additive for consumers.
+  **only rises for the life of a running application** (shutdown discards every channel), which is
+  what makes it worth watching rather than merely reporting; the health payload gains a `channels`
+  field, additive for consumers.
 
   **`SseMessage.data` narrows to a new `JsonValue` in `common` (breaking).** Its object arm admits
   `undefined`, decided by probing rather than by taste: the strict form rejects

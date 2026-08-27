@@ -157,7 +157,13 @@ export class SseService implements IService {
     return this.#connections.size;
   }
 
-  /** Number of channels the registry currently holds; never decreases. */
+  /**
+   * Number of channels the registry currently holds.
+   *
+   * Rises for the life of a running application, since nothing reclaims a
+   * channel; {@linkcode SseService.closeAll} discards them all at shutdown,
+   * which is the only thing that lowers it.
+   */
   get channelCount(): number {
     return this.#registry.size;
   }

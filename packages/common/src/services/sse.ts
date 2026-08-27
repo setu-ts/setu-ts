@@ -185,10 +185,14 @@ export interface ISseService {
    *
    * The counterpart to {@linkcode IWebSocketService.roomCount}, and worth
    * watching rather than merely reporting: a channel is created by
-   * {@linkcode ISseService.channel} and **never reclaimed before shutdown**, so
-   * this number only rises. A steadily climbing count means channel names are
-   * being derived from unbounded input — use {@linkcode ISseService.peek} on
-   * any path that reads a caller-supplied name.
+   * {@linkcode ISseService.channel} and nothing reclaims it, so **for the life
+   * of a running application this number only rises**. A steadily climbing
+   * count means channel names are being derived from unbounded input — use
+   * {@linkcode ISseService.peek} on any path that reads a caller-supplied name.
+   *
+   * The one thing that lowers it is shutdown: the plugin's `onClose` discards
+   * every channel, so a probe racing teardown reads `0` rather than the last
+   * live value.
    *
    * @since 0.4.0
    */

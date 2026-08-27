@@ -225,9 +225,9 @@ describe('SseService.channelCount (M74)', () => {
     expect(service.channelCount).toBe(0);
   });
 
-  it('never decreases — a channel whose members all left is still counted', () => {
+  it('does not fall while the application runs — an emptied channel is still counted', () => {
     // The property that makes this number worth watching rather than merely
-    // reporting. Nothing reclaims an SSE channel before shutdown.
+    // reporting. Nothing reclaims an SSE channel while the app is up.
     const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
     const service = new SseService({}, runtime);
     service.channel('deploys');
@@ -235,5 +235,22 @@ describe('SseService.channelCount (M74)', () => {
     expect(service.channelCount).toBe(1);
     expect(service.peek('deploys')?.size).toBe(0);
     expect(service.channelCount).toBe(1);
+  });
+
+  it('is reset to zero by closeAll, which is the one thing that lowers it', () => {
+    // Pins the single exception the contract names. `SseService` is barrel
+    // exported, so `closeAll` is publicly reachable as well as being what the
+    // plugin's onClose calls — an unqualified "never decreases" would be a
+    // documentation lie, and this is the case that makes it one.
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+    service.channel('a');
+    service.channel('b');
+    expect(service.channelCount).toBe(2);
+
+    service.closeAll();
+
+    expect(service.channelCount).toBe(0);
+    expect(service.peek('a')).toBeUndefined();
   });
 });
