@@ -3377,6 +3377,67 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `@setu-ts/common` declares no worker exit signal, which **M70k had shipped** — the fix was
   recorded seven entries above it in the same section. A release spanning many milestones needs the
   whole `Unreleased` section read for internal contradictions, not just for per-milestone coverage.
+- **Milestone 73** (`packages/common` + `packages/session-plugin` + `packages/auth-plugin` +
+  `packages/kernel` + `packages/websocket-plugin` + `packages/sse-plugin` — realtime authentication.
+  A browser can send exactly **one** credential over an `EventSource` request or a `WebSocket`
+  constructor: a cookie. `JwtStrategy` and `ApiKeyStrategy` both read a header, and
+  `AuthPluginOptions` had no hatch through which an application could supply its own — so the two
+  transports a browser can actually use for realtime work could not authenticate a browser at all:
+  an `EventSource` behind `requireAuth()` was `401`ed, and a socket connected as anonymous with its
+  cookie session unreadable in the very callback the websocket README nominates for the job. Closes
+  X3-5, whose documentation half M70n closed.
+
+  **The cookie is read through a new required `ISessionService.fromHeaders(headers)`** returning a
+  read-only `SessionView` and committing nothing — `load(ctx)` needs an `IRequestContext` that a
+  strategy authenticating an upgrade never has. Both entry points delegate to one `#readCookieValue`
+  and one `#restore`, so they cannot observe a differently-named cookie or disagree about expiry and
+  revocation (the one-capability-one-implementation rule, driven under a non-default configuration).
+  **Breaking for implementors** — a required member, CHANGELOG'd, though the framework's own service
+  is the only one in-repo.
+
+  **`SessionStrategy` maps the opened view through a caller-supplied `toPrincipal`** rather than
+  reading a conventional key, so the plugin never guesses where an identity lives in a payload. It
+  is internal and deliberately NOT barrel-exported, configured only through the new
+  `AuthPluginOptions.session` arm, and yields `null` — continuing the chain — for an absent cookie,
+  an unopenable envelope, an expired or revoked session, or a `toPrincipal` reporting no identity.
+  `AuthPluginOptions.strategies` is the caller hatch, appended in declaration order, and the
+  assembled order is fixed at **jwt → api-key → session → caller-supplied** with the first non-null
+  principal winning, so a request carrying both a bearer header and a cookie authenticates by the
+  JWT. A duplicate strategy name **throws**: a name is a strategy's only identity, and the later
+  entry would be unreachable to anything reasoning about the chain by name. A `session` arm without
+  `SessionPlugin` fails at `register()` naming both plugins rather than with a per-request `401` —
+  `optionalDependencies: [CAPABILITIES.SESSION]` orders the session plugin first and
+  `ctx.services.has` decides once.
+
+  **The WebSocket bridge carries a principal, not a context.** `WebSocketConnectionContext.user?` is
+  populated by threading `ctx.request.user` through an optional second parameter on
+  `IWebSocketService.routeUpgrade`, so a single-parameter implementation stays assignable (pinned by
+  a type-level test) and an absent principal is **omitted** rather than `undefined`, per
+  `exactOptionalPropertyTypes`. **`sse-plugin` needed no source change** — the strategy is the whole
+  fix, and the SSE half is asserted in `auth-plugin`'s integration suite, where that strategy lives.
+  **Per-WebSocket-route authorization is deliberately absent**: those routes are registered on
+  `IWebSocketService.route`, not the kernel router, so they carry no route middleware. The two
+  documented answers are a global guard in the authentication band and a `1008` close from `onOpen`,
+  both driven by the e2e.
+
+  **The real-socket e2e needed a hand-written RFC 6455 client, and that is a runtime fact rather
+  than a preference**: Deno's `WebSocket` takes only `(url, protocols)`, exposes no way to attach a
+  `Cookie` header, and shares no cookie jar with `fetch` (verified — a `Set-Cookie` captured from a
+  `fetch` login is not replayed on a subsequent connect). Scenario (a) therefore performs the
+  handshake on a raw `Deno.connect` socket, checks `Sec-WebSocket-Accept` against
+  `base64(SHA-1(key + GUID))`, and answers the server's keep-alive pings with pongs — without which
+  Deno closes a fresh socket before it can read anything. The refusal case uses **`app.fetch`, never
+  the global `fetch`**, because the fetch algorithm strips `Upgrade`/`Connection` as forbidden
+  headers, so a global fetch arrives as a plain GET and a plain GET on that path is a `404`, not the
+  `401` the test exists to assert. Note that the package's own `test.permissions` block declares
+  `net: true` only, so this file runs under the root `deno task test` (which grants `--allow-env` on
+  the CLI) and NOT under a package-scoped
+  `deno test -P --config packages/websocket-plugin/deno.json` — `RuntimePlugin` reads the
+  environment at `start()`.
+
+  Doc corrections shipped alongside: the stale claims in `common` and `ARCHITECTURE.md` that an
+  upgrade bypasses the middleware pipeline (pre-M70a behaviour), and a `PUBLIC_API.md` line still
+  describing gRPC as using the deprecated `IHttpAdapter.setRpcHandler?` seam) — complete (PR #197)
 - **Milestone 74** (`packages/common` + `packages/websocket-plugin` + `packages/sse-plugin` —
   realtime registry reads and the SSE contract. Two committed contracts could only be read by
   writing to them, and a third advertised a guarantee its own type did not hold. `room(name)` and
@@ -3434,7 +3495,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `publish` with one, because the backplane publisher builds its frame with `JSON.stringify(msg)`
   outside any `try`. Developed in an isolated worktree off `main`, in parallel with M73, which it
   does not depend on) — complete (PR #196)
-- **Next milestone** — **M73** (realtime authentication) and **M75** (broker trace propagation).
+- **Next milestone** — **M75** (broker trace propagation).
 
 ## Verification (run before declaring any work done)
 
