@@ -298,6 +298,23 @@ export class RoomRegistry {
   }
 
   /**
+   * Returns the named room if one already exists, without creating it.
+   *
+   * The non-allocating counterpart to {@linkcode RoomRegistry.get}. It is a
+   * bare map read by design: it must not touch {@linkcode RoomRegistry.#neverJoined}
+   * in either direction, because adding to that set would mark a room already
+   * in use as abandoned, and reclaiming from it on a read path would make a
+   * lookup that promises to change nothing dispose rooms.
+   *
+   * @param name - Room name
+   * @returns The room, or `undefined` when no room of that name exists
+   * @since 0.4.0
+   */
+  peek(name: string): Room | undefined {
+    return this.#rooms.get(name);
+  }
+
+  /**
    * Removes a connection from every room it belongs to, then discards any room
    * left empty.
    *

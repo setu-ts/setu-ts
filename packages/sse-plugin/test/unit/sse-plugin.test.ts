@@ -171,12 +171,23 @@ describe('SsePlugin registration', () => {
     expect(healthIndicatorName).toBe('sse');
     expect(healthIndicatorFn).not.toBeNull();
 
-    if (healthIndicatorFn) {
+    if (healthIndicatorFn && registeredService) {
       const result = await healthIndicatorFn();
       expect(result.status).toBe('up');
       // Assert the full documented shape (§3.9), not just that data exists:
-      // the indicator surfaces the live connection count (0 at registration).
-      expect(result.data).toEqual({ connections: 0 });
+      // both counters are 0 at registration.
+      expect(result.data).toEqual({ connections: 0, channels: 0 });
+
+      // ...then make the two numbers DIFFER before asserting again. At zero the
+      // assertion above cannot tell `channels` from `connections`: wiring
+      // `channels: sseService.connectionCount` leaves it green (verified), so
+      // a copy-paste in the indicator would ship unnoticed. Creating a channel
+      // without opening a connection separates them.
+      registeredService.channel('deploys');
+      registeredService.channel('builds');
+
+      const afterChannels = await healthIndicatorFn();
+      expect(afterChannels.data).toEqual({ connections: 0, channels: 2 });
     }
 
     expect(onCloseHandler).not.toBeNull();
@@ -184,6 +195,11 @@ describe('SsePlugin registration', () => {
       await onCloseHandler();
       // After closeAll, connectionCount should be 0.
       expect(registeredService.connectionCount).toBe(0);
+      // ...and so is channelCount: shutdown is the one thing that lowers it,
+      // which is why the contract says "only rises for the life of a running
+      // application" rather than "never decreases". Non-vacuous because the
+      // two channels created above made it 2.
+      expect(registeredService.channelCount).toBe(0);
     }
   });
 
