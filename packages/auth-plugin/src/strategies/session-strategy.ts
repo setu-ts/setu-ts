@@ -26,18 +26,21 @@ export interface SessionStrategyOptions {
 }
 
 /**
- * Session authentication strategy.
+ * Internal session authentication strategy.
  *
- * The interface and the class share this module because `SessionStrategy` is
- * the strategy's own type: a same-named class and interface merge in one
- * module, but the same names cannot be imported from two modules at once.
+ * Authenticates a request by reading the session cookie through
+ * `ISessionService.fromHeaders` and mapping the opened {@linkcode SessionView}
+ * to a principal through the caller-supplied `toPrincipal` callback.
  *
  * `authenticate` returns `null` when the request carries no usable session
  * (absent cookie, unopenable envelope, expired, or revoked) or when
  * `toPrincipal` says the session carries no identity — in both cases the
  * strategy chain continues with the next strategy.
+ *
+ * Internal to the plugin: configured through `AuthPluginOptions.session`,
+ * never barrel-exported.
  */
-export class SessionStrategy implements SessionStrategy {
+export class SessionStrategy {
   /** Strategy name for identification. */
   readonly name = 'session';
   private readonly sessionService: ISessionService;
