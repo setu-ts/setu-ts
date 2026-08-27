@@ -119,8 +119,24 @@ Every row below was opened and read in this worktree, or established by running 
 - **Why:** `openapi-plugin` and the plugin's own handler builder read these shapes, and
   `resolveParameters` is published API. Changing the storage shape at the same time as the capture
   mechanism would make any regression impossible to attribute to one of the two.
+- **One measured exception — `params` array ORDER.** The captured baseline shows the legacy store
+  holds each route's `params` in **descending** index order (`2, 1, 0`), because legacy parameter
+  decorators evaluate in reverse argument order. Under `@Params` the natural capture order is
+  ascending. That order is **not load-bearing**, established by reading both consumers rather than
+  assumed: `resolveParameters` (`resolvers/parameter-resolver.ts:258`) places each argument by
+  `param.index` and never by array position, and `openapi-plugin` reads the Zod `schema.params`
+  (`generators/openapi-generator.ts:828`), never this array. The only other reader is
+  `findUnresolvableParameters`, where order affects the order of a diagnostic list. The new
+  implementation therefore stores **ascending**, and the baseline comparison is keyed by `index`
+  rather than by position — the contract being asserted is one record per index, which is what the
+  consumers actually depend on.
 - **Test home:** `test/unit/metadata-shape.test.ts`, asserting the stored records field by field
-  against a baseline captured from the legacy implementation before it is deleted.
+  against a baseline captured from the legacy implementation before it is deleted, with `params`
+  compared as an index-keyed set. A second assertion pins the ascending order itself, so the change
+  is deliberate rather than incidental.
+- **Symbol-keyed metadata is outside the fixture.** `Ctx()`'s marker is a symbol key and does not
+  survive `JSON.stringify`, so it appears as `{}` in the captured baseline. It is asserted by the
+  retained M64 cross-copy test instead, and the fixture's limitation is stated at its use site.
 
 ### 3.5 How the legacy behaviour is proven unchanged
 
