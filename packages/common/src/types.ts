@@ -98,3 +98,38 @@ export const PLUGIN_PRIORITY = {
  * @since 0.1.0
  */
 export type PluginPriority = (typeof PLUGIN_PRIORITY)[keyof typeof PLUGIN_PRIORITY];
+
+/**
+ * A value that survives a `JSON.stringify` round trip.
+ *
+ * Recursive: an array's elements and an object's property values are
+ * themselves `JsonValue`s, so a nested payload is checked all the way down
+ * rather than only at its top level.
+ *
+ * **The object arm admits `undefined` deliberately.** `JSON.stringify` drops a
+ * property whose value is `undefined` rather than failing, so
+ * `{ note: string | undefined }` — the shape an optional field takes once it is
+ * written out — is serializable and is accepted here. What the type rejects is
+ * the set `JSON.stringify` cannot represent: `bigint` (which throws), plus
+ * functions and symbols (which it silently drops, losing data the caller
+ * believed it was sending).
+ *
+ * **Two limits are worth knowing before you reach them.** A circular structure
+ * still throws at runtime; no type can express acyclicity. And a named
+ * `interface` is not assignable to this type, because TypeScript grants
+ * implicit index signatures only to object-literal types — declare the payload
+ * with a `type` alias, or extend `Record<string, JsonValue | undefined>`.
+ *
+ * @example
+ * ```typescript
+ * const payload: JsonValue = { build: 412, tags: ['live'], note: undefined };
+ * ```
+ * @since 0.4.0
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue | undefined };

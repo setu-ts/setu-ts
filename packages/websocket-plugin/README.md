@@ -208,13 +208,20 @@ ws.route('/ws', handlers, { protocols: ['chat', 'json'] });
   expose no `ping()` on their web `WebSocket`, so a protocol ping would silently no-op on half the
   supported runtimes. Your client should treat `heartbeatPayload` as a keep-alive and may reply to
   keep the idle timer fresh — the idle sweep looks only at _inbound_ traffic.
-- **`room(name)` is get-or-create, so reading presence is a write.** There is no non-creating
-  lookup: calling `room('board:acme').size` for a name nobody has joined CREATES that room. A
-  presence or dashboard endpoint reporting size for caller-supplied names therefore accumulates one
-  empty room per distinct name polled — with nothing to reclaim it until some other socket
-  disconnects (the sweep runs on disconnection, so an idle application never reclaims). Deliberate
-  in source; keep polled names to a fixed set, or derive presence from your own registry instead of
-  `size`.
+- **`room(name)` is get-or-create; `peek(name)` is the read that is not.** Calling
+  `room('board:acme').size` for a name nobody has joined CREATES that room, so a presence or
+  dashboard endpoint reporting size for caller-supplied names accumulates one empty room per
+  distinct name polled — with nothing to reclaim it until some other socket disconnects (the sweep
+  runs on disconnection, so an idle application never reclaims). Use `peek` wherever the name comes
+  from a request: it returns the room if one exists and `undefined` otherwise, and registers
+  nothing.
+
+  ```typescript
+  app.router.get('/presence/:board', (ctx) => {
+    const board = ctx.params.board ?? '';
+    return ctx.response.json({ present: ws.peek(`board:${board}`)?.size ?? 0 });
+  });
+  ```
 - **Rooms are in-process by default.** `broadcast` skips closed members and drops them, and a room
   that empties is discarded, so a churning connection set does not grow memory. Behind more than one
   replica, register a backplane — see [Scaling beyond one replica](#scaling-beyond-one-replica).

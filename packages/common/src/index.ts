@@ -43,6 +43,7 @@ export { PLUGIN_PRIORITY } from './types.ts';
 export type {
   HealthStatus,
   HttpMethod,
+  JsonValue,
   LifecyclePhase,
   LogLevel,
   MetricType,

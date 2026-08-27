@@ -170,3 +170,34 @@ describe('SseService opening the backplane transport on first connection', () =>
     expect(warnings[0]).toMatchObject({ error: 'transport gone' });
   });
 });
+
+describe('SseService.peek (M74 / X3-8)', () => {
+  it('returns undefined before channel() has ever been called for that name', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+
+    expect(service.peek('deploys')).toBeUndefined();
+  });
+
+  it('returns the identical channel object channel() returns', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+    const created = service.channel('deploys');
+
+    expect(service.peek('deploys')).toBe(created);
+  });
+
+  it('reads a caller-supplied name without registering it', () => {
+    const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
+    const service = new SseService({}, runtime);
+
+    for (let i = 0; i < 50; i++) {
+      expect(service.peek(`build:${i}`)).toBeUndefined();
+    }
+
+    // Nothing was created, so the one name that IS created afterwards is the
+    // only one the registry holds.
+    expect(service.channel('deploys').size).toBe(0);
+    expect(service.peek('build:0')).toBeUndefined();
+  });
+});

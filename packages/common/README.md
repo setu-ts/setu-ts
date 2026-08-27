@@ -322,6 +322,7 @@ package fits the plugin architecture.
 | `HealthStatus`               | type      |
 | `HttpMethod`                 | type      |
 | `JobProcessor`               | type      |
+| `JsonValue`                  | type      |
 | `LifecyclePhase`             | type      |
 | `LoadBalanceStrategy`        | type      |
 | `LogLevel`                   | type      |
