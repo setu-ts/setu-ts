@@ -14,6 +14,7 @@
 
 import type {
   ILogger,
+  IPrincipal,
   IRealtimeBackplane,
   IRuntimeServices,
   IWebSocketConnection,
@@ -227,18 +228,23 @@ export class WebSocketService implements IWebSocketService {
    * The upgrade router the kernel terminal handler consults after the
    * middleware pipeline has run without short-circuiting.
    *
-   * Delegates to {@linkcode WebSocketService.createUpgradeRouter}, which is
-   * the reporting wrapper: a routing failure is written to the logger here, at
-   * its source, before it becomes a refusal. Calling `#route` directly would
-   * make this the one entry point whose failures are invisible — the kernel
-   * has no logger to write them to.
+   * Delegates to the shared `#routeReported` reporting wrapper: a routing
+   * failure is written to the logger here, at its source, before it becomes a
+   * refusal. Calling `#route` directly would make this the one entry point
+   * whose failures are invisible — the kernel has no logger to write them to.
    *
    * @param request - The native, undisturbed upgrade request
+   * @param principal - The authenticated principal, when the middleware
+   *   pipeline produced one (`ctx.request.user`). Absent when the upgrade was
+   *   not authenticated; treated as an anonymous connection, never a failure.
    * @returns The decision, or `null` when this is not a WebSocket route
    * @since 0.3.0
    */
-  routeUpgrade(request: Request): Promise<WebSocketUpgradeDecision | null> {
-    return this.createUpgradeRouter()(request);
+  routeUpgrade(
+    request: Request,
+    principal?: IPrincipal,
+  ): Promise<WebSocketUpgradeDecision | null> {
+    return this.#routeReported(request, principal);
   }
 
   room(name: string): WebSocketRoom {
@@ -287,9 +293,13 @@ export class WebSocketService implements IWebSocketService {
    * route table, applies admission control, and builds the sink the adapter
    * binds its native socket into.
    *
-   * A failure here is reported through the logger before it is turned into a
-   * `500` refusal. The adapter-side `UpgradeRouterStore` also catches, but it
-   * runs inside `@setu-ts/runtime`, which has no logger and therefore
+   * Kept at its public single-parameter shape: the adapter consults it with
+   * the native request alone and has no principal to thread, so an
+   * adapter-side call routes the upgrade as anonymous. A failure is reported
+   * through the logger before it is turned into a `500` refusal, via the same
+   * `#routeReported` wrapper `routeUpgrade` uses, so the logging behavior has
+   * one implementation. The adapter-side `UpgradeRouterStore` also catches,
+   * but it runs inside `@setu-ts/runtime`, which has no logger and therefore
    * has nowhere to put the cause — so the only place a routing bug can be made
    * visible is here, at its source.
    *
@@ -298,18 +308,39 @@ export class WebSocketService implements IWebSocketService {
    * @since 0.1.0
    */
   createUpgradeRouter(): (request: Request) => Promise<WebSocketUpgradeDecision | null> {
-    // deno-lint-ignore require-await
-    return async (request: Request): Promise<WebSocketUpgradeDecision | null> => {
-      try {
-        return this.#route(request);
-      } catch (error) {
-        this.#logger?.error('WebSocket upgrade routing failed', {
-          error,
-          url: request.url,
-        });
-        return { accept: false, status: STATUS_ROUTER_FAILED };
-      }
-    };
+    return (request: Request): Promise<WebSocketUpgradeDecision | null> =>
+      this.#routeReported(request);
+  }
+
+  /**
+   * The reporting wrapper both entry points call — the public `routeUpgrade`
+   * and the adapter-facing router from `createUpgradeRouter`.
+   *
+   * A routing failure is written to the logger here, at its source, before it
+   * becomes a refusal. The HTTP adapter that consults the router has no logger
+   * of its own, and the adapter-side `UpgradeRouterStore` backstop runs inside
+   * `@setu-ts/runtime`, which has no logger and therefore has nowhere to put
+   * the cause — so this is the one place a routing bug can be made visible.
+   *
+   * @param request - The native upgrade request
+   * @param principal - The authenticated principal, when one authenticated the
+   *   upgrade; absent for an anonymous upgrade
+   * @returns The decision, or `null` when this is not a WebSocket route
+   */
+  // deno-lint-ignore require-await
+  async #routeReported(
+    request: Request,
+    principal?: IPrincipal,
+  ): Promise<WebSocketUpgradeDecision | null> {
+    try {
+      return this.#route(request, principal);
+    } catch (error) {
+      this.#logger?.error('WebSocket upgrade routing failed', {
+        error,
+        url: request.url,
+      });
+      return { accept: false, status: STATUS_ROUTER_FAILED };
+    }
   }
 
   /**
@@ -317,9 +348,12 @@ export class WebSocketService implements IWebSocketService {
    * happy path stays readable.
    *
    * @param request - The native upgrade request
+   * @param principal - The authenticated principal, when one authenticated the
+   *   upgrade; handed to `buildContext` so `onOpen` can read it as
+   *   `context.user`
    * @returns The decision, or `null` when this is not a WebSocket route
    */
-  #route(request: Request): WebSocketUpgradeDecision | null {
+  #route(request: Request, principal?: IPrincipal): WebSocketUpgradeDecision | null {
     // Upgrade detection lives here rather than in the caller. Before M70a the
     // adapter's `UpgradeRouterStore` filtered non-upgrade requests out before
     // consulting, and `WsRouteTable.match` keys on PATH ALONE — so without this
@@ -353,7 +387,7 @@ export class WebSocketService implements IWebSocketService {
       // fires only after the adapter has answered the handshake, at which
       // point the runtime has already closed the native request and reading
       // its headers throws.
-      const context = buildContext(request, match.protocol);
+      const context = buildContext(request, match.protocol, principal);
 
       const sink = this.#createSink(context, match.route);
       return match.protocol === undefined
@@ -540,12 +574,17 @@ export class WebSocketService implements IWebSocketService {
  *
  * @param request - The upgrade request
  * @param protocol - The negotiated subprotocol, when one was selected
+ * @param principal - The authenticated principal, when one authenticated the
+ *   upgrade. When absent the `user` key is omitted entirely rather than set to
+ *   `undefined`, keeping the context `exactOptionalPropertyTypes`-clean:
+ *   `'user' in context` is `false` for an anonymous connection.
  * @returns The connection context
  * @since 0.1.0
  */
 export function buildContext(
   request: Request,
   protocol: string | undefined,
+  principal?: IPrincipal,
 ): WebSocketConnectionContext {
   const url = new URL(request.url);
   const query: Record<string, string> = {};
@@ -553,11 +592,16 @@ export function buildContext(
     query[key] = value;
   }
 
-  const base = {
+  // Assembled with conditional spreads rather than explicit `undefined`
+  // values so `exactOptionalPropertyTypes` is never violated: an anonymous
+  // upgrade leaves the `user` key ABSENT (`'user' in context === false`), and
+  // a protocol-less one leaves `protocol` absent, exactly as before.
+  return {
     url: request.url,
     path: url.pathname,
     query,
     headers: new Headers(request.headers),
+    ...(protocol === undefined ? {} : { protocol }),
+    ...(principal === undefined ? {} : { user: principal }),
   };
-  return protocol === undefined ? base : { ...base, protocol };
 }
