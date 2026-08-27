@@ -8,10 +8,13 @@ import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   IAuthService,
+  IAuthStrategy,
   IJwtService,
   IPluginContext,
   IPrincipal,
   IRequest,
+  ISessionService,
+  SessionView,
 } from '@setu-ts/common';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import manifest from '../../deno.json' with { type: 'json' };
@@ -325,6 +328,147 @@ describe('AuthPlugin', () => {
     expect(viaDefault).toBeNull();
   });
 });
+
+describe('AuthPlugin — session strategy and caller strategies (M73)', () => {
+  it('declares the session capability as an optional dependency', () => {
+    const plugin = AuthPlugin({ jwt: { secret: 'test-secret' } });
+    expect(plugin.optionalDependencies).toContain(CAPABILITIES.SESSION);
+  });
+
+  it('throws at register() when options.session is set but the session capability is absent', () => {
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret' },
+      session: { toPrincipal: () => null },
+    });
+    const { ctx } = createFakeContext();
+    // register() is synchronous, so the throw is a sync throw — wrap it.
+    expect(() => plugin.register!(ctx)).toThrow('auth-plugin');
+    expect(() => plugin.register!(ctx)).toThrow('options.session');
+    expect(() => plugin.register!(ctx)).toThrow('session-plugin');
+  });
+
+  it('registers the session strategy when the session capability is present', async () => {
+    const { ctx, registered } = createFakeContext();
+    // Simulate SessionPlugin having registered its service under the token.
+    registered.set(CAPABILITIES.SESSION, fakeSessionService({ id: 's1', data: { uid: 'u1' } }));
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret' },
+      session: { toPrincipal: (view) => ({ id: String(view.data.uid) }) },
+    });
+    await plugin.register!(ctx);
+    const auth = registered.get(CAPABILITIES.AUTH) as IAuthService;
+    const principal = await auth.authenticate(makeRequest({ cookie: 'sid=s1' }));
+    expect(principal).toEqual({ id: 'u1' });
+  });
+
+  it('prefers the jwt principal over the session principal (jwt → api-key → session order)', async () => {
+    const { ctx, registered } = createFakeContext();
+    registered.set(
+      CAPABILITIES.SESSION,
+      fakeSessionService({ id: 's1', data: { uid: 'session-user' } }),
+    );
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret' },
+      session: { toPrincipal: (view) => ({ id: String(view.data.uid) }) },
+    });
+    await plugin.register!(ctx);
+    const jwt = registered.get(CAPABILITIES.JWT) as IJwtService;
+    const auth = registered.get(CAPABILITIES.AUTH) as IAuthService;
+    const token = await jwt.sign({ sub: 'jwt-user' });
+    // A request satisfying BOTH jwt and session must authenticate as jwt.
+    const principal = await auth.authenticate(
+      makeRequest({ authorization: `Bearer ${token}`, cookie: 'sid=s1' }),
+    );
+    expect(principal).toEqual({ id: 'jwt-user' });
+  });
+
+  it('appends caller strategies after the built-ins, in declaration order', async () => {
+    const { ctx, registered } = createFakeContext();
+    const seen: string[] = [];
+    const first: IAuthStrategy = {
+      name: 'custom-a',
+      authenticate: () => {
+        seen.push('custom-a');
+        return Promise.resolve(null);
+      },
+    };
+    const second: IAuthStrategy = {
+      name: 'custom-b',
+      authenticate: () => {
+        seen.push('custom-b');
+        return Promise.resolve({ id: 'from-custom-b' });
+      },
+    };
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret' },
+      strategies: [first, second],
+    });
+    await plugin.register!(ctx);
+    const auth = registered.get(CAPABILITIES.AUTH) as IAuthService;
+    const principal = await auth.authenticate(makeRequest({}));
+    expect(principal).toEqual({ id: 'from-custom-b' });
+    // jwt (no header → null) ran first, then the caller strategies in the
+    // order they were declared.
+    expect(seen).toEqual(['custom-a', 'custom-b']);
+  });
+
+  it('throws at register() when a caller strategy reuses a built-in name', () => {
+    const { ctx } = createFakeContext();
+    const duplicate: IAuthStrategy = {
+      name: 'jwt',
+      authenticate: () => Promise.resolve(null),
+    };
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret' },
+      strategies: [duplicate],
+    });
+    expect(() => plugin.register!(ctx)).toThrow("duplicate strategy name 'jwt'");
+  });
+
+  it('throws at register() when two caller strategies share a name', () => {
+    const { ctx } = createFakeContext();
+    const a: IAuthStrategy = {
+      name: 'custom',
+      authenticate: () => Promise.resolve(null),
+    };
+    const b: IAuthStrategy = {
+      name: 'custom',
+      authenticate: () => Promise.resolve(null),
+    };
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret' },
+      strategies: [a, b],
+    });
+    expect(() => plugin.register!(ctx)).toThrow("duplicate strategy name 'custom'");
+  });
+
+  it('leaves the chain unchanged when neither session nor strategies is configured', async () => {
+    const { ctx, registered } = createFakeContext();
+    const plugin = AuthPlugin({ jwt: { secret: 'test-secret' } });
+    await plugin.register!(ctx);
+    const jwt = registered.get(CAPABILITIES.JWT) as IJwtService;
+    const auth = registered.get(CAPABILITIES.AUTH) as IAuthService;
+    const token = await jwt.sign({ sub: 'solo' });
+    // The jwt strategy still authenticates exactly as before the change.
+    const principal = await auth.authenticate(makeRequest({ authorization: `Bearer ${token}` }));
+    expect(principal).toEqual({ id: 'solo' });
+    // And a request with no credential still resolves to null.
+    expect(await auth.authenticate(makeRequest({}))).toBeNull();
+  });
+});
+
+/**
+ * An ISessionService that opens a fixed view from any headers — stands in for
+ * the session-plugin's service under CAPABILITIES.SESSION.
+ */
+function fakeSessionService(view: SessionView): ISessionService {
+  return {
+    from: () => {
+      throw new Error('from() is not used by these tests');
+    },
+    fromHeaders: () => Promise.resolve(view),
+  };
+}
 
 /**
  * Build a minimal IRequest carrying the given headers.

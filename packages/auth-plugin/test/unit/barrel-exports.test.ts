@@ -1,6 +1,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as auth from '../../src/index.ts';
+import type { IPrincipal, SessionView } from '@setu-ts/common';
+import type { SessionAuthOptions } from '../../src/index.ts';
 
 /**
  * Barrel exports test.
@@ -74,15 +76,33 @@ describe('barrel exports', () => {
     expect(auth).toBeDefined();
   });
 
+  it('exports the SessionAuthOptions type (declared against the barrel)', () => {
+    // Compile-time: `SessionAuthOptions` resolves from the barrel and a
+    // `toPrincipal` callback is assignable to it (M73). Dropping the
+    // re-export stops this file compiling — a type-only export is invisible
+    // to every runtime assertion.
+    const options: SessionAuthOptions = {
+      toPrincipal: (view: SessionView): IPrincipal | null =>
+        view.data.uid === undefined ? null : { id: String(view.data.uid) },
+    };
+
+    expect(options.toPrincipal({ id: 's1', data: { uid: 'u1' } })).toEqual({ id: 'u1' });
+  });
+
   it('does not export internal implementations', () => {
     // JwtService, AuthService, RbacService, JwtStrategy, ApiKeyStrategy,
-    // LocalStrategy, parseDuration, loadIoredis, validateClient should NOT be exported
+    // SessionStrategy, LocalStrategy, parseDuration, loadIoredis,
+    // validateClient should NOT be exported. SessionStrategy (M73) is
+    // configured through AuthPluginOptions.session; the option is the
+    // configuration surface, so the class has no consumer beyond its own
+    // test — the same reason JwtStrategy and ApiKeyStrategy are unexported.
     const internals = [
       'JwtService',
       'AuthService',
       'RbacService',
       'JwtStrategy',
       'ApiKeyStrategy',
+      'SessionStrategy',
       'LocalStrategy',
       'parseDuration',
       'loadIoredis',
