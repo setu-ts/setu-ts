@@ -13,6 +13,7 @@ import {
   Inject,
   Injectable,
   Options,
+  Params,
   Patch,
   Post,
   Put,
@@ -243,7 +244,8 @@ describe('DecoratorPlugin internal paths', () => {
     @Controller('/x')
     class C {
       @Post('/')
-      create(@Body() body: unknown) {
+      @Params(Body())
+      create(body: unknown) {
         return body;
       }
     }

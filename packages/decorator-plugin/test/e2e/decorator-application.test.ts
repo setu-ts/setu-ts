@@ -16,10 +16,11 @@ import {
   Body,
   clearParameterResolvers,
   Controller,
-  createParameterDecorator,
   Ctx,
+  Custom,
   Get,
   Param,
+  Params,
   Post,
   Query,
   registerParameterResolver,
@@ -71,7 +72,8 @@ describe('decorator-driven application (e2e)', () => {
     @Controller('/users')
     class UserController {
       @Get('/:id')
-      getById(@Param('id') id: string) {
+      @Params(Param('id'))
+      getById(id: string) {
         return { id, name: 'Alice' };
       }
     }
@@ -90,7 +92,8 @@ describe('decorator-driven application (e2e)', () => {
     @Controller('/users')
     class UserController {
       @Post('/')
-      create(@Body() body: { name: string }, @Query('source') source: string) {
+      @Params(Body(), Query('source'))
+      create(body: { name: string }, source: string) {
         return { id: '2', name: body.name, source };
       }
     }
@@ -113,7 +116,8 @@ describe('decorator-driven application (e2e)', () => {
     @Controller('/users')
     class UserController {
       @Post('/')
-      create(@Ctx() ctx: IRequestContext) {
+      @Params(Ctx())
+      create(ctx: IRequestContext) {
         return ctx.response.status(201).header('Location', '/users/2').json({ id: '2' });
       }
     }
@@ -130,13 +134,15 @@ describe('decorator-driven application (e2e)', () => {
   });
 
   it('preserves an application-defined context parameter resolver', async () => {
-    const ExistingContext = (): ParameterDecorator => createParameterDecorator('context');
     registerParameterResolver('context', () => 'custom-context');
 
     @Controller('/custom-context')
     class CustomContextController {
       @Get('/')
-      read(@ExistingContext() value: string) {
+      // An application-defined source named `context` carries no built-in
+      // marker, so the registered resolver — not Ctx() — must satisfy it.
+      @Params(Custom<string>('context'))
+      read(value: string) {
         return { value };
       }
     }

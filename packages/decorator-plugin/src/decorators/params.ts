@@ -28,7 +28,7 @@
  */
 import type { IRequestContext } from '@setu-ts/common';
 
-import { defer } from '../metadata/context-bridge.ts';
+import { defer } from '../metadata/pending.ts';
 import type { ParameterMetadata } from '../metadata/metadata-store.ts';
 import { CONTEXT_PARAMETER_METADATA } from './security.ts';
 

@@ -13,6 +13,8 @@
  * @module
  */
 import type { Constructor, IMetadataStore, MiddlewareFunction } from '@setu-ts/common';
+
+import { takePending } from './pending.ts';
 import type { HttpMethod } from '@setu-ts/common';
 
 /**
@@ -321,12 +323,34 @@ export class MetadataStore implements IMetadataStore {
   }
 
   /**
+   * Applies any writes this class's member decorators deferred.
+   *
+   * A standard member decorator never receives the constructor, so it records
+   * its write on the class's `Symbol.metadata` object instead; this replays
+   * those writes the first time the class is read. Draining on read rather than
+   * from a class decorator is what keeps a class carrying member decorators but
+   * no class decorator behaving as it did under the legacy form — its routes
+   * are recorded either way.
+   *
+   * Cheap and idempotent: the pending list is spliced empty as it is applied, so
+   * every later read finds nothing to do.
+   *
+   * @param target - The class being read
+   */
+  #drain(target: Constructor): void {
+    for (const write of takePending(target)) {
+      write(this, target);
+    }
+  }
+
+  /**
    * Returns a class's controller metadata, or `undefined`.
    *
    * @param target - The class to look up
    * @returns The metadata, if any
    */
   getController(target: Constructor): ControllerMetadata | undefined {
+    this.#drain(target);
     return this._controllers.get(target);
   }
 
@@ -337,6 +361,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns `true` if decorated with `@Controller`
    */
   hasController(target: Constructor): boolean {
+    this.#drain(target);
     return this._controllers.has(target);
   }
 
@@ -385,6 +410,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns The optional argument indices; empty when the class marked none
    */
   ctorOptional(target: Constructor): ReadonlySet<number> {
+    this.#drain(target);
     return this._ctorOptional.get(target) ?? EMPTY_INDICES;
   }
 
@@ -395,6 +421,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns The metadata, if any
    */
   getService(target: Constructor): ServiceMetadata | undefined {
+    this.#drain(target);
     return this._services.get(target);
   }
 
@@ -485,6 +512,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns Method name → accumulator
    */
   getMethods(target: Constructor): ReadonlyMap<string, MethodMeta> {
+    this.#drain(target);
     return this._methods.get(target) ?? new Map();
   }
 
@@ -499,6 +527,7 @@ export class MetadataStore implements IMetadataStore {
    * @returns Materialized route metadata (empty when none)
    */
   getRoutesFor(target: Constructor): RouteMetadata[] {
+    this.#drain(target);
     const methods = this._methods.get(target);
     if (methods === undefined) {
       return [];
