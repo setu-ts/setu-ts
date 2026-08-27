@@ -149,3 +149,47 @@ describe('ChannelRegistry', () => {
     expect(registry.size).toBe(0);
   });
 });
+
+describe('ChannelRegistry.peek (M74 / X3-8)', () => {
+  it('returns undefined for a name no channel was ever created for', () => {
+    const registry = new ChannelRegistry();
+
+    expect(registry.peek('deploys')).toBeUndefined();
+    expect(registry.size).toBe(0);
+  });
+
+  it('returns the identical instance a prior get() created', () => {
+    const registry = new ChannelRegistry();
+    const created = registry.get('deploys');
+
+    expect(registry.peek('deploys')).toBe(created);
+  });
+
+  it('creates nothing across many lookups of distinct unknown names', () => {
+    // Worse here than in the room registry: ChannelRegistry has NO reclamation
+    // path, so every channel `get` creates lives until clear() at shutdown.
+    // `peek` is the only non-allocating read.
+    const registry = new ChannelRegistry();
+    registry.get('deploys');
+
+    for (let i = 0; i < 50; i++) {
+      expect(registry.peek(`build:${i}`)).toBeUndefined();
+    }
+
+    expect(registry.size).toBe(1);
+  });
+
+  it('still reports a channel whose members have all left', () => {
+    // Pins the documented behaviour rather than an aspiration: removing every
+    // member does NOT dispose the channel, so peek keeps finding it.
+    const registry = new ChannelRegistry();
+    const conn = makeFakeConn('c1');
+    const channel = registry.get('deploys');
+    channel.add(conn);
+    registry.removeFromAll(conn);
+
+    expect(channel.size).toBe(0);
+    expect(registry.peek('deploys')).toBe(channel);
+    expect(registry.size).toBe(1);
+  });
+});

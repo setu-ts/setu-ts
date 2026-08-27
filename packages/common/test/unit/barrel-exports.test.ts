@@ -11,7 +11,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as common from '../../src/index.ts';
 import type { HealthCheckResult, IHealthIndicator, IServiceRegistry } from '../../src/index.ts';
-import type { RegistryFactory, RouteValidationMetadata } from '../../src/index.ts';
+import type { JsonValue, RegistryFactory, RouteValidationMetadata } from '../../src/index.ts';
 
 describe('@setu-ts/common barrel — registry factory arm', () => {
   it('exports resolveRegistryEntry as a function', () => {
@@ -53,5 +53,15 @@ describe('@setu-ts/common barrel — registry factory arm', () => {
     const metadata: RouteValidationMetadata = { target: 'body', schema: { kind: 'zod' } };
 
     expect(metadata.target).toBe('body');
+  });
+
+  it('exports the JsonValue type (declared against the barrel) (M74/X3-8)', () => {
+    // Declared against the BARREL, not `types.ts`: dropping the re-export stops
+    // this file compiling, which no runtime assertion could detect (the M56
+    // defect class). `SseMessage.data` is typed with it, so an application that
+    // wants to annotate a payload before publishing needs the name exported.
+    const payload: JsonValue = { build: 412, tags: ['live'], note: undefined };
+
+    expect(JSON.stringify(payload)).toBe('{"build":412,"tags":["live"]}');
   });
 });
