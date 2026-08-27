@@ -7521,7 +7521,7 @@ the framework points a new project.
 
 ---
 
-## Milestone 76: Standard Decorators and the `experimentalDecorators` Deprecation ⬜ PLANNED
+## Milestone 76: Standard Decorators and the `experimentalDecorators` Deprecation ✅ COMPLETE
 
 **Objective:** Decide and execute the framework's answer to Deno deprecating
 `experimentalDecorators`, the compiler option the entire decorator surface is built on.
@@ -7683,4 +7683,4 @@ it as a requirement (`ARCHITECTURE.md` §, `PUBLIC_API.md` ×3, `docs/decorators
 | 73        | ✅     | realtime authentication (PR #197)              |
 | 74        | ✅     | realtime reads + sse contract (PR #196)        |
 | 75        | ⬜     | broker trace propagation                       |
-| 76        | ⬜     | standard decorators / experimentalDecorators   |
+| 76        | ✅     | standard decorators / experimentalDecorators   |

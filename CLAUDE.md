@@ -3495,6 +3495,88 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `publish` with one, because the backplane publisher builds its frame with `JSON.stringify(msg)`
   outside any `try`. Developed in an isolated worktree off `main`, in parallel with M73, which it
   does not depend on) — complete (PR #196)
+- **Milestone 76** (`decorator-plugin` + `openapi-plugin` + `starters/rest-starter` + `cli` +
+  `apps/di-decorators` + docs — TC39 standard decorators, retiring `experimentalDecorators`. Every
+  shipped decorator was the LEGACY form, and Deno deprecates the option the whole surface rests on,
+  warning on every `check` and `lint` run. Three facts decided the shape, each re-established by
+  probe on Deno 2.9.5 rather than taken from the ROADMAP: standard decorators already run with
+  `deno.json` = `{}` and no `compilerOptions` key at all; the framework used none of them; and a
+  **parameter** decorator without the flag is a **parse** error, not a type error — so the option's
+  removal would not degrade `@Body`/`@Query`/`@Param`/`@Header`/`@Cookie`/`@CurrentUser`/`@Ctx`/
+  `createParameterDecorator`, it would make them unparseable. The maintainer chose **full migration
+  with the legacy form deleted**, over a dual surface or a documented pin.
+
+  **Two enabling facts the ROADMAP did not record, both found by probe, and the design turns on
+  them.** `Symbol.metadata` works in Deno 2.9.5: `context.metadata` is live at decoration time and
+  readable off the class BEFORE any instance exists — which matters because a standard method
+  decorator never receives the constructor and `context.addInitializer` runs **per instance**, long
+  after `DecoratorPlugin.register()` has read the store. And member decorators run before the class
+  decorator and share its metadata object, so the class decorator (which DOES get the constructor)
+  can transfer the accumulation into the existing constructor-keyed store — meaning `IMetadataStore`
+  in `common` is satisfied unchanged: **no `common` widening and no new token**. Metadata is also
+  NOT prototype-chained in this implementation (measured), which matches the legacy
+  constructor-keyed `Map`, so inheritance behaviour does not change.
+
+  **Parameter injection is replaced by positional `@Params(...)`**, with the existing names kept and
+  their KIND changed from parameter decorator to source descriptor, so every stale call site is a
+  compile error rather than a silent behaviour change. It is strictly stronger than what it
+  replaces: the declaration is type-checked against the handler's own signature (a mismatched
+  parameter is rejected by name), where the legacy parameter decorators checked nothing at all.
+  `createParameterDecorator` becomes `Custom(name, metadata?)`. Constructor injection collapses onto
+  the class-position `@Inject(...)` list — which already shipped, so §9.2's "working replacement" is
+  code that existed rather than new surface — with `Optional(token)` wrapping an entry. The two
+  reconciliation throws that guarded the competing forms have no reachable input any more and are
+  deleted with the form that caused them, along with the now-readerless `mergeCtorParam` and
+  `ctorInject` store methods (M59's precedent).
+
+  **The rewrite is pinned against a baseline captured from the legacy implementation before it was
+  deleted** — a 3,136-line rewrite whose output another package consumes cannot otherwise tell
+  "correct" from "consistently wrong". Controllers, route order, every non-parameter field, custom
+  decorators and the class-position service record are byte-identical. Two divergences are asserted
+  explicitly rather than papered over: `params` are compared as an index-keyed SET, because legacy
+  stored them descending (parameter decorators evaluate in reverse) while the positional form stores
+  them ascending, and order is not load-bearing — established by reading both consumers, since
+  `resolveParameters` places by `param.index` and `openapi-plugin` reads the Zod `schema.params`,
+  never this array; and a parameter-position `@Inject` list moves from `ctorInject` into
+  `services.inject`, so the test asserts the tokens survived rather than that the location did.
+
+  **The first bridge silently lost a behaviour, and the baseline is what caught it.** Legacy
+  recorded routes for a class carrying member decorators but NO class decorator; deferring writes
+  until a class decorator ran dropped them, and the bridge's own docstring asserted the opposite.
+  The store now drains on read via `Symbol.metadata`, which needs no cooperation from any class
+  decorator, while class decorators still drain eagerly through `context.metadata` — necessary
+  because the runtime installs that object on the constructor only AFTER every decorator has run.
+  The accumulator moved to its own module so the graph stays acyclic (§11.3).
+
+  **A cross-runtime trap that would have shipped green.** `Symbol.metadata` is **`undefined` on
+  Node**, and the generated project's own runner (`tsx`) installs the metadata object under
+  `Symbol.for('Symbol.metadata')` instead — measured by reading the class's own symbol keys. So the
+  `?? Symbol.for(...)` fallback is **load-bearing on Node, not defensive**: collapsing it would
+  leave every Node project unable to find any decorator metadata while the Deno suite stayed green.
+  It is a named seam with both arms tested, and its JSDoc says so. Node also still needs `tsx` for a
+  reason unrelated to the retired flag — V8 has not shipped decorators, so plain `node` and
+  `--experimental-strip-types` answer a STANDARD decorator with
+  `SyntaxError: Invalid or unexpected token` (re-measured on v24) — and four doc sites that
+  attributed it to `experimentalDecorators` are corrected.
+
+  **All eight declaration sites lose the option**, not the four the ROADMAP named: the three package
+  manifests, `apps/di-decorators`, both CLI template stamps, the generated Node `tsconfig.json`, and
+  `test/fixtures/snippets/deno.json` — the last found only because it gated every guide fence.
+  `deno
+  task lint` now runs the whole repo with no deprecation warning. Nothing is added back:
+  declaring ANY compiler option replaces Deno's default set (M63 D3), so a template needing none
+  declares none.
+
+  **Verified past the gates by BOOTING**, per M58's lesson that a test asserting decorator PRESENCE
+  covered a controller that answered 500 on every request for five releases: a scaffolded
+  `class-based` project with a generated module type-checks against the workspace and serves —
+  `/greetings/ada` proves positional `@Params` binding, the injected service proves the
+  class-position `@Inject`, and the generated module answers **201** through `Ctx()`. A mechanical
+  transform had also placed `@Inject` on five classes with no constructor at all, producing a
+  self-injection; all five were found by scanning for the shape rather than by the one failure that
+  surfaced. Also fixed two pre-existing defects found in passing: a garbled doc paragraph at the
+  tsconfig emitter, and a **duplicate `### Changed` heading in the CHANGELOG's `Unreleased`
+  section** — the exact defect the alpha.9 release caught once already) — complete (PR pending)
 - **Next milestone** — **M75** (broker trace propagation).
 
 ## Verification (run before declaring any work done)
