@@ -2289,6 +2289,13 @@ plugin registers an async-local context manager and executes `withSpan` callback
 active. This is what makes spans produced by downstream work, including broker publishing, children
 of the request span; without activation they are unrelated siblings.
 
+Activation is conditional, not guaranteed: it requires real OTel mode, `contextPropagation` left
+enabled, and a context manager that registered successfully. Noop and fallback modes, an explicit
+`contextPropagation: false`, and a failed registration all leave spans flat — recorded, but
+unparented. The outcome is reported through the plugin's logger rather than thrown, so a component
+that needs a specific parent passes `parentContext` explicitly instead of relying on ambient
+activation.
+
 Errors are:
 
 1. **Logged** — Via the logger plugin (if registered).

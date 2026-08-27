@@ -9,6 +9,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { normalizeTransportHeaders } from './header-normalize.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
@@ -417,7 +418,11 @@ export class KafkaBroker implements MessageBrokerAdapter {
           topic,
           messageId: `${msgTyped.partition}:${msgTyped.offset}`,
           timestamp: new Date(parseInt(msgTyped.timestamp, 10)),
-          headers: normalizeKafkaHeaders(msgTyped.headers),
+          // Dropping an undecodable value rather than throwing is load-bearing
+          // here: this runs inside `eachMessage`, where a throw prevents the
+          // offset commit and kafka redelivers the record — so one malformed
+          // header from a foreign producer would become an unbounded loop.
+          headers: normalizeTransportHeaders(msgTyped.headers),
         };
 
         // Handler success triggers auto-commit; failure prevents commit
@@ -508,43 +513,4 @@ export class KafkaBroker implements MessageBrokerAdapter {
       options,
     );
   }
-}
-
-/**
- * Normalizes kafkajs headers to a string record.
- *
- * kafkajs types a header value as `Buffer | string | (Buffer | string)[] |
- * undefined` (`IHeaders`), so every arm has to be handled: decoding
- * unconditionally corrupts a `string` value, and ignoring the array arm drops
- * a repeated header. For a repeated header the FIRST value is taken, matching
- * how `Headers.get` reports one value for a name.
- *
- * A value in none of those shapes is DROPPED rather than decoded. This is not
- * defensive noise: `TextDecoder.decode` throws on anything that is not a
- * BufferSource, and this runs inside `eachMessage`, where a throw prevents the
- * offset commit and the broker redelivers the same record — so one malformed
- * header from a foreign producer would become an unbounded redelivery loop.
- *
- * @param headers - The delivered kafkajs header record, if any
- * @returns The headers as a string record; `{}` when none were carried
- */
-function normalizeKafkaHeaders(
-  headers:
-    | Record<string, Uint8Array | string | readonly (Uint8Array | string)[] | undefined>
-    | undefined,
-): Readonly<Record<string, string>> {
-  const decoder = new TextDecoder();
-  const decode = (value: unknown): string | undefined => {
-    if (typeof value === 'string') return value;
-    if (value instanceof Uint8Array) return decoder.decode(value);
-    return undefined;
-  };
-  return Object.fromEntries(
-    Object.entries(headers ?? {}).flatMap(([key, value]) => {
-      if (value === undefined) return [];
-      const candidate = Array.isArray(value) ? value[0] : value;
-      const text = decode(candidate);
-      return text === undefined ? [] : [[key, text]];
-    }),
-  );
 }

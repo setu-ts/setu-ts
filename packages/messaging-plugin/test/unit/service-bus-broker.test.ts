@@ -811,6 +811,69 @@ describe('loadServiceBusModule (exported)', () => {
   });
 });
 
+describe('adaptServiceBusModule inbound header normalization', () => {
+  it('normalizes non-string applicationProperties before the handler sees them', async () => {
+    // The SDK types applicationProperties `number | boolean | string | Date |
+    // null`, but `MessageMetadata.headers` is a string record. Normalizing at
+    // the transport boundary is what makes that declaration true.
+    const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
+
+    let processMessageFn: (msg: unknown) => Promise<void> = () => Promise.resolve();
+    const mod = {
+      ServiceBusClient: class {
+        createSender = () => ({
+          sendMessages: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        });
+        createReceiver = () => ({
+          subscribe: (opts: { processMessage: (msg: unknown) => Promise<void> }) => {
+            processMessageFn = opts.processMessage;
+            return { close: () => Promise.resolve() };
+          },
+          close: () => Promise.resolve(),
+          completeMessage: () => Promise.resolve(),
+          abandonMessage: () => Promise.resolve(),
+        });
+        close = () => Promise.resolve();
+      },
+      ServiceBusAdministrationClient: class {
+        createSubscription = () => Promise.resolve();
+        deleteSubscription = () => Promise.resolve();
+      },
+    };
+
+    const transport = adaptServiceBusModule(
+      mod as unknown as import('../../src/brokers/service-bus-broker.ts').ServiceBusSdkModule,
+      { connectionString: 'test', adminConnectionString: 'test' },
+    );
+
+    let seen: Readonly<Record<string, string>> | undefined;
+    await transport.open('t', 's', (message) => {
+      seen = message.applicationProperties;
+    });
+    await processMessageFn({
+      body: 'payload',
+      applicationProperties: {
+        traceparent: '00-abc-def-01',
+        attempt: 2,
+        replayed: false,
+        enqueued: new Date(0),
+        absent: null,
+      },
+    });
+
+    expect(seen).toEqual({
+      traceparent: '00-abc-def-01',
+      attempt: '2',
+      replayed: 'false',
+      enqueued: '1970-01-01T00:00:00.000Z',
+    });
+    for (const value of Object.values(seen ?? {})) {
+      expect(typeof value).toBe('string');
+    }
+  });
+});
+
 // adaptServiceBusModule coverage
 describe('adaptServiceBusModule', () => {
   it('creates transport from SDK module', async () => {

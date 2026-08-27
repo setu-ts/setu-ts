@@ -25,6 +25,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
@@ -262,7 +263,8 @@ export function adaptServiceBusModule(
           processMessage: async (rawMessage) => {
             const msg = rawMessage as {
               body?: unknown;
-              applicationProperties?: Readonly<Record<string, string>>;
+              // The SDK types this `number | boolean | string | Date | null`.
+              applicationProperties?: Readonly<Record<string, TransportHeaderValue>>;
             };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
 
@@ -280,7 +282,7 @@ export function adaptServiceBusModule(
               payload: body,
               ack,
               nack,
-              applicationProperties: msg.applicationProperties ?? {},
+              applicationProperties: normalizeTransportHeaders(msg.applicationProperties),
             });
           },
           processError: (args: IServiceBusProcessErrorArgs) =>

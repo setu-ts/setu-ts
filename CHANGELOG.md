@@ -110,6 +110,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`@setu-ts/messaging-plugin`: `MessageMetadata.headers` could carry values that were not
+  strings.** The member is declared `Readonly<Record<string, string>>` and is documented as
+  populated by every first-party broker, but `RabbitMqBroker` and `ServiceBusBroker` reached it by
+  assertion rather than conversion. An AMQP field table legitimately carries numbers, booleans,
+  timestamps, byte arrays and nested tables, and the Service Bus SDK types application properties
+  `number | boolean | string | Date | null`, so a subscriber reading `metadata.headers.x` could get
+  a value of any of those types while the compiler promised a string. Both now normalize at the
+  transport boundary through the same helper Kafka already used: a byte value is decoded as UTF-8, a
+  number or boolean is stringified, a `Date` becomes ISO-8601, the first element of a repeated
+  header is taken, and a value with no faithful string form is dropped rather than rendered as
+  `[object Object]`. Kafka's private copy of that logic was deleted in favour of the shared helper.
+
 - **`@setu-ts/messaging-plugin`: the Kafka producer put the entire message payload into Kafka
   transport headers.** `publish` passed the payload object itself as `headers` whenever it was
   non-null, so every field of every message was duplicated into the record's headers — and a

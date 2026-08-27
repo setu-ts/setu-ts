@@ -70,8 +70,17 @@ logger plugin still boots, with nothing emitted.
 ## Propagation
 
 The request-span middleware reads and writes the W3C `traceparent` header, so traces join across
-services without extra configuration. In real OTel mode, `withSpan` also activates its span with an
-async-local context manager: nested work, including messaging publishes, becomes a child span.
+services without extra configuration.
+
+Span **nesting** is a separate mechanism with its own preconditions. In real OTel mode the plugin
+registers an async-local context manager and `withSpan` runs its callback with the span active, so
+nested work — including messaging publishes — becomes a child span. That applies only when all three
+hold: the plugin is in real OTel mode (not noop or fallback), `contextPropagation` is not `false`,
+and the context manager actually registered. Registration is reported through the logger and never
+throws: if the optional `@opentelemetry/context-async-hooks` package cannot be loaded, or the host
+already owns a manager that refuses replacement, spans are still recorded but arrive as unrelated
+siblings rather than a tree. Pass an explicit `parentContext` where the relationship must hold
+regardless.
 
 ## Multiple backends
 

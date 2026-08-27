@@ -3640,15 +3640,23 @@ Each broker uses the header channel its transport actually provides:
 | --------------- | ----------------------------------------------- | -------------------------------------------------------------- |
 | `memory`        | in-process metadata                             | No wire; headers are handed straight to the subscriber.        |
 | `redis-streams` | extra `XADD` field/value pairs beside `payload` | Any non-`payload` field is read back as a header.              |
-| `rabbitmq`      | AMQP `properties.headers`                       | —                                                              |
+| `rabbitmq`      | AMQP `properties.headers`                       | Field-table values are normalized — see below.                 |
 | `nats`          | `MsgHdrs`                                       | Needs a header factory — see the caveat below.                 |
 | `kafka`         | record `headers`                                | String values; a delivered `Buffer` value is decoded as UTF-8. |
 | `pubsub`        | message `attributes`                            | Pub/Sub attribute values must be strings.                      |
-| `service-bus`   | `applicationProperties`                         | —                                                              |
+| `service-bus`   | `applicationProperties`                         | SDK values are normalized — see below.                         |
 
 `MessageMetadata.headers` is populated by every first-party broker: it carries the headers the
-broker read, and `{}` when the transport carried none. It is absent only for a `'custom'` broker
-that does not supply it. Branch on emptiness rather than on the member's presence.
+broker read, and `{}` when the transport carried none. Three transports can deliver values that are
+not strings — AMQP field tables carry numbers, booleans, timestamps and byte arrays; Service Bus
+types its application properties `number | boolean | string | Date | null`; kafkajs delivers
+`Buffer` and permits arrays — so each is normalized to satisfy the declared
+`Record<string, string>`. A byte value is decoded as UTF-8, a number or boolean is stringified, a
+`Date` becomes ISO-8601, and the first element of a repeated header is taken. A value with no
+faithful string form (a nested table, `null`, `NaN`) is **dropped** rather than rendered as
+`[object Object]`, so a missing key reads as absent rather than as a corrupted value. It is absent
+only for a `'custom'` broker that does not supply it. Branch on emptiness rather than on the
+member's presence.
 
 Two cases drop the header rather than propagating, both by construction:
 
@@ -5217,11 +5225,16 @@ bypass the lazy import entirely.
 
 ### Span nesting and broker propagation
 
-In real OTel mode, `withSpan` activates the span while its callback runs. Nested work therefore
-inherits the active parent. When `MessagingPlugin` finds telemetry, it creates `publish <topic>`
-producer spans and `receive <topic>` consumer spans, writes W3C `traceparent` on the transport, and
-parents delivery from the header. Set `tracing: false` to opt out. All first-party brokers expose
-the read transport headers through `MessageMetadata.headers`, using `{}` when the channel is empty.
+In real OTel mode, `withSpan` activates the span while its callback runs, so nested work inherits
+the active parent. Implicit inheritance holds only when the plugin is in real OTel mode,
+`contextPropagation` is not `false`, and the async-local context manager registered successfully;
+noop mode, fallback mode, `contextPropagation: false`, and a context manager that cannot load or
+register all leave spans flat. A failed registration is logged, never thrown. Where the parent
+relationship must hold regardless of activation, pass `parentContext` explicitly. When
+`MessagingPlugin` finds telemetry, it creates `publish <topic>` producer spans and `receive <topic>`
+consumer spans, writes W3C `traceparent` on the transport, and parents delivery from the header. Set
+`tracing: false` to opt out. All first-party brokers expose the read transport headers through
+`MessageMetadata.headers`, using `{}` when the channel is empty.
 
 ### Auto-instrumentation
 

@@ -9,6 +9,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
@@ -533,7 +534,11 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
               this.#runtime.uuid(),
             timestamp: msgTyped.properties?.timestamp as Date ??
               new Date(this.#runtime.now()),
-            headers: (msgTyped.properties?.headers as Readonly<Record<string, string>>) ?? {},
+            headers: normalizeTransportHeaders(
+              msgTyped.properties?.headers as
+                | Readonly<Record<string, TransportHeaderValue>>
+                | undefined,
+            ),
           };
 
           await handler(deserialized, metadata);
