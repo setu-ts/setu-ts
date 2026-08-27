@@ -2010,10 +2010,11 @@ Omitting an option disables that behaviour (no timer created).
   `ISseService` must supply it.
 - `ISseService.connectionCount: number` — current open connections.
 - `ISseService.channelCount: number` — channels the registry currently holds; the counterpart to
-  `IWebSocketService.roomCount`, reported by the `sse` health indicator as `channels`. It **never
-  decreases**, because nothing reclaims a channel before shutdown, so a steadily climbing value is
-  the operator-visible signal that channel names are being derived from unbounded input. Added in
-  M74; a **required** member, like `peek`.
+  `IWebSocketService.roomCount`, reported by the `sse` health indicator as `channels`. Nothing
+  reclaims a channel, so the value **only rises for the life of a running application** and a
+  steadily climbing one is the operator-visible signal that channel names are being derived from
+  unbounded input. Shutdown is the sole exception: `onClose` discards every channel, so a probe
+  racing teardown reads `0`. Added in M74; a **required** member, like `peek`.
 - `ISseConnection.send(msg)` — enqueue an encoded SSE frame (`id:`, `event:`, `data:` / multi-line
   `data:`, `retry:` + blank-line terminator).
 - `ISseConnection.comment(text)` — enqueue a comment frame (`: text\n\n`).

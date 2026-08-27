@@ -321,9 +321,17 @@ deno task release:verify 0.1.0-alpha.9
 ## 9. Out of scope
 
 - **An enumeration API (`rooms()` / `channels()`).** No reader exists: the health indicators report
-  counts, which `roomCount` and `connectionCount` already serve, and a presence endpoint answers one
-  name at a time. Adding it now would be dead surface. A future milestone that ships a realtime
-  presence endpoint owns it.
+  counts, and a presence endpoint answers one name at a time.
+
+  **Amended during implementation.** This bullet originally justified itself with "which `roomCount`
+  and `connectionCount` already serve"; that did not survive contact. `IWebSocketService` publishes
+  `roomCount` and its indicator reports `rooms`, but the SSE indicator reported `connections` alone
+  and `ISseService` had no channel count at all — so the never-reclaimed growth this milestone
+  documents had no operator-visible signal, and the SSE integration guard had to read the registry
+  through `peek` itself for want of one. A required `ISseService.channelCount`, reported as
+  `channels`, was added at the maintainer's direction. The decision recorded here still stands: no
+  enumeration API shipped, only a count. Adding it now would be dead surface. A future milestone
+  that ships a realtime presence endpoint owns it.
 - **Reclaiming empty SSE channels.** §3.9 — a behaviour change that risks silent partial delivery
   for an application holding a channel reference. A safe design (reference-stable channels, or an
   explicit `release(name)`) is a separate change; the growth is documented rather than half-fixed.

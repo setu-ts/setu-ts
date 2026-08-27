@@ -82,9 +82,11 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
             status: 'up',
             data: {
               connections: sseService.connectionCount,
-              // Never decreases (see ISseService.channelCount): a climbing
-              // count is the operator-visible signal that channel names are
-              // being derived from unbounded input.
+              // Rises for the life of the application (see
+              // ISseService.channelCount) — a climbing count is the
+              // operator-visible signal that channel names are being derived
+              // from unbounded input. Only `onClose` lowers it, by discarding
+              // every channel.
               channels: sseService.channelCount,
             },
           }),

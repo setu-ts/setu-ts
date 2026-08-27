@@ -56,8 +56,9 @@ one that runs when the application stops, so unlike a WebSocket room (which is s
 disconnection) a leaked channel lives for the life of the process.
 
 `channelCount` is the operator-visible side of this, reported by the `sse` health indicator as
-`channels`: because nothing reclaims a channel, the number only rises, so a steadily climbing value
-means names are being derived from unbounded input.
+`channels`: because nothing reclaims a channel, the number only rises for the life of a running
+application, so a steadily climbing value means names are being derived from unbounded input. Only
+shutdown lowers it — `onClose` discards every channel.
 
 Use `peek` wherever the name comes from a request. It returns the channel if one exists and
 `undefined` otherwise, and registers nothing:
