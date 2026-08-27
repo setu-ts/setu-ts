@@ -23,6 +23,30 @@ import type { IRequestContext } from '../http.ts';
 export type SessionData = Record<string, unknown>;
 
 /**
+ * A read-only projection of a session: its identifier and payload, with no
+ * mutation surface.
+ *
+ * Returned by {@linkcode ISessionService.fromHeaders} for a session that can be
+ * opened from a `Headers` object alone — the headers-only read used by non-HTTP
+ * entry points (a WebSocket `onOpen` handler, an auth strategy reading a cookie)
+ * where there is no request context to commit onto. Because it exposes no
+ * `set`/`destroy`/`regenerate`, nothing handed out here can fail silently: a
+ * caller cannot write a value that would never persist.
+ *
+ * `data` is returned verbatim, including any reserved keys the session plugin
+ * stores in the payload (e.g. the tenant binding key), so `fromHeaders(...)` and
+ * {@linkcode ISession.toJSON} agree about the same session.
+ *
+ * @since 0.3.0
+ */
+export type SessionView = {
+  /** The session identifier. */
+  readonly id: string;
+  /** The session payload, exactly as stored. */
+  readonly data: Readonly<SessionData>;
+};
+
+/**
  * Per-request session handle.
  *
  * Obtained from {@linkcode ISessionService.from} (or the plugin's `getSession`
@@ -136,6 +160,25 @@ export interface ISessionService {
    * @throws {Error} If the session middleware did not run for this request
    */
   from(ctx: IRequestContext): ISession;
+  /**
+   * Opens a session from a `Headers` object alone — the headers-only read for
+   * non-HTTP entry points that have no request context to commit onto (a
+   * WebSocket `onOpen` handler, an auth strategy reading a cookie).
+   *
+   * This is READ-ONLY: it never commits, never advances the session's `seen`
+   * stamp, and never writes to the store or the cookie. It runs the same
+   * envelope-open, snapshot-parse, and store-read path as the load behind
+   * {@linkcode ISessionService.from}, so it inherits real revocation on the
+   * store strategy.
+   *
+   * @param headers - The request headers to read the session cookie from
+   * @returns A read-only {@linkcode SessionView}, or `null` when there is no
+   *   usable session — the cookie is absent, the envelope cannot be opened, the
+   *   snapshot cannot be parsed, the absolute expiry or idle timeout has passed,
+   *   or the stored entry is gone (revoked)
+   * @since 0.3.0
+   */
+  fromHeaders(headers: Headers): Promise<SessionView | null>;
 }
 
 /**

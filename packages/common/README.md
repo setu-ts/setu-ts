@@ -354,6 +354,7 @@ package fits the plugin architecture.
 | `ServiceOutcome`             | type      |
 | `ServiceScope`               | type      |
 | `SessionData`                | type      |
+| `SessionView`                | type      |
 | `SpanAttributeValue`         | type      |
 | `SpanKind`                   | type      |
 | `SpanStatus`                 | type      |

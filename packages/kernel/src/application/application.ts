@@ -768,7 +768,11 @@ class Application implements IKernelApplication {
     // between "routing failed" and "the handler threw".
     let decision: WebSocketUpgradeDecision | null;
     try {
-      decision = await wsService.routeUpgrade(raw);
+      // The pipeline has already run (line 643, above), so `ctx.request.user`
+      // carries whatever the authentication band produced. The parameter is
+      // optional on the contract (M73 §3.7): a service written before the
+      // widening simply never receives it.
+      decision = await wsService.routeUpgrade(raw, ctx.request.user);
     } catch (cause) {
       // Reported, not swallowed. The pre-M70a backstop in the adapter's
       // `UpgradeRouterStore` discarded the cause because the adapter holds no

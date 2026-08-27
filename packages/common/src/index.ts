@@ -329,7 +329,13 @@ export type {
 export type { ISsrService } from './services/ssr.ts';
 
 // Session contracts
-export type { ISession, ISessionService, ISessionStore, SessionData } from './services/session.ts';
+export type {
+  ISession,
+  ISessionService,
+  ISessionStore,
+  SessionData,
+  SessionView,
+} from './services/session.ts';
 
 // Service discovery contracts
 export type {

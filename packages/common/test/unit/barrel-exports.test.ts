@@ -11,7 +11,12 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as common from '../../src/index.ts';
 import type { HealthCheckResult, IHealthIndicator, IServiceRegistry } from '../../src/index.ts';
-import type { JsonValue, RegistryFactory, RouteValidationMetadata } from '../../src/index.ts';
+import type {
+  JsonValue,
+  RegistryFactory,
+  RouteValidationMetadata,
+  SessionView,
+} from '../../src/index.ts';
 
 describe('@setu-ts/common barrel — registry factory arm', () => {
   it('exports resolveRegistryEntry as a function', () => {
@@ -63,5 +68,27 @@ describe('@setu-ts/common barrel — registry factory arm', () => {
     const payload: JsonValue = { build: 412, tags: ['live'], note: undefined };
 
     expect(JSON.stringify(payload)).toBe('{"build":412,"tags":["live"]}');
+  });
+});
+
+/**
+ * Strict identity check: `true` only when `A` and `B` are the same type
+ * (mutually assignable in the identity sense), so the pinned shape below fails
+ * on any added, removed, or re-typed member.
+ */
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
+  : false;
+
+// Compile-time: `SessionView` resolves from the barrel and its shape is pinned
+// (M73). Dropping the re-export or widening the projection stops this file
+// compiling — a type-only export is invisible to every runtime assertion.
+const sessionViewShapePinned: Equals<
+  SessionView,
+  { readonly id: string; readonly data: Readonly<Record<string, unknown>> }
+> = true;
+
+describe('@setu-ts/common barrel — SessionView (M73)', () => {
+  it('exports the SessionView type with the committed shape (declared against the barrel)', () => {
+    expect(sessionViewShapePinned).toBe(true);
   });
 });
