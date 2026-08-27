@@ -147,9 +147,25 @@ export class SseService implements IService {
     return this.#registry.get(name);
   }
 
+  /** Return the named channel if it already exists, without creating it. */
+  peek(name: string): SseChannel | undefined {
+    return this.#registry.peek(name);
+  }
+
   /** Current number of open connections. */
   get connectionCount(): number {
     return this.#connections.size;
+  }
+
+  /**
+   * Number of channels the registry currently holds.
+   *
+   * Rises for the life of a running application, since nothing reclaims a
+   * channel; {@linkcode SseService.closeAll} discards them all at shutdown,
+   * which is the only thing that lowers it.
+   */
+  get channelCount(): number {
+    return this.#registry.size;
   }
 
   /**

@@ -135,6 +135,22 @@ export class ChannelRegistry {
   }
 
   /**
+   * Returns the named channel if one already exists, without creating it.
+   *
+   * The non-allocating counterpart to {@linkcode ChannelRegistry.get}. It
+   * matters more here than in the WebSocket plugin's room registry: this map
+   * has no reclamation path at all, so a channel `get` creates lives until
+   * {@linkcode ChannelRegistry.clear} runs at shutdown.
+   *
+   * @param name - Channel name
+   * @returns The channel, or `undefined` when no channel of that name exists
+   * @since 0.4.0
+   */
+  peek(name: string): SseChannelImpl | undefined {
+    return this.#channels.get(name);
+  }
+
+  /**
    * Delivers a message that arrived from another replica to this replica's
    * local members.
    *

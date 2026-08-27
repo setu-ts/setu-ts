@@ -389,10 +389,32 @@ export interface IWebSocketService {
   /**
    * Returns the named room, creating it on first use.
    *
+   * Creating is the point: the first call for a name registers a room. Use
+   * {@linkcode IWebSocketService.peek} to read a caller-supplied name without
+   * registering anything.
+   *
    * @param name - Room name
    * @returns The room
    */
   room(name: string): WebSocketRoom;
+  /**
+   * Returns the named room if one already exists, without creating it.
+   *
+   * The non-allocating counterpart to {@linkcode IWebSocketService.room}. A
+   * presence or dashboard endpoint that reports `size` for a name taken from a
+   * request must use this: `room(name)` registers one room per distinct name
+   * polled, and a room nobody has joined is reclaimed only when some other
+   * connection disconnects — so an idle application never reclaims them.
+   *
+   * @param name - Room name
+   * @returns The room, or `undefined` when no room of that name exists
+   * @example
+   * ```typescript
+   * const present = ws.peek(`board:${boardId}`)?.size ?? 0;
+   * ```
+   * @since 0.4.0
+   */
+  peek(name: string): WebSocketRoom | undefined;
   /**
    * Consults the internal upgrade router for an inbound request. Used by the
    * kernel terminal handler to decide whether to upgrade after the middleware

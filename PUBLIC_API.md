@@ -2013,9 +2013,20 @@ Omitting an option disables that behaviour (no timer created).
 - `ISseService.open(ctx): ISseConnection` — opens a new SSE connection; sets headers, returns a
   connection with `result` (`HandlerResult`) the handler must return.
 - `ISseService.channel(name): SseChannel` — get-or-create a named broadcast channel. First call
-  creates; reading `size` for a caller-supplied name is therefore a write, and a never-published
-  channel is reclaimed only when another connection in this process closes.
+  creates, so reading `size` for a caller-supplied name is a write, and **nothing reclaims a channel
+  before shutdown** — the registry has no removal path outside the one that runs when the
+  application stops.
+- `ISseService.peek(name): SseChannel | undefined` — the non-allocating counterpart. Returns the
+  channel when one exists and `undefined` otherwise, registering nothing. Use it wherever the name
+  comes from a request. Added in M74; a **required** member, so a replacement implementation of
+  `ISseService` must supply it.
 - `ISseService.connectionCount: number` — current open connections.
+- `ISseService.channelCount: number` — channels the registry currently holds; the counterpart to
+  `IWebSocketService.roomCount`, reported by the `sse` health indicator as `channels`. Nothing
+  reclaims a channel, so the value **only rises for the life of a running application** and a
+  steadily climbing one is the operator-visible signal that channel names are being derived from
+  unbounded input. Shutdown is the sole exception: `onClose` discards every channel, so a probe
+  racing teardown reads `0`. Added in M74; a **required** member, like `peek`.
 - `ISseConnection.send(msg)` — enqueue an encoded SSE frame (`id:`, `event:`, `data:` / multi-line
   `data:`, `retry:` + blank-line terminator).
 - `ISseConnection.comment(text)` — enqueue a comment frame (`: text\n\n`).
@@ -2043,14 +2054,23 @@ Omitting an option disables that behaviour (no timer created).
   `publish` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
   provider the behavior is unchanged. `SseChannel.size` keeps reporting **local** membership either
   way.
-- **`SseMessage.data` accepts any JSON-serializable value** —
-  `string | number | boolean | null |
-  readonly unknown[] | Record<string, unknown>`. The encoder
-  has always written a string literally and `JSON.stringify`-ed anything else; the TYPE was narrower
-  than that behaviour, so a named interface failed to assign while an inline literal passed and
-  every real application cast. Widening a parameter position is source-compatible for callers.
-  `SseChannelImpl.publishLocal` is the local-only delivery path the backplane subscriber uses;
-  applications call `publish`.
+- **`SseMessage.data` is `JsonValue`** — a recursive JSON-safe type exported from `@setu-ts/common`.
+  Until M74 the union was
+  `string | number | boolean | null | readonly unknown[] |
+  Record<string, unknown>`, whose last
+  two arms admitted values `JSON.stringify` cannot represent, so this section's own claim that the
+  member "accepts any JSON-serializable value" was an aspiration rather than a guarantee. It is now
+  enforced: a `bigint` (which throws) and a function or symbol value (which is silently dropped) are
+  compile errors. A property written `T | undefined` still assigns, because `JSON.stringify` drops
+  the key. Three limits remain and no type can close them: a **circular structure** throws at
+  runtime; `NaN`, `Infinity` and `-Infinity` are members of `number` that JSON cannot represent, so
+  `JSON.stringify` normalizes each to `null` and the value reaches the wire silently changed rather
+  than refused (send it as a string when the distinction matters); and a named `interface` does not
+  assign — TypeScript grants implicit index signatures only to object-literal types, which was true
+  before the M70n widening and after it, so declare the payload with a `type` alias or extend
+  `Record<string, JsonValue | undefined>`. What M70n's widening actually bought was arrays,
+  primitives and `null`. `SseChannelImpl.publishLocal` is the local-only delivery path the backplane
+  subscriber uses; applications call `publish`.
 - Cloudflare Workers and other edge platforms bound long-lived connections by their own limits — the
   plugin opens the stream the same way everywhere, but the platform may truncate the connection.
 - The `inject()` method cannot read a streaming body and throws when it meets one; SSE integration
@@ -2189,11 +2209,13 @@ ws.route('/ws/chat', {
   `fetch` path.
 - **A custom adapter without `setUpgradeRouter` degrades gracefully**: the service still registers,
   the health indicator reports `available: false`, and `route()` throws `WebSocketUnavailableError`.
-- **`room(name)` is get-or-create, so reading presence is a write.** There is no non-creating
-  lookup: `room(callerSupplied).size` creates a room per distinct name polled, and the registry
-  reclaims never-joined rooms only on the next disconnection somewhere in this process — an idle
-  application never does. Deliberate in source (`RoomRegistry`'s own JSDoc records the tradeoff);
-  keep polled names to a fixed set.
+- **`room(name)` is get-or-create; `peek(name)` is the read that is not.**
+  `room(callerSupplied).size` creates a room per distinct name polled, and the registry reclaims
+  never-joined rooms only on the next disconnection somewhere in this process — an idle application
+  never does. `IWebSocketService.peek(name): WebSocketRoom | undefined` returns the room when one
+  exists and `undefined` otherwise, registering nothing, and is what a presence or dashboard
+  endpoint reading a request-supplied name should call. Added in M74; a **required** member, so a
+  replacement implementation of `IWebSocketService` must supply it.
 - **Rooms are in-process until a backplane is registered.** Register
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `broadcast` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
@@ -7609,7 +7631,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Group               | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`, `JsonValue` — the recursive JSON-safe value type (M74); `SseMessage.data` is typed with it, and its object arm admits `undefined` because `JSON.stringify` drops such a key                                                                                                                                                                                                                                    |
 | Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                      |
