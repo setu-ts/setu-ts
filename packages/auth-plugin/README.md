@@ -101,11 +101,22 @@ app.router.post('/auth/login', async (ctx) => {
   calls `IJwtService.verify`, and maps the claims to an `IPrincipal`.
 - **ApiKeyStrategy** — passive API-key authentication. Reads the key from a configurable header
   (default `X-API-Key`) and calls the app-supplied `apiKey.validate(key)` callback.
+- **SessionStrategy** — passive cookie-session authentication. Reads the session cookie through
+  `ISessionService.fromHeaders` and maps the opened `SessionView` to an `IPrincipal` through the
+  required `session.toPrincipal` callback; it returns `null` when no session opened or the session
+  carries no identity, so the chain continues. Configured by the `session` option and never
+  barrel-exported, like the other two; it requires `SessionPlugin` to be registered, or `register()`
+  throws naming both plugins.
 - **LocalStrategy** — explicit credentials verification. Not passive; reached only via
   `IAuthService.verifyCredentials` from a login handler.
 
-Passive strategies run in the configured order during `IAuthService.authenticate`; the first
-non-null principal wins, and `null` is returned when none match.
+Passive strategies run in a fixed order during `IAuthService.authenticate` — **jwt → api-key →
+session → caller-supplied, in declaration order** — and the first non-null principal wins, with
+`null` returned when none match. A request carrying both a bearer header and a session cookie is
+therefore authenticated by the JWT, because the explicit credential runs first. Caller-supplied
+strategies come from the `strategies` option and run last; a `name` colliding with any other
+strategy in the assembled chain makes `register()` throw, because a strategy's `name` is its only
+identity.
 
 ## RBAC
 
@@ -179,20 +190,22 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 
 ## Options
 
-| Option            | Type                                                  | Default           | Description                                   |
-| ----------------- | ----------------------------------------------------- | ----------------- | --------------------------------------------- |
-| `jwt.secret`      | `string \| Uint8Array`                                | -                 | HS256 key. Required for HS256.                |
-| `jwt.privateKey`  | `string` (PEM)                                        | -                 | RS256 private key. Required for RS256.        |
-| `jwt.publicKey`   | `string` (PEM)                                        | -                 | RS256 public key. Required for RS256.         |
-| `jwt.algorithm`   | `'HS256' \| 'RS256'`                                  | inferred          | Inferred from which key material is provided. |
-| `jwt.audience`    | `string`                                              | -                 | Expected `aud`; enforced on verify.           |
-| `jwt.issuer`      | `string`                                              | -                 | Expected `iss`; enforced on verify.           |
-| `jwt.header`      | `string`                                              | `'authorization'` | Header name for bearer extraction.            |
-| `jwt.scheme`      | `string`                                              | `'bearer'`        | Token scheme prefix.                          |
-| `apiKey.header`   | `string`                                              | `'X-API-Key'`     | Header holding the API key.                   |
-| `apiKey.validate` | `(key) => Promise<IPrincipal \| null>`                | -                 | App-supplied API-key lookup.                  |
-| `local.verify`    | `(identifier, secret) => Promise<IPrincipal \| null>` | -                 | App-supplied credential check.                |
-| `rbac.roles`      | `Record<string, RoleDefinition>`                      | -                 | Role → permissions + `inherits` hierarchy.    |
+| Option                | Type                                                  | Default           | Description                                                                                     |
+| --------------------- | ----------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
+| `jwt.secret`          | `string \| Uint8Array`                                | -                 | HS256 key. Required for HS256.                                                                  |
+| `jwt.privateKey`      | `string` (PEM)                                        | -                 | RS256 private key. Required for RS256.                                                          |
+| `jwt.publicKey`       | `string` (PEM)                                        | -                 | RS256 public key. Required for RS256.                                                           |
+| `jwt.algorithm`       | `'HS256' \| 'RS256'`                                  | inferred          | Inferred from which key material is provided.                                                   |
+| `jwt.audience`        | `string`                                              | -                 | Expected `aud`; enforced on verify.                                                             |
+| `jwt.issuer`          | `string`                                              | -                 | Expected `iss`; enforced on verify.                                                             |
+| `jwt.header`          | `string`                                              | `'authorization'` | Header name for bearer extraction.                                                              |
+| `jwt.scheme`          | `string`                                              | `'bearer'`        | Token scheme prefix.                                                                            |
+| `apiKey.header`       | `string`                                              | `'X-API-Key'`     | Header holding the API key.                                                                     |
+| `apiKey.validate`     | `(key) => Promise<IPrincipal \| null>`                | -                 | App-supplied API-key lookup.                                                                    |
+| `local.verify`        | `(identifier, secret) => Promise<IPrincipal \| null>` | -                 | App-supplied credential check.                                                                  |
+| `rbac.roles`          | `Record<string, RoleDefinition>`                      | -                 | Role → permissions + `inherits` hierarchy.                                                      |
+| `session.toPrincipal` | `(view: SessionView) => IPrincipal \| null`           | -                 | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
+| `strategies`          | `readonly IAuthStrategy[]`                            | -                 | Caller-supplied strategies, appended after every built-in in declaration order.                 |
 
 Supplying neither `jwt.secret` (HS256) nor `jwt.privateKey` + `jwt.publicKey` (RS256) throws at
 registration.

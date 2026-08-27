@@ -6,6 +6,57 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`@setu-ts/common`: a headers-only session read and the authenticated-principal bridge for
+  WebSocket upgrades.** `ISessionService.fromHeaders(headers)` opens a session from a `Headers`
+  object alone — the read for non-HTTP entry points (a WebSocket `onOpen` handler, an auth strategy
+  reading a cookie) that have no request context to commit onto — and returns a new read-only
+  `SessionView` (`{ id, data }`) or `null`. It runs the same envelope-open, snapshot-parse, and
+  store-read path as the load behind `from(ctx)`, so it inherits real revocation on the store
+  strategy, but it never commits and never writes. `WebSocketConnectionContext` gains an optional
+  `user?: IPrincipal` — the principal that authenticated the upgrade, omitted when it was anonymous
+  — and `IWebSocketService.routeUpgrade` gains an optional second parameter
+  (`principal?: IPrincipal`) that carries it. Both additions are optional members, so existing
+  implementors and consumers compile unchanged.
+- **`@setu-ts/auth-plugin`: a cookie-backed `SessionStrategy` and a caller-supplied strategy
+  hatch.** `AuthPluginOptions.session` takes a `SessionAuthOptions` whose single required member,
+  `toPrincipal(view)`, maps the opened `SessionView` to the principal it carries (returning `null`
+  continues the chain). When present, the plugin appends an internal `SessionStrategy` — the
+  strategy that reads the session cookie through `ISessionService.fromHeaders` — after the API-key
+  strategy, and requires the `session` capability (`SessionPlugin`) to be registered, or
+  `register()` throws naming both plugins. `AuthPluginOptions.strategies` accepts caller-supplied
+  `IAuthStrategy`s, appended after every built-in in declaration order; a `name` colliding with any
+  other strategy in the assembled chain throws at `register()`. The assembled order is fixed — **jwt
+  → api-key → session → caller-supplied** — and the first non-null principal wins. This closes X3-5:
+  a browser can now authenticate over `EventSource` and a WebSocket upgrade, the two transports that
+  can send only a cookie.
+- **`@setu-ts/session-plugin`, `@setu-ts/kernel`, and `@setu-ts/websocket-plugin`: the bridge wired
+  end to end.** `SessionService` implements `fromHeaders`; the kernel's terminal handler passes
+  `ctx.request.user` to `routeUpgrade`; and `WebSocketService` threads that principal into
+  `buildContext`, so `onOpen`'s `context.user` is the authenticated peer. No adapter change is
+  needed: since M70a `routeUpgrade` is the only live upgrade-routing path on every runtime.
+
+### Changed
+
+- **`@setu-ts/common`: `ISessionService.fromHeaders` is a REQUIRED member.** Callers are unaffected
+  — the addition is source-compatible for every consumer. But an application that implements
+  `ISessionService` itself (not the framework's `SessionService`) now fails to type-check until it
+  adds `fromHeaders(headers: Headers): Promise<SessionView | null>`. It is required rather than
+  optional because a strategy in another package must call it without a capability-shaped guard, and
+  the framework's `SessionService` is the only in-repo implementor (the M51b
+  `IGraphqlService.subscribe` precedent). Migration: add the member to your implementation; the
+  contract is read-only — it must open the session from the supplied headers, return `null` for
+  every condition the load path treats as "no usable session" (absent cookie, unopenable envelope,
+  unparseable snapshot, absolute expiry or idle timeout passed, or a gone store entry), and never
+  commit, advance the `seen` stamp, or write.
+- **`@setu-ts/openapi-plugin`: an unrepresentable schema node is now REPORTED instead of silently
+  emitting `{}`.** A type zod cannot represent in JSON Schema (`z.date()`, `z.bigint()`, …) still
+  degrades to an empty schema — never a throw — but the operation owning it now carries a
+  machine-readable vendor extension naming the route:
+  `"x-setu-unrepresentable": [{ "at": "<operationId>", "reason": "…" }]`. The extension is absent
+  when every schema is representable, so valid documents are unchanged.
+
 ### Fixed
 
 - **Three committed docs still said WebSocket upgrades and gRPC requests bypass the middleware
@@ -32,15 +83,6 @@ All notable changes to this project are documented here. The format follows
   3.1), with dedup, `$ref`/`components` extraction and recursive-schema hoisting working on both
   majors. Both zod v3 and v4 are supported; the plugin imports neither — detection is by duck-typing
   `toJSONSchema`. Zod v3 output is byte-identical.
-
-### Changed
-
-- **`@setu-ts/openapi-plugin`: an unrepresentable schema node is now REPORTED instead of silently
-  emitting `{}`.** A type zod cannot represent in JSON Schema (`z.date()`, `z.bigint()`, …) still
-  degrades to an empty schema — never a throw — but the operation owning it now carries a
-  machine-readable vendor extension naming the route:
-  `"x-setu-unrepresentable": [{ "at": "<operationId>", "reason": "…" }]`. The extension is absent
-  when every schema is representable, so valid documents are unchanged.
 
 ## [0.1.0-alpha.9] — 2026-08-26
 
