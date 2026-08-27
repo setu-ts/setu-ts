@@ -73,7 +73,7 @@ describe('WebSocketConnectionContext.user is optional (M73)', () => {
 
 describe('IWebSocketService.routeUpgrade widening (M73)', () => {
   it('a single-parameter implementation is assignable to the widened signature', async () => {
-    const decision = await singleParamRouteUpgrade(new Request('ws://example.com/ws/chat'));
+    const decision = await singleParamRouteUpgrade(new Request('http://example.com/ws/chat'));
 
     expect(decision).toBeNull();
   });

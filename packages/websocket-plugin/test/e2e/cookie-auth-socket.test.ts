@@ -306,7 +306,11 @@ describe('cookie-authenticated WebSocket (e2e, real sockets)', () => {
     expect(login.status).toBe(200);
     const cookies = login.headers.getSetCookie();
     expect(cookies.length).toBe(1);
-    const cookie = cookies[0].split(';')[0];
+    const setCookie = cookies[0];
+    if (setCookie === undefined) {
+      throw new Error('expected login to set a session cookie');
+    }
+    const cookie = setCookie.split(';')[0];
     expect(cookie.startsWith(`${COOKIE_NAME}=`)).toBe(true);
 
     // Step 2: the RFC 6455 handshake itself, carrying the cookie. Deno's
@@ -318,7 +322,11 @@ describe('cookie-authenticated WebSocket (e2e, real sockets)', () => {
       protectedOpenResolver = resolve;
     });
 
-    const handshake = await rawUpgrade('127.0.0.1', port, '/protected', cookie);
+    const handshake = await withTimeout(
+      rawUpgrade('127.0.0.1', port, '/protected', cookie),
+      TIMEOUT_MS,
+      'the raw RFC 6455 handshake',
+    );
     try {
       // A genuine 101 with a correct accept value: the handshake completed.
       // The guard passed, which is only possible if the cookie carried through

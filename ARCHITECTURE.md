@@ -2766,7 +2766,7 @@ graph TB
 > pipeline has run and before route matching, then records an upgrade intent for the adapter to act
 > on. The pipeline is therefore **not** bypassed for upgrade requests — that was the pre-M70a
 > behaviour, and it is what let an unauthenticated socket through a guarded endpoint.
-
+>
 > The **gRPC Plugin** shipped in Milestone 49 and is likewise no longer a future extension point. It
 > depends on `common` alone — it needed the `http-adapter` capability when it installed a handler
 > there, and since M70a it installs nothing and resolves no adapter. A gRPC exchange cannot travel

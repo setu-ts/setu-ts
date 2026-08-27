@@ -167,11 +167,10 @@ origin plus `Access-Control-Allow-Credentials: true`, which
 the user visits read credentialed responses.
 
 The session cookie defaults to `sameSite: 'lax'`, and an `EventSource` request is not a top-level
-navigation, so a `Lax` cookie is not sent on a cross-origin `EventSource` — cookie-authenticated
-streams are same-origin by default. Setting `cookie.sameSite: 'none'` on `SessionPlugin` removes
-that protection and exposes the stream to cross-site reads; if you must run `none`, the
-`credentials` CORS rule above is the minimum, and checking `Origin` in the authentication band is
-the stronger form.
+navigation, so a `Lax` cookie is not sent on a cross-site `EventSource` request. Setting
+`cookie.sameSite: 'none'` on `SessionPlugin` removes that protection and exposes the stream to
+cross-site reads; if you must run `none`, the `credentials` CORS rule above is the minimum, and
+checking `Origin` in the authentication band is the stronger form.
 
 ## Exports
 
