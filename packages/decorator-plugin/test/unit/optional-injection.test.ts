@@ -1,98 +1,61 @@
-/**
- * Unit tests for the `@Optional` constructor-parameter decorator and the
- * metadata it writes.
- *
- * The resolution behaviour it drives lives in `DecoratorPlugin` and is covered
- * in `test/integration/di-interop.test.ts` against the REAL container and the
- * REAL service registry — the recording fake in `decorator-plugin.test.ts`
- * builds every provider with `new useClass()` and so cannot honor a
- * `useFactory`, which is the form an `@Optional` class registers.
- *
- * @module
- */
-import { describe, it } from '@std/testing/bdd';
+import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { Inject, Injectable, Optional } from '../../src/index.ts';
+import { Inject, Injectable, Optional } from '../../src/decorators/injection.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 
-describe('@Optional decorator', () => {
-  it('records the decorated constructor argument indices', () => {
+describe('Optional constructor dependencies', () => {
+  beforeEach(() => {
     metadataStore.clear();
-
-    @Injectable()
-    class Target {
-      constructor(
-        @Inject('required') readonly a: object,
-        @Optional() @Inject('maybe') readonly b?: object,
-      ) {}
-    }
-
-    expect([...metadataStore.ctorOptional(Target)]).toEqual([1]);
-    expect(metadataStore.ctorInject(Target)).toEqual(['required', 'maybe']);
   });
 
-  it('is order-independent with @Inject on the same parameter', () => {
-    metadataStore.clear();
-
+  it('records the marked argument indices', () => {
     @Injectable()
-    class InjectFirst {
-      constructor(@Inject('maybe') @Optional() readonly a?: object) {}
+    @Inject('required', Optional('maybe'))
+    class Target {
+      constructor(readonly required: unknown, readonly maybe?: unknown) {}
     }
-
-    @Injectable()
-    class OptionalFirst {
-      constructor(@Optional() @Inject('maybe') readonly a?: object) {}
-    }
-
-    expect([...metadataStore.ctorOptional(InjectFirst)]).toEqual([0]);
-    expect([...metadataStore.ctorOptional(OptionalFirst)]).toEqual([0]);
+    expect([...metadataStore.ctorOptional(Target)]).toEqual([1]);
+    expect(metadataStore.getService(Target)?.inject).toEqual(['required', 'maybe']);
   });
 
   it('records several optional arguments independently', () => {
-    metadataStore.clear();
-
     @Injectable()
-    class Target {
-      constructor(
-        @Optional() @Inject('a') readonly a?: object,
-        @Inject('b') readonly b?: object,
-        @Optional() @Inject('c') readonly c?: object,
-      ) {}
+    @Inject(Optional('a'), 'b', Optional('c'))
+    class Several {
+      constructor(readonly a?: unknown, readonly b?: unknown, readonly c?: unknown) {}
     }
-
-    expect([...metadataStore.ctorOptional(Target)].sort()).toEqual([0, 2]);
+    expect([...metadataStore.ctorOptional(Several)].sort()).toEqual([0, 2]);
   });
 
   it('reports an empty set for a class that marked nothing optional', () => {
-    metadataStore.clear();
+    @Injectable()
+    @Inject('a')
+    class None {
+      constructor(readonly a: unknown) {}
+    }
+    expect([...metadataStore.ctorOptional(None)]).toEqual([]);
+  });
 
-    class Plain {}
-
-    expect(metadataStore.ctorOptional(Plain).size).toBe(0);
+  it('reports an empty set for a class with no injection metadata at all', () => {
+    class Bare {}
+    expect([...metadataStore.ctorOptional(Bare)]).toEqual([]);
   });
 
   it('clears recorded optional indices with the rest of the store', () => {
-    metadataStore.clear();
-
     @Injectable()
+    @Inject(Optional('maybe'))
     class Target {
-      constructor(@Optional() @Inject('maybe') readonly a?: object) {}
+      constructor(readonly maybe?: unknown) {}
     }
-
-    expect(metadataStore.ctorOptional(Target).size).toBe(1);
+    expect([...metadataStore.ctorOptional(Target)]).toEqual([0]);
     metadataStore.clear();
-    expect(metadataStore.ctorOptional(Target).size).toBe(0);
+    expect([...metadataStore.ctorOptional(Target)]).toEqual([]);
   });
 
-  it('throws when applied to a method parameter', () => {
-    metadataStore.clear();
-
-    expect(() => {
-      class Target {
-        handle(@Optional() _value: string): void {}
-      }
-      return Target;
-    }).toThrow(/only valid on a constructor parameter/);
+  it('Optional(token) is a plain marker, not a decorator', () => {
+    // It is used INSIDE @Inject, in the position of the argument it describes,
+    // because the TC39 proposal has no parameter position to apply it to.
+    expect(Optional('cache')).toEqual({ token: 'cache', optional: true });
   });
 });

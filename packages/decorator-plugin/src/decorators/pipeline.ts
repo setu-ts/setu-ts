@@ -11,10 +11,10 @@
  *
  * @module
  */
-import type { Constructor } from '@setu-ts/common';
 
-import { metadataStore } from '../metadata/metadata-store.ts';
-import { normalizeMiddleware, protoToCtor } from '../internal.ts';
+import { normalizeMiddleware } from '../internal.ts';
+import { classOrMethodDecorator } from '../metadata/context-bridge.ts';
+import type { SetuClassOrMethodDecorator } from '../metadata/context-bridge.ts';
 import type { MiddlewareLike } from '../internal.ts';
 
 export type { MiddlewareLike } from '../internal.ts';
@@ -27,17 +27,20 @@ export type { MiddlewareLike } from '../internal.ts';
  * @returns A class or method decorator
  * @since 0.1.0
  */
-export function UseGuards(...middlewares: MiddlewareLike[]): MethodDecorator & ClassDecorator {
+export function UseGuards(
+  ...middlewares: MiddlewareLike[]
+): SetuClassOrMethodDecorator {
   const normalized = middlewares.map(normalizeMiddleware);
-  return (target: object, propertyKey?: string | symbol): void => {
-    if (propertyKey === undefined) {
-      metadataStore.mergeController(target as unknown as Constructor, { guards: normalized });
-    } else {
-      metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+  return classOrMethodDecorator(
+    (store, target) => {
+      store.mergeController(target, { guards: normalized });
+    },
+    (store, target, handler) => {
+      store.mutateMethod(target, handler, (meta) => {
         meta.guards.push(...normalized);
       });
-    }
-  };
+    },
+  );
 }
 
 /**
@@ -50,17 +53,18 @@ export function UseGuards(...middlewares: MiddlewareLike[]): MethodDecorator & C
  */
 export function UseInterceptors(
   ...middlewares: MiddlewareLike[]
-): MethodDecorator & ClassDecorator {
+): SetuClassOrMethodDecorator {
   const normalized = middlewares.map(normalizeMiddleware);
-  return (target: object, propertyKey?: string | symbol): void => {
-    if (propertyKey === undefined) {
-      metadataStore.mergeController(target as unknown as Constructor, { interceptors: normalized });
-    } else {
-      metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+  return classOrMethodDecorator(
+    (store, target) => {
+      store.mergeController(target, { interceptors: normalized });
+    },
+    (store, target, handler) => {
+      store.mutateMethod(target, handler, (meta) => {
         meta.interceptors.push(...normalized);
       });
-    }
-  };
+    },
+  );
 }
 
 /**
@@ -71,15 +75,18 @@ export function UseInterceptors(
  * @returns A class or method decorator
  * @since 0.1.0
  */
-export function UseFilters(...middlewares: MiddlewareLike[]): MethodDecorator & ClassDecorator {
+export function UseFilters(
+  ...middlewares: MiddlewareLike[]
+): SetuClassOrMethodDecorator {
   const normalized = middlewares.map(normalizeMiddleware);
-  return (target: object, propertyKey?: string | symbol): void => {
-    if (propertyKey === undefined) {
-      metadataStore.mergeController(target as unknown as Constructor, { filters: normalized });
-    } else {
-      metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+  return classOrMethodDecorator(
+    (store, target) => {
+      store.mergeController(target, { filters: normalized });
+    },
+    (store, target, handler) => {
+      store.mutateMethod(target, handler, (meta) => {
         meta.filters.push(...normalized);
       });
-    }
-  };
+    },
+  );
 }

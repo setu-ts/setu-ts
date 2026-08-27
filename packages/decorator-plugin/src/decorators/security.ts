@@ -9,10 +9,11 @@
  *
  * @module
  */
-import type { Constructor } from '@setu-ts/common';
-
-import { metadataStore } from '../metadata/metadata-store.ts';
-import { protoToCtor } from '../internal.ts';
+import { classOrMethodDecorator, methodDecorator } from '../metadata/context-bridge.ts';
+import type {
+  SetuClassOrMethodDecorator,
+  SetuMethodDecorator,
+} from '../metadata/context-bridge.ts';
 
 /** Metadata key carrying a built-in parameter's kind marker. */
 export const PARAMETER_KIND_KEY = 'setu-ts.parameter.kind';
@@ -62,16 +63,17 @@ export function isContextParameter(metadata?: Readonly<Record<string, unknown>>)
  * @returns A class or method decorator
  * @since 0.1.0
  */
-export function Roles(...roles: string[]): MethodDecorator & ClassDecorator {
-  return (target: object, propertyKey?: string | symbol): void => {
-    if (propertyKey === undefined) {
-      metadataStore.mergeController(target as unknown as Constructor, { roles });
-    } else {
-      metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+export function Roles(...roles: string[]): SetuClassOrMethodDecorator {
+  return classOrMethodDecorator(
+    (store, target) => {
+      store.mergeController(target, { roles });
+    },
+    (store, target, handler) => {
+      store.mutateMethod(target, handler, (meta) => {
         meta.roles = roles;
       });
-    }
-  };
+    },
+  );
 }
 
 /**
@@ -82,55 +84,17 @@ export function Roles(...roles: string[]): MethodDecorator & ClassDecorator {
  * @returns A class or method decorator
  * @since 0.1.0
  */
-export function Permissions(...permissions: string[]): MethodDecorator & ClassDecorator {
-  return (target: object, propertyKey?: string | symbol): void => {
-    if (propertyKey === undefined) {
-      metadataStore.mergeController(target as unknown as Constructor, { permissions });
-    } else {
-      metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+export function Permissions(...permissions: string[]): SetuClassOrMethodDecorator {
+  return classOrMethodDecorator(
+    (store, target) => {
+      store.mergeController(target, { permissions });
+    },
+    (store, target, handler) => {
+      store.mutateMethod(target, handler, (meta) => {
         meta.permissions = permissions;
       });
-    }
-  };
-}
-
-/**
- * Injects the authenticated principal (`ctx.request.user`). Resolved by
- * {@linkcode resolveParameters} as a custom parameter of type `'current-user'`.
- *
- * @returns A parameter decorator
- * @since 0.1.0
- */
-export function CurrentUser(): ParameterDecorator {
-  return (target, propertyKey, parameterIndex) => {
-    metadataStore.storeParam(protoToCtor(target), String(propertyKey), {
-      index: parameterIndex,
-      type: 'custom',
-      customType: 'current-user',
-    });
-  };
-}
-
-/**
- * Injects the active request context. Use it when a decorated handler needs
- * to configure its response or return a streaming response.
- *
- * Resolved by {@linkcode resolveParameters} as a custom parameter of type
- * `'context'`. An internal metadata marker preserves application-defined
- * custom resolvers that also use the `context` name.
- *
- * @returns A parameter decorator
- * @since 0.1.0
- */
-export function Ctx(): ParameterDecorator {
-  return (target, propertyKey, parameterIndex) => {
-    metadataStore.storeParam(protoToCtor(target), String(propertyKey), {
-      index: parameterIndex,
-      type: 'custom',
-      customType: 'context',
-      metadata: CONTEXT_PARAMETER_METADATA,
-    });
-  };
+    },
+  );
 }
 
 /**
@@ -140,10 +104,10 @@ export function Ctx(): ParameterDecorator {
  * @returns A method decorator
  * @since 0.1.0
  */
-export function Public(): MethodDecorator {
-  return (target, propertyKey) => {
-    metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+export function Public(): SetuMethodDecorator {
+  return methodDecorator((store, target, handler) => {
+    store.mutateMethod(target, handler, (meta) => {
       meta.isPublic = true;
     });
-  };
+  });
 }

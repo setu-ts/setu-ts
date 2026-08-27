@@ -2,13 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { Constructor } from '@setu-ts/common';
 
-import {
-  className,
-  isHandlerResult,
-  joinPaths,
-  normalizeMiddleware,
-  protoToCtor,
-} from '../../src/internal.ts';
+import { className, isHandlerResult, joinPaths, normalizeMiddleware } from '../../src/internal.ts';
 
 describe('internal helpers', () => {
   describe('normalizeMiddleware', () => {
@@ -65,13 +59,6 @@ describe('internal helpers', () => {
 
     it('returns false for null', () => {
       expect(isHandlerResult(null)).toBe(false);
-    });
-  });
-
-  describe('protoToCtor', () => {
-    it('returns the constructor of a prototype', () => {
-      class C {}
-      expect(protoToCtor(C.prototype)).toBe(C);
     });
   });
 

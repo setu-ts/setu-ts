@@ -238,10 +238,10 @@ setu new my-app --template full-stack
 | `@Module({ … })`              | A plugin — `IPlugin` with `provides: [CAPABILITIES.X]`          |
 | `providers: [UserService]`    | `decorators: { services: [UserService] }`, or `app.register(…)` |
 | `@Injectable()`               | `@Injectable({ token, scope })`                                 |
-| Constructor injection by type | `@Inject(token)` on each constructor parameter                  |
+| Constructor injection by type | `@Inject(token, …)` on the class, one entry per argument        |
 | `@Controller('/users')`       | `@Controller('/users')` — identical                             |
 | `@Get()` / `@Post()`          | `@Get()` / `@Post()` — identical                                |
-| `@Body()` / `@Query()`        | `@Body()` / `@Query()` — identical                              |
+| `@Body()` / `@Query()`        | `@Params(Body(), Query())` — sources, listed in argument order  |
 | Guard (`CanActivate`)         | `@UseGuards(fn)`, or an `auth-plugin` guard factory             |
 | Pipe (`ValidationPipe`)       | `@ValidateBody(schema)` (Zod)                                   |
 | Interceptor                   | `@UseInterceptors(fn)`                                          |
@@ -256,8 +256,9 @@ import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 import { CAPABILITIES, type ILogger } from '@setu-ts/common';
 
 @Injectable({ token: 'user-service' })
+@Inject(CAPABILITIES.LOGGER)
 class UserService {
-  constructor(@Inject(CAPABILITIES.LOGGER) private logger: ILogger) {}
+  constructor(private logger: ILogger) {}
 }
 ```
 
@@ -265,12 +266,12 @@ class UserService {
 parameter's type requires `emitDecoratorMetadata`, which Deno does not support — so the type is
 simply not available at runtime. This is permanent, not a gap waiting to be filled.
 
-Three consequences, each a startup throw rather than a silent misinjection:
+Two consequences follow from the list being positional:
 
-- Leaving a constructor parameter undecorated (below the last injected one) throws, naming the class
-  and the index.
-- Mixing parameter-level `@Inject` with the deprecated class-level `@Inject('a', 'b')` list throws.
-- `@Inject` on a _method_ parameter throws — those bind with `@Body`/`@Query`/`@Param`.
+- The Nth entry binds the Nth constructor argument, so reordering the constructor without reordering
+  the tokens misinjects every argument — they are one declaration and move together.
+- A list shorter than the constructor leaves the trailing arguments `undefined`; a positional list
+  cannot have gaps. Method parameters are separate, and bind with `@Params(...)`.
 
 ## See Also
 

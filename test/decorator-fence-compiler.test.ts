@@ -153,7 +153,7 @@ describe('docs/decorators.md actual-fence compiler', () => {
     // count. Pin it so the gate notices. If a fence is added or removed,
     // update this number deliberately and confirm the new block compiles.
     const setu = await setuTsFences();
-    expect(setu.length).toBe(28);
+    expect(setu.length).toBe(27);
     // Every checked fence must carry a real heading (no orphan blocks).
     for (const f of setu) {
       expect(f.heading).not.toBe('<no heading>');

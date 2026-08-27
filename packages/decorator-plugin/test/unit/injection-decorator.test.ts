@@ -1,145 +1,135 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { Inject, Injectable } from '../../src/decorators/injection.ts';
+import { Inject, Injectable, Optional } from '../../src/decorators/injection.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
+import type { Constructor } from '@setu-ts/common';
 
-describe('@Injectable / @Inject', () => {
+describe('@Injectable', () => {
   beforeEach(() => {
     metadataStore.clear();
   });
 
   it('stores scope and token', () => {
     @Injectable({ scope: 'singleton', token: 'user-service' })
-    class UserService {
-      greet() {
-        return 'hi';
-      }
-    }
-    const meta = metadataStore.getService(UserService);
-    expect(meta?.scope).toBe('singleton');
-    expect(meta?.token).toBe('user-service');
-    expect(metadataStore.hasService(UserService)).toBe(true);
+    class Svc {}
+    expect(metadataStore.getService(Svc)).toMatchObject({
+      scope: 'singleton',
+      token: 'user-service',
+    });
   });
 
   it('defaults to no scope/token when options are omitted', () => {
     @Injectable()
-    class Svc {
-      run() {
-        return 1;
-      }
-    }
+    class Svc {}
     const meta = metadataStore.getService(Svc);
+    expect(meta).toBeDefined();
     expect(meta?.scope).toBeUndefined();
     expect(meta?.token).toBeUndefined();
   });
 
-  it('stores constructor injection tokens via @Inject', () => {
-    @Injectable()
-    @Inject('database', 'logger')
-    class Repository {
-      constructor(_db: unknown, _logger: unknown) {}
-    }
-    const meta = metadataStore.getService(Repository);
-    expect(meta?.inject).toEqual(['database', 'logger']);
-  });
-
-  it('assembles parameter-level @Inject in declaration order despite reverse evaluation', () => {
-    @Injectable()
-    class Repository {
-      constructor(
-        @Inject('database') readonly db: unknown,
-        @Inject('logger') readonly logger: unknown,
-        @Inject('cache') readonly cache: unknown,
-      ) {}
-    }
-    // Constructor parameter decorators evaluate right-to-left, so an appending
-    // implementation would yield ['cache', 'logger', 'database'] here.
-    expect(metadataStore.ctorInject(Repository)).toEqual(['database', 'logger', 'cache']);
-    // The parameter form must NOT write the class-level field.
-    expect(metadataStore.getService(Repository)?.inject).toBeUndefined();
-  });
-
-  it('records a single parameter-level token without touching class metadata', () => {
-    class Solo {
-      constructor(@Inject('database') readonly db: unknown) {}
-    }
-    expect(metadataStore.ctorInject(Solo)).toEqual(['database']);
-  });
-
-  it('returns undefined for a class with no parameter-level @Inject', () => {
-    @Injectable()
-    class Plain {
-      run() {
-        return 1;
-      }
-    }
-    expect(metadataStore.ctorInject(Plain)).toBeUndefined();
-  });
-
-  it('the leftmost decorator wins when one parameter carries two @Inject', () => {
-    class Doubled {
-      constructor(@Inject('winner') @Inject('loser') readonly dep: unknown) {}
-    }
-    expect(metadataStore.ctorInject(Doubled)).toEqual(['winner']);
-  });
-
-  it('throws when @Inject is applied to a method parameter', () => {
-    expect(() => {
-      class Bad {
-        run(@Inject('database') _db: unknown): void {}
-      }
-      return Bad;
-    }).toThrow(/only valid on a constructor parameter/);
-  });
-
-  it('names the offending method in the method-parameter error', () => {
-    expect(() => {
-      class Bad {
-        handle(@Inject('database') _db: unknown): void {}
-      }
-      return Bad;
-    }).toThrow(/method "handle"/);
-  });
-
-  it('throws when the parameter position receives more than one token', () => {
-    expect(() => {
-      class Bad {
-        constructor(@Inject('a', 'b') readonly dep: unknown) {}
-      }
-      return Bad;
-    }).toThrow(/exactly one token, but received 2/);
-  });
-
-  it('throws when the parameter position receives no token', () => {
-    expect(() => {
-      class Bad {
-        constructor(@Inject() readonly dep: unknown) {}
-      }
-      return Bad;
-    }).toThrow(/exactly one token, but received 0/);
-  });
-
-  it('the class form still records the positional list unchanged', () => {
-    @Injectable()
-    @Inject('database', 'logger')
-    class Legacy {
-      constructor(_db: unknown, _logger: unknown) {}
-    }
-    expect(metadataStore.getService(Legacy)?.inject).toEqual(['database', 'logger']);
-    expect(metadataStore.ctorInject(Legacy)).toBeUndefined();
-  });
-
   it('last-applied @Injectable wins for scope and token (topmost in source)', () => {
-    @Injectable({ scope: 'singleton', token: 'final' })
-    @Injectable({ scope: 'transient', token: 'first' })
-    class Svc {
-      run() {
-        return 1;
-      }
+    @Injectable({ token: 'outer' })
+    @Injectable({ token: 'inner' })
+    class Svc {}
+    expect(metadataStore.getService(Svc)?.token).toBe('outer');
+  });
+});
+
+describe('@Inject', () => {
+  beforeEach(() => {
+    metadataStore.clear();
+  });
+
+  it('records the constructor tokens in argument order', () => {
+    @Injectable()
+    @Inject('database', 'logger', 'cache')
+    class Repository {
+      constructor(readonly db: unknown, readonly logger: unknown, readonly cache: unknown) {}
     }
-    const meta = metadataStore.getService(Svc);
-    expect(meta?.scope).toBe('singleton');
-    expect(meta?.token).toBe('final');
+    expect(metadataStore.getService(Repository)?.inject).toEqual([
+      'database',
+      'logger',
+      'cache',
+    ]);
+  });
+
+  it('records a token list on a class carrying no @Injectable', () => {
+    // @Inject writes through mergeService, so it creates the service record
+    // itself — a class may declare its dependencies without being registered.
+    @Inject('database')
+    class Solo {
+      constructor(readonly db: unknown) {}
+    }
+    expect(metadataStore.getService(Solo)?.inject).toEqual(['database']);
+  });
+
+  it('reports no inject list for a class that declares none', () => {
+    @Injectable()
+    class Plain {}
+    expect(metadataStore.getService(Plain)?.inject).toBeUndefined();
+  });
+
+  it('accepts Optional(token) in the position of the argument it describes', () => {
+    @Injectable()
+    @Inject('database', Optional('cache'), 'logger')
+    class Mixed {
+      constructor(readonly db: unknown, readonly cache: unknown, readonly logger: unknown) {}
+    }
+    // The optional marker contributes its token to the list like any other …
+    expect(metadataStore.getService(Mixed)?.inject).toEqual(['database', 'cache', 'logger']);
+    // … and additionally marks that one argument absent-tolerant.
+    expect([...metadataStore.ctorOptional(Mixed)]).toEqual([1]);
+  });
+
+  it('marks nothing optional when every entry is a bare token', () => {
+    @Injectable()
+    @Inject('database', 'logger')
+    class Required {
+      constructor(readonly db: unknown, readonly logger: unknown) {}
+    }
+    expect([...metadataStore.ctorOptional(Required)]).toEqual([]);
+  });
+
+  it('the topmost @Inject wins when a class carries two', () => {
+    // mergeService replaces `inject` wholesale, and class decorators apply
+    // bottom-up, so the one written highest in the source is applied last.
+    @Inject('winner')
+    @Inject('loser')
+    class Doubled {
+      constructor(readonly dep: unknown) {}
+    }
+    expect(metadataStore.getService(Doubled)?.inject).toEqual(['winner']);
+  });
+});
+
+describe('stacked @Inject declarations', () => {
+  /**
+   * `mergeService` REPLACES `inject` while the optional set used to ACCUMULATE,
+   * so the winning token list could inherit the loser's optional indices. Class
+   * decorators apply bottom-up, so the TOP `@Inject` is the one that wins.
+   */
+  it('lets the last-applied @Inject own both the tokens and the optional set', () => {
+    @Inject('a', 'b', 'c')
+    @Inject(Optional('x'))
+    class Stacked {}
+
+    const target = Stacked as unknown as Constructor;
+    expect(metadataStore.getService(target)?.inject).toEqual(['a', 'b', 'c']);
+    // Without the replacement, index 0 would still be marked optional here and
+    // 'a' would silently resolve to `undefined` when it has no provider.
+    expect([...metadataStore.ctorOptional(target)]).toEqual([]);
+  });
+
+  it('does not strand an optional index the winning list cannot cover', () => {
+    @Inject('only')
+    @Inject('p', 'q', Optional('r'))
+    class Narrowed {}
+
+    const target = Narrowed as unknown as Constructor;
+    expect(metadataStore.getService(target)?.inject).toEqual(['only']);
+    // Index 2 would otherwise survive against a one-entry list, which
+    // `effectiveOptional` refuses at startup.
+    expect([...metadataStore.ctorOptional(target)]).toEqual([]);
   });
 });

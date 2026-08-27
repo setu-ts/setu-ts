@@ -13,8 +13,8 @@
  *
  * @module
  */
-import { metadataStore } from '../metadata/metadata-store.ts';
-import { protoToCtor } from '../internal.ts';
+import { methodDecorator } from '../metadata/context-bridge.ts';
+import type { SetuMethodDecorator } from '../metadata/context-bridge.ts';
 
 /**
  * Attaches a request body schema to the decorated route handler.
@@ -27,15 +27,15 @@ import { protoToCtor } from '../internal.ts';
  * @returns A method decorator
  * @since 0.1.0
  */
-export function ValidateBody(schema: unknown): MethodDecorator {
-  return (target, propertyKey) => {
-    metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+export function ValidateBody(schema: unknown): SetuMethodDecorator {
+  return methodDecorator((store, target, handler) => {
+    store.mutateMethod(target, handler, (meta) => {
       if (meta.schema === undefined) {
         meta.schema = {};
       }
       meta.schema.body = schema;
     });
-  };
+  });
 }
 
 /**
@@ -49,15 +49,15 @@ export function ValidateBody(schema: unknown): MethodDecorator {
  * @returns A method decorator
  * @since 0.1.0
  */
-export function ValidateQuery(schema: unknown): MethodDecorator {
-  return (target, propertyKey) => {
-    metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+export function ValidateQuery(schema: unknown): SetuMethodDecorator {
+  return methodDecorator((store, target, handler) => {
+    store.mutateMethod(target, handler, (meta) => {
       if (meta.schema === undefined) {
         meta.schema = {};
       }
       meta.schema.query = schema;
     });
-  };
+  });
 }
 
 /**
@@ -71,13 +71,13 @@ export function ValidateQuery(schema: unknown): MethodDecorator {
  * @returns A method decorator
  * @since 0.1.0
  */
-export function ValidateParams(schema: unknown): MethodDecorator {
-  return (target, propertyKey) => {
-    metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+export function ValidateParams(schema: unknown): SetuMethodDecorator {
+  return methodDecorator((store, target, handler) => {
+    store.mutateMethod(target, handler, (meta) => {
       if (meta.schema === undefined) {
         meta.schema = {};
       }
       meta.schema.params = schema;
     });
-  };
+  });
 }

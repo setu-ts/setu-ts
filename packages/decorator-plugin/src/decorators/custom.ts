@@ -1,19 +1,19 @@
 /**
- * Custom decorator factories — let consumers create their own decorators
- * that integrate with the framework.
+ * Custom decorator factory — lets consumers create their own decorators that
+ * integrate with the framework.
  *
  * {@linkcode createDecorator} stores class/method metadata replayed against
  * handlers registered via `ctx.decorators.register(name, handler)` (collected
- * under `CAPABILITIES.DECORATOR_HANDLER`). {@linkcode createParameterDecorator}
- * stores parameter metadata resolved by {@linkcode resolveParameters}.
+ * under `CAPABILITIES.DECORATOR_HANDLER`).
+ *
+ * A custom **parameter** source is declared with `Custom(name, metadata?)`
+ * inside `@Params(...)`; see `decorators/params.ts`. The TC39 proposal has no
+ * parameter position, so there is no parameter-decorator factory here.
  *
  * @module
  */
-import type { Constructor } from '@setu-ts/common';
-
-import { metadataStore } from '../metadata/metadata-store.ts';
-import { protoToCtor } from '../internal.ts';
-import type { ParameterMetadata } from '../metadata/metadata-store.ts';
+import { classOrMethodDecorator } from '../metadata/context-bridge.ts';
+import type { SetuClassOrMethodDecorator } from '../metadata/context-bridge.ts';
 
 /**
  * Creates a custom class or method decorator that stores metadata readable
@@ -34,52 +34,13 @@ import type { ParameterMetadata } from '../metadata/metadata-store.ts';
 export function createDecorator(
   name: string,
   metadata: Readonly<Record<string, unknown>>,
-): MethodDecorator & ClassDecorator {
-  return (target: object, propertyKey?: string | symbol): void => {
-    const ctor: Constructor = propertyKey === undefined
-      ? target as unknown as Constructor
-      : protoToCtor(target);
-    if (propertyKey === undefined) {
-      metadataStore.addCustomDecorator({ name, metadata, target: ctor });
-    } else {
-      metadataStore.addCustomDecorator({
-        name,
-        metadata,
-        target: ctor,
-        propertyKey: String(propertyKey),
-      });
-    }
-  };
-}
-
-/**
- * Creates a custom parameter decorator that stores metadata for the
- * {@linkcode resolveParameters} resolver. The parameter is resolved at request
- * time by a resolver registered under `name` via
- * {@linkcode registerParameterResolver}.
- *
- * @param name - Unique parameter decorator type name
- * @param metadata - Optional metadata payload
- * @returns A parameter decorator
- * @example
- * ```typescript
- * export const CurrentTenant = () => createParameterDecorator('current-tenant');
- * ```
- * @since 0.1.0
- */
-export function createParameterDecorator(
-  name: string,
-  metadata?: Readonly<Record<string, unknown>>,
-): ParameterDecorator {
-  return (target, propertyKey, parameterIndex) => {
-    const param: ParameterMetadata = {
-      index: parameterIndex,
-      type: 'custom',
-      customType: name,
-    };
-    if (metadata !== undefined) {
-      param.metadata = metadata;
-    }
-    metadataStore.storeParam(protoToCtor(target), String(propertyKey), param);
-  };
+): SetuClassOrMethodDecorator {
+  return classOrMethodDecorator(
+    (store, target) => {
+      store.addCustomDecorator({ name, metadata, target });
+    },
+    (store, target, handler) => {
+      store.addCustomDecorator({ name, metadata, target, propertyKey: handler });
+    },
+  );
 }

@@ -30,8 +30,9 @@ describe('DecoratorPlugin ↔ DiPlugin interop (real kernel)', () => {
     }
 
     @Injectable({ token: 'greeting-service' })
+    @Inject('greeting-source')
     class GreetingService {
-      constructor(@Inject('greeting-source') readonly source: GreetingSource) {}
+      constructor(readonly source: GreetingSource) {}
 
       greet(): string {
         return this.source.text;
@@ -39,8 +40,9 @@ describe('DecoratorPlugin ↔ DiPlugin interop (real kernel)', () => {
     }
 
     @Controller('/greet')
+    @Inject('greeting-service')
     class GreetingController {
-      constructor(@Inject('greeting-service') readonly service: GreetingService) {}
+      constructor(readonly service: GreetingService) {}
 
       @Get('/')
       greet(): { message: string } {
@@ -78,8 +80,9 @@ describe('DecoratorPlugin ↔ DiPlugin interop (real kernel)', () => {
     }
 
     @Controller('/registry')
+    @Inject('registry-source')
     class RegistryController {
-      constructor(@Inject('registry-source') readonly source: RegistrySource) {}
+      constructor(readonly source: RegistrySource) {}
 
       @Get('/')
       read(): { message: string } {
@@ -143,11 +146,9 @@ describe('@Optional injection (real container and real registry)', () => {
     }
 
     @Controller('/optional-di')
+    @Inject('present-dep', Optional('never-registered'))
     class OptionalController {
-      constructor(
-        @Inject('present-dep') readonly present: PresentDep,
-        @Optional() @Inject('never-registered') readonly missing?: { text: string },
-      ) {}
+      constructor(readonly present: PresentDep, readonly missing?: { text: string }) {}
 
       @Get('/')
       read(): { present: string; missing: string | null } {
@@ -181,10 +182,9 @@ describe('@Optional injection (real container and real registry)', () => {
     }
 
     @Controller('/optional-supplied')
+    @Inject(Optional('sometimes-dep'))
     class SuppliedController {
-      constructor(
-        @Optional() @Inject('sometimes-dep') readonly dep?: SometimesDep,
-      ) {}
+      constructor(readonly dep?: SometimesDep) {}
 
       @Get('/')
       read(): { value: string | null } {
@@ -215,11 +215,9 @@ describe('@Optional injection (real container and real registry)', () => {
     }
 
     @Controller('/optional-registry')
+    @Inject('registry-present', Optional('registry-absent'))
     class RegistryOptionalController {
-      constructor(
-        @Inject('registry-present') readonly present: RegistryPresent,
-        @Optional() @Inject('registry-absent') readonly missing?: { text: string },
-      ) {}
+      constructor(readonly present: RegistryPresent, readonly missing?: { text: string }) {}
 
       @Get('/')
       read(): { present: string; missing: string | null } {
@@ -256,8 +254,9 @@ describe('@Optional injection (real container and real registry)', () => {
     }
 
     @Injectable({ token: 'holder' })
+    @Inject(Optional('exploding-dep'))
     class Holder {
-      constructor(@Optional() @Inject('exploding-dep') readonly dep?: ExplodingDep) {}
+      constructor(readonly dep?: ExplodingDep) {}
     }
 
     const app = createApplication({
@@ -276,34 +275,24 @@ describe('@Optional injection (real container and real registry)', () => {
     expect(() => container.resolve<Holder>('holder')).toThrow(/blew up during construction/);
   });
 
-  it('refuses @Optional on a parameter carrying no @Inject token', async () => {
+  it('refuses an optional index the @Inject list does not name', () => {
+    // Optional(token) sits in the position of the argument it describes, so it
+    // cannot produce an out-of-range index. mergeCtorOptional is public store
+    // API, though, so a direct caller can — and an index past the end of the
+    // list would otherwise pass undefined for an argument no token names.
     metadataStore.clear();
 
     @Injectable({ token: 'untokened' })
+    @Inject('a')
     class Untokened {
-      constructor(@Optional() readonly dep?: object) {}
+      constructor(readonly a: unknown, readonly dep?: object) {}
     }
+    metadataStore.mergeCtorOptional(Untokened, 1);
 
     const app = createApplication({
       plugins: [RuntimePlugin(), DiPlugin(), DecoratorPlugin({ services: [Untokened] })],
     });
 
-    await expect(app.start()).rejects.toThrow(/is @Optional but carries no @Inject token/);
-  });
-
-  it('refuses @Optional combined with the deprecated class-level @Inject list', async () => {
-    metadataStore.clear();
-
-    @Injectable({ token: 'mixed-forms' })
-    @Inject('a')
-    class MixedForms {
-      constructor(@Optional() readonly dep?: object) {}
-    }
-
-    const app = createApplication({
-      plugins: [RuntimePlugin(), DiPlugin(), DecoratorPlugin({ services: [MixedForms] })],
-    });
-
-    await expect(app.start()).rejects.toThrow(/cannot express per-argument optionality/);
+    return expect(app.start()).rejects.toThrow(/the @Inject\(\.\.\.\) list names no token for it/);
   });
 });

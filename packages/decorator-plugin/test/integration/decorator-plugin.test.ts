@@ -23,6 +23,7 @@ import {
   Get,
   Inject,
   Injectable,
+  Params,
   Post,
   UseGuards,
   ValidateBody,
@@ -169,7 +170,8 @@ describe('DecoratorPlugin registration (integration)', () => {
       @ValidateBody(bodySchema)
       @ApiOperation({ summary: 'Create' })
       @ApiResponse({ status: 201, description: 'Created' })
-      create(@Body() body: unknown) {
+      @Params(Body())
+      create(body: unknown) {
         return body;
       }
     }
@@ -213,11 +215,9 @@ describe('DecoratorPlugin registration (integration)', () => {
 
   it('injects parameter-level @Inject arguments in order on the registry path', async () => {
     @Injectable({ token: 'repo' })
+    @Inject('database', 'logger')
     class Repository {
-      constructor(
-        @Inject('database') readonly db: unknown,
-        @Inject('logger') readonly logger: unknown,
-      ) {}
+      constructor(readonly db: unknown, readonly logger: unknown) {}
     }
     const { ctx, services } = createFakeContext();
     ctx.services.register('database', { kind: 'db' });
@@ -231,11 +231,9 @@ describe('DecoratorPlugin registration (integration)', () => {
 
   it('passes parameter-level tokens as ClassProvider.inject on the container path', async () => {
     @Injectable({ scope: 'transient', token: 'repo' })
+    @Inject('database', 'logger')
     class Repository {
-      constructor(
-        @Inject('database') readonly db: unknown,
-        @Inject('logger') readonly logger: unknown,
-      ) {}
+      constructor(readonly db: unknown, readonly logger: unknown) {}
     }
     const { container, registered } = recordingContainer();
     const { ctx } = createFakeContext({ container });
@@ -247,8 +245,9 @@ describe('DecoratorPlugin registration (integration)', () => {
 
   it('injects a parameter-decorated controller from the registry', async () => {
     @Controller('/x')
+    @Inject('database')
     class C {
-      constructor(@Inject('database') readonly db: unknown) {}
+      constructor(readonly db: unknown) {}
       @Get('/')
       list() {
         return this.db;
@@ -260,40 +259,17 @@ describe('DecoratorPlugin registration (integration)', () => {
     expect(routes).toHaveLength(1);
   });
 
-  it('fails registration when a class carries both @Inject forms (registry path)', async () => {
-    @Injectable({ token: 'mixed' })
-    @Inject('database')
-    class MixedService {
-      constructor(@Inject('logger') readonly logger: unknown) {}
+  it('injects only the arguments the @Inject list names', () => {
+    // The class-position list is positional and cannot have gaps, so the
+    // legacy "parameter N has no @Inject token" refusal has no reachable input
+    // any more. A list shorter than the constructor simply leaves the trailing
+    // arguments undefined, which is what a positional list means.
+    @Injectable({ token: 'partial' })
+    @Inject('logger')
+    class PartialService {
+      constructor(readonly logger: unknown, readonly extra?: unknown) {}
     }
-    const { ctx } = createFakeContext();
-    await expect(DecoratorPlugin({ services: [MixedService] }).register(ctx)).rejects.toThrow(
-      /MixedService declares both a class-level @Inject/,
-    );
-  });
-
-  it('fails registration when a class carries both @Inject forms (container path)', async () => {
-    @Injectable({ token: 'mixed2' })
-    @Inject('database')
-    class MixedContainerService {
-      constructor(@Inject('logger') readonly logger: unknown) {}
-    }
-    const { container } = recordingContainer();
-    const { ctx } = createFakeContext({ container });
-    await expect(
-      DecoratorPlugin({ services: [MixedContainerService] }).register(ctx),
-    ).rejects.toThrow(/MixedContainerService declares both a class-level @Inject/);
-  });
-
-  it('fails registration when a constructor parameter is left undecorated', async () => {
-    @Injectable({ token: 'gapped' })
-    class GappedService {
-      constructor(readonly plain: unknown, @Inject('logger') readonly logger: unknown) {}
-    }
-    const { ctx } = createFakeContext();
-    await expect(DecoratorPlugin({ services: [GappedService] }).register(ctx)).rejects.toThrow(
-      /GappedService constructor parameter 0 has no @Inject token/,
-    );
+    expect(metadataStore.getService(PartialService)?.inject).toEqual(['logger']);
   });
 
   it('replays custom decorators against registered DecoratorHandlers', async () => {
@@ -345,7 +321,8 @@ describe('DecoratorPlugin registration (integration)', () => {
       @Post('/')
       @ValidateBody(bodySchema)
       @UseGuards(guardFn)
-      create(@Body() body: unknown) {
+      @Params(Body())
+      create(body: unknown) {
         return body;
       }
     }

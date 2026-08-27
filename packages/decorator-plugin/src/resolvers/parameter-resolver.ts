@@ -15,7 +15,7 @@ import type { ParameterMetadata } from '../metadata/metadata-store.ts';
 
 /**
  * Resolves a custom parameter value (from
- * {@linkcode createParameterDecorator}) at request time.
+ * a `Custom(name)` source) at request time.
  *
  * @param ctx - The request context
  * @param metadata - The metadata captured by the parameter decorator
@@ -32,7 +32,7 @@ const customResolvers = new Map<string, CustomParameterResolver>();
 
 /**
  * Registers a resolver for a custom parameter type created with
- * {@linkcode createParameterDecorator}. `current-user` resolves directly;
+ * a `Custom(name)` source. `current-user` resolves directly;
  * `Ctx()` uses an internal marker and also resolves directly. Application
  * custom parameter types, including one named `context`, use this registry.
  *
