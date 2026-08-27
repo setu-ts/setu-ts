@@ -3377,8 +3377,54 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `@setu-ts/common` declares no worker exit signal, which **M70k had shipped** — the fix was
   recorded seven entries above it in the same section. A release spanning many milestones needs the
   whole `Unreleased` section read for internal contradictions, not just for per-milestone coverage.
-- **Next milestone** — **M73–M75** (realtime authentication, realtime reads - the SSE contract,
-  broker trace propagation).
+- **Milestone 74** (`packages/common` + `packages/websocket-plugin` + `packages/sse-plugin` —
+  realtime registry reads and the SSE contract). Two committed contracts could only be read by
+  writing to them, and a third advertised a guarantee its own type did not hold. `room(name)` and
+  `channel(name)` are get-or-create with no counterpart, so a presence endpoint reporting `size` for
+  a request-supplied name **allocated** one registry entry per distinct name polled — the register
+  measured `roomCount` 3 → 53 across 50 read-only requests, with nothing reclaiming them until an
+  unrelated socket disconnected. `peek(name)` is the non-allocating read, added as a **required**
+  member on `IWebSocketService` and `ISseService` (breaking for an out-of-repo implementor,
+  CHANGELOG'd): optional was rejected because a `peek?` returning `undefined` cannot distinguish "no
+  such room" from "this implementation does not offer the read", the exact ambiguity M70k had to
+  invent `IWorkerHost.reportsExit?` to resolve, and every in-repo stand-in is built with
+  `as unknown as` so a required member cost nothing to add. `RoomRegistry.peek` is deliberately a
+  bare map read that never touches `#neverJoined` in either direction — adding to it would mark a
+  live room abandoned, reclaiming from it would make a read dispose rooms.
+
+  **`SseMessage.data` narrows to a new `JsonValue` in `common` (breaking).** Its object arm admits
+  `undefined`, decided by probing rather than by taste: the strict form rejects
+  `{ note: string | undefined }`, which `JSON.stringify` serializes correctly by dropping the key,
+  while the chosen form still refuses `bigint` in both object and array positions. The same probe
+  removed a cost the ROADMAP had assumed — a named `interface` is **already** unassignable to the
+  old `Record<string, unknown>` arm, so the narrowing imports no new interface-ergonomics
+  regression. Blast radius measured rather than predicted: `deno task check` broke in exactly ONE
+  place repo-wide, a test fixture declaring `extends Record<string, unknown>`, which is precisely
+  the migration an application following the old docs performs, so the repository's own fixture now
+  performs it as the worked example.
+
+  **Four committed-doc conflicts, two of them beyond what the ROADMAP named.** `PUBLIC_API.md`
+  called the member "any JSON-serializable value" while its printed union admitted `bigint` — the
+  narrowing makes the sentence true rather than aspirational (C1); its claim that M70n's widening
+  fixed named-interface assignment is false and was measured so (C2); and **both** the SSE README
+  and `PUBLIC_API.md` stated a never-published channel "is reclaimed only when another connection
+  closes", while `grep` for `delete` in `packages/sse-plugin/src` finds only `#members.delete` — so
+  **nothing reclaims an SSE channel before shutdown** (C3), making that side strictly worse than the
+  WebSocket one, which at least sweeps on disconnection. Adding reclamation was **declined with
+  cause rather than deferred silently**: the `#neverJoined` design carries a latent trap where a
+  caller holding a reclaimed reference publishes into a detached object while a new one serves the
+  name, which would convert the documented "hold a channel reference at startup" pattern into silent
+  partial delivery.
+
+  Each integration guard ships beside a control reproducing the defect through the same entry point
+  — 50 requests through `peek` leave the registry at its starting size while the identical endpoint
+  written with `room()`/`channel()` grows it to 50 — so the guards discriminate rather than merely
+  pass. A separate test pins the runtime divergence the type removes: a non-serializable payload is
+  swallowed per-member by `publishLocal` with no backplane, and throws synchronously out of
+  `publish` with one, because the backplane publisher builds its frame with `JSON.stringify(msg)`
+  outside any `try`. Developed in an isolated worktree off `main`, in parallel with M73, which it
+  does not depend on) — complete (PR pending)
+- **Next milestone** — **M73** (realtime authentication) and **M75** (broker trace propagation).
 
 ## Verification (run before declaring any work done)
 

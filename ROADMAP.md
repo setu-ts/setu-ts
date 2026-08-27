@@ -7423,7 +7423,7 @@ capability.
   read the credential.
 - **Packages:** `auth-plugin`, `session-plugin`, `websocket-plugin`, `sse-plugin`, docs.
 
-## Milestone 74: Realtime Registry Reads and the SSE Contract ⬜ PLANNED
+## Milestone 74: Realtime Registry Reads and the SSE Contract ✅ COMPLETE
 
 **Objective:** A non-mutating way to read realtime registry state, and the `SseMessage.data`
 narrowing deferred from M70n's review.
@@ -7440,6 +7440,43 @@ the semantics in both READMEs and `PUBLIC_API.md`; it did not add the read.
 - **Note on the narrowing:** it fixes a pre-existing exposure, not one M70n introduced — the
   `Record<string, unknown>` arm has always admitted `{ x: 10n }`, which `JSON.stringify` throws on.
 - **Packages:** `websocket-plugin`, `sse-plugin`, `common`.
+
+**Shipped.** `peek(name)` is a **required** member on both `IWebSocketService` and `ISseService`,
+returning the live room/channel or `undefined`. Required rather than optional because an optional
+`peek?` returning `undefined` cannot distinguish "no such room" from "this implementation does not
+offer the read" — the ambiguity M70k had to invent `IWorkerHost.reportsExit?` to resolve. Both
+first-party services delegate to one bare map read; `RoomRegistry.peek` deliberately does not touch
+`#neverJoined` in either direction, since adding to it would mark a live room abandoned and
+reclaiming from it would make a read dispose rooms.
+
+`SseMessage.data` narrows to a new `JsonValue` in `common`. **The object arm admits `undefined`, and
+that was decided by measurement rather than taste**: the strict form rejects
+`{ note: string | undefined }`, a shape `JSON.stringify` serializes correctly by dropping the key,
+while the chosen form still rejects `bigint` in both object and array positions. Also measured, and
+it removed a cost the section had assumed: a named `interface` is **already** unassignable to the
+old `Record<string, unknown>` arm, so the narrowing imports no new interface-ergonomics regression —
+which in turn falsified `PUBLIC_API.md`'s claim that M70n's widening fixed that case (C2).
+
+**Two committed-doc conflicts were corrected beyond the two the section named.** `PUBLIC_API.md`
+called `SseMessage.data` "any JSON-serializable value" while its own printed union admitted `bigint`
+— the narrowing makes the sentence true (C1). And both the SSE README and `PUBLIC_API.md` stated
+that a never-published channel "is reclaimed only when another connection closes"; `grep` for
+`delete` in `packages/sse-plugin/src` finds only `#members.delete`, so **nothing reclaims an SSE
+channel before shutdown** (C3). The SSE exposure is therefore strictly worse than the WebSocket one,
+which at least sweeps on disconnection, and both documents now say so.
+
+**Reclamation for SSE was declined rather than deferred silently**: the WebSocket registry's
+`#neverJoined` design carries a latent trap — a caller holding a reference to a reclaimed entry
+publishes into a detached object while a new one serves the name — and importing it would convert
+the documented "hold a channel reference at startup" pattern into silent partial delivery. `peek`
+closes the read path X3-8 names, which is this milestone's scope.
+
+Each integration guard ships beside a control that reproduces the defect through the same entry
+point: 50 requests answered by `peek` leave the registry at its starting size, while the identical
+endpoint written with `room()`/`channel()` grows it to 50 — so the guards are known to discriminate
+rather than merely to pass. `ISseService` publishes no channel count (the SSE health indicator
+reports `connections` only, with no counterpart to `IWebSocketService.roomCount`), so the SSE guard
+reads the registry through `peek` itself, which the leaky control proves detects creation.
 
 ## Milestone 75: Broker Trace Propagation ⬜ PLANNED
 
@@ -7573,5 +7610,5 @@ the framework points a new project.
 | 71        | ✅     | kernel + contract boundary hardening (PR #190) |
 | 72        | ✅     | cli (transports + interactive, PR #191)        |
 | 73        | ⬜     | realtime authentication                        |
-| 74        | ⬜     | realtime reads + sse contract                  |
+| 74        | ✅     | realtime reads + sse contract (PR pending)     |
 | 75        | ⬜     | broker trace propagation                       |
