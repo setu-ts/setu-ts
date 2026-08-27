@@ -3,9 +3,6 @@
   "version": "0.1.0-alpha.9",
   "license": "MIT",
   "exports": "./src/index.ts",
-  "compilerOptions": {
-    "experimentalDecorators": true
-  },
   "imports": {
     "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.9"
   }

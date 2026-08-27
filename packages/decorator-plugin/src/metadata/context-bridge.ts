@@ -114,3 +114,103 @@ export function flushInto(
     write(store, target);
   }
 }
+
+/**
+ * A standard class decorator that records metadata and leaves the class as it
+ * is. Returning nothing means the class is never replaced, which is what keeps
+ * a decorated class identical to its undecorated self at runtime.
+ *
+ * @since 0.2.0
+ */
+export type SetuClassDecorator = (value: unknown, context: ClassDecoratorContext) => void;
+
+/**
+ * A standard method decorator that records metadata and leaves the method as it
+ * is.
+ *
+ * @since 0.2.0
+ */
+export type SetuMethodDecorator = (
+  value: unknown,
+  context: ClassMethodDecoratorContext,
+) => void;
+
+/**
+ * A standard decorator valid in either the class or the method position,
+ * discriminating on `context.kind`.
+ *
+ * @since 0.2.0
+ */
+export type SetuClassOrMethodDecorator = (
+  value: unknown,
+  context: ClassDecoratorContext | ClassMethodDecoratorContext,
+) => void;
+
+/**
+ * Builds a class decorator that writes to the store immediately — a class
+ * decorator already holds the constructor, so it needs no deferral. It also
+ * drains whatever its members deferred, so any class decorator is sufficient to
+ * flush and it does not matter which one runs first.
+ *
+ * @param write - The store write, given the constructor
+ * @returns A standard class decorator
+ * @since 0.2.0
+ */
+export function classDecorator(
+  write: (store: MetadataStore, target: Constructor) => void,
+): SetuClassDecorator {
+  return (value, context): void => {
+    const target = value as Constructor;
+    flushInto(target, context.metadata);
+    write(metadataStore, target);
+  };
+}
+
+/**
+ * Builds a method decorator that defers its store write until a class decorator
+ * supplies the constructor.
+ *
+ * @param write - The store write, given the constructor and the method name
+ * @returns A standard method decorator
+ * @since 0.2.0
+ */
+export function methodDecorator(
+  write: (store: MetadataStore, target: Constructor, handler: string) => void,
+): SetuMethodDecorator {
+  return (_value, context): void => {
+    const handler = String(context.name);
+    defer(context.metadata, (store, target) => {
+      write(store, target, handler);
+    });
+  };
+}
+
+/**
+ * Builds a decorator valid in both the class and the method position.
+ *
+ * The two positions mean different things — a class-level `@Roles` is the
+ * default for every route, a method-level one overrides it — so each gets its
+ * own write rather than one write branching internally.
+ *
+ * @param onClass - The store write for the class position
+ * @param onMethod - The store write for the method position
+ * @returns A standard class-or-method decorator
+ * @since 0.2.0
+ */
+export function classOrMethodDecorator(
+  onClass: (store: MetadataStore, target: Constructor) => void,
+  onMethod: (store: MetadataStore, target: Constructor, handler: string) => void,
+): SetuClassOrMethodDecorator {
+  return (value, context): void => {
+    if (context.kind === 'class') {
+      const target = value as Constructor;
+      flushInto(target, context.metadata);
+      onClass(metadataStore, target);
+      return;
+    }
+    const handler = String(context.name);
+    defer(context.metadata, (store, target) => {
+      onMethod(store, target, handler);
+    });
+  };
+}

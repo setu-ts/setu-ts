@@ -4,9 +4,10 @@
  *
  * @module
  */
-import type { Constructor, ServiceScope } from '@setu-ts/common';
+import type { ServiceScope } from '@setu-ts/common';
 
-import { metadataStore } from '../metadata/metadata-store.ts';
+import { classDecorator } from '../metadata/context-bridge.ts';
+import type { SetuClassDecorator } from '../metadata/context-bridge.ts';
 
 /**
  * Options for {@linkcode Injectable}.
@@ -18,6 +19,26 @@ export interface InjectableOptions {
   readonly scope?: ServiceScope;
   /** Capability token to register the service under. */
   readonly token?: string;
+}
+
+/**
+ * A constructor dependency: a capability token, or a token wrapped by
+ * {@linkcode Optional}.
+ *
+ * @since 0.2.0
+ */
+export type InjectToken = string | OptionalToken;
+
+/**
+ * A token marked optional by {@linkcode Optional}.
+ *
+ * @since 0.2.0
+ */
+export interface OptionalToken {
+  /** The capability token to resolve. */
+  readonly token: string;
+  /** Discriminator marking this dependency as optional. */
+  readonly optional: true;
 }
 
 /**
@@ -35,100 +56,60 @@ export interface InjectableOptions {
  * ```
  * @since 0.1.0
  */
-export function Injectable(options?: InjectableOptions): ClassDecorator {
-  return (target) => {
-    metadataStore.mergeService(target as unknown as Constructor, options ?? {});
-    return target;
-  };
+export function Injectable(options?: InjectableOptions): SetuClassDecorator {
+  return classDecorator((store, target) => {
+    store.mergeService(target, options ?? {});
+  });
 }
 
 /**
- * Declares a constructor injection token. The `DecoratorPlugin` resolves each
- * token (from the DI container or service registry) and passes the results to
- * the constructor.
- *
- * Usable in two positions:
- *
- * - **On a constructor parameter** (preferred) — one token per parameter, bound
- *   to that argument by position, so reordering the constructor cannot
- *   misinject. This is the form a NestJS reader expects.
- * - **On the class** (deprecated) — a positional token list matching the
- *   constructor's arguments.
+ * Declares the constructor injection tokens for a class, one per constructor
+ * argument in argument order. The `DecoratorPlugin` resolves each token (from
+ * the DI container or the service registry) and passes the results to the
+ * constructor.
  *
  * A token is always required: type-inferred injection needs
  * `emitDecoratorMetadata`, which Deno does not support, so parameter types
  * cannot be read.
  *
- * The two forms are mutually exclusive; a class carrying both fails at
- * `register()` rather than silently preferring one.
+ * Wrap a token in {@linkcode Optional} to let the argument receive `undefined`
+ * when the token has no provider.
  *
- * @param tokens - Capability tokens to inject. Exactly one in the parameter
- * position; one per constructor argument in the (deprecated) class position.
- * @returns A decorator valid in either the class or the constructor-parameter
- * position
- * @throws {Error} When used on a method parameter (only constructor parameters
- * are injected), or when the parameter position receives anything other than
- * exactly one token.
- * @example Parameter position — preferred
+ * @param tokens - One entry per constructor argument, in argument order
+ * @returns A class decorator
+ * @example
  * ```typescript
  * @Injectable()
+ * @Inject(CAPABILITIES.DATABASE, Optional(CAPABILITIES.CACHE))
  * class UserRepository {
- *   constructor(
- *     @Inject(CAPABILITIES.DATABASE) private db: Db,
- *     @Inject(CAPABILITIES.LOGGER) private logger: ILogger,
- *   ) {}
- * }
- * ```
- * @example Class position — deprecated, still supported
- * ```typescript
- * @Injectable()
- * @Inject('database', 'logger')
- * class UserRepository {
- *   constructor(db: Db, logger: ILogger) { … }
+ *   constructor(private db: Db, private cache?: ICacheService) {}
  * }
  * ```
  * @since 0.1.0
  */
-export function Inject(...tokens: string[]): ClassDecorator & ParameterDecorator {
-  const decorator = (
-    target: object,
-    propertyKey?: string | symbol,
-    parameterIndex?: number,
-  ): void => {
-    // A class decorator receives one argument; a parameter decorator receives
-    // three, the third being the argument index.
-    if (typeof parameterIndex === 'number') {
-      if (propertyKey !== undefined) {
-        throw new Error(
-          `@Inject is only valid on a constructor parameter, but was applied to parameter ` +
-            `${parameterIndex} of method "${String(propertyKey)}". Method parameters are bound ` +
-            `with @Body/@Query/@Param/@Headers instead.`,
-        );
-      }
-      if (tokens.length !== 1) {
-        throw new Error(
-          `@Inject on a constructor parameter takes exactly one token, but received ` +
-            `${tokens.length}. One token per parameter.`,
-        );
-      }
-      metadataStore.mergeCtorParam(target as Constructor, parameterIndex, tokens[0] as string);
-      return;
+export function Inject(...tokens: readonly InjectToken[]): SetuClassDecorator {
+  const names = tokens.map((t) => (typeof t === 'string' ? t : t.token));
+  const optional = tokens.reduce<number[]>((acc, t, index) => {
+    if (typeof t !== 'string') {
+      acc.push(index);
     }
-    metadataStore.mergeService(target as unknown as Constructor, { inject: tokens });
-  };
-
-  return decorator as unknown as ClassDecorator & ParameterDecorator;
+    return acc;
+  }, []);
+  return classDecorator((store, target) => {
+    store.mergeService(target, { inject: names });
+    for (const index of optional) {
+      store.mergeCtorOptional(target, index);
+    }
+  });
 }
 
 /**
- * Marks a constructor parameter as optional: when its `@Inject` token has no
- * provider, the argument receives `undefined` instead of failing construction.
+ * Marks a constructor dependency as optional: when the token has no provider,
+ * the argument receives `undefined` instead of failing construction.
  *
- * Pairs with `@Inject` on the same parameter and never replaces it — a token is
- * still required, because type-inferred injection needs `emitDecoratorMetadata`
- * (unsupported on Deno). The two may be written in either order.
+ * Used inside {@linkcode Inject}, in the position of the argument it describes.
  *
- * `@Optional` means the dependency is **absent**, not that construction may
+ * `Optional` means the dependency is **absent**, not that construction may
  * fail: a token that IS provided is resolved normally, and an error thrown
  * while building it — a circular dependency, a throwing factory — propagates
  * rather than being swallowed into `undefined`.
@@ -136,30 +117,18 @@ export function Inject(...tokens: string[]): ClassDecorator & ParameterDecorator
  * Honored identically on both construction paths: the DI container when one is
  * registered, and the kernel's service registry otherwise.
  *
- * @returns A constructor-parameter decorator
- * @throws {Error} When used on a method parameter — only constructor parameters
- * are injected.
+ * @param token - The capability token to resolve when a provider exists
+ * @returns An optional-token marker for use inside `@Inject`
  * @example
  * ```typescript
  * @Injectable()
+ * @Inject(CAPABILITIES.DATABASE, Optional(CAPABILITIES.CACHE))
  * class ReportService {
- *   constructor(
- *     @Inject(CAPABILITIES.DATABASE) private db: Db,
- *     @Optional() @Inject(CAPABILITIES.CACHE) private cache?: ICacheService,
- *   ) {}
+ *   constructor(private db: Db, private cache?: ICacheService) {}
  * }
  * ```
  * @since 0.2.0
  */
-export function Optional(): ParameterDecorator {
-  return (target: object, propertyKey?: string | symbol, parameterIndex?: number): void => {
-    if (propertyKey !== undefined) {
-      throw new Error(
-        `@Optional is only valid on a constructor parameter, but was applied to parameter ` +
-          `${String(parameterIndex)} of method "${String(propertyKey)}". Method parameters are ` +
-          `bound with @Body/@Query/@Param/@Header instead.`,
-      );
-    }
-    metadataStore.mergeCtorOptional(target as Constructor, parameterIndex as number);
-  };
+export function Optional(token: string): OptionalToken {
+  return { token, optional: true };
 }

@@ -6,10 +6,9 @@
  *
  * @module
  */
-import type { Constructor } from '@setu-ts/common';
 
-import { metadataStore } from '../metadata/metadata-store.ts';
-import { protoToCtor } from '../internal.ts';
+import { classDecorator, methodDecorator } from '../metadata/context-bridge.ts';
+import type { SetuClassDecorator, SetuMethodDecorator } from '../metadata/context-bridge.ts';
 
 /**
  * Configuration for {@linkcode ApiOperation}.
@@ -47,11 +46,10 @@ export interface ApiResponseConfig {
  * @returns A class decorator
  * @since 0.1.0
  */
-export function ApiTags(...tags: string[]): ClassDecorator {
-  return (target) => {
-    metadataStore.mergeController(target as unknown as Constructor, { tags });
-    return target;
-  };
+export function ApiTags(...tags: string[]): SetuClassDecorator {
+  return classDecorator((store, target) => {
+    store.mergeController(target, { tags });
+  });
 }
 
 /**
@@ -61,9 +59,9 @@ export function ApiTags(...tags: string[]): ClassDecorator {
  * @returns A method decorator
  * @since 0.1.0
  */
-export function ApiOperation(config: ApiOperationConfig): MethodDecorator {
-  return (target, propertyKey) => {
-    metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+export function ApiOperation(config: ApiOperationConfig): SetuMethodDecorator {
+  return methodDecorator((store, target, handler) => {
+    store.mutateMethod(target, handler, (meta) => {
       if (meta.openapi === undefined) {
         meta.openapi = {};
       }
@@ -78,7 +76,7 @@ export function ApiOperation(config: ApiOperationConfig): MethodDecorator {
         oa.description = config.description;
       }
     });
-  };
+  });
 }
 
 /**
@@ -89,9 +87,9 @@ export function ApiOperation(config: ApiOperationConfig): MethodDecorator {
  * @returns A method decorator
  * @since 0.1.0
  */
-export function ApiResponse(config: ApiResponseConfig): MethodDecorator {
-  return (target, propertyKey) => {
-    metadataStore.mutateMethod(protoToCtor(target), String(propertyKey), (meta) => {
+export function ApiResponse(config: ApiResponseConfig): SetuMethodDecorator {
+  return methodDecorator((store, target, handler) => {
+    store.mutateMethod(target, handler, (meta) => {
       if (meta.openapi === undefined) {
         meta.openapi = {};
       }
@@ -103,5 +101,5 @@ export function ApiResponse(config: ApiResponseConfig): MethodDecorator {
         ...(config.schema !== undefined ? { schema: config.schema } : {}),
       };
     });
-  };
+  });
 }

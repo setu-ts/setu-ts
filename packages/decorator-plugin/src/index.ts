@@ -25,15 +25,33 @@ export { Controller, Version } from './decorators/controller.ts';
 export { Delete, Get, Head, Options, Patch, Post, Put } from './decorators/http.ts';
 export type { HttpMethodDecorator } from './decorators/http.ts';
 
-// --- Request parameter decorators ---
-export { Body, Cookie, Header, Param, Query } from './decorators/request.ts';
+// --- Positional parameter binding ---
+export {
+  Body,
+  Cookie,
+  Ctx,
+  CurrentUser,
+  Custom,
+  Header,
+  Param,
+  Params,
+  Query,
+} from './decorators/params.ts';
+export type { ParamSource, SourceValues } from './decorators/params.ts';
+
+// --- Standard decorator kinds ---
+export type {
+  SetuClassDecorator,
+  SetuClassOrMethodDecorator,
+  SetuMethodDecorator,
+} from './metadata/context-bridge.ts';
 
 // --- Injection decorators ---
 export { Inject, Injectable, Optional } from './decorators/injection.ts';
-export type { InjectableOptions } from './decorators/injection.ts';
+export type { InjectableOptions, InjectToken, OptionalToken } from './decorators/injection.ts';
 
 // --- Security decorators ---
-export { Ctx, CurrentUser, Permissions, Public, Roles } from './decorators/security.ts';
+export { Permissions, Public, Roles } from './decorators/security.ts';
 
 // --- Pipeline decorators ---
 export { UseFilters, UseGuards, UseInterceptors } from './decorators/pipeline.ts';
@@ -47,7 +65,7 @@ export { ApiOperation, ApiResponse, ApiTags } from './decorators/openapi.ts';
 export type { ApiOperationConfig, ApiResponseConfig } from './decorators/openapi.ts';
 
 // --- Custom decorator factories ---
-export { createDecorator, createParameterDecorator } from './decorators/custom.ts';
+export { createDecorator } from './decorators/custom.ts';
 
 // --- Parameter resolver ---
 export {
