@@ -45,16 +45,23 @@ export type MetadataCarrier = Record<PropertyKey, unknown>;
 const PENDING_KEY: symbol = Symbol.for('@setu-ts/decorator-plugin:pending-writes');
 
 /**
- * Resolves the well-known `Symbol.metadata` from a `Symbol` constructor.
+ * Resolves the key a class's decorator metadata is installed under.
  *
- * A separate function rather than an inline `??` so the fallback arm is
- * reachable from a test: every runtime this package supports defines the
- * symbol, so the arm is otherwise dead to the suite while still being the arm
- * that decides whether the package throws at import time on a runtime that
- * does not define it.
+ * **The fallback arm is load-bearing on Node, not defensive.** Measured on Node
+ * v24 running the generated project's own runner (`tsx`): `Symbol.metadata` is
+ * `undefined` there, because V8 has not shipped decorators, and the transform
+ * installs the metadata object under `Symbol.for('Symbol.metadata')` instead —
+ * the registered symbol this falls back to. Deno defines the well-known symbol
+ * and uses that. Both were confirmed by reading the class's own symbol keys.
+ *
+ * So collapsing this to `Symbol.metadata` would leave every Node project unable
+ * to find any decorator metadata, while the Deno suite stayed green. It is a
+ * separate function rather than an inline `??` so both arms are reachable from
+ * a test on either runtime.
  *
  * @param symbolCtor - The `Symbol` constructor to read from
- * @returns The well-known symbol, or a registered stand-in
+ * @returns The well-known symbol when the runtime defines one, else the
+ * registered symbol the downlevel transform uses
  * @since 0.2.0
  */
 export function resolveMetadataSymbol(
@@ -63,7 +70,7 @@ export function resolveMetadataSymbol(
   return symbolCtor.metadata ?? Symbol.for('Symbol.metadata');
 }
 
-/** The standard `Symbol.metadata`, resolved defensively. */
+/** The key this runtime's decorator transform installs metadata under. */
 const METADATA_SYMBOL: symbol = resolveMetadataSymbol(
   Symbol as unknown as { readonly metadata?: symbol },
 );

@@ -44,8 +44,10 @@ export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
 /** Manifest additions unique to the class-based module composition. */
 export const CLASS_BASED_MODULE_MANIFEST: TemplateManifest = {
   ...FUNCTIONAL_MODULE_MANIFEST,
-  // The class-based template emits decorated classes.
-  denoCompilerOptions: { experimentalDecorators: true },
+  // Decorated classes need no compiler option: the surface is TC39 standard
+  // decorators, which every supported runtime parses unconfigured. Declaring
+  // one would also REPLACE Deno's default set (M63 D3), so adding nothing is
+  // both correct and the safer default.
 };
 
 /**

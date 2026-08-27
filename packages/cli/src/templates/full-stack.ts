@@ -217,8 +217,8 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     // Vite reads `tsconfig.json`; `deno check` reads `deno.json` and ignores it.
     // Without the same JSX settings in both, `vite build` succeeds while
     // `deno check` fails on every route with `TS2686 'React' refers to a UMD
-    // global`. `experimentalDecorators` is deliberately absent: this template
-    // registers no decorator plugin and emits no decorated class.
+    // global`. No decorator option appears here, and none is needed anywhere:
+    // the decorator surface is TC39 standard decorators.
     denoCompilerOptions: FULL_STACK_DENO_COMPILER_OPTIONS,
     // The SSR plugin imports the compiled server build and reads client assets
     // through the runtime filesystem; without this the project starts and then

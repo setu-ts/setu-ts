@@ -127,8 +127,9 @@ describe('rest-starter / integration', () => {
     }
 
     @Controller('/billing')
+    @Inject('billing-service')
     class BillingController {
-      constructor(@Inject('billing-service') readonly billing: BillingService) {}
+      constructor(readonly billing: BillingService) {}
 
       @Get('/total')
       total(): { total: number } {
@@ -158,8 +159,9 @@ describe('rest-starter / integration', () => {
     }
 
     @Controller('/pricing')
+    @Inject('pricing-service')
     class PricingController {
-      constructor(@Inject('pricing-service') readonly pricing: PricingService) {}
+      constructor(readonly pricing: PricingService) {}
 
       @Get('/total')
       total(): { total: number } {

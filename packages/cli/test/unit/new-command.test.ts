@@ -772,11 +772,14 @@ describe('runNewCommand', () => {
         expect(h.fs.read('/work/app/.npmrc')).toContain('@jsr:registry=https://npm.jsr.io');
       });
 
-      it('emits a tsconfig enabling the decorators the plugins need', async () => {
+      it('emits a tsconfig that needs no decorator option', async () => {
+        // Standard decorators are ordinary syntax to `tsc` and `tsx`; the
+        // legacy option is deprecated in Deno and is stamped nowhere.
         const h = harness();
         await h.run(['app', '--runtime', runtime]);
         const tsconfig = JSON.parse(h.fs.read('/work/app/tsconfig.json'));
-        expect(tsconfig.compilerOptions.experimentalDecorators).toBe(true);
+        expect(tsconfig.compilerOptions.experimentalDecorators).toBeUndefined();
+        expect(tsconfig.compilerOptions.strict).toBe(true);
       });
 
       it('emits the serve entry and no deno.json', async () => {

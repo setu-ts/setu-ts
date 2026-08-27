@@ -239,18 +239,20 @@ export interface TemplateManifest {
    * `compilerOptions` merged into the generated `deno.json`.
    *
    * This is the set `deno check` and `deno task start` actually honor. A
-   * template that emits decorated classes needs `experimentalDecorators`; a
-   * template that emits JSX needs `jsx` and `jsxImportSource`.
+   * template that emits JSX needs `jsx` and `jsxImportSource`; a template that
+   * emits decorated classes needs nothing, because the decorator surface is
+   * TC39 standard decorators, which Deno parses with no configuration at all.
    *
    * **A template emitting JSX must declare `jsx` whenever it declares anything
    * here at all.** Measured: a manifest with no `compilerOptions` key checks
    * JSX clean, because Deno applies its own `react-jsx` default — but declaring
-   * ANY option replaces that default set, so
-   * `{ experimentalDecorators: true }` alone silently reverts JSX to the classic
-   * transform and every `.tsx` fails with `TS2686 'React' refers to a UMD
-   * global`. That is why this is per template rather than a fixed block: the
-   * previous fixed `experimentalDecorators` was itself the cause of the
-   * full-stack template's 79 type errors, not merely a redundant extra.
+   * ANY option replaces that default set, so one unrelated option silently
+   * reverts JSX to the classic transform and every `.tsx` fails with
+   * `TS2686 'React' refers to a UMD global`. That is why this is per template
+   * rather than a fixed block: a fixed `experimentalDecorators` was itself the
+   * cause of the full-stack template's 79 type errors (M63 D3), not merely a
+   * redundant extra. The same trap is why a template needing no option now
+   * declares none rather than an empty object.
    */
   readonly denoCompilerOptions?: Readonly<Record<string, unknown>>;
   /** Entries merged into the Deno import map, for aliases `deno check` must resolve. */

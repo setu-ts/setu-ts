@@ -128,15 +128,26 @@ describe('generateModule', () => {
       expect(source).toContain("@Controller('/user-profile')");
     });
 
-    it('takes the request context through @Ctx(), never positionally', () => {
-      // The plugin builds a handler's argument list from parameter metadata
-      // ALONE, so a bare `ctx` parameter arrives `undefined` and the first
-      // `ctx.response` throws — a 500 on every request, which is what shipped
-      // from M34 until M58. `@Ctx()` is the metadata that fills the slot; the
-      // e2e that boots the app is the real proof.
+    it('declares the request context as a @Params source, never positionally', () => {
+      // The plugin builds a handler's argument list from the @Params
+      // declaration ALONE, so an undeclared `ctx` parameter arrives
+      // `undefined` and the first `ctx.response` throws — a 500 on every
+      // request, which is what shipped from M34 until M58. Declaring `Ctx()`
+      // fills the slot; the e2e that boots the app is the real proof.
       const source = fileAt(files, 'src/modules/user-profile/user-profile.controller.ts');
-      expect(source).toContain('@Ctx() ctx: IRequestContext');
+      expect(source).toContain('@Params(Body<Record<string, unknown>>(), Ctx())');
+      expect(source).toContain('create(body: Record<string, unknown>, ctx: IRequestContext)');
       expect(source).toContain('ctx.response.status(201)');
+      expect(source).not.toContain('@Ctx() ctx');
+    });
+
+    it('injects the service through the class-position @Inject list', () => {
+      // A constructor parameter decorator is a PARSE error under standard
+      // decorators, so the token list moves to the class.
+      const source = fileAt(files, 'src/modules/user-profile/user-profile.controller.ts');
+      expect(source).toContain("@Inject('user-profile-service')");
+      expect(source).toContain('constructor(private readonly service: UserProfileService) {}');
+      expect(source).not.toContain("@Inject('user-profile-service') private");
     });
 
     it('registers the service under the token the controller injects', () => {
