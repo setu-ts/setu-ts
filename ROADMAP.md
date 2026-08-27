@@ -7399,7 +7399,7 @@ in a project the CLI just wrote.
   and any prompt on a path a gate drives.
 - **Packages:** `cli`.
 
-## Milestone 73: Realtime Authentication ⬜ PLANNED
+## Milestone 73: Realtime Authentication ✅ COMPLETE
 
 **Objective:** Let a browser authenticate over the two realtime transports it can actually use.
 Carried out of M70n, which closed X3-5's documentation half only.
@@ -7422,6 +7422,18 @@ capability.
   kernel pipeline, so a guard CAN refuse an upgrade today; what is missing is a strategy that can
   read the credential.
 - **Packages:** `auth-plugin`, `session-plugin`, `websocket-plugin`, `sse-plugin`, docs.
+
+**Shipped.** `ISessionService.fromHeaders(headers)` is the headers-only session read — a new
+required member returning the read-only `SessionView` (`{ id, data }`) or `null` — and it routes
+through the same `#restore` path `load()` uses, so it inherits real revocation on the store
+strategy. `AuthPluginOptions.session` configures the internal `SessionStrategy` (cookie → session →
+principal through the required `toPrincipal` callback), and `AuthPluginOptions.strategies` is the
+caller-supplied hatch; the assembled order is fixed — jwt → api-key → session → caller-supplied —
+and a duplicate strategy `name` throws at `register()`. The bridge carries the authenticated
+principal into the socket: the kernel passes `ctx.request.user` to `IWebSocketService.routeUpgrade`,
+and `onOpen`'s `WebSocketConnectionContext` gains the optional `user` member. No adapter change was
+needed — since M70a `routeUpgrade` is the only live upgrade-routing path on every runtime. Closes
+X3-5 in full (the doc half shipped in M70n).
 
 ## Milestone 74: Realtime Registry Reads and the SSE Contract ⬜ PLANNED
 
@@ -7572,6 +7584,6 @@ the framework points a new project.
 | 70n       | ✅     | decorators, validation, closeout               |
 | 71        | ✅     | kernel + contract boundary hardening (PR #190) |
 | 72        | ✅     | cli (transports + interactive, PR #191)        |
-| 73        | ⬜     | realtime authentication                        |
+| 73        | ✅     | realtime authentication (PR pending)           |
 | 74        | ⬜     | realtime reads + sse contract                  |
 | 75        | ⬜     | broker trace propagation                       |

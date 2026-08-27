@@ -1296,6 +1296,17 @@ RBAC is configured:
 `rbac` is optional. A JWT-only registration provides `jwt` and `authentication`; it deliberately
 does not register an authorization service or advertise the authorization capability.
 
+> **Session authentication and caller-supplied strategies (M73):** `session` takes a
+> `SessionAuthOptions` whose single required member, `toPrincipal(view)`, maps the opened
+> `SessionView` to the principal it carries — returning `null` continues the chain. When present,
+> the plugin appends an internal `SessionStrategy` after the API-key strategy and requires the
+> `session` capability (`SessionPlugin`) to be registered, or `register()` throws naming both
+> plugins. `strategies` accepts caller-supplied `IAuthStrategy`s, appended after every built-in in
+> declaration order; a `name` colliding with any other strategy in the assembled chain throws at
+> `register()`. The assembled order is fixed — **jwt → api-key → session → caller-supplied** — and
+> the first non-null principal wins, so a request carrying both a bearer header and a session cookie
+> authenticates by the JWT.
+
 > **Phasing (M16b, shipped):** **refresh tokens** and **rate limiting** shipped in M16b as
 > standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a
 > refresh token arrives in the request body, not as a passive header credential) and
@@ -1306,42 +1317,43 @@ does not register an authorization service or advertise the authorization capabi
 
 ### Exports
 
-| Export                       | File                                      | Description                                                               |
-| ---------------------------- | ----------------------------------------- | ------------------------------------------------------------------------- |
-| `AuthPlugin`                 | `src/plugin/auth-plugin.ts`               | Plugin factory                                                            |
-| `AuthPluginOptions`          | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac`)              |
-| `JwtOptions`                 | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme)     |
-| `ApiKeyOptions`              | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                    |
-| `LocalOptions`               | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                               |
-| `PasswordHasher`             | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                         |
-| `MalformedPasswordHashError` | `src/services/password-hasher.ts`         | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash |
-| `authMiddleware`             | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`         |
-| `requireAuth`                | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                           |
-| `requireRole`                | `src/guards/index.ts`                     | Guard: require a role (401/403)                                           |
-| `requirePermission`          | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                     |
-| `requireAnyRole`             | `src/guards/index.ts`                     | Guard: require any of the given roles                                     |
-| `requireAllPermissions`      | `src/guards/index.ts`                     | Guard: require all of the given permissions                               |
-| `publicRoute`                | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                            |
-| `RefreshTokenService`        | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                 |
-| `RefreshTokenOptions`        | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                                 |
-| `TokenPair`                  | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`             |
-| `RefreshTokenStore`          | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records                 |
-| `RefreshTokenRecord`         | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                        |
-| `MemoryRefreshTokenStore`    | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                                  |
-| `rateLimitMiddleware`        | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)          |
-| `RateLimitOptions`           | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                                  |
-| `RateLimitStore`             | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                           |
-| `RateLimitResult`            | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                            |
-| `MemoryRateLimitStore`       | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                      |
-| `RedisRateLimitStore`        | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                     |
-| `IAuthService`               | re-export                                 | From `@setu-ts/common`                                                    |
-| `IJwtService`                | re-export                                 | From `@setu-ts/common`                                                    |
-| `IAuthorizationService`      | re-export                                 | From `@setu-ts/common`                                                    |
-| `IAuthStrategy`              | re-export                                 | From `@setu-ts/common`                                                    |
-| `IPrincipal`                 | re-export                                 | From `@setu-ts/common`                                                    |
-| `JwtSignOptions`             | re-export                                 | From `@setu-ts/common`                                                    |
-| `RbacConfig`                 | re-export                                 | From `@setu-ts/common`                                                    |
-| `RoleDefinition`             | re-export                                 | From `@setu-ts/common`                                                    |
+| Export                       | File                                      | Description                                                                             |
+| ---------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| `AuthPlugin`                 | `src/plugin/auth-plugin.ts`               | Plugin factory                                                                          |
+| `AuthPluginOptions`          | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies`) |
+| `JwtOptions`                 | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme)                   |
+| `ApiKeyOptions`              | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                                  |
+| `LocalOptions`               | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                                             |
+| `SessionAuthOptions`         | `src/interfaces/index.ts`                 | Session strategy config (required `toPrincipal` callback)                               |
+| `PasswordHasher`             | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                                       |
+| `MalformedPasswordHashError` | `src/services/password-hasher.ts`         | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash               |
+| `authMiddleware`             | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`                       |
+| `requireAuth`                | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                                         |
+| `requireRole`                | `src/guards/index.ts`                     | Guard: require a role (401/403)                                                         |
+| `requirePermission`          | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                                   |
+| `requireAnyRole`             | `src/guards/index.ts`                     | Guard: require any of the given roles                                                   |
+| `requireAllPermissions`      | `src/guards/index.ts`                     | Guard: require all of the given permissions                                             |
+| `publicRoute`                | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                                          |
+| `RefreshTokenService`        | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                               |
+| `RefreshTokenOptions`        | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                                               |
+| `TokenPair`                  | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                           |
+| `RefreshTokenStore`          | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records                               |
+| `RefreshTokenRecord`         | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                                      |
+| `MemoryRefreshTokenStore`    | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                                                |
+| `rateLimitMiddleware`        | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)                        |
+| `RateLimitOptions`           | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                                                |
+| `RateLimitStore`             | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                                         |
+| `RateLimitResult`            | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                                          |
+| `MemoryRateLimitStore`       | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                                    |
+| `RedisRateLimitStore`        | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                                   |
+| `IAuthService`               | re-export                                 | From `@setu-ts/common`                                                                  |
+| `IJwtService`                | re-export                                 | From `@setu-ts/common`                                                                  |
+| `IAuthorizationService`      | re-export                                 | From `@setu-ts/common`                                                                  |
+| `IAuthStrategy`              | re-export                                 | From `@setu-ts/common`                                                                  |
+| `IPrincipal`                 | re-export                                 | From `@setu-ts/common`                                                                  |
+| `JwtSignOptions`             | re-export                                 | From `@setu-ts/common`                                                                  |
+| `RbacConfig`                 | re-export                                 | From `@setu-ts/common`                                                                  |
+| `RoleDefinition`             | re-export                                 | From `@setu-ts/common`                                                                  |
 
 ### Registration
 
@@ -2030,6 +2042,7 @@ Omitting an option disables that behaviour (no timer created).
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `publish` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
   provider the behavior is unchanged. `SseChannel.size` keeps reporting **local** membership either
+  way.
 - **`SseMessage.data` accepts any JSON-serializable value** —
   `string | number | boolean | null |
   readonly unknown[] | Record<string, unknown>`. The encoder
@@ -2068,6 +2081,13 @@ router, inside its error-reporting wrapper, because `WsRouteTable` matches on pa
 routing failure has no other place to be logged. A non-conformant upgrade carrying a body is refused
 `400` by the kernel before any handshake is attempted, so the behaviour is one thing on all four
 adapters instead of a runtime-specific failure inside the upgrade call.
+
+Since M73 the pipeline's authenticated principal rides the upgrade: the kernel passes
+`ctx.request.user` to `IWebSocketService.routeUpgrade`, and `onOpen`'s `WebSocketConnectionContext`
+carries it as the optional `user` member — populated when a strategy authenticated the upgrade,
+omitted when it did not. An unauthenticated upgrade is anonymous, and a guard in the authentication
+band refuses it before the handshake. See the `session` arm of
+[`AuthPlugin`](#authplugin-setu-tsauth-plugin) for the cookie-backed strategy that produces it.
 
 ### Registration
 
@@ -2408,6 +2428,13 @@ app.router.post('/login', (ctx) => {
 
 ### Notes
 
+- **`ISessionService.fromHeaders(headers)` is the headers-only read for non-HTTP entry points.** It
+  opens the session from a `Headers` object alone — a WebSocket `onOpen` handler, an auth strategy
+  reading a cookie — and returns a read-only `SessionView` (`{ id, data }`) or `null`. It runs the
+  same envelope-open, snapshot-parse, and store-read path as the load behind `from(ctx)`, so it
+  inherits real revocation on the store strategy, but it never commits, never advances the `seen`
+  stamp, and never writes. It is a **required** member: an application that implements
+  `ISessionService` itself must add it (see the CHANGELOG migration note).
 - **Nothing in application code writes a `Set-Cookie`.** The middleware commits after `next()`
   returns, and only when the session is dirty, regenerated, destroyed, or `rolling` is on. A pure
   read emits no header, so sessions do not defeat downstream caching. This works after the handler
@@ -7616,7 +7643,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`                                                                                                                                                                                                             |
 | Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                                                                                                                           |
-| Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `SessionView`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                               |

@@ -205,17 +205,30 @@ ws.route('/ws', handlers, { protocols: ['chat', 'json'] });
   carried onto the handshake response. The pipeline still _runs_, which is what lets a guard refuse;
   it just has no response left to decorate once the socket is taken over. A refused upgrade is an
   ordinary HTTP response and carries everything.
-- **Authenticate inside `onOpen` — and know that a cookie session is not yet verifiable there.**
-  Browsers cannot set headers on a `WebSocket` constructor, so a bearer header never arrives. A
-  cookie does arrive, but this framework cannot read it in `onOpen` today:
-  `ISessionService.from(ctx)` needs a request context, and `onOpen` is handed a
-  `WebSocketConnectionContext` rather than one — the pipeline's context is gone by the time the
-  callback fires — and the service exposes no open-from-headers seam. Carrying a session cookie
-  therefore authenticates nothing here — verify instead a credential you can check directly: a
-  signed token in the query string (keep it short-lived; it lands in URLs and access logs) or a
-  subprotocol carrying a nonce your HTTP layer issued. `conn.close(1008)` refuses a peer whose
-  credential fails. A cookie-backed strategy that composes with sessions is tracked as a defect in
-  `smoke/DEFECTS.md` (X3-5).
+- **Authenticate inside `onOpen` — a cookie session is verifiable there.** Browsers cannot set
+  headers on a `WebSocket` constructor, so a bearer header never arrives — but a cookie does, and
+  the framework now reads it. When `@setu-ts/auth-plugin` runs with a `session` arm (see
+  [`packages/auth-plugin/README.md`](https://github.com/setu-ts/setu-ts/tree/main/packages/auth-plugin/README.md)),
+  the pipeline authenticates the upgrade before the handshake decides it, so `onOpen`'s
+  `context.user` carries the principal the session mapped — `context.user.id` is the peer, and the
+  member is omitted entirely when the upgrade was anonymous. To read the session payload itself,
+  open it from the upgrade's headers: `await sessions.fromHeaders(context.headers)` (where
+  `sessions` is the `ISessionService` resolved from `CAPABILITIES.SESSION`) returns the read-only
+  `SessionView` — `{ id, data }` — or `null`. `conn.close(1008)` refuses a peer whose credential
+  fails, and a guard in the authentication band refuses the upgrade earlier, before the socket
+  opens. The `SessionView` is a snapshot taken at handshake time and never refreshes: a session
+  destroyed mid-connection leaves the socket open, so `1008` is the application-side revocation
+  path. An application not running `SessionPlugin` can still verify a credential it can check
+  directly: a signed token in the query string (keep it short-lived; it lands in URLs and access
+  logs) or a subprotocol carrying a nonce your HTTP layer issued.
+- **A cookie-authenticated socket is same-site by default — and `sameSite: 'none'` removes that.**
+  The session cookie defaults to `sameSite: 'lax'`, and a WebSocket handshake is not a top-level
+  navigation, so a `Lax` cookie is not sent on a cross-site upgrade: a cross-site page cannot open a
+  cookie-authenticated socket. Setting `cookie.sameSite: 'none'` on `SessionPlugin` removes that
+  protection, and the same-origin policy does not cover `WebSocket` — a cross-site page can then
+  open the socket and read everything it is sent. If you must run `none`, check the `Origin` header
+  in the authentication band (a guard that refuses foreign origins refuses the upgrade before the
+  handshake) rather than trusting the cookie alone.
 - **The heartbeat is an application-level frame, not an RFC 6455 ping.** Deno and Cloudflare Workers
   expose no `ping()` on their web `WebSocket`, so a protocol ping would silently no-op on half the
   supported runtimes. Your client should treat `heartbeatPayload` as a keep-alive and may reply to
