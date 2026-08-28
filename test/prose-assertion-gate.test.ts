@@ -158,7 +158,7 @@ describe('prose assertion gate — evaluator', () => {
 
   it('fails closed when a document batch exceeds its timeout', async () => {
     const source =
-      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`while (true) {}\` | \`null\` |`;
+      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`(() => { while (true) {} })()\` | \`null\` |`;
     const findings = await checkDocument('timeout.md', source, 20);
 
     expect(findings.length).toBe(1);
@@ -190,6 +190,12 @@ describe('prose assertion gate — evaluator', () => {
 
     expect(compareClaim(claim, undefined)?.message).toContain('Unverified');
     expect(compareClaim(claim, { ok: true, value: 1 })).toBeNull();
+  });
+
+  it('treats JSON objects with a different property order as equal', () => {
+    const claim = { expression: '({ a: 1, b: 2 })', expected: { b: 2, a: 1 }, line: 5 };
+
+    expect(compareClaim(claim, { ok: true, value: { a: 1, b: 2 } })).toBeNull();
   });
 });
 

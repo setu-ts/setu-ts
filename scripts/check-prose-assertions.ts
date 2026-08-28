@@ -259,6 +259,26 @@ export async function evaluateClaims(
   return parseResults(new TextDecoder().decode(output.stdout), claims.length);
 }
 
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length && left.every((value, index) =>
+        jsonValuesEqual(value, right[index])
+      );
+  }
+  if (typeof left !== 'object' || left === null || typeof right !== 'object' || right === null) {
+    return false;
+  }
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord);
+  return leftKeys.length === Object.keys(rightRecord).length &&
+    leftKeys.every((key) =>
+      Object.hasOwn(rightRecord, key) && jsonValuesEqual(leftRecord[key], rightRecord[key])
+    );
+}
+
 /**
  * Compares one expected claim value with a sandbox result.
  *
@@ -273,7 +293,7 @@ export function compareClaim(claim: Claim, result: ClaimResult | undefined): Fin
   if (!result.ok) {
     return { line: claim.line, file: '', message: `Failed: ${result.error}` };
   }
-  if (JSON.stringify(result.value) !== JSON.stringify(claim.expected)) {
+  if (!jsonValuesEqual(result.value, claim.expected)) {
     return {
       line: claim.line,
       file: '',
