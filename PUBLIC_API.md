@@ -5208,20 +5208,20 @@ bypass the lazy import entirely.
 
 ### Options
 
-| Option                  | Type                                      | Required        | Description                                        |
-| ----------------------- | ----------------------------------------- | --------------- | -------------------------------------------------- |
-| `serviceName`           | `string`                                  | Yes (real mode) | Service name reported to the exporter              |
-| `serviceVersion`        | `string`                                  | No              | Service version (default: `'1.0.0'`)               |
-| `exporter`              | `'otlp' \| 'console'`                     | No              | Exporter kind; absent = noop mode                  |
-| `endpoint`              | `string`                                  | Yes (otlp)      | OTLP HTTP endpoint URL                             |
-| `headers`               | `Record<string, string>`                  | No              | Optional OTLP HTTP headers                         |
-| `sampling`              | `{ type: 'traceidratio'; ratio: number }` | No              | Sampling config (default ratio: 1.0)               |
-| `tracerProviderFactory` | `() => Promise<TracerHost>`               | No              | Injectable factory to bypass lazy import           |
-| `middleware`            | `boolean`                                 | No              | Register request-span middleware (default: `true`) |
-| `spanProcessor`         | `'simple' \| 'batch'`                     | No              | Span processor (`'simple'` by default)             |
-| `instrumentations`      | `InstrumentationsConfig`                  | No              | Auto-instrumentation config (runtime-gated no-op)  |
-| `contextPropagation`    | `boolean`                                 | No              | Activate real OTel spans (default: `true`)         |
-| `contextManagerFactory` | `() => Promise<ContextManager>`           | No              | Injectable context-manager loader                  |
+| Option                  | Type                                                       | Required        | Description                                                                                                  |
+| ----------------------- | ---------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------ |
+| `serviceName`           | `string`                                                   | Yes (real mode) | Service name reported to the exporter                                                                        |
+| `serviceVersion`        | `string`                                                   | No              | Service version (default: `'1.0.0'`)                                                                         |
+| `exporter`              | `'otlp' \| 'console'`                                      | No              | Exporter kind; absent = noop mode                                                                            |
+| `endpoint`              | `string`                                                   | Yes (otlp)      | OTLP HTTP endpoint URL                                                                                       |
+| `headers`               | `Record<string, string>`                                   | No              | Optional OTLP HTTP headers                                                                                   |
+| `sampling`              | `{ type: 'traceidratio'; ratio: number }`                  | No              | Sampling config (default ratio: 1.0)                                                                         |
+| `tracerProviderFactory` | `() => Promise<TracerHost>`                                | No              | Injectable factory to bypass lazy import                                                                     |
+| `middleware`            | `boolean`                                                  | No              | Register request-span middleware (default: `true`)                                                           |
+| `spanProcessor`         | `'simple' \| 'batch'`                                      | No              | Span processor (`'simple'` by default)                                                                       |
+| `instrumentations`      | `InstrumentationsConfig`                                   | No              | Auto-instrumentation config (runtime-gated no-op)                                                            |
+| `contextPropagation`    | `boolean`                                                  | No              | Activate real OTel spans (default: `true`)                                                                   |
+| `contextManagerFactory` | `() => Promise<{ enable(): unknown; disable(): unknown }>` | No              | Injectable context-manager loader; structural, so an OTel `ContextManager` needs no import from this package |
 
 ### Span nesting and broker propagation
 
