@@ -10,7 +10,7 @@ them.
 ## Install
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.1.0-alpha.9/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.1.0-alpha.10/main
 ```
 
 Install it with an explicit binary name (`-n setu`): Deno's default inference would name the
