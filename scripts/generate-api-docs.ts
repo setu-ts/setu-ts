@@ -10,7 +10,9 @@
  * The ratchet policy (§3.10 of the M38 plan):
  * - Diagnostics are partitioned by owning package path
  * - Any diagnostic in a CLEAN_PACKAGE fails the gate
- * - The total diagnostic count must not exceed DOC_LINT_BASELINE (760)
+ * - The total diagnostic count must not exceed DOC_LINT_BASELINE, and only
+ *   when the running Deno matches DOC_LINT_BASELINE_DENO — the count is
+ *   version-sensitive, so it is skipped rather than compared elsewhere
  * - If the count is BELOW baseline, the script instructs to lower the constant
  *
  * Usage:
@@ -57,6 +59,111 @@ export const CLEAN_PACKAGES = new Set([
  * members with documented, `unknown`-typed ones.
  */
 export const DOC_LINT_BASELINE = 752;
+
+/**
+ * The Deno version {@linkcode DOC_LINT_BASELINE} was measured on.
+ *
+ * `deno doc --lint` output is **version-sensitive**, and not marginally so: the
+ * identical tree at `22bb5ca9` — the commit that froze the count at 752 —
+ * reports **752** diagnostics on Deno 2.9.5 and **496** on 2.9.6, a 256
+ * difference from the toolchain alone. So a count is only meaningful against
+ * the version that produced the baseline, and comparing across versions is not
+ * a stricter check, it is a meaningless one.
+ *
+ * Before this constant existed the ratchet had no way to know that, so a
+ * developer on any other Deno saw a permanently red gate whose message told
+ * them, in as many words, to `Update DOC_LINT_BASELINE ... to 496`. Following
+ * that instruction would have made CI fail on the next push with *exceeds
+ * baseline (496)*, inverting the gate and blocking every PR — a confident
+ * instruction that breaks the build is worse than no check at all.
+ *
+ * Keep this in step with the `deno-version` pin in `.github/workflows/ci.yml`;
+ * CI is the authoritative reading. When that pin moves, re-measure and update
+ * BOTH constants in the same change.
+ */
+export const DOC_LINT_BASELINE_DENO = '2.9.5';
+
+/** The outcome of comparing a diagnostic count against the frozen baseline. */
+export interface BaselineVerdict {
+  /** Whether this toolchain can be compared against the baseline at all. */
+  readonly comparable: boolean;
+  /** Findings that must fail the gate; empty when satisfied or skipped. */
+  readonly findings: readonly string[];
+  /** The line describing the outcome. Always present, never empty. */
+  readonly report: string;
+}
+
+/**
+ * Applies the ratchet policy to a diagnostic count.
+ *
+ * Extracted as a pure function so every branch — including the
+ * version-mismatch skip, which cannot be reached on a machine matching the
+ * baseline — is unit-testable without spawning `deno doc`.
+ *
+ * A version mismatch is deliberately **not** a failure. Failing would block
+ * every contributor whose Deno differs from CI's pin, which is the defect this
+ * seam exists to remove; the count is reported and the comparison skipped, and
+ * CI remains authoritative. Clean-package findings are unaffected and still
+ * fail, because those are specific, named diagnostics rather than a count
+ * comparison.
+ *
+ * @param totalDiagnostics - Diagnostics parsed from this run.
+ * @param denoVersion - The Deno version that produced them.
+ * @param baseline - The frozen count. Defaults to {@linkcode DOC_LINT_BASELINE}.
+ * @param baselineDenoVersion - The version the baseline was measured on.
+ *   Defaults to {@linkcode DOC_LINT_BASELINE_DENO}.
+ * @returns The verdict; `findings` is empty unless the gate must fail.
+ */
+export function evaluateBaselineRatchet(
+  totalDiagnostics: number,
+  denoVersion: string,
+  baseline: number = DOC_LINT_BASELINE,
+  baselineDenoVersion: string = DOC_LINT_BASELINE_DENO,
+): BaselineVerdict {
+  if (denoVersion !== baselineDenoVersion) {
+    return {
+      comparable: false,
+      findings: [],
+      report: `API JSDoc ratchet SKIPPED: not comparable on this toolchain. ` +
+        `This run is Deno ${denoVersion} and produced ${totalDiagnostics} ` +
+        `diagnostic(s); the baseline of ${baseline} was measured on Deno ` +
+        `${baselineDenoVersion}, and \`deno doc --lint\` output differs by ` +
+        `version. Do NOT update DOC_LINT_BASELINE from this run — CI (Deno ` +
+        `${baselineDenoVersion}) is authoritative. To reproduce its reading: ` +
+        `docker run --rm -v "$PWD":/w -w /w -e DENO_DIR=/tmp/dc ` +
+        `denoland/deno:${baselineDenoVersion} run --allow-read --allow-run ` +
+        `--allow-env --allow-write=/tmp/dc scripts/generate-api-docs.ts --check`,
+    };
+  }
+
+  if (totalDiagnostics > baseline) {
+    return {
+      comparable: true,
+      findings: [
+        `Total JSDoc diagnostics (${totalDiagnostics}) exceeds baseline (${baseline}).`,
+      ],
+      report: `API JSDoc lint failed: ${totalDiagnostics} exceeds baseline ${baseline}.`,
+    };
+  }
+
+  if (totalDiagnostics < baseline) {
+    return {
+      comparable: true,
+      findings: [
+        `Total JSDoc diagnostics (${totalDiagnostics}) is BELOW baseline (${baseline}).`,
+        `Update DOC_LINT_BASELINE constant in scripts/generate-api-docs.ts to ${totalDiagnostics}.`,
+      ],
+      report: `API JSDoc lint failed: ${totalDiagnostics} is below baseline ${baseline}.`,
+    };
+  }
+
+  return {
+    comparable: true,
+    findings: [],
+    report: `API JSDoc lint passed: ${totalDiagnostics} known diagnostic(s) at baseline ` +
+      `${baseline}, 0 in the ${CLEAN_PACKAGES.size} clean package(s).`,
+  };
+}
 
 /** One parsed `deno doc --lint` diagnostic. */
 export interface DocLintDiagnostic {
@@ -714,6 +821,9 @@ export function classifyChildResult(
  * @param outputDir - Output directory for HTML generation
  * @param fs - File system abstraction
  * @param cmd - Command execution abstraction
+ * @param denoVersion - The running Deno version, injectable so ratchet tests
+ *   are deterministic rather than dependent on the developer's toolchain.
+ *   Defaults to the live `Deno.version.deno`.
  * @returns Exit code and findings
  */
 export async function runApiDocs(
@@ -731,6 +841,7 @@ export async function runApiDocs(
       args: string[],
     ) => Promise<{ code: number; stdout: string; stderr: string }>;
   },
+  denoVersion: string = Deno.version.deno,
 ): Promise<{ code: number; findings: string[] }> {
   const findings: string[] = [];
 
@@ -803,19 +914,8 @@ export async function runApiDocs(
       }
     }
 
-    const totalDiagnostics = diagnostics.length;
-    if (totalDiagnostics > DOC_LINT_BASELINE) {
-      findings.push(
-        `Total JSDoc diagnostics (${totalDiagnostics}) exceeds baseline (${DOC_LINT_BASELINE}).`,
-      );
-    } else if (totalDiagnostics < DOC_LINT_BASELINE) {
-      findings.push(
-        `Total JSDoc diagnostics (${totalDiagnostics}) is BELOW baseline (${DOC_LINT_BASELINE}).`,
-      );
-      findings.push(
-        `Update DOC_LINT_BASELINE constant in scripts/generate-api-docs.ts to ${totalDiagnostics}.`,
-      );
-    }
+    const verdict = evaluateBaselineRatchet(diagnostics.length, denoVersion);
+    findings.push(...verdict.findings);
 
     if (findings.length > 0) {
       console.error('API JSDoc lint check failed:');
@@ -828,10 +928,13 @@ export async function runApiDocs(
     // Report the ratchet state on success. A gate that passes in total silence
     // is indistinguishable from a gate that did nothing, and this one's whole
     // job is to make a known, frozen debt VISIBLE rather than merely tolerated.
-    console.log(
-      `API JSDoc lint passed: ${totalDiagnostics} known diagnostic(s) at baseline ` +
-        `${DOC_LINT_BASELINE}, 0 in the ${CLEAN_PACKAGES.size} clean package(s).`,
-    );
+    // A skipped comparison is reported just as loudly, on stderr, so an
+    // unusable reading is never mistaken for a clean one.
+    if (verdict.comparable) {
+      console.log(verdict.report);
+    } else {
+      console.error(verdict.report);
+    }
   } else {
     // Propagate child-process failures: non-zero exit code is a failure
     if (result.code !== 0) {

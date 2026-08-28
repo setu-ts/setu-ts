@@ -24,7 +24,9 @@ import {
   CLEAN_PACKAGES,
   collectApiEntrypoints,
   DOC_LINT_BASELINE,
+  DOC_LINT_BASELINE_DENO,
   DOC_LINT_EXIT_CODE,
+  evaluateBaselineRatchet,
   expandExportTargets,
   normalizeDiagnosticPath,
   parseDocLintDiagnostics,
@@ -208,6 +210,58 @@ error[private-type-ref]: public type references private type
       const stderr = '\u001b[31merror: Module not found\u001b[0m\n';
       const diagnostics = parseDocLintDiagnostics(stderr);
       expect(diagnostics).toHaveLength(0);
+    });
+  });
+
+  describe('evaluateBaselineRatchet — version-sensitivity guard', () => {
+    it('equal count on the baseline version passes and reports the ratchet state', () => {
+      const v = evaluateBaselineRatchet(752, '2.9.5', 752, '2.9.5');
+      expect(v.comparable).toBe(true);
+      expect(v.findings).toHaveLength(0);
+      expect(v.report).toContain('passed');
+      expect(v.report).toContain('752');
+    });
+
+    it('above baseline on the baseline version fails', () => {
+      const v = evaluateBaselineRatchet(753, '2.9.5', 752, '2.9.5');
+      expect(v.comparable).toBe(true);
+      expect(v.findings.some((f) => f.includes('exceeds baseline'))).toBe(true);
+    });
+
+    it('below baseline on the baseline version fails and names the constant', () => {
+      const v = evaluateBaselineRatchet(700, '2.9.5', 752, '2.9.5');
+      expect(v.comparable).toBe(true);
+      expect(v.findings.some((f) => f.includes('BELOW baseline'))).toBe(true);
+      expect(v.findings.some((f) => f.includes('Update DOC_LINT_BASELINE'))).toBe(true);
+      expect(v.findings.some((f) => f.includes('700'))).toBe(true);
+    });
+
+    // The regression this seam exists for. `deno doc --lint` reported 752
+    // diagnostics on Deno 2.9.5 and 496 on 2.9.6 for the SAME tree, so before
+    // the guard a contributor on 2.9.6 was told to lower the constant to 496 —
+    // which would have failed CI with "exceeds baseline (496)" on the next
+    // push and blocked every PR.
+    it('a differing Deno version does NOT fail, and refuses to advise lowering', () => {
+      const v = evaluateBaselineRatchet(496, '2.9.6', 752, '2.9.5');
+      expect(v.comparable).toBe(false);
+      expect(v.findings).toHaveLength(0);
+      expect(v.report).toContain('SKIPPED');
+      expect(v.report).toContain('2.9.6');
+      expect(v.report).toContain('2.9.5');
+      expect(v.report).toContain('Do NOT update DOC_LINT_BASELINE');
+      expect(v.report).not.toContain('BELOW baseline');
+    });
+
+    it('a differing version is skipped even when the count would otherwise exceed', () => {
+      const v = evaluateBaselineRatchet(9000, '2.9.6', 752, '2.9.5');
+      expect(v.comparable).toBe(false);
+      expect(v.findings).toHaveLength(0);
+    });
+
+    it('defaults to the shipped constants', () => {
+      const v = evaluateBaselineRatchet(DOC_LINT_BASELINE, DOC_LINT_BASELINE_DENO);
+      expect(v.comparable).toBe(true);
+      expect(v.findings).toHaveLength(0);
     });
   });
 
@@ -598,6 +652,31 @@ error[private-type-ref]: public type references private type
       };
     }
 
+    it('version mismatch → gate passes rather than blocking the contributor', async () => {
+      const fs = makeFs();
+      const diagnostics = `error[missing-jsdoc]: test
+  --> packages/runtime/src/index.ts:1:0`;
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd, '99.99.99');
+      expect(result.code).toBe(0);
+      expect(result.findings).toHaveLength(0);
+    });
+
+    it('version mismatch still fails on a clean-package diagnostic', async () => {
+      const fs = makeFs();
+      const stderr = 'error[missing-jsdoc]: test\n  --> packages/common/src/index.ts:1:0\n';
+      const cmd = {
+        run: () => Promise.resolve({ code: 1, stdout: '', stderr }),
+      };
+      const result = await runApiDocs('check', 'docs/api', fs, cmd, '99.99.99');
+      expect(result.code).toBe(1);
+      expect(result.findings.some((f) => f.includes('CLEAN packages'))).toBe(true);
+      // ...but never the count advice, which is what breaks CI when followed.
+      expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(false);
+    });
+
     it('normal lint with exactly baseline diagnostics → success', async () => {
       const fs = makeFs();
       const diagnostics = Array.from(
@@ -609,7 +688,13 @@ error[private-type-ref]: public type references private type
       const cmd = {
         run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }),
       };
-      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      const result = await runApiDocs(
+        'check',
+        'docs/api',
+        fs,
+        cmd,
+        DOC_LINT_BASELINE_DENO,
+      );
       expect(result.code).toBe(0);
       expect(result.findings).toHaveLength(0);
     });
@@ -625,7 +710,13 @@ error[private-type-ref]: public type references private type
       const cmd = {
         run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }),
       };
-      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      const result = await runApiDocs(
+        'check',
+        'docs/api',
+        fs,
+        cmd,
+        DOC_LINT_BASELINE_DENO,
+      );
       expect(result.code).toBe(1);
       expect(result.findings.some((f) => f.includes('exceeds baseline'))).toBe(
         true,
@@ -639,7 +730,13 @@ error[private-type-ref]: public type references private type
       const cmd = {
         run: () => Promise.resolve({ code: 1, stdout: '', stderr: diagnostics }),
       };
-      const result = await runApiDocs('check', 'docs/api', fs, cmd);
+      const result = await runApiDocs(
+        'check',
+        'docs/api',
+        fs,
+        cmd,
+        DOC_LINT_BASELINE_DENO,
+      );
       expect(result.code).toBe(1);
       expect(result.findings.some((f) => f.includes('BELOW baseline'))).toBe(
         true,
