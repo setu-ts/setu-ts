@@ -3648,6 +3648,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   surfaced. Also fixed two pre-existing defects found in passing: a garbled doc paragraph at the
   tsconfig emitter, and a **duplicate `### Changed` heading in the CHANGELOG's `Unreleased`
   section** — the exact defect the alpha.9 release caught once already) — complete (PR #200)
+- **Alpha release `v0.1.0-alpha.10`** — on `release/v0.1.0-alpha.10`, published 2026-08-28 (PR #202,
+  tag at the merge commit `3fcb05e6`; CI published it, one green `Publish to JSR` job — the fourth
+  first-try success in a row). **47 packages** — the list is unchanged from alpha.8, so no package
+  published for the first time and neither `release:create-packages` nor `release:link-repos` was
+  needed. Scope was M73–M76 plus the A9-1 zod v4 OpenAPI fix and the dependency-compatibility
+  tooling. Verified after publishing by querying all 47 on the registry (none yanked), then
+  installing `kernel` + `runtime` into a throwaway dir with `--min-dep-age 0` and serving a request
+  (`200 {"ok":true}`); `common` resolved transitively at alpha.10, which is the only real evidence
+  the cross-package specifier bump landed inside the published tarballs. Five package pages
+  (`kernel`, `session-plugin`, `decorator-plugin`, `sdk`, `cli`) spot-checked as rendering their
+  READMEs. The Release object carries `resolved-set.json` — the **first release to ship that
+  artifact**, added by PR #195, and its generation step is why the two new workflow steps
+  (`release:resolved-set`, then publish, then the Release object) were pre-flighted locally before
+  tagging rather than first exercised by the tag run. **The gap found while cutting it was a missing
+  entry, not a contradiction**: PR #195 — declared zod/Drizzle/Prisma compatibility ranges, the
+  `resolved-set.json` artifact and the weekly dependency-drift workflow — had **no CHANGELOG entry
+  at all**, the same class of miss as alpha.8's M63. Reading the whole `Unreleased` section for
+  internal contradictions (the alpha.9 lesson) found none this time, so both checks are worth
+  running and they catch different things. CodeRabbit raised one Major finding — that README claims
+  alpha.10 is live before publication — which was **refuted with evidence**: every release since
+  alpha.1 states the shipping version in the release commit itself (`32ef2f41` for alpha.9 bumps the
+  same line), the window is one CI run, and `checkVersionClaims` would reject a "pending" phrasing
+  as neither a current-release claim nor a `version:history` record.
 - **Next milestone** — **M40** (final polish and release).
 
 ## Verification (run before declaring any work done)
