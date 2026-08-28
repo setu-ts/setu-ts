@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0-alpha.10] — 2026-08-28
+
+**The decorator surface moves to the TC39 standard, and realtime grows up.** Every shipped decorator
+was the legacy TypeScript form, which requires the `experimentalDecorators` compiler option Deno now
+deprecates and warns on. Removing that option would not merely untype the parameter decorators — the
+Stage 3 proposal has no parameter position at all, so they would stop parsing. The surface is
+therefore migrated deliberately now rather than under time pressure later: parameter injection
+becomes positional `@Params(...)`, constructor injection collapses onto the class-position
+`@Inject(...)` list, and no compiler option is required anywhere any more. This is the one change in
+this release an application must act on, and the migrations are worked through below.
+
+The realtime story closes the two gaps a browser actually hits. A browser can send exactly one
+credential over an `EventSource` request or a WebSocket constructor — a cookie — and neither
+built-in strategy read one, so the two transports the framework offers for realtime could not
+authenticate a browser at all. `AuthPluginOptions.session` now reads the session cookie through a
+new headers-only session read, and an authenticated upgrade's principal reaches `onOpen`. Both
+realtime registries also gained a non-mutating read: `room(name)` and `channel(name)` are
+get-or-create, so a presence endpoint reporting `size` for a request-supplied name was registering
+one entry per distinct name polled.
+
+Traces now cross a broker and nest under the request that caused them. Every first-party messaging
+broker writes `traceparent` on publish and reports the transport headers it read, and telemetry
+spans run with their span active rather than arriving as detached roots — which changes exported
+trace shape for anyone already exporting.
+
+Nothing else here requires an application change unless it is named **Breaking** below.
+
 ### Added
 
 - **Broker trace propagation (M75).** `@setu-ts/common` now provides the W3C trace-context codec and
@@ -41,6 +68,19 @@ All notable changes to this project are documented here. The format follows
   `ctx.request.user` to `routeUpgrade`; and `WebSocketService` threads that principal into
   `buildContext`, so `onOpen`'s `context.user` is the authenticated peer. No adapter change is
   needed: since M70a `routeUpgrade` is the only live upgrade-routing path on every runtime.
+- **Declared dependency-compatibility ranges, and a reproducibility artifact on every release.** The
+  Zod-facing packages now state the ranges they are tested against rather than leaving them to be
+  inferred: `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin` and `@setu-ts/decorator-plugin`
+  support **zod v3 (`>=3.24.0 <4`) and zod v4 (`>=4.4.0 <5`)**, and `deno task check:compat`
+  exercises each declared major independently — no package imports zod, so an application may use
+  either major, or both in one process. `@setu-ts/database-plugin` records its tested Drizzle
+  baseline (`0.45.2`) and its Prisma v7 integration as the current claims, with wider ranges pending
+  the work that would make them tested rather than guessed. Separately, every GitHub Release now
+  carries a `resolved-set.json` asset wrapping the committed `deno.lock` under the release version —
+  exact transitive versions and integrity hashes, so the tagged framework tree rebuilds against the
+  reviewed resolution — and a weekly **Dependency drift** workflow re-resolves every workspace range
+  into a fresh lockfile, runs the gates against it, and files one issue naming each committed→fresh
+  change. It never modifies `deno.lock` and cannot block a pull request or a release.
 
 ### Changed
 
@@ -3399,6 +3439,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.1.0-alpha.10]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.10
 [0.1.0-alpha.9]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.9
 [0.1.0-alpha.8]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.7
