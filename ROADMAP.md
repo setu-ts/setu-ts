@@ -7810,10 +7810,14 @@ planning against a guess.
 - **In scope:** the probe above, and then the decision it settles. If Mongo comes back cheap, a
   small milestone — a configurable primary-key name following the D1 precedent, plus a
   `'custom'`-arm adapter, which has been expressible from another package since **M52c** promoted
-  `IDatabaseAdapter` into `common`. Blockers 2 and 3 are **M79**, scheduled below, and that is where
-  the honest design difficulty is. This section originally called that split "a recommendation this
-  section makes, not a decision it takes", which is the defect corrected here — see M79 for the
-  measurement.
+  `IDatabaseAdapter` into `common`. Blocker 2 is **M79**, scheduled below, and so is the
+  multi-column form of blocker 1 that Mongo's single `_id` does not need — that is where the honest
+  design difficulty is. Blocker 3 is deliberately **not** scheduled as portable surface at all:
+  M79's own out-of-scope bullet gives the reason, that TTL, consistency level and secondary-index
+  selection are spelled differently by every candidate backend and so belong with the adapter that
+  first needs them, and M82 excludes Bigtable's cell versioning on the same grounds. This section
+  originally called that split "a recommendation this section makes, not a decision it takes", which
+  is the defect corrected here — see M79 for the measurement.
 - **Not in scope, because it is scheduled rather than dropped:** DynamoDB is **M80**, Cosmos DB is
   **M81** and Cloud Bigtable is **M82**, all three gated on M79. An enterprise backend is not
   excluded for failing to fit a contract — the contract is what grows. What this milestone does not
@@ -7877,11 +7881,14 @@ changes cost and consistency invisibly, which is the one instinct M78 got exactl
 
 - **In scope:** the three members above, implemented across all four shipped adapters (Memory,
   Prisma, Drizzle, D1) — a widening no adapter implements is a widening with no consumer.
-- **Not in scope:** TTL, consistency level and secondary-index selection (M78's blocker 3). No two
-  of Mongo, DynamoDB, Cosmos and Bigtable spell any of them alike — Bigtable's answer to TTL is a
-  per-column-family garbage-collection policy, which is not a TTL at all — and none has a second
-  consumer today, so each belongs with the adapter that first needs it — named here rather than
-  absorbed silently.
+- **Not in scope — all four members of M78's blocker 3:** TTL, consistency level and secondary-index
+  selection are excluded because no two of Mongo, DynamoDB, Cosmos and Bigtable spell any of them
+  alike — Bigtable's answer to TTL is a per-column-family garbage-collection policy, which is not a
+  TTL at all — and none has a second consumer today, so each belongs with the adapter that first
+  needs it. **Partition awareness** is excluded for a different reason and is not a gap: it is
+  per-entity _mapping_ rather than portable surface, and each backend milestone carries its own
+  (M80's partition-plus-sort key, M81's partition key, M82's row key). Named here rather than
+  absorbed silently, so blocker 3 is accounted for in full.
 - **Packages:** `common`, `database-plugin`, `cloudflare-plugin`.
 
 ---
