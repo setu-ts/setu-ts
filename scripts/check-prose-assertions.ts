@@ -319,10 +319,10 @@ export async function checkDocument(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<readonly Finding[]> {
   const findings: Finding[] = [];
+  const claims: Claim[] = [];
   for (const block of findClaimBlocks(source)) {
-    let claims: readonly Claim[];
     try {
-      claims = parseClaimTable(block);
+      claims.push(...parseClaimTable(block));
     } catch (error) {
       findings.push({
         file,
@@ -333,17 +333,19 @@ export async function checkDocument(
       });
       continue;
     }
-    const results = await evaluateClaims(claims, timeoutMs);
-    if (results === null) {
-      for (const claim of claims) {
-        findings.push({ file, line: claim.line, message: 'Unverified: sandbox batch failed.' });
-      }
-      continue;
+  }
+  if (claims.length === 0) return findings;
+
+  const results = await evaluateClaims(claims, timeoutMs);
+  if (results === null) {
+    for (const claim of claims) {
+      findings.push({ file, line: claim.line, message: 'Unverified: sandbox batch failed.' });
     }
-    for (const [index, claim] of claims.entries()) {
-      const finding = compareClaim(claim, results[index]);
-      if (finding !== null) findings.push({ ...finding, file });
-    }
+    return findings;
+  }
+  for (const [index, claim] of claims.entries()) {
+    const finding = compareClaim(claim, results[index]);
+    if (finding !== null) findings.push({ ...finding, file });
   }
   return findings;
 }

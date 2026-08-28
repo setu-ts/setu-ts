@@ -156,6 +156,26 @@ describe('prose assertion gate — evaluator', () => {
     expect(findings.every((finding) => finding.message.includes('Unverified'))).toBe(true);
   });
 
+  it('uses one batch for every valid table in a document', async () => {
+    const source = [
+      `<!-- ${MARKER} -->`,
+      '',
+      '| Expression | Value |',
+      '| - | - |',
+      '| `Deno.exit(0)` | `null` |',
+      '',
+      `<!-- ${MARKER} -->`,
+      '',
+      '| Expression | Value |',
+      '| - | - |',
+      '| `1 === 1` | `true` |',
+    ].join('\n');
+    const findings = await checkDocument('two-tables.md', source);
+
+    expect(findings.length).toBe(2);
+    expect(findings.every((finding) => finding.message.includes('Unverified'))).toBe(true);
+  });
+
   it('fails closed when a document batch exceeds its timeout', async () => {
     const source =
       `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`(() => { while (true) {} })()\` | \`null\` |`;
