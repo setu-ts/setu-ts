@@ -7604,6 +7604,168 @@ into whatever touches these files next.
 
 ---
 
+## Milestone 77: Executable Prose Assertions
+
+**Objective:** Make a claim about runtime behaviour checkable by a gate, the way a link target and a
+code fence already are.
+
+**The gap, stated precisely.** The repository gates documentation three ways and not one of them
+evaluates a claim:
+
+- `scripts/check-docs.ts` — link targets, cross-file anchors, package-catalog structure, version
+  claims. Structural only.
+- `scripts/plan-lint.ts` — plan section structure and unfilled placeholders. Structural only.
+- The fence compilers — `test/guide-fence-compiler.test.ts`,
+  `test/package-readme-fence-compiler.test.ts`, `test/decorator-fence-compiler.test.ts` —
+  **type-check** committed fixtures. This is the closest existing machinery and it is still not the
+  same thing: a fence that compiles proves nothing about the sentence beside it.
+
+So `Infinity > 0` is `false`, "Redis keeps a key's TTL across later `HSET`s", and "workerd accepts a
+plain Durable Object class" are all unverifiable by every gate this repository has, in `CLAUDE.md`,
+`AI_GUIDELINES.md`, every package README, every JSDoc block, every plan, and the agent rule files.
+
+**The evidence this is a real failure mode rather than a hypothetical — PR #179.** One sentence in
+`.roo/rules-code-review/01-review-only.md`, describing how `NaN` and the infinities defeat a bound
+check, took **four consecutive corrections in a single afternoon**. Each was verified against the
+real runtime, and each prior version was genuinely wrong:
+
+1. "`NaN` and infinities, where every `>` becomes `false`" — but `Infinity > 0` is `true`.
+2. "`NaN`, where every comparison yields `false`" — but `NaN != 1` and `NaN !== 1` are `true`.
+3. "`-Infinity` inverts it into rejecting everything" — but `-Infinity > -Infinity` and
+   `NaN > -Infinity` are `false`.
+4. A fourth claim was checked pre-emptively and needed no fix.
+
+Every version passed `fmt:check` and `check:docs`. That document exists to make code review precise,
+which is what makes it the sharpest available demonstration: **normative prose asserting mechanical
+facts drifts from them exactly the way JSDoc does, and nothing catches it.**
+
+**Where a design should start — re-measured for this section, because the original note was stale.**
+The repository already marks its own load-bearing claims. `(measured)`, `measured:`,
+`probed, not assumed` and `verified from source` appear **32 times**:
+
+| Location           | Count               |
+| ------------------ | ------------------- |
+| `packages/*/src`   | 14, across 13 files |
+| `CLAUDE.md`        | 8                   |
+| `ROADMAP.md`       | 7                   |
+| `CHANGELOG.md`     | 2                   |
+| `.roo/rules/`      | 1                   |
+| `AI_GUIDELINES.md` | 0                   |
+| `PUBLIC_API.md`    | 0                   |
+
+Those parentheticals are an existing, author-applied signal for "this sentence asserts runtime
+behaviour", and promoting a convention people already follow beats inventing an annotation nobody
+adopts. The correction matters to the design: nearly half the markers sit in **narrative** documents
+rather than JSDoc, and the two documents a consumer is most likely to act on — `PUBLIC_API.md` and
+`AI_GUIDELINES.md` — carry **none**, so a gate scoped to `packages/*/src` would find under half of
+the existing signal and none of the highest-traffic surface.
+
+**The scope question is which claims are mechanizable at all**, and the honest answer is three
+tiers:
+
+1. **Language semantics** (`NaN > 1`, `Infinity > 0`) — a one-line `deno eval`. Cheap, hermetic, and
+   the tier PR #179's four failures all sat in.
+2. **Live-backend behaviour** ("Redis keeps a TTL across `HSET`") — needs a real server, so it
+   belongs with the existing guarded real-backend suites and their CI service containers rather than
+   with a documentation gate.
+3. **Platform behaviour** ("workerd accepts a plain DO class", "a browser hydrates this") — needs
+   `wrangler dev` or a browser CI does not install. Not mechanizable here; M52d and M37c already
+   record these as manually verified, which is the right treatment.
+
+A gate covering only tier 1 is still worth having, and is the cheapest thing on this list.
+
+- **In scope:** the annotation decision (promote the existing parentheticals, or introduce one
+  marker they map onto); a gate that extracts and evaluates tier-1 claims; the decision on whether a
+  tier-2 claim gets a marker that merely _routes_ it to a guarded suite rather than trying to run
+  it; and which documents the gate scans, given that the two with the widest audience carry no
+  markers today.
+- **Not in scope:** retro-annotating every existing claim, which would be a sweep rather than a
+  mechanism, and tiers 2 and 3 as gate targets.
+- **Packages:** `scripts`, `test`, and the scanned documents. No `packages/*/src` change is
+  expected; if one becomes necessary the design has drifted into annotation-in-source, which is a
+  different milestone.
+
+### Related, and the same class
+
+Two doc-accuracy items are unowned and worth deciding in the same conversation rather than
+separately: the zero-dependency claim audit, and the M76 finding that **nothing compiles
+`PUBLIC_API.md`** — measured with the repository's own `scanFences` at 232 fenced blocks, 202
+TypeScript, 109 importing `@setu-ts/`. That last one is a fence gate rather than a prose gate, but
+it is the same gap seen from the other side: the file a consumer reads most is checked least.
+
+---
+
+## Milestone 78: Document-Database Backends
+
+**Objective:** Decide whether the `database` capability serves a document store, and if so at what
+contract cost.
+
+**The gap, verified by `grep` rather than assumed.** `database-plugin` ships Memory, Prisma, Drizzle
+and D1 — every real backend relational. `mongo|dynamo|cassandra|firestore|nosql` (case-insensitive)
+over `ROADMAP.md`, `ARCHITECTURE.md` and `PUBLIC_API.md` returns **zero hits**, so this is
+**unowned**, not deferred. Note that NoSQL stores already exist throughout the framework, just never
+under this capability: Redis backs cache, queue, messaging, rate limiting and the realtime
+backplane; Cloudflare KV and R2 back cache, session and storage; and object storage spans
+S3/GCS/Azure/B2. The gap is specifically a document or wide-column **database** backend.
+
+**The portable contract is already store-agnostic; the adapters are what is relational.**
+`IDataSource`'s methods contain no SQL. The only SQL-shaped surface in the whole contract is
+`IDatabaseAdapter.rawQuery(sql, params)` and `IDatabaseService.query(sql, params)`. Equality
+`where`, M68's `FilterExpression`, `orderBy`, `limit`, `offset` and `select` all map onto MongoDB or
+DynamoDB without redesign.
+
+**One measurement decides the size of the Mongo half, and it has not been taken.** Prisma's MongoDB
+connector may already work through the existing `PrismaAdapter` **unchanged**: the adapter's CRUD
+path is Prisma's model delegates (`findMany`/`count`/`create`/`update`/`delete` with
+`where`/`orderBy`/`take`/`skip`/`select`), which the Mongo connector implements identically, and
+M68's filter translation emits only `contains`/`gt`/`gte`/`lt`/`lte`/`in`/`AND`/`OR`. The single SQL
+touchpoint is `rawQuery` → `$queryRawUnsafe`
+(`database-plugin/src/adapters/prisma/prisma-adapter.ts:256`), which Mongo rejects in favour of
+`$runCommandRaw` — so repositories would work while `query()` failed. **That probe is this
+milestone's first deliverable**, because it decides whether Mongo is an adapter, a documented
+configuration, or a `'custom'`-arm example; writing the rest of the plan before taking it would be
+planning against a guess.
+
+**Three contract blockers, in increasing difficulty, re-checked against source for this section.**
+
+1. **Single-column primary keys are baked into two of the three real adapters.** Prisma hardcodes
+   `where: { id }` at `adapters/prisma/prisma-adapter.ts:390` (`findById`), `:423` (`update`) and
+   `:434` (`delete`). D1 already made it configurable through `D1Target.primaryKey`
+   (`cloudflare-plugin/src/database/d1-sql.ts:49`) — that is the precedent to follow. Mongo's `_id`
+   needs exactly this; DynamoDB's composite partition-plus-sort key does not fit `findById(id)` at
+   all.
+
+   **Correction to the note this section came from:** it recorded Drizzle as _also_ requiring an
+   `id` column **at connect**. That stopped being true in **M70j** (X4-9), which moved the check to
+   the moment a repository is asked for — `adapters/drizzle/drizzle-adapter.ts:235` now says in as
+   many words that the `id` column is "a REPOSITORY precondition, not a registry one", and names
+   composite-key tables as the case it deliberately unblocked. So one blocker is already half
+   retired, and the in-repo precedent for composite keys is stronger than the note implies.
+
+2. **`FilterComparison.field` is a flat `string`** in all four arms
+   (`common/src/services/database.ts:81`), so a nested document path (`address.city`) is expressible
+   only by accident of a backend's own parsing.
+
+3. **No TTL, secondary-index selection, consistency level, or partition awareness** — which are the
+   concepts a team chooses a NoSQL store _for_. Serving a document store without them is serving it
+   as a slower relational database.
+
+- **In scope:** the probe above, and then the decision it settles. If Mongo comes back cheap, a
+  small milestone — a configurable primary-key name following the D1 precedent, plus a
+  `'custom'`-arm adapter, which has been expressible from another package since **M52c** promoted
+  `IDatabaseAdapter` into `common`. Blockers 2 and 3 are a **separate contract milestone**, and that
+  is where the honest design difficulty is; splitting them is a recommendation this section makes,
+  not a decision it takes.
+- **Not in scope:** DynamoDB. Its composite key contradicts `findById(id)` at the contract level, so
+  it depends on the contract milestone rather than preceding it.
+- **The rule that binds any widening here:** every new contract member names its consumer per
+  package before it is added, and a member no adapter can honestly implement is cut at plan time —
+  the `poolSize` precedent.
+- **Packages:** `database-plugin` and `common`, plus whichever package hosts a Mongo adapter if the
+  probe says one is needed.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                        |
@@ -7718,3 +7880,5 @@ into whatever touches these files next.
 | 74        | ✅     | realtime reads + sse contract (PR #196)        |
 | 75        | ✅     | broker trace propagation (PR #201)             |
 | 76        | ✅     | standard decorators / experimentalDecorators   |
+| 77        | ⬜     | executable prose assertions                    |
+| 78        | ⬜     | document-database backends                     |
