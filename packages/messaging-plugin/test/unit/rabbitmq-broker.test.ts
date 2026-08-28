@@ -284,6 +284,49 @@ describe('RabbitMqBroker', () => {
     await broker.disconnect();
   });
 
+  it('normalizes non-string AMQP field-table values into metadata.headers', async () => {
+    // An AMQP field table is not a string map: amqplib delivers numbers,
+    // booleans, timestamps, byte arrays and nested tables. Asserting one into
+    // `Readonly<Record<string, string>>` is a type lie that reaches the
+    // subscriber, so every value is normalized or dropped at the boundary.
+    const fakeConnection = new FakeAmqpConnection({
+      seededMessages: [
+        {
+          topic: 'test.topic',
+          content: JSON.stringify({ x: 1 }),
+          properties: {
+            messageId: 'm-headers',
+            headers: {
+              traceparent: new TextEncoder().encode('00-abc-def-01'),
+              retries: 3,
+              redelivered: true,
+              nested: { unsupported: true },
+            },
+          },
+        },
+      ],
+    });
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: fakeConnection,
+    });
+
+    let headers: Readonly<Record<string, string>> | undefined;
+    await broker.connect();
+    await broker.subscribe('test.topic', (_data, metadata) => {
+      headers = metadata.headers;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(headers).toEqual({ traceparent: '00-abc-def-01', retries: '3', redelivered: 'true' });
+    // Every surviving value really is a string, which is what the cast claimed
+    // without checking.
+    for (const value of Object.values(headers ?? {})) {
+      expect(typeof value).toBe('string');
+    }
+
+    await broker.disconnect();
+  });
+
   // R2: nack+logger on handler throw
   it('subscribe nacks and logs when the handler throws', async () => {
     const runtime = createFakeRuntime();

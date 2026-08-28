@@ -6,10 +6,16 @@
  */
 
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
-import { TELEMETRY_CONTEXT_OPAQUE, type TelemetryContext } from '@setu-ts/common';
+import {
+  contextToTraceparent,
+  extractContextFromHeaders,
+  type TelemetryContext,
+} from '@setu-ts/common';
 import { loadOtlpExporter } from '../exporters/otlp-exporter.ts';
 import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 import { createSpanProcessor } from '../services/span-processor-factory.ts';
+import { loadAsyncLocalStorageContextManager, registerContextManager } from './context-manager.ts';
+import type { ContextManagerOutcome } from './context-manager.ts';
 
 // OTel API handle — populated by loadOtelTracerProvider when the SDK is loaded.
 let _otelApi: OtelApi | null = null;
@@ -31,6 +37,8 @@ interface OtelApi {
   };
   context: {
     active(): unknown;
+    with<T>(context: unknown, fn: () => Promise<T>): Promise<T>;
+    setGlobalContextManager(manager: unknown): boolean;
   };
 }
 
@@ -43,75 +51,14 @@ function getOtelApi(): OtelApi | null {
   return _otelApi;
 }
 
-// --- W3C traceparent propagation helpers ---
-
-/** W3C traceparent regex: version-traceId-parentId-flags. */
-const TRACEPARENT_RE = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/i;
-
 /**
- * Parses a W3C `traceparent` header into a `TelemetryContext`.
- *
- * Returns a context with `{ _opaque: TELEMETRY_CONTEXT_OPAQUE, traceId, spanId, traceFlags }`
- * when the header is valid and version `"00"`; otherwise returns a minimal context
- * (`{ _opaque }`) indicating no extractable parent.
+ * Receives the span-activation outcome so the plugin can report it through its
+ * logger. Declared as a callback rather than taking an `ILogger` so this module
+ * stays free of the logger contract and the branch is unit-testable with a spy.
  *
  * @internal
  */
-export function parseTraceparentToContext(
-  header: string | null,
-): TelemetryContext {
-  if (!header) {
-    return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
-  }
-  const m = TRACEPARENT_RE.exec(header);
-  if (!m) {
-    return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
-  }
-  const [, version, traceId, spanId, flags] = m;
-  // Only version "00" is defined by the W3C spec
-  if (version !== '00') {
-    return { _opaque: TELEMETRY_CONTEXT_OPAQUE };
-  }
-  return {
-    _opaque: TELEMETRY_CONTEXT_OPAQUE,
-    traceId,
-    spanId,
-    traceFlags: flags,
-  };
-}
-
-/**
- * Extracts `traceparent` / `tracestate` from incoming headers and returns a
- * `TelemetryContext` suitable for span parenting.
- *
- * @internal
- */
-export function extractContextFromHeaders(headers: Headers): TelemetryContext {
-  const traceparent = headers.get('traceparent');
-  const tracestate = headers.get('tracestate');
-  const ctx = parseTraceparentToContext(traceparent);
-  if (tracestate) {
-    return { ...ctx, tracestate };
-  }
-  return ctx;
-}
-
-/**
- * Serialises a `TelemetryContext` into a W3C `traceparent` header string.
- *
- * When the context carries `traceId` + `spanId` + `traceFlags` the output is
- * a valid header (`00-<traceId>-<spanId>-<flags>`).  Otherwise returns `null`
- * so callers can skip injection.
- *
- * @internal
- */
-export function contextToTraceparent(context: TelemetryContext): string | null {
-  if (!context.traceId || !context.spanId) {
-    return null;
-  }
-  const flags = context.traceFlags ?? '01';
-  return `00-${context.traceId}-${context.spanId}-${flags}`;
-}
+export type ContextActivationReporter = (outcome: ContextManagerOutcome) => void;
 
 /**
  * Module handle returned by lazy-loading `npm:@opentelemetry/sdk-trace-base`.
@@ -188,6 +135,7 @@ export interface BuildTracerHostOptions {
    * @internal
    */
   validated?: boolean;
+  contextActivation?: boolean;
 }
 
 /**
@@ -345,6 +293,14 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
 
       return tracer.startSpan(name, otelSpanOptions, parentContext);
     },
+    ...(opts.contextActivation
+      ? {
+        activate<T>(span: unknown, fn: () => Promise<T>): Promise<T> {
+          const api = getOtelApi();
+          return api ? api.context.with(api.trace.setSpan(api.context.active(), span), fn) : fn();
+        },
+      }
+      : {}),
     extractContext(headers: Headers): TelemetryContext {
       return extractContextFromHeaders(headers);
     },
@@ -375,6 +331,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
  */
 export async function loadOtelTracerProvider(
   options: TelemetryPluginOptions,
+  reportActivation?: ContextActivationReporter,
 ): Promise<TracerHost> {
   // Validate options BEFORE lazy-loading (fail fast, avoid unnecessary imports)
   if (options.exporter === 'otlp' && !options.endpoint) {
@@ -397,6 +354,21 @@ export async function loadOtelTracerProvider(
   const apiMod = await import('npm:@opentelemetry/api@^1.9.0');
   setOtelApi(apiMod as OtelApi);
 
+  // Span activation is opt-out. When it is attempted the outcome is reported,
+  // so a runtime that cannot supply an async-context store degrades to unnested
+  // spans loudly rather than silently (the M24b never-throw-but-never-silent
+  // policy). `contextPropagation: false` is a deliberate choice, so nothing is
+  // reported for it.
+  let contextActivation = false;
+  if (options.contextPropagation !== false) {
+    const outcome = await registerContextManager(
+      (apiMod as OtelApi).context,
+      options.contextManagerFactory ?? loadAsyncLocalStorageContextManager,
+    );
+    contextActivation = outcome.activated;
+    reportActivation?.(outcome);
+  }
+
   // Build exporter constructors from loaded modules
   let otlpExporterCtor: OtlpExporterCtor | undefined;
   let consoleExporterCtor: ConsoleExporterCtor | undefined;
@@ -413,6 +385,7 @@ export async function loadOtelTracerProvider(
     resourcesMod: resourcesMod as OtelResourcesModule,
     pluginOptions: options,
     validated: true, // loadOtelTracerProvider already validated above
+    contextActivation,
   };
   if (otlpExporterCtor) {
     buildOpts.otlpExporterCtor = otlpExporterCtor;

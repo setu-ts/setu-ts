@@ -3,6 +3,13 @@
  *
  * Records all method calls and simulates Kafka behavior.
  */
+/** A header value in any shape kafkajs's `IHeaders` admits. */
+export type KafkaHeaderValue =
+  | string
+  | Uint8Array
+  | readonly (string | Uint8Array)[]
+  | undefined;
+
 export interface FakeKafkaOptions {
   /** Pre-seeded messages for eachMessage callbacks. */
   seededMessages?: Array<{
@@ -11,7 +18,14 @@ export interface FakeKafkaOptions {
     partition: number;
     offset: string;
     timestamp: string;
-    headers: Record<string, string>;
+    /**
+     * Header values. A plain `string` is encoded to bytes, modelling how real
+     * kafkajs delivers a header it was given as a string. A `Uint8Array` or an
+     * array is passed through untouched, so a test can exercise the other arms
+     * of kafkajs's `IHeaders` (`Buffer | string | (Buffer | string)[] |
+     * undefined`) which a string-only fake cannot express.
+     */
+    headers: Record<string, KafkaHeaderValue>;
   }>;
   /** Whether stop() should reject. */
   rejectStop?: boolean;
@@ -25,7 +39,7 @@ export class FakeKafkaMessage {
   #partition: number;
   #offset: string;
   #timestamp: string;
-  #headers: Record<string, Uint8Array>;
+  #headers: Record<string, KafkaHeaderValue>;
   #key: Uint8Array | null;
 
   constructor(
@@ -33,7 +47,7 @@ export class FakeKafkaMessage {
     partition: number,
     offset: string,
     timestamp: string,
-    headers: Record<string, string>,
+    headers: Record<string, KafkaHeaderValue>,
     key: string | null = null,
   ) {
     this.#value = new TextEncoder().encode(value);
@@ -41,7 +55,9 @@ export class FakeKafkaMessage {
     this.#offset = offset;
     this.#timestamp = timestamp;
     this.#headers = Object.fromEntries(
-      Object.entries(headers).map(([k, v]) => [k, new TextEncoder().encode(v)]),
+      Object.entries(headers).map((
+        [k, v],
+      ) => [k, typeof v === 'string' ? new TextEncoder().encode(v) : v]),
     );
     this.#key = key !== null ? new TextEncoder().encode(key) : null;
   }
@@ -58,7 +74,7 @@ export class FakeKafkaMessage {
     return this.#timestamp;
   }
 
-  get headers(): Record<string, Uint8Array> {
+  get headers(): Record<string, KafkaHeaderValue> {
     return { ...this.#headers };
   }
 
@@ -91,7 +107,7 @@ export class FakeKafkaConsumer {
     partition: number;
     offset: string;
     timestamp: string;
-    headers: Record<string, string>;
+    headers: Record<string, KafkaHeaderValue>;
   }>;
 
   constructor(
@@ -103,7 +119,7 @@ export class FakeKafkaConsumer {
       partition: number;
       offset: string;
       timestamp: string;
-      headers: Record<string, string>;
+      headers: Record<string, KafkaHeaderValue>;
     }>,
   ) {
     this.#subscribedTopics = [];

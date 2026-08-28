@@ -10,8 +10,13 @@ export interface FakeRedisOptions {
   rejectXadd?: boolean;
   /** Whether to reject on XREADGROUP. */
   rejectXreadgroup?: boolean;
-  /** Pre-seeded messages for XREADGROUP. */
-  seededMessages?: Array<{ id: string; payload: string }>;
+  /**
+   * Pre-seeded messages for XREADGROUP. `fields` carries any stream fields
+   * beside `payload` — the channel the broker uses for transport headers.
+   */
+  seededMessages?: Array<
+    { id: string; payload: string; fields?: Readonly<Record<string, string>> }
+  >;
 }
 
 /**
@@ -21,9 +26,22 @@ export interface FakeRedisOptions {
  */
 export class FakeRedisStreamsClient implements IRedisStreamsClient {
   #options: FakeRedisOptions;
-  #streams: Map<string, Array<{ id: string; payload: string }>>;
+  // Entries retain EVERY field, not just `payload`: a real Redis stream
+  // stores an arbitrary field/value list, and the broker carries transport
+  // headers in the fields beside `payload`. A fake that kept only the
+  // payload would silently drop them and make a header round-trip test
+  // pass (or fail) for reasons unrelated to the code under test.
+  #streams: Map<string, Array<{ id: string; payload: string; fields: string[] }>>;
   #groups: Map<string, Set<string>>; // stream -> consumer groups
   #pending: Map<string, Map<string, { groupId: string; messageId: string }>>; // stream -> groupId -> messageId -> pending
+  // Entries already handed to a group, tracked SEPARATELY from the PEL.
+  // In real Redis, `XREADGROUP ... STREAMS key >` returns only entries never
+  // delivered to that group, and `XACK` removes an entry from the PEL without
+  // making it eligible for `>` again. Conflating the two (deleting the pending
+  // entry on ack, and treating "not pending" as "deliverable") redelivers every
+  // successfully-acked message on the next poll — the opposite of the real
+  // server, and invisible until the fake could deliver at all.
+  #deliveredToGroup: Map<string, Set<string>>; // stream -> `${group}:${id}`
   #calls: Array<{ method: string; args: unknown[] }>;
   #quitCalled = false;
   #connectCalled = false;
@@ -33,6 +51,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     this.#streams = new Map();
     this.#groups = new Map();
     this.#pending = new Map();
+    this.#deliveredToGroup = new Map();
     this.#calls = [];
   }
 
@@ -78,6 +97,7 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
    */
   resetStreams(): void {
     this.#streams.clear();
+    this.#deliveredToGroup.clear();
     this.#groups.clear();
     this.#pending.clear();
   }
@@ -87,9 +107,9 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     name: string,
     id: string,
     data: string | Array<string>,
-    ..._args: string[]
+    ...args: string[]
   ): Promise<string> {
-    this.#record('xadd', [name, id, data]);
+    this.#record('xadd', [name, id, data, ...args]);
 
     if (this.#options.rejectXadd) {
       throw new Error('XADD failed');
@@ -110,8 +130,10 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
       payload = payloadIdx >= 0 && payloadIdx + 1 < data.length ? data[payloadIdx + 1] : '';
     }
 
+    // Preserve the complete field/value list exactly as a server would.
+    const fields = typeof data === 'string' ? [data, ...args] : [...data, ...args];
     const entryId = id === '*' ? `0-${stream.length}` : id;
-    stream.push({ id: entryId, payload });
+    stream.push({ id: entryId, payload, fields });
 
     return entryId;
   }
@@ -190,13 +212,14 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
 
     // Return seeded messages first (for testing)
     if (this.#options.seededMessages && this.#options.seededMessages.length > 0) {
-      const result: unknown[][] = [];
+      const entries: unknown[][] = [];
       for (const msg of this.#options.seededMessages) {
-        result.push([msg.id, ['payload', msg.payload]]);
+        const extra = Object.entries(msg.fields ?? {}).flatMap(([k, v]) => [k, v]);
+        entries.push([msg.id, ['payload', msg.payload, ...extra]]);
       }
       // Clear seeded messages after returning them once
       this.#options.seededMessages = [];
-      return result;
+      return [[stream, entries]];
     }
 
     if (!this.#streams.has(stream)) {
@@ -205,25 +228,34 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
 
     const streamData = this.#streams.get(stream)!;
 
-    // Get messages after the last ID (simulated as '>')
-    // For simplicity, return all messages not yet acked by this group
-    const result: unknown[][] = [];
+    // '>' semantics: entries never delivered to this group.
+    const entries: unknown[][] = [];
+    let delivered = this.#deliveredToGroup.get(stream);
+    if (!delivered) {
+      delivered = new Set();
+      this.#deliveredToGroup.set(stream, delivered);
+    }
+    if (!this.#pending.has(stream)) {
+      this.#pending.set(stream, new Map());
+    }
+    const streamPending = this.#pending.get(stream)!;
 
-    // Return new messages (not yet acked)
-    const streamPending = this.#pending.get(stream);
     for (const entry of streamData) {
       const key = `${group}:${entry.id}`;
-      if (!streamPending || !streamPending.has(key)) {
-        result.push([entry.id, ['payload', entry.payload]]);
-        // Mark as pending after returning
-        if (!streamPending) {
-          this.#pending.set(stream, new Map());
-        }
-        this.#pending.get(stream)!.set(key, { groupId: group, messageId: entry.id });
-      }
+      if (delivered.has(key)) continue;
+      entries.push([entry.id, entry.fields]);
+      delivered.add(key);
+      // Delivered entries enter the PEL until acked.
+      streamPending.set(key, { groupId: group, messageId: entry.id });
     }
 
-    return result.length > 0 ? result : null;
+    // Real XREADGROUP nests entries one level deeper, per stream:
+    // [[streamName, [[id, [field, value, ...]], ...]], ...]. Returning the bare
+    // entry list made every delivery unparseable by the broker, so its whole
+    // subscribe path — deserialize, metadata, handler, ack — never ran, while
+    // the two tests that looked like they covered it asserted only that
+    // `xreadgroup` had been called.
+    return entries.length > 0 ? [[stream, entries]] : null;
   }
 
   // deno-lint-ignore require-await
@@ -238,14 +270,10 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     let acked = 0;
     for (const id of ids) {
       const key = `${group}:${id}`;
-      if (streamPending.has(key)) {
-        streamPending.delete(key);
-        acked++;
-      } else {
-        // Mark as pending for future ack
-        streamPending.set(key, { groupId: group, messageId: id });
-        acked++;
-      }
+      // XACK removes the entry from the PEL. It does NOT make the entry
+      // eligible for a later `>` read — that is what `#deliveredToGroup`
+      // records, and it is deliberately left untouched here.
+      if (streamPending.delete(key)) acked++;
     }
 
     return acked;

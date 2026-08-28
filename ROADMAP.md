@@ -4346,20 +4346,26 @@ a kernel catch-all handler. **Depends on M42** (streaming SSR); coexists with M4
 > the normal pipeline, the telemetry request-span middleware (priority 30, runtime-agnostic) already
 > wraps every SSR request and emits one server span with W3C `traceparent` propagation — no M44 work
 > needed for request-level tracing. Known gaps the M44 plan should account for (do NOT silently
-> assume they work): (1) **No implicit span nesting across `await`** — the plugin registers no OTel
-> `ContextManager` (would pull `node:async_hooks`, breaking runtime independence), so spans from
-> auto-instrumentation and from loaders/actions are ROOTS, not children of the SSR request span; to
-> link a loader/action span, create it manually via `ITelemetryService` with an explicit
+> assume they work): (1) **No implicit span nesting across `await`** — ~~the plugin registers no
+> OTel `ContextManager` (would pull `node:async_hooks`, breaking runtime independence), so spans
+> from auto-instrumentation and from loaders/actions are ROOTS, not children of the SSR request
+> span; to link a loader/action span, create it manually via `ITelemetryService` with an explicit
 > `parentContext`. If M44 wants loader/action spans nested under the request span, that is a design
 > decision the plan must own (candidate: read the active span off `ctx.state`/`loadContext` and pass
-> it as parent). (2) **Server-side only** — M24b auto-instrumentation (`fetch` via undici) traces
-> server-side `fetch()` in loaders/actions on **Node only** (no-op on Deno/Bun/CF-Workers); browser
-> RR navigation + hydration are NOT traced and need a separate browser OTel setup (out of scope).
-> (3) **Multi-backend export** (Datadog / New Relic / App Insights simultaneously) is NOT a
-> built-in: the plugin wires a single exporter. Fan-out is via an OTLP→OpenTelemetry-Collector
-> deployment, or an injected `tracerProviderFactory` host with multiple span processors — an
-> app/deploy concern, not an M44 concern, but noted so M44 does not assume multi-destination tracing
-> exists.
+> it as parent).~~ **SUPERSEDED BY M75.** The plugin now registers an
+> `AsyncLocalStorageContextManager` from the OPTIONAL `@opentelemetry/context-async-hooks`, so in
+> real OTel mode a loader/action span created through `ITelemetryService` auto-parents under the SSR
+> request span with no explicit `parentContext`. Runtime independence is preserved because the
+> package is lazily imported and its absence degrades to one `warn` plus the previous flat shape,
+> never a startup failure. The explicit-`parentContext` route still works and remains the way to
+> guarantee the link when `contextPropagation: false` or the optional package is absent. (2)
+> **Server-side only** — M24b auto-instrumentation (`fetch` via undici) traces server-side `fetch()`
+> in loaders/actions on **Node only** (no-op on Deno/Bun/CF-Workers); browser RR navigation +
+> hydration are NOT traced and need a separate browser OTel setup (out of scope). (3)
+> **Multi-backend export** (Datadog / New Relic / App Insights simultaneously) is NOT a built-in:
+> the plugin wires a single exporter. Fan-out is via an OTLP→OpenTelemetry-Collector deployment, or
+> an injected `tracerProviderFactory` host with multiple span processors — an app/deploy concern,
+> not an M44 concern, but noted so M44 does not assume multi-destination tracing exists.
 
 ### Package: `@setu-ts/react-router-plugin`
 
@@ -7500,16 +7506,16 @@ rather than merely to pass. The SSE guard reads the registry through the new
 `ISseService.channelCount`, whose control is that same leaky case: the identical reading answers 50
 when the endpoint is written with `channel()`.
 
-## Milestone 75: Broker Trace Propagation ⬜ PLANNED
+## Milestone 75: Broker Trace Propagation ✅ COMPLETE
 
 **Objective:** Carry W3C trace context across the message broker, so a trace survives a publish.
 
-**The gap, verified from source.** `MessageMetadata.headers`
-(`packages/common/src/services/messaging.ts:21`) is declared and **no broker populates it**, so
-`headers` is `{}` on every delivered message and a consumer span is orphaned from its producer. The
-OTel auto-instrumentation that would inject it is Node-gated (M24b), while the CLI's default
-scaffold runtime is Deno — so the one mechanism that could close this is unavailable exactly where
-the framework points a new project.
+**The gap, verified from source.** `MessageMetadata.headers` is optional: RabbitMQ and Kafka read
+transport headers, while the other first-party brokers previously omitted them and NATS exposed its
+internal header object. No broker injected a W3C parent on publish. Separately, `withSpan` created
+spans without activating them, so work started inside a request was a sibling rather than a child.
+The Node-only auto-instrumentation route cannot close that framework-level gap on the CLI's Deno
+default; the telemetry activation seam does.
 
 - **In scope:** `traceparent` injected on publish and extracted on delivery across all seven
   `messaging-plugin` brokers; a `telemetry-plugin` seam that works off Node; the decision on whether
@@ -7710,5 +7716,5 @@ into whatever touches these files next.
 | 72        | ✅     | cli (transports + interactive, PR #191)        |
 | 73        | ✅     | realtime authentication (PR #197)              |
 | 74        | ✅     | realtime reads + sse contract (PR #196)        |
-| 75        | ⬜     | broker trace propagation                       |
+| 75        | ✅     | broker trace propagation (PR #201)             |
 | 76        | ✅     | standard decorators / experimentalDecorators   |

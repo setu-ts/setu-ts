@@ -3217,6 +3217,8 @@ interface MessagingCommonOptions {
   name?: string;
   /** Serializer for message payloads. @defaultValue new JsonSerializer() */
   serializer?: ISerializer;
+  /** Create producer and consumer spans when telemetry is registered. @defaultValue true */
+  tracing?: boolean;
 }
 
 // ── Default (in-memory). `broker` is optional so MessagingPlugin() and {} are valid. ──
@@ -3259,6 +3261,8 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
   url?: string;
   /** Injected NATS connection. */
   client?: INatsConnection;
+  /** Header factory required for propagation on an injected NATS connection. */
+  headersFactory?: () => INatsHeaders;
   /** JetStream stream name. @defaultValue 'MESSAGING' */
   streamName?: string;
   /** Default consumer group / queue name. */
@@ -3620,6 +3624,50 @@ export type {
 
 > **Kafka Commit Model:** Kafka uses the producer/consumer commit model — handler success
 > auto-commits; a thrown handler prevents commit.
+
+---
+
+### Trace context across the broker
+
+When `CAPABILITIES.TELEMETRY` is registered, the plugin wraps the broker so `publish`, `subscribe`,
+`request` and `respond` create producer and consumer spans, writing a W3C `traceparent` on publish
+and parenting delivery from the header it reads back. `MessagingPlugin({ tracing: false })` opts
+out; with no telemetry capability registered, behaviour is unchanged.
+
+Each broker uses the header channel its transport actually provides:
+
+| Broker          | Channel                                         | Notes                                                          |
+| --------------- | ----------------------------------------------- | -------------------------------------------------------------- |
+| `memory`        | in-process metadata                             | No wire; headers are handed straight to the subscriber.        |
+| `redis-streams` | extra `XADD` field/value pairs beside `payload` | Any non-`payload` field is read back as a header.              |
+| `rabbitmq`      | AMQP `properties.headers`                       | Field-table values are normalized — see below.                 |
+| `nats`          | `MsgHdrs`                                       | Needs a header factory — see the caveat below.                 |
+| `kafka`         | record `headers`                                | String values; a delivered `Buffer` value is decoded as UTF-8. |
+| `pubsub`        | message `attributes`                            | Pub/Sub attribute values must be strings.                      |
+| `service-bus`   | `applicationProperties`                         | SDK values are normalized — see below.                         |
+
+`MessageMetadata.headers` is populated by every first-party broker: it carries the headers the
+broker read, and `{}` when the transport carried none. Three transports can deliver values that are
+not strings — AMQP field tables carry numbers, booleans, timestamps and byte arrays; Service Bus
+types its application properties `number | boolean | string | Date | null`; kafkajs delivers
+`Buffer` and permits arrays — so each is normalized to satisfy the declared
+`Record<string, string>`. A byte value is decoded as UTF-8, a number or boolean is stringified, a
+`Date` becomes ISO-8601, and the first element of a repeated header is taken. A value with no
+faithful string form (a nested table, `null`, `NaN`) is **dropped** rather than rendered as
+`[object Object]`, so a missing key reads as absent rather than as a corrupted value. It is absent
+only for a `'custom'` broker that does not supply it. Branch on emptiness rather than on the
+member's presence.
+
+Two cases drop the header rather than propagating, both by construction:
+
+- **NATS with an injected `client`.** A `MsgHdrs` can only be built by the nats module's `headers()`
+  function, and an injected connection carries no module. Pass `NatsOptions.headersFactory` (for
+  example `() => nats.headers()`) alongside the client. Without it the broker publishes normally and
+  reports the dropped headers once through its logger.
+- **A Pub/Sub or Service Bus transport injected via `client` that predates this release.**
+  `IPubSubTransport.publish` and `IServiceBusTransport.send` gained an optional third parameter
+  (`attributes` / `applicationProperties`), and their delivered-message callbacks gained a matching
+  optional member. A two-parameter implementation stays assignable and simply ignores the header.
 
 ---
 
@@ -5160,18 +5208,35 @@ bypass the lazy import entirely.
 
 ### Options
 
-| Option                  | Type                                      | Required        | Description                                        |
-| ----------------------- | ----------------------------------------- | --------------- | -------------------------------------------------- |
-| `serviceName`           | `string`                                  | Yes (real mode) | Service name reported to the exporter              |
-| `serviceVersion`        | `string`                                  | No              | Service version (default: `'1.0.0'`)               |
-| `exporter`              | `'otlp' \| 'console'`                     | No              | Exporter kind; absent = noop mode                  |
-| `endpoint`              | `string`                                  | Yes (otlp)      | OTLP HTTP endpoint URL                             |
-| `headers`               | `Record<string, string>`                  | No              | Optional OTLP HTTP headers                         |
-| `sampling`              | `{ type: 'traceidratio'; ratio: number }` | No              | Sampling config (default ratio: 1.0)               |
-| `tracerProviderFactory` | `() => Promise<TracerHost>`               | No              | Injectable factory to bypass lazy import           |
-| `middleware`            | `boolean`                                 | No              | Register request-span middleware (default: `true`) |
-| `spanProcessor`         | `'simple' \| 'batch'`                     | No              | Span processor (`'simple'` by default)             |
-| `instrumentations`      | `InstrumentationsConfig`                  | No              | Auto-instrumentation config (runtime-gated no-op)  |
+| Option                  | Type                                                       | Required        | Description                                                                                                                                                                                             |
+| ----------------------- | ---------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serviceName`           | `string`                                                   | Yes (real mode) | Service name reported to the exporter                                                                                                                                                                   |
+| `serviceVersion`        | `string`                                                   | No              | Service version (default: `'1.0.0'`)                                                                                                                                                                    |
+| `exporter`              | `'otlp' \| 'console'`                                      | No              | Exporter kind; absent = noop mode                                                                                                                                                                       |
+| `endpoint`              | `string`                                                   | Yes (otlp)      | OTLP HTTP endpoint URL                                                                                                                                                                                  |
+| `headers`               | `Record<string, string>`                                   | No              | Optional OTLP HTTP headers                                                                                                                                                                              |
+| `sampling`              | `{ type: 'traceidratio'; ratio: number }`                  | No              | Sampling config (default ratio: 1.0)                                                                                                                                                                    |
+| `tracerProviderFactory` | `() => Promise<TracerHost>`                                | No              | Injectable factory to bypass lazy import                                                                                                                                                                |
+| `middleware`            | `boolean`                                                  | No              | Register request-span middleware (default: `true`)                                                                                                                                                      |
+| `spanProcessor`         | `'simple' \| 'batch'`                                      | No              | Span processor (`'simple'` by default)                                                                                                                                                                  |
+| `instrumentations`      | `InstrumentationsConfig`                                   | No              | Auto-instrumentation config (runtime-gated no-op)                                                                                                                                                       |
+| `contextPropagation`    | `boolean`                                                  | No              | Activate real OTel spans (default: `true`)                                                                                                                                                              |
+| `contextManagerFactory` | `() => Promise<{ enable(): unknown; disable(): unknown }>` | No              | Injectable context-manager **factory** — it returns a promise of a manager, not a manager. The return type is structural, so it can resolve to an OTel context manager with no import from this package |
+
+### Span nesting and broker propagation
+
+In real OTel mode, `withSpan` activates the span while its callback runs, so nested work inherits
+the active parent. Implicit inheritance holds only when the plugin is in real OTel mode,
+`contextPropagation` is not `false`, and the async-local context manager registered successfully;
+noop mode, fallback mode, `contextPropagation: false`, and a failed registration — the optional
+package not loading, or the registration call throwing — all leave spans flat. A host that already
+owns a context manager is NOT a failure: the plugin adopts it and nesting still works. A failed
+registration is logged, never thrown. Where the parent relationship must hold regardless of
+activation, pass `parentContext` explicitly. When `MessagingPlugin` finds telemetry, it creates
+`publish <topic>` producer spans and `receive <topic>` consumer spans, writes W3C `traceparent` on
+the transport, and parents delivery from the header. Set `tracing: false` to opt out. All
+first-party brokers expose the read transport headers through `MessageMetadata.headers`, using `{}`
+when the channel is empty.
 
 ### Auto-instrumentation
 
@@ -5274,23 +5339,30 @@ The telemetry contract is framework-owned and exported from `@setu-ts/common` (z
 importable without the OTel SDK installed). The telemetry-plugin translates these to OTel types at
 its implementation seam.
 
-| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                             |
-| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`.                                                  |
-| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                         |
-| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                    |
-| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                   |
-| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                   |
-| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                    |
-| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly (there is no implicit parent linking — see note below). |
-| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                        |
-| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                        |
+| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                                       |
+| -------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`.                                                            |
+| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                                   |
+| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                              |
+| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                             |
+| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                             |
+| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                              |
+| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below. |
+| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                  |
+| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                  |
 
-> **No implicit parent/child linking.** The framework registers no OTel `ContextManager` (the only
-> runtime-agnostic option depends on `node:async_hooks`), so a `withSpan` nested inside another does
-> not auto-parent. To create a child span, pass `parentContext` (or the extracted context) on
-> `SpanOptions`. The request-span middleware always passes the incoming `traceparent` as the parent
-> explicitly, so cross-process propagation (incoming header → server span) works out of the box.
+> **Implicit parent/child linking is conditional.** Since M75 the plugin DOES register an OTel
+> `ContextManager` — the `AsyncLocalStorageContextManager` from the optional
+> `@opentelemetry/context-async-hooks` — so in real OTel mode a `withSpan` nested inside another
+> auto-parents. That holds only while a context manager is active: the plugin either registers its
+> own or adopts one the host already owns, and both nest. It does NOT hold in noop or fallback mode,
+> under `contextPropagation: false`, or when the optional package cannot be loaded and registration
+> therefore fails — there, spans are recorded but unparented.
+>
+> Pass `parentContext` (or the extracted context) on `SpanOptions` wherever the relationship must
+> hold regardless of activation. The request-span middleware always passes the incoming
+> `traceparent` as the parent explicitly, so cross-process propagation (incoming header → server
+> span) works out of the box in every mode.
 
 ---
 

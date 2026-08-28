@@ -37,17 +37,19 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option             | Type                     | Default    | Description                                          |
-| ------------------ | ------------------------ | ---------- | ---------------------------------------------------- |
-| `serviceName`      | `string`                 | —          | Required when an exporter is configured.             |
-| `serviceVersion`   | `string`                 | `'1.0.0'`  | Reported to the exporter.                            |
-| `exporter`         | `SpanExporterKind`       | —          | Absent means noop mode.                              |
-| `endpoint`         | `string`                 | —          | Required when `exporter: 'otlp'`.                    |
-| `headers`          | `Record<string, string>` | —          | Sent with OTLP requests.                             |
-| `sampling`         | `SamplingConfig`         | —          | Sampling configuration.                              |
-| `spanProcessor`    | `'simple' \| 'batch'`    | `'simple'` | Use `'batch'` in production.                         |
-| `middleware`       | `boolean`                | `true`     | Register the request-span middleware.                |
-| `instrumentations` | `InstrumentationsConfig` | none       | Per-instrumentation auto-instrumentation; see below. |
+| Option                  | Type                                                       | Default    | Description                                                                                                                                                                                                                                           |
+| ----------------------- | ---------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serviceName`           | `string`                                                   | —          | Required when an exporter is configured.                                                                                                                                                                                                              |
+| `serviceVersion`        | `string`                                                   | `'1.0.0'`  | Reported to the exporter.                                                                                                                                                                                                                             |
+| `exporter`              | `SpanExporterKind`                                         | —          | Absent means noop mode.                                                                                                                                                                                                                               |
+| `endpoint`              | `string`                                                   | —          | Required when `exporter: 'otlp'`.                                                                                                                                                                                                                     |
+| `headers`               | `Record<string, string>`                                   | —          | Sent with OTLP requests.                                                                                                                                                                                                                              |
+| `sampling`              | `SamplingConfig`                                           | —          | Sampling configuration.                                                                                                                                                                                                                               |
+| `spanProcessor`         | `'simple' \| 'batch'`                                      | `'simple'` | Use `'batch'` in production.                                                                                                                                                                                                                          |
+| `middleware`            | `boolean`                                                  | `true`     | Register the request-span middleware.                                                                                                                                                                                                                 |
+| `instrumentations`      | `InstrumentationsConfig`                                   | none       | Per-instrumentation auto-instrumentation; see below.                                                                                                                                                                                                  |
+| `contextPropagation`    | `boolean`                                                  | `true`     | Activate real spans for nested work.                                                                                                                                                                                                                  |
+| `contextManagerFactory` | `() => Promise<{ enable(): unknown; disable(): unknown }>` | —          | Injectable async-local context manager loader: a **factory** returning a promise, not a manager instance. Its return type is structural on purpose, so the factory can resolve to an OTel context manager without importing a type from this package. |
 
 ## Auto-instrumentation
 
@@ -69,6 +71,24 @@ logger plugin still boots, with nothing emitted.
 
 The request-span middleware reads and writes the W3C `traceparent` header, so traces join across
 services without extra configuration.
+
+Span **nesting** is a separate mechanism with its own preconditions. In real OTel mode the plugin
+registers an async-local context manager and `withSpan` runs its callback with the span active, so
+nested work — including messaging publishes — becomes a child span. That applies only when all three
+hold: the plugin is in real OTel mode (not noop or fallback), `contextPropagation` is not `false`,
+and a context manager is active. Registration is reported through the logger and never throws.
+
+Two outcomes count as active, and only one counts as failure:
+
+- **Registered.** The plugin installed its own async-local manager. Nesting works.
+- **Adopted.** `setGlobalContextManager` reported that the host already owns a manager, so the
+  plugin keeps the host's. Nesting still works — the existing manager carries the context — which is
+  why this is reported as active rather than as a failure.
+- **Failed.** The optional `@opentelemetry/context-async-hooks` package could not be loaded, or the
+  registration call itself threw. Only here are spans still recorded but arriving as unrelated
+  siblings rather than a tree.
+
+Pass an explicit `parentContext` where the relationship must hold regardless.
 
 ## Multiple backends
 

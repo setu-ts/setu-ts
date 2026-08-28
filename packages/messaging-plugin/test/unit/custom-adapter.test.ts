@@ -21,6 +21,9 @@ describe('asBrokerAdapter', () => {
       isReady: () => true,
       reachability: () => Promise.resolve(true),
       isHealthy: () => Promise.resolve(true),
+      publishWithHeaders: () => Promise.resolve(),
+      subscribeWithHeaders: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      requestWithHeaders: () => Promise.resolve(null),
     });
     const adapter = asBrokerAdapter(broker);
     expect(adapter).toBe(broker);
@@ -103,6 +106,18 @@ describe('asBrokerAdapter', () => {
     expect(published).toBe(true);
   });
 
+  it('drops headers when adapting a public custom broker', async () => {
+    let published = false;
+    const adapter = asBrokerAdapter(createMinimalBroker({
+      publish: () => {
+        published = true;
+        return Promise.resolve();
+      },
+    }));
+    await adapter.publishWithHeaders('topic', { data: 1 }, { traceparent: '00-parent' });
+    expect(published).toBe(true);
+  });
+
   it('delegates subscribe to instance', async () => {
     let subscribed = false;
     const broker = createMinimalBroker({
@@ -113,6 +128,7 @@ describe('asBrokerAdapter', () => {
     });
     const adapter = asBrokerAdapter(broker);
     await adapter.subscribe('topic', () => {});
+    await adapter.subscribeWithHeaders('topic', () => {}, {});
     expect(subscribed).toBe(true);
   });
 
@@ -126,6 +142,7 @@ describe('asBrokerAdapter', () => {
     });
     const adapter = asBrokerAdapter(broker);
     await adapter.request('topic', {});
+    await adapter.requestWithHeaders('topic', {}, { traceparent: '00-parent' });
     expect(requested).toBe(true);
   });
 

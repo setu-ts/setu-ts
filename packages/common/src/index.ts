@@ -70,6 +70,15 @@ export type {
 export { replacePrincipal, replaceTenant, sealRequestIdentity } from './request-identity.ts';
 export { CLIENT_IP_STATE_KEY } from './state-keys.ts';
 
+// W3C trace context codec
+export {
+  contextToTraceparent,
+  extractContextFromHeaders,
+  parseTraceparentToContext,
+  TRACEPARENT_HEADER,
+  TRACESTATE_HEADER,
+} from './trace-context.ts';
+
 // HTTP abstractions
 export type {
   HandlerResult,

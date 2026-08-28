@@ -3495,6 +3495,77 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `publish` with one, because the backplane publisher builds its frame with `JSON.stringify(msg)`
   outside any `try`. Developed in an isolated worktree off `main`, in parallel with M73, which it
   does not depend on) — complete (PR #196)
+- **Milestone 75** (`packages/common` + `packages/telemetry-plugin` + `packages/messaging-plugin` —
+  broker trace propagation. **The ROADMAP's premise did not survive source-checking, and correcting
+  it was half the milestone.** It said `MessageMetadata.headers` "is declared and no broker
+  populates it, so `headers` is `{}` on every delivered message"; measured per broker, RabbitMQ and
+  Kafka DID populate it, four omitted it entirely (so the delivered value was `undefined`, never
+  `{}`), and NATS populated it with the wrong object. And the gap was **two independent breaks**,
+  not one: no broker injected a `traceparent` on publish, AND `TelemetryService.withSpan` never
+  called `context.with`, so a span created anywhere inside a request handler was a fresh root.
+  Closing only the broker half yields a correctly-linked producer→consumer pair floating in its OWN
+  trace, disconnected from the request that caused it — which is what every fake-backed test in the
+  package passes in. `TracerHost` gains an optional `activate?`, `withSpan` uses it, and the plugin
+  registers an `AsyncLocalStorageContextManager` behind a literal lazy `npm:` import; failure is one
+  `warn` and a degrade, never a throw. `contextPropagation: false` restores the flat shape. **Span
+  nesting is a behaviour change to exported trace shape** and is CHANGELOG'd as one.
+
+  **Four external facts were established by probe rather than inferred, and two changed the
+  design.** OTel's default global context manager is `NoopContextManager`, whose `context.with`
+  propagates **nothing at all** — not even synchronously — so activation is inert until a manager is
+  registered; `AsyncLocalStorageContextManager` works on Deno across `await` and does **not** need
+  `enable()` (its store is built in the constructor), which is why the shipped code deliberately
+  omits that call. A real `MsgHdrs` cast to a plain object yields `undefined` for every key and
+  `Object.keys` of `['_code','_description','headers']` — its internals — which is the D2 defect.
+  And Pub/Sub `attributes` (string values only) plus Service Bus `applicationProperties` exist on
+  both directions, so all seven brokers can carry a header and no payload envelope is needed —
+  enveloping was refused because plain pub/sub is the cross-service surface and a foreign consumer
+  would break (the M14d wire change was acceptable only because RPC is framework-internal).
+
+  The trace-context codec is **promoted** to `common` and `telemetry-plugin` deletes its copies, so
+  this removes a definition rather than adding one (not the M30b `pemToDer` case). One
+  `TracedBroker` decorator owns all span work, so the seven brokers get transport plumbing only and
+  RPC traces for free through `RequestReplyDeps.publish`. `MessageMetadata.headers` stays
+  **optional** — requiring it breaks out-of-repo implementors without making any of them populate it
+  — but becomes a populated contract, with `{}` meaning "read the channel, it was empty" and
+  `undefined` meaning "no channel". `src/index.ts` gains nothing in `messaging-plugin`; a
+  `barrel-exports` test pins that.
+
+  **Verification found the headline deliverables asserted almost nothing, and one pre-existing hole
+  that had hidden a whole code path.** `header-conformance.test.ts` was named for all seven brokers
+  and drove `InMemoryBroker` alone — it would have passed with the other six broken; it now runs one
+  table over all seven, and six of the seven passed on the first real run. `messaging-telemetry`
+  asserted the consumer's parent traceId was `toBeDefined()` rather than that it MATCHED, so a span
+  parented into the wrong trace satisfied it; the fixture could not express the assertion at all
+  (`RecordedSpan` carried no span context) and now does. The pre-existing hole:
+  `FakeRedisStreamsClient` returned XREADGROUP entries **unnested**, where real Redis nests them
+  under `[streamName, entries]`, so `RedisStreamsBroker`'s entire delivery path — deserialize,
+  metadata, handler, ack — had **never run in tests**, while the two tests that looked like they
+  covered it asserted only that `xreadgroup` had been CALLED (one is titled "READ-BACK: message
+  round-trip"). The fake also discarded every stream field except `payload`, which is the channel
+  the header rides. Both fixed, both weak tests given real assertions. `NatsOptions.logger` was dead
+  surface — set by the plugin, read by nothing — and is now the sink for the dropped-header report
+  (`KafkaOptions.logger` is still dead; noted, not fixed, since finding it a use is outside this
+  milestone). `registerContextManager` returned `setGlobalContextManager(m) || true`, a tautology
+  that made the return value dead and 100% coverage vacuous; it now reports a discriminated outcome
+  distinguishing "I registered it" from "the host already had one" (both usable) from a named
+  failure. Its registration call is guarded too — found because my own test title claimed "never
+  throws" while asserting the opposite. NATS also had a dead `resolveClient` lazy branch duplicating
+  the connect logic; there is one connect path now.
+
+  **The proof is real OpenTelemetry, and both halves are independently controlled.**
+  `trace-continuity-real.test.ts` drives the real API, SDK and context manager and asserts the
+  finished spans' parent chain: `POST /orders` → `publish` → `receive`, one trace. Removing
+  activation makes it 2 traces. But a second case was needed and is the more instructive one:
+  in-memory delivery runs INSIDE the producer's active context, so the consumer inherits the trace
+  ambiently and the header is **not** load-bearing there — writing the header under a wrong name
+  still passed. The cross-process case captures what the producer put on the wire and delivers it
+  into a second broker from a clean context, which is what a real hop does; that case fails the
+  moment the header is wrong. Real RabbitMQ 4 and Redis 7 round-trips are committed and guarded, and
+  the Redis one was shown to discriminate against a live server. Also fixed: my own insertion split
+  `TelemetryPlugin` from its JSDoc so the block documented the new function instead (the M70m
+  stacked-docblock defect), caught by the M38 ratchet — which the previous commit had left failing
+  at 769 against a 752 baseline) — complete (PR #201)
 - **Milestone 76** (`decorator-plugin` + `openapi-plugin` + `starters/rest-starter` + `cli` +
   `apps/di-decorators` + docs — TC39 standard decorators, retiring `experimentalDecorators`. Every
   shipped decorator was the LEGACY form, and Deno deprecates the option the whole surface rests on,
@@ -3577,7 +3648,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   surfaced. Also fixed two pre-existing defects found in passing: a garbled doc paragraph at the
   tsconfig emitter, and a **duplicate `### Changed` heading in the CHANGELOG's `Unreleased`
   section** — the exact defect the alpha.9 release caught once already) — complete (PR #200)
-- **Next milestone** — **M75** (broker trace propagation).
+- **Next milestone** — **M40** (final polish and release).
 
 ## Verification (run before declaring any work done)
 

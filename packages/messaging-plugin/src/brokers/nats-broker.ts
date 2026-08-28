@@ -13,7 +13,7 @@ import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
-import type { INatsConnection, NatsOptions } from '../interfaces/index.ts';
+import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
 
 /**
  * Lazily load nats at runtime.
@@ -46,17 +46,34 @@ export function validateClient(client: unknown): client is INatsConnection {
 }
 
 /**
+ * The connection plus the header factory that came with it.
+ *
+ * A lazily-loaded nats module carries `headers()`, so a real connection can
+ * always build `MsgHdrs`. An injected connection carries no module, so the
+ * factory is absent unless the application supplied one through
+ * {@linkcode NatsOptions.headersFactory}.
+ */
+interface ResolvedNatsClient {
+  readonly connection: INatsConnection;
+  readonly headersFactory?: () => INatsHeaders;
+}
+
+/**
  * Resolve the NATS connection: prefer injected client, then lazy-load nats.
+ *
+ * This is the single connect path. An earlier revision branched in `connect()`
+ * and left this function's lazy arm unreachable — the same logic in two places,
+ * one of them dead.
  *
  * @param url - NATS connection URL(s)
  * @param injectedClient - Optionally injected NATS connection
- * @returns The resolved connection
+ * @returns The resolved connection and, for a lazily-loaded module, its header factory
  * @throws {Error} If no client injected and nats cannot be loaded
  */
 async function resolveClient(
   url: string,
   injectedClient?: INatsConnection,
-): Promise<INatsConnection> {
+): Promise<ResolvedNatsClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
       throw new Error(
@@ -64,11 +81,14 @@ async function resolveClient(
           '(needs: jetstream, jetstreamManager, close)',
       );
     }
-    return injectedClient;
+    return { connection: injectedClient };
   }
   const nats = await loadNats();
   const connection = await nats.connect({ servers: url });
-  return connection as unknown as INatsConnection;
+  return {
+    connection: connection as unknown as INatsConnection,
+    headersFactory: () => nats.headers() as unknown as INatsHeaders,
+  };
 }
 
 /**
@@ -91,6 +111,10 @@ export class NatsBroker implements MessageBrokerAdapter {
   #url: string;
   #injectedClient: INatsConnection | undefined;
   #streamName: string;
+  #headersFactory: (() => INatsHeaders) | undefined;
+  #logger: { error: (msg: string) => void } | undefined;
+  /** Guards the no-header-channel report so it is emitted once, not per publish. */
+  #headerWarningEmitted = false;
   #connection: INatsConnection | null = null;
   #js: unknown | null = null;
   #ready = false;
@@ -116,9 +140,11 @@ export class NatsBroker implements MessageBrokerAdapter {
     this.#url = options?.url ?? 'nats://localhost:4222';
     this.#injectedClient = options?.client;
     this.#streamName = options?.streamName ?? 'MESSAGING';
+    this.#headersFactory = options?.headersFactory;
+    this.#logger = options?.logger;
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
-      publish: (topic, message) => this.publish(topic, message),
+      publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
       setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
@@ -171,7 +197,10 @@ export class NatsBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
-    this.#connection = await resolveClient(this.#url, this.#injectedClient);
+    const resolved = await resolveClient(this.#url, this.#injectedClient);
+    this.#connection = resolved.connection;
+    // An explicitly supplied factory wins; the module's own is the fallback.
+    this.#headersFactory ??= resolved.headersFactory;
 
     // Ensure stream exists (unconditional for both injected and real connections)
     const realConn = this.#connection as unknown as { jetstreamManager(): Promise<unknown> };
@@ -320,6 +349,15 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  /** Publishes a message with framework-owned transport headers. @internal */
+  publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#connection) {
       return Promise.reject(new Error('NatsBroker is not connected'));
     }
@@ -327,8 +365,21 @@ export class NatsBroker implements MessageBrokerAdapter {
     const encoder = new TextEncoder();
     const data = encoder.encode(serialized);
 
-    const realJs = this.#js as unknown as { publish(subject: string, data: Uint8Array): void };
-    realJs.publish(topic, data);
+    const realJs = this.#js as unknown as {
+      publish(subject: string, data: Uint8Array, options?: { headers: INatsHeaders }): void;
+    };
+    const natsHeaders = this.#headersFactory?.();
+    if (natsHeaders) {
+      for (const [key, value] of Object.entries(headers)) natsHeaders.set(key, value);
+      realJs.publish(topic, data, { headers: natsHeaders });
+    } else {
+      // No `MsgHdrs` factory: an injected connection carries no nats module, so
+      // there is nothing to build headers with. Publishing still succeeds, but
+      // trace context cannot cross this broker — report it once rather than
+      // dropping the header silently on every publish.
+      this.#reportMissingHeaderChannel(headers);
+      realJs.publish(topic, data);
+    }
     return Promise.resolve();
   }
 
@@ -406,7 +457,7 @@ export class NatsBroker implements MessageBrokerAdapter {
           topic,
           messageId: String(msgTyped.seq),
           timestamp: new Date(msgTyped.info.timestamp),
-          headers: (msgTyped.headers as Readonly<Record<string, string>>) ?? undefined,
+          headers: toHeaderRecord(msgTyped.headers),
         };
 
         const handlerResult = handler(deserialized, metadata);
@@ -446,6 +497,15 @@ export class NatsBroker implements MessageBrokerAdapter {
     };
   }
 
+  /** Subscribes through the header-aware internal path. @internal */
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
+  }
+
   /**
    * Sends a request and awaits a single correlated reply.
    *
@@ -458,7 +518,17 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
-    return this.#rr.request<TRes>(topic, message, options);
+    return this.requestWithHeaders(topic, message, {}, options);
+  }
+
+  /** Sends request-reply traffic with framework-owned headers. @internal */
+  requestWithHeaders<TReq, TRes>(
+    topic: string,
+    message: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options, headers);
   }
 
   /**
@@ -483,4 +553,33 @@ export class NatsBroker implements MessageBrokerAdapter {
       options,
     );
   }
+  /**
+   * Reports, at most once, that headers were dropped for want of a `MsgHdrs`
+   * factory. Silent when the caller supplied no headers, since nothing is lost.
+   *
+   * @param headers - The headers that could not be attached
+   */
+  #reportMissingHeaderChannel(headers: Readonly<Record<string, string>>): void {
+    if (this.#headerWarningEmitted || Object.keys(headers).length === 0) {
+      return;
+    }
+    this.#headerWarningEmitted = true;
+    this.#logger?.error(
+      'NatsBroker: transport headers dropped because no NATS headers factory is available. ' +
+        'Pass NatsOptions.headersFactory (for example `() => nats.headers()`) alongside an ' +
+        'injected client so trace context can cross the broker.',
+    );
+  }
+}
+
+function toHeaderRecord(headers: unknown): Readonly<Record<string, string>> {
+  if (!headers || typeof headers !== 'object') return {};
+  const candidate = headers as { keys?: unknown; get?: unknown };
+  if (typeof candidate.keys !== 'function' || typeof candidate.get !== 'function') return {};
+  const values: Record<string, string> = {};
+  for (const key of candidate.keys() as Iterable<string>) {
+    const value = (candidate.get as (name: string) => unknown)(key);
+    if (typeof value === 'string') values[key] = value;
+  }
+  return values;
 }

@@ -54,6 +54,81 @@ describe('NatsBroker', () => {
     await broker.disconnect();
   });
 
+  it('publishes supplied framework headers through the injected factory', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeNatsConnection();
+    const values = new Map<string, string>();
+    const broker = new NatsBroker(runtime, serializer, {
+      client: fakeConnection,
+      headersFactory: () => ({
+        set: (key, value) => values.set(key, value),
+        get: (key) => values.get(key),
+        keys: () => values.keys(),
+      }),
+    });
+    await broker.connect();
+
+    await broker.publishWithHeaders('test.subject', { ok: true }, { traceparent: '00-test' });
+    expect(values.get('traceparent')).toBe('00-test');
+    await broker.disconnect();
+  });
+
+  it('reports once when headers are dropped for want of a MsgHdrs factory', async () => {
+    // An injected connection carries no nats module, so there is no `headers()`
+    // to build MsgHdrs with. Publishing must still succeed, but dropping trace
+    // context silently is what made D2 invisible — so it is reported, once.
+    const errors: string[] = [];
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeNatsConnection(),
+      logger: { error: (msg) => errors.push(msg) },
+    });
+    await broker.connect();
+
+    await broker.publishWithHeaders('orders', { id: 1 }, { traceparent: '00-a' });
+    await broker.publishWithHeaders('orders', { id: 2 }, { traceparent: '00-b' });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('headersFactory');
+    await broker.disconnect();
+  });
+
+  it('stays silent when no headers were supplied, since nothing is lost', async () => {
+    const errors: string[] = [];
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeNatsConnection(),
+      logger: { error: (msg) => errors.push(msg) },
+    });
+    await broker.connect();
+
+    await broker.publish('orders', { id: 1 });
+
+    expect(errors).toEqual([]);
+    await broker.disconnect();
+  });
+
+  it('normalizes delivered NATS headers through keys and get', async () => {
+    const values = new Map([['traceparent', '00-parent']]);
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeNatsConnection({
+        seededMessages: [{
+          subject: 'orders',
+          data: '{"id":"1"}',
+          seq: 1,
+          timestamp: '2025-01-01T00:00:00.000Z',
+          headers: { keys: () => values.keys(), get: (key) => values.get(key) },
+        }],
+      }),
+    });
+    await broker.connect();
+    let headers: Readonly<Record<string, string>> | undefined;
+    await broker.subscribeWithHeaders('orders', (_message, metadata) => {
+      headers = metadata.headers;
+    });
+    expect(headers).toEqual({ traceparent: '00-parent' });
+    await broker.disconnect();
+  });
+
   it('subscribe creates durable consumer', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();

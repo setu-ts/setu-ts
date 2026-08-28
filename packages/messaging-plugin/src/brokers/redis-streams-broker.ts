@@ -15,6 +15,12 @@ import { RequestReplyCore } from './request-reply-core.ts';
 import type { IRedisStreamsClient, RedisStreamsOptions } from '../interfaces/index.ts';
 
 /**
+ * The stream field carrying the serialized message body. Reserved: it is never
+ * written as a transport header, and the first occurrence wins on read.
+ */
+const PAYLOAD_FIELD = 'payload';
+
+/**
  * Lazily load ioredis at runtime. Pin to 5.x for stability.
  *
  * @returns The ioredis constructor
@@ -139,7 +145,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     this.#activeSubscriptions = new Map();
     this.#pollIntervals = new Map();
     this.#rr = new RequestReplyCore({
-      publish: (topic, message) => this.publish(topic, message),
+      publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
       setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
@@ -258,13 +264,28 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  /** Publishes a message with framework-owned transport headers. @internal */
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisStreamsBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
-    // XADD with '*' for auto-generated ID
-    await this.#client.xadd(topic, '*', 'payload', serialized);
+    // XADD with '*' for auto-generated ID. Headers ride as extra field/value
+    // pairs beside `payload`, so `payload` is RESERVED: emitting a second field
+    // with that name would shadow the body, and the reader would hand the
+    // header value to the deserializer instead of the message.
+    const fields = Object.entries(headers)
+      .filter(([key]) => key !== PAYLOAD_FIELD)
+      .flatMap(([key, value]) => [key, value]);
+    await this.#client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields);
   }
 
   /**
@@ -335,10 +356,14 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
             const fields = entry[1];
             // fields is array of [field, value, field, value, ...]
             let payload: string | null = null;
+            const headers: Record<string, string> = {};
             for (let i = 0; i < fields.length; i += 2) {
-              if (fields[i] === 'payload') {
-                payload = fields[i + 1] as string;
-                break;
+              if (fields[i] === PAYLOAD_FIELD) {
+                // First occurrence wins, so a foreign producer that wrote a
+                // duplicate `payload` field cannot shadow the real body.
+                payload ??= fields[i + 1] as string;
+              } else {
+                headers[fields[i]] = fields[i + 1];
               }
             }
 
@@ -351,6 +376,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
               topic,
               messageId: entryId,
               timestamp: new Date(parseInt(entryId.split('-')[0])),
+              headers,
             };
 
             try {
@@ -395,6 +421,15 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     };
   }
 
+  /** Subscribes through the header-aware internal path. @internal */
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
+  }
+
   /**
    * Sends a request and awaits a single correlated reply.
    *
@@ -407,7 +442,17 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
-    return this.#rr.request<TRes>(topic, message, options);
+    return this.requestWithHeaders(topic, message, {}, options);
+  }
+
+  /** Sends request-reply traffic with framework-owned headers. @internal */
+  requestWithHeaders<TReq, TRes>(
+    topic: string,
+    message: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options, headers);
   }
 
   /**

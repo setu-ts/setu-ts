@@ -9,6 +9,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
@@ -158,7 +159,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     }
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
-      publish: (topic, message) => this.publish(topic, message),
+      publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
       setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
@@ -277,7 +278,16 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  /** Publishes a message with framework-owned transport headers. @internal */
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }
@@ -298,6 +308,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     // Build properties
     const properties: Record<string, unknown> = {};
     properties.messageId = this.#runtime.uuid();
+    properties.headers = headers;
     if (typeof message === 'object' && message !== null) {
       // Try to extract existing messageId/timestamp/headers if present
       const msg = message as Record<string, unknown>;
@@ -398,6 +409,15 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     };
   }
 
+  /** Subscribes through the header-aware internal path. @internal */
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
+  }
+
   /**
    * Sends a request and awaits a single correlated reply.
    *
@@ -410,7 +430,17 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
-    return this.#rr.request<TRes>(topic, message, options);
+    return this.requestWithHeaders(topic, message, {}, options);
+  }
+
+  /** Sends request-reply traffic with framework-owned headers. @internal */
+  requestWithHeaders<TReq, TRes>(
+    topic: string,
+    message: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options, headers);
   }
 
   /**
@@ -504,8 +534,11 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
               this.#runtime.uuid(),
             timestamp: msgTyped.properties?.timestamp as Date ??
               new Date(this.#runtime.now()),
-            headers: (msgTyped.properties?.headers as Readonly<Record<string, string>>) ??
-              undefined,
+            headers: normalizeTransportHeaders(
+              msgTyped.properties?.headers as
+                | Readonly<Record<string, TransportHeaderValue>>
+                | undefined,
+            ),
           };
 
           await handler(deserialized, metadata);

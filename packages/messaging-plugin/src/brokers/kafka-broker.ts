@@ -9,6 +9,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { normalizeTransportHeaders } from './header-normalize.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
@@ -132,7 +133,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
-      publish: (topic, message) => this.publish(topic, message),
+      publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
       setTimeout: (fn, ms) => this.#runtime.setTimeout(fn, ms),
@@ -314,7 +315,16 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @returns Resolves when published
    * @since 0.1.0
    */
-  async publish<T>(topic: string, message: T): Promise<void> {
+  publish<T>(topic: string, message: T): Promise<void> {
+    return this.publishWithHeaders(topic, message, {});
+  }
+
+  /** Publishes a message with framework-owned transport headers. @internal */
+  async publishWithHeaders<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<void> {
     if (!this.#producer) {
       throw new Error('KafkaBroker is not connected');
     }
@@ -328,9 +338,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
       topic,
       messages: [{
         value: serialized,
-        headers: typeof message === 'object' && message !== null
-          ? (message as Record<string, string>)
-          : undefined,
+        headers,
       }],
     });
   }
@@ -394,7 +402,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
           key: Uint8Array | null;
           value: Uint8Array | null;
           timestamp: string;
-          headers: Record<string, Uint8Array>;
+          headers?: Record<
+            string,
+            Uint8Array | string | readonly (Uint8Array | string)[] | undefined
+          >;
           partition: number;
           offset: string;
         };
@@ -407,9 +418,11 @@ export class KafkaBroker implements MessageBrokerAdapter {
           topic,
           messageId: `${msgTyped.partition}:${msgTyped.offset}`,
           timestamp: new Date(parseInt(msgTyped.timestamp, 10)),
-          headers: Object.fromEntries(
-            Object.entries(msgTyped.headers).map(([k, v]) => [k, new TextDecoder().decode(v)]),
-          ),
+          // Dropping an undecodable value rather than throwing is load-bearing
+          // here: this runs inside `eachMessage`, where a throw prevents the
+          // offset commit and kafka redelivers the record — so one malformed
+          // header from a foreign producer would become an unbounded loop.
+          headers: normalizeTransportHeaders(msgTyped.headers),
         };
 
         // Handler success triggers auto-commit; failure prevents commit
@@ -434,6 +447,15 @@ export class KafkaBroker implements MessageBrokerAdapter {
     };
   }
 
+  /** Subscribes through the header-aware internal path. @internal */
+  subscribeWithHeaders<T>(
+    topic: string,
+    handler: MessageHandler<T>,
+    options?: SubscribeOptions,
+  ): Promise<ISubscription> {
+    return this.subscribe(topic, handler, options);
+  }
+
   /**
    * Sends a request and awaits its single correlated reply.
    *
@@ -455,7 +477,17 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   request<TReq, TRes>(topic: string, message: TReq, options?: RequestOptions): Promise<TRes> {
-    return this.#rr.request<TRes>(topic, message, options);
+    return this.requestWithHeaders(topic, message, {}, options);
+  }
+
+  /** Sends request-reply traffic with framework-owned headers. @internal */
+  requestWithHeaders<TReq, TRes>(
+    topic: string,
+    message: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes> {
+    return this.#rr.request<TRes>(topic, message, options, headers);
   }
 
   /**

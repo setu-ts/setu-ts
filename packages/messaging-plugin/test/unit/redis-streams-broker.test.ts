@@ -176,6 +176,15 @@ describe('RedisStreamsBroker', () => {
     // Wait for poll loop to process
     await new Promise((r) => setTimeout(r, 50));
 
+    // The handler MUST have run: this test previously asserted nothing about
+    // `callCount`, and the fake's XREADGROUP reply shape meant the handler was
+    // never invoked at all — so it passed while covering none of its subject.
+    expect(callCount).toBeGreaterThan(0);
+    // A thrown handler leaves the entry unacked, which is the behaviour named
+    // in the title.
+    const ackCalls = fakeClient.calls.filter((c) => c.method === 'xack');
+    expect(ackCalls).toHaveLength(0);
+
     await broker.disconnect();
   });
 
@@ -194,16 +203,80 @@ describe('RedisStreamsBroker', () => {
     await broker.connect();
 
     // The broker will poll for messages on subscribe
-    await broker.subscribe('test.stream', () => {});
+    const delivered: Array<{ userId: number; name: string }> = [];
+    await broker.subscribe<{ userId: number; name: string }>('test.stream', (message) => {
+      delivered.push(message);
+    });
 
     // Wait for poll loop to process seeded messages
     await new Promise((r) => setTimeout(r, 50));
 
-    // Verify xreadgroup was called
-    const calls = fakeClient.calls;
-    const xreadgroupCall = calls.find((c) => c.method === 'xreadgroup');
-    expect(xreadgroupCall).toBeDefined();
+    // A test titled READ-BACK must actually read the payload back. It used to
+    // assert only that `xreadgroup` had been CALLED, which is true whether or
+    // not a single message is ever delivered.
+    expect(delivered).toEqual([{ userId: 456, name: 'test' }]);
+    // Delivery succeeded, so the entry is acked.
+    expect(fakeClient.calls.filter((c) => c.method === 'xack')).toHaveLength(1);
 
+    await broker.disconnect();
+  });
+
+  it('reserves the payload field, so a header cannot shadow the message body', async () => {
+    // Headers ride as extra XADD fields beside `payload`. A header literally
+    // named `payload` used to emit a SECOND field with that name; the reader
+    // took the last occurrence, handed the header value to the deserializer,
+    // and the message was silently lost (JSON.parse threw inside the poll, so
+    // the entry was never acked and the handler never ran).
+    const client = new FakeRedisStreamsClient();
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      pollIntervalMs: 5,
+      blockSizeMs: 5,
+    });
+    await broker.connect();
+    const delivered: Array<
+      { body: unknown; headers: Readonly<Record<string, string>> | undefined }
+    > = [];
+    await broker.subscribeWithHeaders('reserved', (message, metadata) => {
+      delivered.push({ body: message, headers: metadata.headers });
+    });
+
+    await broker.publishWithHeaders(
+      'reserved',
+      { real: 'body' },
+      { payload: 'HIJACKED', traceparent: '00-tp' },
+    );
+    await new Promise((r) => setTimeout(r, 120));
+
+    // The body survives, and the reserved name is dropped rather than written.
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.body).toEqual({ real: 'body' });
+    expect(delivered[0]?.headers).toEqual({ traceparent: '00-tp' });
+    await broker.disconnect();
+  });
+
+  it('takes the first payload field when a foreign producer wrote two', async () => {
+    const client = new FakeRedisStreamsClient({
+      seededMessages: [{
+        id: '1-0',
+        payload: '{"real":"body"}',
+        // A duplicate `payload` field, as only a foreign producer could write.
+        fields: { payload: 'HIJACKED' },
+      }],
+    });
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      pollIntervalMs: 5,
+      blockSizeMs: 5,
+    });
+    await broker.connect();
+    const delivered: unknown[] = [];
+    await broker.subscribeWithHeaders('reserved', (message) => {
+      delivered.push(message);
+    });
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(delivered).toEqual([{ real: 'body' }]);
     await broker.disconnect();
   });
 

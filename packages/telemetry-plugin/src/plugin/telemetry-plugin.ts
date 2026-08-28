@@ -19,11 +19,12 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
-import { contextToTraceparent, extractContextFromHeaders } from '../tracing/tracer.ts';
+import { contextToTraceparent, extractContextFromHeaders } from '@setu-ts/common';
 import {
   buildInstrumentationRegistry,
   type InstrumentationReporter,
 } from '../instrumentation/instrumentation-registry.ts';
+import type { ContextActivationReporter } from '../tracing/tracer.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -61,6 +62,36 @@ function createInstrumentationReporter(ctx: { logger?: ILogger }): Instrumentati
         reason: outcome.reason,
       });
     }
+  };
+}
+
+/**
+ * Builds the span-activation outcome reporter. Like the instrumentation
+ * reporter above, `ctx.logger` is read **at call time** so a logger registered
+ * imperatively after this plugin is still found (the M52b lesson).
+ *
+ * Activation is an enhancement, never a requirement: a failure is a `warn`
+ * naming the reason, not a throw, because a trace with unnested spans is worth
+ * more than an application that will not boot.
+ *
+ * @param ctx - The plugin context whose logger is read at call time
+ * @returns A reporter that logs the activation outcome
+ */
+function createActivationReporter(ctx: { logger?: ILogger }): ContextActivationReporter {
+  return (outcome) => {
+    const logger = ctx.logger;
+    if (!logger) return;
+    if (outcome.activated) {
+      logger.debug(
+        `Span context activation available (${outcome.adopted} context manager)`,
+        { adopted: outcome.adopted },
+      );
+      return;
+    }
+    logger.warn(
+      `Span context activation unavailable; spans will not nest: ${outcome.reason}`,
+      { reason: outcome.reason },
+    );
   };
 }
 
@@ -121,7 +152,10 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
         if (options.tracerProviderFactory) {
           tracerHost = await options.tracerProviderFactory();
         } else {
-          tracerHost = await loadOtelTracerProvider(options);
+          tracerHost = await loadOtelTracerProvider(
+            options,
+            createActivationReporter(ctx),
+          );
         }
         service = new TelemetryService(tracerHost);
 
@@ -204,9 +238,12 @@ export function createNoopTracerHost(): TracerHost {
   };
 }
 
-async function loadOtelTracerProvider(options: TelemetryPluginOptions): Promise<TracerHost> {
+async function loadOtelTracerProvider(
+  options: TelemetryPluginOptions,
+  reportActivation?: ContextActivationReporter,
+): Promise<TracerHost> {
   const { loadOtelTracerProvider: loader } = await import('../tracing/tracer.ts');
-  return loader(options);
+  return loader(options, reportActivation);
 }
 
 export { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';

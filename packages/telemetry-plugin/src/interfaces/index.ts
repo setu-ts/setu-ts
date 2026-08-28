@@ -73,6 +73,8 @@ export interface TracerHost {
       parentContext?: TelemetryContext;
     },
   ): unknown;
+  /** Runs work with the supplied span as the active OTel span, when supported. */
+  activate?<T>(span: unknown, fn: () => Promise<T>): Promise<T>;
   /** Extracts a context from incoming headers (for traceparent propagation). */
   extractContext(headers: Headers): TelemetryContext;
   /** Injects a context into outgoing headers. */
@@ -112,6 +114,10 @@ export interface TelemetryPluginOptions {
   tracerProviderFactory?: () => Promise<TracerHost>;
   /** Whether to register the request-span middleware (default: `true`). */
   middleware?: boolean;
+  /** Whether real OTel spans become active for nested work (default: `true`). */
+  contextPropagation?: boolean;
+  /** Injectable loader for the OTel context manager. */
+  contextManagerFactory?: () => Promise<{ enable(): unknown; disable(): unknown }>;
   /**
    * Span processor to use (`'simple'` by default, `'batch'` as an option).
    *

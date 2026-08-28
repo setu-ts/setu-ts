@@ -159,6 +159,9 @@ export class TelemetryService implements ITelemetryService {
     const heSpan = new OtelSpan(span);
 
     try {
+      if (this.#tracerHost.activate) {
+        return await this.#tracerHost.activate(span, () => fn(heSpan));
+      }
       return await fn(heSpan);
     } catch (error) {
       heSpan.setStatus('error');

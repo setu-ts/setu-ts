@@ -193,6 +193,8 @@ export interface MessagingCommonOptions {
    * Serializer for message payloads.
    */
   serializer?: ISerializer;
+  /** Whether to create producer and consumer spans when telemetry is available. */
+  tracing?: boolean;
 }
 
 // ─── Arms of the discriminated union ───────────────────────────────────────────
@@ -243,6 +245,20 @@ export interface NatsMessagingOptions extends MessagingCommonOptions {
   broker: 'nats';
   url?: string;
   client?: INatsConnection;
+  /**
+   * Factory building the NATS `MsgHdrs` used to carry transport headers.
+   *
+   * Required alongside {@link client} for trace propagation: an injected
+   * connection carries no nats module, so the broker has no `headers()` to call.
+   * A lazily-loaded connection supplies its own and needs nothing here.
+   *
+   * @example
+   * ```typescript
+   * import * as nats from 'npm:nats@2.x';
+   * MessagingPlugin({ broker: 'nats', client, headersFactory: () => nats.headers() });
+   * ```
+   */
+  headersFactory?: () => INatsHeaders;
   streamName?: string;
   defaultQueue?: string;
 }
@@ -431,12 +447,24 @@ export interface NatsOptions {
   url?: string;
   /** Injected NATS connection. */
   client?: INatsConnection;
+  /** Factory for NATS headers when an application injects the connection. */
+  headersFactory?: () => INatsHeaders;
   /** JetStream stream name (default: 'MESSAGING'). */
   streamName?: string;
   /** Default consumer group name. */
   defaultQueue?: string;
   /** Optional logger for error reporting. */
   logger?: { error: (msg: string) => void };
+}
+
+/** Public members used from NATS `MsgHdrs`. */
+export interface INatsHeaders {
+  /** Stores one header value. */
+  set(key: string, value: string): void;
+  /** Reads one header value. */
+  get(key: string): string | undefined;
+  /** Lists the header names. */
+  keys(): Iterable<string>;
 }
 
 /**

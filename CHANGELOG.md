@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Broker trace propagation (M75).** `@setu-ts/common` now provides the W3C trace-context codec and
+  header-name constants. When telemetry is registered, every first-party messaging broker writes
+  `traceparent` on publish and exposes delivered transport headers; the messaging plugin creates
+  producer/consumer spans around that path. `MessagingPlugin({ tracing: false })` opts out.
+
 - **`@setu-ts/common`: a headers-only session read and the authenticated-principal bridge for
   WebSocket upgrades.** `ISessionService.fromHeaders(headers)` opens a session from a `Headers`
   object alone — the read for non-HTTP entry points (a WebSocket `onOpen` handler, an auth strategy
@@ -39,6 +44,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Telemetry spans now nest.** Real OTel `withSpan` callbacks run with their span active using an
+  async-local context manager (unless `contextPropagation: false`), so work initiated in a request
+  becomes a child of its request span rather than a detached root. **This changes exported trace
+  shape for every application already using `exporter: 'otlp'` or `'console'`:** spans that arrived
+  as separate roots now arrive as one tree, so dashboards or alerts keyed on root-span counts will
+  see fewer roots and deeper traces. Nothing needs changing to adopt it; set
+  `TelemetryPlugin({ contextPropagation: false })` to keep the previous flat shape. Activation needs
+  `npm:@opentelemetry/context-async-hooks`; when that package is absent, or the runtime supplies no
+  async-context store, the plugin logs one `warn` and degrades to the previous behaviour rather than
+  failing startup.
+
+- **`traceparent` parsing is stricter.** The codec promoted to `@setu-ts/common` rejects two inputs
+  the telemetry plugin's private copy accepted: an UPPERCASE-hex header (the previous regex carried
+  the `i` flag, while W3C Trace Context defines the value as lowercase hex), and an all-zero trace
+  or span id, which is not a valid parent. Both now yield "no extractable parent", so a request from
+  a non-conformant upstream starts a new trace instead of continuing an invalid one.
+
+- **`MessageMetadata.headers` is now populated by every first-party broker.** It was already read by
+  the RabbitMQ and Kafka brokers and omitted entirely by the memory, Redis Streams, Pub/Sub and
+  Service Bus brokers; all seven now report the transport headers they read, and `{}` — not
+  `undefined` — when the transport carried none. **A consumer that branches on the member's presence
+  changes behaviour:** `if (metadata.headers)` was falsy on those four brokers and is now truthy.
+  Test emptiness instead (`Object.keys(metadata.headers ?? {}).length === 0`).
 - **BREAKING — `@setu-ts/decorator-plugin`: the decorator surface moves to TC39 standard decorators,
   and the legacy form is removed.** Every shipped decorator was a legacy TypeScript decorator, which
   requires the `experimentalDecorators` compiler option. Deno deprecates that option and warns on
@@ -207,6 +235,42 @@ All notable changes to this project are documented here. The format follows
   when every schema is representable, so valid documents are unchanged.
 
 ### Fixed
+
+- **`@setu-ts/messaging-plugin`: a transport header whose bytes are not valid UTF-8 is dropped
+  rather than decoded to replacement characters.** The normalizer decoded byte values with a lenient
+  `TextDecoder`, which substitutes `U+FFFD` for malformed input — so a subscriber received a string
+  the producer never sent, indistinguishable from a real value, while the module's own contract says
+  a value with no faithful string form is dropped. Decoding is now fatal and a rejected value is
+  omitted. The throw is caught inside the normalizer, which matters on the Kafka path: an escaping
+  throw inside `eachMessage` prevents the offset commit and the record is redelivered indefinitely.
+  Valid multi-byte UTF-8 is unaffected.
+
+- **`@setu-ts/messaging-plugin`: `MessageMetadata.headers` could carry values that were not
+  strings.** The member is declared `Readonly<Record<string, string>>` and is documented as
+  populated by every first-party broker, but `RabbitMqBroker` and `ServiceBusBroker` reached it by
+  assertion rather than conversion. An AMQP field table legitimately carries numbers, booleans,
+  timestamps, byte arrays and nested tables, and the Service Bus SDK types application properties
+  `number | boolean | string | Date | null`, so a subscriber reading `metadata.headers.x` could get
+  a value of any of those types while the compiler promised a string. Both now normalize at the
+  transport boundary through the same helper Kafka already used: a byte value is decoded as UTF-8, a
+  number or boolean is stringified, a `Date` becomes ISO-8601, the first element of a repeated
+  header is taken, and a value with no faithful string form is dropped rather than rendered as
+  `[object Object]`. Kafka's private copy of that logic was deleted in favour of the shared helper.
+
+- **`@setu-ts/messaging-plugin`: the Kafka producer put the entire message payload into Kafka
+  transport headers.** `publish` passed the payload object itself as `headers` whenever it was
+  non-null, so every field of every message was duplicated into the record's headers — and a
+  non-string field is not a legal `IHeaders` value (`Buffer | string | (Buffer | string)[]`), so
+  kafkajs had to coerce it. Only framework-owned headers are sent now. A consumer reading payload
+  fields off `metadata.headers` was relying on the defect and must read them off the message.
+
+- **`@setu-ts/messaging-plugin`: `metadata.headers` on the NATS broker exposed the client's private
+  internals instead of the message headers.** The delivered `MsgHdrs` was cast to
+  `Record<string, string>`; probed against real `npm:nats@2.x`, that yields `undefined` for every
+  real key and `Object.keys` of `['_code', '_description', 'headers']`. Headers are now read through
+  the object's own `keys()`/`get()`. `NatsOptions.headersFactory` supplies the `MsgHdrs` constructor
+  when the connection is injected (a lazily-loaded module provides its own); with neither available
+  the broker publishes without headers and reports it once.
 
 - **Three committed docs still said WebSocket upgrades and gRPC requests bypass the middleware
   pipeline**, which M70a made false. `packages/websocket-plugin/README.md` claimed "the adapter

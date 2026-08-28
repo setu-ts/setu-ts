@@ -18,7 +18,10 @@ export interface MessageMetadata {
   readonly messageId?: string;
   /** Delivery timestamp, when available. */
   readonly timestamp?: Date;
-  /** Transport headers. */
+  /**
+   * Transport headers read from the delivered message. First-party brokers
+   * populate this with `{}` when their transport carried no headers.
+   */
   readonly headers?: Readonly<Record<string, string>>;
 }
 

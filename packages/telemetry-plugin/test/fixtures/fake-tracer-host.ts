@@ -22,6 +22,13 @@ export interface RecordedSpan {
   status: SpanStatus | null;
   exceptions: Error[];
   ended: boolean;
+  /**
+   * The span's own context. Recorded so a test can assert trace IDENTITY —
+   * that a consumer span landed in the SAME trace as its producer — rather
+   * than only that some parent context was supplied. A span parented into the
+   * wrong trace satisfies `toBeDefined()`, which is why this is here.
+   */
+  context: SpanContext;
 }
 
 /**
@@ -65,6 +72,7 @@ export function createFakeTracerHost(): FakeTracerHost {
           status: null,
           exceptions: [],
           ended: false,
+          context: { traceId: fakeTraceId, spanId: fakeSpanId, traceFlags: '01' },
         },
         setAttribute(key, value) {
           this._recorded.attributes[key] = value;
