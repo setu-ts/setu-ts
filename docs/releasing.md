@@ -346,11 +346,27 @@ deno task check:api-docs
 deno task check:docs
 ```
 
-The ratchet (`DOC_LINT_BASELINE = 776`) is frozen in `scripts/generate-api-docs.ts`. If the total
+The ratchet (`DOC_LINT_BASELINE = 752`) is frozen in `scripts/generate-api-docs.ts`. If the total
 diagnostic count drops below the baseline, the script prints a message instructing you to lower the
 constant in the same commit — do not ship a lower count without updating the constant, and do not
 raise the constant to accommodate new debt. The ten `CLEAN_PACKAGES` are permanently exempt: any
 finding in those packages fails the gate regardless of the baseline.
+
+**The count is only comparable on the Deno version that produced it.** `deno doc --lint` emits a
+different number per version — the identical tree reports 752 diagnostics on Deno 2.9.5 and 496 on
+2.9.6 — so the baseline is paired with `DOC_LINT_BASELINE_DENO`, which tracks the `deno-version` pin
+in `.github/workflows/ci.yml`. On any other version the gate reports the count and **skips** the
+comparison rather than failing, because failing would block every contributor whose toolchain
+differs from CI's; clean-package findings still fail. Never lower the constant from a run whose
+output says `SKIPPED` — CI is the authoritative reading, and to reproduce it locally:
+
+```bash
+docker run --rm -v "$PWD":/w -w /w -e DENO_DIR=/tmp/dc denoland/deno:2.9.5 \
+  run --allow-read --allow-run --allow-env --allow-write=/tmp/dc \
+  scripts/generate-api-docs.ts --check
+```
+
+When the CI pin moves, re-measure and update both constants in the same change.
 
 Generated output lives under `docs/api/`, which is gitignored. Verify it is not tracked:
 

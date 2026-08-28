@@ -7757,8 +7757,10 @@ an adapter, not a hint.
   `offset` of `n` can only be emulated by fetching and discarding `n` items — `O(n)` reads, which
   silently changes both cost and consistency. Either an adapter serves a documented key/index-based
   subset and refuses the rest by name — the `UnsupportedFilterOperatorError` precedent — or the
-  contract grows a cursor concept. That is a contract decision, and it is the reason DynamoDB sits
-  in "not in scope" below rather than beside Mongo.
+  contract grows a cursor concept. That is a contract decision, and it is **M79** below. Note which
+  way that decision runs: a cursor is not a DynamoDB concession, because `OFFSET n` makes the server
+  scan and discard `n` rows on Postgres, MySQL and SQLite too, so a deep page is already `O(n)` on
+  every backend this framework ships.
 
 **One measurement decides the size of the Mongo half, and it has not been taken.** Prisma's MongoDB
 connector may already work through the existing `PrismaAdapter` **unchanged**: the adapter's CRUD
@@ -7785,7 +7787,9 @@ planning against a guess.
    internal, **unexported** `D1Target` (`database/d1-sql.ts:45-50`) that the statement builders
    consume. So the public surface is a per-entity override with a zero-config default, and the
    builders never see an option bag. Mongo's `_id` needs exactly this; DynamoDB's composite
-   partition-plus-sort key does not fit `findById(id)` at all.
+   partition-plus-sort key does not fit `findById(id)` at all. Both are served by **M79**, and so is
+   a case that needs no new backend to hit: the M70j comment quoted below names "ordinary join and
+   per-tenant tables" as relational schemas the same scalar `id` locks out of repositories today.
 
    **Correction to the note this section came from:** it recorded Drizzle as _also_ requiring an
    `id` column **at connect**. That stopped being true in **M70j** (X4-9), which moved the check to
@@ -7806,16 +7810,195 @@ planning against a guess.
 - **In scope:** the probe above, and then the decision it settles. If Mongo comes back cheap, a
   small milestone — a configurable primary-key name following the D1 precedent, plus a
   `'custom'`-arm adapter, which has been expressible from another package since **M52c** promoted
-  `IDatabaseAdapter` into `common`. Blockers 2 and 3 are a **separate contract milestone**, and that
-  is where the honest design difficulty is; splitting them is a recommendation this section makes,
-  not a decision it takes.
-- **Not in scope:** DynamoDB. Its composite key contradicts `findById(id)` at the contract level, so
-  it depends on the contract milestone rather than preceding it.
+  `IDatabaseAdapter` into `common`. Blocker 2 is **M79**, scheduled below, and so is the
+  multi-column form of blocker 1 that Mongo's single `_id` does not need — that is where the honest
+  design difficulty is. Blocker 3 is deliberately **not** scheduled as portable surface at all:
+  M79's own out-of-scope bullet gives the reason, that TTL, consistency level and secondary-index
+  selection are spelled differently by every candidate backend and so belong with the adapter that
+  first needs them, and M82 excludes Bigtable's cell versioning on the same grounds. This section
+  originally called that split "a recommendation this section makes, not a decision it takes", which
+  is the defect corrected here — see M79 for the measurement.
+- **Not in scope, because it is scheduled rather than dropped:** DynamoDB is **M80**, Cosmos DB is
+  **M81** and Cloud Bigtable is **M82**, all three gated on M79. An enterprise backend is not
+  excluded for failing to fit a contract — the contract is what grows. What this milestone does not
+  do is let a Mongo probe block on a contract widening it does not need.
 - **The rule that binds any widening here:** every new contract member names its consumer per
   package before it is added, and a member no adapter can honestly implement is cut at plan time —
   the `poolSize` precedent.
 - **Packages:** `database-plugin` and `common`, plus whichever package hosts a Mongo adapter if the
   probe says one is needed.
+
+---
+
+## Milestone 79: Portable Data-Access Contract — Composite Keys, Nested Paths, Cursors
+
+**Objective:** Grow `IDataSource` and `NormalizedQuery` to express what two shipped backends already
+need and three unowned ones require, so that a document or wide-column adapter is an implementation
+milestone rather than a contract argument.
+
+**This milestone exists because M78 deferred to it and it did not exist.** M78's "not in scope"
+bullet said DynamoDB "depends on the contract milestone rather than preceding it", while
+`grep -n '^## Milestone' ROADMAP.md` on `main` at `eea86574` returned **M78 as the last heading**
+and the Progress Tracking table ended at row 78. A deferral whose target does not exist is an
+exclusion wearing a sequencing argument, and for a backend as widely deployed as DynamoDB that is
+not a decision this framework gets to take by omission. (That reading is pinned to the commit for
+the same reason M78 pins its own `grep`: this section is the thing that falsifies it.)
+
+**Each member below has at least two consumers that predate any new backend**, which is what makes
+this a contract addition rather than a DynamoDB-shaped one — the `poolSize` rule applied in the
+direction it was written for.
+
+1. **Composite keys.** `IDataSource.findById`/`update`/`delete` take `string | number`
+   (`common/src/services/database.ts:141`). The repo has conceded this limit twice rather than fixed
+   it: `D1EntityMapping.primaryKey` (`cloudflare-plugin/src/database/d1-adapter.ts:50-83`) makes the
+   key _name_ configurable but still single-column, and M70j's comment at
+   `database-plugin/src/adapters/drizzle/drizzle-adapter.ts:235` states in as many words that those
+   three methods are "single-key by contract", naming "ordinary join and per-tenant tables" as what
+   that locks out of repositories. **Consumers before any new backend: Drizzle join and
+   tenant-scoped tables, D1, and Mongo compound `_id`.**
+2. **Nested paths.** `FilterComparison.field` is a flat `string` in all four arms of the union
+   (`common/src/services/database.ts:81`, repeated at `:83`, `:88`, `:93` and `:98`), so
+   `address.city` is expressible only by accident of a backend's own parsing. **Consumers before any
+   new backend: Mongo subdocuments and Postgres JSONB through both Prisma and Drizzle.** Bigtable
+   then makes it structural rather than optional: it addresses _every_ column as `family:qualifier`,
+   so a two-part path is not an advanced case there but the only case (M82).
+3. **Cursor pagination.** `NormalizedQuery.offset` is a row count
+   (`common/src/services/database.ts:122`). This is the member most easily mistaken for a DynamoDB
+   concession and is the opposite: `OFFSET n` makes the server scan and discard `n` rows on
+   PostgreSQL, MySQL and SQLite alike, so deep pagination is already `O(n)` on **every backend the
+   framework ships today**. A keyset cursor is the enterprise-workload answer independently of whom
+   else it unblocks — and it is the single concept all three unowned backends already have and
+   cannot express: DynamoDB's `LastEvaluatedKey`, Cosmos's continuation token and Bigtable's
+   row-range start key are one member wearing three names.
+
+**Three constraints the plan inherits rather than decides.** `offset` is **not** removed — it is
+released API and §9.4 governs; the cursor is additive beside it, and an adapter that cannot honour
+one refuses by name on the `UnsupportedFilterOperatorError` precedent
+(`database-plugin/src/adapters/prisma/prisma-adapter.ts:535`). Scalar `findById(id)` stays as a
+source-compatible overload, so no existing call site moves. And a widened member that an adapter can
+only _emulate_ is refused rather than emulated: fetching and discarding `n` items to fake an offset
+changes cost and consistency invisibly, which is the one instinct M78 got exactly right.
+
+- **In scope:** the three members above, implemented across all four shipped adapters (Memory,
+  Prisma, Drizzle, D1) — a widening no adapter implements is a widening with no consumer.
+- **Not in scope — all four members of M78's blocker 3:** TTL, consistency level and secondary-index
+  selection are excluded because no two of Mongo, DynamoDB, Cosmos and Bigtable spell any of them
+  alike — Bigtable's answer to TTL is a per-column-family garbage-collection policy, which is not a
+  TTL at all — and none has a second consumer today, so each belongs with the adapter that first
+  needs it. **Partition awareness** is excluded for a different reason and is not a gap: it is
+  per-entity _mapping_ rather than portable surface, and each backend milestone carries its own
+  (M80's partition-plus-sort key, M81's partition key, M82's row key). Named here rather than
+  absorbed silently, so blocker 3 is accounted for in full.
+- **Packages:** `common`, `database-plugin`, `cloudflare-plugin`.
+
+---
+
+## Milestone 80: DynamoDB Backend
+
+**Objective:** A first-class DynamoDB adapter, serving the portable contract natively where DynamoDB
+has a native answer and refusing the remainder by name.
+
+**The count M78 never took, and it decides which in-repo precedent applies.** Two precedents compete
+for a backend that cannot serve everything. One is refuse-the-gap-by-name — `MemoryAdapter.query()`,
+`LocalStorageProvider.getSignedUrl`, `R2Storage.getSignedUrl`, `UnsupportedFilterOperatorError`. The
+other is do-not-register-at-all: `WorkersCron` deliberately withholds `CAPABILITIES.SCHEDULER`
+because six of eight methods would throw, and `cloudflare-plugin/src/cron/workers-cron.ts:18` cites
+Liskov by name for it. M78 invoked the second standard without counting. With M79's composite keys
+in place, **all six `IDataSource` methods work on DynamoDB** — `findAll`, `findById`, `create`,
+`update`, `delete` and `count`. What remains unsupported is two _members_ of `NormalizedQuery`, not
+two methods: arbitrary `orderBy` (a `Query` orders only by the table's or a GSI's sort key) and row
+`offset` (M79 supplies the cursor `LastEvaluatedKey` → `ExclusiveStartKey` was always asking for).
+That is the `UnsupportedFilterOperatorError` case, not the Liskov case.
+
+**Verified against a real backend before the milestone was written**, so the composite-key claim is
+measured rather than reasoned: `amazon/dynamodb-local` on `127.0.0.1:8000` served a `CreateTable`
+with a partition-plus-sort key, a `PutItem`, a `GetItem` read-back and a `DeleteTable` (2026-08-29).
+Local run notes, including the volume-ownership trap that makes the emulator hang rather than error,
+belong in the milestone plan.
+
+- **In scope:** the adapter and its key mapping (per-entity partition and sort key, following the
+  whole two-layer `D1EntityMapping` → internal-target shape rather than one type of it); native
+  cursor pagination; `Query`-versus-`Scan` selection driven by the resolved key condition; non-key
+  `orderBy` and any emulated offset refused by name.
+- **Recommendation the plan should take or overturn explicitly:** host it as a new discriminated arm
+  of `DatabasePluginOptions` in `database-plugin`, beside `prisma`/`drizzle`/`memory`/`custom`, with
+  the AWS SDK behind the §12.2 inject-or-lazy seam and a guarded real-import test. A separate
+  package is expressible — M52c promoted `IDatabaseAdapter` into `common` precisely so a backend can
+  live elsewhere — but it buys nothing here and splits one capability's documentation across two
+  READMEs.
+- **Not in scope:** GSI _selection_ as a contract concept (M79's out-of-scope list); the adapter may
+  use a GSI it was configured with, and does not invent a portable way to ask for one.
+- **Packages:** `database-plugin`, `common` if the key mapping needs a shared type.
+
+---
+
+## Milestone 81: Cosmos DB Backend
+
+**Objective:** An Azure Cosmos DB backend, and the probe that decides whether it is one adapter or
+two.
+
+**This is the most completely unowned of the three, and unlike Mongo it has no code path at all.**
+`grep -ric cosmos ROADMAP.md ARCHITECTURE.md PUBLIC_API.md README.md` on `main` at `eea86574`
+returned **0 in all four files** — where M78's equivalent `grep` at least found `'mongodb'` shipped
+as a published arm of `PrismaSqlProvider`. For a framework that ships a first-class Cloudflare
+backend (D1, KV, R2, Durable Objects) and four cloud message brokers, having no Azure database story
+is a gap in the same class, not a smaller one.
+
+**The probe this milestone opens with, mirroring M78's.** Cosmos exposes two wire APIs, and which
+one the framework should serve is a measurement rather than a preference. Its **MongoDB-compatible**
+API may be servable by whatever M78 concludes for Mongo at no additional adapter cost, in which case
+this milestone is largely configuration and documentation; its **NoSQL (SQL) API** is the native
+one, needs `npm:@azure/cosmos`, and pages by continuation token — which is M79's cursor again, a
+third consumer for that member and the reason this sits after M79 rather than beside M78.
+
+- **In scope:** the probe, then whichever of the two arms it justifies; per-entity partition-key
+  mapping (Cosmos requires the partition key on every point read, so `findById` needs M79's key
+  object for the same structural reason DynamoDB does); continuation-token pagination.
+- **Not in scope:** request-unit budgeting and consistency levels — the same M79 exclusion, for the
+  same reason.
+- **Packages:** `database-plugin`, or a new package if the probe says the NoSQL API needs one.
+
+---
+
+## Milestone 82: Cloud Bigtable Backend
+
+**Objective:** A Google Cloud Bigtable adapter — the wide-column half of the gap M78 named and only
+half closed.
+
+**M78's own sentence promises this one.** It states the gap is "specifically a document or
+wide-column **database** backend", then scopes itself to document stores; Bigtable, HBase and
+Cassandra are the wide-column side, and `grep -ric 'bigtable'` over `ROADMAP.md`, `ARCHITECTURE.md`,
+`PUBLIC_API.md` and `README.md` on `main` at `eea86574` returned **0 in all four**. For a framework
+already shipping four GCP-adjacent integrations (Pub/Sub, GCS, Secret Manager, and the Cloud Run
+deployment path), no GCP database story is the same class of gap as the missing Azure one.
+
+**Bigtable inverts the DynamoDB problem, which is why it is a separate milestone and not a footnote
+to M80.** Its row key is a **single lexicographically-sorted string**, so `findById(id)` fits it
+natively with no key object at all — the member M79 has to add for DynamoDB and Cosmos, Bigtable
+does not need. What it lacks instead is everything _around_ the key: there are **no secondary
+indexes of any kind**, so a predicate on a non-key column is a scan with a server-side filter rather
+than an index seek, and `orderBy` is row-key order or nothing. So the two backends stress opposite
+ends of the same contract, and an adapter that assumed either shape would mis-serve the other.
+
+**Verified against the real emulator before this section was written** (`cbtemulator` via
+`gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators` on `127.0.0.1:8086`, 2026-08-29), so
+each claim above is measured rather than reasoned: a point read of row key `u#002` returned its
+columns across two families; a range scan of `[u#002, u#004)` returned exactly `u#002` and `u#003`,
+which is the start-key cursor model with no row offset anywhere in it; and a filter on `cf2:city`
+returned the two matching rows through a two-part `family:qualifier` address. One emulator trap for
+the plan: **`cbtemulator` implements no instance admin API** — `instance.create()` answers
+`12 UNIMPLEMENTED`, instances are implicit, and tables are created directly.
+
+- **In scope:** the adapter; per-entity row-key mapping (including the standard practice of
+  composing a row key from several logical fields, which is a _mapping_ concern rather than the
+  composite-key _contract_ M79 adds); column-family mapping for `select` and for filter paths;
+  start-key cursor pagination; non-key `orderBy` refused by name.
+- **Not in scope:** garbage-collection policies and cell versioning. Bigtable stores a timestamped
+  version history per cell, which no other backend in the portable contract has any counterpart for,
+  so exposing it portably would be inventing a concept for one adapter — the `poolSize` rule. An
+  application needing it reaches the client directly, as it does for a Prisma raw query.
+- **Packages:** `database-plugin`, and `common` only if the row-key mapping shares a type with
+  M80's.
 
 ---
 
@@ -7935,3 +8118,7 @@ planning against a guess.
 | 76        | ✅     | standard decorators / experimentalDecorators   |
 | 77        | ✅     | executable prose assertions                    |
 | 78        | ⬜     | document-database backends                     |
+| 79        | ⬜     | portable data-access contract                  |
+| 80        | ⬜     | dynamodb backend                               |
+| 81        | ⬜     | cosmos db backend                              |
+| 82        | ⬜     | cloud bigtable backend                         |
