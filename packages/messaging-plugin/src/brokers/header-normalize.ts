@@ -10,9 +10,10 @@
  * subscriber as a runtime surprise, so every first-party broker funnels its
  * inbound headers through here.
  *
- * A value that has no faithful string form (a nested table, an array of
- * tables, `null`) is DROPPED rather than stringified into `[object Object]` —
- * a missing header is readable as absent, while a corrupted one is not.
+ * A value that has no faithful string form — a nested table, an array of
+ * tables, `null`, or a byte value that is not valid UTF-8 — is DROPPED rather
+ * than rendered as `[object Object]` or as U+FFFD replacement characters. A
+ * missing header is readable as absent, while a corrupted one is not.
  *
  * @module
  */
@@ -29,7 +30,12 @@ export type TransportHeaderValue =
   | readonly unknown[]
   | Record<string, unknown>;
 
-const decoder = new TextDecoder();
+// `fatal: true` so malformed bytes REJECT rather than decoding to U+FFFD.
+// The lenient default synthesizes replacement characters the producer never
+// sent, which is a value with no faithful string form — exactly what this
+// module drops. Reuse across a throw is safe: non-streaming `decode()` is
+// stateless (probed).
+const decoder = new TextDecoder('utf-8', { fatal: true });
 
 /**
  * Converts one native header value to its string form.
@@ -40,7 +46,16 @@ const decoder = new TextDecoder();
 function toHeaderString(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   // `Buffer` extends `Uint8Array`, so this covers amqplib and kafkajs alike.
-  if (value instanceof Uint8Array) return decoder.decode(value);
+  if (value instanceof Uint8Array) {
+    try {
+      return decoder.decode(value);
+    } catch {
+      // Catching here is mandatory, not defensive: the Kafka path runs inside
+      // `eachMessage`, where an escaping throw prevents the offset commit and
+      // the broker redelivers the record forever.
+      return undefined;
+    }
+  }
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : undefined;
   if (typeof value === 'boolean') return String(value);
   if (value instanceof Date) {

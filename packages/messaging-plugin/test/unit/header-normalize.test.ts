@@ -53,6 +53,35 @@ describe('normalizeTransportHeaders', () => {
     });
   });
 
+  it('DROPS a byte value that is not valid UTF-8 instead of emitting U+FFFD', () => {
+    // The lenient TextDecoder default replaces malformed bytes with U+FFFD, so
+    // a subscriber would receive a string the producer never sent and could not
+    // tell it apart from a real one. Dropping reports the truth: absent.
+    const malformed = new Uint8Array([0xff, 0xfe, 0xe2, 0x28, 0xa1]);
+    const result = normalizeTransportHeaders({ traceparent: malformed, ok: 'kept' });
+
+    expect(result).toEqual({ ok: 'kept' });
+    expect(Object.keys(result)).not.toContain('traceparent');
+    expect(JSON.stringify(result)).not.toContain('\uFFFD');
+  });
+
+  it('decodes valid multi-byte UTF-8 unchanged under fatal decoding', () => {
+    // The fatal decoder must not reject legitimate non-ASCII values.
+    const bytes = new TextEncoder().encode('ünïcode ✓ 日本語');
+    expect(normalizeTransportHeaders({ note: bytes })).toEqual({ note: 'ünïcode ✓ 日本語' });
+  });
+
+  it('keeps decoding correctly after a malformed value threw', () => {
+    // The decoder is shared at module scope, so a rejected value must not
+    // poison later ones.
+    const bad = new Uint8Array([0xff]);
+    const good = new TextEncoder().encode('00-abc-def-01');
+    expect(normalizeTransportHeaders({ a: bad, b: good, c: bad, d: good })).toEqual({
+      b: '00-abc-def-01',
+      d: '00-abc-def-01',
+    });
+  });
+
   it('DROPS a value with no faithful string form rather than corrupting it', () => {
     // `[object Object]` and `"NaN"` read as real header values to a subscriber;
     // an absent key reads as absent, which is the truth.

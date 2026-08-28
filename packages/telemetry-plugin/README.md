@@ -76,11 +76,19 @@ Span **nesting** is a separate mechanism with its own preconditions. In real OTe
 registers an async-local context manager and `withSpan` runs its callback with the span active, so
 nested work — including messaging publishes — becomes a child span. That applies only when all three
 hold: the plugin is in real OTel mode (not noop or fallback), `contextPropagation` is not `false`,
-and the context manager actually registered. Registration is reported through the logger and never
-throws: if the optional `@opentelemetry/context-async-hooks` package cannot be loaded, or the host
-already owns a manager that refuses replacement, spans are still recorded but arrive as unrelated
-siblings rather than a tree. Pass an explicit `parentContext` where the relationship must hold
-regardless.
+and a context manager is active. Registration is reported through the logger and never throws.
+
+Two outcomes count as active, and only one counts as failure:
+
+- **Registered.** The plugin installed its own async-local manager. Nesting works.
+- **Adopted.** `setGlobalContextManager` reported that the host already owns a manager, so the
+  plugin keeps the host's. Nesting still works — the existing manager carries the context — which is
+  why this is reported as active rather than as a failure.
+- **Failed.** The optional `@opentelemetry/context-async-hooks` package could not be loaded, or the
+  registration call itself threw. Only here are spans still recorded but arriving as unrelated
+  siblings rather than a tree.
+
+Pass an explicit `parentContext` where the relationship must hold regardless.
 
 ## Multiple backends
 

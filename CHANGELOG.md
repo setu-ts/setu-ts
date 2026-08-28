@@ -236,6 +236,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`@setu-ts/messaging-plugin`: a transport header whose bytes are not valid UTF-8 is dropped
+  rather than decoded to replacement characters.** The normalizer decoded byte values with a lenient
+  `TextDecoder`, which substitutes `U+FFFD` for malformed input — so a subscriber received a string
+  the producer never sent, indistinguishable from a real value, while the module's own contract says
+  a value with no faithful string form is dropped. Decoding is now fatal and a rejected value is
+  omitted. The throw is caught inside the normalizer, which matters on the Kafka path: an escaping
+  throw inside `eachMessage` prevents the offset commit and the record is redelivered indefinitely.
+  Valid multi-byte UTF-8 is unaffected.
+
 - **`@setu-ts/messaging-plugin`: `MessageMetadata.headers` could carry values that were not
   strings.** The member is declared `Readonly<Record<string, string>>` and is documented as
   populated by every first-party broker, but `RabbitMqBroker` and `ServiceBusBroker` reached it by
