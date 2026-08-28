@@ -1,7 +1,8 @@
 # Milestone 77 — Executable Prose Assertions (`scripts`, `test`)
 
-> **Status:** Planning. Branch: `feat/m77-executable-prose-assertions`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Branch: `feat/m77-executable-prose-assertions`. `main` is
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR.
 
 ## 0. Objective & scope
 
@@ -189,17 +190,18 @@ No package `src/index.ts` changes — this milestone ships no package source (§
 the script's exported surface, which exists so the decidable logic is unit-testable and therefore
 coverage-gated, following the `check-docs.ts` / `docs-gate.test.ts` split.
 
-| Exported symbol                   | Kind     | Consumer / real code path that READS it                                                                                       |
-| --------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `MARKER`                          | const    | `findClaimBlocks` matches against it; the test asserts the three comment spellings resolve to it.                             |
-| `findClaimBlocks(source)`         | fn       | `checkDocument` calls it per file; it is the block-scoping rule of §3.2.                                                      |
-| `parseClaimTable(block)`          | fn       | `checkDocument` calls it on each found block to produce `Claim[]`; owns the `\|` unescape of §3.3.                            |
-| `buildProgram(claims)`            | fn       | `evaluateClaims` pipes its output to the subprocess stdin; kept pure so the generated program is assertable without spawning. |
-| `parseResults(stdout, expected)`  | fn       | `evaluateClaims` calls it; owns the short-batch rule of §3.5.                                                                 |
-| `compareClaim(claim, result)`     | fn       | `checkDocument` calls it per claim to produce a `Finding`; owns value comparison.                                             |
-| `evaluateClaims(claims)`          | async fn | The thin I/O seam — spawns the subprocess. Called by `checkDocument`; deliberately the only non-pure export.                  |
-| `SCAN_ROOTS`                      | const    | The gate's own walker reads it; the test asserts `.roo` is a member (§3.6).                                                   |
-| `Claim`, `ClaimResult`, `Finding` | types    | Parameter and return types of the functions above; read by the test's own annotations.                                        |
+| Exported symbol                       | Kind     | Consumer / real code path that READS it                                                                                                       |
+| ------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MARKER`                              | const    | `findClaimBlocks` matches against it; the test asserts the three comment spellings resolve to it.                                             |
+| `findClaimBlocks(source)`             | fn       | `checkDocument` calls it per file; it is the block-scoping rule of §3.2.                                                                      |
+| `parseClaimTable(block)`              | fn       | `checkDocument` calls it on each found block to produce `Claim[]`; owns the `\|` unescape of §3.3.                                            |
+| `buildProgram(claims)`                | fn       | `evaluateClaims` pipes its output to the subprocess stdin; kept pure so the generated program is assertable without spawning.                 |
+| `parseResults(stdout, expected)`      | fn       | `evaluateClaims` calls it; owns the short-batch rule of §3.5.                                                                                 |
+| `compareClaim(claim, result)`         | fn       | `checkDocument` calls it per claim to produce a `Finding`; owns value comparison.                                                             |
+| `evaluateClaims(claims)`              | async fn | The thin evaluator I/O seam — spawns the subprocess. Called by `checkDocument`.                                                               |
+| `collectMarkdown(root)` / `run(args)` | async fn | `run` is the command-line orchestration seam and calls the walker when no paths are supplied; tests drive both without calling `Deno.exit()`. |
+| `SCAN_ROOTS`                          | const    | The gate's own walker reads it; the test asserts `.roo` is a member (§3.6).                                                                   |
+| `Claim`, `ClaimResult`, `Finding`     | types    | Parameter and return types of the functions above; read by the test's own annotations.                                                        |
 
 ### 4.1 Options — every option names its consumer
 

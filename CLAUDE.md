@@ -3648,6 +3648,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   surfaced. Also fixed two pre-existing defects found in passing: a garbled doc paragraph at the
   tsconfig emitter, and a **duplicate `### Changed` heading in the CHANGELOG's `Unreleased`
   section** — the exact defect the alpha.9 release caught once already) — complete (PR #200)
+- **Milestone 77** (`scripts` + `test` + documentation rules — executable prose assertions):
+  `check:docs` now runs a rendered-claim gate over Markdown, including `.roo`. An `assert:js` marker
+  precedes a two-column `Expression` / JSON `Value` table; each document is evaluated in a separate
+  permission-denied `deno run --no-prompt --ext=ts -` subprocess, so a failing expression, timeout,
+  process exit, malformed table, or short result batch fails closed. The seeded code-review table
+  pins the twelve `NaN` and infinity claims that previously drifted through four corrections. The
+  gate scans `.roo` explicitly without widening the existing structural checker, is covered by the
+  script-coverage target set, and the ROADMAP now records why old `(measured)` parentheticals are
+  provenance rather than executable assertions — complete (PR pending).
 - **Alpha release `v0.1.0-alpha.10`** — on `release/v0.1.0-alpha.10`, published 2026-08-28 (PR #202,
   tag at the merge commit `3fcb05e6`; CI published it, one green `Publish to JSR` job — the fourth
   first-try success in a row). **47 packages** — the list is unchanged from alpha.8, so no package
@@ -3671,7 +3680,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   alpha.1 states the shipping version in the release commit itself (`32ef2f41` for alpha.9 bumps the
   same line), the window is one CI run, and `checkVersionClaims` would reject a "pending" phrasing
   as neither a current-release claim nor a `version:history` record.
-- **Next milestone** — **M40** (final polish and release).
+- **Next milestone** — **M78** (document-database backends).
 
 ## Verification (run before declaring any work done)
 

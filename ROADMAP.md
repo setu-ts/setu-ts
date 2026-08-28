@@ -7604,7 +7604,7 @@ into whatever touches these files next.
 
 ---
 
-## Milestone 77: Executable Prose Assertions
+## Milestone 77: Executable Prose Assertions ✅ COMPLETE
 
 **Objective:** Make a claim about runtime behaviour checkable by a gate, the way a link target and a
 code fence already are.
@@ -7645,7 +7645,7 @@ facts drifts from them exactly the way JSDoc does, and nothing catches it.**
 
 **Where a design should start — re-measured for this section, because the original note was stale.**
 The repository already marks its own load-bearing claims. `(measured)`, `measured:`,
-`probed, not assumed` and `verified from source` appear **32 times**:
+`probed, not assumed` and `verified from source` appear **32 times (case-insensitive)**:
 
 | Location           | Count               |
 | ------------------ | ------------------- |
@@ -7657,18 +7657,21 @@ The repository already marks its own load-bearing claims. `(measured)`, `measure
 | `AI_GUIDELINES.md` | 0                   |
 | `PUBLIC_API.md`    | 0                   |
 
-Those parentheticals are an existing, author-applied signal for "this sentence asserts runtime
-behaviour", and promoting a convention people already follow beats inventing an annotation nobody
-adopts. The correction matters to the design: nearly half the markers sit in **narrative** documents
-rather than JSDoc, and the two documents a consumer is most likely to act on — `PUBLIC_API.md` and
-`AI_GUIDELINES.md` — carry **none**, so a gate scoped to `packages/*/src` would find under half of
-the existing signal and none of the highest-traffic surface.
+Those parentheticals are an existing, author-applied provenance signal, but they are not the primary
+annotation: classifying the 14 `packages/*/src` markers finds 11 tier 3, one tier 2, and only two
+tier 1 claims, so promoting them would give the gate almost no executable corpus. A new marker can
+instead name the enumerable tier-1 claim beside the prose it proves. The correction matters to the
+design: nearly half the markers sit in **narrative** documents rather than JSDoc, and the two
+documents a consumer is most likely to act on — `PUBLIC_API.md` and `AI_GUIDELINES.md` — carry
+**none**, so a gate scoped to `packages/*/src` would find under half of the existing signal and none
+of the highest-traffic surface.
 
 **The scope question is which claims are mechanizable at all**, and the honest answer is three
 tiers:
 
-1. **Language semantics** (`NaN > 1`, `Infinity > 0`) — a one-line `deno eval`. Cheap, hermetic, and
-   the tier PR #179's four failures all sat in.
+1. **Language semantics** (`NaN > 1`, `Infinity > 0`) — `deno run --no-prompt --ext=ts -` over
+   stdin. Cheap, hermetic, and the tier PR #179's four failures all sat in; unlike `deno eval`, it
+   can deny document text every permission.
 2. **Live-backend behaviour** ("Redis keeps a TTL across `HSET`") — needs a real server, so it
    belongs with the existing guarded real-backend suites and their CI service containers rather than
    with a documentation gate.
@@ -7688,6 +7691,11 @@ A gate covering only tier 1 is still worth having, and is the cheapest thing on 
 - **Packages:** `scripts`, `test`, and the scanned documents. No `packages/*/src` change is
   expected; if one becomes necessary the design has drifted into annotation-in-source, which is a
   different milestone.
+
+`.roo/**` was outside every existing documentation gate: `check-docs.ts` skips dot-prefixed
+directories and its scan roots omit it, despite this milestone's motivating prose living there. The
+new assertion gate scans `.roo` explicitly; extending the existing structural checker to that tree
+is deliberately outside this narrow closure.
 
 ### Related, and the same class
 
@@ -7925,5 +7933,5 @@ planning against a guess.
 | 74        | ✅     | realtime reads + sse contract (PR #196)        |
 | 75        | ✅     | broker trace propagation (PR #201)             |
 | 76        | ✅     | standard decorators / experimentalDecorators   |
-| 77        | ⬜     | executable prose assertions                    |
+| 77        | ✅     | executable prose assertions                    |
 | 78        | ⬜     | document-database backends                     |

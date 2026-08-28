@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
+  permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
+  CI instead of remaining unchecked prose.
+
 ## [0.1.0-alpha.10] — 2026-08-28
 
 **The decorator surface moves to the TC39 standard, and realtime grows up.** Every shipped decorator
