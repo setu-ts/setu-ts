@@ -46,6 +46,7 @@ const THRESHOLD = 90;
  */
 export const SCRIPT_TARGETS: readonly string[] = [
   'scripts/check-docs.ts',
+  'scripts/check-prose-assertions.ts',
   'scripts/generate-api-docs.ts',
   // The pure half of the package-exports tooling. Its subprocess wrapper
   // (`package-export-collection.ts`) is deliberately absent: it is the thin

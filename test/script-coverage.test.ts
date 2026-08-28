@@ -41,9 +41,10 @@ const HEADER =
 const FAILING_COVERAGE = { branchPct: 80.0, functionPct: 70.0, linePct: 60.0 };
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly four canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(4);
+  it('has exactly five canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(5);
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
+    expect(SCRIPT_TARGETS).toContain('scripts/check-prose-assertions.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/generate-api-docs.ts');
     // The pure half of the package-exports tooling. Its subprocess wrapper is
     // deliberately NOT a target — the decidable logic was extracted out of it.
@@ -75,6 +76,7 @@ describe('script-coverage target-set completeness', () => {
     const stdout = HEADER + '\n' +
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
+      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
       row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
@@ -88,6 +90,7 @@ describe('script-coverage target-set completeness', () => {
   it('rejects an unknown/extra row (a non-target script)', () => {
     const stdout = HEADER + '\n' +
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
+      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
       row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
@@ -101,13 +104,14 @@ describe('script-coverage target-set completeness', () => {
   it('accepts every target passing (the happy path)', () => {
     const stdout = HEADER + '\n' +
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
+      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
       row('scripts/npm-specifier-audit.ts', 96, 97, 95);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
     expect(failures).toEqual([]);
-    expect(parsed.byTarget.size).toBe(4);
+    expect(parsed.byTarget.size).toBe(5);
     const below = belowThreshold(parsed);
     expect(below).toEqual([]);
   });
@@ -115,6 +119,7 @@ describe('script-coverage target-set completeness', () => {
   it('flags one target below threshold while the set is complete', () => {
     const stdout = HEADER + '\n' +
       row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
+      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
       row('scripts/generate-api-docs.ts', 80, 70, 60) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
       row('scripts/npm-specifier-audit.ts', 96, 97, 95);
@@ -132,6 +137,7 @@ describe('script-coverage target-set completeness', () => {
   it('flags two targets below threshold', () => {
     const stdout = HEADER + '\n' +
       row('scripts/check-docs.ts', 80, 70, 60) + '\n' +
+      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
       row('scripts/generate-api-docs.ts', 80, 70, 60) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
       row('scripts/npm-specifier-audit.ts', 96, 97, 95);

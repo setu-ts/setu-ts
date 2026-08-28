@@ -68,6 +68,24 @@ drift into — it is a conclusion you may only reach after a deliberate hunt has
   value a real measurement can produce. Then a negative or zero limit, a value whose
   `toString`/`valueOf` throws, and a revoked `Proxy`. A limit option that disabled the very check it
   configured, and an error serializer that threw while serializing, have both shipped here.
+
+<!-- assert:js -->
+
+| Expression              | Value   |
+| ----------------------- | ------- |
+| `NaN > 1`               | `false` |
+| `NaN < 1`               | `false` |
+| `NaN >= 1`              | `false` |
+| `NaN <= 1`              | `false` |
+| `NaN == 1`              | `false` |
+| `NaN === 1`             | `false` |
+| `NaN != 1`              | `true`  |
+| `NaN !== 1`             | `true`  |
+| `Infinity > 0`          | `true`  |
+| `-Infinity > -Infinity` | `false` |
+| `NaN > -Infinity`       | `false` |
+| `-Infinity < 0`         | `true`  |
+
 - **For every sequence of two or more awaited operations against shared external state** — a Redis
   key, a table row, a file, a shared registry — re-read it as though a second caller interleaves at
   each `await`. Ask what that caller observes between a write and the read that depends on it, and

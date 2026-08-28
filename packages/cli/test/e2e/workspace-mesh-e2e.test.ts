@@ -356,7 +356,14 @@ describe('a three-service workspace — end to end', () => {
       }
     } finally {
       for (const server of servers) {
-        server.kill();
+        // A peer can exit while the probe is resolving; killing an already
+        // terminated process throws, but its status and streams still need
+        // draining before this test can finish.
+        try {
+          server.kill();
+        } catch {
+          // Already gone.
+        }
         await server.status;
         await server.stdout.cancel();
         await server.stderr.cancel();
