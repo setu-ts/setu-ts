@@ -63,6 +63,87 @@ recorded here and corrected in the ROADMAP as C2.
 | `filter-conformance.test.ts`         | `packages/database-plugin/test/unit/filter-conformance.test.ts`                                  | The existing one-query-through-every-adapter suite M70b added — the natural home for cross-adapter conformance of the new members                                                                  |
 | §2.2 plugin-import ban               | `AI_GUIDELINES.md` §2.2                                                                          | `cloudflare-plugin` may not import `database-plugin`, so anything both need lives in `common` (the M47 frame-codec precedent)                                                                      |
 
+## 1A. Facts established by LIVE PROBE (measured 2026-08-29, not reasoned)
+
+Every fact below was produced by executing against a real backend on this machine — Prisma 7.10.0
+against PostgreSQL 16, and MongoDB 8 as a single-node replica set. §1B records exactly how to bring
+both up, so nothing here needs re-deriving. Four of these measurements **changed the design**; two
+of them turned a reasoned decision into an evidenced one; and one is a negative control that
+reproduces a silent data-loss defect.
+
+| #   | Question the design depended on                                                          | Measured answer                                                                                                                                                                                                                                                           | What it changed                                                                                                                           |
+| --- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | Prisma's generated compound-key field for an **unnamed** `@@id([tenantId, userId])`      | `tenantId_userId` — the column names joined by `_`. Executed, not just read off the type: `findUnique({ where: { tenantId_userId: {…} } })` returned the row.                                                                                                             | Confirms §3.4's derived default. The probe the plan deferred to "implementation step 1" is **done**.                                      |
+| P2  | Prisma's compound-key field for a **named** `@@id([...], name: "enrollmentKey")`         | `enrollmentKey`. **And the derived `courseId_personId` is REJECTED on that model** — measured `false`.                                                                                                                                                                    | §3.4: the per-entity override is **mandatory** for a named `@@id`, not a convenience. Sharpened.                                          |
+| P3  | Does Prisma's compound-key object care about **property order**?                         | **No.** `{ userId, tenantId }` matched the same row as `{ tenantId, userId }`.                                                                                                                                                                                            | Prisma needs no canonical ordering — which is the exact opposite of Mongo (P4), so the adapter cannot share one assumption.               |
+| P4  | Does Mongo's **subdocument `_id`** care about field order?                               | **Yes, decisively.** `{tenantId,userId}` matched; `{userId,tenantId}` returned `null` for the same document.                                                                                                                                                              | Confirms §3.3's "no `_id` rename for a compound key" with evidence, and makes the new `'compound'` arm safe only under a canonical order. |
+| P5  | Can a compound `_id` be addressed reliably at all?                                       | **Only under a canonical order.** Building the subdocument in the mapping's declared column order matched (`true`); passing the caller's key object through verbatim missed (`false`).                                                                                    | §3.3 gains an `idType: 'compound'` arm whose whole correctness rests on ordering by the mapping, never by the caller.                     |
+| P6  | Do Prisma composite `update` and `delete` return the **row**, as `IDataSource` requires? | **Yes** — `update` returned the updated row and `delete` returned the deleted row.                                                                                                                                                                                        | Removes the `updateMany` + `findFirst` fallback from consideration entirely; §3.4's rejection of it is now measured.                      |
+| P7  | Prisma's nested JSON path filter shape                                                   | `{ profile: { path: ['address','city'], equals: 'Kolkata' } }` returned the 3 matching rows.                                                                                                                                                                              | Confirms §3.5's claim that Prisma has a native path form to translate onto.                                                               |
+| P8  | Mongo's nested path shape                                                                | The native dotted key `"profile.address.city"` returned the 3 matching rows.                                                                                                                                                                                              | Confirms §3.5's "path arrays join to Mongo's native dotted key".                                                                          |
+| P9  | Does a `Date` range filter work on both?                                                 | **Yes on both** — Prisma `{ createdAt: { gt: date } }` and Mongo `{ createdAt: { $gt: date } }` each returned the expected count.                                                                                                                                         | Confirms §3.9's fourth member is translatable on the two backends that must carry it.                                                     |
+| P10 | Does the §3.8 keyset tree page correctly on a real database?                             | **Yes on both.** `or(lt, and(eq, gt))` over `createdAt desc, userId asc` walked 6 rows in 3 pages with no overlap and no gap, on Prisma/Postgres and on Mongo.                                                                                                            | Confirms §3.8's central claim — the predicate needs only operators the contract already has.                                              |
+| P11 | **Is the tiebreaker actually load-bearing?** (negative control)                          | **Yes — dropping it silently loses rows.** With six rows over only two distinct `createdAt` values, the naive `createdAt < cursor` walk returned **4 of 6**; `u2` and `u5` never appeared and the walk reported success. Reproduced identically on Postgres and on Mongo. | Promotes the tiebreaker from a refinement to a **correctness requirement** (§3.8), with a committed regression test.                      |
+
+**P11 is the finding that matters most**, and it is why §3.8 puts the builder in `common` rather
+than letting each adapter roll its own: the defect is backend-independent, produces no error, and a
+first page of results looks entirely correct. An initial run of the P10 walk was **vacuous** — every
+`createdAt` was distinct, so the tiebreaker branch never executed and the test would have passed
+against a builder that omitted it. The committed test therefore seeds ties deliberately.
+
+## 1B. Live backend setup — everything needed, no searching
+
+Both backends below are already running on this machine. The commands are recorded so the
+implementation, the reviewer and CI-adjacent local runs need no lookup.
+
+**MongoDB 8 — `he-mongo`, already up.** It is a single-node **replica set** (Prisma's MongoDB
+connector requires one), and the member host must be `127.0.0.1:27017`, because a client on the host
+discovers the topology and dials whatever the member advertises.
+
+```bash
+docker run -d --name he-mongo --restart unless-stopped -p 127.0.0.1:27017:27017   -v he-mongo-data:/data/db mongo:8 --replSet rs0 --bind_ip_all
+docker exec he-mongo mongosh --quiet --eval   'rs.initiate({_id:"rs0", members:[{_id:0, host:"127.0.0.1:27017"}]})'
+```
+
+Connection string (this is the value `MONGO_URL` / `MONGODB_URI` takes):
+
+```
+mongodb://127.0.0.1:27017/setu_m79?replicaSet=rs0
+```
+
+**PostgreSQL 16 — `m79-postgres`, created for this milestone.** Port **5433** deliberately, because
+`web-app-postgres` (an unrelated project) already holds 5432 and must not be touched.
+
+```bash
+docker run -d --name m79-postgres --restart unless-stopped   -e POSTGRES_PASSWORD=probe -e POSTGRES_DB=m79probe   -p 127.0.0.1:5433:5432 postgres:16-alpine
+```
+
+```
+postgresql://postgres:probe@127.0.0.1:5433/m79probe
+```
+
+**Prisma 7 prerequisites, confirmed live.** Prisma 7 **removed `url` from the schema file** — a
+`datasource` block carrying `url` fails validation with `P1012`. The three requirements M70j
+recorded are all real and all necessary:
+
+1. `prisma.config.ts` at the project root carrying `schema`, `migrations.path` and `datasource.url`;
+   the schema's `datasource` block keeps only `provider`.
+2. A driver adapter passed to the client constructor —
+   `new PrismaClient({ adapter: new PrismaPg({ connectionString }) })` from `@prisma/adapter-pg`.
+3. Packages: `prisma@^7`, `@prisma/client@^7`, `@prisma/adapter-pg`, `pg`.
+
+```bash
+export DATABASE_URL="postgresql://postgres:probe@127.0.0.1:5433/m79probe"
+npx prisma db push && npx prisma generate
+```
+
+**Before running anything that stops a container**, check `AutoRemove` — M70c's outage suites issue
+a real `docker stop`, and a container created with `--rm` is destroyed by it and never returns:
+
+```bash
+docker inspect -f '{{.HostConfig.AutoRemove}}' he-mongo m79-postgres   # both must print false
+```
+
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
 | #  | Conflict                                                                                                                                                                                                                                                                                                                                | Resolution (picked side)                                                                                                                                                                                                                 | Doc deliverable (same PR)                                                                                                                      |
@@ -120,8 +201,24 @@ recorded here and corrected in the ROADMAP as C2.
   in the target would put a `typeof x === 'string'` branch in every statement builder, which is
   where a composite key would silently degrade to its first column. One shape at the builder means
   the scalar case is the one-element array and cannot diverge.
+- **Mongo additionally gains an `idType: 'compound'` arm, and P4/P5 are why it is safe.** A compound
+  `_id` subdocument is Mongo's own idiom for a composite key, and M78's scalar mapping cannot
+  address such a collection at all. It is admitted here **only** because the probe settled the
+  ordering question: a subdocument `_id` match is **field-order sensitive** (P4 — the same document
+  matched under `{tenantId,userId}` and missed under `{userId,tenantId}`), so the adapter builds the
+  subdocument in the **mapping's declared column order** and never in the caller's key- object order
+  (P5 — canonical `true`, caller-order `false`). Passing the caller's object through would make
+  `findById` return `null` for an existing row depending on how the caller happened to write the
+  literal. The default stays flat top-level fields, which are order-independent and which a unique
+  index constrains (measured: a duplicate insert is rejected with code `11000`).
+- **The two backends disagree about ordering, which is why neither assumption is shared.** Prisma's
+  compound-key object is order-**insensitive** (P3) while Mongo's subdocument `_id` is order-
+  **sensitive** (P4). The canonical ordering therefore lives in each adapter's own key builder,
+  derived from the resolved target's column array, rather than in `common`.
 - **Test home:** `test/unit/mongo-mapping.test.ts`, `test/unit/memory-adapter.test.ts`,
-  `test/unit/drizzle-adapter-columns.test.ts`, and `cloudflare-plugin/test/unit/d1-adapter.test.ts`.
+  `test/unit/drizzle-adapter-columns.test.ts`, and `cloudflare-plugin/test/unit/d1-adapter.test.ts`;
+  the order-sensitivity guard in `test/integration/real-mongo-adapter.test.ts`, which is the only
+  place a real server can show it.
 
 ### 3.4 Prisma's compound key — derived name with a per-entity override
 
@@ -135,13 +232,21 @@ recorded here and corrected in the ROADMAP as C2.
   `findFirst` costs two round trips and is not atomic, which is precisely the "emulation that
   changes cost and consistency invisibly" the ROADMAP forbids; and refusing composite keys on Prisma
   outright would leave the framework's most-used ORM out of the milestone's headline member.
-- **Verification requirement, not an assumption:** the joined-name default is Prisma's documented
-  generated name for a two-column `@@id`, and CLAUDE.md forbids taking an external-package fact from
-  memory. **Implementation step 1 is to probe it against a real generated Prisma v7 client** and
-  record the reading in this section. The override exists regardless, so a probe that contradicts
-  the default changes one constant rather than the design.
+- **Measured, not assumed (P1, P2, P6) — this probe is complete.** Against a real generated Prisma
+  7.10.0 client on live PostgreSQL 16: an unnamed `@@id([tenantId, userId])` generates
+  `tenantId_userId` and `findUnique` through it returned the row; composite `update` and `delete`
+  each returned the **row**, so both honour `IDataSource`'s return contract natively and the
+  `updateMany` + `findFirst` fallback is ruled out by measurement rather than by argument.
+- **The override is MANDATORY for a named `@@id`, not a convenience — this is the sharpening P2
+  forced.** A model declaring `@@id([...], name: "enrollmentKey")` generates only `enrollmentKey`,
+  and the derived `courseId_personId` is **rejected** on that model (measured `false`). So an entity
+  whose schema names its compound key cannot work on the derived default at all, and the adapter
+  must refuse by name (§3.11) when a composite key is configured for an entity Prisma rejects the
+  derived name on, telling the caller to set `compositeKeyName`. Silently falling back to
+  `findFirst` there would reintroduce the non-atomic path this decision rejects.
 - **Test home:** `test/unit/prisma-adapter.test.ts` (the emitted `where` argument, asserted for the
-  derived name and for the override), plus the probe recorded in the PR body.
+  derived name and for the override) and `test/integration/real-prisma-adapter.test.ts` (both models
+  driven against live PostgreSQL, including the named-key refusal).
 
 ### 3.5 Nested path representation
 
@@ -205,8 +310,18 @@ recorded here and corrected in the ROADMAP as C2.
   which deletes a would-be duplicate rather than creating one. The fingerprint is the correctness
   guard: a cursor minted under one sort and presented under another would otherwise return a
   silently wrong page, and this repository has shipped that class of defect before.
+- **The primary-key tiebreaker is a correctness requirement, and P11 measured the cost of omitting
+  it.** Over six rows carrying only two distinct `createdAt` values, a naive `createdAt < cursor`
+  walk returned **4 of 6** — two rows never appeared and the walk reported success, with no error
+  raised by Postgres or by Mongo. So `keysetPredicate` always appends the resolved key columns as
+  the final sort term, and a caller-supplied `orderBy` that already ends in them is not duplicated.
+  P10 confirms the full tree walks 6 rows in 3 pages with no overlap and no gap on both
+  Prisma/PostgreSQL and Mongo.
 - **Test home:** `packages/common/test/unit/cursor-codec.test.ts` (round trip, malformed token,
-  fingerprint mismatch), `test/unit/filter-conformance.test.ts` (the predicate against all five).
+  fingerprint mismatch), `test/unit/filter-conformance.test.ts` (the predicate against all five),
+  and the live-backend suites in §6, whose fixtures **seed deliberate sort-key ties** — without them
+  the walk passes against a builder that omits the tiebreaker entirely (the vacuous first run
+  recorded in §1A).
 
 ### 3.9 The ordered-comparison arm gains `Date`
 
@@ -302,6 +417,7 @@ exported.
 | -------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `D1EntityMapping.primaryKey` (widened)                         | `D1Adapter.resolveTarget`, normalising to `D1Target.primaryKey` | A scalar name keeps today's behaviour; an array emits a multi-column `WHERE a = ?1 AND b = ?2`. Default `['id']`.                                                       |
 | `MongoEntityMapping.primaryKey` (widened)                      | `resolveMongoTarget`, normalising to `MongoTarget.primaryKey`   | A scalar keeps the `_id` rename path unchanged. An array maps each named field and performs **no** `_id` rename, since a compound key is not the driver's `_id`.        |
+| `MongoEntityMapping.idType: 'compound'` (new arm)              | The Mongo key builder / `toDriverDocument`                      | Stores the composite key as a subdocument `_id`, built in the mapping's declared column order (P4/P5). Absent, a composite key maps to flat top-level fields.           |
 | `DrizzleAdapterOptions.entities[e].primaryKey` (new)           | `createDrizzleDataSourceInner`                                  | Replaces the hardcoded `columnFor(table, entity, 'id')`. Default `['id']`, so an unconfigured entity behaves exactly as today, including its refuse-by-name on absence. |
 | `PrismaAdapterOptions.entities[e].compositeKeyName` (new)      | The Prisma composite `where` builder (§3.4)                     | Overrides the derived joined name. Unset with a scalar key: today's `where: { id }` path, unchanged.                                                                    |
 | `MemoryAdapter.createDataSource(entity, primaryKey)` (widened) | `EntityStore.primaryKey`                                        | The parameter accepts the widened form; the store normalises to an array. Composite rows match on every named column.                                                   |
@@ -337,29 +453,30 @@ each has a test in §6.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                       | src covered                                          | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                 |
-| --------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `common/test/unit/cursor-codec.test.ts` **(new)**               | `common/src/services/cursor.ts`                      | `encodeCursor` and `decodeCursor` round-trip against `CursorPayload`; a malformed token decodes to `null` rather than throwing; a fingerprint mismatch is detectable; `keysetPredicate` emits the `or(lt, and(eq, gt))` tree for `desc` and its mirror for `asc`, and appends the key tiebreaker |
-| `common/test/unit/database-contract-types.test.ts` **(new)**    | `common/src/services/database.ts` (type level)       | `@ts-expect-error` cases: an `IDataSource` implementor with the old scalar-only signature is refused; a `Date` in the ordered arm is accepted; a `Date` in the `contains` arm is refused; a two-element `field` array type-checks without `as const`                                             |
-| `database-plugin/test/unit/entity-key.test.ts` **(new)**        | `src/query/key-target.ts`                            | `resolveKeyColumns('id')` yields `['id']`; the array form passes through; `keyValues` refuses a scalar against a two-column target and refuses a record missing a column, each naming the column                                                                                                 |
-| `database-plugin/test/unit/page-result.test.ts` **(new)**       | `src/query/query-builder.ts` (`normalizePageQuery`)  | A cursor alongside a non-zero `offset` rejects (§3.10); an absent cursor yields a first page; the one-extra-row probe sets `nextCursor` to `null` on the last page and to a token otherwise                                                                                                      |
-| `database-plugin/test/unit/errors.test.ts`                      | `src/errors.ts`                                      | `UnsupportedQueryFeatureError` carries its feature, adapter and `name`, and survives `instanceof`                                                                                                                                                                                                |
-| `database-plugin/test/unit/query-builder.test.ts`               | `src/query/query-builder.ts`                         | `matchesFilter` resolves a two-segment path and returns `false` for a missing intermediate rather than throwing; `comparableGreaterThan` orders two `Date`s (with the control from §3.9); `unknownColumnError` does not reject a path's root field                                               |
-| `database-plugin/test/unit/base-repository.test.ts`             | `src/repositories/base-repository.ts`                | A composite key round-trips through `findById`, `update` and `delete` against a repository declared with a two-column key type; `findPage` refuses by name when the data source omits `findPage`; a `@ts-expect-error` pins an out-of-constraint key type                                        |
-| `database-plugin/test/unit/memory-adapter.test.ts`              | `src/adapters/memory/memory-adapter.ts`              | Composite store matching; `findPage` walks a seeded set across three pages with no row repeated and none skipped                                                                                                                                                                                 |
-| `database-plugin/test/unit/prisma-adapter.test.ts`              | `src/adapters/prisma/prisma-adapter.ts`              | The emitted `where` for a composite key uses the derived compound name, and the override replaces it; a nested path emits Prisma's own path form; a `Date` reaches the delegate unconverted — each asserted on the recorded delegate argument                                                    |
-| `database-plugin/test/unit/drizzle-adapter-columns.test.ts`     | `src/adapters/drizzle/drizzle-adapter.ts`            | Configured key columns replace the hardcoded `'id'`; an unconfigured entity still refuses a missing `id` by name; a composite-key table now yields a repository where it previously threw                                                                                                        |
-| `database-plugin/test/unit/mongo-mapping.test.ts`               | `src/adapters/mongo/mongo-mapping.ts`                | `resolveMongoTarget` normalises both forms to an array; a compound key performs no `_id` rename; the scalar path stays byte-identical to M78 (a pinned regression case)                                                                                                                          |
-| `database-plugin/test/unit/mongo-query.test.ts`                 | `src/adapters/mongo/mongo-query.ts`                  | A two-segment path becomes the dotted key `'address.city'`; an empty path is refused; a `Date` passes through unescaped                                                                                                                                                                          |
-| `database-plugin/test/unit/mongo-data-source.test.ts`           | `src/adapters/mongo/mongo-data-source.ts`            | Composite `findById`, `update` and `delete` build the multi-field filter; `findPage` pages against the recorded cursor arguments                                                                                                                                                                 |
-| `database-plugin/test/unit/filter-conformance.test.ts`          | all five adapters                                    | One nested-path query, one `Date` range query and one three-page cursor walk run through **every** adapter; each result matches the reference, and any adapter that cannot serve the query refuses with its own named class — extending the existing M70b table rather than adding a second one  |
-| `database-plugin/test/unit/barrel-exports.test.ts`              | `src/index.ts`                                       | The three new symbols and six re-exports are present, asserted against the barrel rather than the concrete modules (the M56 defect class)                                                                                                                                                        |
-| `database-plugin/test/integration/database-plugin.test.ts`      | plugin, service and repository                       | Through a real kernel application: a composite-key repository writes and reads back, and a cursor walk over a seeded table returns every row exactly once                                                                                                                                        |
-| `database-plugin/test/integration/real-drizzle-adapter.test.ts` | Drizzle against the real SQL generator               | The composite-key `WHERE` and the keyset predicate are asserted in the **emitted SQL** and executed against the real `node:sqlite` engine — the M68 precedent, where a string assertion alone missed a live defect                                                                               |
-| `database-plugin/test/integration/real-mongo-adapter.test.ts`   | Mongo against a real server (guarded on `MONGO_URL`) | A compound-`_id` collection round-trips through `findById`, `update` and `delete`; a nested-path filter matches a real subdocument; a cursor walk returns every document once                                                                                                                    |
-| `cloudflare-plugin/test/unit/d1-sql.test.ts`                    | `src/database/d1-sql.ts`                             | Multi-column key predicates bind in column order and respect `D1_MAX_BOUND_PARAMS`; a nested path and a `Date` are each refused with `CloudflareUnsupportedError` naming the cause                                                                                                               |
-| `cloudflare-plugin/test/unit/d1-data-source.test.ts`            | `src/database/d1-data-source.ts`                     | Composite key on the committed path and on the deferred-write transaction path (where `update` and `delete` read first); `findPage` against the real `node:sqlite` engine the M52c suite already drives                                                                                          |
-| `cloudflare-plugin/test/unit/d1-adapter.test.ts`                | `src/database/d1-adapter.ts`                         | `resolveTarget` normalises both `primaryKey` forms; the zero-config default is still `['id']`                                                                                                                                                                                                    |
+| Test file                                                                | src covered                                                | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `common/test/unit/cursor-codec.test.ts` **(new)**                        | `common/src/services/cursor.ts`                            | `encodeCursor` and `decodeCursor` round-trip against `CursorPayload`; a malformed token decodes to `null` rather than throwing; a fingerprint mismatch is detectable; `keysetPredicate` emits the `or(lt, and(eq, gt))` tree for `desc` and its mirror for `asc`, and appends the key tiebreaker |
+| `common/test/unit/database-contract-types.test.ts` **(new)**             | `common/src/services/database.ts` (type level)             | `@ts-expect-error` cases: an `IDataSource` implementor with the old scalar-only signature is refused; a `Date` in the ordered arm is accepted; a `Date` in the `contains` arm is refused; a two-element `field` array type-checks without `as const`                                             |
+| `database-plugin/test/unit/entity-key.test.ts` **(new)**                 | `src/query/key-target.ts`                                  | `resolveKeyColumns('id')` yields `['id']`; the array form passes through; `keyValues` refuses a scalar against a two-column target and refuses a record missing a column, each naming the column                                                                                                 |
+| `database-plugin/test/unit/page-result.test.ts` **(new)**                | `src/query/query-builder.ts` (`normalizePageQuery`)        | A cursor alongside a non-zero `offset` rejects (§3.10); an absent cursor yields a first page; the one-extra-row probe sets `nextCursor` to `null` on the last page and to a token otherwise                                                                                                      |
+| `database-plugin/test/unit/errors.test.ts`                               | `src/errors.ts`                                            | `UnsupportedQueryFeatureError` carries its feature, adapter and `name`, and survives `instanceof`                                                                                                                                                                                                |
+| `database-plugin/test/unit/query-builder.test.ts`                        | `src/query/query-builder.ts`                               | `matchesFilter` resolves a two-segment path and returns `false` for a missing intermediate rather than throwing; `comparableGreaterThan` orders two `Date`s (with the control from §3.9); `unknownColumnError` does not reject a path's root field                                               |
+| `database-plugin/test/unit/base-repository.test.ts`                      | `src/repositories/base-repository.ts`                      | A composite key round-trips through `findById`, `update` and `delete` against a repository declared with a two-column key type; `findPage` refuses by name when the data source omits `findPage`; a `@ts-expect-error` pins an out-of-constraint key type                                        |
+| `database-plugin/test/unit/memory-adapter.test.ts`                       | `src/adapters/memory/memory-adapter.ts`                    | Composite store matching; `findPage` walks a seeded set across three pages with no row repeated and none skipped                                                                                                                                                                                 |
+| `database-plugin/test/unit/prisma-adapter.test.ts`                       | `src/adapters/prisma/prisma-adapter.ts`                    | The emitted `where` for a composite key uses the derived compound name, and the override replaces it; a nested path emits Prisma's own path form; a `Date` reaches the delegate unconverted — each asserted on the recorded delegate argument                                                    |
+| `database-plugin/test/unit/drizzle-adapter-columns.test.ts`              | `src/adapters/drizzle/drizzle-adapter.ts`                  | Configured key columns replace the hardcoded `'id'`; an unconfigured entity still refuses a missing `id` by name; a composite-key table now yields a repository where it previously threw                                                                                                        |
+| `database-plugin/test/unit/mongo-mapping.test.ts`                        | `src/adapters/mongo/mongo-mapping.ts`                      | `resolveMongoTarget` normalises both forms to an array; a compound key performs no `_id` rename; the scalar path stays byte-identical to M78 (a pinned regression case)                                                                                                                          |
+| `database-plugin/test/unit/mongo-query.test.ts`                          | `src/adapters/mongo/mongo-query.ts`                        | A two-segment path becomes the dotted key `'address.city'`; an empty path is refused; a `Date` passes through unescaped                                                                                                                                                                          |
+| `database-plugin/test/unit/mongo-data-source.test.ts`                    | `src/adapters/mongo/mongo-data-source.ts`                  | Composite `findById`, `update` and `delete` build the multi-field filter; `findPage` pages against the recorded cursor arguments                                                                                                                                                                 |
+| `database-plugin/test/unit/filter-conformance.test.ts`                   | all five adapters                                          | One nested-path query, one `Date` range query and one three-page cursor walk run through **every** adapter; each result matches the reference, and any adapter that cannot serve the query refuses with its own named class — extending the existing M70b table rather than adding a second one  |
+| `database-plugin/test/unit/barrel-exports.test.ts`                       | `src/index.ts`                                             | The three new symbols and six re-exports are present, asserted against the barrel rather than the concrete modules (the M56 defect class)                                                                                                                                                        |
+| `database-plugin/test/integration/database-plugin.test.ts`               | plugin, service and repository                             | Through a real kernel application: a composite-key repository writes and reads back, and a cursor walk over a seeded table returns every row exactly once                                                                                                                                        |
+| `database-plugin/test/integration/real-drizzle-adapter.test.ts`          | Drizzle against the real SQL generator                     | The composite-key `WHERE` and the keyset predicate are asserted in the **emitted SQL** and executed against the real `node:sqlite` engine — the M68 precedent, where a string assertion alone missed a live defect                                                                               |
+| `database-plugin/test/integration/real-mongo-adapter.test.ts`            | Mongo against a real server (guarded on `MONGO_URL`)       | A compound-`_id` collection round-trips through `findById`, `update` and `delete`; a nested-path filter matches a real subdocument; a cursor walk returns every document once                                                                                                                    |
+| `database-plugin/test/integration/real-prisma-adapter.test.ts` **(new)** | Prisma against live PostgreSQL (guarded on `POSTGRES_URL`) | Composite round trip through the repository; the named-`@@id` refusal and its `compositeKeyName` fix; JSONB path; `Date` range; a tied-fixture cursor walk — see §6.1                                                                                                                            |
+| `cloudflare-plugin/test/unit/d1-sql.test.ts`                             | `src/database/d1-sql.ts`                                   | Multi-column key predicates bind in column order and respect `D1_MAX_BOUND_PARAMS`; a nested path and a `Date` are each refused with `CloudflareUnsupportedError` naming the cause                                                                                                               |
+| `cloudflare-plugin/test/unit/d1-data-source.test.ts`                     | `src/database/d1-data-source.ts`                           | Composite key on the committed path and on the deferred-write transaction path (where `update` and `delete` read first); `findPage` against the real `node:sqlite` engine the M52c suite already drives                                                                                          |
+| `cloudflare-plugin/test/unit/d1-adapter.test.ts`                         | `src/database/d1-adapter.ts`                               | `resolveTarget` normalises both `primaryKey` forms; the zero-config default is still `['id']`                                                                                                                                                                                                    |
 
 **Negative controls to run and revert, each observed failing before it is trusted:**
 
@@ -375,6 +492,41 @@ each has a test in §6.
    must report a `nextCursor` that yields an empty page.
 6. Make one refusal throw synchronously instead of rejecting — its `.rejects.toThrow` assertion must
    fail (§3.12).
+
+### 6.1 Behavioural tests against a LIVE database (required, not optional)
+
+Every probe in §1A is committed as a behavioural test, because a probe run once in a scratch
+directory proves the design and guards nothing. Each suite is **guarded on its connection
+environment variable and skips via `ignore` rather than by returning early inside the test body** —
+the M70c trap, where a suite reported _passed_ while asserting nothing, and where the ignored count
+is the only tell. §1B carries the container commands and connection strings.
+
+**`real-prisma-adapter.test.ts`** — guarded on `POSTGRES_URL`, against PostgreSQL 16. The schema it
+pushes carries **both** compound-key models, because the two behave differently (P2):
+
+1. A composite `findById`/`update`/`delete` round trip through the **repository** surface on the
+   unnamed-`@@id` model, asserting `update` returns the updated row and `delete` reports `true`.
+2. The named-`@@id` model refuses by name without `compositeKeyName`, and succeeds with it — the
+   assertion that P2 exists at all.
+3. A nested-path filter matches real JSONB rows (P7).
+4. A `Date` range filter returns the expected rows (P9).
+5. A three-page cursor walk over a fixture **seeded with deliberate sort-key ties** returns every
+   row exactly once (P10/P11).
+
+**`real-mongo-adapter.test.ts`** — guarded on `MONGO_URL`, against MongoDB 8 (replica set):
+
+1. A flat composite key round-trips through `findById`/`update`/`delete`, and matches regardless of
+   the caller's key-object property order.
+2. A compound-`_id` collection under `idType: 'compound'` round-trips — and the **order-sensitivity
+   guard**: the same key written in the reverse property order still matches, which only holds
+   because the adapter imposes the mapping's order (P4/P5). This assertion is the reason the arm is
+   safe to ship, and no fake can produce it.
+3. A dotted nested-path filter matches a real subdocument (P8).
+4. A `Date` range filter (P9), and the tied-fixture cursor walk (P10/P11).
+
+**Both suites carry the P11 negative control as a committed test**, not merely as a manual step: a
+cursor walk built **without** the key tiebreaker over the tied fixture must lose rows. It is
+asserted as a loss so the guard fails if a future change makes the naive walk correct by accident.
 
 ## 7. Verification gates
 
@@ -395,11 +547,20 @@ deno task publish:check          # on a COMMITTED tree
 deno task release:verify <version>
 ```
 
-And the guarded real-backend suite, which the fake-only path cannot substitute for:
+And the guarded real-backend suites (§6.1), which the fake-only path cannot substitute for. Bring
+the containers up with §1B, then run with **both** variables set — a missing one skips that suite,
+and the **ignored count in the summary is the only tell**:
 
 ```bash
-MONGO_URL=mongodb://127.0.0.1:27017/?replicaSet=rs0 deno task test
+MONGO_URL='mongodb://127.0.0.1:27017/setu_m79?replicaSet=rs0' \
+POSTGRES_URL='postgresql://postgres:probe@127.0.0.1:5433/m79probe' \
+  deno task test
 ```
+
+Confirm the run was not vacuous: the summary must report **0 ignored** for these two suites. Both
+packages' `deno.json` `test.permissions.net` allowlists need `127.0.0.1:27017` and `127.0.0.1:5433`
+— a CLI `--allow-net` **replaces** that block rather than unioning with it (M53), so the grant
+belongs in the manifest and stays endpoint-scoped.
 
 ## 8. Risks & mitigations
 
@@ -415,8 +576,16 @@ MONGO_URL=mongodb://127.0.0.1:27017/?replicaSet=rs0 deno task test
   root cause (M37b ioredis, M53 `zrangebyscore`, M55 `Deno.FsFile.read`, M70l RabbitMQ). Mitigation:
   the Drizzle and D1 cursor and composite-key paths are exercised against the real `node:sqlite`
   engine, and Mongo against a real server, not only against recording fakes.
-- **The Prisma compound-key name is an external fact.** Mitigated by §3.4's probe-first requirement
-  and by the per-entity override, which makes a wrong default a one-constant fix.
+- **~~The Prisma compound-key name is an external fact.~~ Retired — measured (P1, P2, P6).** The
+  derived name, the named-key rejection and the row-returning `update`/`delete` are all confirmed
+  against a real generated Prisma 7.10.0 client on live PostgreSQL 16.
+- **A live-backend suite that skips while reporting green.** The M70c trap. Mitigation: both suites
+  in §6.1 guard with `ignore` rather than an early return, and §7 requires reading the ignored count
+  rather than the pass count.
+- **A cursor test that passes vacuously.** Measured during planning: the first P10 walk used
+  distinct sort values, so the tiebreaker branch never executed and would have passed against a
+  builder that omitted it entirely. Mitigation: every committed cursor fixture seeds deliberate
+  ties, and the P11 negative control is committed alongside as a test that must observe a loss.
 - **Cursor pagination over a non-unique sort with no usable tiebreaker.** An entity whose key
   columns are absent from a projection cannot mint a cursor. Mitigation: `findPage` adds the key
   columns to `select` when a projection is present and strips them from the returned rows, and a
