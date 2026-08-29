@@ -182,6 +182,41 @@ function mapRefs(node: unknown, map: (ref: string) => string): unknown {
 }
 
 /**
+ * Which side of a schema a document site is describing.
+ *
+ * A zod schema has two shapes, and for anything carrying a `.default()`, a
+ * `.transform()`, a `.coerce`, or the ordinary key-stripping of `z.object`,
+ * they differ. `'input'` is what a client may SEND; `'output'` is what the
+ * server holds after parsing. A request body, a query string, a path parameter
+ * and a header are all `'input'`; a response body is `'output'`.
+ *
+ * Getting this wrong is not cosmetic — it makes a document contradict the
+ * server it describes. Measured against zod 4.4 on the three object modes:
+ *
+ * | schema           | unknown key at runtime | `'output'` says          | `'input'` says   |
+ * | ---------------- | ---------------------- | ------------------------ | ---------------- |
+ * | `z.object`       | accepted, stripped     | `additionalProperties: false` | (absent)    |
+ * | `z.strictObject` | rejected               | `additionalProperties: false` | `false`     |
+ * | `z.looseObject`  | accepted, kept         | `additionalProperties: {}`    | `{}`        |
+ *
+ * — so on a REQUEST body the output view documents a restriction the server
+ * does not apply, while a strict schema keeps its `false` under either view. A
+ * `.default()` field is likewise `required` in the output view (the parsed
+ * object always has it) and optional in the input view (the client may omit
+ * it, which is what a default is FOR).
+ *
+ * Only the zod v4 path reads this. The v3 path hand-walks `_def` and has no
+ * `io` concept; what it produces is already the INPUT view — it marks a
+ * `.default()` field optional and documents a `.transform()` by its source
+ * type — so v3 request bodies were always right and v3 responses carry the
+ * same input-shaped view they always have. Closing that is a v3-transformer
+ * change with no consumer asking for it, and is deliberately not done here.
+ *
+ * @since 0.2.0
+ */
+export type SchemaIo = 'input' | 'output';
+
+/**
  * Converts a Zod schema to an OpenAPI 3.1 schema object.
  *
  * Zod v3 and v4 are both supported, detected per schema by duck typing
@@ -250,9 +285,11 @@ export class ZodToOpenApi {
    * Transforms a Zod schema into an OpenAPI schema object.
    *
    * @param schema - The Zod schema to convert (unknown to accept any Zod schema)
+   * @param io - Which side this site describes; see {@linkcode SchemaIo}.
+   *   Defaults to `'output'`, so an existing single-argument call is unchanged
    * @returns The OpenAPI schema object representation
    */
-  transform(schema: unknown): OpenApiSchemaObject {
+  transform(schema: unknown, io: SchemaIo = 'output'): OpenApiSchemaObject {
     // Consulted BEFORE the version dispatch, so a hook sees every node the
     // caller asked about — including one it may want to name even though this
     // transformer would degrade it to `{}`.
@@ -264,7 +301,7 @@ export class ZodToOpenApi {
     // these nodes at all).
     const candidate = schema as Partial<Zod4SchemaLike> | undefined | null;
     if (typeof candidate?.toJSONSchema === 'function') {
-      return this.#transformZod4(candidate as Zod4SchemaLike);
+      return this.#transformZod4(candidate as Zod4SchemaLike, io);
     }
 
     const zodSchema = schema as ZodSchema | undefined;
@@ -335,16 +372,17 @@ export class ZodToOpenApi {
    * independent of `override`.
    *
    * @param schema - The duck-typed zod v4 schema
+   * @param io - Which side this site describes; see {@linkcode SchemaIo}
    * @returns The adapted OpenAPI schema object
    */
-  #transformZod4(schema: Zod4SchemaLike): OpenApiSchemaObject {
+  #transformZod4(schema: Zod4SchemaLike, io: SchemaIo): OpenApiSchemaObject {
     const previousRoot = this.#zod4ConversionRoot;
     this.#zod4ConversionRoot = schema;
     try {
       const js = schema.toJSONSchema({
         reused: 'ref',
         cycles: 'ref',
-        io: 'output',
+        io,
         unrepresentable: 'any',
         override: (ctx: Zod4OverrideContext) => this.#overrideZod4(ctx),
       });

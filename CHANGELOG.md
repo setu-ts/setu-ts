@@ -10,6 +10,42 @@ All notable changes to this project are documented here. The format follows
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.
 
+### Fixed
+
+- **`@setu-ts/openapi-plugin` documented a zod v4 REQUEST body as the shape the server holds after
+  parsing, so a document could contradict the application serving it.** `ZodToOpenApi` converted
+  every schema with `io: 'output'`. A field carrying `.default('free')` was therefore listed in the
+  request body's `required` while the server accepted a body omitting it and supplied the default —
+  reproduced in one running app, `201` from the route and `required: ["name","age","plan"]` from its
+  own `/openapi.json` — so a generated client took a required argument for a field the API defaults.
+  A `.transform()` field documented as `{}`, silently, because a transform's OUTPUT has no JSON
+  Schema representation. And `additionalProperties: false` was emitted for a plain `z.object`, which
+  strips an unknown key and answers 2xx rather than rejecting it.
+
+  Every request-side position — `body`, `params`, `query`, `headers` — is now converted from the
+  input side; `response` keeps the output side. A `z.strictObject` keeps
+  `additionalProperties:
+  false` under either view, so nothing a client may send is widened. This
+  was a consequence of the alpha.10 zod-v4 fix rather than a regression in it: before that, a v4
+  schema transformed to `{}`, so there was no `required` list to be wrong. **Zod v3 documents are
+  unchanged** — that path has no `io` concept and already emitted the input view, which is what
+  makes the two majors agree on a request body now.
+
+  Two visible consequences, both by design. A request body built from a plain `z.object` no longer
+  carries `additionalProperties: false`. And a schema whose two views differ and that is used on
+  BOTH sides is hoisted into one component per side rather than one shared component; a schema whose
+  views are identical — every zod v3 schema, and any v4 schema with no default, transform, coercion
+  or object-mode difference — still yields exactly one, so most documents are unchanged. A schema
+  registered with `addSchema('Name', …)` keeps that name on the output side and gains a `NameInput`
+  twin when a request site reaches it — identified by schema rather than by name, so registering an
+  unrelated `AddressInput` alongside `Address` cannot capture it.
+
+### Added
+
+- **`@setu-ts/openapi-plugin` exports `SchemaIo`** and `ZodToOpenApi.transform` takes it as an
+  optional second argument (`transform(schema, io?)`, defaulting to `'output'`), so an existing
+  single-argument call is unchanged.
+
 ## [0.1.0-alpha.10] — 2026-08-28
 
 **The decorator surface moves to the TC39 standard, and realtime grows up.** Every shipped decorator

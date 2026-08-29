@@ -55,18 +55,25 @@ describe('OpenAPI integration — zod v4', () => {
       }>;
     }>();
 
-    // THE DEFECT: this was `{"schema":{}}` before the fix. Matched as a
+    // THE DEFECT (A9-1): this was `{"schema":{}}` before the fix. Matched as a
     // subset: zod v4 also emits a regex `pattern` beside derived formats.
-    expect(spec.paths['/widgets']?.post?.requestBody?.content['application/json'].schema)
-      .toMatchObject({
-        type: 'object',
-        properties: {
-          name: { type: 'string', minLength: 1 },
-          email: { type: 'string', format: 'email' },
-        },
-        required: ['name', 'email'],
-        additionalProperties: false,
-      });
+    const bodySchema = spec.paths['/widgets']?.post?.requestBody?.content['application/json']
+      .schema;
+    expect(bodySchema).toMatchObject({
+      type: 'object',
+      properties: {
+        name: { type: 'string', minLength: 1 },
+        email: { type: 'string', format: 'email' },
+      },
+      required: ['name', 'email'],
+    });
+    // A10-1: a request body is documented in the INPUT view, so the strictness
+    // marker is ABSENT here — `z4.object` strips an unknown key and answers
+    // 2xx, so `additionalProperties: false` would document a restriction the
+    // server does not apply. It is still emitted on the response below, where
+    // the output view is the right one, and a `z4.strictObject` keeps it under
+    // either view (see the transformer's `SchemaIo` table).
+    expect(bodySchema).not.toHaveProperty('additionalProperties');
     expect(
       spec.paths['/widgets']?.post?.responses['201']?.content?.['application/json']?.schema,
     ).toEqual({
