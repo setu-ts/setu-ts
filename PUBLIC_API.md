@@ -5620,8 +5620,12 @@ and any v4 schema with no default, transform, coercion or object-mode difference
 ONE component shared by every site, exactly as before. A schema whose views differ and that is used
 on both sides yields one component per side, because the two sites do not describe the same shape. A
 schema registered through `addSchema('Name', …)` keeps that name for the output side and gains a
-`NameInput` sibling when a request site reaches it, so the contributor's chosen name still appears
-on both sides.
+`NameInput` twin when a request site reaches it, so the contributor's chosen name still appears on
+both sides. The twin is identified by SCHEMA, never by name alone — registering both `Address` and
+an unrelated `AddressInput` is legal, and the twin then takes the next free suffixed name rather
+than adopting the unrelated component. It belongs to the document that needed it: a later
+`generate()` with no request site for that schema drops it, exactly as it drops every other
+per-document component.
 
 ### Notes
 

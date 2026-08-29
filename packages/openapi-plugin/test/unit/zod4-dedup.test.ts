@@ -62,11 +62,14 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
     expect(bodySchema(doc, '/a')).toEqual({ $ref: '#/components/schemas/PostABody' });
     expect(bodySchema(doc, '/b')).toEqual({ $ref: '#/components/schemas/PostABody' });
     expect(Object.keys(doc.components?.schemas ?? {})).toEqual(['PostABody']);
+    // A HOISTED request component carries the input view, exactly as an inline
+    // one does. This assertion passed before the io split only because the
+    // hoisting path transformed with the default side — so a reused request
+    // body was documented output-shaped while a single-use one was correct.
     expect(doc.components?.schemas?.PostABody).toEqual({
       type: 'object',
       properties: { id: { type: 'string' }, qty: { type: 'number' } },
       required: ['id', 'qty'],
-      additionalProperties: false,
     });
   });
 
@@ -289,6 +292,87 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
         .additionalProperties,
     ).toBe(false);
     expect(doc.components?.schemas?.AddressInput).not.toHaveProperty('additionalProperties');
+  });
+
+  it('deduplicates the input side even when the output side hoisted first', () => {
+    // The response side claims a component first (two response uses), and the
+    // request side then has two uses of its own. Both must share ONE input
+    // component: a per-schema name would hand the input side the response's
+    // shape, and no name at all would inline the same shape twice.
+    const shared = z4.object({ id: z4.string() });
+    const doc = generator().generate([
+      route('GET', '/a', { response: { 200: shared } }),
+      route('GET', '/b', { response: { 200: shared } }),
+      route('POST', '/c', { body: shared }),
+      route('POST', '/d', { body: shared }),
+    ]);
+
+    const responseRef =
+      (doc.paths['/a']?.get?.responses['200']?.content?.['application/json']?.schema as {
+        $ref?: string;
+      }).$ref;
+    const cRef = (bodySchema(doc, '/c') as { $ref?: string }).$ref;
+    const dRef = (bodySchema(doc, '/d') as { $ref?: string }).$ref;
+
+    expect(cRef).toMatch(/^#\/components\/schemas\//);
+    expect(cRef).toBe(dRef);
+    expect(cRef).not.toBe(responseRef);
+
+    const inputComponent = doc.components?.schemas?.[cRef!.split('/').pop()!] as {
+      additionalProperties?: unknown;
+    };
+    expect(inputComponent).not.toHaveProperty('additionalProperties');
+  });
+
+  it('does not adopt an unrelated component that happens to be named <Name>Input', () => {
+    // A contributor may register both names. The twin must be identified by
+    // SCHEMA identity, never by the name alone, or a request body would be
+    // documented with a schema that has nothing to do with it.
+    const address = z4.object({ city: z4.string() });
+    const unrelated = z4.object({ totallyDifferent: z4.number() });
+    const gen = new OpenApiGenerator({ title: 'T', version: '1' });
+    gen.addSchema('Address', address);
+    gen.addSchema('AddressInput', unrelated);
+
+    const doc = gen.generate([route('POST', '/people', { body: address })]);
+
+    const ref = (bodySchema(doc, '/people') as { $ref?: string }).$ref!;
+    const referenced = doc.components?.schemas?.[ref.split('/').pop()!] as {
+      properties?: Record<string, unknown>;
+    };
+    // Whatever it is named, it must describe THIS schema.
+    expect(Object.keys(referenced.properties ?? {})).toEqual(['city']);
+    // And the contributor's unrelated registration is untouched.
+    expect(
+      Object.keys(
+        (doc.components?.schemas?.AddressInput as { properties?: Record<string, unknown> })
+          .properties ?? {},
+      ),
+    ).toEqual(['totallyDifferent']);
+  });
+
+  it('drops a contributor twin between documents instead of leaving a dangling ref', () => {
+    // The twin belongs to the document that needed it. A second `generate()`
+    // purges its component, so the recorded name must go with it — otherwise
+    // the next request site referencing that schema emits a `$ref` to a
+    // component this document does not contain.
+    const address = z4.object({ city: z4.string() });
+    const gen = new OpenApiGenerator({ title: 'T', version: '1' });
+    gen.addSchema('Address', address);
+
+    const first = gen.generate([route('POST', '/people', { body: address })]);
+    expect(bodySchema(first, '/people')).toEqual({ $ref: '#/components/schemas/AddressInput' });
+
+    const second = gen.generate([route('GET', '/places', { response: { 200: address } })]);
+    // The contributor registration survives; the twin does not.
+    expect(second.components?.schemas?.Address).toBeDefined();
+    expect(second.components?.schemas?.AddressInput).toBeUndefined();
+
+    // And a later document that DOES have a request site rebuilds it, rather
+    // than referencing the purged name or skipping it.
+    const third = gen.generate([route('POST', '/again', { body: address })]);
+    expect(bodySchema(third, '/again')).toEqual({ $ref: '#/components/schemas/AddressInput' });
+    expect(third.components?.schemas?.AddressInput).toBeDefined();
   });
 
   it('leaves a single-use zod v4 schema inline without components', () => {

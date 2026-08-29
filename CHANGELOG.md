@@ -36,8 +36,9 @@ All notable changes to this project are documented here. The format follows
   BOTH sides is hoisted into one component per side rather than one shared component; a schema whose
   views are identical — every zod v3 schema, and any v4 schema with no default, transform, coercion
   or object-mode difference — still yields exactly one, so most documents are unchanged. A schema
-  registered with `addSchema('Name', …)` keeps that name on the output side and gains `NameInput`
-  when a request site reaches it.
+  registered with `addSchema('Name', …)` keeps that name on the output side and gains a `NameInput`
+  twin when a request site reaches it — identified by schema rather than by name, so registering an
+  unrelated `AddressInput` alongside `Address` cannot capture it.
 
 ### Added
 
