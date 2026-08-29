@@ -8309,12 +8309,17 @@ page — an alternative, not a code path this package maintains.
 Raised by review on this PR, which correctly caught a scope line asserting the browser's guarantee
 for every runtime; the measurements then showed the two-arm repair was itself the wrong shape.
 
-- **In scope:** `createSseClient` and `createRealtimeClient` (WebSocket) in `@setu-ts/sdk`, zero npm
-  dependencies, ONE `fetch`-based implementation each across browser, Deno, Node, Bun and Workers; a
-  `setu generate sse <name>` schematic emitting a **controller** plus the React hook into app code;
-  a `ws-route` schematic emitting the plugin form; the registry second argument on
-  `registerGeneratedRoutes` and the generated SSE controller that consumes it; and documenting the
-  controllers-seam boundary in `PUBLIC_API.md` and the CLI README.
+- **In scope:** two clients in `@setu-ts/sdk`, zero npm dependencies, each ONE implementation across
+  browser, Deno, Node, Bun and Workers — but over different primitives, which is not a detail to
+  gloss. `createSseClient` is `fetch`-based and delegates to `EventSource` nowhere, for the reasons
+  measured above. `createRealtimeClient` is a WebSocket client built on the global `WebSocket`,
+  which unlike `EventSource` IS universally available — measured `function` on Deno 2.9.6, Node
+  v24.18.0, Bun 1.4.0 and real workerd — so it needs no transport fallback at all; what it adds is
+  the keep-alive contract the server already defines (heartbeat filtering, reply-to-keep-alive),
+  plus reconnect with backoff and room re-join. A `setu generate sse <name>` schematic emitting a
+  **controller** plus the React hook into app code; a `ws-route` schematic emitting the plugin form;
+  the registry second argument on `registerGeneratedRoutes` and the generated SSE controller that
+  consumes it; and documenting the controllers-seam boundary in `PUBLIC_API.md` and the CLI README.
 - **Not in scope:** any change to the wire protocol of either plugin — both are correct and the
   clients are written against them as they are. No React in any published package, no
   `@setu-ts/sse-plugin/react` subpath: the `@setu-ts/runtime/worker` precedent makes a subpath
