@@ -3682,7 +3682,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   as neither a current-release claim nor a `version:history` record.
 - **Milestone 78** — native MongoDB backend for `database-plugin`, including the `'mongodb'`
   configuration arm, native query translation, ObjectId mapping, injected-client seam, and real
-  driver CI coverage — complete (PR pending).
+  driver CI coverage — complete (PR #208).
 - **Next milestone** — **M79** (portable data-access contract).
 
 ## Verification (run before declaring any work done)

@@ -8127,7 +8127,7 @@ the plan: **`cbtemulator` implements no instance admin API** — `instance.creat
 | 75        | ✅     | broker trace propagation (PR #201)                     |
 | 76        | ✅     | standard decorators / experimentalDecorators           |
 | 77        | ✅     | executable prose assertions                            |
-| 78        | ✅     | document-database backends (Mongo adapter, PR pending) |
+| 78        | ✅     | document-database backends (Mongo adapter, PR #208)    |
 | 79        | ⬜     | portable data-access contract                          |
 | 80        | ⬜     | dynamodb backend                                       |
 | 81        | ⬜     | cosmos db backend                                      |
