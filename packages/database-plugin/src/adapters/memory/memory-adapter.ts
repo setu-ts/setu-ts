@@ -278,10 +278,10 @@ export class MemoryAdapter implements IDatabaseAdapter {
     this.getStore(entity, primaryKey); // Ensure the store (and its key) exists.
     return {
       findAll: (query) => this.queryEntities(entity, query),
-      findById: (id) => this.findEntityById(entity, id),
+      findById: (id) => this.findEntityById(entity, id as string | number),
       create: (data) => this.insertEntity(entity, data),
-      update: (id, data) => this.updateEntity(entity, id, data),
-      delete: (id) => this.deleteEntity(entity, id),
+      update: (id, data) => this.updateEntity(entity, id as string | number, data),
+      delete: (id) => this.deleteEntity(entity, id as string | number),
       count: (where, filter) => this.countEntities(entity, where, filter),
     };
   }
@@ -355,7 +355,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    */
   findEntityById(
     entity: string,
-    id: string | number,
+    id: string | number, // widened to EntityKey by M79; composite keys are refused at mapping time
   ): Promise<Record<string, unknown> | null> {
     const store = this.getStore(entity);
     const record = store.records.find((r) => r[store.primaryKey] === id);
@@ -394,7 +394,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    */
   updateEntity(
     entity: string,
-    id: string | number,
+    id: string | number, // widened to EntityKey by M79; composite keys are refused at mapping time
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>> {
     const store = this.getStore(entity);
@@ -413,7 +413,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * @param id - Primary key value
    * @returns `true` when deleted, `false` if not found
    */
-  deleteEntity(entity: string, id: string | number): Promise<boolean> {
+  deleteEntity(entity: string, id: string | number): Promise<boolean> { // widened to EntityKey by M79
     const store = this.getStore(entity);
     const index = store.records.findIndex((r) => r[store.primaryKey] === id);
     if (index === -1) return Promise.resolve(false);

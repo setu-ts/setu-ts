@@ -92,7 +92,7 @@ export type FilterComparison = {
   readonly type: 'comparison';
   readonly field: string;
   readonly operator: 'gt' | 'gte' | 'lt' | 'lte';
-  readonly value: string | number;
+  readonly value: string | number | Date;
 } | {
   readonly type: 'comparison';
   readonly field: string;
@@ -109,6 +109,39 @@ export type FilterExpression = FilterComparison | {
   readonly type: 'and' | 'or';
   readonly filters: readonly FilterExpression[];
 };
+
+/**
+ * A primary key value: a scalar `string`, a scalar `number`, or a composite
+ * key expressed as a readonly record of named columns to values.
+ *
+ * A composite key is a **record**, never an array, because a composite key is
+ * named columns and an array would force the caller to depend on a column
+ * order the mapping owns. The scalar arms are retained so every existing call
+ * site and every existing adapter keeps compiling.
+ *
+ * @since 0.1.0
+ */
+export type EntityKey = string | number | Readonly<Record<string, string | number>>;
+
+/**
+ * A single page of rows returned by {@linkcode IDataSource.findPage}, plus the
+ * cursor that continues to the next page (or `null` when the page is the last).
+ *
+ * @since 0.1.0
+ */
+export interface PageResult {
+  /** The rows in this page, already filtered, sorted, paginated and projected. */
+  readonly rows: Record<string, unknown>[];
+  /**
+   * A cursor to fetch the next page, or `null` when no further page exists.
+   *
+   * A cursor that returned an empty page would be indistinguishable from a
+   * genuine last page, so the count is one greater than the page size: the
+   * adapter fetches `limit + 1` rows and sets `nextCursor` to `null` precisely
+   * when it fetched no more than `limit`.
+   */
+  readonly nextCursor: string | null;
+}
 
 /**
  * A repository query with every option resolved to a concrete value — the
@@ -130,6 +163,14 @@ export interface NormalizedQuery {
   readonly limit: number;
   /** Number of leading rows to skip. */
   readonly offset: number;
+  /**
+   * A keyset cursor position, or `undefined` when the query starts at the
+   * first page. Carried alongside {@linkcode offset} rather than replacing it:
+   * an offset says "skip this many from the start" and a cursor says "after
+   * this row", and the two are contradictory — a query carrying both is
+   * refused by name (§3.10).
+   */
+  readonly cursor?: string;
   /** Field projection. Empty means all fields. */
   readonly select: readonly string[];
 }
@@ -162,10 +203,16 @@ export interface IDataSource {
   /**
    * Find a single entity by its primary key value.
    *
-   * @param id - The primary key value
+   * The key is an {@linkcode EntityKey}: a scalar `string`/`number` or a
+   * composite record. A composite record is refused by the backend when it
+   * maps to a single column (e.g. Prisma's `where: { id }`), so widening this
+   * parameter is source-compatible for callers but breaking for an
+   * out-of-repo implementor whose method still declares the scalar-only form.
+   *
+   * @param id - The primary key value (scalar or composite record)
    * @returns The row, or `null` when no row has that key
    */
-  findById(id: string | number): Promise<Record<string, unknown> | null>;
+  findById(id: EntityKey): Promise<Record<string, unknown> | null>;
   /**
    * Insert a new entity.
    *
@@ -184,18 +231,33 @@ export interface IDataSource {
    * @throws {Error} When no row has that key
    */
   update(
-    id: string | number,
+    id: EntityKey,
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>>;
   /**
    * Delete an entity by primary key.
    *
-   * @param id - The primary key value
+   * @param id - The primary key value (scalar or composite record)
    * @returns `true` when a row was deleted, `false` when none matched. On a
    * deferred-write transaction this reports whether a committed row matched,
    * and the delete itself lands at commit.
    */
-  delete(id: string | number): Promise<boolean>;
+  delete(id: EntityKey): Promise<boolean>;
+  /**
+   * Find a page of entities by cursor pagination.
+   *
+   * **Optional.** The member exists on every in-repo adapter but is declared
+   * optional so an out-of-repo implementor that cannot page by cursor keeps
+   * compiling. When it is absent, the repository above refuses cursor paging
+   * by name (`UnsupportedQueryFeatureError`): absence means "cannot page by
+   * cursor", never "there are no more rows" — the distinction an absent
+   * member cannot otherwise preserve.
+   *
+   * @param query - The fully-resolved query, carrying an incoming `cursor`
+   * @returns The matching rows plus a `nextCursor` that is `null` when no
+   * further page exists
+   */
+  findPage?(query: NormalizedQuery): Promise<PageResult>;
   /**
    * Count entities matching a filter.
    *

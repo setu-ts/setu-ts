@@ -86,7 +86,9 @@ package fits the plugin architecture.
 | `contextToTraceparent`       | function  |
 | `createCachedProbe`          | function  |
 | `createCapabilityToken`      | function  |
+| `decodeCursor`               | function  |
 | `decodeFrameData`            | function  |
+| `encodeCursor`               | function  |
 | `encodeFrameData`            | function  |
 | `err`                        | function  |
 | `errorResponderOf`           | function  |
@@ -101,6 +103,7 @@ package fits the plugin architecture.
 | `isWorkerReadySignal`        | function  |
 | `isWorkerTaskReply`          | function  |
 | `isWorkerTaskRequest`        | function  |
+| `keysetPredicate`            | function  |
 | `none`                       | function  |
 | `ok`                         | function  |
 | `parseCookie`                | function  |
@@ -143,6 +146,7 @@ package fits the plugin architecture.
 | `CqrsCommand`                | interface |
 | `CqrsQuery`                  | interface |
 | `CqrsRequest`                | interface |
+| `CursorPayload`              | interface |
 | `EncodedPayload`             | interface |
 | `EnvVarSpec`                 | interface |
 | `Err`                        | interface |
@@ -259,6 +263,7 @@ package fits the plugin architecture.
 | `NormalizedQuery`            | interface |
 | `NotificationMessage`        | interface |
 | `Ok`                         | interface |
+| `PageResult`                 | interface |
 | `PickOptions`                | interface |
 | `ProcessOptions`             | interface |
 | `ProviderOptions`            | interface |
@@ -316,6 +321,7 @@ package fits the plugin architecture.
 | `CliCommandHandler`          | type      |
 | `Constructor`                | type      |
 | `DecoratorHandler`           | type      |
+| `EntityKey`                  | type      |
 | `EventHandler`               | type      |
 | `FilterComparison`           | type      |
 | `FilterExpression`           | type      |

@@ -197,6 +197,7 @@ export type {
   RoleDefinition,
 } from './services/auth.ts';
 export type {
+  EntityKey,
   FilterComparison,
   FilterExpression,
   FilterOperator,
@@ -207,7 +208,13 @@ export type {
   ITransaction,
   NormalizedQuery,
   OrderDirection,
+  PageResult,
 } from './services/database.ts';
+// Portable keyset-cursor codec + predicate (§3.8). Pure and zero-dependency, so
+// it lives in `common` and is reached by every adapter — including
+// `cloudflare-plugin`, which cannot import `database-plugin` (AI_GUIDELINES §2.2).
+export { decodeCursor, encodeCursor, keysetPredicate } from './services/cursor.ts';
+export type { CursorPayload } from './services/cursor.ts';
 export type { ICacheStore } from './services/cache.ts';
 export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from './services/events.ts';
 export type {

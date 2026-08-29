@@ -543,7 +543,10 @@ function createDrizzleDataSourceInner(
         entity,
         'update',
       );
-      return oneReturnedRow(entity, 'update', rows, id);
+      // `id` is EntityKey here; the error message only interpolates it as a
+      // scalar, so cast it — composite keys are refused at the mapping layer
+      // and never reach a Drizzle row-returning path.
+      return oneReturnedRow(entity, 'update', rows, id as string | number);
     },
 
     async delete(id) {
