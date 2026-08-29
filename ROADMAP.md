@@ -8085,6 +8085,37 @@ renaming `describeBilling` to `chargeCard` and running any later `setu generate 
 scenario surviving in the mode M65 made the default. The plan either bends the example to the
 convention or changes the convention; it does not leave both unstated.
 
+**A defect the prototype found by falling into it, and it is squarely this milestone's subject.** A
+class carrying `@Injectable` but **no `@Inject` list**, whose constructor takes arguments, is
+constructed with **zero arguments** and registered anyway — `instantiate`
+(`decorator-plugin/src/plugin/decorator-plugin.ts:288-299`) branches on
+`inject !== undefined && inject.length > 0` and otherwise falls through to
+`new (target as new () => unknown)()`, where the cast is exactly what lets a constructor with
+required parameters be called with none. Startup is clean: no throw, no warning, `/health` up. The
+failure surfaces on the first request that touches the dependency, as a bare
+`TypeError: Cannot read properties of undefined (reading '<method>')` answered `500` — the injected
+field is simply `undefined`. Reproduced by removing one `@Inject` line from the prototype's own
+service and driving a real kernel application.
+
+**It is a hole in M76's own stated rule, at the likeliest place to fall in.** That milestone
+established that a token can never be inferred — `emitDecoratorMetadata` is absent repo-wide and
+Deno does not support it — and therefore that _every ambiguous case throws at startup instead of
+misinjecting_: mixing both `@Inject` forms, a hole below the last injected index, `@Inject` on a
+method parameter. Forgetting the decorator entirely is the one case that does not throw, and it is
+the commonest of the set, because it is an omission rather than a mistake. The neighbouring
+diagnostic makes the inconsistency sharper: a class passed in `modules` with no `@Module` metadata
+is reported by name, while a service with an unsatisfiable constructor is not.
+
+**The signal is already in hand and is cheap.** `register()` holds the constructor, and
+`Function.length` is the declared arity — measured: `1` and `2` for the broken shapes, and `0` for a
+class with no constructor, an empty constructor, or one whose parameters all carry defaults, so the
+obvious false positives do not arise. A class with `length > 0` and no `@Inject` cannot be satisfied
+by any code path, which makes a startup refusal decidable rather than heuristic. The one imprecision
+is worth stating and points the safe way: a parameter with a default lowers the reported arity, so
+`length` is a LOWER bound — the check can under-report, never over-report. Whether this refuses at
+`register()` (the M76 precedent) or warns by name (the `@Module` precedent immediately beside it) is
+the plan's call; doing neither is what ships today.
+
 **One trap the prototype hit, recorded so the plan does not rediscover it.** Interpolating a seam
 symbol inline pushed the EMITTER's own source past `deno fmt`'s 100 columns; fmt then reflowed that
 line **inside the template literal**, which changed the text the template EMITS, and the scaffolded
@@ -8096,7 +8127,7 @@ its output.
   `DecoratorPluginOptions.modules` in `decorator-plugin`; the module schematic emitting a module
   class and the aggregate barrel carrying module classes; the scanner precondition and its migration
   report; a seeded worked example in the `rest` template, registered through the seam barrel exactly
-  as `class-based`'s is.
+  as `class-based`'s is; and the arity check that closes the missing-`@Inject` hole above.
 - **Not in scope:** per-module DI scoping or an injector boundary of any kind — that is a
   `di-plugin` contract question, and `exports` above is the reason it is not smuggled in here.
   Auto-discovery of modules by filesystem scan is excluded too: `autoDiscover` has no in-repo
