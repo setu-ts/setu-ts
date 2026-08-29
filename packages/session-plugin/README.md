@@ -244,31 +244,32 @@ arriving while every session reads as absent.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `csrfFormMiddleware` | function |
-| `getCsrfToken` | function |
-| `getSession` | function |
-| `sessionMiddleware` | function |
-| `SessionPlugin` | function |
-| `verifyCsrfToken` | function |
-| `CacheSessionStore` | class |
-| `CsrfTokenMismatchError` | class |
-| `MemorySessionStore` | class |
-| `SessionMiddlewareMissingError` | class |
-| `SessionSecretMissingError` | class |
-| `SessionService` | class |
-| `SessionTooLargeError` | class |
-| `CSRF_SESSION_KEY` | const |
-| `CacheSessionStoreOptions` | interface |
-| `CsrfFormOptions` | interface |
-| `MemorySessionStoreDeps` | interface |
-| `SessionCookieOptions` | interface |
-| `SessionPluginOptions` | interface |
-| `SessionServiceDeps` | interface |
-| `SessionMode` | type |
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `csrfFormMiddleware`            | function  |
+| `getCsrfToken`                  | function  |
+| `getSession`                    | function  |
+| `sessionMiddleware`             | function  |
+| `SessionPlugin`                 | function  |
+| `verifyCsrfToken`               | function  |
+| `CacheSessionStore`             | class     |
+| `CsrfTokenMismatchError`        | class     |
+| `MemorySessionStore`            | class     |
+| `SessionMiddlewareMissingError` | class     |
+| `SessionSecretMissingError`     | class     |
+| `SessionService`                | class     |
+| `SessionTooLargeError`          | class     |
+| `CSRF_SESSION_KEY`              | const     |
+| `CacheSessionStoreOptions`      | interface |
+| `CsrfFormOptions`               | interface |
+| `MemorySessionStoreDeps`        | interface |
+| `SessionCookieOptions`          | interface |
+| `SessionPluginOptions`          | interface |
+| `SessionServiceDeps`            | interface |
+| `SessionMode`                   | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Documentation
 

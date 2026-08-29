@@ -433,36 +433,36 @@ publish or format it has nowhere to go.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `createApiKeyAuthInterceptor` | function |
-| `createBearerAuthInterceptor` | function |
-| `createClient` | function |
-| `createDefaultClientTiming` | function |
-| `generateOpenApiClient` | function |
-| `ClientCircuitOpenError` | class |
-| `HttpClientError` | class |
-| `OpenApiCodegenError` | class |
-| `CircuitBreakerPolicy` | interface |
-| `ClientOptions` | interface |
-| `ClientRateLimitPolicy` | interface |
-| `ClientRequest` | interface |
-| `ClientRequestContext` | interface |
-| `ClientResponse` | interface |
-| `IClientTiming` | interface |
-| `IHttpClient` | interface |
-| `OpenApiCodegenOptions` | interface |
-| `RetryPolicy` | interface |
-| `SdkOpenApiDocument` | interface |
-| `SdkOpenApiOperation` | interface |
-| `SdkOpenApiParameter` | interface |
-| `SdkOpenApiPathItem` | interface |
-| `SdkOpenApiRequestBody` | interface |
-| `SdkOpenApiResponse` | interface |
-| `SdkOpenApiSchema` | interface |
-| `BackoffStrategy` | type |
-| `ClientRequestInterceptor` | type |
-| `ClientResponseInterceptor` | type |
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `createApiKeyAuthInterceptor` | function  |
+| `createBearerAuthInterceptor` | function  |
+| `createClient`                | function  |
+| `createDefaultClientTiming`   | function  |
+| `generateOpenApiClient`       | function  |
+| `ClientCircuitOpenError`      | class     |
+| `HttpClientError`             | class     |
+| `OpenApiCodegenError`         | class     |
+| `CircuitBreakerPolicy`        | interface |
+| `ClientOptions`               | interface |
+| `ClientRateLimitPolicy`       | interface |
+| `ClientRequest`               | interface |
+| `ClientRequestContext`        | interface |
+| `ClientResponse`              | interface |
+| `IClientTiming`               | interface |
+| `IHttpClient`                 | interface |
+| `OpenApiCodegenOptions`       | interface |
+| `RetryPolicy`                 | interface |
+| `SdkOpenApiDocument`          | interface |
+| `SdkOpenApiOperation`         | interface |
+| `SdkOpenApiParameter`         | interface |
+| `SdkOpenApiPathItem`          | interface |
+| `SdkOpenApiRequestBody`       | interface |
+| `SdkOpenApiResponse`          | interface |
+| `SdkOpenApiSchema`            | interface |
+| `BackoffStrategy`             | type      |
+| `ClientRequestInterceptor`    | type      |
+| `ClientResponseInterceptor`   | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
-
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
