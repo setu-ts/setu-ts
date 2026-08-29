@@ -72,7 +72,7 @@ export class MongoAdapter implements IDatabaseAdapter {
     this.#mapping = options.collections ?? undefined;
   }
 
-  /** @inheritdoc */
+  /** Establishes the database connection, resolving the client and database name. @inheritdoc */
   async connect(): Promise<void> {
     if (this.#client !== null) return;
     // Resolve the loader — injected (no import) or the literal lazy import.
@@ -87,7 +87,7 @@ export class MongoAdapter implements IDatabaseAdapter {
     this.#connected = true;
   }
 
-  /** @inheritdoc */
+  /** Closes the connection and releases the client. @inheritdoc */
   async disconnect(): Promise<void> {
     if (this.#client !== null) {
       await this.#client.close();
@@ -96,12 +96,12 @@ export class MongoAdapter implements IDatabaseAdapter {
     this.#connected = false;
   }
 
-  /** @inheritdoc */
+  /** Reports whether the adapter is connected. @inheritdoc */
   isReady(): boolean {
     return this.#connected;
   }
 
-  /** @inheritdoc */
+  /** Returns a data source for the named entity's collection. @inheritdoc */
   createDataSource(entity: string): import('@setu-ts/common').IDataSource {
     this.assertConnected();
     return createMongoDataSource(
@@ -114,11 +114,11 @@ export class MongoAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * @inheritdoc
-   *
    * Opens a driver session and calls `startTransaction()`. A deployment
    * without a replica set fails here, with the driver's own error wrapped in
    * {@linkcode MongoTransactionUnavailableError} — never at `connect()`.
+   *
+   * @inheritdoc
    */
   async beginTransaction(): Promise<IAdapterTransaction> {
     this.assertConnected();
@@ -143,13 +143,13 @@ export class MongoAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * @inheritdoc
-   *
-   * MongoDB has no SQL, so a raw query is refused by name rather than emulated
-   * (the silent-divergence defect M70j closed). The error names the adapter
-   * and points at the injected client for native commands.
+   * Refuses the raw SQL query by name — MongoDB has no SQL — rather than
+   * emulating it (the silent-divergence defect M70j closed). The error names
+   * the adapter and points at the injected client for native commands.
    *
    * It rejects, never throws synchronously.
+   *
+   * @inheritdoc
    */
   // deno-lint-ignore require-await -- the refusal must REJECT, not throw synchronously
   async rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {

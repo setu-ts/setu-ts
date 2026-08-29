@@ -36,8 +36,21 @@ export type {
   PrismaSqlProvider,
 } from './interfaces/index.ts';
 
-// Mongo structural types the `'mongodb'` arm carries (injected-client seam).
-export type { IMongoClient, IMongoObjectIdCtor } from './adapters/mongo/mongo-client.ts';
+// Mongo structural types the `'mongodb'` arm carries (injected-client seam),
+// including the collection-level shapes the client's members reference so the
+// seam's return types stay nameable from the package entry.
+export type {
+  IMongoClient,
+  IMongoCollection,
+  IMongoCollectionFindOneAndUpdateOptions,
+  IMongoCursor,
+  IMongoDatabase,
+  IMongoObjectId,
+  IMongoObjectIdCtor,
+  IMongoSession,
+  MongoOptions,
+  MongoWriteOptions,
+} from './adapters/mongo/mongo-client.ts';
 
 // Errors
 export {

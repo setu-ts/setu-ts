@@ -1275,32 +1275,36 @@ Prisma raw query. Transactions use a `startSession()` and are refused at `beginT
 `MongoTransactionUnavailableError` on a deployment that is not a replica set, never at `connect()`.
 
 `IMongoClient` and `IMongoObjectIdCtor` are the exported injection seam. The real driver implements
-their structural shapes; its database, collection, session, and ObjectId-instance details remain
-internal to the adapter.
+their structural shapes. The types the client's members reference — `IMongoDatabase`,
+`IMongoSession`, and the `IMongoObjectId` instance shape — are exported alongside them so the seam's
+return types are nameable from the package entry, as are the collection-level shapes
+`IMongoDatabase.collection()` reaches (`IMongoCollection`, `IMongoCursor`,
+`IMongoCollectionFindOneAndUpdateOptions`, and the `MongoOptions`/`MongoWriteOptions` option bags).
 
 ### Exports
 
-| Export                                                                                                                      | Kind                              |
-| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `DatabasePlugin`                                                                                                            | factory                           |
-| `DatabaseService`                                                                                                           | class                             |
-| `BaseRepository`, `UnitOfWork`                                                                                              | classes                           |
-| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`                                                          | classes                           |
-| `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                           |
-| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`                                                                | classes                           |
-| `MongoTransactionUnavailableError`                                                                                          | class                             |
-| `PrismaSqlProvider`                                                                                                         | type                              |
-| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                         |
-| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                             |
-| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                        |
-| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                             |
-| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`                          | interfaces                        |
-| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                        |
-| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                             |
-| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                             |
-| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`          |
-| `DataSource`                                                                                                                | deprecated alias of `IDataSource` |
-| `IMongoClient`, `IMongoObjectIdCtor`                                                                                        | interfaces (Mongo injection seam) |
+| Export                                                                                                                      | Kind                               |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `DatabasePlugin`                                                                                                            | factory                            |
+| `DatabaseService`                                                                                                           | class                              |
+| `BaseRepository`, `UnitOfWork`                                                                                              | classes                            |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`                                                          | classes                            |
+| `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                            |
+| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`                                                                | classes                            |
+| `MongoTransactionUnavailableError`                                                                                          | class                              |
+| `PrismaSqlProvider`                                                                                                         | type                               |
+| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                          |
+| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                              |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                         |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                              |
+| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`                          | interfaces                         |
+| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                         |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                              |
+| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                              |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`           |
+| `DataSource`                                                                                                                | deprecated alias of `IDataSource`  |
+| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                   | interfaces (Mongo injection seam)  |
+| `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`          | interfaces (Mongo collection seam) |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.

@@ -19,9 +19,15 @@
  */
 import type {
   IMongoClient,
+  IMongoCollection,
+  IMongoCollectionFindOneAndUpdateOptions,
+  IMongoCursor,
   IMongoDatabase,
   IMongoObjectId,
   IMongoObjectIdCtor,
+  IMongoSession,
+  MongoOptions,
+  MongoWriteOptions,
 } from './mongo-client-types.ts';
 
 /**
@@ -57,6 +63,47 @@ export type { IMongoClient };
  * @since 0.1.0
  */
 export type { IMongoDatabase };
+
+/**
+ * A structural subset of the driver `ClientSession` — the members the
+ * transaction path calls.
+ *
+ * @since 0.1.0
+ */
+export type { IMongoSession };
+
+/**
+ * A structural subset of the driver `Collection` — the methods the data source
+ * calls to serve the six `IDataSource` methods.
+ *
+ * @since 0.1.0
+ */
+export type { IMongoCollection };
+
+/**
+ * The native driver `findOneAndUpdate` options the adapter passes through.
+ *
+ * @since 0.1.0
+ */
+export type { IMongoCollectionFindOneAndUpdateOptions };
+
+/** A structural subset of the driver's cursor returned from `find()`. */
+export type { IMongoCursor };
+
+/**
+ * Operation options the data source passes to every driver call — the session
+ * a transaction-scoped data source binds to.
+ *
+ * @since 0.1.0
+ */
+export type { MongoOptions };
+
+/**
+ * Write-path operation options the data source passes to the driver.
+ *
+ * @since 0.1.0
+ */
+export type { MongoWriteOptions };
 
 /**
  * The native `mongodb` module shape the lazy loader adapts.
