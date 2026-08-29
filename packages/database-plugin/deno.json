@@ -4,10 +4,14 @@
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "npm:mongodb": "npm:mongodb@^6.21.0"
+    "mongodb": "npm:mongodb@^6.21.0"
   },
   "test": {
     "permissions": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "sys": ["hostname", "osRelease"],
       "net": ["127.0.0.1:27017", "localhost:27017"]
     }
   }

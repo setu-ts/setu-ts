@@ -65,4 +65,76 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
       await adapter.disconnect();
     }
   });
+
+  it('serves a numeric primary key through every IDataSource entry point', async () => {
+    if (mongoUrl === undefined) return;
+
+    // The default `'auto'` mapping converted through `ObjectId.isValid`, which
+    // the real driver answers `true` for on any number while its constructor
+    // rejects one — so a collection keyed by application-assigned numbers threw
+    // `BSONError` on create, findById, findAll, count and delete alike. Only a
+    // real driver shows it: the structural double's `isValid` cannot.
+    const collection = `m78_numeric_${crypto.randomUUID().replaceAll('-', '')}`;
+    const adapter = new MongoAdapter({
+      url: mongoUrl,
+      database: 'setu_m78',
+      collections: { Widget: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Widget');
+      const created = await source.create({ id: 7, name: 'numeric' });
+      // The key keeps its own type, so the value `create()` returned is the
+      // value `findById` accepts — the round trip a stringified key broke.
+      expect(created).toEqual({ id: 7, name: 'numeric' });
+      await expect(source.findById(created.id as number)).resolves.toEqual(created);
+      await expect(source.findById(7)).resolves.toEqual({ id: 7, name: 'numeric' });
+      await expect(source.findAll(query({ where: { id: 7 } }))).resolves.toEqual([
+        { id: 7, name: 'numeric' },
+      ]);
+      await expect(source.count({ id: 7 })).resolves.toBe(1);
+      await expect(source.update(7, { name: 'renamed' })).resolves.toEqual({
+        id: 7,
+        name: 'renamed',
+      });
+      await expect(source.delete(7)).resolves.toBe(true);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('commits and rolls back a real session transaction (replica set only)', async () => {
+    // Transactions were proven by a fake whose session is inert, so neither
+    // commit nor rollback was ever observed against a server. A standalone
+    // `mongod` refuses `startTransaction` by design, so this case is guarded on
+    // the deployment rather than only on the URL — CI's Mongo service is
+    // standalone, while a `?replicaSet=` deployment runs it for real.
+    if (mongoUrl === undefined || !mongoUrl.includes('replicaSet=')) return;
+
+    const collection = `m78_tx_${crypto.randomUUID().replaceAll('-', '')}`;
+    const adapter = new MongoAdapter({
+      url: mongoUrl,
+      database: 'setu_m78',
+      collections: { Widget: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Widget');
+
+      const committed = await adapter.beginTransaction();
+      await committed.createDataSource('Widget').create({ name: 'committed' });
+      await committed.commit();
+      expect((await source.findAll(query())).map((row) => row.name)).toEqual(['committed']);
+
+      const abandoned = await adapter.beginTransaction();
+      await abandoned.createDataSource('Widget').create({ name: 'rolled-back' });
+      await abandoned.rollback();
+      // The rolled-back write must be absent — the assertion a fake cannot make.
+      expect((await source.findAll(query())).map((row) => row.name)).toEqual(['committed']);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
 });

@@ -900,7 +900,7 @@ adapter cannot run without: `'prisma'` requires `options.prismaClient`, `'drizzl
 injected `options.client`), and `'custom'` requires `adapter`. Omitting one is a **compile error**
 rather than a startup throw. The exported arms are `MemoryDatabaseOptions`, `PrismaDatabaseOptions`,
 `DrizzleDatabaseOptions`, `MongoDatabaseOptions` and `CustomDatabaseOptions`;
-`BuiltInDatabaseOptions` is the union of the first three and keeps its published name, so an
+`BuiltInDatabaseOptions` is the union of the four built-in arms and keeps its published name, so an
 existing annotation carrying a memory configuration still compiles. `PrismaAdapterOptions` and
 `DrizzleAdapterOptions` narrow `DatabaseAdapterOptions` for their arm; `MongoAdapterOptions` is its
 dedicated document-driver option bag.
@@ -1248,10 +1248,13 @@ app.register(DatabasePlugin({
 }));
 ```
 
-`MongoAdapterOptions` is the Mongo-specific option bag. It requires `url` (the connection string)
-**unless** `client` is supplied — an already-constructed `IMongoClient`. When `client` is present
-the lazy `import('npm:mongodb@^6.21.0')` never runs; the injected client is structural, so a driver
-of a different major that honours the same shapes is accepted. An injected client that uses ObjectId
+`MongoAdapterOptions` is the Mongo-specific option bag, and it is a **union of two arms**: one
+requires `url` (the connection string), the other requires `client` (an already-constructed
+`IMongoClient`). Supplying neither is a compile error rather than a `connect()` throw — the
+guarantee every other built-in arm gives. `MongoAdapterOptionsBase` is the half both arms share
+(`objectIdCtor`, `database`, `collections`). When `client` is present the lazy
+`import('npm:mongodb@^6.21.0')` never runs; the injected client is structural, so a driver of a
+different major that honours the same shapes is accepted. An injected client that uses ObjectId
 values supplies its `objectIdCtor` companion, so the adapter can convert 24-hex repository ids
 without importing the driver. `database` names the database; when absent the one encoded in `url` is
 used, and if neither yields a name `connect()` fails at startup naming the option. `collections` is
@@ -1262,12 +1265,15 @@ public surface is a per-entity override with a zero-config default and the inter
 unexported.
 
 Identity maps `_id` to the configured primary key on read and back on write. Because a
-`findOne({_id: "<24-hex>"})` misses when `_id` is an `ObjectId`, the driver id is converted with
-`ObjectId.isValid` (which accepts only a 24-hex string) for an `idType` of `'auto'` (the default),
-forced for `'objectId'`, and forbidden for `'raw'`. `find` serves
-`orderBy`/`offset`/`limit`/`select` natively as `sort`/`skip`/`limit`/`projection`, and `contains`
-compiles to a `$regex` match with an escaped value (the inverse of the SQL `contains`), so `%` and
-`_` in the searched value stay literal.
+`findOne({_id: "<24-hex>"})` misses when `_id` is an `ObjectId`, the driver id is converted with a
+24-hex **string** test for an `idType` of `'auto'` (the default), forced for `'objectId'`, and
+forbidden for `'raw'`. The string half of that test is load-bearing rather than defensive: the
+driver's own `ObjectId.isValid` answers `true` for **any number** while its constructor rejects one,
+so a collection keyed by application-assigned numbers is passed through verbatim — `findById`,
+`update` and `delete` accept `string | number`, and a numeric key must reach the driver unconverted.
+`find` serves `orderBy`/`offset`/`limit`/`select` natively as `sort`/`skip`/`limit`/`projection`,
+and `contains` compiles to a `$regex` match with an escaped value (the inverse of the SQL
+`contains`), so `%` and `_` in the searched value stay literal.
 
 `rawQuery` is refused by name with `UnsupportedRawQueryError` — MongoDB has no SQL, so an
 application reaches the injected client directly for native commands, exactly as it does for a
@@ -1298,6 +1304,7 @@ return types are nameable from the package entry, as are the collection-level sh
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                         |
 | `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                              |
 | `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`                          | interfaces                         |
+| `MongoAdapterOptions` (union of two arms), `MongoAdapterOptionsBase`, `MongoEntityMapping`                                  | types                              |
 | `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                         |
 | `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                              |
 | `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                              |
@@ -1314,9 +1321,6 @@ the promoted `IDataSource` (the same type), and will be removed in the next majo
 `'mongodb'` arm is additive as well: `MongoDatabaseOptions` extends `DatabaseConnectionOptions` and
 carries its dedicated `MongoAdapterOptions` bag, so a registration carrying a memory, Prisma,
 Drizzle or custom configuration still compiles unchanged.
-
-`DatabaseAdapterType` gained `'custom'`; `DatabasePluginOptions` became a union discriminated on
-`type`. Both are additive for callers — every existing registration compiles unchanged.
 
 ### Multiple Databases
 

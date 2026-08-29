@@ -12,6 +12,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MongoAdapter, parseDatabaseFromUrl } from '../../src/adapters/mongo/mongo-adapter.ts';
+import type { MongoAdapterOptions } from '../../src/interfaces/index.ts';
 import { MongoTransactionUnavailableError } from '../../src/errors.ts';
 import {
   FakeMongoClient,
@@ -45,7 +46,20 @@ describe('MongoAdapter — lifecycle against an injected client', () => {
   });
 
   it('fails to construct when neither url nor client is supplied', () => {
-    expect(() => new MongoAdapter({})).toThrow(/requires either/);
+    // `MongoAdapterOptions` is a union whose arms each require one of the two,
+    // so a typed caller cannot reach this — the cast stands in for the plugin's
+    // untyped `buildAdapterOptions` carry, which is the only real path here.
+    expect(() => new MongoAdapter({} as unknown as MongoAdapterOptions)).toThrow(
+      /requires either/,
+    );
+  });
+
+  it('rejects an options bag supplying neither url nor client at compile time', () => {
+    // @ts-expect-error — neither arm of the union is satisfied. The directive is
+    // self-validating: if the union ever stops enforcing this, the unused
+    // expect-error becomes a compile error of its own.
+    const unusable: MongoAdapterOptions = { database: 'app' };
+    expect(unusable.database).toBe('app');
   });
 
   it('connects idempotently — the second connect() performs no new client work', async () => {

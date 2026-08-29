@@ -40,7 +40,7 @@ import type { MongoTarget } from './mongo-mapping.ts';
  *
  * app.register(DatabasePlugin({
  *   type: 'mongodb',
- *   options: { mongo: { url: 'mongodb://localhost:27017' } },
+ *   options: { url: 'mongodb://localhost:27017/mydb' },
  * }));
  * ```
  * @since 0.1.0
@@ -60,8 +60,11 @@ export class MongoAdapter implements IDatabaseAdapter {
    *
    * @param options - The `'mongodb'` arm options; `url` is required unless
    *   `client` is supplied
-   * @throws {Error} When neither `url` nor `client` is supplied — a compile
-   *   error on the discriminated union, so this is defensive
+   * @throws {Error} When neither `url` nor `client` is supplied. A typed
+   *   caller cannot reach this — {@linkcode MongoAdapterOptions} is a union
+   *   whose arms each require one of the two — but the plugin builds the bag
+   *   through an untyped carry (`buildAdapterOptions`), so the runtime guard
+   *   is the backstop for that cast rather than dead code.
    */
   constructor(options: MongoAdapterOptions) {
     if (options.client === undefined && options.url === undefined) {

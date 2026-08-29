@@ -81,6 +81,14 @@ const ROWS: Row[] = [
   { id: 'r6', name: 'backXslash' },
   { id: 'r7', name: 'plain text' },
   { id: 'r8', name: 'Bolt M6' },
+  // Regex-metacharacter rows. `.` and `*` are wildcards in a Mongo `$regex`
+  // and literal data in a SQL `LIKE`, so these are the mirror image of the
+  // `%`/`_` rows above — and no existing row could catch an unescaped Mongo
+  // pattern, because none contains a regex metacharacter.
+  { id: 'r9', name: 'v3.5 release' },
+  { id: 'r10', name: 'v315 release' },
+  { id: 'r11', name: 'a*b glob' },
+  { id: 'r12', name: 'aXXb glob' },
 ];
 
 const ids = (rows: Row[]): string[] => rows.map((r) => String(r.id));
@@ -127,6 +135,14 @@ const CASES: Case[] = [
   {
     label: 'in [null] (null-only membership)',
     filter: { type: 'comparison', field: 'name', operator: 'in', value: [null] },
+  },
+  {
+    label: "contains 'v3.5' (a . is data, not a regex any-char)",
+    filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'v3.5' },
+  },
+  {
+    label: "contains 'a*b' (a * is data, not a regex repeat)",
+    filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'a*b' },
   },
   {
     label: "eq 'plain text'",

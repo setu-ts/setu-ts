@@ -50,10 +50,26 @@ const HEX24 = /^[0-9a-f]{24}$/;
  */
 export const fakeObjectIdCtor = Object.assign(
   function fakeObjectIdCtorCtor(value?: string): IMongoObjectId {
+    // The real constructor throws for anything that is not a 24-hex string, a
+    // 12-byte Uint8Array, or an integer — including the numeric values its own
+    // `isValid` accepts. Reproducing the throw is what lets this double fail
+    // when the adapter converts something it should have passed through.
+    if (value !== undefined && !HEX24.test(String(value))) {
+      throw new Error(
+        'input must be a 24 character hex string, 12 byte Uint8Array, or an integer',
+      );
+    }
     return new FakeObjectId(value);
   },
   {
+    // Mirrors the REAL driver rather than what the adapter wants: measured on
+    // `mongodb@6.21.0`, `ObjectId.isValid` answers `true` for ANY number
+    // (`isValid(5)`, `isValid(0)`, `isValid(1234567890)`) while
+    // `new ObjectId('5')` throws. A double that answered `false` for a number
+    // hid exactly that divergence, so a numeric primary key threw a raw
+    // `BSONError` on every entry point while this suite stayed green.
     isValid(value: unknown): boolean {
+      if (typeof value === 'number') return true;
       return typeof value === 'string' && HEX24.test(value);
     },
   },

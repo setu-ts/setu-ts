@@ -28,6 +28,7 @@ export type {
   IUnitOfWork,
   MemoryDatabaseOptions,
   MongoAdapterOptions,
+  MongoAdapterOptionsBase,
   MongoDatabaseOptions,
   MongoEntityMapping,
   OrderDirection,

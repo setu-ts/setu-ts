@@ -39,7 +39,10 @@ export interface MongoEntityMapping {
    * - `'objectId'` forces the id to a driver `ObjectId` on read and write.
    * - `'raw'` forbids conversion, so a `string` id is passed to the driver
    *   verbatim.
-   * - absent uses `ObjectId.isValid(id)`, which is exactly a 24-hex test.
+   * - absent converts a **string** id that `ObjectId.isValid` accepts — a
+   *   24-hex string. A non-string id (a `number` key) is passed through
+   *   verbatim, because the driver's `isValid` answers `true` for any number
+   *   while its constructor rejects one.
    *
    * The genuinely ambiguous collection — one whose `_id` values are 24-hex
    * **strings** rather than `ObjectId`s — cannot be distinguished at runtime,
@@ -115,11 +118,13 @@ export function resolveMongoTarget(
 
 /**
  * Maps a driver document onto the repository's row: the mapped primary-key
- * field carries the `_id` value as a string, and `_id` is removed so the row
- * never leaks the driver's field name.
+ * field carries the `_id` value, and `_id` is removed so the row never leaks
+ * the driver's field name.
  *
- * Returning an `ObjectId` instance would break `JSON.stringify` round-tripping
- * in handlers; returning the hex string keeps the row a plain `Record`.
+ * The value is passed through {@linkcode fromDriverId}: a JSON scalar keeps its
+ * own type so the key round-trips through `findById`, while an `ObjectId` is
+ * rendered as its 24-hex string, because returning the instance would break
+ * `JSON.stringify` round-tripping in handlers.
  *
  * @param document - The raw driver document
  * @param target - The resolved entity target
@@ -133,10 +138,41 @@ export function fromDriverDocument(
   const row: Record<string, unknown> = { ...document };
   const rawId = row[DRIVER_ID_FIELD];
   if (rawId !== undefined) {
-    row[target.primaryKey] = toIdString(rawId);
+    row[target.primaryKey] = fromDriverId(rawId);
     delete row[DRIVER_ID_FIELD];
   }
   return row;
+}
+
+/**
+ * Converts a driver `_id` into the value the repository row carries.
+ *
+ * A JSON scalar (`string`, `number`, `boolean`, `null`) is preserved with its
+ * own type, so a collection keyed by application-assigned numbers round-trips:
+ * `create()` returns the key it was given and `findById(row.id)` finds the row
+ * again — the behaviour every other adapter has (the Memory reference returns
+ * `{ id: 7 }`, not `{ id: '7' }`). Stringifying a scalar made that call miss
+ * silently, because `'7'` is a legitimately different key from `7` and no
+ * runtime test can tell which the collection meant.
+ *
+ * Anything else — an `ObjectId` above all — is rendered with
+ * {@linkcode toIdString}, because returning the instance would break
+ * `JSON.stringify` round-tripping in a handler and the 24-hex string is the
+ * form callers address. `toDriverId` converts that string back, so the
+ * `ObjectId` case round-trips too. An exotic non-scalar key (a `Date`, a
+ * `Binary`) is rendered but does NOT round-trip through `findById`; use
+ * `idType: 'raw'` and address such a collection through the injected client.
+ *
+ * @param value - The raw driver `_id`
+ * @returns The repository-visible primary-key value
+ * @since 0.1.0
+ */
+export function fromDriverId(value: unknown): unknown {
+  const kind = typeof value;
+  if (value === null || kind === 'string' || kind === 'number' || kind === 'boolean') {
+    return value;
+  }
+  return toIdString(value);
 }
 
 /**
@@ -173,10 +209,11 @@ export function toDriverDocument(
 /**
  * Converts a driver id value to the string a caller addresses.
  *
- * An `ObjectId` serializes to its 24-hex string; anything else is used as-is,
- * so a `number` or `raw` string id is preserved.
+ * An `ObjectId` serializes to its 24-hex string. Callers reach this through
+ * {@linkcode fromDriverId}, which returns every JSON scalar — `null` included —
+ * before this is called, so a nullish value never arrives here.
  *
- * @param value - The driver id value
+ * @param value - The driver id value; never `null` or `undefined`
  * @returns The id as a string
  * @since 0.1.0
  */
@@ -186,7 +223,11 @@ export function toIdString(value: unknown): string {
     const str = (value as { toString(): string }).toString();
     if (typeof str === 'string') return str;
   }
-  return String(value);
+  // Last resort for a value with no callable `toString` — a null-prototype
+  // object. `String(value)` THROWS `TypeError: Cannot convert object to
+  // primitive value` there, and a renderer that throws while rendering is the
+  // defect class this fallback exists to avoid.
+  return Object.prototype.toString.call(value);
 }
 
 /**
@@ -198,8 +239,10 @@ export function toIdString(value: unknown): string {
  * - `'objectId'` converts a valid 24-hex string to an `ObjectId`; a value that
  *   `ObjectId.isValid` rejects is a configuration fault, so it throws naming
  *   the offending value.
- * - `'auto'` uses `ObjectId.isValid` — exactly a 24-hex test — so a raw 24-hex
- *   string is converted and everything else is used as-is.
+ * - `'auto'` converts a **string** the driver's `ObjectId.isValid` accepts (a
+ *   24-hex string) and passes everything else through, including a numeric
+ *   primary key — see {@linkcode isObjectIdHex} for why the string test is
+ *   required rather than defensive.
  *
  * @param value - The repository id value
  * @param idType - The target's id strategy
@@ -217,16 +260,37 @@ export function toDriverId(
     if (objectIdCtor === undefined) {
       throw new Error('MongoAdapter needs the driver ObjectId to map objectId ids');
     }
-    if (!objectIdCtor.isValid(value)) {
+    if (!isObjectIdHex(value, objectIdCtor)) {
       throw new Error(
         `Cannot map id '${String(value)}' to ObjectId: it is not a valid 24-hex id`,
       );
     }
-    return new objectIdCtor(String(value));
+    return new objectIdCtor(value);
   }
   // idType === 'auto'
-  if (objectIdCtor !== undefined && objectIdCtor.isValid(value)) {
-    return new objectIdCtor(String(value));
+  if (objectIdCtor !== undefined && isObjectIdHex(value, objectIdCtor)) {
+    return new objectIdCtor(value);
   }
   return value;
+}
+
+/**
+ * Tests whether a repository id is a 24-hex string the driver can construct an
+ * `ObjectId` from.
+ *
+ * The `typeof value === 'string'` half is load-bearing rather than defensive:
+ * the real driver's `ObjectId.isValid` returns `true` for **any number**
+ * (measured on `mongodb@6.21.0` — `isValid(5)`, `isValid(0)` and
+ * `isValid(1234567890)` are all `true`), while `new ObjectId('5')` throws
+ * `BSONError: input must be a 24 character hex string, 12 byte Uint8Array, or
+ * an integer`. `IDataSource.findById`/`update`/`delete` accept `string |
+ * number`, so a collection keyed by application-assigned numbers reached that
+ * throw on every entry point under the default `'auto'` mapping.
+ *
+ * @param value - The repository id value
+ * @param objectIdCtor - The driver `ObjectId` constructor
+ * @returns `true` when the value is a string the constructor accepts
+ */
+function isObjectIdHex(value: unknown, objectIdCtor: IMongoObjectIdCtor): value is string {
+  return typeof value === 'string' && objectIdCtor.isValid(value);
 }

@@ -3,8 +3,9 @@
 Database access with the repository pattern and Unit of Work. Registers an `IDatabaseService` under
 `CAPABILITIES.DATABASE` (`'database'`).
 
-Three adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, and
-`DrizzleAdapter`. The application owns the optional ORM clients and injects them into the plugin.
+Four adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, `DrizzleAdapter`,
+and `MongoAdapter` (the native `mongodb` driver). The application owns the optional ORM and driver
+clients and injects them into the plugin.
 
 ## ORM compatibility
 
@@ -62,28 +63,31 @@ await db.transaction(async (uow) => {
 
 ## Options
 
-| Option    | Type                                | Default     | Description                              |
-| --------- | ----------------------------------- | ----------- | ---------------------------------------- |
-| `type`    | `'memory' \| 'prisma' \| 'drizzle'` | `'memory'`  | ORM adapter.                             |
-| `name`    | `string`                            | `'default'` | Named connection for multi-database use. |
-| `options` | `DatabaseAdapterOptions`            | —           | Adapter-specific configuration.          |
+| Option    | Type                                                         | Default     | Description                              |
+| --------- | ------------------------------------------------------------ | ----------- | ---------------------------------------- |
+| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'custom'` | `'memory'`  | Backend adapter.                         |
+| `name`    | `string`                                                     | `'default'` | Named connection for multi-database use. |
+| `options` | `DatabaseAdapterOptions`                                     | —           | Adapter-specific configuration.          |
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
 
-`options` is a `DatabaseAdapterOptions`, and the arms narrow it: `type: 'prisma'` requires
-`prismaClient`, `type: 'drizzle'` requires both `drizzleInstance` and `drizzleTables`. Those are
-required **by the union**, so omitting one is a compile error rather than a startup throw.
+Each arm narrows `options`: `type: 'prisma'` requires `prismaClient`, `type: 'drizzle'` requires
+both `drizzleInstance` and `drizzleTables`, `type: 'mongodb'` requires either `url` or `client`, and
+`type: 'custom'` requires `adapter`. Those are required **by the union**, so omitting one is a
+compile error rather than a startup throw. The `'mongodb'` arm carries its own `MongoAdapterOptions`
+bag rather than the shared `DatabaseAdapterOptions` — see
+[the MongoDB backend](#the-mongodb-backend) below.
 
-| `options` field      | Type                      | Default | Read by                                                                                                                                      |
-| -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `logQueries`         | `boolean`                 | `false` | The database **service**, so it applies to every adapter including `'custom'` — logs entity, operation and monotonic duration.               |
-| `prismaClient`       | `unknown`                 | —       | Prisma. Required.                                                                                                                            |
-| `provider`           | `PrismaSqlProvider`       | derived | Prisma. Names the connector when it cannot be detected; see `contains` below.                                                                |
-| `drizzleInstance`    | `DrizzleDatabaseIdentity` | —       | Drizzle. Required; created by `createDrizzleDatabase()`.                                                                                     |
-| `drizzleTables`      | `Record<string, unknown>` | —       | Drizzle. Required; entity name → real table definition.                                                                                      |
-| `transactionTimeout` | `number` (ms)             | `30000` | Prisma only. Raises Prisma's ~5 s interactive-transaction default, which is too short for a full Unit of Work. Unread by Memory and Drizzle. |
-| `url`                | `string`                  | —       | **Deprecated and unread.** A Prisma v7 client carries its own connection configuration; see below.                                           |
+| `options` field      | Type                      | Default | Read by                                                                                                                                                              |
+| -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `logQueries`         | `boolean`                 | `false` | The database **service**, so it applies to every adapter including `'custom'` — logs entity, operation and monotonic duration.                                       |
+| `prismaClient`       | `unknown`                 | —       | Prisma. Required.                                                                                                                                                    |
+| `provider`           | `PrismaSqlProvider`       | derived | Prisma. Names the connector when it cannot be detected; see `contains` below.                                                                                        |
+| `drizzleInstance`    | `DrizzleDatabaseIdentity` | —       | Drizzle. Required; created by `createDrizzleDatabase()`.                                                                                                             |
+| `drizzleTables`      | `Record<string, unknown>` | —       | Drizzle. Required; entity name → real table definition.                                                                                                              |
+| `transactionTimeout` | `number` (ms)             | `30000` | Prisma only. Raises Prisma's ~5 s interactive-transaction default, which is too short for a full Unit of Work. Unread by Memory and Drizzle.                         |
+| `url`                | `string`                  | —       | **Deprecated and unread by Prisma** — a v7 client carries its own connection configuration; see below. The `'mongodb'` arm reads it as the driver connection string. |
 
 ### Prisma 7 setup
 
@@ -197,6 +201,55 @@ freely selected generic cannot claim another database's transaction surface. Use
 intentionally exposes only Drizzle's transaction-safe callback surface. Memory, Prisma, and custom
 services throw an error naming their configured adapter. Objects not created by this plugin throw an
 invalid-scope error.
+
+## The MongoDB backend
+
+`type: 'mongodb'` serves the `database` capability from a document store, over the native
+[`mongodb`](https://www.npmjs.com/package/mongodb) driver (`npm:mongodb@^6.21.0`). It implements all
+six `IDataSource` methods and translates all six `NormalizedQuery` members natively — `where` and
+`filter` become a match document, `orderBy`/`offset`/`limit`/`select` become
+`sort`/`skip`/`limit`/`projection`. Nothing is filtered, sorted or paginated in JavaScript.
+
+```typescript
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+
+app.register(DatabasePlugin({
+  type: 'mongodb',
+  options: {
+    url: 'mongodb://127.0.0.1:27017/app',
+    collections: { User: { collection: 'users', primaryKey: 'user_id' } },
+  },
+}));
+```
+
+| `options` field | Type                                 | Default            | Read by                                                                                                             |
+| --------------- | ------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `url`           | `string`                             | —                  | The lazy client path. Required unless `client` is supplied; also supplies `database` when that option is absent.    |
+| `client`        | `IMongoClient`                       | —                  | `connect()`. An already-constructed client; when present the lazy `import('npm:mongodb@^6.21.0')` never runs.       |
+| `objectIdCtor`  | `IMongoObjectIdCtor`                 | from the lazy load | The `_id` conversion. Supply it alongside an injected `client` whose collections use `ObjectId` keys.               |
+| `database`      | `string`                             | from `url`         | The collection resolver. When neither this nor `url` yields a name, `connect()` fails at startup naming the option. |
+| `collections`   | `Record<string, MongoEntityMapping>` | `{}`               | Per-entity `{ collection?, primaryKey?, idType? }`. An unmapped entity uses its own name and `'id'`.                |
+
+**Identity.** `_id` is mapped to the configured primary key on read (as a string, so a row stays
+`JSON.stringify`-able) and back to `_id` on write. Under the default `idType: 'auto'` a 24-hex
+**string** id is converted to an `ObjectId`, because `findOne({ _id: '<24-hex>' })` misses an
+`ObjectId` key; anything else — including a numeric primary key — is passed to the driver verbatim.
+`'objectId'` forces the conversion and refuses a value it cannot convert by name; `'raw'` forbids
+it, which is the setting for a collection whose `_id` values genuinely are 24-hex strings (no
+runtime test can tell that case from an `ObjectId` one).
+
+**`contains`.** Compiles to an escaped `$regex`. This is the inverse of the SQL case: `%` and `_`
+are ordinary data in Mongo, while `.` and `*` are wildcards, so the value is regex-escaped and a
+search for `3.5` does not match `315`. Case sensitivity follows the collection's collation and is
+not overridden.
+
+**`rawQuery` is refused by name** with `UnsupportedRawQueryError` — MongoDB has no SQL, so
+`IDatabaseService.query()` is unavailable on this arm and an application reaches the injected client
+directly for native commands (`aggregate`, `runCommand`), exactly as it does for a Prisma raw query.
+
+**Transactions** use a driver session. They require a replica set, and the refusal is late and named
+— `beginTransaction()` throws `MongoTransactionUnavailableError`, never `connect()` — so a
+standalone `mongod` remains a valid deployment for an application that never opens one.
 
 ## Filtering and single-row lookup
 
@@ -330,7 +383,7 @@ imperative begin/commit.
 | `IRepository`                             | interface |
 | `IUnitOfWork`                             | interface |
 | `MemoryDatabaseOptions`                   | interface |
-| `MongoAdapterOptions`                     | interface |
+| `MongoAdapterOptionsBase`                 | interface |
 | `MongoDatabaseOptions`                    | interface |
 | `MongoEntityMapping`                      | interface |
 | `MongoOptions`                            | interface |
@@ -346,6 +399,7 @@ imperative begin/commit.
 | `FilterComparison`                        | type      |
 | `FilterExpression`                        | type      |
 | `FilterOperator`                          | type      |
+| `MongoAdapterOptions`                     | type      |
 | `MongoWriteOptions`                       | type      |
 | `OrderDirection`                          | type      |
 | `PrismaSqlProvider`                       | type      |

@@ -49,7 +49,6 @@
     "npm:graphql@16": "16.14.2",
     "npm:ioredis@5": "5.11.1",
     "npm:kafkajs@2": "2.2.4",
-    "npm:mongodb@6": "6.21.0",
     "npm:mongodb@^6.21.0": "6.21.0",
     "npm:nats@2": "2.29.3",
     "npm:nodemailer@9": "9.0.4",
