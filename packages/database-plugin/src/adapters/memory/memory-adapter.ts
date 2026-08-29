@@ -278,10 +278,33 @@ export class MemoryAdapter implements IDatabaseAdapter {
     this.getStore(entity, primaryKey); // Ensure the store (and its key) exists.
     return {
       findAll: (query) => this.queryEntities(entity, query),
-      findById: (id) => this.findEntityById(entity, id as string | number),
+      findById: (id) => {
+        if (typeof id === 'object') {
+          return Promise.reject(
+            new Error(
+              `MemoryAdapter.findById: composite keys are not supported; got ${typeof id}.`,
+            ),
+          );
+        }
+        return this.findEntityById(entity, id);
+      },
       create: (data) => this.insertEntity(entity, data),
-      update: (id, data) => this.updateEntity(entity, id as string | number, data),
-      delete: (id) => this.deleteEntity(entity, id as string | number),
+      update: (id, data) => {
+        if (typeof id === 'object') {
+          return Promise.reject(
+            new Error(`MemoryAdapter.update: composite keys are not supported; got ${typeof id}.`),
+          );
+        }
+        return this.updateEntity(entity, id, data);
+      },
+      delete: (id) => {
+        if (typeof id === 'object') {
+          return Promise.reject(
+            new Error(`MemoryAdapter.delete: composite keys are not supported; got ${typeof id}.`),
+          );
+        }
+        return this.deleteEntity(entity, id);
+      },
       count: (where, filter) => this.countEntities(entity, where, filter),
     };
   }

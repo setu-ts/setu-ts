@@ -57,6 +57,7 @@ export type {
 export {
   MongoTransactionUnavailableError,
   UnsupportedFilterOperatorError,
+  UnsupportedQueryFeatureError,
   UnsupportedRawQueryError,
 } from './errors.ts';
 
@@ -64,6 +65,8 @@ export {
 // backend author can reach the whole contract from one import, and so the
 // already-exported `DataSource.findAll` parameter type is finally nameable.
 export type {
+  CursorPayload,
+  EntityKey,
   FilterComparison,
   FilterExpression,
   FilterOperator,
@@ -71,7 +74,9 @@ export type {
   IDatabaseAdapter,
   IDataSource,
   NormalizedQuery,
+  PageResult,
 } from '@setu-ts/common';
+export { decodeCursor, encodeCursor, keysetPredicate } from '@setu-ts/common';
 
 // Services
 export { DatabaseService } from './services/database-service.ts';

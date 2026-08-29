@@ -6,14 +6,20 @@
  *
  * @module
  */
-import type { IDatabaseAdapter } from '@setu-ts/common';
+import type { EntityKey, IDatabaseAdapter } from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
-import type { CountOptions, FindOptions } from '../query/find-options.ts';
+import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
 import type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
 import type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
 // Re-export query option types so consumers don't need internal paths.
-export type { CountOptions, FindOptions, OrderDirection } from '../query/find-options.ts';
+export type {
+  CountOptions,
+  FindOptions,
+  OrderDirection,
+  Page,
+  PageOptions,
+} from '../query/find-options.ts';
 
 /**
  * The SQL connector a Prisma client is bound to.
@@ -55,10 +61,10 @@ export type PrismaSqlProvider =
  * Generic repository providing CRUD operations over an entity type.
  *
  * @typeParam Entity - The entity shape the repository manages
- * @typeParam Id - Primary key type (defaults to `string`)
+ * @typeParam Id - Primary key type, constrained to {@linkcode EntityKey} (scalar `string`/`number` or composite record). Defaults to `string`.
  * @since 0.1.0
  */
-export interface IRepository<Entity, Id = string> {
+export interface IRepository<Entity, Id extends EntityKey = string> {
   /**
    * Fetch a single entity by its primary key.
    *
@@ -132,6 +138,16 @@ export interface IRepository<Entity, Id = string> {
    * @since 0.1.0
    */
   count(options?: CountOptions): Promise<number>;
+
+  /**
+   * Find a page of entities by cursor pagination.
+   *
+   * @param options - Find options, optionally carrying a cursor position
+   * @returns The page of entities plus a `nextCursor` that is `null` when the page is the last
+   * @throws {UnsupportedQueryFeatureError} When the bound data source lacks `findPage`
+   * @since 0.1.0
+   */
+  findPage(options: PageOptions): Promise<Page<Entity>>;
 }
 
 /**
@@ -152,7 +168,7 @@ export interface IUnitOfWork {
    * @returns Repository bound to the current transaction
    * @since 0.1.0
    */
-  getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id>;
+  getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id>;
 }
 
 /**
@@ -171,7 +187,7 @@ export interface IDatabaseService {
    * @returns Repository for the entity
    * @since 0.1.0
    */
-  getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id>;
+  getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id>;
 
   /**
    * Execute the `work` callback within a database transaction.

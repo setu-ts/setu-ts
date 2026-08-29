@@ -504,6 +504,13 @@ function createDrizzleDataSourceInner(
 
   return {
     async findById(id) {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new Error(
+            `DrizzleAdapter.findById: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       const rows = await instance.select().from(drizzleTable).where(operators.eq(idColumn, id));
       return rows[0] ?? null;
     },
@@ -538,18 +545,29 @@ function createDrizzleDataSourceInner(
     },
 
     async update(id, data) {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new Error(
+            `DrizzleAdapter.update: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       const rows = await returningRows(
         instance.update(drizzleTable).set(data).where!(operators.eq(idColumn, id)),
         entity,
         'update',
       );
-      // `id` is EntityKey here; the error message only interpolates it as a
-      // scalar, so cast it — composite keys are refused at the mapping layer
-      // and never reach a Drizzle row-returning path.
-      return oneReturnedRow(entity, 'update', rows, id as string | number);
+      return oneReturnedRow(entity, 'update', rows, id);
     },
 
     async delete(id) {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new Error(
+            `DrizzleAdapter.delete: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       const rows = await returningRows(
         instance.delete(drizzleTable).where(operators.eq(idColumn, id)),
         entity,

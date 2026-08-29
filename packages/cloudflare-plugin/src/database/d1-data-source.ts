@@ -9,7 +9,7 @@
  * @module
  */
 
-import type { FilterExpression, IDataSource, NormalizedQuery } from '@setu-ts/common';
+import type { EntityKey, FilterExpression, IDataSource, NormalizedQuery } from '@setu-ts/common';
 import type { ID1Database, ID1PreparedStatement } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import type { D1Statement, D1Target } from './d1-sql.ts';
@@ -64,7 +64,14 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       return [...result.results];
     },
 
-    findById(id: string | number): Promise<Record<string, unknown> | null> {
+    findById(id: EntityKey): Promise<Record<string, unknown> | null> {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new CloudflareUnsupportedError(
+            `D1Adapter.findById: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       return prepareStatement(db, buildSelectById(target, id)).first();
     },
 
@@ -80,9 +87,16 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
     },
 
     async update(
-      id: string | number,
+      id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new CloudflareUnsupportedError(
+            `D1Adapter.update: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       const row = await prepareStatement(db, buildUpdate(target, id, data)).first();
       if (row === null) {
         throw new Error(`Entity '${target.table}' with id '${id}' not found`);
@@ -90,7 +104,14 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       return row;
     },
 
-    async delete(id: string | number): Promise<boolean> {
+    async delete(id: EntityKey): Promise<boolean> {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new CloudflareUnsupportedError(
+            `D1Adapter.delete: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       const result = await prepareStatement(db, buildDelete(target, id)).all();
       return result.results.length > 0;
     },
@@ -183,8 +204,15 @@ export function createD1TransactionDataSource(
       return await committed.findAll(query);
     },
 
-    async findById(id: string | number): Promise<Record<string, unknown> | null> {
+    async findById(id: EntityKey): Promise<Record<string, unknown> | null> {
       buffer.assertOpen();
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new CloudflareUnsupportedError(
+            `D1Adapter.findById: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       return await committed.findById(id);
     },
 
@@ -209,10 +237,17 @@ export function createD1TransactionDataSource(
     },
 
     async update(
-      id: string | number,
+      id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
       buffer.assertOpen();
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new CloudflareUnsupportedError(
+            `D1Adapter.update: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       const current = await committed.findById(id);
       if (current === null) {
         throw new Error(`Entity '${target.table}' with id '${id}' not found`);
@@ -221,8 +256,15 @@ export function createD1TransactionDataSource(
       return { ...current, ...data };
     },
 
-    async delete(id: string | number): Promise<boolean> {
+    async delete(id: EntityKey): Promise<boolean> {
       buffer.assertOpen();
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new CloudflareUnsupportedError(
+            `D1Adapter.delete: composite keys are not supported; got ${typeof id}.`,
+          ),
+        );
+      }
       const current = await committed.findById(id);
       if (current === null) return false;
       buffer.add(buildDelete(target, id));

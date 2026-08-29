@@ -214,30 +214,29 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 
 ## Exports
 
-| Export                    | Kind      |
-| ------------------------- | --------- |
-| `OpenApiPlugin`           | function  |
-| `swaggerUiHtml`           | function  |
-| `zodToOpenApi`            | function  |
-| `OpenApiGenerator`        | class     |
-| `OpenApiService`          | class     |
-| `ZodToOpenApi`            | class     |
-| `IOpenApiService`         | interface |
-| `OpenApiDocument`         | interface |
+| Export | Kind |
+| --- | --- |
+| `OpenApiPlugin` | function |
+| `swaggerUiHtml` | function |
+| `zodToOpenApi` | function |
+| `OpenApiGenerator` | class |
+| `OpenApiService` | class |
+| `ZodToOpenApi` | class |
+| `IOpenApiService` | interface |
+| `OpenApiDocument` | interface |
 | `OpenApiGeneratorOptions` | interface |
-| `OpenApiOperation`        | interface |
-| `OpenApiParameter`        | interface |
-| `OpenApiPluginOptions`    | interface |
-| `OpenApiRequestBody`      | interface |
-| `OpenApiResponse`         | interface |
-| `OpenApiSchemaObject`     | interface |
-| `OpenApiServiceOptions`   | interface |
-| `SwaggerUiOptions`        | interface |
-| `SchemaIo`                | type      |
-| `SchemaNodeHook`          | type      |
+| `OpenApiOperation` | interface |
+| `OpenApiParameter` | interface |
+| `OpenApiPluginOptions` | interface |
+| `OpenApiRequestBody` | interface |
+| `OpenApiResponse` | interface |
+| `OpenApiSchemaObject` | interface |
+| `OpenApiServiceOptions` | interface |
+| `SwaggerUiOptions` | interface |
+| `SchemaIo` | type |
+| `SchemaNodeHook` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

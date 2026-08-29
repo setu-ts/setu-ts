@@ -1,14 +1,14 @@
-// deno-lint-ignore-file require-await -- interface methods must be async (IRepository)
 /**
  * Base repository that normalizes query options and delegates data
  * operations to an adapter-specific data source.
  *
  * @module
  */
-import type { IDataSource } from '@setu-ts/common';
-import type { CountOptions, FindOptions } from '../query/find-options.ts';
+import type { EntityKey, IDataSource } from '@setu-ts/common';
+import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
 import { normalizeCountOptions, normalizeQuery } from '../query/query-builder.ts';
 import type { IRepository } from '../interfaces/index.ts';
+import { UnsupportedQueryFeatureError } from '../errors.ts';
 
 /**
  * The data-access seam adapter-specific implementations provide, keeping
@@ -23,7 +23,7 @@ import type { IRepository } from '../interfaces/index.ts';
  * // Before
  * import type { DataSource } from '@setu-ts/database-plugin';
  * // After
- * import type { IDataSource } from '@setu-ts/common';
+ * import type { EntityKey, IDataSource } from '@setu-ts/common';
  * ```
  * @since 0.1.0
  */
@@ -37,10 +37,11 @@ export type DataSource = IDataSource;
  * this class and provide their own {@linkcode DataSource} wire-up.
  *
  * @typeParam Entity - Entity shape
- * @typeParam Id - Primary key type
+ * @typeParam Id - Primary key type, constrained to {@linkcode EntityKey}
  * @since 0.1.0
  */
-export abstract class BaseRepository<Entity, Id = string> implements IRepository<Entity, Id> {
+export abstract class BaseRepository<Entity, Id extends EntityKey = string>
+  implements IRepository<Entity, Id> {
   /**
    * Creates a new repository instance.
    *
@@ -93,7 +94,7 @@ export abstract class BaseRepository<Entity, Id = string> implements IRepository
   }
 
   async delete(id: Id): Promise<boolean> {
-    return this._dataSource.delete(this.coerceId(id));
+    return await this._dataSource.delete(this.coerceId(id));
   }
 
   async exists(id: Id): Promise<boolean> {
@@ -103,12 +104,45 @@ export abstract class BaseRepository<Entity, Id = string> implements IRepository
 
   async count(options?: CountOptions): Promise<number> {
     const where = normalizeCountOptions(options);
-    return this._dataSource.count(where, options?.filter);
+    return await this._dataSource.count(where, options?.filter);
+  }
+
+  /**
+   * Find a page of entities by cursor pagination.
+   *
+   * Refuses by name with {@linkcode UnsupportedQueryFeatureError} when the
+   * bound data source does not expose a `findPage` member — which is true for
+   * every shipped adapter until the milestone that implements cursor paging
+   * on that backend. Absence means "cannot page by cursor", never "there are
+   * no more rows".
+   *
+   * @param options - Find options, optionally carrying a cursor
+   * @returns The page of entities plus a `nextCursor`
+   * @throws {UnsupportedQueryFeatureError} When the data source lacks `findPage`
+   */
+  async findPage(options: PageOptions): Promise<Page<Entity>> {
+    const query = normalizeQuery(options);
+    const { findPage } = this._dataSource;
+    if (findPage === undefined) {
+      return Promise.reject(
+        new UnsupportedQueryFeatureError(
+          'cursor-pagination',
+          'database-plugin',
+          `The bound data source does not support cursor pagination (no findPage member). ` +
+            `Use findAll with offset/limit instead.`,
+        ),
+      );
+    }
+    const result = await findPage(query);
+    return {
+      rows: result.rows.map((row) => this.toEntity(row)),
+      nextCursor: result.nextCursor,
+    };
   }
 
   /** Cast the entity id to the type the adapter expects. */
-  protected coerceId(id: Id): string | number {
-    return id as string | number;
+  protected coerceId(id: Id): EntityKey {
+    return id;
   }
 
   /** Cast a raw row to the typed Entity. */

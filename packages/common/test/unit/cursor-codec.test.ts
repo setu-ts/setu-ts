@@ -318,4 +318,21 @@ describe('cursor.ts defensive edge cases', () => {
     expect(decoded).not.toBeNull();
     expect(decoded!.keyValues).toEqual(['x']);
   });
+
+  it('handles base64url with only 1 value (exercises ??0 fallbacks)', () => {
+    // 1 base64 char -> values.length=1 -> n1/n2/n3 are undefined -> ??0
+    // This exercises the defensive null-coalescing paths in base64ToBytes.
+    // The result is not valid JSON, so decodeCursor returns null.
+    expect(decodeCursor('Q')).toBeNull();
+  });
+
+  it('handles base64url with only 2 values (exercises ??0 fallbacks)', () => {
+    // 2 base64 chars -> values.length=2 -> n2/n3 are undefined -> ??0
+    expect(decodeCursor('QQ')).toBeNull();
+  });
+
+  it('handles base64url with only 3 values (exercises ??0 fallback)', () => {
+    // 3 base64 chars -> values.length=3 -> n3 is undefined -> ??0
+    expect(decodeCursor('QQQ')).toBeNull();
+  });
 });

@@ -17,7 +17,7 @@ import type { IUnitOfWork } from '../interfaces/index.ts';
 import { BaseRepository, type DataSource } from '../repositories/base-repository.ts';
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
-import type { IDatabaseAdapter } from '@setu-ts/common';
+import type { EntityKey, IDatabaseAdapter } from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
@@ -36,7 +36,7 @@ import {
  *
  * @internal
  */
-class InternalRepo<Entity, Id = string> extends BaseRepository<Entity, Id> {
+class InternalRepo<Entity, Id extends EntityKey = string> extends BaseRepository<Entity, Id> {
   constructor(dataSource: DataSource) {
     super(dataSource);
   }
@@ -74,7 +74,7 @@ export class DatabaseService implements IDatabaseService {
   ) {}
 
   /** Returns a repository bound to the named entity on the outer database scope. */
-  getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id> {
+  getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id> {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
     }

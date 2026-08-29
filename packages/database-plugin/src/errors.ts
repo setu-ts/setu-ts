@@ -98,6 +98,54 @@ export class UnsupportedRawQueryError extends Error {
 }
 
 /**
+ * Thrown when an adapter refuses a query feature that is expressible in the
+ * portable {@linkcode IDataSource} contract but not supported by the active
+ * backend.
+ *
+ * Carries the feature, the adapter, and a `name` discriminant so consumers
+ * can branch with `instanceof` rather than matching message text. Every
+ * refusal reachable from a `Promise`-returning method rejects rather than
+ * throwing synchronously.
+ *
+ * @example
+ * ```typescript
+ * import { UnsupportedQueryFeatureError } from '@setu-ts/database-plugin';
+ * try {
+ *   await repo.findById({ tenantId: 't1', userId: 7 });
+ * } catch (err) {
+ *   if (err instanceof UnsupportedQueryFeatureError) {
+ *     console.error(`Feature '${err.feature}' unsupported on ${err.adapter}`);
+ *   }
+ * }
+ * ```
+ * @since 0.1.0
+ */
+export class UnsupportedQueryFeatureError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'UnsupportedQueryFeatureError';
+
+  /** The query feature that could not be honoured (e.g. `'composite-key'`). */
+  readonly feature: string;
+
+  /** The adapter name (e.g. `'prisma'`, `'drizzle'`, `'memory'`). */
+  readonly adapter: string;
+
+  /**
+   * Creates the error. The `message` is the full diagnostic — safe to log, never
+   * to serve — and names the feature and the adapter.
+   *
+   * @param feature - The query feature that is not supported
+   * @param adapter - The adapter name
+   * @param message - The full diagnostic, safe to log
+   */
+  constructor(feature: string, adapter: string, message: string) {
+    super(message);
+    this.feature = feature;
+    this.adapter = adapter;
+  }
+}
+
+/**
  * Thrown by {@linkcode MongoAdapter.beginTransaction} on a deployment without
  * a replica set.
  *

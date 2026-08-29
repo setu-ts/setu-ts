@@ -3,6 +3,7 @@
  *
  * @module
  */
+import type { EntityKey } from '@setu-ts/common';
 import { BaseRepository, type DataSource } from '../../repositories/base-repository.ts';
 
 /**
@@ -12,10 +13,11 @@ import { BaseRepository, type DataSource } from '../../repositories/base-reposit
  * the standard {@linkcode IRepository} interface.
  *
  * @typeParam Entity - Entity shape
- * @typeParam Id - Primary key type
+ * @typeParam Id - Primary key type, constrained to {@linkcode EntityKey}
  * @since 0.1.0
  */
-export class PrismaRepository<Entity, Id = string> extends BaseRepository<Entity, Id> {
+export class PrismaRepository<Entity extends Record<string, unknown>, Id extends EntityKey = string>
+  extends BaseRepository<Entity, Id> {
   constructor(
     protected override readonly _dataSource: DataSource,
   ) {

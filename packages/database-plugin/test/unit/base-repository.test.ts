@@ -1,4 +1,3 @@
-// deno-lint-ignore-file require-await -- test fixtures must be async to satisfy IRepository
 /**
  * Unit tests for BaseRepository.
  *
@@ -14,6 +13,8 @@ import {
   matchesWhere,
   projectFields,
 } from '../../src/query/query-builder.ts';
+import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import type { FindOptions } from '../../src/query/find-options.ts';
 
 interface TestEntity {
   id: string;
@@ -35,6 +36,7 @@ function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] }
   return {
     records,
     async findAll(query) {
+      await Promise.resolve();
       let result = [...records] as unknown as Record<string, unknown>[];
       if (Object.keys(query.where).length > 0) {
         result = result.filter((row) => matchesWhere(row, query.where));
@@ -51,27 +53,32 @@ function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] }
       return result;
     },
     async findById(id: string | number) {
+      await Promise.resolve();
       const found = records.find((r) => r.id === id);
       return found ? { ...found } as unknown as Record<string, unknown> : null;
     },
     async create(data) {
+      await Promise.resolve();
       const entity = { id: crypto.randomUUID(), ...data };
       records.push(entity);
       return entity as unknown as Record<string, unknown>;
     },
     async update(id: string | number, data) {
+      await Promise.resolve();
       const index = records.findIndex((r) => r.id === id);
       if (index === -1) throw new Error('not found');
       records[index] = { ...records[index], ...data };
       return { ...records[index] } as unknown as Record<string, unknown>;
     },
     async delete(id: string | number) {
+      await Promise.resolve();
       const index = records.findIndex((r) => r.id === id);
       if (index === -1) return false;
       records.splice(index, 1);
       return true;
     },
     async count(where) {
+      await Promise.resolve();
       let result = [...records];
       for (const [key, value] of Object.entries(where)) {
         result = result.filter((r) => r[key as keyof TestEntity] === value);
@@ -82,7 +89,7 @@ function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] }
 }
 
 class TestRepository extends BaseRepository<TestEntity, string> {
-  constructor(dataSource: ReturnType<typeof createTestDataSource>) {
+  constructor(dataSource: DataSource & { records: Partial<TestEntity>[] }) {
     super(dataSource);
   }
 }
@@ -226,4 +233,53 @@ describe('BaseRepository', () => {
       expect(await repo.count({ where: { active: true } })).toBe(1);
     });
   });
+
+  describe('findPage', () => {
+    it('refuses by name when the data source omits findPage', async () => {
+      // Build a fake data source that has all required members EXCEPT findPage.
+      // Use an anonymous subclass to bypass the protected constructor.
+      class StubRepo extends BaseRepository<TestEntity, string> {
+        constructor() {
+          super({
+            findAll: async () => await Promise.resolve([]),
+            findById: async () => await Promise.resolve(null),
+            create: async () => await Promise.resolve({}),
+            update: async () => await Promise.resolve({}),
+            delete: async () => await Promise.resolve(false),
+            count: async () => await Promise.resolve(0),
+          } as unknown as DataSource);
+        }
+      }
+      const repoWithoutFindPage = new StubRepo();
+      await expect(repoWithoutFindPage.findPage({} as FindOptions)).rejects.toThrow(
+        UnsupportedQueryFeatureError,
+      );
+      await expect(repoWithoutFindPage.findPage({} as FindOptions)).rejects.toThrow(
+        'cursor pagination',
+      );
+    });
+
+    it('still passes scalar round trips through findById/update/delete', async () => {
+      ds.records.push({ id: '1', name: 'Alice', active: true });
+      const entity = await repo.findById('1');
+      expect(entity).not.toBeNull();
+      expect(entity!.name).toBe('Alice');
+
+      const updated = await repo.update('1', { name: 'Alicia' });
+      expect(updated.name).toBe('Alicia');
+
+      const deleted = await repo.delete('1');
+      expect(deleted).toBe(true);
+    });
+  });
 });
+
+// @ts-expect-error — `Date` is not assignable to `EntityKey` (`string | number | Record<...>`).
+// This pins that an out-of-constraint `Id` type is refused at the declaration site.
+// A type that is not a subtype of EntityKey (e.g. `Date`, `symbol`, `null`) would be rejected
+// by the `Id extends EntityKey` constraint on `IRepository` / `BaseRepository`.
+class _BadIdRepo extends BaseRepository<TestEntity, Date> {
+  constructor(ds: DataSource) {
+    super(ds);
+  }
+}

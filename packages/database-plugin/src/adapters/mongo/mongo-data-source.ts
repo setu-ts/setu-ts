@@ -12,6 +12,7 @@
  * @module
  */
 import type {
+  EntityKey,
   FilterExpression,
   IAdapterTransaction,
   IDataSource,
@@ -94,7 +95,14 @@ export function createMongoDataSource(
 
   const options = (): MongoCollectionOptions => (session === undefined ? {} : { session });
 
-  const convertId = (id: string | number): unknown => toDriverId(id, target.idType, objectIdCtor);
+  const convertId = (id: EntityKey): unknown => {
+    if (typeof id === 'object') {
+      throw new Error(
+        `MongoAdapter: composite keys are not supported; got ${typeof id}.`,
+      );
+    }
+    return toDriverId(id, target.idType, objectIdCtor);
+  };
 
   return {
     findAll: async (query: NormalizedQuery): Promise<Record<string, unknown>[]> => {

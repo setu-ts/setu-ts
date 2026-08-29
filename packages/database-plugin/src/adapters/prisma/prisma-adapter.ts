@@ -387,7 +387,14 @@ function createPrismaDataSourceInner(
   }
 
   return {
-    findById: (id) => delegate.findUnique({ where: { id } }),
+    findById: (id) => {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new Error(`PrismaAdapter.findById: composite keys are not supported; got ${typeof id}.`),
+        );
+      }
+      return delegate.findUnique({ where: { id } });
+    },
 
     findAll: (query) => {
       const args: Parameters<ModelDelegate['findMany']>[0] = {};
@@ -420,6 +427,11 @@ function createPrismaDataSourceInner(
     create: (data) => delegate.create({ data }),
 
     update(id, data) {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new Error(`PrismaAdapter.update: composite keys are not supported; got ${typeof id}.`),
+        );
+      }
       return delegate.update({ where: { id }, data }).catch((err) => {
         const code = (err as { code?: string }).code;
         if (code === 'P2025') {
@@ -430,6 +442,11 @@ function createPrismaDataSourceInner(
     },
 
     async delete(id) {
+      if (typeof id === 'object') {
+        return Promise.reject(
+          new Error(`PrismaAdapter.delete: composite keys are not supported; got ${typeof id}.`),
+        );
+      }
       try {
         await delegate.delete({ where: { id } });
         return true;
