@@ -8150,6 +8150,144 @@ its output.
   No `src` file outside the change references them.
 - **Packages:** `decorator-plugin`, `cli`.
 
+## Milestone 84: Realtime Client Consumption
+
+**Objective:** Give the two realtime transports a first-party client story. Ship a zero-dependency
+SSE client core, a WebSocket client that implements the keep-alive contract the server already
+defines, and generated starting points for both — so a browser is not left hand-rolling the half of
+the protocol the framework never wrote down in code.
+
+**The gap is asymmetric, and the asymmetry is the whole design.**
+`grep -rln "new WebSocket("
+packages/*/src` returns **nothing**, and so does `EventSource(`: no
+package constructs a client for either transport. `@setu-ts/sdk` advertises itself as a client "for
+consuming Setu-TS APIs from browsers and servers" and is HTTP-only. No first-party example connects
+either — `apps/realtime`, the flagship two-replica realtime example, drives **SSE over `fetch`**,
+not WebSocket. The only client sockets in the repository are hand-rolled inside tests.
+
+But the two transports are not equally underserved, and that was established by measurement against
+published `alpha.10` apps rather than read from source.
+
+**SSE needs no client, because the browser is one.** The plugin emits spec-correct SSE, and three
+lines are why: the heartbeat is `this.comment('heartbeat')` → a `: heartbeat` **comment frame**
+(`sse-plugin/src/connection/sse-connection.ts:93`), which the SSE spec has the client discard; the
+initial `retry: <ms>` frame (`:100`) is the standard field `EventSource` honours for its own
+reconnect backoff; and `lastEventId` is read from the `last-event-id` header (`:49`) that
+`EventSource` resends automatically. Driven with a real `EventSource` against the X15 app
+(`heartbeatMs: 100`), a full round trip delivered the named event and leaked **0 heartbeat frames**
+into `onmessage`. Auto-reconnect, backoff, resumption and heartbeat filtering are all the
+platform's. What is missing there is ergonomics only — the X15 route's `useEffect` is ~11 lines of
+connect, parse, guard, cleanup.
+
+**WebSocket is a different case: the server defines a protocol and ships no client that speaks it.**
+The heartbeat is an application-level text frame, not an RFC 6455 ping, because Deno and Workers
+expose no `ping()` (`websocket-plugin/src/interfaces/index.ts:27`) — so
+`conn.send(heartbeatPayload)` (`heartbeat/heartbeat.ts:113`) is indistinguishable from application
+data. And `touch()` fires only on an inbound message (`services/websocket-service.ts:553`), so the
+idle sweep measures **inbound** silence. Measured with `heartbeatMs: 1000, idleTimeoutMs: 3000`
+against a client written the way the X13 exercise writes one — connect, render every frame, send
+nothing:
+
+```
+frames the naive client rendered as board updates: ["ping","ping","ping"]
+close code after 5s of a read-only subscriber: 1001
+readyState (3 = CLOSED): 3
+```
+
+A read-only subscriber — a dashboard, a notification panel, the archetypal WebSocket consumer —
+renders `ping` into its own UI and is then evicted, permanently, because nothing reconnects. The
+README states the contract correctly ("your client should treat `heartbeatPayload` as a keep-alive
+and may reply to keep the idle timer fresh — the idle sweep looks only at _inbound_ traffic"), so
+this is a missing implementation rather than a doc defect. The same README recommends SSE partly
+because it "reconnect[s] automatically in the browser. A WebSocket buys you an upstream channel at
+the cost of all of that" — an accurate concession, with nothing offered to restore it.
+
+**The pressure this creates is visible in the exercise code.** X13's `board.tsx` opens a **fresh
+socket per message sent**, sends, and closes it, while an already-open socket sits unused in the
+effect — a full handshake per submit. That is what hand-rolling looks like with nothing to reach
+for.
+
+**React must not enter a published dependency graph, so the hook is not in a plugin.** This was the
+first shape considered and it is refused on precedent: `react-router-plugin` — the package whose
+entire purpose is React SSR — declares `imports: {}` and reaches React through a literal lazy
+`import('npm:react-router@8')` behind an injectable seam. AI_GUIDELINES:731-737 states frontend
+tooling "is never imported by a plugin and never appears in a JSR package's dependency graph," and
+:913 makes any graph change an approval gate; React is absent from **every** package manifest in the
+workspace today. A hook cannot use the lazy-import escape hatch either — that works for runtime code
+called at request time, while a hook must be statically importable by the app's bundler. And the
+`sse-plugin` barrel exports `SsePlugin`/`SseService`/`SseConnection`, so importing the package for a
+hook drags the server module graph into the browser.
+
+**The core is therefore framework-agnostic and lives in `@setu-ts/sdk`**, which already advertises
+"browsers and servers" with zero npm dependencies — typed channels, JSON parsing, typed event names
+for SSE; heartbeat filtering, keep-alive reply, reconnect with backoff and room re-join for
+WebSocket. The React binding is **emitted by the CLI into application code**, where React already
+lives. Each piece sits where its dependencies already are, and both transports share one core rather
+than diverging.
+
+**Room re-join is the part that needs designing rather than assuming.** A WebSocket room is bound in
+`onOpen` from the query string (the X13 plugin's shape), so a reconnect must re-supply it — the
+client cannot simply reopen the URL and expect prior membership. With a backplane in play this
+interacts with `exceptId`, since connection ids are `runtime.uuid()` and a reconnected client is a
+new id, so "except me" after a reconnect means a different member than before.
+
+**SSE routes belong in `src/controllers/`, and the seam is what stops them.** An SSE route is an
+ordinary `GET` and `IRequestContext` exposes `readonly services: IServiceRegistry`
+(`common/src/http.ts:246`), so a controller can resolve `CAPABILITIES.SSE` per request and call
+`sse.open(ctx)` — there is no technical reason for it to be a plugin. Both smoke exercises put it in
+one anyway, because they also needed a guard, and `middleware.add` is plugin-context-only while the
+generated seam receives a single argument: `registerGeneratedRoutes(router: IRouterApi)`. So
+`src/controllers/` is **route-shaped but service-blind at registration time**, which is why anything
+needing startup wiring becomes a plugin. That boundary is written down nowhere and is rediscovered
+by trying it. Passing the registry as a second argument is non-breaking — the CLI owns the seam and
+every call site — and is what lets a generated SSE controller resolve its capability at registration
+rather than per request. **Approved (§10.2, maintainer, 2026-08-30.)**
+
+**Its blast radius is measured, and the shape is the trap.** THREE emitter sites must move together,
+and they are not co-located: the signature (`cli/src/seams/http.ts:168`), the real call written into
+`setu.config.ts` (`cli/src/templates/seam.ts:104`), and a THIRD copy of the same call string inside
+the generated barrel's own header comment (`seams/http.ts:119`), which documents how
+`setu.config.ts` consumes it. Missing the signature or the real call breaks a scaffold loudly;
+missing the header leaves every generated barrel documenting a call shape that no longer matches the
+one emitted beside it — quiet, and exactly the M70h `renderList` defect class, where one owner
+reached two of eight call sites. One owner for the rendered call string is therefore part of this
+change, not a tidy-up after it. Nine assertions pin the literal
+`registerGeneratedRoutes(app.router)` across 11 test files; those failing is the guard working, and
+a scaffold-and-boot run is what proves the seam still wires (`scaffold-runs-e2e`, `seam-probe`).
+
+**WebSocket routes cannot move, and that is a constraint rather than a preference.**
+`IWebSocketService.route(path, handlers, options)` (`common/src/services/websocket.ts:388`)
+registers on the plugin's own exact-path table, a separate registry from `IRouterApi` — so no
+controller can express one. `src/plugins/` stays their only home, which reopens M70i's declined
+`ws-route` schematic as the way to generate one.
+
+**Neither transport has a schematic today.** The registry holds 14 (`plugin`, `module`,
+`controller`, `service`, `route`, `middleware`, `guard`, `health-indicator`, `metric`,
+`command-handler`, `query-handler`, `event-handler`, `job`, `migration`) and none is realtime.
+`setu generate plugin` emits a generic capability stub — a token, a one-method `describe()`
+interface, one `ctx.services.register(...)` — so every line of realtime code in both exercises was
+hand-written.
+
+- **In scope:** `createSseClient` and `createRealtimeClient` (WebSocket) in `@setu-ts/sdk`, zero npm
+  dependencies, browser and server; a `setu generate sse <name>` schematic emitting a **controller**
+  plus the React hook into app code; a `ws-route` schematic emitting the plugin form; the registry
+  second argument on `registerGeneratedRoutes` and the generated SSE controller that consumes it;
+  and documenting the controllers-seam boundary in `PUBLIC_API.md` and the CLI README.
+- **Not in scope:** any change to the wire protocol of either plugin — both are correct and the
+  clients are written against them as they are. No React in any published package, no
+  `@setu-ts/sse-plugin/react` subpath: the `@setu-ts/runtime/worker` precedent makes a subpath
+  structurally possible, but React would still have to resolve for `deno check` in this workspace
+  and JSR has no peer-dependency story, so it is declined rather than deferred. No SSE client
+  reconnect logic — duplicating what `EventSource` already does correctly would be the dead-surface
+  rule.
+- **Verification bar:** the WebSocket client must be driven against a **real socket** with
+  `heartbeatMs` and `idleTimeoutMs` both set, and a read-only subscriber must survive past the idle
+  window — the measured `1001` above is the negative control, and it must fail without the
+  keep-alive reply. The SSE client must be driven with a real server and assert 0 heartbeat leakage
+  under a heartbeat interval short enough to guarantee ticks.
+- **Packages:** `sdk`, `cli`. (`sse-plugin` and `websocket-plugin` are unchanged — this ships a
+  client, not a protocol.)
+
 ---
 
 ## Progress Tracking
@@ -8273,3 +8411,4 @@ its output.
 | 81        | ⬜     | cosmos db backend                                   |
 | 82        | ⬜     | cloud bigtable backend                              |
 | 83        | ⬜     | module declarations + functional example            |
+| 84        | ⬜     | realtime client consumption (sdk + cli)             |
