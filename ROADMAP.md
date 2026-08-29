@@ -8268,41 +8268,68 @@ controller can express one. `src/plugins/` stays their only home, which reopens 
 interface, one `ctx.services.register(...)` — so every line of realtime code in both exercises was
 hand-written.
 
-**`EventSource` is a browser guarantee, not a runtime one, so the SSE client is two behaviours
-behind one entry point.** Measured on all four rather than assumed, and the split is not the one an
-edge-versus-server intuition predicts: `typeof EventSource` is `function` on Deno 2.9.6 and
+**The SSE client is ONE `fetch`-based implementation on every runtime, and `EventSource` is
+deliberately not delegated to.** Delegation was the first shape considered — it is the obvious one —
+and it is rejected on three grounds, each measured rather than argued.
+
+**First, `EventSource` is a browser guarantee rather than a runtime one, and the split is not the
+one an edge-versus-server intuition predicts.** `typeof EventSource` is `function` on Deno 2.9.6 and
 `function` on **real workerd** (`wrangler dev --local`, which also reported
 `navigator.userAgent === 'Cloudflare-Workers'`, so the reading came from the platform rather than a
 shim), while it is **`undefined` on Node v24.18.0 and Bun 1.4.0**. The two runtimes lacking it are
-the two SERVER runtimes — precisely where server-to-server SSE consumption happens. So on half the
-runtimes `@setu-ts/sdk` claims there is nothing to delegate to, and the server pattern this
-repository actually uses is `fetch`-streaming — `apps/realtime` consumes SSE that way rather than
-through `EventSource`. A `fetch` stream provides no reconnect, no backoff and no `Last-Event-ID`
-resend, so "the platform handles it" is true in a browser and false in a server. `createSseClient`
-therefore delegates to `EventSource` where one exists and otherwise runs a `fetch`-streaming reader
-that owns reconnect, backoff and `Last-Event-ID` resumption itself; the plan must state the contract
-for each arm rather than leaving a server consumer to discover that its stream never came back.
-Raised by review on this PR, and it corrects a scope line that had asserted the browser's guarantee
-for every runtime.
+the two SERVER runtimes — precisely where server-to-server SSE consumption happens — so a delegating
+client would fall back to its own reader exactly where it is used most.
+
+**Second, `fetch` streaming works everywhere, so the fallback is never actually a fallback.** Driven
+against a real SSE endpoint emitting one frame per 200 ms, chunk arrivals were incremental on all
+four: Deno `6, 206, 407, 608, 809`; Node `31, 231, 432, 632, 833`; Bun `2, 203, 403, 603, 804`; and
+inside real workerd `0, 200, 200, 401, 401, 601, 601, 801, 802`. All four saw 4 frames and discarded
+4 `: heartbeat` comments. `apps/realtime` already consumes SSE this way rather than through
+`EventSource`.
+
+**Third — and this is what settles it — `fetch` is strictly MORE capable than the thing it would
+delegate to.** Every probe above carried `Authorization: Bearer …`. `EventSource` cannot: its
+constructor arity is `1` and its init dictionary holds only `withCredentials`, so it can present a
+cookie and nothing else. That is the same limitation M73 had to work around server-side by building
+a cookie-reading `SessionStrategy`, and the same one that forced M73's own e2e to hand-roll an RFC
+6455 handshake. A server consumer authenticates with a bearer token, so on Deno and Workers — the
+two runtimes that HAVE `EventSource` — the delegating arm would be the one that cannot authenticate,
+making the fallback better than the primary.
+
+Two arms would also mean two reconnect policies, two backoff curves, two `Last-Event-ID` behaviours
+and a defect reproducible on Node but not Deno, against this repository's own rule that one
+capability has one implementation honouring one configuration. So `createSseClient` owns what
+`EventSource` would have donated: a spec-compliant frame parser (`data:`/`event:`/`id:`/`retry:`,
+multi-line `data` joined with `\n`, dispatch on a blank line, `:`-comment lines discarded, all three
+line terminators, a leading BOM, and exactly one space stripped after the colon), reconnect using
+the server's `retry:` as the backoff base, `Last-Event-ID` resent on reconnect, and an `AbortSignal`
+for teardown. `EventSource` remains the documented alternative for a cookie-authenticated browser
+page — an alternative, not a code path this package maintains.
+
+Raised by review on this PR, which correctly caught a scope line asserting the browser's guarantee
+for every runtime; the measurements then showed the two-arm repair was itself the wrong shape.
 
 - **In scope:** `createSseClient` and `createRealtimeClient` (WebSocket) in `@setu-ts/sdk`, zero npm
-  dependencies, browser and server; a `setu generate sse <name>` schematic emitting a **controller**
-  plus the React hook into app code; a `ws-route` schematic emitting the plugin form; the registry
-  second argument on `registerGeneratedRoutes` and the generated SSE controller that consumes it;
-  and documenting the controllers-seam boundary in `PUBLIC_API.md` and the CLI README.
+  dependencies, ONE `fetch`-based implementation each across browser, Deno, Node, Bun and Workers; a
+  `setu generate sse <name>` schematic emitting a **controller** plus the React hook into app code;
+  a `ws-route` schematic emitting the plugin form; the registry second argument on
+  `registerGeneratedRoutes` and the generated SSE controller that consumes it; and documenting the
+  controllers-seam boundary in `PUBLIC_API.md` and the CLI README.
 - **Not in scope:** any change to the wire protocol of either plugin — both are correct and the
   clients are written against them as they are. No React in any published package, no
   `@setu-ts/sse-plugin/react` subpath: the `@setu-ts/runtime/worker` precedent makes a subpath
   structurally possible, but React would still have to resolve for `deno check` in this workspace
-  and JSR has no peer-dependency story, so it is declined rather than deferred. No SSE client
-  reconnect logic **in the browser** — duplicating what `EventSource` already does correctly there
-  would be the dead-surface rule. Server consumers are a different case and are IN scope; see the
-  runtime split below.
+  and JSR has no peer-dependency story, so it is declined rather than deferred. No delegation to
+  `EventSource` on any runtime, and therefore no second SSE code path — the reasoning is above, and
+  the consequence is that reconnect, backoff and resumption are OWNED here rather than inherited.
 - **Verification bar:** the WebSocket client must be driven against a **real socket** with
   `heartbeatMs` and `idleTimeoutMs` both set, and a read-only subscriber must survive past the idle
   window — the measured `1001` above is the negative control, and it must fail without the
-  keep-alive reply. The SSE client must be driven with a real server and assert 0 heartbeat leakage
-  under a heartbeat interval short enough to guarantee ticks.
+  keep-alive reply. The SSE client must be driven against a real server on all four runtimes — the
+  bar the design's own evidence already met — asserting 0 heartbeat leakage under a heartbeat
+  interval short enough to guarantee ticks, a bearer header reaching the server (the capability
+  `EventSource` cannot offer, and the reason there is one implementation), and a reconnect that
+  resends `Last-Event-ID` after the stream is cut.
 - **Packages:** `sdk`, `cli`. (`sse-plugin` and `websocket-plugin` are unchanged — this ships a
   client, not a protocol.)
 
