@@ -146,6 +146,28 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
     expect(rows.map((r) => r.name)).toEqual(['3.5mm jack']);
   });
 
+  it('maps primary-key where, filter, count, and sort clauses to Mongo _id', async () => {
+    const client = makeClient();
+    const ds = makeDataSource(client);
+    const first = await ds.create({ id: '507f1f77bcf86cd799439011', name: 'first' });
+    await ds.create({ id: '507f1f77bcf86cd799439012', name: 'second' });
+
+    await expect(ds.findAll(query({ where: { id: first.id } }))).resolves.toEqual([first]);
+    await expect(ds.findAll(query({
+      filter: { type: 'comparison', field: 'id', operator: 'eq', value: first.id },
+    }))).resolves.toEqual([first]);
+    await expect(ds.count({ id: first.id })).resolves.toBe(1);
+    await ds.findAll(query({ orderBy: { id: 'desc' } }));
+
+    const calls = client.databases.get('testdb')!.collection('Widget').calls;
+    const whereFind = calls.find((call) => call.method === 'find')!;
+    expect(String((whereFind.args[0] as { _id: unknown })._id)).toBe(first.id);
+    const sortFind = calls.filter((call) => call.method === 'find').at(-1)!;
+    expect((sortFind.args[1] as { sort: Record<string, string> }).sort).toEqual({ _id: 'desc' });
+    const count = calls.find((call) => call.method === 'countDocuments')!;
+    expect(String((count.args[0] as { _id: unknown })._id)).toBe(first.id);
+  });
+
   it('passes a session to every operation when one is supplied', async () => {
     const session: IMongoSession = {
       startTransaction: () => Promise.resolve(),

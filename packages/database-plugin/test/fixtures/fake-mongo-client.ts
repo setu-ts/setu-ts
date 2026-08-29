@@ -63,6 +63,9 @@ export const fakeObjectIdCtor = Object.assign(
 function matchCondition(actual: unknown, cond: unknown): boolean {
   if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
     const ops = cond as Record<string, unknown>;
+    if (!Object.keys(ops).some((key) => key.startsWith('$'))) {
+      return sameMongoValue(actual, cond);
+    }
     for (const [op, expected] of Object.entries(ops)) {
       // `$options` accompanies `$regex` (case sensitivity follows the
       // collection's collation); it is not itself a match operator.

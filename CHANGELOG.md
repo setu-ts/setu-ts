@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- Added a native MongoDB backend to `@setu-ts/database-plugin`.
+  `DatabasePlugin({ type: 'mongodb',
+  options: { url } })` now provides repositories over the
+  lazy-loaded MongoDB driver, including `_id` mapping, ObjectId-aware injected clients, query
+  translation, and session transactions.
 - Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.

@@ -30,6 +30,7 @@ import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
+import { FakeMongoClient, fakeObjectIdCtor } from '../fixtures/fake-mongo-client.ts';
 
 function createFakeConfig(): IConfig {
   return {
@@ -246,6 +247,30 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       await plugin.register!(ctx);
       const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
       expect(db).toBeDefined();
+    });
+  });
+
+  describe('mongodb adapter selection', () => {
+    it('forwards objectIdCtor to an injected Mongo client', async () => {
+      const ctx = createFakeContext();
+      const client = new FakeMongoClient();
+      const plugin = DatabasePlugin({
+        type: 'mongodb',
+        options: {
+          client,
+          objectIdCtor: fakeObjectIdCtor,
+          database: 'testdb',
+        },
+      });
+      await plugin.register!(ctx);
+      const database = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const widgets = database.getRepository<{ id: string }>('Widget');
+      await widgets.create({ id: '507f1f77bcf86cd799439011' });
+      const calls = client.databases.get('testdb')!.collection('Widget').calls;
+      const document = calls.find((call) => call.method === 'insertOne')!.args[0] as {
+        _id: { toString(): string };
+      };
+      expect(document._id.toString()).toBe('507f1f77bcf86cd799439011');
     });
   });
 

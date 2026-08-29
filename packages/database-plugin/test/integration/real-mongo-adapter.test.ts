@@ -42,6 +42,13 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
       const created = await source.create({ name: 'Bolt', size: 10 });
       expect(typeof created.id).toBe('string');
       await expect(source.findById(String(created.id))).resolves.toEqual(created);
+      await expect(source.findAll(query({ where: { id: created.id } }))).resolves.toEqual([
+        created,
+      ]);
+      await expect(source.findAll(query({
+        filter: { type: 'comparison', field: 'id', operator: 'eq', value: created.id },
+      }))).resolves.toEqual([created]);
+      await expect(source.count({ id: created.id })).resolves.toBe(1);
 
       const updated = await source.update(String(created.id), { size: 20 });
       expect(updated).toEqual({ ...created, size: 20 });

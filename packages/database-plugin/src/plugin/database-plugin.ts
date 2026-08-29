@@ -185,7 +185,7 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   const result: Record<string, unknown> = {};
   const anyOpts = opts as Record<string, unknown> | undefined;
   // Carry every known key from either arm onto the shared bag. The `'mongodb'`
-  // arm's `client`/`database`/`collections` keys are absent from
+  // arm's `client`/`objectIdCtor`/`database`/`collections` keys are absent from
   // `DatabaseAdapterOptions`, so they are read through the index signature the
   // same way the other arm-specific keys are; the arm's adapter reads only what
   // it needs.
@@ -202,6 +202,7 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('drizzleTables');
   carry('transactionTimeout');
   carry('client');
+  carry('objectIdCtor');
   carry('database');
   carry('collections');
   return result as DatabaseAdapterOptions;

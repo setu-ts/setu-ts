@@ -23,6 +23,7 @@ import {
   toDriverDocument,
   toDriverId,
 } from './mongo-mapping.ts';
+import type { MongoTarget } from './mongo-mapping.ts';
 import { translateCountFilter, translateQuery } from './mongo-query.ts';
 import type {
   IMongoClient,
@@ -97,7 +98,10 @@ export function createMongoDataSource(
 
   return {
     findAll: async (query: NormalizedQuery): Promise<Record<string, unknown>[]> => {
-      const { filter, options: findOptions } = translateQuery(query);
+      const { filter: translatedFilter, options: findOptions } = translateQuery(
+        mapQueryToDriver(query, target),
+      );
+      const filter = mapMongoIdValues(translatedFilter, target, objectIdCtor);
       const projection = findOptions.projection === undefined
         ? undefined
         : mapProjection(findOptions.projection, target.primaryKey);
@@ -151,9 +155,107 @@ export function createMongoDataSource(
       where: Record<string, unknown>,
       filter?: FilterExpression,
     ): Promise<number> => {
-      return await collection.countDocuments(translateCountFilter(where, filter), options());
+      const mapped = mapQueryToDriver(
+        {
+          where,
+          orderBy: {},
+          limit: -1,
+          offset: 0,
+          select: [],
+          ...(filter === undefined ? {} : { filter }),
+        },
+        target,
+      );
+      return await collection.countDocuments(
+        mapMongoIdValues(translateCountFilter(mapped.where, mapped.filter), target, objectIdCtor),
+        options(),
+      );
     },
   };
+}
+
+/** Maps repository-visible primary-key fields onto Mongo's `_id` field. */
+function mapQueryToDriver(
+  query: NormalizedQuery,
+  target: MongoTarget,
+): NormalizedQuery {
+  const mapField = (field: string): string => field === target.primaryKey ? '_id' : field;
+  const where = Object.fromEntries(
+    Object.entries(query.where).map(([field, value]) => [
+      mapField(field),
+      value,
+    ]),
+  );
+  const orderBy = Object.fromEntries(
+    Object.entries(query.orderBy).map(([field, direction]) => [mapField(field), direction]),
+  );
+  return {
+    ...query,
+    where,
+    orderBy,
+    ...(query.filter === undefined
+      ? {}
+      : { filter: mapFilterToDriver(query.filter, target.primaryKey) }),
+  };
+}
+
+/** Recursively maps a portable primary-key filter field/value to Mongo form. */
+function mapFilterToDriver(
+  expression: FilterExpression,
+  primaryKey: string,
+): FilterExpression {
+  if (expression.type !== 'comparison') {
+    return {
+      ...expression,
+      filters: expression.filters.map((child) => mapFilterToDriver(child, primaryKey)),
+    };
+  }
+  return expression.field === primaryKey ? { ...expression, field: '_id' } : expression;
+}
+
+/** Converts values carried by native `_id` predicates to the driver's id form. */
+function mapMongoIdValues(
+  filter: Record<string, unknown>,
+  target: MongoTarget,
+  objectIdCtor?: IMongoObjectIdCtor,
+): Record<string, unknown> {
+  const mapValue = (value: unknown): unknown => toDriverId(value, target.idType, objectIdCtor);
+  const mapped: Record<string, unknown> = {};
+  for (const [field, condition] of Object.entries(filter)) {
+    if (field === '$and' || field === '$or') {
+      mapped[field] = (condition as Record<string, unknown>[]).map((child) =>
+        mapMongoIdValues(child, target, objectIdCtor)
+      );
+    } else if (field === '_id') {
+      mapped[field] = mapMongoIdCondition(condition, mapValue);
+    } else {
+      mapped[field] = condition;
+    }
+  }
+  return mapped;
+}
+
+/** Converts scalar and operator-document Mongo `_id` predicates. */
+function mapMongoIdCondition(
+  condition: unknown,
+  mapValue: (value: unknown) => unknown,
+): unknown {
+  if (condition === null || typeof condition !== 'object' || Array.isArray(condition)) {
+    return mapValue(condition);
+  }
+  const entries = Object.entries(condition);
+  if (!entries.some(([operator]) => operator.startsWith('$'))) {
+    return mapValue(condition);
+  }
+  const operators: Record<string, unknown> = {};
+  for (const [operator, value] of entries) {
+    operators[operator] = operator === '$options' || operator === '$regex'
+      ? value
+      : operator === '$in' && Array.isArray(value)
+      ? value.map(mapValue)
+      : mapValue(value);
+  }
+  return operators;
 }
 
 /**
