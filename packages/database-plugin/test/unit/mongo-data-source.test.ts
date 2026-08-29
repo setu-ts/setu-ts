@@ -327,9 +327,6 @@ describe('update never sends the primary key to the driver', () => {
   });
 
   it('an update carrying only the primary key is a no-op that returns the row', async () => {
-    // Stripping the key can empty the payload. mongod 8 accepts `$set: {}` and
-    // answers with the document, so this stays a successful read-back rather
-    // than becoming a new failure mode.
     const ds = makeDataSource();
     await ds.create({ id: 7, name: 'first' });
     expect(await ds.update(7, { id: 7 })).toEqual({ id: 7, name: 'first' });
@@ -398,5 +395,37 @@ describe('update strips the primary key before it can be converted', () => {
     );
     const payload = (call?.args[1] as { $set: Record<string, unknown> }).$set;
     expect(payload).toEqual({ name: 'renamed' });
+  });
+});
+
+describe('an update with nothing left to set issues no write', () => {
+  it('reads the row rather than sending `$set: {}`', async () => {
+    // `$set: {}` is a write that changes nothing, and it is not universally
+    // accepted — measured, mongod 3.6.23 rejects it while 4.0.28, 4.4.30 and
+    // 8.x accept it. The driver pins no server floor, so the empty payload is
+    // served as a read on every version instead.
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 7, name: 'first' });
+
+    expect(await ds.update(7, { id: 7 })).toEqual({ id: 7, name: 'first' });
+    expect(await ds.update(7, {})).toEqual({ id: 7, name: 'first' });
+
+    const calls = client.db('testdb').collection('Widget').calls;
+    expect(calls.some((c) => c.method === 'findOneAndUpdate')).toBe(false);
+  });
+
+  it('still reports a missing row the same way', async () => {
+    const ds = makeDataSource();
+    await expect(ds.update(404, {})).rejects.toThrow(/no Widget row with id '404'/);
+  });
+
+  it('a payload with a real field still issues the write', async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 7, name: 'first' });
+    await ds.update(7, { name: 'second' });
+    const calls = client.db('testdb').collection('Widget').calls;
+    expect(calls.some((c) => c.method === 'findOneAndUpdate')).toBe(true);
   });
 });

@@ -152,16 +152,30 @@ export function createMongoDataSource(
       const patch = { ...data };
       delete patch[target.primaryKey];
       delete patch['_id'];
+
+      const missing = (): Error =>
+        new Error(
+          `MongoAdapter: no ${target.collection} row with ${target.primaryKey} '${String(id)}'`,
+        );
+
+      // Stripping the key can leave nothing to set. Read the row instead of
+      // sending `$set: {}` — it is a write that changes nothing, and server
+      // support for it is not universal: measured, 3.6.23 rejects it outright
+      // while 4.0.28, 4.4.30 and 8.x accept it and answer with the document.
+      // The driver pins no server floor, so the branch removes the question
+      // rather than declaring a minimum version this package cannot enforce.
+      if (Object.keys(patch).length === 0) {
+        const existing = await collection.findOne({ _id: convertId(id) }, options());
+        if (existing === null || existing === undefined) throw missing();
+        return fromDriverDocument(existing, target);
+      }
+
       const result = await collection.findOneAndUpdate(
         { _id: convertId(id) },
         { $set: patch },
         { returnDocument: 'after', ...options() },
       );
-      if (result === null || result === undefined) {
-        throw new Error(
-          `MongoAdapter: no ${target.collection} row with ${target.primaryKey} '${String(id)}'`,
-        );
-      }
+      if (result === null || result === undefined) throw missing();
       return fromDriverDocument(result, target);
     },
 
