@@ -364,3 +364,39 @@ describe('the fake client honours the real driver where the adapter depends on i
     expect(await ds.findById(1)).toEqual({ id: 1, name: 'second' });
   });
 });
+
+describe('update strips the primary key before it can be converted', () => {
+  it('an unconvertible key in the payload does not fail the update', async () => {
+    // The key is discarded, so it must not be able to fail the call on its way
+    // out. Stripping AFTER `toDriverDocument` left `toDriverId` running first,
+    // and on an `idType: 'objectId'` target that throws for a value the update
+    // was never going to use.
+    const client = makeClient();
+    const ds = createMongoDataSource(
+      client,
+      'testdb',
+      'Widget',
+      { Widget: { idType: 'objectId' } },
+      fakeObjectIdCtor,
+    );
+    const valid = '507f1f77bcf86cd799439011';
+    await ds.create({ id: valid, name: 'first' });
+
+    await expect(ds.update(valid, { id: 'not-a-valid-objectid', name: 'renamed' }))
+      .resolves.toMatchObject({ name: 'renamed' });
+  });
+
+  it('a stray literal `_id` beside the mapped key never reaches $set', async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 1, name: 'first' });
+
+    await ds.update(1, { id: 1, _id: 'stray', name: 'renamed' });
+
+    const call = client.db('testdb').collection('Widget').calls.find(
+      (c) => c.method === 'findOneAndUpdate',
+    );
+    const payload = (call?.args[1] as { $set: Record<string, unknown> }).$set;
+    expect(payload).toEqual({ name: 'renamed' });
+  });
+});

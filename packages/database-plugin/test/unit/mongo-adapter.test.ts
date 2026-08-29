@@ -157,11 +157,10 @@ describe('MongoAdapter — rawQuery refuses by name', () => {
     expect(() => {
       first = adapter.rawQuery('select 1');
     }).not.toThrow();
-    // Settle the rejection so it is not reported as unhandled.
-    await first?.catch(() => {});
-    await expect(adapter.rawQuery('select 1')).rejects.toThrow(
-      /does not support raw SQL/,
-    );
+    // Assert the rejection rather than swallowing it: the contract is "rejects,
+    // never throws synchronously", and catching without asserting would leave
+    // a `rawQuery` that RESOLVED passing this test.
+    await expect(first).rejects.toThrow(/does not support raw SQL/);
   });
 });
 

@@ -133,14 +133,25 @@ export function createMongoDataSource(
       id: string | number,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> => {
-      const patch = toDriverDocument(data, target, objectIdCtor);
       // The primary key never travels in an update payload: `id` already
       // addresses the row, and MongoDB refuses a `$set` that would change
       // `_id` ("Performing an update on the path '_id' would modify the
       // immutable field '_id'"), so a caller passing the whole row back with a
       // different key met a raw driver error through a portable contract.
       // `update` does not move a row to a new primary key on any adapter.
-      delete patch._id;
+      //
+      // It is dropped BEFORE conversion, not after: `toDriverDocument` runs
+      // `toDriverId`, which throws for a value an `idType: 'objectId'` target
+      // cannot convert — so stripping afterwards left a value that has no
+      // effect on the update still able to fail it.
+      //
+      // Both spellings go: the mapped primary key, and a literal `_id` a caller
+      // may have carried over from a raw document. `toDriverDocument` used to
+      // collapse the two by renaming, so dropping only the mapped name would
+      // let a stray `_id` reach `$set` and be refused by the server.
+      const patch = { ...data };
+      delete patch[target.primaryKey];
+      delete patch['_id'];
       const result = await collection.findOneAndUpdate(
         { _id: convertId(id) },
         { $set: patch },
