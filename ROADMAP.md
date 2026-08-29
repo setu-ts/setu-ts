@@ -8188,7 +8188,7 @@ idle sweep measures **inbound** silence. Measured with `heartbeatMs: 1000, idleT
 against a client written the way the X13 exercise writes one — connect, render every frame, send
 nothing:
 
-```
+```text
 frames the naive client rendered as board updates: ["ping","ping","ping"]
 close code after 5s of a read-only subscriber: 1001
 readyState (3 = CLOSED): 3
@@ -8268,6 +8268,19 @@ controller can express one. `src/plugins/` stays their only home, which reopens 
 interface, one `ctx.services.register(...)` — so every line of realtime code in both exercises was
 hand-written.
 
+**`EventSource` is a browser guarantee, not a runtime one, so the SSE client is two behaviours
+behind one entry point.** Measured, not assumed: `typeof EventSource` is `function` on Deno 2.9.6
+and **`undefined` on Node v24.18.0 and Bun 1.4.0** (Cloudflare Workers unverified — no workerd run
+was made for this). So on two of the four runtimes `@setu-ts/sdk` claims there is nothing to
+delegate to, and the server pattern this repository actually uses is `fetch`-streaming —
+`apps/realtime` consumes SSE that way rather than through `EventSource`. A `fetch` stream provides
+no reconnect, no backoff and no `Last-Event-ID` resend, so "the platform handles it" is true in a
+browser and false in a server. `createSseClient` therefore delegates to `EventSource` where one
+exists and otherwise runs a `fetch`-streaming reader that owns reconnect, backoff and
+`Last-Event-ID` resumption itself; the plan must state the contract for each arm rather than leaving
+a server consumer to discover that its stream never came back. Raised by review on this PR, and it
+corrects a scope line that had asserted the browser's guarantee for every runtime.
+
 - **In scope:** `createSseClient` and `createRealtimeClient` (WebSocket) in `@setu-ts/sdk`, zero npm
   dependencies, browser and server; a `setu generate sse <name>` schematic emitting a **controller**
   plus the React hook into app code; a `ws-route` schematic emitting the plugin form; the registry
@@ -8278,8 +8291,9 @@ hand-written.
   `@setu-ts/sse-plugin/react` subpath: the `@setu-ts/runtime/worker` precedent makes a subpath
   structurally possible, but React would still have to resolve for `deno check` in this workspace
   and JSR has no peer-dependency story, so it is declined rather than deferred. No SSE client
-  reconnect logic — duplicating what `EventSource` already does correctly would be the dead-surface
-  rule.
+  reconnect logic **in the browser** — duplicating what `EventSource` already does correctly there
+  would be the dead-surface rule. Server consumers are a different case and are IN scope; see the
+  runtime split below.
 - **Verification bar:** the WebSocket client must be driven against a **real socket** with
   `heartbeatMs` and `idleTimeoutMs` both set, and a read-only subscriber must survive past the idle
   window — the measured `1001` above is the negative control, and it must fail without the
