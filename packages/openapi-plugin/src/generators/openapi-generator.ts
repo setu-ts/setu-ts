@@ -1297,13 +1297,13 @@ export class OpenApiGenerator {
     // Always the INPUT twin: `addSchema` records its name under `output`, and
     // the only side that can then find no name of its own is the request side.
     // An `Output` arm would be a branch no input can reach.
-    const preferred = `${registeredName}Input`;
-    // Reuse the preferred name ONLY when it is already this schema's twin.
-    // Presence alone is not enough: a contributor may register both `Address`
-    // and an unrelated `AddressInput`, and adopting that one would document a
-    // request body with a schema that has nothing to do with it.
-    const name = this.#componentSchemas.has(preferred) ? this.#claimNameFrom(preferred) : preferred;
-    this.#reservedNames.add(name);
+    // `<name>Input` is a PREFERENCE, not a claim. A contributor may register
+    // both `Address` and an unrelated `AddressInput`, and adopting that one
+    // would document a request body with a schema that has nothing to do with
+    // it — so this goes through the same allocator every other component name
+    // does, which suffixes when the preference is taken and consults the
+    // reserved set as well as the delivered one.
+    const name = this.#claimComponentName(`${registeredName}Input`);
     // Transformed under the reentrancy guard for the same reason `addSchema`
     // uses one: without it the hook answers this node with a `$ref` to the
     // component it is in the middle of building.
@@ -1323,23 +1323,6 @@ export class OpenApiGenerator {
   }
 
   /**
-   * Suffixes a taken name until it is free, reusing {@linkcode
-   * #claimComponentName}'s rule so twin names and hoisted names cannot collide
-   * with each other.
-   *
-   * @param base - The preferred name
-   * @returns The first free `base`, `base2`, `base3`, …
-   */
-  #claimNameFrom(base: string): string {
-    for (let n = 2;; n++) {
-      const candidate = `${base}${n}`;
-      if (!this.#componentSchemas.has(candidate) && !this.#reservedNames.has(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  /**
    * Claims a free component name derived from the site that first hoisted the
    * schema (`PostOrdersResponse409`), suffixing on collision.
    *
@@ -1348,16 +1331,24 @@ export class OpenApiGenerator {
    * considered and rejected: a description is prose, so it makes a poor type
    * name.
    *
-   * @returns A component name not already in use
+   * Takes the base as an argument so the twin namer shares this rule rather
+   * than restating it. A name is free only when it is in NEITHER
+   * `#componentSchemas` nor `#reservedNames`: the zod v4 `$defs` path claims
+   * every surviving definition's name BEFORE delivering any of them, so a
+   * claimed-but-undelivered name is absent from the component map and a
+   * presence check alone would hand it out twice.
+   *
+   * @param preferred - The name to try first; defaults to the current site's hint
+   * @returns A component name not already in use, reserved before it is returned
    */
-  #claimComponentName(): string {
+  #claimComponentName(preferred?: string): string {
     const taken = (candidate: string): boolean =>
       this.#componentSchemas.has(candidate) || this.#reservedNames.has(candidate);
     const reserve = (candidate: string): string => {
       this.#reservedNames.add(candidate);
       return candidate;
     };
-    const base = toPascalCase(this.#nameHint);
+    const base = preferred ?? toPascalCase(this.#nameHint);
     if (!taken(base)) return reserve(base);
     for (let n = 2;; n++) {
       const candidate = `${base}${n}`;
