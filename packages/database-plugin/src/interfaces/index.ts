@@ -9,6 +9,8 @@
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
+import type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
+import type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
 // Re-export query option types so consumers don't need internal paths.
 export type { CountOptions, FindOptions, OrderDirection } from '../query/find-options.ts';
@@ -24,6 +26,12 @@ export type { CountOptions, FindOptions, OrderDirection } from '../query/find-op
  *   — `LIKE`-based with a backslash default escape, so the value is escaped.
  * - **Passed through** (`mongodb`) — `contains` compiles to a `$regex` match in
  *   which `%` and `_` are already literal, so escaping them would be wrong.
+ *   **This arm is unreachable on Prisma v7**: a Prisma client for MongoDB
+ *   cannot be constructed (generation succeeds, construction fails — MongoDB
+ *   did not make the Prisma 7 release and returns in Prisma 8). It is retained
+ *   because it is a published export (AI_GUIDELINES §9.2), and the reasoning
+ *   stays correct for any future Prisma-Mongo client. The supported MongoDB
+ *   route is the `'mongodb'` **adapter arm** ({@linkcode MongoDatabaseOptions}).
  * - **Refused** (`sqlite`) — `LIKE`-based with no default escape character and
  *   no `ESCAPE` clause from Prisma, so a literal `contains` is inexpressible.
  *
@@ -223,7 +231,15 @@ export interface IDatabaseService {
  *
  * @since 0.1.0
  */
-export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'custom';
+export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'mongodb' | 'custom';
+
+// Re-export the Mongo structural types the `'mongodb'` arm carries, so an
+// application annotating its configuration reaches them from the package
+// barrel. The client and ObjectId constructor are the only parts of the
+// inject-or-lazy seam application configuration needs; the remaining driver
+// shapes stay internal.
+export type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
+export type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
 /**
  * The options every {@linkcode DatabasePluginOptions} arm shares.
@@ -329,7 +345,8 @@ export interface DrizzleDatabaseOptions extends DatabaseConnectionOptions {
 export type BuiltInDatabaseOptions =
   | MemoryDatabaseOptions
   | PrismaDatabaseOptions
-  | DrizzleDatabaseOptions;
+  | DrizzleDatabaseOptions
+  | MongoDatabaseOptions;
 
 /**
  * The arm supplying an externally-implemented backend.
@@ -504,3 +521,124 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
    */
   readonly drizzleTables: Record<string, unknown>;
 }
+
+/**
+ * The arm selecting the Mongo adapter over the native `mongodb` driver.
+ *
+ * `options.mongo.url` is required by the union unless `options.mongo.client`
+ * is supplied, so a registration that forgets both is a compile error instead
+ * of a `connect()` throw — the same guarantee the `'custom'` arm gives
+ * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
+ * `client` is an already-constructed structural `IMongoClient`, and absent it
+ * the adapter performs a literal `import('npm:mongodb@^6.21.0')` at connect time.
+ *
+ * @example
+ * ```typescript
+ * import { DatabasePlugin } from '@setu-ts/database-plugin';
+ *
+ * DatabasePlugin({
+ *   type: 'mongodb',
+ *   options: { url: 'mongodb://localhost:27017/mydb' },
+ * });
+ * ```
+ * @since 0.1.0
+ */
+export interface MongoDatabaseOptions extends DatabaseConnectionOptions {
+  /** Selects the Mongo arm. */
+  readonly type: 'mongodb';
+  /** Mongo adapter configuration; `url` (or `client`) is required. */
+  readonly options: MongoAdapterOptions;
+}
+
+/**
+ * The options both {@linkcode MongoAdapterOptions} arms share — everything
+ * that is optional regardless of how the client is supplied.
+ *
+ * It is exported because the arms below reference it, so a caller building a
+ * configuration incrementally can name the shared half.
+ *
+ * @since 0.1.0
+ */
+export interface MongoAdapterOptionsBase {
+  /**
+   * The driver's `ObjectId` constructor when {@linkcode MongoAdapterOptions.client} is injected.
+   *
+   * A `MongoClient` instance does not expose the driver's `ObjectId` class.
+   * Supplying it preserves the adapter's `_id` conversion for injected clients
+   * while still avoiding a lazy driver import. It is not needed on the lazy
+   * path because that import supplies the constructor.
+   *
+   * @since 0.1.0
+   */
+  readonly objectIdCtor?: IMongoObjectIdCtor;
+
+  /**
+   * The database the collections live in.
+   *
+   * Absent, the one encoded in {@linkcode url} is used; absent from both,
+   * `connect()` fails at startup naming the option.
+   *
+   * @since 0.1.0
+   */
+  readonly database?: string;
+
+  /**
+   * Per-entity collection and primary-key overrides, keyed by the entity name
+   * passed to `getRepository()`.
+   *
+   * An entity with no entry uses its own name as the collection and `'id'` as
+   * the key, which is why the zero-config path works for a schema whose
+   * collection names already match — the D1 two-layer shape.
+   *
+   * @example
+   * ```typescript
+   * new MongoAdapter({
+   *   url: 'mongodb://127.0.0.1:27017/app',
+   *   collections: { User: { collection: 'users', primaryKey: 'user_id', idType: 'raw' } },
+   * });
+   * ```
+   * @since 0.1.0
+   */
+  readonly collections?: Readonly<Record<string, MongoEntityMapping>>;
+}
+
+/**
+ * Options for the {@link MongoAdapter} — the `'mongodb'` arm.
+ *
+ * A **union of two arms**, so supplying neither `url` nor `client` is a
+ * compile error rather than a `connect()` throw — the guarantee every other
+ * built-in arm gives (`'prisma'` requires `prismaClient`, `'drizzle'` requires
+ * both Drizzle options, `'custom'` requires `adapter`). Both members stay
+ * readable on either arm, so the adapter reads `options.url` and
+ * `options.client` without narrowing first.
+ *
+ * @example
+ * ```typescript
+ * const lazy: MongoAdapterOptions = { url: 'mongodb://127.0.0.1:27017/app' };
+ * const injected: MongoAdapterOptions = { client: myMongoClient, database: 'app' };
+ * ```
+ * @since 0.1.0
+ */
+export type MongoAdapterOptions =
+  | (MongoAdapterOptionsBase & {
+    /**
+     * The connection string used to construct a client when none is injected.
+     *
+     * The database the collections live in is taken from `database` when
+     * present, otherwise the database encoded in this URI.
+     */
+    readonly url: string;
+    /** An already-constructed client; omit it to load the driver lazily. */
+    readonly client?: IMongoClient;
+  })
+  | (MongoAdapterOptionsBase & {
+    /**
+     * An already-constructed `IMongoClient`.
+     *
+     * When present, the lazy `import('npm:mongodb@^6.21.0')` never runs — the
+     * seam that keeps the branching unit-testable.
+     */
+    readonly client: IMongoClient;
+    /** The connection string; unread once a client is injected. */
+    readonly url?: string;
+  });

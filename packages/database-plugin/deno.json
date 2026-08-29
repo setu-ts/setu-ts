@@ -2,5 +2,17 @@
   "name": "@setu-ts/database-plugin",
   "version": "0.1.0-alpha.10",
   "license": "MIT",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "imports": {
+    "mongodb": "npm:mongodb@^6.21.0"
+  },
+  "test": {
+    "permissions": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "sys": ["hostname", "osRelease"],
+      "net": ["127.0.0.1:27017", "localhost:27017"]
+    }
+  }
 }

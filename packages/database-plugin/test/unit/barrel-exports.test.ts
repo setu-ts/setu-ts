@@ -5,6 +5,9 @@ import type {
   DrizzleAdapterOptions,
   DrizzleDatabaseOptions,
   MemoryDatabaseOptions,
+  MongoAdapterOptions,
+  MongoDatabaseOptions,
+  MongoEntityMapping,
   PrismaAdapterOptions,
   PrismaDatabaseOptions,
 } from '../../src/index.ts';
@@ -52,7 +55,37 @@ describe('database-plugin barrel exports', () => {
       drizzleTables: {},
     } as unknown as DrizzleAdapterOptions;
     const drizzle: DrizzleDatabaseOptions = { type: 'drizzle', options: drizzleOptions };
-    expect([memory.type, prisma.type, drizzle.type]).toEqual(['memory', 'prisma', 'drizzle']);
+    const mongoOptions: MongoAdapterOptions = {
+      url: 'mongodb://localhost:27017/app',
+    };
+    const mongo: MongoDatabaseOptions = { type: 'mongodb', options: mongoOptions };
+    const mapping: MongoEntityMapping = { collection: 'users', primaryKey: 'user_id' };
+    expect([memory.type, prisma.type, drizzle.type, mongo.type, mapping.collection]).toEqual([
+      'memory',
+      'prisma',
+      'drizzle',
+      'mongodb',
+      'users',
+    ]);
+  });
+
+  it('exports the Mongo adapter and only its application-facing surface', () => {
+    expect(typeof database.MongoAdapter).toBe('function');
+    expect(typeof database.UnsupportedRawQueryError).toBe('function');
+    expect(typeof database.MongoTransactionUnavailableError).toBe('function');
+    for (
+      const internal of [
+        'createMongoDataSource',
+        'MongoTransaction',
+        'createInjectedClientLoader',
+        'createLazyClientLoader',
+        'translateQuery',
+        'resolveMongoTarget',
+        'parseDatabaseFromUrl',
+      ]
+    ) {
+      expect(Object.hasOwn(database, internal)).toBe(false);
+    }
   });
 
   it('does not leak the internal raw-statement binder', () => {

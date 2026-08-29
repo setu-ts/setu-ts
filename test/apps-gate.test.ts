@@ -131,6 +131,22 @@ describe('real-backend CI wiring', () => {
     expect(workflow).toContain('- 6379:6379');
   });
 
+  it('declares the Mongo service, URI, and scoped database-plugin permission', async () => {
+    for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
+      const workflowText = await Deno.readTextFile(workflow);
+      expect(workflowText).toContain('MONGODB_URI: mongodb://127.0.0.1:27017');
+      expect(workflowText).toContain('image: mongo:8');
+      expect(workflowText).toContain('- 27017:27017');
+    }
+    const config = await readJson<{
+      readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
+    }>('packages/database-plugin/deno.json');
+    expect(config.test?.permissions?.net).toEqual([
+      '127.0.0.1:27017',
+      'localhost:27017',
+    ]);
+  });
+
   it('pins ElasticMQ image and declares SQS local-region/credentials', async () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     // Pin the ElasticMQ image to avoid drift from `latest`

@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+- Added a native MongoDB backend to `@setu-ts/database-plugin`.
+  `DatabasePlugin({ type: 'mongodb',
+  options: { url } })` now provides repositories over the
+  lazy-loaded MongoDB driver, including `_id` mapping, ObjectId-aware injected clients, query
+  translation, and session transactions. `MongoAdapterOptions` is a union of two arms, so a
+  registration supplying neither `url` nor `client` is a compile error rather than a `connect()`
+  throw; `MongoAdapterOptionsBase` names the half both arms share. The `'mongodb'` member of the
+  published `PrismaSqlProvider` union is retained but documented as unreachable on Prisma v7 — the
+  adapter arm is the supported MongoDB route.
 - Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.

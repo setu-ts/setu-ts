@@ -896,13 +896,14 @@ app.register(DatabasePlugin({
 
 `DatabasePluginOptions` is a union discriminated on `type`, and each arm names the options its
 adapter cannot run without: `'prisma'` requires `options.prismaClient`, `'drizzle'` requires both
-`options.drizzleInstance` and `options.drizzleTables`, and `'custom'` requires `adapter`. Omitting
-one is a **compile error** rather than a startup throw. The exported arms are
-`MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions` and
-`CustomDatabaseOptions`; `BuiltInDatabaseOptions` is the union of the first three and keeps its
-published name, so an existing annotation carrying a memory configuration still compiles.
-`PrismaAdapterOptions` and `DrizzleAdapterOptions` are `DatabaseAdapterOptions` narrowed for their
-arm.
+`options.drizzleInstance` and `options.drizzleTables`, `'mongodb'` requires `options.url` (or an
+injected `options.client`), and `'custom'` requires `adapter`. Omitting one is a **compile error**
+rather than a startup throw. The exported arms are `MemoryDatabaseOptions`, `PrismaDatabaseOptions`,
+`DrizzleDatabaseOptions`, `MongoDatabaseOptions` and `CustomDatabaseOptions`;
+`BuiltInDatabaseOptions` is the union of the four built-in arms and keeps its published name, so an
+existing annotation carrying a memory configuration still compiles. `PrismaAdapterOptions` and
+`DrizzleAdapterOptions` narrow `DatabaseAdapterOptions` for their arm; `MongoAdapterOptions` is its
+dedicated document-driver option bag.
 
 Three Prisma 7 prerequisites are the application's to supply and are documented in the package
 README: the driver-adapter package, a `prisma.config.ts` (Prisma 7 rejects `url` in
@@ -941,6 +942,14 @@ run. `createDrizzleDatabase()` rejects those published types at compile time, an
 unwrapped structural instance. The explicit source-owned bridge is the positive capability that
 asserts the selected driver awaits its callback Promise; unknown adopting-Promise and thenable
 wrappers are rejected at startup before native transaction work begins.
+
+`PrismaSqlProvider` still carries a `'mongodb'` member and the `PASSTHROUGH_PROVIDERS` mechanism
+that holds it, but that arm is **unreachable on Prisma v7**: a Prisma client for MongoDB cannot be
+constructed (generation succeeds, construction fails — Prisma states MongoDB "did not make the
+Prisma 7 release" and returns in Prisma 8). The `'mongodb'` **adapter arm** above is the supported
+MongoDB route; the `'mongodb'` provider string on the Prisma union is retained only because removing
+it is a published export (AI_GUIDELINES §9.2), and the `contains`-to-`$regex` reasoning behind
+`PASSTHROUGH_PROVIDERS` stays correct for any future Prisma-Mongo client.
 
 ### Repository Pattern
 
@@ -1221,33 +1230,97 @@ interface IDataSource {
 A data source owns query evaluation end to end — it applies `where`, `orderBy`, `offset`/`limit` and
 `select` itself, and `BaseRepository` must not re-apply any of them.
 
+### MongoDB backend (`'mongodb'` arm)
+
+`MongoAdapter` is a document-store backend over the native `mongodb` driver (`npm:mongodb@^6.21.0`),
+registered through the same discriminated union as every other backend:
+
+```typescript
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+
+app.register(DatabasePlugin({
+  type: 'mongodb',
+  options: {
+    url: 'mongodb://127.0.0.1:27017/app',
+    // or inject a constructed client so the driver is never imported:
+    // client: new MongoClient(url),
+  },
+}));
+```
+
+`MongoAdapterOptions` is the Mongo-specific option bag, and it is a **union of two arms**: one
+requires `url` (the connection string), the other requires `client` (an already-constructed
+`IMongoClient`). Supplying neither is a compile error rather than a `connect()` throw — the
+guarantee every other built-in arm gives. `MongoAdapterOptionsBase` is the half both arms share
+(`objectIdCtor`, `database`, `collections`). When `client` is present the lazy
+`import('npm:mongodb@^6.21.0')` never runs; the injected client is structural, so a driver of a
+different major that honours the same shapes is accepted. An injected client that uses ObjectId
+values supplies its `objectIdCtor` companion, so the adapter can convert 24-hex repository ids
+without importing the driver. `database` names the database; when absent the one encoded in `url` is
+used, and if neither yields a name `connect()` fails at startup naming the option. `collections` is
+a per-entity override (`{ collection?, primaryKey?,
+idType? }`); an unmapped entity uses its own
+name as the collection and `'id'` as the primary key — the D1-shaped two-layer mapping, where the
+public surface is a per-entity override with a zero-config default and the internal target is
+unexported.
+
+Identity maps `_id` to the configured primary key on read and back on write. Because a
+`findOne({_id: "<24-hex>"})` misses when `_id` is an `ObjectId`, the driver id is converted with a
+24-hex **string** test for an `idType` of `'auto'` (the default), forced for `'objectId'`, and
+forbidden for `'raw'`. The string half of that test is load-bearing rather than defensive: the
+driver's own `ObjectId.isValid` answers `true` for **any number** while its constructor rejects one,
+so a collection keyed by application-assigned numbers is passed through verbatim — `findById`,
+`update` and `delete` accept `string | number`, and a numeric key must reach the driver unconverted.
+`find` serves `orderBy`/`offset`/`limit`/`select` natively as `sort`/`skip`/`limit`/`projection`,
+and `contains` compiles to a `$regex` match with an escaped value (the inverse of the SQL
+`contains`), so `%` and `_` in the searched value stay literal.
+
+`rawQuery` is refused by name with `UnsupportedRawQueryError` — MongoDB has no SQL, so an
+application reaches the injected client directly for native commands, exactly as it does for a
+Prisma raw query. Transactions use a `startSession()` and are refused at `beginTransaction()` with
+`MongoTransactionUnavailableError` on a deployment that is not a replica set, never at `connect()`.
+
+`IMongoClient` and `IMongoObjectIdCtor` are the exported injection seam. The real driver implements
+their structural shapes. The types the client's members reference — `IMongoDatabase`,
+`IMongoSession`, and the `IMongoObjectId` instance shape — are exported alongside them so the seam's
+return types are nameable from the package entry, as are the collection-level shapes
+`IMongoDatabase.collection()` reaches (`IMongoCollection`, `IMongoCursor`,
+`IMongoCollectionFindOneAndUpdateOptions`, and the `MongoOptions`/`MongoWriteOptions` option bags).
+
 ### Exports
 
-| Export                                                                                                                      | Kind                              |
-| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `DatabasePlugin`                                                                                                            | factory                           |
-| `DatabaseService`                                                                                                           | class                             |
-| `BaseRepository`, `UnitOfWork`                                                                                              | classes                           |
-| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`                                                                          | classes                           |
-| `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                           |
-| `UnsupportedFilterOperatorError`                                                                                            | class                             |
-| `PrismaSqlProvider`                                                                                                         | type                              |
-| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                         |
-| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                             |
-| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                        |
-| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                             |
-| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`                                                  | interfaces                        |
-| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                        |
-| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                             |
-| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                             |
-| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`          |
-| `DataSource`                                                                                                                | deprecated alias of `IDataSource` |
+| Export                                                                                                                      | Kind                               |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `DatabasePlugin`                                                                                                            | factory                            |
+| `DatabaseService`                                                                                                           | class                              |
+| `BaseRepository`, `UnitOfWork`                                                                                              | classes                            |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`                                                          | classes                            |
+| `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                            |
+| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`                                                                | classes                            |
+| `MongoTransactionUnavailableError`                                                                                          | class                              |
+| `PrismaSqlProvider`                                                                                                         | type                               |
+| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                          |
+| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                              |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                         |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                              |
+| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`                          | interfaces                         |
+| `MongoAdapterOptions` (union of two arms), `MongoAdapterOptionsBase`, `MongoEntityMapping`                                  | types                              |
+| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                         |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                              |
+| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                              |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`           |
+| `DataSource`                                                                                                                | deprecated alias of `IDataSource`  |
+| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                   | interfaces (Mongo injection seam)  |
+| `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`          | interfaces (Mongo collection seam) |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.
 
 `DatabaseAdapterType` gained `'custom'`; `DatabasePluginOptions` became a union discriminated on
-`type`. Both are additive for callers — every existing registration compiles unchanged.
+`type`. Both are additive for callers — every existing registration compiles unchanged. The
+`'mongodb'` arm is additive as well: `MongoDatabaseOptions` extends `DatabaseConnectionOptions` and
+carries its dedicated `MongoAdapterOptions` bag, so a registration carrying a memory, Prisma,
+Drizzle or custom configuration still compiles unchanged.
 
 ### Multiple Databases
 

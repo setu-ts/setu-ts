@@ -15,11 +15,13 @@ import type {
   DatabaseAdapterType,
   DatabasePluginOptions,
   IDatabaseService,
+  MongoAdapterOptions,
 } from '../interfaces/index.ts';
 import { DatabaseService } from '../services/database-service.ts';
 import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
+import { MongoAdapter } from '../adapters/mongo/mongo-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../repositories/base-repository.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -161,6 +163,11 @@ function createAdapter(
       return Promise.resolve(new PrismaAdapter(adapterOptions));
     case 'drizzle':
       return Promise.resolve(new DrizzleAdapter(adapterOptions));
+    case 'mongodb':
+      // Mongo's options share the `DatabaseAdapterOptions` bag the other built-in
+      // arms use; `buildAdapterOptions` carries them through, so the arm is built
+      // from `adapterOptions` just like the others — no cast to a concrete adapter.
+      return Promise.resolve(new MongoAdapter(adapterOptions as MongoAdapterOptions));
     case 'memory':
     default:
       return Promise.resolve(new MemoryAdapter());
@@ -176,27 +183,28 @@ function createAdapter(
  */
 function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOptions {
   const result: Record<string, unknown> = {};
-  if (opts?.url !== undefined) {
-    result.url = opts.url;
-  }
-  if (opts?.logQueries !== undefined) {
-    result.logQueries = opts.logQueries;
-  }
-  if (opts?.prismaClient !== undefined) {
-    result.prismaClient = opts.prismaClient;
-  }
-  if (opts?.provider !== undefined) {
-    result.provider = opts.provider;
-  }
-  if (opts?.drizzleInstance !== undefined) {
-    result.drizzleInstance = opts.drizzleInstance;
-  }
-  if (opts?.drizzleTables !== undefined) {
-    result.drizzleTables = opts.drizzleTables;
-  }
-  if (opts?.transactionTimeout !== undefined) {
-    result.transactionTimeout = opts.transactionTimeout;
-  }
+  const anyOpts = opts as Record<string, unknown> | undefined;
+  // Carry every known key from either arm onto the shared bag. The `'mongodb'`
+  // arm's `client`/`objectIdCtor`/`database`/`collections` keys are absent from
+  // `DatabaseAdapterOptions`, so they are read through the index signature the
+  // same way the other arm-specific keys are; the arm's adapter reads only what
+  // it needs.
+  const carry = (key: string): void => {
+    if (anyOpts?.[key] !== undefined) {
+      result[key] = anyOpts[key];
+    }
+  };
+  carry('url');
+  carry('logQueries');
+  carry('prismaClient');
+  carry('provider');
+  carry('drizzleInstance');
+  carry('drizzleTables');
+  carry('transactionTimeout');
+  carry('client');
+  carry('objectIdCtor');
+  carry('database');
+  carry('collections');
   return result as DatabaseAdapterOptions;
 }
 
