@@ -233,6 +233,7 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `OpenApiSchemaObject`     | interface |
 | `OpenApiServiceOptions`   | interface |
 | `SwaggerUiOptions`        | interface |
+| `SchemaIo`                | type      |
 | `SchemaNodeHook`          | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

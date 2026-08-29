@@ -5591,6 +5591,38 @@ presence marks a v4 schema; the plugin imports neither major.
 - **Zod v3 output is unchanged** — the same schemas produce byte-identical documents as before this
   support existed.
 
+#### Request and response are documented from different sides
+
+A zod schema has two shapes: what a client may SEND, and what the server holds after parsing. They
+differ for anything carrying a `.default()`, a `.transform()`, a `.coerce`, or the ordinary
+key-stripping of `z.object`. Every request-side position — `body`, `params`, `query`, `headers` — is
+documented from the **input** side; `response` is documented from the **output** side.
+
+This is what stops a document contradicting the server it describes. A field with `.default('free')`
+is optional for a client (that is what a default is for) and always present in a response, so it is
+absent from the request body's `required` and present in the response's. A `.transform()` field
+documents its SOURCE type on a request rather than the unrepresentable `{}` its result produces. And
+on the three object modes, measured against zod 4.4:
+
+| schema           | unknown key at runtime | request body documents       | response documents           |
+| ---------------- | ---------------------- | ---------------------------- | ---------------------------- |
+| `z.object`       | accepted, stripped     | (no `additionalProperties`)  | `additionalProperties:false` |
+| `z.strictObject` | rejected               | `additionalProperties:false` | `additionalProperties:false` |
+| `z.looseObject`  | accepted, kept         | `additionalProperties:{}`    | `additionalProperties:{}`    |
+
+`ZodToOpenApi.transform(schema, io?)` takes the side as an optional second argument, defaulting to
+`'output'`, so a direct call is unchanged. Only the zod v4 path reads it: the v3 path has no `io`
+concept and already emits the input view, which is why v3 documents are byte-identical and why the
+two majors now agree on a request body.
+
+**Deduplication follows the side.** A schema whose two views are identical — every zod v3 schema,
+and any v4 schema with no default, transform, coercion or object-mode difference — is hoisted into
+ONE component shared by every site, exactly as before. A schema whose views differ and that is used
+on both sides yields one component per side, because the two sites do not describe the same shape. A
+schema registered through `addSchema('Name', …)` keeps that name for the output side and gains a
+`NameInput` sibling when a request site reaches it, so the contributor's chosen name still appears
+on both sides.
+
 ### Notes
 
 - Every `RouteSchema` position the generator reads becomes part of the operation: `body` becomes the

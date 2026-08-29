@@ -8,6 +8,7 @@ import { securityMetadataOf, validationMetadataOf } from '@setu-ts/common';
 
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
+import type { SchemaIo } from '../transformers/zod-to-openapi.ts';
 
 /**
  * Plugin names whose routes are operational rather than part of the API being
@@ -359,8 +360,15 @@ export class OpenApiGenerator {
    * v3 documents inline versus reference there.
    */
   readonly #parameterTransformer: ZodToOpenApi;
-  /** How many sites reference each schema identity, filled by the counting pass. */
-  readonly #schemaCounts: Map<unknown, number>;
+  /**
+   * How many sites reference each schema identity, filled by the counting pass
+   * and split by io.
+   *
+   * Split because a schema used once as a request body and once as a response
+   * is used ONCE in each shape — counting it as two would hoist a component
+   * that no second site can share, since the shapes differ.
+   */
+  readonly #schemaCounts: Map<unknown, { input: number; output: number }>;
   /**
    * Component names claimed but not yet delivered.
    *
@@ -397,6 +405,48 @@ export class OpenApiGenerator {
   #pass: 'count' | 'emit';
   /** Name hint for the schema currently being resolved, e.g. `PostOrdersBody`. */
   #nameHint: string;
+  /**
+   * Which side the site currently being resolved describes.
+   *
+   * Held as a field rather than threaded through every helper, mirroring
+   * {@linkcode #nameHint}: the two are set and restored together by the same
+   * site methods, and the hook needs both without either being a parameter of
+   * the transformer's own recursion.
+   */
+  #io: SchemaIo = 'output';
+  /**
+   * The io a hoisted component was transformed under.
+   *
+   * Dedup keys on schema IDENTITY, and one identity now has two legitimate
+   * shapes, so a schema reached as both a request body and a response must not
+   * `$ref` whichever component happened to be built first — that is how a
+   * document would claim a `.default()` field is required of a client, which
+   * is the defect this whole seam exists to remove. A site whose io differs
+   * from the recorded one transforms inline instead: always correct, at the
+   * cost of one un-shared shape in the rare document that does this.
+   */
+  readonly #schemaIo = new Map<unknown, SchemaIo>();
+  /**
+   * Hook-less, channel-less transformer used ONLY to ask whether a schema's
+   * two views differ.
+   *
+   * It cannot be `#transformer`: that one's hook records counts and hoists
+   * components, so probing through it would count nodes the document never
+   * asked about. It cannot be `#parameterTransformer` either — that one has
+   * channels, so a probe would DELIVER `$defs` components as a side effect.
+   */
+  readonly #viewProbe = new ZodToOpenApi();
+  /**
+   * Memoized answer to "do this schema's input and output views differ?".
+   *
+   * They do not for any zod v3 schema — that path hand-walks `_def` and has no
+   * `io` concept — nor for a v4 schema carrying no default, transform, coercion
+   * or object-mode difference. When they agree, everything below behaves
+   * exactly as it did before io existed: one count, one component, every site
+   * sharing it. The split is paid for only by documents that genuinely have two
+   * shapes to describe.
+   */
+  readonly #viewsDifferCache = new Map<unknown, boolean>();
   /**
    * Diagnostics reported by the transformer for the operation CURRENTLY being
    * built; attached as the `x-setu-unrepresentable` extension and reset per
@@ -477,7 +527,11 @@ export class OpenApiGenerator {
     // Transformed under the reentrancy guard, so the hook does not answer this
     // node with a `$ref` to the component it is in the middle of building.
     this.#hoisting.add(schema);
-    const transformed = this.#transformer.transform(schema);
+    // A contributor registration names one component and says nothing about
+    // which side uses it, so it keeps the output view it has always had. A
+    // request site that reaches the same schema transforms inline for its own
+    // side rather than pointing at a shape that is not its own.
+    const transformed = this.#transformer.transform(schema, 'output');
     this.#hoisting.delete(schema);
     this.#schemaMap.set(schema, name);
     this.#componentSchemas.set(name, transformed);
@@ -628,7 +682,7 @@ export class OpenApiGenerator {
         required: true,
         content: {
           'application/json': {
-            schema: this.#resolveSchema(schema.body, `${operationId}Body`),
+            schema: this.#resolveSchema(schema.body, `${operationId}Body`, 'input'),
           },
         },
       }
@@ -925,7 +979,11 @@ export class OpenApiGenerator {
             ? {
               content: {
                 'application/json': {
-                  schema: this.#resolveSchema(schema, `${operationId}Response${statusCode}`),
+                  schema: this.#resolveSchema(
+                    schema,
+                    `${operationId}Response${statusCode}`,
+                    'output',
+                  ),
                 },
               },
             }
@@ -1021,13 +1079,16 @@ export class OpenApiGenerator {
    * @param schema - The schema to resolve
    * @returns The schema or a $ref
    */
-  #resolveSchema(schema: unknown, nameHint: string): OpenApiSchemaObject {
+  #resolveSchema(schema: unknown, nameHint: string, io: SchemaIo): OpenApiSchemaObject {
     const previous = this.#nameHint;
+    const previousIo = this.#io;
     this.#nameHint = nameHint;
+    this.#io = io;
     try {
-      return this.#recordHoistedRoot(schema, this.#transformer.transform(schema));
+      return this.#recordHoistedRoot(schema, this.#transformer.transform(schema, io));
     } finally {
       this.#nameHint = previous;
+      this.#io = previousIo;
     }
   }
 
@@ -1043,11 +1104,16 @@ export class OpenApiGenerator {
    */
   #transformParameterSchema(schema: unknown, nameHint: string): OpenApiSchemaObject {
     const previous = this.#nameHint;
+    const previousIo = this.#io;
     this.#nameHint = nameHint;
+    // Every parameter site is request-side: a path parameter, a query string
+    // and a header are all things a CLIENT sends.
+    this.#io = 'input';
     try {
-      return this.#parameterTransformer.transform(schema);
+      return this.#parameterTransformer.transform(schema, 'input');
     } finally {
       this.#nameHint = previous;
+      this.#io = previousIo;
     }
   }
 
@@ -1091,6 +1157,7 @@ export class OpenApiGenerator {
     if (ref === undefined || !ref.startsWith(COMPONENT_REF_PREFIX)) return result;
     if (!this.#schemaMap.has(schema)) {
       this.#schemaMap.set(schema, ref.slice(COMPONENT_REF_PREFIX.length));
+      this.#schemaIo.set(schema, this.#bucket(schema));
     }
     return result;
   }
@@ -1114,23 +1181,43 @@ export class OpenApiGenerator {
     if (this.#hoisting.has(schema)) return undefined;
 
     if (this.#pass === 'count') {
-      const seen = this.#schemaCounts.get(schema) ?? 0;
-      this.#schemaCounts.set(schema, seen + 1);
+      const bucket = this.#bucket(schema);
+      const seen = this.#schemaCounts.get(schema) ?? { input: 0, output: 0 };
+      this.#schemaCounts.set(schema, { ...seen, [bucket]: seen[bucket] + 1 });
       // Descend only on the FIRST sighting, mirroring the emit pass, where a
       // hoisted schema is transformed once and every later site gets a `$ref`
       // that descends into nothing. Without this the children of a twice-used
       // parent are counted twice as well and hoist into components with a
       // single reference each — and the child claims the name the parent
       // wanted, since both derive it from the same site.
-      return seen === 0 ? undefined : {};
+      //
+      // Per io, for the same reason the counts are: the emit pass hoists per
+      // side, so the first sighting on THIS side is the one that must descend.
+      return seen[bucket] === 0 ? undefined : {};
     }
 
     // Pre-registered (addSchema / OPENAPI_SCHEMA) or already hoisted: the
     // contributor-chosen or previously-claimed name wins.
     const existing = this.#schemaMap.get(schema);
-    if (existing !== undefined) return { $ref: `#/components/schemas/${existing}` };
+    if (existing !== undefined) {
+      // Sharing is only sound when the component was built for THIS side.
+      // `addSchema` contributions carry no io of their own and are treated as
+      // output-shaped, which is what they have always been.
+      const componentIo = this.#schemaIo.get(schema) ?? 'output';
+      if (componentIo === this.#bucket(schema)) return { $ref: `#/components/schemas/${existing}` };
+      // A schema the GENERATOR hoisted takes its name from the site that
+      // hoisted it, so the other side simply hoists its own under its own site
+      // name and nothing is lost.
+      if (!this.#registered.has(schema)) return undefined;
+      // A CONTRIBUTOR-registered schema is different: the name is the point of
+      // `addSchema`, and dropping to an anonymous site-derived component would
+      // silently discard it. Give the other side a sibling that keeps the
+      // chosen name — the convention every generator that respects both sides
+      // uses — rather than pointing at a shape that is not this side's.
+      return { $ref: `#/components/schemas/${this.#sideSibling(schema, existing)}` };
+    }
 
-    if ((this.#schemaCounts.get(schema) ?? 0) < 2) return undefined;
+    if ((this.#schemaCounts.get(schema)?.[this.#bucket(schema)] ?? 0) < 2) return undefined;
 
     this.#hoisting.add(schema);
     const transformed = this.#recordHoistedRoot(schema, this.#transformer.transform(schema));
@@ -1144,8 +1231,77 @@ export class OpenApiGenerator {
 
     const name = this.#claimComponentName();
     this.#schemaMap.set(schema, name);
+    this.#schemaIo.set(schema, this.#bucket(schema));
     this.#componentSchemas.set(name, transformed);
     return { $ref: `#/components/schemas/${name}` };
+  }
+
+  /**
+   * Whether a schema's input and output views differ.
+   *
+   * @param schema - The schema to probe
+   * @returns `true` when the two sides would document different shapes
+   */
+  #viewsDiffer(schema: unknown): boolean {
+    const cached = this.#viewsDifferCache.get(schema);
+    if (cached !== undefined) return cached;
+    const differs = JSON.stringify(this.#viewProbe.transform(schema, 'input')) !==
+      JSON.stringify(this.#viewProbe.transform(schema, 'output'));
+    this.#viewsDifferCache.set(schema, differs);
+    return differs;
+  }
+
+  /**
+   * The dedup bucket a site's references land in.
+   *
+   * One bucket per schema while its two views agree — which is every zod v3
+   * schema and most v4 ones — and one per side when they do not, because two
+   * sites that document different shapes cannot share a component.
+   *
+   * @param schema - The schema being referenced
+   * @returns The io to bucket under
+   */
+  #bucket(schema: unknown): SchemaIo {
+    return this.#viewsDiffer(schema) ? this.#io : 'output';
+  }
+
+  /**
+   * Builds (once) and names the other-side twin of a contributor-registered
+   * component.
+   *
+   * `addSchema('Address', …)` registers ONE name, and the same schema may be
+   * referenced from a request body and from a response — two genuinely
+   * different shapes. The registered name keeps the output side it was
+   * transformed under; the request side gets `<name>Input`, so the
+   * contributor's name still appears in both and neither side documents the
+   * other's shape.
+   *
+   * @param schema - The contributor-registered schema
+   * @param registeredName - The name `addSchema` claimed
+   * @returns The component name to reference for the CURRENT side
+   */
+  #sideSibling(schema: unknown, registeredName: string): string {
+    // Always the INPUT twin, and that is a property rather than an assumption:
+    // `addSchema` records a name without an io, which reads as `'output'`, and
+    // `#recordHoistedRoot` only records an io for a schema not already in
+    // `#schemaMap` — so a registered schema's component is output-shaped and
+    // the side that finds it different is always the request side. An
+    // `Output` arm here would be a branch no input can reach.
+    const name = `${registeredName}Input`;
+    if (this.#componentSchemas.has(name)) return name;
+    // Transformed under the reentrancy guard for the same reason `addSchema`
+    // uses one: without it the hook answers this node with a `$ref` to the
+    // component it is in the middle of building.
+    this.#hoisting.add(schema);
+    const transformed = this.#transformer.transform(schema, this.#io);
+    this.#hoisting.delete(schema);
+    this.#componentSchemas.set(name, transformed);
+    // Unconditional, unlike `addSchema`'s delivery: a twin is only ever built
+    // from the emit path, which runs inside `generate`, so it always belongs to
+    // the current document and must be purged with it. A `#generating` guard
+    // here would be a branch no input can take.
+    this.#perDocComponents.add(name);
+    return name;
   }
 
   /**

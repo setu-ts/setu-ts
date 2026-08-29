@@ -45,6 +45,12 @@ function responseSchema(
   return doc.paths[path]?.get?.responses[status]?.content?.['application/json']?.schema;
 }
 
+// A10-1: every shape asserted below that comes from a request BODY or a
+// parameter site is documented in the INPUT view, so it carries no
+// `additionalProperties: false` — `z4.object` strips an unknown key and answers
+// 2xx, so emitting the marker would document a restriction the server does not
+// apply. Response-derived components keep it (see the assertions that still
+// carry it), and a `z4.strictObject` keeps it under either view.
 describe('OpenApiGenerator — zod v4 dedup', () => {
   it('dedups a zod v4 body reused across two routes into ONE component', () => {
     const shared = z4.object({ id: z4.string(), qty: z4.number() });
@@ -130,7 +136,6 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
       type: 'object',
       properties: { city: { type: 'string' } },
       required: ['city'],
-      additionalProperties: false,
     });
     // No mechanical `__schema<n>` names leak into the document.
     for (const componentName of Object.keys(doc.components?.schemas ?? {})) {
@@ -169,13 +174,11 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
       type: 'object',
       properties: { a: { type: 'string' } },
       required: ['a'],
-      additionalProperties: false,
     });
     expect(doc.components?.schemas?.[bName]).toEqual({
       type: 'object',
       properties: { b: { type: 'string' } },
       required: ['b'],
-      additionalProperties: false,
     });
   });
 
@@ -196,10 +199,96 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
     const body = bodySchema(doc, '/people') as {
       properties?: Record<string, { $ref?: string }>;
     };
-    expect(body.properties?.home).toEqual({ $ref: '#/components/schemas/Address' });
-    expect(body.properties?.billing).toEqual({ $ref: '#/components/schemas/Address' });
+    // A10-1: `addSchema` registers the OUTPUT shape under the contributor's
+    // name, and this is a request body, so both fields point at the input-side
+    // twin — which keeps the contributor's name rather than falling back to an
+    // anonymous site-derived one.
+    expect(body.properties?.home).toEqual({ $ref: '#/components/schemas/AddressInput' });
+    expect(body.properties?.billing).toEqual({ $ref: '#/components/schemas/AddressInput' });
     // The alias def was dropped, not delivered as a second component.
-    expect(Object.keys(doc.components?.schemas ?? {})).toEqual(['Address']);
+    expect(Object.keys(doc.components?.schemas ?? {}).sort()).toEqual(['Address', 'AddressInput']);
+  });
+
+  it('splits one zod v4 schema into two components when its sides differ', () => {
+    // A10-1: the same object used as a request body and as a response is TWO
+    // shapes — `additionalProperties` differs even with no default — so the
+    // sites cannot share a component. Each side hoists its own, named from the
+    // site that hoisted it.
+    const shared = z4.object({ id: z4.string() });
+    const doc = generator().generate([
+      route('POST', '/users', { body: shared, response: { 201: shared } }),
+      route('GET', '/users', { response: { 200: shared } }),
+    ]);
+
+    const body = bodySchema(doc, '/users') as { $ref?: string; additionalProperties?: unknown };
+    const created = doc.paths['/users']?.post?.responses['201']?.content?.['application/json']
+      ?.schema as { $ref?: string };
+    const listed = doc.paths['/users']?.get?.responses['200']?.content?.['application/json']
+      ?.schema as { $ref?: string };
+
+    // Both RESPONSE sites share one component, which is M70m's property intact
+    // within a side.
+    expect(created.$ref).toBe(listed.$ref);
+    // The body does not point at it.
+    expect(body.$ref).not.toBe(created.$ref);
+
+    const responseComponent = doc.components?.schemas?.[created.$ref!.split('/').pop()!] as {
+      additionalProperties?: unknown;
+    };
+    expect(responseComponent.additionalProperties).toBe(false);
+    // The body side carries the input view, whether it was hoisted or inlined.
+    const bodyShape = body.$ref === undefined
+      ? body
+      : doc.components?.schemas?.[body.$ref.split('/').pop()!] as {
+        additionalProperties?: unknown;
+      };
+    expect(bodyShape).not.toHaveProperty('additionalProperties');
+  });
+
+  it('does not let a request body point at a component the response side hoisted', () => {
+    // The response side hoists FIRST here (two response uses, one body use), so
+    // the body reaches a schema that already has a component — built for the
+    // other side. Sharing it would put the output shape on a request body,
+    // which is the defect in miniature.
+    const shared = z4.object({ id: z4.string() });
+    const doc = generator().generate([
+      route('GET', '/a', { response: { 200: shared } }),
+      route('GET', '/b', { response: { 200: shared } }),
+      route('POST', '/c', { body: shared }),
+    ]);
+
+    const responseRef = (doc.paths['/a']?.get?.responses['200']?.content?.['application/json']
+      ?.schema as { $ref?: string }).$ref;
+    expect(responseRef).toMatch(/^#\/components\/schemas\//);
+
+    const body = bodySchema(doc, '/c') as { $ref?: string; additionalProperties?: unknown };
+    expect(body.$ref).not.toBe(responseRef);
+    // Used once on the input side, so it stays inline — and carries the input
+    // view, without the strictness marker the response component has.
+    expect(body).not.toHaveProperty('additionalProperties');
+    expect(body).toMatchObject({ type: 'object', properties: { id: { type: 'string' } } });
+  });
+
+  it("builds a contributor schema's input twin once and shares it across request sites", () => {
+    const address = z4.object({ city: z4.string() });
+    const gen = new OpenApiGenerator({ title: 'T', version: '1' });
+    gen.addSchema('Address', address);
+    const doc = gen.generate([
+      route('POST', '/people', { body: address }),
+      route('POST', '/places', { body: address }),
+    ]);
+
+    const ref = { $ref: '#/components/schemas/AddressInput' };
+    expect(bodySchema(doc, '/people')).toEqual(ref);
+    // Second site: the twin is memoized, not rebuilt under a colliding name.
+    expect(bodySchema(doc, '/places')).toEqual(ref);
+    expect(Object.keys(doc.components?.schemas ?? {}).sort()).toEqual(['Address', 'AddressInput']);
+    // The registered component keeps the OUTPUT shape it was registered with.
+    expect(
+      (doc.components?.schemas?.Address as { additionalProperties?: unknown })
+        .additionalProperties,
+    ).toBe(false);
+    expect(doc.components?.schemas?.AddressInput).not.toHaveProperty('additionalProperties');
   });
 
   it('leaves a single-use zod v4 schema inline without components', () => {
@@ -212,7 +301,6 @@ describe('OpenApiGenerator — zod v4 dedup', () => {
       type: 'object',
       properties: { id: { type: 'string' } },
       required: ['id'],
-      additionalProperties: false,
     });
   });
 });
@@ -316,7 +404,6 @@ describe('OpenApiGenerator — zod v4 parameter sites (review round 2)', () => {
         type: 'object',
         properties: { tag: { type: 'string' } },
         required: ['tag'],
-        additionalProperties: false,
       });
     }
 
@@ -404,7 +491,6 @@ describe('OpenApiGenerator — per-document component reset', () => {
       type: 'object',
       properties: { tag: { type: 'string' } },
       required: ['tag'],
-      additionalProperties: false,
     });
 
     const second = gen.generate([
