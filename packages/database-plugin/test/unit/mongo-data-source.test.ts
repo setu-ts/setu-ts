@@ -13,19 +13,19 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
+import type { IMongoSession } from '../../src/adapters/mongo/mongo-client-types.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
-import {
-  FakeMongoClient,
-  FakeMongoDatabase,
-  fakeObjectIdCtor,
-  FakeSession,
-  InsertedIdUndefinedCollection,
-} from '../fixtures/fake-mongo-client.ts';
+import { FakeMongoClient, fakeObjectIdCtor, FakeSession } from '../fixtures/fake-mongo-client.ts';
 
 /** A fresh client per test — the real driver hands back the same collection
  * instance per name, so a shared client would leak documents between tests. */
 function makeClient(): FakeMongoClient {
   return new FakeMongoClient();
+}
+
+/** Builds the normal ObjectId-aware data source the lazy production path uses. */
+function makeDataSource(client: FakeMongoClient = makeClient()) {
+  return createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
 }
 
 /** Builds a normalized query with one member overridden. */
@@ -42,7 +42,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
 
 describe('createMongoDataSource — the six IDataSource methods', () => {
   it('create composes the returned row from the input plus the generated _id', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     const row = await ds.create({ name: 'Bolt', size: 10 });
     expect(row).toEqual({ name: 'Bolt', size: 10, id: expect.any(String) });
     expect(Object.hasOwn(row, '_id')).toBe(false);
@@ -64,7 +64,7 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
   });
 
   it('findById maps the document back and returns null when missing', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     const created = await ds.create({ name: 'Bolt' });
     const found = await ds.findById(String(created.id));
     expect(found).toEqual({ name: 'Bolt', id: created.id });
@@ -73,26 +73,26 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
   });
 
   it('update returns the updated document directly (not a ModifyResult)', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     const created = await ds.create({ name: 'Bolt' });
     const updated = await ds.update(String(created.id), { name: 'Nut' });
     expect(updated).toEqual({ name: 'Nut', id: created.id });
   });
 
   it('update throws when no row has the given key', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     await expect(ds.update('missing', { name: 'x' })).rejects.toThrow(/no Widget row/);
   });
 
   it('delete reports true only when a row was removed', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     const created = await ds.create({ name: 'Bolt' });
     await expect(ds.delete(String(created.id))).resolves.toBe(true);
     await expect(ds.delete(String(created.id))).resolves.toBe(false);
   });
 
   it('count honours where and a filter', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     await ds.create({ name: 'Bolt', size: 10 });
     await ds.create({ name: 'Nut', size: 20 });
     await ds.create({ name: 'Washer', size: 30 });
@@ -100,7 +100,8 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
   });
 
   it('findAll translates where, filter, orderBy, offset, limit and select', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const client = makeClient();
+    const ds = makeDataSource(client);
     await ds.create({ name: 'Bolt', size: 10 });
     await ds.create({ name: 'Nut', size: 20 });
     await ds.create({ name: 'Washer', size: 30 });
@@ -112,10 +113,30 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
     }));
     expect(rows.map((r) => r.name)).toEqual(['Washer', 'Nut']);
     expect(Object.hasOwn(rows[0], 'id')).toBe(false);
+    const calls = client.databases.get('testdb')!.collection('Widget').calls;
+    const findOptions = calls.find((call) => call.method === 'find')!.args[1] as {
+      projection: Record<string, 0 | 1>;
+    };
+    // Mongo includes `_id` by default under an inclusion projection, so the
+    // adapter must explicitly exclude it when `id` was not selected.
+    expect(findOptions.projection).toEqual({ name: 1, _id: 0 });
+  });
+
+  it('maps a selected repository primary key to Mongo _id', async () => {
+    const client = makeClient();
+    const ds = makeDataSource(client);
+    const created = await ds.create({ name: 'Bolt' });
+    const rows = await ds.findAll(query({ select: ['id', 'name'] }));
+    expect(rows).toEqual([{ id: created.id, name: 'Bolt' }]);
+    const calls = client.databases.get('testdb')!.collection('Widget').calls;
+    const findOptions = calls.find((call) => call.method === 'find')!.args[1] as {
+      projection: Record<string, 0 | 1>;
+    };
+    expect(findOptions.projection).toEqual({ name: 1, _id: 1 });
   });
 
   it('findAll translates a contains comparison to a regex-escaped $regex', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     await ds.create({ name: '3.5mm jack' });
     await ds.create({ name: '315mm jack' });
     const rows = await ds.findAll(query({
@@ -126,7 +147,7 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
   });
 
   it('passes a session to every operation when one is supplied', async () => {
-    const session = {
+    const session: IMongoSession = {
       startTransaction: () => Promise.resolve(),
       commitTransaction: () => Promise.resolve(),
       abortTransaction: () => Promise.resolve(),
@@ -138,21 +159,36 @@ describe('createMongoDataSource — the six IDataSource methods', () => {
       'testdb',
       'Widget',
       undefined,
-      undefined,
-      session as never,
+      fakeObjectIdCtor,
+      session,
     );
-    await ds.create({ name: 'Bolt' });
-    const calls = (client.databases.get('testdb')?.collection('Widget').calls ?? []).map(
-      (c: { method: string }) => c.method,
-    );
-    expect(calls).toContain('insertOne');
+    const created = await ds.create({ name: 'Bolt' });
+    await ds.findAll(query());
+    await ds.findById(String(created.id));
+    await ds.update(String(created.id), { name: 'Nut' });
+    await ds.delete(String(created.id));
+    await ds.count({});
+    const calls = client.databases.get('testdb')!.collection('Widget').calls;
+    expect(calls.map((call) => call.method)).toEqual([
+      'insertOne',
+      'find',
+      'findOne',
+      'findOneAndUpdate',
+      'deleteOne',
+      'countDocuments',
+    ]);
+    const sessionOptions = calls.map((call) => {
+      const index = call.method === 'findOneAndUpdate' ? 2 : 1;
+      return call.args[index] as { session?: unknown };
+    });
+    expect(sessionOptions.every((operation) => operation.session === session)).toBe(true);
   });
 });
 
 describe('createMongoDataSource — write-shape edge branches', () => {
   it('create passes the generated _id through when insertOne returns an insertedId', async () => {
     const client = makeClient();
-    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined);
+    const ds = makeDataSource(client);
     const row = await ds.create({ name: 'Bolt' });
     expect(typeof row.id).toBe('string');
     // The stored document carries the string _id the lookup key is built from.
@@ -164,7 +200,7 @@ describe('createMongoDataSource — write-shape edge branches', () => {
 describe('MongoTransaction — commit, rollback and createDataSource', () => {
   it('createDataSource throws after the transaction is finalized', async () => {
     const client = new FakeMongoClient();
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     await ds.create({ name: 'Bolt' });
     const tx = client.startSession() as never;
     const { MongoTransaction } = await import('../../src/adapters/mongo/mongo-data-source.ts');
@@ -226,7 +262,7 @@ describe('MongoTransaction — commit, rollback and createDataSource', () => {
   });
 
   it('count honours both a where and a filter expression', async () => {
-    const ds = createMongoDataSource(makeClient(), 'testdb', 'Widget', undefined);
+    const ds = makeDataSource();
     await ds.create({ name: 'Bolt', size: 10 });
     await ds.create({ name: 'Nut', size: 20 });
     await ds.create({ name: 'Washer', size: 30 });
@@ -236,22 +272,5 @@ describe('MongoTransaction — commit, rollback and createDataSource', () => {
       { type: 'comparison', field: 'name', operator: 'contains', value: 'N' },
     );
     expect(count).toBe(1);
-  });
-
-  it('create does not set the primary key when insertOne returns no insertedId', async () => {
-    // A real driver always returns an insertedId, but the contract only sets the
-    // primary key when one is present, so the absent-insertedId branch is covered
-    // with a collection whose insertOne returns no id.
-    const col = new InsertedIdUndefinedCollection();
-    const db = new FakeMongoDatabase();
-    // deno-lint-ignore no-explicit-any -- test double: override db/collection to inject a custom collection
-    (db as { collection: (n: string) => any }).collection = () => col;
-    const client = new FakeMongoClient();
-    // deno-lint-ignore no-explicit-any -- test double: override client/db to inject a custom db
-    (client as { db: (n: string) => any }).db = () => db;
-    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined);
-    const row = await ds.create({ name: 'Bolt' });
-    expect(row).toEqual({ name: 'Bolt' });
-    expect(Object.hasOwn(row, 'id')).toBe(false);
   });
 });

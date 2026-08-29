@@ -9,7 +9,7 @@
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
-import type { IMongoClient } from '../adapters/mongo/mongo-client.ts';
+import type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
 import type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
 // Re-export query option types so consumers don't need internal paths.
@@ -228,16 +228,11 @@ export interface IDatabaseService {
 export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'mongodb' | 'custom';
 
 // Re-export the Mongo structural types the `'mongodb'` arm carries, so an
-// application annotating its configuration or implementing the `'custom'` arm
-// reaches them from the package barrel. The client/database/object-id structural
-// types live on the inject-or-lazy seam; the entity mapping is the two-layer
-// public shape.
-export type {
-  IMongoClient,
-  IMongoDatabase,
-  IMongoObjectId,
-  IMongoObjectIdCtor,
-} from '../adapters/mongo/mongo-client.ts';
+// application annotating its configuration reaches them from the package
+// barrel. The client and ObjectId constructor are the only parts of the
+// inject-or-lazy seam application configuration needs; the remaining driver
+// shapes stay internal.
+export type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
 export type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
 /**
@@ -529,7 +524,7 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
  * of a `connect()` throw — the same guarantee the `'custom'` arm gives
  * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * `client` is an already-constructed structural `IMongoClient`, and absent it
- * the adapter performs a literal `import('npm:mongodb@^7')` at connect time.
+ * the adapter performs a literal `import('npm:mongodb@^6.21.0')` at connect time.
  *
  * @example
  * ```typescript
@@ -569,13 +564,25 @@ export interface MongoAdapterOptions {
   /**
    * An already-constructed `IMongoClient`.
    *
-   * When present, the lazy `import('npm:mongodb@^7')` never runs — the seam
+   * When present, the lazy `import('npm:mongodb@^6.21.0')` never runs — the seam
    * that keeps the branching unit-testable. Omit it to let the adapter load
    * the driver lazily from {@linkcode url}.
    *
    * @since 0.1.0
    */
   readonly client?: IMongoClient;
+
+  /**
+   * The driver's `ObjectId` constructor when {@linkcode client} is injected.
+   *
+   * A `MongoClient` instance does not expose the driver's `ObjectId` class.
+   * Supplying it preserves the adapter's `_id` conversion for injected clients
+   * while still avoiding a lazy driver import. It is not needed on the lazy
+   * path because that import supplies the constructor.
+   *
+   * @since 0.1.0
+   */
+  readonly objectIdCtor?: IMongoObjectIdCtor;
 
   /**
    * The database the collections live in.

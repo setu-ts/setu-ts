@@ -57,22 +57,23 @@ Without `distributedLock`, a process-local `MemoryLock` is used — fine for a s
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `SchedulerPlugin` | function |
-| `SchedulerUnavailableError` | class |
-| `DistributedLockOptions` | interface |
-| `IDistributedLock` | interface |
-| `IRedisLockClient` | interface |
-| `IScheduler` | interface |
-| `RetryOptions` | interface |
-| `ScheduledJob` | interface |
-| `ScheduleOptions` | interface |
-| `SchedulerPluginOptions` | interface |
-| `SchedulerBackoff` | type |
-| `SchedulerJobHandler` | type |
+| Export                      | Kind      |
+| --------------------------- | --------- |
+| `SchedulerPlugin`           | function  |
+| `SchedulerUnavailableError` | class     |
+| `DistributedLockOptions`    | interface |
+| `IDistributedLock`          | interface |
+| `IRedisLockClient`          | interface |
+| `IScheduler`                | interface |
+| `RetryOptions`              | interface |
+| `ScheduledJob`              | interface |
+| `ScheduleOptions`           | interface |
+| `SchedulerPluginOptions`    | interface |
+| `SchedulerBackoff`          | type      |
+| `SchedulerJobHandler`       | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

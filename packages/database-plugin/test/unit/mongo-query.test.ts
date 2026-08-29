@@ -76,7 +76,9 @@ describe('translateQuery — every NormalizedQuery member maps natively', () => 
       offset: 20,
       select: ['score'],
     } as NormalizedQuery);
-    expect(filter).toEqual({ active: true, score: { $gte: 80 } });
+    expect(filter).toEqual({
+      $and: [{ active: true }, { score: { $gte: 80 } }],
+    });
     expect(options).toEqual({
       sort: { score: 'desc' },
       skip: 20,
@@ -96,7 +98,7 @@ describe('translateFilter — and/or and nested comparisons', () => {
       ],
     };
     expect(translateFilter(expression)).toEqual({
-      $and: [{}, { b: { $gt: 2 } }],
+      $and: [{ a: { $eq: 1 } }, { b: { $gt: 2 } }],
     });
   });
 
@@ -130,8 +132,8 @@ describe('translateComparison — every operator maps', () => {
     value,
   } as FilterComparison);
 
-  it('eq returns undefined — equality is carried by where', () => {
-    expect(translateComparison(comparison('eq', 1))).toBeUndefined();
+  it('eq maps to $eq so a filter-only equality remains a predicate', () => {
+    expect(translateComparison(comparison('eq', 1))).toEqual({ $eq: 1 });
   });
 
   it('contains → $regex with an escaped value and empty $options', () => {
@@ -169,7 +171,16 @@ describe('translateCountFilter — where + optional filter', () => {
       { active: true },
       { type: 'comparison', field: 'age', operator: 'gte', value: 18 },
     );
-    expect(doc).toEqual({ active: true, age: { $gte: 18 } });
+    expect(doc).toEqual({
+      $and: [{ active: true }, { age: { $gte: 18 } }],
+    });
+  });
+
+  it('keeps where and an equality filter on the same field conjunctive', () => {
+    expect(translateCountFilter(
+      { score: 10 },
+      { type: 'comparison', field: 'score', operator: 'gt', value: 5 },
+    )).toEqual({ $and: [{ score: 10 }, { score: { $gt: 5 } }] });
   });
 
   it('returns just where when no filter is supplied', () => {

@@ -13,7 +13,12 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MongoAdapter, parseDatabaseFromUrl } from '../../src/adapters/mongo/mongo-adapter.ts';
 import { MongoTransactionUnavailableError } from '../../src/errors.ts';
-import { FakeMongoClient, FakeSession, FakeSessionClient } from '../fixtures/fake-mongo-client.ts';
+import {
+  FakeMongoClient,
+  fakeObjectIdCtor,
+  FakeSession,
+  FakeSessionClient,
+} from '../fixtures/fake-mongo-client.ts';
 
 describe('MongoAdapter — lifecycle against an injected client', () => {
   it('is not ready before connect and ready after', async () => {
@@ -78,6 +83,22 @@ describe('MongoAdapter — lifecycle against an injected client', () => {
     expect(client.databases.has('url-db')).toBe(false);
   });
 
+  it('uses the supplied ObjectId constructor with an injected client', async () => {
+    const client = new FakeMongoClient();
+    const adapter = new MongoAdapter({
+      url: 'mongodb://localhost:27017/db',
+      client,
+      objectIdCtor: fakeObjectIdCtor,
+    });
+    await adapter.connect();
+    const source = adapter.createDataSource('Widget');
+    await source.create({ id: '507f1f77bcf86cd799439011', name: 'Bolt' });
+    await expect(source.findById('507f1f77bcf86cd799439011')).resolves.toEqual({
+      id: '507f1f77bcf86cd799439011',
+      name: 'Bolt',
+    });
+  });
+
   it('disconnects cleanly when it was never connected', async () => {
     const adapter = new MongoAdapter({ url: 'mongodb://localhost:27017/db' });
     await adapter.disconnect();
@@ -92,13 +113,15 @@ describe('MongoAdapter — lifecycle against an injected client', () => {
 });
 
 describe('MongoAdapter — lazy connect (guarded on a live server)', () => {
-  // The lazy path performs the real `import('npm:mongodb@^7')` and then
+  // The lazy path performs the real `import('npm:mongodb@^6.21.0')` and then
   // `client.connect()`. Against no server the connection is refused, so this
   // guards the inject-or-lazy branch of connect() without a fixture: a live
   // server is required to drive the success branch, and the absence of one
   // drives the failure branch.
   it('lazy connect() rejects when no server is reachable', async () => {
-    const adapter = new MongoAdapter({ url: 'mongodb://127.0.0.1:1/db' });
+    const adapter = new MongoAdapter({
+      url: 'mongodb://127.0.0.1:1/db?serverSelectionTimeoutMS=10&connectTimeoutMS=10',
+    });
     await expect(adapter.connect()).rejects.toThrow();
     expect(adapter.isReady()).toBe(false);
   });
@@ -128,12 +151,18 @@ describe('MongoAdapter — transactions', () => {
   it('opens a session and returns a transaction on a replica-capable client', async () => {
     const session = new FakeSession();
     const client = new FakeSessionClient(session);
-    const adapter = new MongoAdapter({ url: 'mongodb://localhost:27017/db', client });
+    const adapter = new MongoAdapter({
+      url: 'mongodb://localhost:27017/db',
+      client,
+      objectIdCtor: fakeObjectIdCtor,
+    });
     await adapter.connect();
     const tx = await adapter.beginTransaction();
     expect(session.started).toBe(true);
     expect(session.calls).toContain('startTransaction');
-    await tx.createDataSource('Widget').create({ id: 'w1' });
+    await tx.createDataSource('Widget').create({ id: '507f1f77bcf86cd799439011' });
+    await expect(tx.createDataSource('Widget').findById('507f1f77bcf86cd799439011')).resolves
+      .toEqual({ id: '507f1f77bcf86cd799439011' });
     await tx.commit();
     expect(session.calls).toContain('commitTransaction');
     expect(session.calls).toContain('endSession');

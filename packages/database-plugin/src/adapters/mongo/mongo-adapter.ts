@@ -9,7 +9,7 @@
  *
  * The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * {@linkcode MongoAdapterOptions.client} (preferred — the application
- * constructs and configures it) or a lazy literal `import('npm:mongodb@^7')`
+ * constructs and configures it) or a lazy literal `import('npm:mongodb@^6.21.0')`
  * at {@linkcode connect} time. Transactions use a driver session and refuse
  * late — at {@linkcode beginTransaction}, never at {@linkcode connect} — so a
  * standalone `mongod` that never opens one is still a valid deployment.
@@ -77,7 +77,7 @@ export class MongoAdapter implements IDatabaseAdapter {
     if (this.#client !== null) return;
     // Resolve the loader — injected (no import) or the literal lazy import.
     this.#loader = this.#options.client !== undefined
-      ? createInjectedClientLoader(this.#options.client)
+      ? createInjectedClientLoader(this.#options.client, this.#options.objectIdCtor)
       : await createLazyClientLoader(this.#options.url as string);
     this.#client = await this.#loader.createClient(this.#options.url as string);
     await this.#client.connect();
@@ -90,7 +90,7 @@ export class MongoAdapter implements IDatabaseAdapter {
   /** @inheritdoc */
   async disconnect(): Promise<void> {
     if (this.#client !== null) {
-      await this.#client.disconnect();
+      await this.#client.close();
       this.#client = null;
     }
     this.#connected = false;
@@ -133,7 +133,13 @@ export class MongoAdapter implements IDatabaseAdapter {
           (error instanceof Error ? error.message : String(error)),
       );
     }
-    return new MongoTransaction(session, client, this.#resolveDatabaseName(), this.#mapping);
+    return new MongoTransaction(
+      session,
+      client,
+      this.#resolveDatabaseName(),
+      this.#mapping,
+      this.#loader?.objectIdCtor,
+    );
   }
 
   /**

@@ -1,7 +1,8 @@
 # Milestone 78 — MongoDB backend (`@setu-ts/database-plugin`)
 
-> **Status:** Planning. Branch: `feat/m78-document-database-backends`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Branch: `feat/m78-document-database-backends`. `main` is
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR. The implementation and verification evidence are recorded below.
 
 ## 0. Objective & scope
 
@@ -49,20 +50,20 @@ this milestone an adapter rather than a documented configuration.
 
 ### 1.1 External facts — measured against the real packages, not remembered
 
-| Fact                                                                                                                                                      | How established                                                                                                          | Consequence for this plan                                                                          |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| **Prisma v7 cannot connect to MongoDB.** `PrismaClientOptions` is a two-arm union: `{ accelerateUrl }` or `{ adapter: runtime.SqlDriverAdapterFactory }`. | Read from the generated `generated/prisma/internal/prismaNamespace.ts:673-716` after a real `prisma generate` at 7.10.0. | The Prisma route is closed; this milestone is an adapter.                                          |
-| `@prisma/adapter-mongodb` **does not exist** at any tag (404). The eight adapters at 7.10.0 are all SQL.                                                  | `npm view` per adapter name.                                                                                             | No driver-adapter route exists.                                                                    |
-| `prisma generate` **succeeds** for `provider = "mongodb"` — failure appears only at client construction.                                                  | Ran it; client emitted to `./generated/prisma`.                                                                          | The doc correction in C1 must say the failure is late, or a reader will conclude Mongo works.      |
-| Prisma states MongoDB "did not make the Prisma 7 release" and points users at **v6.19**; support returns in Prisma 8.                                     | Prisma upgrade guide and v7 changelog.                                                                                   | Pinning v6 contradicts M66's v7 requirement; waiting on v8 is not a plan. Recorded in C2.          |
-| `mongodb` driver: `insertOne` → `{ acknowledged, insertedId }` with `insertedId` an `ObjectId`.                                                           | Real driver against the running replica set.                                                                             | `create()` composes the returned document rather than re-reading.                                  |
-| **`findOne({_id: "<24-hex string>"})` MISSES** where `_id` is an `ObjectId`.                                                                              | Same probe — conversion is mandatory, not defensive.                                                                     | Drives §3.4.                                                                                       |
-| `find(filter, { sort, skip, limit, projection })` serves `orderBy`/`offset`/`limit`/`select` natively.                                                    | Same probe: sorted desc, skipped 1, limited 2, projected 2 fields.                                                       | All six `NormalizedQuery` members map; nothing is emulated in JavaScript.                          |
-| **`findOneAndUpdate` returns the document directly**, not `ModifyResult{value}`.                                                                          | Same probe on driver 6.21.0 AND 7.6.0.                                                                                   | `update()` reads the result directly; the older `.value` shape would be `undefined`.               |
-| `deleteOne` → `{ deletedCount }`; transactions via `startSession()` roll back correctly.                                                                  | Same probe; abort left 0 rows.                                                                                           | `delete(): Promise<boolean>` is `deletedCount > 0`; §3.6 uses sessions.                            |
-| `ObjectId.isValid` accepts **only** 24-hex — `'abcdefghijkl'` (12 chars) is `false`.                                                                      | `deno eval` against the real driver.                                                                                     | The conversion rule in §3.4 is a clean test, not a heuristic with a 12-byte edge case.             |
-| Driver behaviour is **identical on `mongodb@6.21.0` and `@7.6.0`** across all nine probed shapes.                                                         | Ran the same probe under both majors.                                                                                    | Pin `npm:mongodb@^7` for the lazy import; an application injecting a v6 client is still supported. |
-| **Transactions require a replica set.**                                                                                                                   | The probe's replica set is `rs0`; a standalone `mongod` rejects `startTransaction`.                                      | §3.6 refuses at `beginTransaction()`, never at `connect()`.                                        |
+| Fact                                                                                                                                                                  | How established                                                                                                          | Consequence for this plan                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| **Prisma v7 cannot connect to MongoDB.** `PrismaClientOptions` is a two-arm union: `{ accelerateUrl }` or `{ adapter: runtime.SqlDriverAdapterFactory }`.             | Read from the generated `generated/prisma/internal/prismaNamespace.ts:673-716` after a real `prisma generate` at 7.10.0. | The Prisma route is closed; this milestone is an adapter.                                                        |
+| `@prisma/adapter-mongodb` **does not exist** at any tag (404). The eight adapters at 7.10.0 are all SQL.                                                              | `npm view` per adapter name.                                                                                             | No driver-adapter route exists.                                                                                  |
+| `prisma generate` **succeeds** for `provider = "mongodb"` — failure appears only at client construction.                                                              | Ran it; client emitted to `./generated/prisma`.                                                                          | The doc correction in C1 must say the failure is late, or a reader will conclude Mongo works.                    |
+| Prisma states MongoDB "did not make the Prisma 7 release" and points users at **v6.19**; support returns in Prisma 8.                                                 | Prisma upgrade guide and v7 changelog.                                                                                   | Pinning v6 contradicts M66's v7 requirement; waiting on v8 is not a plan. Recorded in C2.                        |
+| `mongodb` driver: `insertOne` → `{ acknowledged, insertedId }` with `insertedId` an `ObjectId`.                                                                       | Real driver against the running replica set.                                                                             | `create()` composes the returned document rather than re-reading.                                                |
+| **`findOne({_id: "<24-hex string>"})` MISSES** where `_id` is an `ObjectId`.                                                                                          | Same probe — conversion is mandatory, not defensive.                                                                     | Drives §3.4.                                                                                                     |
+| `find(filter, { sort, skip, limit, projection })` serves `orderBy`/`offset`/`limit`/`select` natively.                                                                | Same probe: sorted desc, skipped 1, limited 2, projected 2 fields.                                                       | All six `NormalizedQuery` members map; nothing is emulated in JavaScript.                                        |
+| **`findOneAndUpdate` returns the document directly**, not `ModifyResult{value}`.                                                                                      | Same probe on driver 6.21.0 AND 7.6.0.                                                                                   | `update()` reads the result directly; the older `.value` shape would be `undefined`.                             |
+| `deleteOne` → `{ deletedCount }`; transactions via `startSession()` roll back correctly.                                                                              | Same probe; abort left 0 rows.                                                                                           | `delete(): Promise<boolean>` is `deletedCount > 0`; §3.6 uses sessions.                                          |
+| `ObjectId.isValid` accepts **only** 24-hex — `'abcdefghijkl'` (12 chars) is `false`.                                                                                  | `deno eval` against the real driver.                                                                                     | The conversion rule in §3.4 is a clean test, not a heuristic with a 12-byte edge case.                           |
+| Driver CRUD behaviour is **identical on `mongodb@6.21.0` and `@7.6.0`** across all nine probed shapes, but v7.6.0 sends invalid handshake metadata under `deno test`. | Reproduced against the real Mongo 8 service; v6.21.0 connects and runs under the project's test runner.                  | Pin `npm:mongodb@^6.21.0` for the lazy import; injected clients from either major remain supported structurally. |
+| **Transactions require a replica set.**                                                                                                                               | The probe's replica set is `rs0`; a standalone `mongod` rejects `startTransaction`.                                      | §3.6 refuses at `beginTransaction()`, never at `connect()`.                                                      |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -82,20 +83,21 @@ this milestone an adapter rather than a documented configuration.
   are pinning Prisma v6.19, which contradicts M66's v7 requirement and the package's own documented
   setup, or waiting for Prisma 8, which is a different product with a different CLI. A native driver
   also removes the Prisma Accelerate dependency the v7 union would otherwise imply.
-- **Test home:** `test/integration/real-mongo-adapter.test.ts` drives the adapter against a real
-  replica set; no Prisma package appears in the dependency graph.
+- **Test home:** `test/integration/real-mongo-adapter.test.ts` drives CRUD through the adapter
+  against the CI Mongo service; no Prisma package appears in the dependency graph.
 
 ### 3.2 Arm shape and client seam
 
 - **Decision:** a `'mongodb'` member of the discriminated union with
   `options.mongo?: MongoAdapterOptions`, and the client supplied **inject-or-lazy** (§12.2):
   `MongoAdapterOptions.client` accepts a structural `IMongoClient`, and absent it the adapter lazily
-  performs a literal `import('npm:mongodb@^7')` and constructs one from `MongoAdapterOptions.url`.
+  performs a literal `import('npm:mongodb@^6.21.0')` and constructs one from
+  `MongoAdapterOptions.url`.
 - **Why:** the discriminated union makes a missing `url`-and-`client` pair a compile error rather
   than a startup throw; the literal specifier satisfies M70e's recurrence gate (a computed specifier
   is refused by `scripts/npm-specifier-audit.ts`).
-- **Test home:** `test/unit/mongo-adapter-options.test.ts` for the arm's type behaviour;
-  `test/integration/real-import.test.ts` for the guarded real import.
+- **Test home:** `test/unit/barrel-exports.test.ts` checks the arm's public type behaviour, and
+  `test/unit/mongo-client-seam.test.ts` covers the guarded real lazy import.
 
 ### 3.3 Identity mapping — `_id` ↔ the configured primary key
 
@@ -119,7 +121,7 @@ this milestone an adapter rather than a documented configuration.
   rule is precise. The genuinely ambiguous case is a collection whose `_id` values are 24-hex
   **strings**; no runtime test can distinguish it, which is why the override exists rather than
   being guessed.
-- **Test home:** `test/unit/mongo-object-id.test.ts` covers both automatic branches and both forced
+- **Test home:** `test/unit/mongo-mapping.test.ts` covers both automatic branches and both forced
   ones, with the ambiguous-collection case named.
 
 ### 3.5 `rawQuery` — refused by name
@@ -144,8 +146,10 @@ this milestone an adapter rather than a documented configuration.
   deployment for an application that never opens one. Probing at `connect()` would cost a round trip
   on every boot and would refuse a working configuration — the M52 lesson that a health probe must
   not perform binding I/O, applied to startup.
-- **Test home:** `test/integration/real-mongo-transaction.test.ts` commits and rolls back against
-  the real replica set; the refusal path is unit-tested through the injected client seam.
+- **Test home:** `test/unit/mongo-adapter.test.ts` covers the session contract, commit/rollback and
+  the named non-replica-set refusal through the injected client seam. The CI Mongo service is
+  intentionally standalone, so its real-driver integration suite exercises CRUD rather than a
+  transaction a standalone deployment cannot support.
 
 ### 3.7 `contains` — regex-escaped, which is the inverse of the SQL case
 
@@ -156,7 +160,7 @@ this milestone an adapter rather than a documented configuration.
   so an unescaped search for `3.5` matches `315`. Missing this would be the same class of wrong
   answer M70b's X12-1 fixed from the other direction, and it is invisible to any test whose fixture
   has no metacharacter in it.
-- **Test home:** `test/unit/mongo-filter.test.ts` includes a value containing `.` and `*` with a
+- **Test home:** `test/unit/mongo-query.test.ts` includes a value containing `.` and `*` with a
   negative control row that an unescaped pattern would also match. Case sensitivity follows the
   collection's collation and is documented, not overridden — the M68 precedent.
 
@@ -169,7 +173,7 @@ this milestone an adapter rather than a documented configuration.
 - **Why:** M68 had to decide both cases for SQL and they do not carry over unchanged — SQL's `IN`
   never matches `NULL` whereas Mongo's `$in: [null]` also matches absent fields. Leaving it
   undecided is how an adapter silently disagrees with its siblings.
-- **Test home:** `test/unit/mongo-filter.test.ts`, plus a row in the existing
+- **Test home:** `test/unit/mongo-query.test.ts`, plus a row in the existing
   `filter-conformance.test.ts` so every adapter is asserted to agree or refuse.
 
 ### 3.9 Lifecycle
@@ -182,30 +186,32 @@ this milestone an adapter rather than a documented configuration.
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                    | Kind      | Consumer / real code path that READS it                                                                                             |
-| ---------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `MongoAdapter`                     | class     | `createAdapter`'s new `case 'mongodb'` in `plugin/database-plugin.ts`; also constructible by an application for the `'custom'` arm. |
-| `MongoAdapterOptions`              | type      | The `'mongodb'` union arm; read by `MongoAdapter`'s constructor and by application code annotating its configuration.               |
-| `MongoEntityMapping`               | type      | `MongoAdapterOptions.collections` values; consumed by the internal target resolver.                                                 |
-| `IMongoClient`                     | interface | The injection seam in `MongoAdapterOptions.client`; implemented structurally by the real driver and by the test double.             |
-| `UnsupportedRawQueryError`         | class     | Thrown by `MongoAdapter.rawQuery`; consumers `instanceof` it. Exported for the same reason `UnsupportedFilterOperatorError` is.     |
-| `MongoTransactionUnavailableError` | class     | Thrown by `MongoAdapter.beginTransaction` on a non-replica-set deployment; distinguishes a configuration fault from a driver fault. |
+| Exported symbol                    | Kind      | Consumer / real code path that READS it                                                                                               |
+| ---------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `MongoAdapter`                     | class     | `createAdapter`'s new `case 'mongodb'` in `plugin/database-plugin.ts`; also constructible by an application for the `'custom'` arm.   |
+| `MongoAdapterOptions`              | type      | The `'mongodb'` union arm; read by `MongoAdapter`'s constructor and by application code annotating its configuration.                 |
+| `MongoEntityMapping`               | type      | `MongoAdapterOptions.collections` values; consumed by the internal target resolver.                                                   |
+| `IMongoClient`                     | interface | The injection seam in `MongoAdapterOptions.client`; implemented structurally by the real driver and by the test double.               |
+| `IMongoObjectIdCtor`               | interface | The optional injected-client companion in `MongoAdapterOptions.objectIdCtor`; preserves native ObjectId conversion without an import. |
+| `UnsupportedRawQueryError`         | class     | Thrown by `MongoAdapter.rawQuery`; consumers `instanceof` it. Exported for the same reason `UnsupportedFilterOperatorError` is.       |
+| `MongoTransactionUnavailableError` | class     | Thrown by `MongoAdapter.beginTransaction` on a non-replica-set deployment; distinguishes a configuration fault from a driver fault.   |
 
 ### 4.1 Options — every option names its consumer
 
-| Option                            | Consumer                             | Behavior (per implementation)                                                                                                                                                    |
-| --------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MongoAdapterOptions.url`         | `MongoAdapter.connect` lazy path     | Connection string used to construct a client when none is injected. Required in the union arm unless `client` is supplied.                                                       |
-| `MongoAdapterOptions.client`      | `MongoAdapter.connect`               | An already-constructed `IMongoClient`. When present the lazy `import()` never runs — the seam that keeps the branching unit-testable.                                            |
-| `MongoAdapterOptions.database`    | `MongoAdapter`'s collection resolver | Database name. Absent, the one encoded in `url` is used; absent from both, `connect()` fails at startup naming the option.                                                       |
-| `MongoAdapterOptions.collections` | internal target resolver (§3.3)      | Per-entity `{ collection?, primaryKey?, idType? }`. An unmapped entity uses the entity name as the collection and `'id'` as the primary key — zero-config default, the D1 shape. |
-| `MongoEntityMapping.idType`       | §3.4 conversion                      | `'objectId'` forces conversion, `'raw'` forbids it, absent uses `ObjectId.isValid`.                                                                                              |
+| Option                             | Consumer                             | Behavior (per implementation)                                                                                                                                                    |
+| ---------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MongoAdapterOptions.url`          | `MongoAdapter.connect` lazy path     | Connection string used to construct a client when none is injected. Required in the union arm unless `client` is supplied.                                                       |
+| `MongoAdapterOptions.client`       | `MongoAdapter.connect`               | An already-constructed `IMongoClient`. When present the lazy `import()` never runs — the seam that keeps the branching unit-testable.                                            |
+| `MongoAdapterOptions.objectIdCtor` | `MongoAdapter.connect`               | The injected client's `ObjectId` constructor. It preserves automatic 24-hex conversion without importing the driver; omitted only when the collection uses raw ids.              |
+| `MongoAdapterOptions.database`     | `MongoAdapter`'s collection resolver | Database name. Absent, the one encoded in `url` is used; absent from both, `connect()` fails at startup naming the option.                                                       |
+| `MongoAdapterOptions.collections`  | internal target resolver (§3.3)      | Per-entity `{ collection?, primaryKey?, idType? }`. An unmapped entity uses the entity name as the collection and `'id'` as the primary key — zero-config default, the D1 shape. |
+| `MongoEntityMapping.idType`        | §3.4 conversion                      | `'objectId'` forces conversion, `'raw'` forbids it, absent uses `ObjectId.isValid`.                                                                                              |
 
 ## 5. Implementation files
 
 | File                                      | Purpose                                                                                                                        |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `src/index.ts`                            | Barrel: adds the six symbols in §4.                                                                                            |
+| `src/index.ts`                            | Barrel: adds the seven symbols in §4.                                                                                          |
 | `src/adapters/mongo/mongo-adapter.ts`     | `MongoAdapter` — lifecycle, `createDataSource`, `beginTransaction`, `rawQuery` refusal.                                        |
 | `src/adapters/mongo/mongo-data-source.ts` | `IDataSource` implementation: the six methods over one collection.                                                             |
 | `src/adapters/mongo/mongo-query.ts`       | Pure translation of `NormalizedQuery` → driver `filter` + `find` options; `FilterExpression` → Mongo operators; `escapeRegex`. |
@@ -217,20 +223,16 @@ this milestone an adapter rather than a documented configuration.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                | src covered                   | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                            |
-| -------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/unit/mongo-adapter.test.ts`                        | `mongo-adapter.ts`            | Lifecycle against an injected `IMongoClient`; `rawQuery` **rejects** with `UnsupportedRawQueryError` and does not throw synchronously; `isReady()` performs no I/O. Calls type-check against `IDatabaseAdapter`.                                                                                                                                            |
-| `test/unit/mongo-data-source.test.ts`                    | `mongo-data-source.ts`        | All six `IDataSource` methods against a fake client that honours the real driver's shapes — `insertOne` → `{acknowledged,insertedId}`, `findOneAndUpdate` → the document directly, `deleteOne` → `{deletedCount}`. A double that returns `ModifyResult{value}` would be a contract-violating fixture (the recurring root cause) and is explicitly not used. |
-| `test/unit/mongo-query.test.ts`                          | `mongo-query.ts`              | Every `NormalizedQuery` member; every `FilterComparison` operator; `and`/`or`; empty `in`; `in` containing `null`; `limit: -1` producing no limit.                                                                                                                                                                                                          |
-| `test/unit/mongo-filter.test.ts`                         | `mongo-query.ts` (regex half) | `contains` escapes `.`, `*`, `+`, `?`, `[`, `]`, `\`; includes the negative-control row an unescaped pattern would wrongly match (§3.7).                                                                                                                                                                                                                    |
-| `test/unit/mongo-mapping.test.ts`                        | `mongo-mapping.ts`            | `_id` → `id` on read and back on write; `_id` absent from returned records; per-entity `collection`/`primaryKey` overrides; unmapped-entity defaults.                                                                                                                                                                                                       |
-| `test/unit/mongo-object-id.test.ts`                      | `mongo-mapping.ts` (id half)  | 24-hex converts; non-hex does not; `idType: 'raw'` forbids conversion of a 24-hex string; `idType: 'objectId'` forces it and reports a usable error for an invalid value.                                                                                                                                                                                   |
-| `test/unit/mongo-client-seam.test.ts`                    | `mongo-client.ts`             | `adaptMongoModule` against a fake module; the injected-vs-lazy branching, so the branch around the import is covered without performing it.                                                                                                                                                                                                                 |
-| `test/integration/real-import.test.ts` (extended)        | `mongo-client.ts`             | Guarded REAL `import('npm:mongodb@^7')` constructing a client — the one test that proves the lazy path is not a shim.                                                                                                                                                                                                                                       |
-| `test/integration/real-mongo-adapter.test.ts`            | all mongo `src`               | Guarded on `MONGODB_URI`. Drives the adapter through a real replica set: create → **read back** → update → count → filtered `findAll` with sort/skip/limit/select → delete. Read-back is mandatory per the M10 lesson.                                                                                                                                      |
-| `test/integration/real-mongo-transaction.test.ts`        | `mongo-adapter.ts`            | Commit persists; rollback leaves nothing; the non-replica-set refusal is asserted through the seam.                                                                                                                                                                                                                                                         |
-| `test/integration/filter-conformance.test.ts` (extended) | `mongo-query.ts`              | Mongo joins the existing cross-adapter conformance table — every adapter agrees or refuses by name.                                                                                                                                                                                                                                                         |
-| `test/unit/barrel-exports.test.ts` (extended)            | `src/index.ts`                | The six new symbols are exported; the internal target type is NOT (the M56 defect class).                                                                                                                                                                                                                                                                   |
+| Test file                                                | src covered            | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                            |
+| -------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/unit/mongo-adapter.test.ts`                        | `mongo-adapter.ts`     | Lifecycle against an injected `IMongoClient`; `rawQuery` **rejects** with `UnsupportedRawQueryError` and does not throw synchronously; `isReady()` performs no I/O. Calls type-check against `IDatabaseAdapter`.                                                                                                                                            |
+| `test/unit/mongo-data-source.test.ts`                    | `mongo-data-source.ts` | All six `IDataSource` methods against a fake client that honours the real driver's shapes — `insertOne` → `{acknowledged,insertedId}`, `findOneAndUpdate` → the document directly, `deleteOne` → `{deletedCount}`. A double that returns `ModifyResult{value}` would be a contract-violating fixture (the recurring root cause) and is explicitly not used. |
+| `test/unit/mongo-query.test.ts`                          | `mongo-query.ts`       | Every `NormalizedQuery` member and `FilterComparison` operator; `and`/`or`; equality conjunction; escaped `contains`; empty `in`; `in` containing `null`; `limit: -1` producing no limit.                                                                                                                                                                   |
+| `test/unit/mongo-mapping.test.ts`                        | `mongo-mapping.ts`     | `_id` → `id` on read and back on write; `_id` absent from returned records; per-entity `collection`/`primaryKey` overrides; automatic and forced ObjectId branches; unmapped-entity defaults.                                                                                                                                                               |
+| `test/unit/mongo-client-seam.test.ts`                    | `mongo-client.ts`      | `adaptMongoModule` against a fake module; injected-vs-lazy branching; and the guarded real lazy import.                                                                                                                                                                                                                                                     |
+| `test/integration/real-mongo-adapter.test.ts`            | all Mongo `src`        | Guarded real `import('npm:mongodb@^6.21.0')` plus create → read-back → update → count → projection → delete against the standalone CI Mongo service. Read-back is mandatory per the M10 lesson.                                                                                                                                                             |
+| `test/integration/filter-conformance.test.ts` (extended) | `mongo-query.ts`       | Mongo joins the existing cross-adapter conformance table — every adapter agrees or refuses by name.                                                                                                                                                                                                                                                         |
+| `test/unit/barrel-exports.test.ts` (extended)            | `src/index.ts`         | The seven new symbols are exported; internal helpers and the resolved target type are NOT (the M56 defect class).                                                                                                                                                                                                                                           |
 
 ## 7. Verification gates
 
@@ -269,7 +271,8 @@ rule that a guarded suite which can skip in CI is a guarded suite that will.
 - **Prisma 8 may restore MongoDB**, making a second Mongo route exist. Mitigation: nothing here
   blocks that — the `'mongodb'` adapter arm and the `PrismaSqlProvider` `'mongodb'` provider string
   are independent, and C1's note names which is which.
-- **Driver major drift**: `npm:mongodb@^7` is pinned while an application may inject a v6 client.
+- **Driver major drift**: `npm:mongodb@^6.21.0` is pinned because v7.6.0 is incompatible with
+  `deno test`; applications may inject either compatible driver major through the structural seam.
   Mitigation: measured identical across both majors on every shape used (§1.1); the injected path is
   structural, so it does not care.
 

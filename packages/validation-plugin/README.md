@@ -77,31 +77,32 @@ identity and behaviour are unchanged, and removing it would change nothing this 
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `createSanitizer` | function |
-| `createValidationMiddleware` | function |
-| `defaultFormatter` | function |
-| `nestjsFormatter` | function |
-| `resolveFormatter` | function |
-| `rfc9457Formatter` | function |
-| `sanitize` | function |
-| `validateBody` | function |
-| `validateCookies` | function |
-| `validateHeaders` | function |
-| `validateParams` | function |
-| `validateQuery` | function |
-| `ValidationPlugin` | function |
-| `ValidationService` | class |
-| `rfc7807Formatter` | const |
-| `FormattedError` | interface |
-| `FormatValidationErrors` | interface |
-| `SanitizationRules` | interface |
-| `ValidationPluginOptions` | interface |
-| `ErrorFormat` | type |
-| `ValidationErrorFormatter` | type |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `createSanitizer`            | function  |
+| `createValidationMiddleware` | function  |
+| `defaultFormatter`           | function  |
+| `nestjsFormatter`            | function  |
+| `resolveFormatter`           | function  |
+| `rfc9457Formatter`           | function  |
+| `sanitize`                   | function  |
+| `validateBody`               | function  |
+| `validateCookies`            | function  |
+| `validateHeaders`            | function  |
+| `validateParams`             | function  |
+| `validateQuery`              | function  |
+| `ValidationPlugin`           | function  |
+| `ValidationService`          | class     |
+| `rfc7807Formatter`           | const     |
+| `FormattedError`             | interface |
+| `FormatValidationErrors`     | interface |
+| `SanitizationRules`          | interface |
+| `ValidationPluginOptions`    | interface |
+| `ErrorFormat`                | type      |
+| `ValidationErrorFormatter`   | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

@@ -81,36 +81,37 @@ problem type identified by `https://setu-ts.dev/errors/validation` — the same 
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `badRequest` | function |
-| `conflict` | function |
-| `defaultFormatter` | function |
-| `errorHandler` | function |
-| `forbidden` | function |
-| `internalServerError` | function |
-| `notFound` | function |
-| `notImplemented` | function |
-| `rfc7807Formatter` | function |
-| `rfc9457Formatter` | function |
-| `selectFormatter` | function |
-| `serviceUnavailable` | function |
-| `statusTitle` | function |
-| `tooManyRequests` | function |
-| `unauthorized` | function |
-| `validationError` | function |
-| `HttpError` | class |
-| `ERROR_TYPE_BASE` | const |
-| `STATUS_TITLES` | const |
-| `DefaultErrorBody` | interface |
-| `ErrorHandlerOptions` | interface |
-| `HttpErrorInit` | interface |
-| `ProblemDetails` | interface |
-| `ValidationError` | interface |
-| `ErrorFormat` | type |
-| `ErrorHandlerFormatter` | type |
+| Export                  | Kind      |
+| ----------------------- | --------- |
+| `badRequest`            | function  |
+| `conflict`              | function  |
+| `defaultFormatter`      | function  |
+| `errorHandler`          | function  |
+| `forbidden`             | function  |
+| `internalServerError`   | function  |
+| `notFound`              | function  |
+| `notImplemented`        | function  |
+| `rfc7807Formatter`      | function  |
+| `rfc9457Formatter`      | function  |
+| `selectFormatter`       | function  |
+| `serviceUnavailable`    | function  |
+| `statusTitle`           | function  |
+| `tooManyRequests`       | function  |
+| `unauthorized`          | function  |
+| `validationError`       | function  |
+| `HttpError`             | class     |
+| `ERROR_TYPE_BASE`       | const     |
+| `STATUS_TITLES`         | const     |
+| `DefaultErrorBody`      | interface |
+| `ErrorHandlerOptions`   | interface |
+| `HttpErrorInit`         | interface |
+| `ProblemDetails`        | interface |
+| `ValidationError`       | interface |
+| `ErrorFormat`           | type      |
+| `ErrorHandlerFormatter` | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

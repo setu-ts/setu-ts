@@ -37,12 +37,7 @@ export type {
 } from './interfaces/index.ts';
 
 // Mongo structural types the `'mongodb'` arm carries (injected-client seam).
-export type {
-  IMongoClient,
-  IMongoDatabase,
-  IMongoObjectId,
-  IMongoObjectIdCtor,
-} from './adapters/mongo/mongo-client.ts';
+export type { IMongoClient, IMongoObjectIdCtor } from './adapters/mongo/mongo-client.ts';
 
 // Errors
 export {
@@ -98,22 +93,3 @@ export { createDrizzleDataSource } from './adapters/drizzle/drizzle-repository.t
 
 // Mongo adapter — document-store backend over the native `mongodb` driver.
 export { MongoAdapter } from './adapters/mongo/mongo-adapter.ts';
-export { createMongoDataSource, MongoTransaction } from './adapters/mongo/mongo-data-source.ts';
-export {
-  createInjectedClientLoader,
-  createLazyClientLoader,
-} from './adapters/mongo/mongo-client.ts';
-export {
-  escapeRegex,
-  translateCountFilter,
-  translateFilter,
-  translateQuery,
-} from './adapters/mongo/mongo-query.ts';
-export {
-  fromDriverDocument,
-  resolveMongoTarget,
-  toDriverDocument,
-  toDriverId,
-  toIdString,
-} from './adapters/mongo/mongo-mapping.ts';
-export { parseDatabaseFromUrl } from './adapters/mongo/mongo-adapter.ts';

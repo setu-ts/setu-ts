@@ -79,6 +79,14 @@ export interface IMongoSession {
 export interface IMongoCollectionFindOneAndUpdateOptions {
   /** Returns the updated document (rather than the original). */
   returnDocument: 'before' | 'after';
+  /** The session a transaction-scoped operation runs under. */
+  session?: IMongoSession;
+}
+
+/** A structural subset of the driver's cursor returned from `find()`. */
+export interface IMongoCursor {
+  /** Materializes the cursor's matching documents. */
+  toArray(): Promise<Record<string, unknown>[]>;
 }
 
 /**
@@ -115,13 +123,14 @@ export interface IMongoCollection {
    *
    * @param filter - The match filter
    * @param options - The `findOne` options (`projection`/`sort`)
-   * @param sessionOptions - The operation options (e.g. a session)
    * @returns The matching document, or `null`
    */
   findOne(
     filter: Record<string, unknown>,
-    options?: { projection?: Record<string, 1>; sort?: Record<string, unknown> },
-    sessionOptions?: MongoOptions,
+    options?: MongoOptions & {
+      projection?: Record<string, 0 | 1>;
+      sort?: Record<string, unknown>;
+    },
   ): Promise<Record<string, unknown> | null>;
 
   /**
@@ -129,19 +138,17 @@ export interface IMongoCollection {
    *
    * @param filter - The match filter
    * @param options - The `find` options (`sort`/`skip`/`limit`/`projection`)
-   * @param sessionOptions - The operation options (e.g. a session)
-   * @returns The matching documents
+   * @returns A cursor that materializes the matching documents with `toArray()`
    */
   find(
     filter: Record<string, unknown>,
-    options?: {
+    options?: MongoOptions & {
       sort?: Record<string, unknown>;
       skip?: number;
       limit?: number;
-      projection?: Record<string, 1>;
+      projection?: Record<string, 0 | 1>;
     },
-    sessionOptions?: MongoOptions,
-  ): Promise<Record<string, unknown>[]>;
+  ): IMongoCursor;
 
   /**
    * Finds one document and applies an update, returning the updated document.
@@ -149,14 +156,12 @@ export interface IMongoCollection {
    * @param filter - The match filter
    * @param update - The update document (`$set` form)
    * @param options - The `findOneAndUpdate` options
-   * @param sessionOptions - The operation options (e.g. a session)
    * @returns The updated document, or `null` when none matched
    */
   findOneAndUpdate(
     filter: Record<string, unknown>,
     update: Record<string, unknown>,
     options: IMongoCollectionFindOneAndUpdateOptions,
-    sessionOptions?: MongoOptions,
   ): Promise<Record<string, unknown> | null>;
 
   /**
@@ -217,7 +222,7 @@ export interface IMongoClient {
   /**
    * Closes the connection.
    */
-  disconnect(): Promise<void>;
+  close(): Promise<void>;
 
   /**
    * Returns the database named `name`.

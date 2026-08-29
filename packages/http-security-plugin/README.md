@@ -201,25 +201,26 @@ auth-plugin.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `corsMiddleware` | function |
-| `csrfMiddleware` | function |
-| `HttpSecurityPlugin` | function |
-| `ipSecurityMiddleware` | function |
-| `requestSizeMiddleware` | function |
-| `securityHeadersMiddleware` | function |
-| `ContentSecurityPolicyOptions` | interface |
-| `CorsOptions` | interface |
-| `CsrfOptions` | interface |
-| `HttpSecurityPluginOptions` | interface |
-| `IpSecurityOptions` | interface |
-| `RequestSizeOptions` | interface |
-| `SecurityHeadersOptions` | interface |
+| Export                           | Kind      |
+| -------------------------------- | --------- |
+| `corsMiddleware`                 | function  |
+| `csrfMiddleware`                 | function  |
+| `HttpSecurityPlugin`             | function  |
+| `ipSecurityMiddleware`           | function  |
+| `requestSizeMiddleware`          | function  |
+| `securityHeadersMiddleware`      | function  |
+| `ContentSecurityPolicyOptions`   | interface |
+| `CorsOptions`                    | interface |
+| `CsrfOptions`                    | interface |
+| `HttpSecurityPluginOptions`      | interface |
+| `IpSecurityOptions`              | interface |
+| `RequestSizeOptions`             | interface |
+| `SecurityHeadersOptions`         | interface |
 | `StrictTransportSecurityOptions` | interface |
-| `CorsOriginMatcher` | type |
+| `CorsOriginMatcher`              | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

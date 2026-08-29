@@ -3680,7 +3680,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   alpha.1 states the shipping version in the release commit itself (`32ef2f41` for alpha.9 bumps the
   same line), the window is one CI run, and `checkVersionClaims` would reject a "pending" phrasing
   as neither a current-release claim nor a `version:history` record.
-- **Next milestone** — **M78** (document-database backends).
+- **Milestone 78** — native MongoDB backend for `database-plugin`, including the `'mongodb'`
+  configuration arm, native query translation, ObjectId mapping, injected-client seam, and real
+  driver CI coverage — complete (PR pending).
+- **Next milestone** — **M79** (portable data-access contract).
 
 ## Verification (run before declaring any work done)
 

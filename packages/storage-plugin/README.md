@@ -163,41 +163,42 @@ the provider has no liveness check.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `IAwsS3Client` | reference |
-| `canSign` | function |
-| `createUploadMiddleware` | function |
-| `getUploadedFile` | function |
-| `StoragePlugin` | function |
-| `AzureBlobProvider` | class |
-| `GcsProvider` | class |
-| `LocalStorageProvider` | class |
-| `MemoryProvider` | class |
-| `S3Provider` | class |
-| `StorageService` | class |
-| `AzureBlobProviderOptions` | interface |
-| `AzureStorageOptions` | interface |
-| `GcsProviderOptions` | interface |
-| `GcsStorageOptions` | interface |
-| `IAzureBlobClient` | interface |
-| `IGcsClient` | interface |
-| `IS3Backend` | interface |
-| `IStorage` | interface |
-| `LocalStorageOptions` | interface |
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `IAwsS3Client`                | reference |
+| `canSign`                     | function  |
+| `createUploadMiddleware`      | function  |
+| `getUploadedFile`             | function  |
+| `StoragePlugin`               | function  |
+| `AzureBlobProvider`           | class     |
+| `GcsProvider`                 | class     |
+| `LocalStorageProvider`        | class     |
+| `MemoryProvider`              | class     |
+| `S3Provider`                  | class     |
+| `StorageService`              | class     |
+| `AzureBlobProviderOptions`    | interface |
+| `AzureStorageOptions`         | interface |
+| `GcsProviderOptions`          | interface |
+| `GcsStorageOptions`           | interface |
+| `IAzureBlobClient`            | interface |
+| `IGcsClient`                  | interface |
+| `IS3Backend`                  | interface |
+| `IStorage`                    | interface |
+| `LocalStorageOptions`         | interface |
 | `LocalStorageProviderOptions` | interface |
-| `MemoryStorageOptions` | interface |
-| `PutObjectOptions` | interface |
-| `S3ProviderOptions` | interface |
-| `S3StorageOptions` | interface |
-| `SignedUrlOptions` | interface |
-| `UploadedFile` | interface |
-| `UploadMiddlewareOptions` | interface |
-| `StoragePluginOptions` | type |
-| `StorageProviderOptions` | type |
-| `StorageProviderType` | type |
+| `MemoryStorageOptions`        | interface |
+| `PutObjectOptions`            | interface |
+| `S3ProviderOptions`           | interface |
+| `S3StorageOptions`            | interface |
+| `SignedUrlOptions`            | interface |
+| `UploadedFile`                | interface |
+| `UploadMiddlewareOptions`     | interface |
+| `StoragePluginOptions`        | type      |
+| `StorageProviderOptions`      | type      |
+| `StorageProviderType`         | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

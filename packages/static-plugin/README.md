@@ -131,15 +131,16 @@ The plugin registers a health indicator named `static-files`:
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `createStaticHandler` | function |
-| `StaticPlugin` | function |
-| `StaticFilesService` | class |
-| `IStaticFiles` | interface |
-| `StaticPluginOptions` | type |
+| Export                | Kind      |
+| --------------------- | --------- |
+| `createStaticHandler` | function  |
+| `StaticPlugin`        | function  |
+| `StaticFilesService`  | class     |
+| `IStaticFiles`        | interface |
+| `StaticPluginOptions` | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Example Application
 

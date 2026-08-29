@@ -73,39 +73,40 @@ middleware publishes the active prefix under `TENANT_CACHE_PREFIX_STATE_KEY`, re
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `getTenantCachePrefix` | function |
-| `MultiTenancyPlugin` | function |
-| `tenantMiddleware` | function |
-| `ColumnPerTenant` | class |
-| `DatabasePerTenant` | class |
-| `HeaderResolver` | class |
-| `JwtResolver` | class |
-| `MemoryTenantDataStore` | class |
-| `PathResolver` | class |
-| `SchemaPerTenant` | class |
-| `SubdomainResolver` | class |
-| `TenantNotResolvedError` | class |
-| `CAPABILITIES` | const |
-| `TENANT_CACHE_PREFIX_STATE_KEY` | const |
-| `HeaderResolverOptions` | interface |
-| `IMultiTenancyService` | interface |
-| `ITenant` | interface |
-| `ITenantDataStore` | interface |
-| `ITenantRepository` | interface |
-| `ITenantResolver` | interface |
-| `JwtResolverOptions` | interface |
-| `MemoryTenantDataStoreOptions` | interface |
-| `MultiTenancyPluginOptions` | interface |
-| `PathResolverOptions` | interface |
-| `SubdomainResolverOptions` | interface |
-| `TenantCacheOptions` | interface |
-| `DatabaseStrategyKind` | type |
-| `ITenantIsolationStrategy` | type |
-| `ResolverConfig` | type |
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `getTenantCachePrefix`          | function  |
+| `MultiTenancyPlugin`            | function  |
+| `tenantMiddleware`              | function  |
+| `ColumnPerTenant`               | class     |
+| `DatabasePerTenant`             | class     |
+| `HeaderResolver`                | class     |
+| `JwtResolver`                   | class     |
+| `MemoryTenantDataStore`         | class     |
+| `PathResolver`                  | class     |
+| `SchemaPerTenant`               | class     |
+| `SubdomainResolver`             | class     |
+| `TenantNotResolvedError`        | class     |
+| `CAPABILITIES`                  | const     |
+| `TENANT_CACHE_PREFIX_STATE_KEY` | const     |
+| `HeaderResolverOptions`         | interface |
+| `IMultiTenancyService`          | interface |
+| `ITenant`                       | interface |
+| `ITenantDataStore`              | interface |
+| `ITenantRepository`             | interface |
+| `ITenantResolver`               | interface |
+| `JwtResolverOptions`            | interface |
+| `MemoryTenantDataStoreOptions`  | interface |
+| `MultiTenancyPluginOptions`     | interface |
+| `PathResolverOptions`           | interface |
+| `SubdomainResolverOptions`      | interface |
+| `TenantCacheOptions`            | interface |
+| `DatabaseStrategyKind`          | type      |
+| `ITenantIsolationStrategy`      | type      |
+| `ResolverConfig`                | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

@@ -18,6 +18,7 @@ import type {
   IMongoClient,
   IMongoCollection,
   IMongoCollectionFindOneAndUpdateOptions,
+  IMongoCursor,
   IMongoDatabase,
   IMongoObjectId,
   IMongoObjectIdCtor,
@@ -68,7 +69,7 @@ function matchCondition(actual: unknown, cond: unknown): boolean {
       if (op === '$options') continue;
       switch (op) {
         case '$eq':
-          if (actual !== expected) return false;
+          if (!sameMongoValue(actual, expected)) return false;
           break;
         case '$gt':
           if (Number(actual) <= Number(expected)) return false;
@@ -84,7 +85,7 @@ function matchCondition(actual: unknown, cond: unknown): boolean {
           break;
         case '$in': {
           const arr = expected as unknown[];
-          if (!arr.some((v) => v === actual)) return false;
+          if (!arr.some((v) => sameMongoValue(v, actual))) return false;
           break;
         }
         case '$regex': {
@@ -99,7 +100,16 @@ function matchCondition(actual: unknown, cond: unknown): boolean {
     }
     return true;
   }
-  return actual === cond;
+  return sameMongoValue(actual, cond);
+}
+
+/** Compares scalar values with the driver's ObjectId value semantics. */
+function sameMongoValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left !== null && right !== null && typeof left === 'object' && typeof right === 'object') {
+    return String(left) === String(right);
+  }
+  return false;
 }
 
 /** Evaluates a whole match filter against a document. */
@@ -124,7 +134,7 @@ function matchFilter(doc: Record<string, unknown>, filter: Record<string, unknow
 
 function project(
   row: Record<string, unknown>,
-  projection: Record<string, 1>,
+  projection: Record<string, 0 | 1>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [field, keep] of Object.entries(projection)) {
@@ -147,15 +157,15 @@ export class FakeMongoCollection implements IMongoCollection {
     document: Record<string, unknown>,
     _options?: MongoOptions,
   ): Promise<{ acknowledged: boolean; insertedId: IMongoObjectId | string | number }> {
-    this.calls.push({ method: 'insertOne', args: [document] });
+    this.calls.push({ method: 'insertOne', args: [document, _options] });
     let id: IMongoObjectId | string | number = document._id as IMongoObjectId | string | number;
     if (id === undefined || id === null) {
       id = new FakeObjectId();
     }
-    // Store the id in its string form, so equality lookups (`{ _id: <string> }`)
-    // match the stored document — the real driver stores `_id` as a 24-hex
-    // string and matches on that, not an ObjectId instance.
-    const stored: Record<string, unknown> = { ...document, _id: String(id) };
+    // Preserve the driver's value. A real collection stores an ObjectId as an
+    // ObjectId, not as its string rendering; `sameMongoValue` mirrors the
+    // driver's value comparison for this structural fake.
+    const stored: Record<string, unknown> = { ...document, _id: id };
     const idx = this.#docs.findIndex((d) => String(d._id) === String(id));
     if (idx >= 0) {
       this.#docs[idx] = stored;
@@ -168,25 +178,25 @@ export class FakeMongoCollection implements IMongoCollection {
   // deno-lint-ignore require-await -- in-memory double, resolves synchronously
   async findOne(
     filter: Record<string, unknown>,
-    _options?: { projection?: Record<string, 1>; sort?: Record<string, unknown> },
-    _sessionOptions?: MongoOptions,
+    _options?: MongoOptions & {
+      projection?: Record<string, 0 | 1>;
+      sort?: Record<string, unknown>;
+    },
   ): Promise<Record<string, unknown> | null> {
-    this.calls.push({ method: 'findOne', args: [filter] });
+    this.calls.push({ method: 'findOne', args: [filter, _options] });
     const found = this.#docs.find((d) => matchFilter(d, filter));
     return found ? { ...found } : null;
   }
 
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async find(
+  find(
     filter: Record<string, unknown>,
-    options?: {
+    options?: MongoOptions & {
       sort?: Record<string, unknown>;
       skip?: number;
       limit?: number;
-      projection?: Record<string, 1>;
+      projection?: Record<string, 0 | 1>;
     },
-    _sessionOptions?: MongoOptions,
-  ): Promise<Record<string, unknown>[]> {
+  ): IMongoCursor {
     this.calls.push({ method: 'find', args: [filter, options] });
     let rows = this.#docs.filter((d) => matchFilter(d, filter));
     if (options?.sort !== undefined) {
@@ -201,13 +211,15 @@ export class FakeMongoCollection implements IMongoCollection {
     }
     if (options?.skip !== undefined) rows = rows.slice(options.skip);
     if (options?.limit !== undefined && options.limit >= 0) rows = rows.slice(0, options.limit);
-    return options?.projection !== undefined
-      ? rows.map((r) => project(r, options.projection as Record<string, 1>))
+    const projection = options?.projection;
+    const result = projection !== undefined
+      ? rows.map((r) => project(r, projection))
       : rows.map((r) => {
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(r)) out[k] = v;
         return out;
       });
+    return { toArray: (): Promise<Record<string, unknown>[]> => Promise.resolve(result) };
   }
 
   // deno-lint-ignore require-await -- in-memory double, resolves synchronously
@@ -215,7 +227,6 @@ export class FakeMongoCollection implements IMongoCollection {
     filter: Record<string, unknown>,
     update: Record<string, unknown>,
     options: IMongoCollectionFindOneAndUpdateOptions,
-    _sessionOptions?: MongoOptions,
   ): Promise<Record<string, unknown> | null> {
     this.calls.push({ method: 'findOneAndUpdate', args: [filter, update, options] });
     const idx = this.#docs.findIndex((d) => matchFilter(d, filter));
@@ -230,7 +241,7 @@ export class FakeMongoCollection implements IMongoCollection {
     filter: Record<string, unknown>,
     _options?: MongoOptions,
   ): Promise<{ deletedCount: number }> {
-    this.calls.push({ method: 'deleteOne', args: [filter] });
+    this.calls.push({ method: 'deleteOne', args: [filter, _options] });
     const idx = this.#docs.findIndex((d) => matchFilter(d, filter));
     if (idx < 0) return { deletedCount: 0 };
     this.#docs.splice(idx, 1);
@@ -242,51 +253,8 @@ export class FakeMongoCollection implements IMongoCollection {
     filter: Record<string, unknown>,
     _options?: MongoOptions,
   ): Promise<number> {
-    this.calls.push({ method: 'countDocuments', args: [filter] });
+    this.calls.push({ method: 'countDocuments', args: [filter, _options] });
     return this.#docs.filter((d) => matchFilter(d, filter)).length;
-  }
-}
-
-/**
- * A collection whose `insertOne` returns no `insertedId`, so the data source
- * exercises the contract branch that does not set the primary key when the
- * insert reports none.
- */
-export class InsertedIdUndefinedCollection implements IMongoCollection {
-  readonly calls: Array<{ method: string; args: unknown[] }> = [];
-
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async insertOne(
-    document: Record<string, unknown>,
-    _options?: MongoOptions,
-  ): Promise<{ acknowledged: boolean; insertedId: IMongoObjectId | string | number }> {
-    this.calls.push({ method: 'insertOne', args: [document] });
-    return { acknowledged: true, insertedId: undefined as unknown as IMongoObjectId };
-  }
-
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async findOne(): Promise<Record<string, unknown> | null> {
-    return null;
-  }
-
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async find(): Promise<Record<string, unknown>[]> {
-    return [];
-  }
-
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async findOneAndUpdate(): Promise<Record<string, unknown> | null> {
-    return null;
-  }
-
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async deleteOne(): Promise<{ deletedCount: number }> {
-    return { deletedCount: 0 };
-  }
-
-  // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async countDocuments(): Promise<number> {
-    return 0;
   }
 }
 
@@ -335,7 +303,7 @@ export class FakeMongoClient implements IMongoClient {
   }
 
   // deno-lint-ignore require-await -- in-memory double, resolves synchronously
-  async disconnect(): Promise<void> {
+  async close(): Promise<void> {
     this.#connected = false;
   }
 

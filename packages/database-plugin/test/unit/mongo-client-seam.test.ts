@@ -2,7 +2,7 @@
  * Coverage for the inject-or-lazy client seam (`mongo-client.ts`).
  *
  * The injected-vs-lazy branching is exercised without performing the real
- * `import('npm:mongodb@^7')`, so the branch around that import is covered and
+ * `import('npm:mongodb@^6.21.0')`, so the branch around that import is covered and
  * the seam stays unit-testable.
  *
  * @module

@@ -49,7 +49,8 @@
     "npm:graphql@16": "16.14.2",
     "npm:ioredis@5": "5.11.1",
     "npm:kafkajs@2": "2.2.4",
-    "npm:mongodb@7": "7.6.0",
+    "npm:mongodb@6": "6.21.0",
+    "npm:mongodb@^6.21.0": "6.21.0",
     "npm:nats@2": "2.29.3",
     "npm:nodemailer@9": "9.0.4",
     "npm:pino@10": "10.3.1",
@@ -1136,8 +1137,8 @@
     "@types/webidl-conversions@7.0.3": {
       "integrity": "sha512-CiJJvcRtIgzadHCYXw7dqEnMNRjhGZlYK05Mj9OyktqV8uVT8fD2BFOB7S1uwBE3Kj2Z+4UyPmFw/Ixgw/LAlA=="
     },
-    "@types/whatwg-url@13.0.0": {
-      "integrity": "sha512-N8WXpbE6Wgri7KUSvrmQcqrMllKZ9uxkYWMt+mCSGwNc0Hsw9VQTW7ApqI4XNrx6/SaM2QQJCzMPDEXE058s+Q==",
+    "@types/whatwg-url@11.0.5": {
+      "integrity": "sha512-coYR071JRaHa+xoEvvYqvnIHaVqaYrLPbsufM9BF63HkwI5Lgmy2QR8Q5K/lYDYo5AK82wOvSOS0UsLTpTG7uQ==",
       "dependencies": [
         "@types/webidl-conversions"
       ]
@@ -1229,8 +1230,8 @@
         "balanced-match"
       ]
     },
-    "bson@7.3.2": {
-      "integrity": "sha512-1w0ra+ho1cuE+w8jzwgzTFIimFtCfZeCoOsvIPQg6uyFCsp8M29U7bNNf5GrFh88TXbYg1g3TyKUGpd6O7q6zA=="
+    "bson@6.10.4": {
+      "integrity": "sha512-WIsKqkSC0ABoBJuT1LEX+2HEvNmNKKgnTAyd0fL8qzK4SH2i9NXg+t08YtdZp/V9IZ33cxe3iV4yM0qg8lMQng=="
     },
     "buffer-equal-constant-time@1.0.1": {
       "integrity": "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="
@@ -1933,15 +1934,15 @@
     "module-details-from-path@1.0.4": {
       "integrity": "sha512-EGWKgxALGMgzvxYF1UyGTy0HXX/2vHLkw6+NvDKW2jypWbHpjQuj4UMcqQWXHERJhVGKikolT06G3bcKe4fi7w=="
     },
-    "mongodb-connection-string-url@7.0.2": {
-      "integrity": "sha512-ZoS07RoFqpKYQwAk59qmrx8+jJHNHU30UjlU96QktiGn1ltvDr+vCznLX5DiUBLEpMAHatHNWV1nM/74ul66kA==",
+    "mongodb-connection-string-url@3.0.2": {
+      "integrity": "sha512-rMO7CGo/9BFwyZABcKAWL8UJwH/Kc2x0g72uhDWzG48URRax5TCIcJ7Rc3RZqffZzO/Gwff/jyKwCU9TN8gehA==",
       "dependencies": [
         "@types/whatwg-url",
         "whatwg-url@14.2.0"
       ]
     },
-    "mongodb@7.6.0": {
-      "integrity": "sha512-WbZ6OCjYw2c53LOjfkQa+reXr7kIiOVpXXglnASFuiMtif0BvsMwHe3ClJHLm1/r7wJFwaasfFtD6iYIktB01g==",
+    "mongodb@6.21.0": {
+      "integrity": "sha512-URyb/VXMjJ4da46OeSXg+puO39XH9DeQpWCslifrRn9JWugy0D+DvvBvkm2WxmHe61O/H19JM66p1z7RHVkZ6A==",
       "dependencies": [
         "@mongodb-js/saslprep",
         "bson",
@@ -2503,7 +2504,7 @@
       },
       "packages/database-plugin": {
         "dependencies": [
-          "npm:mongodb@7"
+          "npm:mongodb@^6.21.0"
         ]
       },
       "packages/decorator-plugin": {

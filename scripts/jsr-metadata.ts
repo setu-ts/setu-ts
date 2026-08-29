@@ -161,7 +161,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
 
   // ── Data ──────────────────────────────────────────────────────────────────
   'database-plugin': {
-    description: 'Repository pattern and Unit of Work over Prisma, Drizzle, D1, or memory',
+    description: 'Repository pattern and Unit of Work over MongoDB, Prisma, Drizzle, D1, or memory',
     runtimeCompat: PORTABLE,
   },
   'cache-plugin': {

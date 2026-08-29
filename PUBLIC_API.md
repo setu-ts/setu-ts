@@ -898,12 +898,12 @@ app.register(DatabasePlugin({
 adapter cannot run without: `'prisma'` requires `options.prismaClient`, `'drizzle'` requires both
 `options.drizzleInstance` and `options.drizzleTables`, `'mongodb'` requires `options.url` (or an
 injected `options.client`), and `'custom'` requires `adapter`. Omitting one is a **compile error**
-rather than a startup throw. The exported arms are
-`MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`
-and `CustomDatabaseOptions`; `BuiltInDatabaseOptions` is the union of the first three and keeps its
-published name, so an existing annotation carrying a memory configuration still compiles.
-`PrismaAdapterOptions`, `DrizzleAdapterOptions` and `MongoAdapterOptions` are `DatabaseAdapterOptions`
-narrowed for their arm.
+rather than a startup throw. The exported arms are `MemoryDatabaseOptions`, `PrismaDatabaseOptions`,
+`DrizzleDatabaseOptions`, `MongoDatabaseOptions` and `CustomDatabaseOptions`;
+`BuiltInDatabaseOptions` is the union of the first three and keeps its published name, so an
+existing annotation carrying a memory configuration still compiles. `PrismaAdapterOptions` and
+`DrizzleAdapterOptions` narrow `DatabaseAdapterOptions` for their arm; `MongoAdapterOptions` is its
+dedicated document-driver option bag.
 
 Three Prisma 7 prerequisites are the application's to supply and are documented in the package
 README: the driver-adapter package, a `prisma.config.ts` (Prisma 7 rejects `url` in
@@ -943,13 +943,13 @@ unwrapped structural instance. The explicit source-owned bridge is the positive 
 asserts the selected driver awaits its callback Promise; unknown adopting-Promise and thenable
 wrappers are rejected at startup before native transaction work begins.
 
-`PrismaSqlProvider` still carries a `'mongodb'` member and the `PASSTHROUGH_PROVIDERS` mechanism that
-holds it, but that arm is **unreachable on Prisma v7**: a Prisma client for MongoDB cannot be
-constructed (generation succeeds, construction fails — Prisma states MongoDB "did not make the Prisma 7
-release" and returns in Prisma 8). The `'mongodb'` **adapter arm** above is the supported MongoDB
-route; the `'mongodb'` provider string on the Prisma union is retained only because removing it is a
-published export (AI_GUIDELINES §9.2), and the `contains`-to-`$regex` reasoning behind `PASSTHROUGH_PROVIDERS`
-stays correct for any future Prisma-Mongo client.
+`PrismaSqlProvider` still carries a `'mongodb'` member and the `PASSTHROUGH_PROVIDERS` mechanism
+that holds it, but that arm is **unreachable on Prisma v7**: a Prisma client for MongoDB cannot be
+constructed (generation succeeds, construction fails — Prisma states MongoDB "did not make the
+Prisma 7 release" and returns in Prisma 8). The `'mongodb'` **adapter arm** above is the supported
+MongoDB route; the `'mongodb'` provider string on the Prisma union is retained only because removing
+it is a published export (AI_GUIDELINES §9.2), and the `contains`-to-`$regex` reasoning behind
+`PASSTHROUGH_PROVIDERS` stays correct for any future Prisma-Mongo client.
 
 ### Repository Pattern
 
@@ -1232,7 +1232,7 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 
 ### MongoDB backend (`'mongodb'` arm)
 
-`MongoAdapter` is a document-store backend over the native `mongodb` driver (`npm:mongodb@^7`),
+`MongoAdapter` is a document-store backend over the native `mongodb` driver (`npm:mongodb@^6.21.0`),
 registered through the same discriminated union as every other backend:
 
 ```typescript
@@ -1248,31 +1248,35 @@ app.register(DatabasePlugin({
 }));
 ```
 
-`MongoAdapterOptions` is `DatabaseAdapterOptions` narrowed for the arm. It requires `url` (the
-connection string) **unless** `client` is supplied — an already-constructed `IMongoClient`. When
-`client` is present the lazy `import('npm:mongodb@^7')` never runs; the injected client is structural,
-so a driver of a different major that honours the same shapes is accepted. `database` names the
-database; when absent the one encoded in `url` is used, and if neither yields a name `connect()` fails
-at startup naming the option. `collections` is a per-entity override (`{ collection?, primaryKey?,
-idType? }`); an unmapped entity uses its own name as the collection and `'id'` as the primary key — the
-D1-shaped two-layer mapping, where the public surface is a per-entity override with a zero-config
-default and the internal target is unexported.
+`MongoAdapterOptions` is the Mongo-specific option bag. It requires `url` (the connection string)
+**unless** `client` is supplied — an already-constructed `IMongoClient`. When `client` is present
+the lazy `import('npm:mongodb@^6.21.0')` never runs; the injected client is structural, so a driver
+of a different major that honours the same shapes is accepted. An injected client that uses ObjectId
+values supplies its `objectIdCtor` companion, so the adapter can convert 24-hex repository ids
+without importing the driver. `database` names the database; when absent the one encoded in `url` is
+used, and if neither yields a name `connect()` fails at startup naming the option. `collections` is
+a per-entity override (`{ collection?, primaryKey?,
+idType? }`); an unmapped entity uses its own
+name as the collection and `'id'` as the primary key — the D1-shaped two-layer mapping, where the
+public surface is a per-entity override with a zero-config default and the internal target is
+unexported.
 
 Identity maps `_id` to the configured primary key on read and back on write. Because a
 `findOne({_id: "<24-hex>"})` misses when `_id` is an `ObjectId`, the driver id is converted with
 `ObjectId.isValid` (which accepts only a 24-hex string) for an `idType` of `'auto'` (the default),
-forced for `'objectId'`, and forbidden for `'raw'`. `find` serves `orderBy`/`offset`/`limit`/`select`
-natively as `sort`/`skip`/`limit`/`projection`, and `contains` compiles to a `$regex` match with an
-escaped value (the inverse of the SQL `contains`), so `%` and `_` in the searched value stay literal.
+forced for `'objectId'`, and forbidden for `'raw'`. `find` serves
+`orderBy`/`offset`/`limit`/`select` natively as `sort`/`skip`/`limit`/`projection`, and `contains`
+compiles to a `$regex` match with an escaped value (the inverse of the SQL `contains`), so `%` and
+`_` in the searched value stay literal.
 
-`rawQuery` is refused by name with `UnsupportedRawQueryError` — MongoDB has no SQL, so an application
-reaches the injected client directly for native commands, exactly as it does for a Prisma raw query.
-Transactions use a `startSession()` and are refused at `beginTransaction()` with
+`rawQuery` is refused by name with `UnsupportedRawQueryError` — MongoDB has no SQL, so an
+application reaches the injected client directly for native commands, exactly as it does for a
+Prisma raw query. Transactions use a `startSession()` and are refused at `beginTransaction()` with
 `MongoTransactionUnavailableError` on a deployment that is not a replica set, never at `connect()`.
 
-The four `IMongo*` interfaces (`IMongoClient`, `IMongoDatabase`, `IMongoObjectId`,
-`IMongoObjectIdCtor`) are the injection seam, implemented structurally by the real driver and by the
-test double; they are exported so an application can annotate an injected client or build its own.
+`IMongoClient` and `IMongoObjectIdCtor` are the exported injection seam. The real driver implements
+their structural shapes; its database, collection, session, and ObjectId-instance details remain
+internal to the adapter.
 
 ### Exports
 
@@ -1283,7 +1287,6 @@ test double; they are exported so an application can annotate an injected client
 | `BaseRepository`, `UnitOfWork`                                                                                              | classes                           |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`                                                          | classes                           |
 | `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                           |
-| `MongoTransaction`                                                                                                          | class                             |
 | `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`                                                                | classes                           |
 | `MongoTransactionUnavailableError`                                                                                          | class                             |
 | `PrismaSqlProvider`                                                                                                         | type                              |
@@ -1297,16 +1300,16 @@ test double; they are exported so an application can annotate an injected client
 | `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                             |
 | `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`          |
 | `DataSource`                                                                                                                | deprecated alias of `IDataSource` |
-| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`                                                      | interfaces (Mongo injection seam) |
+| `IMongoClient`, `IMongoObjectIdCtor`                                                                                        | interfaces (Mongo injection seam) |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.
 
 `DatabaseAdapterType` gained `'custom'`; `DatabasePluginOptions` became a union discriminated on
-`type`. Both are additive for callers — every existing registration compiles unchanged. The `'mongodb'`
-arm is additive as well: `MongoDatabaseOptions` and `MongoAdapterOptions` extend the existing
-`DatabaseConnectionOptions` / `DatabaseAdapterOptions` shapes, so a registration carrying a memory,
-Prisma, Drizzle or custom configuration still compiles unchanged.
+`type`. Both are additive for callers — every existing registration compiles unchanged. The
+`'mongodb'` arm is additive as well: `MongoDatabaseOptions` extends `DatabaseConnectionOptions` and
+carries its dedicated `MongoAdapterOptions` bag, so a registration carrying a memory, Prisma,
+Drizzle or custom configuration still compiles unchanged.
 
 `DatabaseAdapterType` gained `'custom'`; `DatabasePluginOptions` became a union discriminated on
 `type`. Both are additive for callers — every existing registration compiles unchanged.

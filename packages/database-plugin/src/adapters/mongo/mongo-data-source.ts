@@ -22,7 +22,6 @@ import {
   resolveMongoTarget,
   toDriverDocument,
   toDriverId,
-  toIdString,
 } from './mongo-mapping.ts';
 import { translateCountFilter, translateQuery } from './mongo-query.ts';
 import type {
@@ -99,12 +98,20 @@ export function createMongoDataSource(
   return {
     findAll: async (query: NormalizedQuery): Promise<Record<string, unknown>[]> => {
       const { filter, options: findOptions } = translateQuery(query);
-      const rows = await collection.find(filter, findOptions, options());
+      const projection = findOptions.projection === undefined
+        ? undefined
+        : mapProjection(findOptions.projection, target.primaryKey);
+      const rows = await collection.find(
+        filter,
+        projection === undefined
+          ? { ...findOptions, ...options() }
+          : { ...findOptions, projection, ...options() },
+      ).toArray();
       return rows.map((row) => fromDriverDocument(row, target));
     },
 
     findById: async (id: string | number): Promise<Record<string, unknown> | null> => {
-      const document = await collection.findOne({ _id: convertId(id) }, undefined, options());
+      const document = await collection.findOne({ _id: convertId(id) }, options());
       return document ? fromDriverDocument(document, target) : null;
     },
 
@@ -112,14 +119,10 @@ export function createMongoDataSource(
       const document = toDriverDocument(data, target, objectIdCtor);
       const result = await collection.insertOne(document, options());
       // Compose the returned document from what we inserted plus the generated
-      // `_id`, rather than re-reading: the driver returns
-      // `{ acknowledged, insertedId }`, so the row we want is the input with
-      // the primary-key field set to the generated id.
-      const row: Record<string, unknown> = { ...data };
-      if (result.insertedId !== undefined) {
-        row[target.primaryKey] = toIdString(result.insertedId);
-      }
-      return fromDriverDocument(row, target);
+      // `_id`, rather than re-reading: the driver always returns
+      // `{ acknowledged, insertedId }`, so the mapped read path remains the
+      // single place that translates `_id` to the repository primary key.
+      return fromDriverDocument({ ...document, _id: result.insertedId }, target);
     },
 
     update: async (
@@ -129,8 +132,7 @@ export function createMongoDataSource(
       const result = await collection.findOneAndUpdate(
         { _id: convertId(id) },
         { $set: toDriverDocument(data, target, objectIdCtor) },
-        { returnDocument: 'after' },
-        options(),
+        { returnDocument: 'after', ...options() },
       );
       if (result === null || result === undefined) {
         throw new Error(
@@ -169,6 +171,7 @@ export class MongoTransaction implements IAdapterTransaction {
   readonly #client: IMongoClient;
   readonly #databaseName: string;
   readonly #mapping: Readonly<Record<string, MongoEntityMapping>> | undefined;
+  readonly #objectIdCtor: IMongoObjectIdCtor | undefined;
   #finalized = false;
 
   constructor(
@@ -176,11 +179,13 @@ export class MongoTransaction implements IAdapterTransaction {
     client: IMongoClient,
     databaseName: string,
     mapping: Readonly<Record<string, MongoEntityMapping>> | undefined,
+    objectIdCtor?: IMongoObjectIdCtor,
   ) {
     this.#session = session;
     this.#client = client;
     this.#databaseName = databaseName;
     this.#mapping = mapping;
+    this.#objectIdCtor = objectIdCtor;
   }
 
   /** @inheritdoc */
@@ -215,8 +220,33 @@ export class MongoTransaction implements IAdapterTransaction {
       this.#databaseName,
       entity,
       this.#mapping,
-      undefined,
+      this.#objectIdCtor,
       this.#session,
     );
   }
+}
+
+/**
+ * Converts a repository projection to the physical Mongo document shape.
+ *
+ * Mongo includes `_id` with an inclusion projection unless it is explicitly
+ * excluded. The repository contract promises that `select` drops unselected
+ * fields, including the mapped primary key, so this makes `_id` explicit and
+ * maps a requested primary key back to Mongo's field name.
+ */
+function mapProjection(
+  projection: Record<string, 1>,
+  primaryKey: string,
+): Record<string, 0 | 1> {
+  const mapped: Record<string, 0 | 1> = {};
+  let includesPrimaryKey = false;
+  for (const field of Object.keys(projection)) {
+    if (field === primaryKey) {
+      includesPrimaryKey = true;
+    } else {
+      mapped[field] = 1;
+    }
+  }
+  mapped._id = includesPrimaryKey ? 1 : 0;
+  return mapped;
 }

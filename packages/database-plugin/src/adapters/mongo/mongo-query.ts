@@ -64,8 +64,7 @@ export function escapeRegex(value: string): string {
  * collation, documented rather than overridden).
  *
  * @param comparison - The comparison to translate
- * @returns The operator document, or `undefined` when the comparison is `eq`
- *   (equality is carried by the `where` map, so a bare `eq` needs no operator)
+ * @returns The operator document
  * @since 0.1.0
  */
 export function translateComparison(
@@ -74,9 +73,7 @@ export function translateComparison(
   const { operator } = comparison;
   switch (operator) {
     case 'eq':
-      // An equality comparison is carried by `where`; no operator document is
-      // needed. Returning `undefined` lets the caller omit it.
-      return undefined;
+      return { $eq: comparison.value };
     case 'contains':
       return { $regex: escapeRegex(comparison.value), $options: '' };
     case 'gt':
@@ -121,11 +118,9 @@ export function translateFilter(expression: FilterExpression): Record<string, un
       [key]: expression.filters.map((child) => translateFilter(child)),
     };
   }
-  // A comparison that is not `eq` is nested under its field path.
+  // Every comparison is nested under its field path so a filter-only `eq`
+  // remains a predicate rather than silently matching every document.
   const operators = translateComparison(expression);
-  if (operators === undefined) {
-    return {};
-  }
   return { [expression.field]: operators };
 }
 
@@ -146,21 +141,13 @@ export function translateQuery(query: NormalizedQuery): {
   filter: Record<string, unknown>;
   options: MongoFindOptions;
 } {
-  const filter: Record<string, unknown> = { ...query.where };
-
-  if (query.filter !== undefined) {
-    const nested = translateFilter(query.filter);
-    // Fold the expression's operators into the match document. An `and`/`or`
-    // contributes its own `$and`/`$or` key at the top level; a nested field
-    // comparison merges under its field name.
-    for (const [key, value] of Object.entries(nested)) {
-      if (key === '$and' || key === '$or') {
-        filter[key] = value;
-      } else {
-        filter[key] = value;
-      }
-    }
-  }
+  const where = { ...query.where };
+  const expression = query.filter === undefined ? undefined : translateFilter(query.filter);
+  const filter = expression === undefined
+    ? where
+    : Object.keys(where).length === 0
+    ? expression
+    : { $and: [where, expression] };
 
   // `MongoFindOptions` properties are `readonly` optionals, so each is folded
   // into the object literal only when the corresponding query clause is present.
@@ -194,11 +181,8 @@ export function translateCountFilter(
   where: Record<string, unknown>,
   filter?: FilterExpression,
 ): Record<string, unknown> {
-  const filterDoc: Record<string, unknown> = { ...where };
-  if (filter !== undefined) {
-    for (const [key, value] of Object.entries(translateFilter(filter))) {
-      filterDoc[key] = value;
-    }
-  }
-  return filterDoc;
+  const equality = { ...where };
+  if (filter === undefined) return equality;
+  const expression = translateFilter(filter);
+  return Object.keys(equality).length === 0 ? expression : { $and: [equality, expression] };
 }
