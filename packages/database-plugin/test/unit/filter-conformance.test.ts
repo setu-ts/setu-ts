@@ -137,6 +137,17 @@ const CASES: Case[] = [
     filter: { type: 'comparison', field: 'name', operator: 'in', value: [null] },
   },
   {
+    // A group is legal with no children and every adapter must answer with its
+    // boolean identity. Mongo alone used to emit `$and: []`/`$or: []`, which
+    // the server refuses outright — the divergence this table exists to catch.
+    label: 'and [] (empty conjunction — matches everything)',
+    filter: { type: 'and', filters: [] },
+  },
+  {
+    label: 'or [] (empty disjunction — matches nothing)',
+    filter: { type: 'or', filters: [] },
+  },
+  {
     label: "contains 'v3.5' (a . is data, not a regex any-char)",
     filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'v3.5' },
   },
@@ -223,6 +234,10 @@ function colName(col: unknown): string {
 }
 
 function evalDrizzle(row: Row, expr: unknown): boolean {
+  // The adapter answers `undefined` for a tautology, meaning "emit no WHERE
+  // clause" — which selects every row. Modelling that as anything else would
+  // make the harness disagree with the adapter it evaluates.
+  if (expr === undefined) return true;
   const e = expr as Record<string, unknown>;
   switch (e.op) {
     case 'and':
@@ -253,11 +268,27 @@ function evalMongo(row: Row, filter: unknown): boolean {
     return false;
   }
   const f = filter as Record<string, unknown>;
+  for (const key of ['$and', '$or', '$nor'] as const) {
+    // mongod REFUSES an empty logical array ("$and argument must be a
+    // non-empty array"). JavaScript's `every`/`some` happily answer `true`/
+    // `false` for one, so an evaluator that just delegated to them would
+    // report agreement for a document the server rejects outright — the
+    // contract-violating-double class, in the harness itself.
+    if (key in f && (f[key] as unknown[]).length === 0) {
+      throw new Error(`mongod refuses an empty array: ${key}`);
+    }
+  }
   if ('$and' in f) {
     return (f.$and as unknown[]).every((sub) => evalMongo(row, sub));
   }
   if ('$or' in f) {
     return (f.$or as unknown[]).some((sub) => evalMongo(row, sub));
+  }
+  if ('$nor' in f) {
+    // `$nor: [{}]` is the negation of match-all — the match-nothing document
+    // the adapter emits for an empty `or`. Verified against mongod 8, where it
+    // selects zero rows both standalone and nested inside `$and`.
+    return !(f.$nor as unknown[]).some((sub) => evalMongo(row, sub));
   }
   for (const [field, cond] of Object.entries(f)) {
     if (!matchConditionMongo(row[field], cond)) return false;

@@ -73,6 +73,38 @@ function assertOptionArms(): void {
   const memory: BuiltInDatabaseOptions = { name: 'scratch' };
   const plugin: DatabasePluginOptions = memory;
   void plugin;
+
+  // --- the mongodb arm ----------------------------------------------------
+  // Either half of the union satisfies it on its own.
+  const mongoLazy: DatabasePluginOptions = {
+    type: 'mongodb',
+    options: { url: 'mongodb://127.0.0.1:27017/app' },
+  };
+  void mongoLazy;
+  const mongoInjected: DatabasePluginOptions = {
+    type: 'mongodb',
+    options: { client: {} as never, database: 'app' },
+  };
+  void mongoInjected;
+
+  // `logQueries` is read by the SERVICE for every arm and carried by
+  // `buildAdapterOptions`, so the Mongo arm must be able to express it. It was
+  // the only built-in arm that could not: the options type did not inherit the
+  // shared bag, so this literal failed excess-property checking (TS2353) while
+  // the feature worked at runtime.
+  const mongoLogged: DatabasePluginOptions = {
+    type: 'mongodb',
+    options: { url: 'mongodb://127.0.0.1:27017/app', logQueries: true },
+  };
+  void mongoLogged;
+
+  // --- rejected -----------------------------------------------------------
+  const mongoNeither: DatabasePluginOptions = {
+    type: 'mongodb',
+    // @ts-expect-error -- neither `url` nor `client`: no arm of the union matches.
+    options: { database: 'app' },
+  };
+  void mongoNeither;
 }
 void assertOptionArms;
 

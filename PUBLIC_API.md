@@ -1156,9 +1156,11 @@ const users = await userRepo.findAll({
 An `in` with an empty list matches nothing, and a list containing `null` matches rows whose column
 is null — SQL `IN` never matches `NULL` by itself, so the SQL adapters emit an explicit null branch.
 `contains` is a substring match whose `%` and `_` are always data rather than wildcards; its **case
-sensitivity is the database's**, not the framework's — Memory and D1 match case-sensitively, while a
-`LIKE`-based backend follows the column's collation (case-sensitive on PostgreSQL, case-insensitive
-on SQLite and most MySQL collations). Collation control is not part of this contract.
+sensitivity is the database's**, not the framework's — Memory, D1 and Mongo match case-sensitively,
+while a `LIKE`-based backend follows the column's collation (case-sensitive on PostgreSQL,
+case-insensitive on SQLite and most MySQL collations). Mongo compiles to `$regex`, to which MongoDB
+does not apply collation, so a case-insensitive collection collation does not make it
+case-insensitive. Collation control is not part of this contract.
 
 On the **Prisma** adapter the connector decides how that guarantee is met. On PostgreSQL, MySQL, SQL
 Server, and CockroachDB the value is escaped and matched literally, because their `LIKE` defaults
@@ -1271,9 +1273,17 @@ forbidden for `'raw'`. The string half of that test is load-bearing rather than 
 driver's own `ObjectId.isValid` answers `true` for **any number** while its constructor rejects one,
 so a collection keyed by application-assigned numbers is passed through verbatim — `findById`,
 `update` and `delete` accept `string | number`, and a numeric key must reach the driver unconverted.
+On read the inverse holds: an `ObjectId` is rendered as its 24-hex string, while a JSON scalar keeps
+its own type, so the value `create()` returns is the value `findById()` accepts. `primaryKey` may
+name `_id` itself, in which case the row keeps that field rather than having it renamed away. The
+primary key never travels in an update payload — MongoDB refuses a `$set` that would change `_id`,
+and `update` moves no row to a new key on any adapter.
+
 `find` serves `orderBy`/`offset`/`limit`/`select` natively as `sort`/`skip`/`limit`/`projection`,
 and `contains` compiles to a `$regex` match with an escaped value (the inverse of the SQL
-`contains`), so `%` and `_` in the searched value stay literal.
+`contains`), so `%` and `_` in the searched value stay literal. An empty filter group compiles to
+its boolean identity — an empty `and` matches every document, an empty `or` matches none — because
+MongoDB refuses `$and: []`/`$or: []` outright, and those are the answers Memory and Drizzle give.
 
 `rawQuery` is refused by name with `UnsupportedRawQueryError` — MongoDB has no SQL, so an
 application reaches the injected client directly for native commands, exactly as it does for a

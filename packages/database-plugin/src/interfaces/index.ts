@@ -525,9 +525,9 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
 /**
  * The arm selecting the Mongo adapter over the native `mongodb` driver.
  *
- * `options.mongo.url` is required by the union unless `options.mongo.client`
- * is supplied, so a registration that forgets both is a compile error instead
- * of a `connect()` throw — the same guarantee the `'custom'` arm gives
+ * `options.url` is required by the union unless `options.client` is supplied,
+ * so a registration that forgets both is a compile error instead of a
+ * `connect()` throw — the same guarantee the `'custom'` arm gives
  * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
  * `client` is an already-constructed structural `IMongoClient`, and absent it
  * the adapter performs a literal `import('npm:mongodb@^6.21.0')` at connect time.
@@ -559,7 +559,7 @@ export interface MongoDatabaseOptions extends DatabaseConnectionOptions {
  *
  * @since 0.1.0
  */
-export interface MongoAdapterOptionsBase {
+export interface MongoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
   /**
    * The driver's `ObjectId` constructor when {@linkcode MongoAdapterOptions.client} is injected.
    *

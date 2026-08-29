@@ -296,3 +296,136 @@ describe('MongoTransaction — commit, rollback and createDataSource', () => {
     expect(count).toBe(1);
   });
 });
+
+describe('update never sends the primary key to the driver', () => {
+  it('drops `_id` from the `$set` payload', async () => {
+    // MongoDB refuses a `$set` that would change `_id` ("Performing an update
+    // on the path '_id' would modify the immutable field '_id'" — reproduced
+    // against mongod 8), so a caller handing the whole row back with a
+    // different key met a raw driver error through a portable contract. `id`
+    // already addresses the row, so the key never belongs in the payload.
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 7, name: 'first' });
+
+    await ds.update(7, { id: 9, name: 'renamed' });
+
+    const call = client.db('testdb').collection('Widget').calls.find(
+      (c) => c.method === 'findOneAndUpdate',
+    );
+    const payload = (call?.args[1] as { $set: Record<string, unknown> }).$set;
+    expect(payload).toEqual({ name: 'renamed' });
+    expect('_id' in payload).toBe(false);
+  });
+
+  it('still updates the addressed row and returns it with its key intact', async () => {
+    const ds = makeDataSource();
+    await ds.create({ id: 7, name: 'first' });
+    expect(await ds.update(7, { id: 9, name: 'renamed' })).toEqual({ id: 7, name: 'renamed' });
+    // The row keeps its original key: `update` moves no row to a new id.
+    expect(await ds.findById(7)).toEqual({ id: 7, name: 'renamed' });
+  });
+
+  it('an update carrying only the primary key is a no-op that returns the row', async () => {
+    const ds = makeDataSource();
+    await ds.create({ id: 7, name: 'first' });
+    expect(await ds.update(7, { id: 7 })).toEqual({ id: 7, name: 'first' });
+  });
+});
+
+describe('the fake client honours the real driver where the adapter depends on it', () => {
+  it('treats `limit: 0` as unlimited, as mongod does', async () => {
+    // Measured against mongod 8: `find({}, { limit: 0 })` returns every match.
+    // The framework's own `applyPagination` gates its slice on `limit > 0` for
+    // the same reason, so a double slicing to zero would have been the only
+    // component in the stack disagreeing — and would have hidden it.
+    const ds = makeDataSource();
+    await ds.create({ id: 1 });
+    await ds.create({ id: 2 });
+    expect(await ds.findAll(query({ limit: 0 }))).toHaveLength(2);
+    expect(await ds.findAll(query({ limit: 1 }))).toHaveLength(1);
+  });
+
+  it("`returnDocument: 'before'` answers with the pre-update document", async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 1, name: 'first' });
+    const collection = client.db('testdb').collection('Widget');
+    const before = await collection.findOneAndUpdate(
+      { _id: 1 },
+      { $set: { name: 'second' } },
+      { returnDocument: 'before' },
+    );
+    expect(before).toEqual({ _id: 1, name: 'first' });
+    // …and the write still landed.
+    expect(await ds.findById(1)).toEqual({ id: 1, name: 'second' });
+  });
+});
+
+describe('update strips the primary key before it can be converted', () => {
+  it('an unconvertible key in the payload does not fail the update', async () => {
+    // The key is discarded, so it must not be able to fail the call on its way
+    // out. Stripping AFTER `toDriverDocument` left `toDriverId` running first,
+    // and on an `idType: 'objectId'` target that throws for a value the update
+    // was never going to use.
+    const client = makeClient();
+    const ds = createMongoDataSource(
+      client,
+      'testdb',
+      'Widget',
+      { Widget: { idType: 'objectId' } },
+      fakeObjectIdCtor,
+    );
+    const valid = '507f1f77bcf86cd799439011';
+    await ds.create({ id: valid, name: 'first' });
+
+    await expect(ds.update(valid, { id: 'not-a-valid-objectid', name: 'renamed' }))
+      .resolves.toMatchObject({ name: 'renamed' });
+  });
+
+  it('a stray literal `_id` beside the mapped key never reaches $set', async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 1, name: 'first' });
+
+    await ds.update(1, { id: 1, _id: 'stray', name: 'renamed' });
+
+    const call = client.db('testdb').collection('Widget').calls.find(
+      (c) => c.method === 'findOneAndUpdate',
+    );
+    const payload = (call?.args[1] as { $set: Record<string, unknown> }).$set;
+    expect(payload).toEqual({ name: 'renamed' });
+  });
+});
+
+describe('an update with nothing left to set issues no write', () => {
+  it('reads the row rather than sending `$set: {}`', async () => {
+    // `$set: {}` is a write that changes nothing, and it is not universally
+    // accepted — measured, mongod 3.6.23 rejects it while 4.0.28, 4.4.30 and
+    // 8.x accept it. The driver pins no server floor, so the empty payload is
+    // served as a read on every version instead.
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 7, name: 'first' });
+
+    expect(await ds.update(7, { id: 7 })).toEqual({ id: 7, name: 'first' });
+    expect(await ds.update(7, {})).toEqual({ id: 7, name: 'first' });
+
+    const calls = client.db('testdb').collection('Widget').calls;
+    expect(calls.some((c) => c.method === 'findOneAndUpdate')).toBe(false);
+  });
+
+  it('still reports a missing row the same way', async () => {
+    const ds = makeDataSource();
+    await expect(ds.update(404, {})).rejects.toThrow(/no Widget row with id '404'/);
+  });
+
+  it('a payload with a real field still issues the write', async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 7, name: 'first' });
+    await ds.update(7, { name: 'second' });
+    const calls = client.db('testdb').collection('Widget').calls;
+    expect(calls.some((c) => c.method === 'findOneAndUpdate')).toBe(true);
+  });
+});

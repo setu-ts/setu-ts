@@ -1,8 +1,9 @@
 # Milestone 78 — MongoDB backend (`@setu-ts/database-plugin`)
 
-> **Status:** Complete (PR pending). Branch: `feat/m78-document-database-backends`. `main` is
-> protected — all work (implementation + fixes) stays on this one branch until it merges via a
-> single PR. The implementation and verification evidence are recorded below.
+> **Status:** Complete (PR #208). Archived on completion. Branch:
+> `feat/m78-document-database-backends`. `main` is protected — all work (implementation + fixes)
+> stays on this one branch until it merges via a single PR. The implementation and verification
+> evidence are recorded below.
 
 ## 0. Objective & scope
 

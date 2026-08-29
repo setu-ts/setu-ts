@@ -229,7 +229,13 @@ export class FakeMongoCollection implements IMongoCollection {
       });
     }
     if (options?.skip !== undefined) rows = rows.slice(options.skip);
-    if (options?.limit !== undefined && options.limit >= 0) rows = rows.slice(0, options.limit);
+    // The real driver treats `limit: 0` as UNLIMITED, not as "no rows"
+    // (measured against mongod 8). Slicing to zero here would make the double
+    // disagree with the server the adapter actually runs against, which is how
+    // a fake hides a defect rather than exposing one — and it would also
+    // disagree with the framework's own `applyPagination`, where `limit > 0`
+    // gates the slice.
+    if (options?.limit !== undefined && options.limit > 0) rows = rows.slice(0, options.limit);
     const projection = options?.projection;
     const result = projection !== undefined
       ? rows.map((r) => project(r, projection))
@@ -250,9 +256,14 @@ export class FakeMongoCollection implements IMongoCollection {
     this.calls.push({ method: 'findOneAndUpdate', args: [filter, update, options] });
     const idx = this.#docs.findIndex((d) => matchFilter(d, filter));
     if (idx < 0) return null;
+    // Snapshot BEFORE mutating: the real driver's `returnDocument: 'before'`
+    // answers with the pre-update document. Reading the slot after the write
+    // returned the post-update one, so the double contradicted the very
+    // contract this file exists to hold it to.
+    const before = { ...this.#docs[idx] };
     const updated = applySet(this.#docs[idx], update);
     this.#docs[idx] = updated;
-    return options.returnDocument === 'before' ? { ...this.#docs[idx] } : { ...updated };
+    return options.returnDocument === 'before' ? before : { ...updated };
   }
 
   // deno-lint-ignore require-await -- in-memory double, resolves synchronously

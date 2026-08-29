@@ -133,16 +133,49 @@ export function createMongoDataSource(
       id: string | number,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> => {
-      const result = await collection.findOneAndUpdate(
-        { _id: convertId(id) },
-        { $set: toDriverDocument(data, target, objectIdCtor) },
-        { returnDocument: 'after', ...options() },
-      );
-      if (result === null || result === undefined) {
-        throw new Error(
+      // The primary key never travels in an update payload: `id` already
+      // addresses the row, and MongoDB refuses a `$set` that would change
+      // `_id` ("Performing an update on the path '_id' would modify the
+      // immutable field '_id'"), so a caller passing the whole row back with a
+      // different key met a raw driver error through a portable contract.
+      // `update` does not move a row to a new primary key on any adapter.
+      //
+      // It is dropped BEFORE conversion, not after: `toDriverDocument` runs
+      // `toDriverId`, which throws for a value an `idType: 'objectId'` target
+      // cannot convert — so stripping afterwards left a value that has no
+      // effect on the update still able to fail it.
+      //
+      // Both spellings go: the mapped primary key, and a literal `_id` a caller
+      // may have carried over from a raw document. `toDriverDocument` used to
+      // collapse the two by renaming, so dropping only the mapped name would
+      // let a stray `_id` reach `$set` and be refused by the server.
+      const patch = { ...data };
+      delete patch[target.primaryKey];
+      delete patch['_id'];
+
+      const missing = (): Error =>
+        new Error(
           `MongoAdapter: no ${target.collection} row with ${target.primaryKey} '${String(id)}'`,
         );
+
+      // Stripping the key can leave nothing to set. Read the row instead of
+      // sending `$set: {}` — it is a write that changes nothing, and server
+      // support for it is not universal: measured, 3.6.23 rejects it outright
+      // while 4.0.28, 4.4.30 and 8.x accept it and answer with the document.
+      // The driver pins no server floor, so the branch removes the question
+      // rather than declaring a minimum version this package cannot enforce.
+      if (Object.keys(patch).length === 0) {
+        const existing = await collection.findOne({ _id: convertId(id) }, options());
+        if (existing === null || existing === undefined) throw missing();
+        return fromDriverDocument(existing, target);
       }
+
+      const result = await collection.findOneAndUpdate(
+        { _id: convertId(id) },
+        { $set: patch },
+        { returnDocument: 'after', ...options() },
+      );
+      if (result === null || result === undefined) throw missing();
       return fromDriverDocument(result, target);
     },
 
