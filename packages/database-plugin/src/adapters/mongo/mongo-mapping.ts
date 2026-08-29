@@ -139,7 +139,12 @@ export function fromDriverDocument(
   const rawId = row[DRIVER_ID_FIELD];
   if (rawId !== undefined) {
     row[target.primaryKey] = fromDriverId(rawId);
-    delete row[DRIVER_ID_FIELD];
+    // `primaryKey: '_id'` is a legal mapping — a collection addressed by the
+    // driver's own field name. Deleting unconditionally wrote the id and then
+    // removed it, so the row came back with no primary key at all.
+    if (target.primaryKey !== DRIVER_ID_FIELD) {
+      delete row[DRIVER_ID_FIELD];
+    }
   }
   return row;
 }
@@ -196,12 +201,15 @@ export function toDriverDocument(
 ): Record<string, unknown> {
   const document: Record<string, unknown> = { ...row };
   if (Object.prototype.hasOwnProperty.call(document, target.primaryKey)) {
-    document[DRIVER_ID_FIELD] = toDriverId(
-      document[target.primaryKey],
-      target.idType,
-      objectIdCtor,
-    );
-    delete document[target.primaryKey];
+    const converted = toDriverId(document[target.primaryKey], target.idType, objectIdCtor);
+    // Delete before assigning, and only when the two names differ: under
+    // `primaryKey: '_id'` the source and destination are the same field, so an
+    // unconditional delete dropped the caller's key and let the driver
+    // generate a fresh one.
+    if (target.primaryKey !== DRIVER_ID_FIELD) {
+      delete document[target.primaryKey];
+    }
+    document[DRIVER_ID_FIELD] = converted;
   }
   return document;
 }

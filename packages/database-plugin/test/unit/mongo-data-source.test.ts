@@ -296,3 +296,71 @@ describe('MongoTransaction — commit, rollback and createDataSource', () => {
     expect(count).toBe(1);
   });
 });
+
+describe('update never sends the primary key to the driver', () => {
+  it('drops `_id` from the `$set` payload', async () => {
+    // MongoDB refuses a `$set` that would change `_id` ("Performing an update
+    // on the path '_id' would modify the immutable field '_id'" — reproduced
+    // against mongod 8), so a caller handing the whole row back with a
+    // different key met a raw driver error through a portable contract. `id`
+    // already addresses the row, so the key never belongs in the payload.
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 7, name: 'first' });
+
+    await ds.update(7, { id: 9, name: 'renamed' });
+
+    const call = client.db('testdb').collection('Widget').calls.find(
+      (c) => c.method === 'findOneAndUpdate',
+    );
+    const payload = (call?.args[1] as { $set: Record<string, unknown> }).$set;
+    expect(payload).toEqual({ name: 'renamed' });
+    expect('_id' in payload).toBe(false);
+  });
+
+  it('still updates the addressed row and returns it with its key intact', async () => {
+    const ds = makeDataSource();
+    await ds.create({ id: 7, name: 'first' });
+    expect(await ds.update(7, { id: 9, name: 'renamed' })).toEqual({ id: 7, name: 'renamed' });
+    // The row keeps its original key: `update` moves no row to a new id.
+    expect(await ds.findById(7)).toEqual({ id: 7, name: 'renamed' });
+  });
+
+  it('an update carrying only the primary key is a no-op that returns the row', async () => {
+    // Stripping the key can empty the payload. mongod 8 accepts `$set: {}` and
+    // answers with the document, so this stays a successful read-back rather
+    // than becoming a new failure mode.
+    const ds = makeDataSource();
+    await ds.create({ id: 7, name: 'first' });
+    expect(await ds.update(7, { id: 7 })).toEqual({ id: 7, name: 'first' });
+  });
+});
+
+describe('the fake client honours the real driver where the adapter depends on it', () => {
+  it('treats `limit: 0` as unlimited, as mongod does', async () => {
+    // Measured against mongod 8: `find({}, { limit: 0 })` returns every match.
+    // The framework's own `applyPagination` gates its slice on `limit > 0` for
+    // the same reason, so a double slicing to zero would have been the only
+    // component in the stack disagreeing — and would have hidden it.
+    const ds = makeDataSource();
+    await ds.create({ id: 1 });
+    await ds.create({ id: 2 });
+    expect(await ds.findAll(query({ limit: 0 }))).toHaveLength(2);
+    expect(await ds.findAll(query({ limit: 1 }))).toHaveLength(1);
+  });
+
+  it("`returnDocument: 'before'` answers with the pre-update document", async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Widget', undefined, fakeObjectIdCtor);
+    await ds.create({ id: 1, name: 'first' });
+    const collection = client.db('testdb').collection('Widget');
+    const before = await collection.findOneAndUpdate(
+      { _id: 1 },
+      { $set: { name: 'second' } },
+      { returnDocument: 'before' },
+    );
+    expect(before).toEqual({ _id: 1, name: 'first' });
+    // …and the write still landed.
+    expect(await ds.findById(1)).toEqual({ id: 1, name: 'second' });
+  });
+});

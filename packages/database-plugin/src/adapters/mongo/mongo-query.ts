@@ -60,8 +60,10 @@ export function escapeRegex(value: string): string {
  * maps to `$in` (an empty list becomes a match-nothing predicate, and a list
  * containing `null` keeps the `null`, which Mongo matches for both a null
  * value and a missing field); `contains` maps to a regex-escaped `$regex`
- * with an empty `$options` (case sensitivity follows the collection's
- * collation, documented rather than overridden).
+ * with an empty `$options`, which is **case-sensitive**: MongoDB does not apply
+ * a collection's collation to `$regex`, so a case-insensitive collation does
+ * not make this match case-insensitive (measured against a `strength: 2`
+ * collection, where `$eq` matched and `$regex` did not).
  *
  * @param comparison - The comparison to translate
  * @returns The operator document
@@ -113,6 +115,17 @@ export function translateComparison(
  */
 export function translateFilter(expression: FilterExpression): Record<string, unknown> {
   if (expression.type !== 'comparison') {
+    if (expression.filters.length === 0) {
+      // `FilterExpression` permits an empty group and `normalizeQuery` forwards
+      // it unchanged, but MongoDB refuses `$and: []`/`$or: []` outright
+      // ("$and argument must be a non-empty array"). The group therefore
+      // compiles to its boolean identity, which is what the other adapters
+      // already produce — Memory via `every`/`some`, Drizzle via its
+      // tautology/contradiction pair: an empty `and` matches every document,
+      // an empty `or` matches none. `$nor: [{}]` is the negation of match-all,
+      // and both forms compose inside an enclosing `$and`.
+      return expression.type === 'and' ? {} : { $nor: [{}] };
+    }
     const key = expression.type === 'and' ? '$and' : '$or';
     return {
       [key]: expression.filters.map((child) => translateFilter(child)),

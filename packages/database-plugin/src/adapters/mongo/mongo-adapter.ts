@@ -47,6 +47,8 @@ import type { MongoTarget } from './mongo-mapping.ts';
  */
 export class MongoAdapter implements IDatabaseAdapter {
   #client: IMongoClient | null = null;
+  /** The in-flight `connect()`, so concurrent callers share one attempt. */
+  #connecting: Promise<void> | null = null;
   #loader: MongoClientLoader | null = null;
   #connected = false;
   readonly #options: MongoAdapterOptions;
@@ -75,18 +77,59 @@ export class MongoAdapter implements IDatabaseAdapter {
     this.#mapping = options.collections ?? undefined;
   }
 
-  /** Establishes the database connection, resolving the client and database name. @inheritdoc */
+  /**
+   * Establishes the database connection, resolving the client and database name.
+   *
+   * Nothing is retained until the connection is fully established: a failure
+   * leaves `#client` null, so the `#client !== null` guard above does not turn
+   * a transient outage into a permanently unusable adapter. Assigning the
+   * field first made every later `connect()` a no-op while `isReady()` stayed
+   * `false`, so the adapter could never recover.
+   *
+   * @inheritdoc
+   */
   async connect(): Promise<void> {
     if (this.#client !== null) return;
+    // Concurrent callers share one attempt rather than each constructing a
+    // client and all but the last leaking. The attempt is NEVER cached past
+    // settlement: holding a rejected promise here would reinstate exactly the
+    // permanently-unusable adapter this method was fixed to avoid.
+    if (this.#connecting !== null) return await this.#connecting;
+    const attempt = this.#establish();
+    this.#connecting = attempt;
+    try {
+      await attempt;
+    } finally {
+      this.#connecting = null;
+    }
+  }
+
+  /**
+   * Performs one connection attempt.
+   *
+   * @throws {Error} When the driver cannot connect or no database resolves
+   */
+  async #establish(): Promise<void> {
     // Resolve the loader — injected (no import) or the literal lazy import.
-    this.#loader = this.#options.client !== undefined
+    const injected = this.#options.client !== undefined;
+    const loader = this.#options.client !== undefined
       ? createInjectedClientLoader(this.#options.client, this.#options.objectIdCtor)
       : await createLazyClientLoader(this.#options.url as string);
-    this.#client = await this.#loader.createClient(this.#options.url as string);
-    await this.#client.connect();
-    // Fail at startup when no database can be resolved (the plan §3.9 contract),
-    // not lazily on the first data operation.
-    this.#resolveDatabaseName();
+    const client = await loader.createClient(this.#options.url as string);
+    try {
+      await client.connect();
+      // Fail at startup when no database can be resolved (the plan §3.9 contract),
+      // not lazily on the first data operation.
+      this.#resolveDatabaseName();
+    } catch (error) {
+      // Close only a client this adapter created. An injected one belongs to
+      // the application, which may reuse it. The close failure is discarded
+      // deliberately: the connect error is the one the caller needs.
+      if (!injected) await client.close().catch(() => {});
+      throw error;
+    }
+    this.#loader = loader;
+    this.#client = client;
     this.#connected = true;
   }
 

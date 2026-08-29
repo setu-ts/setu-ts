@@ -67,7 +67,7 @@ await db.transaction(async (uow) => {
 | --------- | ------------------------------------------------------------ | ----------- | ---------------------------------------- |
 | `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'custom'` | `'memory'`  | Backend adapter.                         |
 | `name`    | `string`                                                     | `'default'` | Named connection for multi-database use. |
-| `options` | `DatabaseAdapterOptions`                                     | —           | Adapter-specific configuration.          |
+| `options` | per-arm (see `type`)                                         | —           | Adapter-specific configuration.          |
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
@@ -230,18 +230,21 @@ app.register(DatabasePlugin({
 | `database`      | `string`                             | from `url`         | The collection resolver. When neither this nor `url` yields a name, `connect()` fails at startup naming the option. |
 | `collections`   | `Record<string, MongoEntityMapping>` | `{}`               | Per-entity `{ collection?, primaryKey?, idType? }`. An unmapped entity uses its own name and `'id'`.                |
 
-**Identity.** `_id` is mapped to the configured primary key on read (as a string, so a row stays
-`JSON.stringify`-able) and back to `_id` on write. Under the default `idType: 'auto'` a 24-hex
-**string** id is converted to an `ObjectId`, because `findOne({ _id: '<24-hex>' })` misses an
-`ObjectId` key; anything else — including a numeric primary key — is passed to the driver verbatim.
-`'objectId'` forces the conversion and refuses a value it cannot convert by name; `'raw'` forbids
-it, which is the setting for a collection whose `_id` values genuinely are 24-hex strings (no
-runtime test can tell that case from an `ObjectId` one).
+**Identity.** `_id` is mapped to the configured primary key on read and back to `_id` on write. An
+`ObjectId` is rendered as its 24-hex string so a row stays `JSON.stringify`-able; a JSON scalar
+(`string`, `number`, `boolean`, `null`) keeps its own type, so the value `create()` returns is the
+value `findById()` accepts. Under the default `idType: 'auto'` a 24-hex **string** id is converted
+to an `ObjectId`, because `findOne({ _id: '<24-hex>' })` misses an `ObjectId` key; anything else —
+including a numeric primary key — is passed to the driver verbatim. `'objectId'` forces the
+conversion and refuses a value it cannot convert by name; `'raw'` forbids it, which is the setting
+for a collection whose `_id` values genuinely are 24-hex strings (no runtime test can tell that case
+from an `ObjectId` one).
 
 **`contains`.** Compiles to an escaped `$regex`. This is the inverse of the SQL case: `%` and `_`
 are ordinary data in Mongo, while `.` and `*` are wildcards, so the value is regex-escaped and a
-search for `3.5` does not match `315`. Case sensitivity follows the collection's collation and is
-not overridden.
+search for `3.5` does not match `315`. The match is **case-sensitive** and cannot be made otherwise
+through this operator: MongoDB does not apply a collection's collation to `$regex`, so even a
+case-insensitive collation leaves `contains` case-sensitive.
 
 **`rawQuery` is refused by name** with `UnsupportedRawQueryError` — MongoDB has no SQL, so
 `IDatabaseService.query()` is unavailable on this arm and an application reaches the injected client
@@ -284,8 +287,10 @@ containing `null` matches rows whose column is null (SQL `IN` never matches `NUL
 the adapters emit an explicit null branch).
 
 **`contains` is a substring match, and its case sensitivity belongs to the database.** The Memory
-adapter and D1 match case-sensitively; a `LIKE`-based backend follows the column's collation, which
-is case-sensitive on PostgreSQL and case-insensitive on SQLite and most MySQL collations.
+adapter, D1 and Mongo match case-sensitively — Mongo compiles to `$regex`, which MongoDB does not
+apply collation to, so a case-insensitive collection collation does not change it. A `LIKE`-based
+backend follows the column's collation, which is case-sensitive on PostgreSQL and case-insensitive
+on SQLite and most MySQL collations.
 
 **`%` and `_` in the searched value are data, never wildcards — and on the Prisma adapter the
 connector decides how that is achieved.** Memory (`includes`), Drizzle (`LIKE … ESCAPE '\'`) and D1

@@ -133,9 +133,17 @@ export function createMongoDataSource(
       id: string | number,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> => {
+      const patch = toDriverDocument(data, target, objectIdCtor);
+      // The primary key never travels in an update payload: `id` already
+      // addresses the row, and MongoDB refuses a `$set` that would change
+      // `_id` ("Performing an update on the path '_id' would modify the
+      // immutable field '_id'"), so a caller passing the whole row back with a
+      // different key met a raw driver error through a portable contract.
+      // `update` does not move a row to a new primary key on any adapter.
+      delete patch._id;
       const result = await collection.findOneAndUpdate(
         { _id: convertId(id) },
-        { $set: toDriverDocument(data, target, objectIdCtor) },
+        { $set: patch },
         { returnDocument: 'after', ...options() },
       );
       if (result === null || result === undefined) {

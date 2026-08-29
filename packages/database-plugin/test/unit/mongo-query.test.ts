@@ -203,3 +203,48 @@ describe('escapeRegex — the metacharacters the driver treats specially', () =>
     expect(new RegExp(escaped).test('3.5')).toBe(true);
   });
 });
+
+describe('empty filter groups compile to their boolean identity', () => {
+  // `FilterExpression.filters` is `readonly FilterExpression[]`, so an empty
+  // group is a legal value that `normalizeQuery` forwards unchanged. MongoDB
+  // refuses `$and: []`/`$or: []` outright ("must be a non-empty array"), so
+  // emitting them verbatim turned a legal query into a driver error — while
+  // Memory (`every`/`some`) and Drizzle (tautology/contradiction) both answer
+  // with the identity.
+  it('an empty `and` matches every document', () => {
+    expect(translateFilter({ type: 'and', filters: [] })).toEqual({});
+  });
+
+  it('an empty `or` matches no document', () => {
+    expect(translateFilter({ type: 'or', filters: [] })).toEqual({ $nor: [{}] });
+  });
+
+  it('never emits a `$and`/`$or` key with an empty array', () => {
+    for (const type of ['and', 'or'] as const) {
+      const emitted = translateFilter({ type, filters: [] });
+      expect(emitted.$and).toBeUndefined();
+      expect(emitted.$or).toBeUndefined();
+    }
+  });
+
+  it('an empty group nested inside a populated one is still legal', () => {
+    expect(
+      translateFilter({
+        type: 'and',
+        filters: [
+          { type: 'comparison', field: 'n', operator: 'eq', value: 1 },
+          { type: 'or', filters: [] },
+        ],
+      }),
+    ).toEqual({ $and: [{ n: { $eq: 1 } }, { $nor: [{}] }] });
+  });
+
+  it('a populated group is unchanged', () => {
+    expect(
+      translateFilter({
+        type: 'or',
+        filters: [{ type: 'comparison', field: 'n', operator: 'eq', value: 1 }],
+      }),
+    ).toEqual({ $or: [{ n: { $eq: 1 } }] });
+  });
+});

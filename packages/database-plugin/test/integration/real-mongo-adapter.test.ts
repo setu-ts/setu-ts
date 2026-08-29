@@ -13,6 +13,17 @@ import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
 
 const mongoUrl = Deno.env.get('MONGODB_URI');
+/**
+ * Whether the real-server cases run. They are declared with the BDD `ignore`
+ * option rather than an early `return`, so an unset `MONGODB_URI` is reported
+ * as **ignored** instead of as a passing test that exercised nothing — the
+ * distinction CI depends on (M37's exit-77 rule in test form).
+ */
+const skipReal = mongoUrl === undefined;
+/** The URL, narrowed for the guarded bodies; unused when `skipReal`. */
+const url = mongoUrl ?? '';
+/** Transactions need a replica set; a standalone `mongod` refuses them. */
+const skipTx = skipReal || !url.includes('replicaSet=');
 
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
   return {
@@ -26,12 +37,12 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
 }
 
 describe('MongoAdapter against a real MongoDB server (guarded)', () => {
-  it('lazily imports the driver and reads CRUD operations back through IDataSource', async () => {
-    if (mongoUrl === undefined) return;
-
+  it('lazily imports the driver and reads CRUD operations back through IDataSource', {
+    ignore: skipReal,
+  }, async () => {
     const collection = `m78_widgets_${crypto.randomUUID().replaceAll('-', '')}`;
     const adapter = new MongoAdapter({
-      url: mongoUrl,
+      url,
       database: 'setu_m78',
       collections: { Widget: { collection } },
     });
@@ -66,9 +77,9 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
     }
   });
 
-  it('serves a numeric primary key through every IDataSource entry point', async () => {
-    if (mongoUrl === undefined) return;
-
+  it('serves a numeric primary key through every IDataSource entry point', {
+    ignore: skipReal,
+  }, async () => {
     // The default `'auto'` mapping converted through `ObjectId.isValid`, which
     // the real driver answers `true` for on any number while its constructor
     // rejects one — so a collection keyed by application-assigned numbers threw
@@ -76,7 +87,7 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
     // real driver shows it: the structural double's `isValid` cannot.
     const collection = `m78_numeric_${crypto.randomUUID().replaceAll('-', '')}`;
     const adapter = new MongoAdapter({
-      url: mongoUrl,
+      url,
       database: 'setu_m78',
       collections: { Widget: { collection } },
     });
@@ -104,17 +115,81 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
     }
   });
 
-  it('commits and rolls back a real session transaction (replica set only)', async () => {
+  it('serves the shapes a fake cannot prove: empty groups, `_id` as the key, pk in update', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `m78_shapes_${crypto.randomUUID().replaceAll('-', '')}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m78',
+      collections: { Widget: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Widget');
+      await source.create({ id: 1, name: 'one' });
+      await source.create({ id: 2, name: 'two' });
+
+      // An empty group is a legal `FilterExpression`. Emitted verbatim the
+      // server refuses it outright ("$and argument must be a non-empty
+      // array"), so it compiles to its boolean identity instead.
+      await expect(source.findAll(query({ filter: { type: 'and', filters: [] } })))
+        .resolves.toHaveLength(2);
+      await expect(source.findAll(query({ filter: { type: 'or', filters: [] } })))
+        .resolves.toHaveLength(0);
+      // …and composed with an equality half, which is the other emitted shape.
+      await expect(
+        source.findAll(query({ where: { id: 1 }, filter: { type: 'and', filters: [] } })),
+      ).resolves.toHaveLength(1);
+      await expect(source.count({}, { type: 'or', filters: [] })).resolves.toBe(0);
+
+      // The server rejects a `$set` that would change `_id`, so the primary key
+      // must never reach the update payload.
+      await expect(source.update(1, { id: 99, name: 'renamed' })).resolves.toEqual({
+        id: 1,
+        name: 'renamed',
+      });
+      await expect(source.findById(1)).resolves.toEqual({ id: 1, name: 'renamed' });
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('round-trips a collection whose primary key IS `_id`', { ignore: skipReal }, async () => {
+    const collection = `m78_native_${crypto.randomUUID().replaceAll('-', '')}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m78',
+      collections: { Widget: { collection, primaryKey: '_id', idType: 'raw' } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Widget');
+      // Mapping the key onto the driver's own field name wrote it and then
+      // deleted it — on read the row lost its key, and on write the caller's
+      // key was dropped so the server generated a different one.
+      const created = await source.create({ _id: 42, name: 'native' });
+      expect(created).toEqual({ _id: 42, name: 'native' });
+      await expect(source.findById(42)).resolves.toEqual({ _id: 42, name: 'native' });
+      await expect(source.delete(42)).resolves.toBe(true);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('commits and rolls back a real session transaction (replica set only)', {
+    ignore: skipTx,
+  }, async () => {
     // Transactions were proven by a fake whose session is inert, so neither
     // commit nor rollback was ever observed against a server. A standalone
     // `mongod` refuses `startTransaction` by design, so this case is guarded on
     // the deployment rather than only on the URL — CI's Mongo service is
     // standalone, while a `?replicaSet=` deployment runs it for real.
-    if (mongoUrl === undefined || !mongoUrl.includes('replicaSet=')) return;
-
     const collection = `m78_tx_${crypto.randomUUID().replaceAll('-', '')}`;
     const adapter = new MongoAdapter({
-      url: mongoUrl,
+      url,
       database: 'setu_m78',
       collections: { Widget: { collection } },
     });

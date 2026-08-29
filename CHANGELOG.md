@@ -14,7 +14,13 @@ All notable changes to this project are documented here. The format follows
   registration supplying neither `url` nor `client` is a compile error rather than a `connect()`
   throw; `MongoAdapterOptionsBase` names the half both arms share. The `'mongodb'` member of the
   published `PrismaSqlProvider` union is retained but documented as unreachable on Prisma v7 — the
-  adapter arm is the supported MongoDB route.
+  adapter arm is the supported MongoDB route. Identity round-trips: an `ObjectId` is rendered as its
+  24-hex string while a JSON scalar keeps its own type, `primaryKey` may name `_id` itself, and the
+  primary key never travels in an update payload (MongoDB refuses a `$set` that would change `_id`).
+  An empty filter group compiles to its boolean identity, matching Memory and Drizzle, because
+  MongoDB refuses `$and: []`/`$or: []`. `contains` is case-sensitive and cannot be made otherwise —
+  MongoDB does not apply collation to `$regex`. The arm accepts the shared `logQueries` option like
+  every other built-in adapter.
 - Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.

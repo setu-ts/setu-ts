@@ -162,3 +162,42 @@ describe('toDriverId — primary-key value → driver form', () => {
     );
   });
 });
+
+describe("mapping when the primary key IS the driver's own `_id` field", () => {
+  const target = { collection: 'events', primaryKey: '_id', idType: 'raw' } as const;
+
+  it('read keeps the id instead of writing then deleting the same field', () => {
+    // `MongoEntityMapping.primaryKey` accepts any name, `'_id'` included — a
+    // collection addressed by the driver's own field name. The unconditional
+    // delete assigned `row['_id']` and then removed it, so the row came back
+    // with no primary key at all.
+    expect(fromDriverDocument({ _id: 7, name: 'launch' }, target)).toEqual({
+      _id: 7,
+      name: 'launch',
+    });
+  });
+
+  it('write keeps the caller-supplied key rather than dropping it', () => {
+    // Dropping `_id` on write is worse than losing it on read: the driver then
+    // generates a fresh key and the row is stored under an id the caller never
+    // chose, silently.
+    expect(toDriverDocument({ _id: 7, name: 'launch' }, target)).toEqual({
+      _id: 7,
+      name: 'launch',
+    });
+  });
+
+  it('a differently-named primary key still hides `_id` from the row', () => {
+    // The guard is scoped to the equal-names case; the ordinary mapping is
+    // unchanged.
+    const renamed = { collection: 'events', primaryKey: 'id', idType: 'raw' } as const;
+    expect(fromDriverDocument({ _id: 7, name: 'launch' }, renamed)).toEqual({
+      id: 7,
+      name: 'launch',
+    });
+    expect(toDriverDocument({ id: 7, name: 'launch' }, renamed)).toEqual({
+      _id: 7,
+      name: 'launch',
+    });
+  });
+});
