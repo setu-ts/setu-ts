@@ -25,6 +25,7 @@ import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { UnsupportedFilterOperatorError } from '../../src/errors.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
+import { translateFilter } from '../../src/adapters/mongo/mongo-query.ts';
 import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
@@ -228,6 +229,81 @@ function evalDrizzle(row: Row, expr: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Mongo operator-tree evaluator (the subset the case table exercises).
+// ---------------------------------------------------------------------------
+
+function evalMongo(row: Row, filter: unknown): boolean {
+  if (filter === null || typeof filter !== 'object') {
+    return false;
+  }
+  const f = filter as Record<string, unknown>;
+  if ('$and' in f) {
+    return (f.$and as unknown[]).every((sub) => evalMongo(row, sub));
+  }
+  if ('$or' in f) {
+    return (f.$or as unknown[]).some((sub) => evalMongo(row, sub));
+  }
+  for (const [field, cond] of Object.entries(f)) {
+    if (!matchConditionMongo(row[field], cond)) return false;
+  }
+  return true;
+}
+
+function matchConditionMongo(actual: unknown, cond: unknown): boolean {
+  if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
+    const ops = cond as Record<string, unknown>;
+    for (const [op, expected] of Object.entries(ops)) {
+      switch (op) {
+        case '$eq': {
+          if (actual !== expected) return false;
+          break;
+        }
+        case '$regex': {
+          const re = new RegExp(String(expected), (ops.$options as string) ?? '');
+          if (!re.test(String(actual))) return false;
+          break;
+        }
+        case '$options': {
+          break;
+        }
+        case '$in': {
+          if (!(expected as unknown[]).some((v) => v === actual)) return false;
+          break;
+        }
+        case '$gt':
+          if (!(Number(actual) > Number(expected))) return false;
+          break;
+        case '$gte':
+          if (!(Number(actual) >= Number(expected))) return false;
+          break;
+        case '$lt':
+          if (!(Number(actual) < Number(expected))) return false;
+          break;
+        case '$lte':
+          if (!(Number(actual) <= Number(expected))) return false;
+          break;
+        default:
+          throw new Error(`conformance evaluator: unhandled Mongo op '${op}'`);
+      }
+    }
+    return true;
+  }
+  return actual === cond;
+}
+
+/** Translate through Mongo and return the recorded match filter. */
+function mongoWhere(filter: FilterExpression): Record<string, unknown> {
+  // `eq` is carried by `where`, not a filter operator, so a bare `eq`
+  // comparison must be folded into the match document as a field equality to
+  // match the reference (Memory's `actual === value`).
+  if (filter.type === 'comparison' && filter.operator === 'eq') {
+    return { [filter.field]: filter.value };
+  }
+  const expression = { type: 'and', filters: [filter] } as FilterExpression;
+  return translateFilter(expression);
+}
+
+// ---------------------------------------------------------------------------
 // Translation drivers.
 // ---------------------------------------------------------------------------
 
@@ -288,6 +364,30 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
       expect(drizzleRows).toEqual(expected);
     });
   }
+
+  // Every case also agrees with Mongo's native $regex/$in/$gt… translation.
+  for (const { label, filter } of CASES) {
+    it(`Memory/Mongo agree: ${label}`, () => {
+      const expected = reference(filter);
+      const filterDoc = mongoWhere(filter);
+      const mongoRows = ids(ROWS.filter((row) => evalMongo(row, filterDoc)));
+      expect(mongoRows).toEqual(expected);
+    });
+  }
+
+  it('the escaped-dot contains case does not match the metacharacter row', () => {
+    // §3.7: an unescaped '3.5' would treat '.' as "any char". The escaped
+    // pattern must select only the literal, and the reference table's
+    // metacharacter row must never be selected by a bare substring contains.
+    const filter = {
+      type: 'comparison',
+      field: 'name',
+      operator: 'contains',
+      value: 'back',
+    } as FilterExpression;
+    const rows = ids(ROWS.filter((row) => evalMongo(row, mongoWhere(filter))));
+    expect(rows).toEqual(['r5', 'r6']);
+  });
 
   it('the % case is the X12-1 discriminator: literal, not wildcard', () => {
     // Reference: only rows containing the literal substring '50% off'.

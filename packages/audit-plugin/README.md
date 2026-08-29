@@ -108,25 +108,24 @@ MIT
 
 ## Exports
 
-| Export                 | Kind      |
-| ---------------------- | --------- |
-| `AuditPlugin`          | function  |
-| `AuditService`         | class     |
-| `DatabaseAuditStorage` | class     |
-| `FileAuditStorage`     | class     |
-| `LogAuditStorage`      | class     |
-| `MemoryAuditStorage`   | class     |
-| `AuditEntry`           | interface |
-| `AuditPluginOptions`   | interface |
-| `AuditQuery`           | interface |
-| `AuditStorageOptions`  | interface |
-| `IAuditDbClient`       | interface |
-| `IAuditLogger`         | interface |
-| `StoredAuditEntry`     | interface |
-| `AuditStorageType`     | type      |
+| Export | Kind |
+| --- | --- |
+| `AuditPlugin` | function |
+| `AuditService` | class |
+| `DatabaseAuditStorage` | class |
+| `FileAuditStorage` | class |
+| `LogAuditStorage` | class |
+| `MemoryAuditStorage` | class |
+| `AuditEntry` | interface |
+| `AuditPluginOptions` | interface |
+| `AuditQuery` | interface |
+| `AuditStorageOptions` | interface |
+| `IAuditDbClient` | interface |
+| `IAuditLogger` | interface |
+| `StoredAuditEntry` | interface |
+| `AuditStorageType` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

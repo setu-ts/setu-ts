@@ -7762,7 +7762,7 @@ an adapter, not a hint.
   scan and discard `n` rows on Postgres, MySQL and SQLite too, so a deep page is already `O(n)` on
   every backend this framework ships.
 
-**One measurement decides the size of the Mongo half, and it has not been taken.** Prisma's MongoDB
+**One measurement decides the size of the Mongo half, and it is now taken.** Prisma's MongoDB
 connector may already work through the existing `PrismaAdapter` **unchanged**: the adapter's CRUD
 path is Prisma's model delegates (`findMany`/`count`/`create`/`update`/`delete` with
 `where`/`orderBy`/`take`/`skip`/`select`), which the Mongo connector implements identically, and
@@ -7770,10 +7770,15 @@ M68's filter translation emits only `contains`/`gt`/`gte`/`lt`/`lte`/`in`/`AND`/
 `contains` is **already** Mongo-aware, per the `PASSTHROUGH_PROVIDERS` finding above, so the probe
 covers the CRUD and raw-query paths rather than filters. The single SQL touchpoint is `rawQuery` →
 `$queryRawUnsafe` (`database-plugin/src/adapters/prisma/prisma-adapter.ts:256`), which Mongo rejects
-in favour of `$runCommandRaw` — so repositories would work while `query()` failed. **That probe is
-this milestone's first deliverable**, because it decides whether Mongo is an adapter, a documented
-configuration, or a `'custom'`-arm example; writing the rest of the plan before taking it would be
-planning against a guess.
+in favour of `$runCommandRaw` — so repositories would work while `query()` failed. **That probe was
+taken, and it decided Mongo is an adapter, not a documented configuration or a `'custom'`-arm
+example** — the branch that this milestone shipped. Writing the rest of the plan after the probe (as
+this section originally did) is what made it read as a guess; the decision is now in code, not
+behind it.
+
+**Correction (C4):** the statement that the probe "has not been taken" and is "this milestone's first
+deliverable" described the state when this section was authored; it is now recorded as taken with its
+result, so a reader does not re-run it.
 
 **Three contract blockers, in increasing difficulty, re-checked against source for this section.**
 
@@ -7807,17 +7812,22 @@ planning against a guess.
    concepts a team chooses a NoSQL store _for_. Serving a document store without them is serving it
    as a slower relational database.
 
-- **In scope:** the probe above, and then the decision it settles. If Mongo comes back cheap, a
-  small milestone — a configurable primary-key name following the D1 precedent, plus a
-  `'custom'`-arm adapter, which has been expressible from another package since **M52c** promoted
-  `IDatabaseAdapter` into `common`. Blocker 2 is **M79**, scheduled below, and so is the
-  multi-column form of blocker 1 that Mongo's single `_id` does not need — that is where the honest
-  design difficulty is. Blocker 3 is deliberately **not** scheduled as portable surface at all:
-  M79's own out-of-scope bullet gives the reason, that TTL, consistency level and secondary-index
-  selection are spelled differently by every candidate backend and so belong with the adapter that
-  first needs them, and M82 excludes Bigtable's cell versioning on the same grounds. This section
-  originally called that split "a recommendation this section makes, not a decision it takes", which
-  is the defect corrected here — see M79 for the measurement.
+- **In scope:** the probe above, and then the decision it settles. **The probe was taken during
+  planning (before the rest of this section was written, as this section directed): Mongo is a
+  first-class adapter, not a documented configuration or a `'custom'`-arm example.** It is shipped as
+  `MongoAdapter` over the native `mongodb` driver (`npm:mongodb@^7`), registered through the
+  discriminated union as `type: 'mongodb'` and documented in `PUBLIC_API.md` (`### MongoDB backend`),
+  the package README, and this section's Progress Tracking row. A configurable primary-key name
+  follows the D1 precedent (`MongoEntityMapping`) from the start, so the "small milestone" this
+  section imagined is the shape already merged — no separate milestone stood between the probe and the
+  arm. Blocker 2 is **M79**, scheduled below, and so is the multi-column form of blocker 1 that
+  Mongo's single `_id` does not need — that is where the honest design difficulty is. Blocker 3 is
+  deliberately **not** scheduled as portable surface at all: M79's own out-of-scope bullet gives the
+  reason, that TTL, consistency level and secondary-index selection are spelled differently by every
+  candidate backend and so belong with the adapter that first needs them, and M82 excludes Bigtable's
+  cell versioning on the same grounds. This section originally called that split "a recommendation this
+  section makes, not a decision it takes", which is the defect corrected here — see M79 for the
+  measurement.
 - **Not in scope, because it is scheduled rather than dropped:** DynamoDB is **M80**, Cosmos DB is
   **M81** and Cloud Bigtable is **M82**, all three gated on M79. An enterprise backend is not
   excluded for failing to fit a contract — the contract is what grows. What this milestone does not
@@ -8117,7 +8127,7 @@ the plan: **`cbtemulator` implements no instance admin API** — `instance.creat
 | 75        | ✅     | broker trace propagation (PR #201)             |
 | 76        | ✅     | standard decorators / experimentalDecorators   |
 | 77        | ✅     | executable prose assertions                    |
-| 78        | ⬜     | document-database backends                     |
+| 78        | ✅     | document-database backends (Mongo adapter)     |
 | 79        | ⬜     | portable data-access contract                  |
 | 80        | ⬜     | dynamodb backend                               |
 | 81        | ⬜     | cosmos db backend                              |

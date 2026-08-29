@@ -60,3 +60,75 @@ export class UnsupportedFilterOperatorError extends Error {
     this.connector = connector;
   }
 }
+
+/**
+ * Thrown by {@linkcode MongoAdapter.rawQuery} — MongoDB has no SQL, so a raw
+ * query is refused by name rather than emulated (the silent-divergence defect
+ * M70j closed). The error names the adapter and points at the injected client
+ * for native commands.
+ *
+ * It rejects, never throws synchronously — a synchronous throw from a
+ * `Promise`-typed method is the M52b/M52c/M70j defect class.
+ *
+ * @example
+ * ```typescript
+ * import { UnsupportedRawQueryError } from '@setu-ts/database-plugin';
+ * try {
+ *   await adapter.rawQuery('SELECT 1');
+ * } catch (err) {
+ *   if (err instanceof UnsupportedRawQueryError) {
+ *     console.error(err.message);
+ *   }
+ * }
+ * ```
+ * @since 0.1.0
+ */
+export class UnsupportedRawQueryError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'UnsupportedRawQueryError';
+
+  /**
+   * Creates the error.
+   *
+   * @param message - The full diagnostic, safe to log
+   */
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Thrown by {@linkcode MongoAdapter.beginTransaction} on a deployment without
+ * a replica set.
+ *
+ * A standalone `mongod` is a legitimate deployment for an application that
+ * never opens a transaction, so the refusal is named and late — it happens at
+ * `beginTransaction()`, never at `connect()`, where probing would cost a round
+ * trip on every boot and refuse a working configuration.
+ *
+ * @example
+ * ```typescript
+ * import { MongoTransactionUnavailableError } from '@setu-ts/database-plugin';
+ * try {
+ *   await adapter.beginTransaction();
+ * } catch (err) {
+ *   if (err instanceof MongoTransactionUnavailableError) {
+ *     console.error(err.message);
+ *   }
+ * }
+ * ```
+ * @since 0.1.0
+ */
+export class MongoTransactionUnavailableError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'MongoTransactionUnavailableError';
+
+  /**
+   * Creates the error.
+   *
+   * @param message - The full diagnostic, safe to log
+   */
+  constructor(message: string) {
+    super(message);
+  }
+}

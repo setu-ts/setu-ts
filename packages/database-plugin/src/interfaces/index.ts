@@ -9,6 +9,8 @@
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions } from '../query/find-options.ts';
+import type { IMongoClient } from '../adapters/mongo/mongo-client.ts';
+import type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
 // Re-export query option types so consumers don't need internal paths.
 export type { CountOptions, FindOptions, OrderDirection } from '../query/find-options.ts';
@@ -223,7 +225,20 @@ export interface IDatabaseService {
  *
  * @since 0.1.0
  */
-export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'custom';
+export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'mongodb' | 'custom';
+
+// Re-export the Mongo structural types the `'mongodb'` arm carries, so an
+// application annotating its configuration or implementing the `'custom'` arm
+// reaches them from the package barrel. The client/database/object-id structural
+// types live on the inject-or-lazy seam; the entity mapping is the two-layer
+// public shape.
+export type {
+  IMongoClient,
+  IMongoDatabase,
+  IMongoObjectId,
+  IMongoObjectIdCtor,
+} from '../adapters/mongo/mongo-client.ts';
+export type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
 /**
  * The options every {@linkcode DatabasePluginOptions} arm shares.
@@ -329,7 +344,8 @@ export interface DrizzleDatabaseOptions extends DatabaseConnectionOptions {
 export type BuiltInDatabaseOptions =
   | MemoryDatabaseOptions
   | PrismaDatabaseOptions
-  | DrizzleDatabaseOptions;
+  | DrizzleDatabaseOptions
+  | MongoDatabaseOptions;
 
 /**
  * The arm supplying an externally-implemented backend.
@@ -503,4 +519,89 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
    * @since 0.2.0
    */
   readonly drizzleTables: Record<string, unknown>;
+}
+
+/**
+ * The arm selecting the Mongo adapter over the native `mongodb` driver.
+ *
+ * `options.mongo.url` is required by the union unless `options.mongo.client`
+ * is supplied, so a registration that forgets both is a compile error instead
+ * of a `connect()` throw — the same guarantee the `'custom'` arm gives
+ * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
+ * `client` is an already-constructed structural `IMongoClient`, and absent it
+ * the adapter performs a literal `import('npm:mongodb@^7')` at connect time.
+ *
+ * @example
+ * ```typescript
+ * import { DatabasePlugin } from '@setu-ts/database-plugin';
+ *
+ * DatabasePlugin({
+ *   type: 'mongodb',
+ *   options: { mongo: { url: 'mongodb://localhost:27017/mydb' } },
+ * });
+ * ```
+ * @since 0.1.0
+ */
+export interface MongoDatabaseOptions extends DatabaseConnectionOptions {
+  /** Selects the Mongo arm. */
+  readonly type: 'mongodb';
+  /** Mongo adapter configuration; `url` (or `client`) is required. */
+  readonly options: MongoAdapterOptions;
+}
+
+/**
+ * Options for the {@link MongoAdapter} — the `'mongodb'` arm.
+ *
+ * @since 0.1.0
+ */
+export interface MongoAdapterOptions {
+  /**
+   * The connection string used to construct a client when none is injected.
+   *
+   * Required in the union arm unless {@linkcode client} is supplied. The
+   * database the collections live in is taken from {@linkcode database} when
+   * present, otherwise the database encoded in this URI.
+   *
+   * @since 0.1.0
+   */
+  readonly url?: string;
+
+  /**
+   * An already-constructed `IMongoClient`.
+   *
+   * When present, the lazy `import('npm:mongodb@^7')` never runs — the seam
+   * that keeps the branching unit-testable. Omit it to let the adapter load
+   * the driver lazily from {@linkcode url}.
+   *
+   * @since 0.1.0
+   */
+  readonly client?: IMongoClient;
+
+  /**
+   * The database the collections live in.
+   *
+   * Absent, the one encoded in {@linkcode url} is used; absent from both,
+   * `connect()` fails at startup naming the option.
+   *
+   * @since 0.1.0
+   */
+  readonly database?: string;
+
+  /**
+   * Per-entity collection and primary-key overrides, keyed by the entity name
+   * passed to `getRepository()`.
+   *
+   * An entity with no entry uses its own name as the collection and `'id'` as
+   * the key, which is why the zero-config path works for a schema whose
+   * collection names already match — the D1 two-layer shape.
+   *
+   * @example
+   * ```typescript
+   * new MongoAdapter({ url }, {
+   *   collections: { User: { collection: 'users', primaryKey: 'user_id', idType: 'raw' } },
+   * });
+   * ```
+   * @since 0.1.0
+   */
+  readonly collections?: Readonly<Record<string, MongoEntityMapping>>;
 }

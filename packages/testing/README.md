@@ -194,23 +194,23 @@ in PUBLIC_API.md for the full option tables and notes.
 
 ## Exports
 
-| Export                | Kind      |
-| --------------------- | --------- |
-| `collectStream`       | function  |
-| `createMockPlugin`    | function  |
-| `createTestApp`       | function  |
-| `createTestContext`   | function  |
-| `inject`              | function  |
-| `FixtureManager`      | class     |
-| `MockResponse`        | class     |
-| `MockServiceRegistry` | class     |
-| `IKernelApplication`  | interface |
-| `InjectRequest`       | interface |
-| `InjectResponse`      | interface |
-| `MockPluginOptions`   | interface |
-| `StreamingBody`       | interface |
-| `TestAppOptions`      | interface |
-| `TestContextOptions`  | interface |
+| Export | Kind |
+| --- | --- |
+| `collectStream` | function |
+| `createMockPlugin` | function |
+| `createTestApp` | function |
+| `createTestContext` | function |
+| `inject` | function |
+| `FixtureManager` | class |
+| `MockResponse` | class |
+| `MockServiceRegistry` | class |
+| `IKernelApplication` | interface |
+| `InjectRequest` | interface |
+| `InjectResponse` | interface |
+| `MockPluginOptions` | interface |
+| `StreamingBody` | interface |
+| `TestAppOptions` | interface |
+| `TestContextOptions` | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+

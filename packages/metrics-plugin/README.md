@@ -52,27 +52,26 @@ decrements the active-requests gauge rather than leaking it.
 
 ## Exports
 
-| Export                 | Kind      |
-| ---------------------- | --------- |
-| `MetricsPlugin`        | function  |
-| `Counter`              | class     |
-| `Gauge`                | class     |
-| `Histogram`            | class     |
-| `MetricsService`       | class     |
-| `Summary`              | class     |
-| `ICounter`             | interface |
-| `IGauge`               | interface |
-| `IHistogram`           | interface |
-| `IMetric`              | interface |
-| `IMetricsService`      | interface |
-| `ISummary`             | interface |
-| `MetricConfig`         | interface |
-| `MetricOptions`        | interface |
+| Export | Kind |
+| --- | --- |
+| `MetricsPlugin` | function |
+| `Counter` | class |
+| `Gauge` | class |
+| `Histogram` | class |
+| `MetricsService` | class |
+| `Summary` | class |
+| `ICounter` | interface |
+| `IGauge` | interface |
+| `IHistogram` | interface |
+| `IMetric` | interface |
+| `IMetricsService` | interface |
+| `ISummary` | interface |
+| `MetricConfig` | interface |
+| `MetricOptions` | interface |
 | `MetricsPluginOptions` | interface |
-| `NamedMetricConfig`    | interface |
+| `NamedMetricConfig` | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 
