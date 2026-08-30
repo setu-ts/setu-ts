@@ -15,14 +15,12 @@
 import type {
   CursorPayload,
   EntityKey,
-  FilterComparison,
   FilterExpression,
   IAdapterTransaction,
   IDatabaseAdapter,
-  OrderDirection,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, encodeCursor } from '@setu-ts/common';
+import { decodeCursor, encodeCursor, keysetPredicate } from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,
@@ -581,70 +579,6 @@ export class MemoryAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Build the portable "strictly after this row" filter a cursor walk needs,
-   * as a lexicographic disjunction over the full resolved sort.
-   *
-   * The resolved sort is the caller's `orderBy` fields followed by any key
-   * columns not already ordered (the tiebreaker). For a sort `(a asc, b desc,
-   * k asc)` and cursor values `(a0, b0, k0)` the "row after" comparison
-   * `(a, b, k) > (a0, b0, k0)` expands to
-   * `a > a0 OR (a = a0 AND b < b0) OR (a = a0 AND b = b0 AND k > k0)` — one
-   * leg per sort position, where each leg pins every earlier field to its
-   * cursor value and compares the position's own field in its own direction.
-   *
-   * Field values come from the decoded {@linkcode CursorPayload}: an
-   * `orderBy` field is indexed by its position in `orderedValues`, a pure
-   * tiebreaker key column by its position in `keyValues`. Both lookups are
-   * positional, so a field name that appears in neither payload resolves to
-   * `undefined` and matches nothing — the cursor is refused in practice by
-   * the fingerprint guard before this can mislead a walk.
-   *
-   * @param decoded - The decoded cursor payload for the row to continue after
-   * @param orderBy - The resolved sort specification
-   * @param keyColumns - The primary-key columns, as the final tiebreaker terms
-   * @returns The keyset filter, conjoinable with the caller's own filter
-   */
-  private buildKeysetFilter(
-    decoded: CursorPayload,
-    orderBy: NormalizedQuery['orderBy'],
-    keyColumns: readonly string[],
-  ): FilterExpression {
-    const entries = Object.entries(orderBy);
-    const tail: ReadonlyArray<[string, OrderDirection]> = keyColumns
-      .filter((col) => orderBy[col] === undefined)
-      .map((col): [string, OrderDirection] => [col, 'asc']);
-    const fullSort: ReadonlyArray<[string, OrderDirection]> = [...entries, ...tail];
-
-    const valueOf = (field: string): string | number => {
-      const orderByIndex = entries.findIndex(([name]) => name === field);
-      if (orderByIndex !== -1) return decoded.orderedValues[orderByIndex];
-      const keyIndex = keyColumns.indexOf(field);
-      return decoded.keyValues[keyIndex];
-    };
-
-    const legs: FilterExpression[] = [];
-    for (let i = 0; i < fullSort.length; i++) {
-      const terms: FilterComparison[] = [];
-      for (let j = 0; j < i; j++) {
-        terms.push({
-          type: 'comparison',
-          field: fullSort[j][0],
-          operator: 'eq',
-          value: valueOf(fullSort[j][0]),
-        });
-      }
-      terms.push({
-        type: 'comparison',
-        field: fullSort[i][0],
-        operator: fullSort[i][1] === 'desc' ? 'lt' : 'gt',
-        value: valueOf(fullSort[i][0]),
-      });
-      legs.push(terms.length === 1 ? terms[0] : { type: 'and', filters: terms });
-    }
-    return legs.length === 1 ? legs[0] : { type: 'or', filters: legs };
-  }
-
-  /**
    * Mint the next-page cursor from the last row of a non-terminal page.
    *
    * The cursor is only ever produced when {@linkcode hasMore} is true AND the
@@ -699,8 +633,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
    *
    * `decoded.orderedValues` carries the value of EVERY ordered field (in
    * `orderBy` order) from the last row of the previous page — not just key
-   * column values. This is what {@linkcode MemoryAdapter.buildKeysetFilter}
-   * indexes by position to build the "row after this one" comparison.
+   * column values. This is what {@linkcode keysetPredicate} indexes by
+   * position to build the "row after this one" comparison.
    *
    * @param entity - Entity name
    * @param query - Normalized page query (carries `cursor`, `filter`,
@@ -751,7 +685,12 @@ export class MemoryAdapter implements IDatabaseAdapter {
     //    filter when both are present.
     let results = getRecords();
     if (decoded !== null) {
-      const predicate = this.buildKeysetFilter(decoded, query.orderBy, keyColumns);
+      const predicate = keysetPredicate(
+        decoded.orderedValues,
+        decoded.keyValues,
+        query.orderBy,
+        keyColumns,
+      );
       results = results.filter((row) => matchesFilter(row, predicate));
     }
 
@@ -783,7 +722,12 @@ export class MemoryAdapter implements IDatabaseAdapter {
       // project afterward because the projection must touch every probe row.)
       let projected = getRecords();
       if (decoded !== null) {
-        const predicate = this.buildKeysetFilter(decoded, query.orderBy, keyColumns);
+        const predicate = keysetPredicate(
+          decoded.orderedValues,
+          decoded.keyValues,
+          query.orderBy,
+          keyColumns,
+        );
         projected = projected.filter((row) => matchesFilter(row, predicate));
       }
       if (query.filter !== undefined) {

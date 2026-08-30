@@ -104,32 +104,39 @@ export function decodeCursor(token: string): CursorPayload | null {
  * Build the "row after this one" keyset comparison as a portable
  * {@linkcode FilterExpression}.
  *
- * For a `desc` sort on a single key column `key` the tree is
- * `or(lt(key), and(eq(key), gt(key)))` — rows before the cursor's value, plus
- * rows equal to it. The `asc` mirror swaps the comparison directions.
+ * The comparison is the lexicographic expansion of
+ * `(resolved sort) > (cursor values)`: one `or` leg per position of the
+ * resolved sort, where each leg pins every earlier field to its cursor value
+ * (`eq`) and compares the leg's own field strictly in its own direction. For
+ * a sort `(a asc, b desc, k asc)` over cursor values `(a0, b0, k0)` the tree
+ * is `or(gt(a, a0), and(eq(a, a0), lt(b, b0)), and(eq(a, a0), eq(b, b0),
+ * gt(k, k0)))` — for the plan §3.8 case, `createdAt desc` with an `id asc`
+ * tiebreaker, exactly `or(lt(createdAt), and(eq(createdAt), gt(id)))`. A flat
+ * `or` of per-field strict comparisons is NOT this tree: it matches rows
+ * before the cursor whenever any single field sorts beyond its cursor value.
  *
- * The primary key columns (`keyColumns`) are always appended as the final sort
- * term: this is the tiebreaker that makes a walk over a non-unique sort
- * correct — over rows carrying only two distinct sort values, a walk that
- * omitted it returned 4 of 6 and reported success. A caller-supplied `orderBy`
- * that already ends in the key columns is not duplicated: the term is appended
- * only when it is not already the last term.
+ * The resolved sort is the caller's `orderBy` followed by every key column
+ * not already ordered (each as `asc`): the primary-key tiebreaker is a
+ * correctness requirement, not a refinement — over rows carrying only two
+ * distinct sort values, a walk that omitted it returned 4 of 6 and reported
+ * success. A key column already present in `orderBy` is a sort position
+ * already and is never appended twice.
  *
  * **Cursor values layout:** `orderedValues` carries the value of each
- * {@linkcode orderBy} field, in order, from the row the cursor was minted
- * against. `keyValues` carries the primary-key column values in key-column
- * order. When a key column is absent from `orderBy` (a pure tiebreaker), the
- * predicate falls back to `keyValues[0]` — never `orderedValues[0]`, because
- * the first ordered-value may belong to a non-key field and would produce a
- * wrong tiebreaker comparison.
+ * `orderBy` field, in order, from the row the cursor was minted against;
+ * `keyValues` carries the primary-key column values in key-column order. An
+ * `orderBy` field is indexed by its `orderBy` position; a pure-tiebreaker key
+ * column by its own key-column position — never a shared `orderedValues[0]`,
+ * which may belong to a non-key field.
  *
  * @param orderedValues - Value of each ordered field from the cursor row, in
  *   `orderBy` order — the i-th element is the value of
  *   `Object.entries(orderBy)[i]`
- * @param keyValues - Primary-key column values in key-column order; used as
- *   the tiebreaker fallback when a key column is absent from `orderBy`
+ * @param keyValues - Primary-key column values in key-column order; a key
+ *   column absent from `orderBy` is indexed by its position here
  * @param orderBy - The resolved sort specification (field → direction)
- * @param keyColumns - The primary-key columns, as the final tiebreaker term
+ * @param keyColumns - The primary-key columns, appended as ascending
+ *   tiebreakers when `orderBy` does not already carry them
  * @returns The keyset comparison, conjoinable with the caller's own filter
  * @since 0.1.0
  */
@@ -140,47 +147,47 @@ export function keysetPredicate(
   keyColumns: ReadonlyArray<string>,
 ): FilterExpression {
   const entries = Object.entries(orderBy);
-  const lastField = entries.length > 0 ? entries[entries.length - 1][0] : undefined;
-  const lastKey = keyColumns.length > 0 ? keyColumns[keyColumns.length - 1] : undefined;
-  // The key tiebreaker is the final sort term. When the caller's orderBy
-  // already ends in the last key column, appending it would duplicate the term,
-  // so the guard is the *last* key column against the *last* ordered field.
-  const hasTiebreaker = keyColumns.length > 0 && lastField !== lastKey;
+  // The resolved sort: the caller's orderBy fields, then every key column not
+  // already ordered as an ascending tiebreaker. A key column already present
+  // in orderBy is a sort position already and must not be appended twice.
+  const tiebreaker: ReadonlyArray<[string, OrderDirection]> = keyColumns
+    .filter((column) => orderBy[column] === undefined)
+    .map((column): [string, OrderDirection] => [column, 'asc']);
+  const sort: ReadonlyArray<[string, OrderDirection]> = [...entries, ...tiebreaker];
 
-  // A value is looked up by the position its column occupies in the sort: the
-  // sort field's value at that position. A key column absent from the sort
-  // (a pure tiebreaker) takes the first key-value (its position in the
-  // ordered-values is undefined since the key column is not in orderBy).
+  // An orderBy field's value sits at its orderBy position in `orderedValues`;
+  // a pure-tiebreaker key column's value sits at its own key-column position
+  // in `keyValues` — never `orderedValues[0]`, which may belong to a non-key
+  // field.
   const valueOf = (field: string): string | number => {
-    const index = entries.findIndex(([name]) => name === field);
-    return index === -1 ? keyValues[0] : orderedValues[index];
+    const orderByIndex = entries.findIndex(([name]) => name === field);
+    if (orderByIndex !== -1) return orderedValues[orderByIndex];
+    return keyValues[keyColumns.indexOf(field)];
   };
 
-  const comparisons: FilterComparison[] = entries.map(
-    ([field, direction]): FilterComparison => ({
+  // One leg per sort position: every earlier field pinned to its cursor value
+  // (`eq`), the leg's own field compared strictly in its own direction. A
+  // single-term leg stays a bare comparison; the legs combine under one `or`.
+  const legs = sort.map(([field, direction], position): FilterExpression => {
+    const terms: FilterComparison[] = [];
+    for (let earlier = 0; earlier < position; earlier++) {
+      const pinned = sort[earlier][0];
+      terms.push({
+        type: 'comparison',
+        field: pinned,
+        operator: 'eq',
+        value: valueOf(pinned),
+      });
+    }
+    terms.push({
       type: 'comparison',
       field,
       operator: direction === 'desc' ? 'lt' : 'gt',
       value: valueOf(field),
-    }),
-  );
-
-  const or: FilterExpression = { type: 'or', filters: comparisons };
-  if (!hasTiebreaker) return or;
-
-  // A multi-column key is an `or` of `eq(column, value)` under the `and`, so a
-  // row equal to the cursor on any key column is carried forward; the outer
-  // `and` then narrows it by the tiebreaker's own direction.
-  const eqOr: FilterComparison[] = keyColumns.map((column) => ({
-    type: 'comparison',
-    field: column,
-    operator: 'eq',
-    value: valueOf(column),
-  }));
-  return {
-    type: 'and',
-    filters: [or, { type: 'or', filters: eqOr }],
-  };
+    });
+    return terms.length === 1 ? terms[0] : { type: 'and', filters: terms };
+  });
+  return { type: 'or', filters: legs };
 }
 
 /**
