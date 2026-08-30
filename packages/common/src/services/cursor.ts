@@ -17,14 +17,38 @@
 import type { FilterComparison, FilterExpression, OrderDirection } from './database.ts';
 
 /**
- * The decoded contents of a cursor minted by {@linkcode encodeCursor}: the key
- * values plus a stable fingerprint of the resolved sort specification. The
- * fingerprint is what a fingerprint mismatch on decode detects.
+ * The decoded contents of a cursor minted by {@linkcode encodeCursor}: the
+ * values of every ordered field (in `orderBy` order) plus the primary-key
+ * column values (for tiebreaker lookups) plus a stable fingerprint of the
+ * sort specification. The fingerprint is what a fingerprint mismatch on decode
+ * detects.
+ *
+ * The i-th element of {@linkcode orderedValues} is the value of
+ * `Object.entries(orderBy)[i]` from the row the cursor was minted against.
+ * This is what {@linkcode keysetPredicate} indexes to build the "row after
+ * this one" comparison — a cursor that carried only key-column values would
+ * be wrong whenever `orderBy` contains non-key fields.
+ *
+ * {@linkcode keyValues} carries the same information but indexed by key
+ * column name rather than by `orderBy` position. It is used by
+ * {@linkcode keysetPredicate} as the tiebreaker fallback when a key column is
+ * absent from `orderBy` — using `orderedValues[0]` there would be wrong
+ * because the first ordered-value may belong to a non-key field.
  *
  * @since 0.1.0
  */
 export interface CursorPayload {
-  /** The primary-key column values in their resolved sort order. */
+  /**
+   * The value of every ordered field (in `orderBy` declaration order), from
+   * the row the cursor was minted against. Index `i` is the value of the
+   * i-th entry of `Object.entries(orderBy)`.
+   */
+  readonly orderedValues: ReadonlyArray<string | number>;
+  /**
+   * The primary-key column values (in key-column order), from the row the
+   * cursor was minted against. Used by {@linkcode keysetPredicate} as the
+   * tiebreaker fallback when a key column is absent from `orderBy`.
+   */
   readonly keyValues: ReadonlyArray<string | number>;
   /**
    * A stable fingerprint of the resolved sort specification: each ordered
@@ -70,6 +94,7 @@ export function decodeCursor(token: string): CursorPayload | null {
   }
   if (!isPayload(parsed)) return null;
   return {
+    orderedValues: [...parsed.orderedValues],
     keyValues: [...parsed.keyValues],
     sortFingerprint: parsed.sortFingerprint,
   };
@@ -90,14 +115,27 @@ export function decodeCursor(token: string): CursorPayload | null {
  * that already ends in the key columns is not duplicated: the term is appended
  * only when it is not already the last term.
  *
- * @param cursorValues - The key values in their resolved sort order
+ * **Cursor values layout:** `orderedValues` carries the value of each
+ * {@linkcode orderBy} field, in order, from the row the cursor was minted
+ * against. `keyValues` carries the primary-key column values in key-column
+ * order. When a key column is absent from `orderBy` (a pure tiebreaker), the
+ * predicate falls back to `keyValues[0]` — never `orderedValues[0]`, because
+ * the first ordered-value may belong to a non-key field and would produce a
+ * wrong tiebreaker comparison.
+ *
+ * @param orderedValues - Value of each ordered field from the cursor row, in
+ *   `orderBy` order — the i-th element is the value of
+ *   `Object.entries(orderBy)[i]`
+ * @param keyValues - Primary-key column values in key-column order; used as
+ *   the tiebreaker fallback when a key column is absent from `orderBy`
  * @param orderBy - The resolved sort specification (field → direction)
  * @param keyColumns - The primary-key columns, as the final tiebreaker term
  * @returns The keyset comparison, conjoinable with the caller's own filter
  * @since 0.1.0
  */
 export function keysetPredicate(
-  cursorValues: ReadonlyArray<string | number>,
+  orderedValues: ReadonlyArray<string | number>,
+  keyValues: ReadonlyArray<string | number>,
   orderBy: Readonly<Record<string, OrderDirection>>,
   keyColumns: ReadonlyArray<string>,
 ): FilterExpression {
@@ -111,10 +149,11 @@ export function keysetPredicate(
 
   // A value is looked up by the position its column occupies in the sort: the
   // sort field's value at that position. A key column absent from the sort
-  // (a pure tiebreaker) takes the first cursor value.
+  // (a pure tiebreaker) takes the first key-value (its position in the
+  // ordered-values is undefined since the key column is not in orderBy).
   const valueOf = (field: string): string | number => {
     const index = entries.findIndex(([name]) => name === field);
-    return index === -1 ? cursorValues[0] : cursorValues[index];
+    return index === -1 ? keyValues[0] : orderedValues[index];
   };
 
   const comparisons: FilterComparison[] = entries.map(
@@ -155,6 +194,7 @@ export function keysetPredicate(
  */
 function isPayload(value: unknown): value is CursorPayload {
   return typeof value === 'object' && value !== null &&
+    Array.isArray((value as CursorPayload).orderedValues) &&
     Array.isArray((value as CursorPayload).keyValues) &&
     typeof (value as CursorPayload).sortFingerprint === 'string';
 }

@@ -13,11 +13,16 @@
  * @module
  */
 import type {
+  CursorPayload,
   EntityKey,
+  FilterComparison,
   FilterExpression,
   IAdapterTransaction,
   IDatabaseAdapter,
+  OrderDirection,
+  PageResult,
 } from '@setu-ts/common';
+import { decodeCursor, encodeCursor } from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,
@@ -29,6 +34,7 @@ import {
 } from '../../query/query-builder.ts';
 import { resolveKeyColumns } from '../../query/key-target.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
 
 /**
  * A single in-memory entity store keyed by entity name.
@@ -317,6 +323,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
         return Promise.resolve(results.map((r) => ({ ...r })));
       },
 
+      findPage: (query) => this.findPageInternal(entity, query, effectiveRecords),
+
       findById: (id) => {
         const records = effectiveRecords();
         const store = this.getStore(entity);
@@ -393,6 +401,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
       update: (id, data) => this.updateEntity(entity, id, data),
       delete: (id) => this.deleteEntity(entity, id),
       count: (where, filter) => this.countEntities(entity, where, filter),
+      findPage: (query) =>
+        this.findPageInternal(entity, query, () => this.getStore(entity).records),
     };
   }
 
@@ -556,6 +566,259 @@ export class MemoryAdapter implements IDatabaseAdapter {
         matchesWhere(row, where) && (filter === undefined || matchesFilter(row, filter))
       ).length,
     );
+  }
+
+  /**
+   * Build the keyset cursor fingerprint from a {@linkcode NormalizedQuery.orderBy}
+   * specification. The fingerprint must be stable across all calls with the same
+   * sort so a cursor minted under one sort is refused when presented under another.
+   *
+   * @param orderBy - The resolved sort specification
+   * @returns A stable fingerprint string
+   */
+  private buildSortFingerprint(orderBy: NormalizedQuery['orderBy']): string {
+    return Object.entries(orderBy).map(([field, direction]) => `${field}:${direction}`).join(',');
+  }
+
+  /**
+   * Build the portable "strictly after this row" filter a cursor walk needs,
+   * as a lexicographic disjunction over the full resolved sort.
+   *
+   * The resolved sort is the caller's `orderBy` fields followed by any key
+   * columns not already ordered (the tiebreaker). For a sort `(a asc, b desc,
+   * k asc)` and cursor values `(a0, b0, k0)` the "row after" comparison
+   * `(a, b, k) > (a0, b0, k0)` expands to
+   * `a > a0 OR (a = a0 AND b < b0) OR (a = a0 AND b = b0 AND k > k0)` — one
+   * leg per sort position, where each leg pins every earlier field to its
+   * cursor value and compares the position's own field in its own direction.
+   *
+   * Field values come from the decoded {@linkcode CursorPayload}: an
+   * `orderBy` field is indexed by its position in `orderedValues`, a pure
+   * tiebreaker key column by its position in `keyValues`. Both lookups are
+   * positional, so a field name that appears in neither payload resolves to
+   * `undefined` and matches nothing — the cursor is refused in practice by
+   * the fingerprint guard before this can mislead a walk.
+   *
+   * @param decoded - The decoded cursor payload for the row to continue after
+   * @param orderBy - The resolved sort specification
+   * @param keyColumns - The primary-key columns, as the final tiebreaker terms
+   * @returns The keyset filter, conjoinable with the caller's own filter
+   */
+  private buildKeysetFilter(
+    decoded: CursorPayload,
+    orderBy: NormalizedQuery['orderBy'],
+    keyColumns: readonly string[],
+  ): FilterExpression {
+    const entries = Object.entries(orderBy);
+    const tail: ReadonlyArray<[string, OrderDirection]> = keyColumns
+      .filter((col) => orderBy[col] === undefined)
+      .map((col): [string, OrderDirection] => [col, 'asc']);
+    const fullSort: ReadonlyArray<[string, OrderDirection]> = [...entries, ...tail];
+
+    const valueOf = (field: string): string | number => {
+      const orderByIndex = entries.findIndex(([name]) => name === field);
+      if (orderByIndex !== -1) return decoded.orderedValues[orderByIndex];
+      const keyIndex = keyColumns.indexOf(field);
+      return decoded.keyValues[keyIndex];
+    };
+
+    const legs: FilterExpression[] = [];
+    for (let i = 0; i < fullSort.length; i++) {
+      const terms: FilterComparison[] = [];
+      for (let j = 0; j < i; j++) {
+        terms.push({
+          type: 'comparison',
+          field: fullSort[j][0],
+          operator: 'eq',
+          value: valueOf(fullSort[j][0]),
+        });
+      }
+      terms.push({
+        type: 'comparison',
+        field: fullSort[i][0],
+        operator: fullSort[i][1] === 'desc' ? 'lt' : 'gt',
+        value: valueOf(fullSort[i][0]),
+      });
+      legs.push(terms.length === 1 ? terms[0] : { type: 'and', filters: terms });
+    }
+    return legs.length === 1 ? legs[0] : { type: 'or', filters: legs };
+  }
+
+  /**
+   * Mint the next-page cursor from the last row of a non-terminal page.
+   *
+   * The cursor is only ever produced when {@linkcode hasMore} is true AND the
+   * page is non-empty: on a terminal page there is no next row to continue to,
+   * and reading the ordered/key values off an empty page would crash on the
+   * missing last row.
+   *
+   * @param pageRows - The rows of the page about to be returned (empty is fine)
+   * @param orderBy - The resolved sort specification
+   * @param keyColumns - The primary-key columns for cursor minting
+   * @param fingerprint - The sort fingerprint to embed in the cursor
+   * @param hasMore - Whether a further page exists
+   * @returns The encoded cursor, or `null` when the page is terminal
+   */
+  private mintNextCursor(
+    pageRows: Record<string, unknown>[],
+    orderBy: NormalizedQuery['orderBy'],
+    keyColumns: readonly string[],
+    fingerprint: string,
+    hasMore: boolean,
+  ): string | null {
+    if (!hasMore || pageRows.length === 0) return null;
+    const lastRow = pageRows[pageRows.length - 1];
+    const orderedValues = Object.entries(orderBy).map(
+      ([field]) => lastRow[field] as string | number,
+    );
+    const keyValues = keyColumns.map((col) => lastRow[col] as string | number);
+    return encodeCursor({ orderedValues, keyValues, sortFingerprint: fingerprint });
+  }
+
+  /**
+   * Core `findPage` implementation shared between the non-transactional data
+   * source and the transaction overlay. The `getRecords` thunk lets the two
+   * callers — the committed store and the per-tx overlay — each supply their
+   * visible row set without duplicating the cursor-handling logic.
+   *
+   * Pipeline:
+   * 1. Decode the incoming cursor. When absent, the walk starts at page one.
+   *    When malformed, reject by name.
+   * 2. When present, verify the sort fingerprint so a cross-sort cursor is
+   *    refused rather than served a silently wrong page.
+   * 3. Build the portable keyset predicate with {@linkcode keysetPredicate},
+   *    conjoin it with the caller's own filter (when present), and apply
+   *    `where` / `filter` / `orderBy` in the same order as {@linkcode findAll}.
+   * 4. Fetch `limit + 1` rows (the one-extra-row probe): if more than `limit`
+   *    are returned there IS a next page and the last returned row yields the
+   *    next cursor; otherwise the page is terminal and `nextCursor` is `null`.
+   * 5. When a projection is active, the key columns are added to the internal
+   *    select so they participate in the probe and are available for cursor
+   *    minting; they are stripped from the returned rows so the caller's
+   *    projection is what comes back — plan §8 risk.
+   *
+   * `decoded.orderedValues` carries the value of EVERY ordered field (in
+   * `orderBy` order) from the last row of the previous page — not just key
+   * column values. This is what {@linkcode MemoryAdapter.buildKeysetFilter}
+   * indexes by position to build the "row after this one" comparison.
+   *
+   * @param entity - Entity name
+   * @param query - Normalized page query (carries `cursor`, `filter`,
+   *   `orderBy`, `limit`, and `select`)
+   * @param getRecords - Thunk supplying the visible rows at call time
+   * @returns A {@linkcode PageResult} carrying `rows` and the `nextCursor`
+   * @throws {UnsupportedQueryFeatureError} When the token is malformed or the
+   *   fingerprint does not match the current sort
+   */
+  findPageInternal(
+    entity: string,
+    query: NormalizedQuery,
+    getRecords: () => Record<string, unknown>[],
+  ): Promise<PageResult> {
+    const store = this.getStore(entity);
+    const keyColumns = store.primaryKey;
+
+    // 1. Decode cursor. A missing cursor means start of the walk.
+    let decoded: CursorPayload | null = null;
+    if (query.cursor !== undefined) {
+      decoded = decodeCursor(query.cursor);
+      if (decoded === null) {
+        return Promise.reject(
+          new UnsupportedQueryFeatureError(
+            'cursor-pagination',
+            'memory',
+            `entity '${entity}': malformed cursor token`,
+          ),
+        );
+      }
+    }
+
+    // 2. Sort fingerprint guard. A cursor minted under a different sort must be
+    //    refused by name rather than served a silently wrong page.
+    const fingerprint = this.buildSortFingerprint(query.orderBy);
+    if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
+      return Promise.reject(
+        new UnsupportedQueryFeatureError(
+          'cursor-pagination',
+          'memory',
+          `entity '${entity}': cursor fingerprint mismatch — expected '${fingerprint}', ` +
+            `got '${decoded.sortFingerprint}'`,
+        ),
+      );
+    }
+
+    // 3. Build and apply the keyset predicate. Conjoin it with the caller's
+    //    filter when both are present.
+    let results = getRecords();
+    if (decoded !== null) {
+      const predicate = this.buildKeysetFilter(decoded, query.orderBy, keyColumns);
+      results = results.filter((row) => matchesFilter(row, predicate));
+    }
+
+    if (query.filter !== undefined) {
+      const filter = query.filter;
+      results = results.filter((row) => matchesFilter(row, filter));
+    }
+    results = applyOrderBy(results, query.orderBy);
+
+    // 4. One-extra-row probe. `limit + 1` rows tells us whether a next page
+    //    exists: more than `limit` means there is, and the LAST row mints the
+    //    next cursor; otherwise the page is terminal.
+    const probeLimit = query.limit > 0 ? query.limit + 1 : -1;
+    results = applyPagination(results, 0, probeLimit);
+
+    const hasMore = query.limit > 0 && results.length > query.limit;
+    const pageRows = hasMore ? results.slice(0, query.limit) : results;
+
+    // 5. Project. When the caller asked for specific fields we add the key
+    //    columns to the internal select so they participate in the probe and are
+    //    available for cursor minting; then strip them from the returned rows so
+    //    the caller's projection is what comes back — plan §8 risk.
+    const effectiveSelect = query.select.length > 0
+      ? [...new Set([...query.select, ...keyColumns])]
+      : [];
+    if (effectiveSelect.length > 0) {
+      // Re-run the full pipeline with the augmented select to ensure the
+      // probe rows carry the key columns. (We re-evaluate rather than
+      // project afterward because the projection must touch every probe row.)
+      let projected = getRecords();
+      if (decoded !== null) {
+        const predicate = this.buildKeysetFilter(decoded, query.orderBy, keyColumns);
+        projected = projected.filter((row) => matchesFilter(row, predicate));
+      }
+      if (query.filter !== undefined) {
+        const filter = query.filter;
+        projected = projected.filter((row) => matchesFilter(row, filter));
+      }
+      projected = applyOrderBy(projected, query.orderBy);
+      projected = applyPagination(projected, 0, probeLimit);
+      const more = query.limit > 0 && projected.length > query.limit;
+      const slice = more ? projected.slice(0, query.limit) : projected;
+      const nextCursor = this.mintNextCursor(
+        more ? slice : [],
+        query.orderBy,
+        keyColumns,
+        fingerprint,
+        more,
+      );
+      return Promise.resolve({
+        rows: slice.map((r) => projectFields(r, query.select) as Record<string, unknown>),
+        nextCursor,
+      });
+    }
+
+    const nextCursor = this.mintNextCursor(
+      hasMore ? pageRows : [],
+      query.orderBy,
+      keyColumns,
+      fingerprint,
+      hasMore,
+    );
+
+    return Promise.resolve({
+      rows: pageRows.map((r) => ({ ...r })),
+      nextCursor,
+    });
   }
 
   /** @inheritdoc — raw query not supported on memory adapter. */

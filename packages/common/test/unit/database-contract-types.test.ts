@@ -197,10 +197,14 @@ describe('M79 portable data-access contract types', () => {
   });
 
   it('CursorPayload type is reachable from barrel', () => {
-    const payload: CursorPayload = { keyValues: [1], sortFingerprint: 'id:asc' };
+    const payload: CursorPayload = {
+      orderedValues: [1],
+      keyValues: [1],
+      sortFingerprint: 'id:asc',
+    };
     const token = encodeCursor(payload);
     const decoded = decodeCursor(token);
     expect(decoded).not.toBeNull();
-    expect(decoded!.keyValues).toEqual([1]);
+    expect(decoded!.orderedValues).toEqual([1]);
   });
 });

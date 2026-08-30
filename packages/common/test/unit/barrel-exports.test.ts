@@ -99,6 +99,7 @@ describe('@setu-ts/common barrel — M79 portable data-access contract', () => {
     const _entityKey: import('../../src/index.ts').EntityKey = 'id';
     const _pageResult: import('../../src/index.ts').PageResult = { rows: [], nextCursor: null };
     const _cursorPayload: import('../../src/index.ts').CursorPayload = {
+      orderedValues: [1],
       keyValues: [1],
       sortFingerprint: 'a:asc',
     };
@@ -107,6 +108,6 @@ describe('@setu-ts/common barrel — M79 portable data-access contract', () => {
     expect(typeof common.keysetPredicate).toBe('function');
     expect(_entityKey).toBe('id');
     expect(_pageResult.rows).toEqual([]);
-    expect(_cursorPayload.keyValues).toEqual([1]);
+    expect(_cursorPayload.orderedValues).toEqual([1]);
   });
 });

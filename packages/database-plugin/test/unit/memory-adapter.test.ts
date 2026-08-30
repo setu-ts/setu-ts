@@ -8,6 +8,7 @@
  * - commit applies overlay; rollback discards
  * - update-in-tx isolation — uncommitted update invisible outside
  * - delete-in-tx isolation — uncommitted delete invisible outside
+ * - findPage — cursor pagination, including the P11 tied-fixture walk
  *
  * @module
  */
@@ -16,6 +17,7 @@ import { expect } from '@std/expect';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
+import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 
 describe('MemoryAdapter', () => {
   let adapter: MemoryAdapter;
@@ -347,6 +349,197 @@ describe('MemoryAdapter', () => {
       });
       expect(rows).toEqual([{ name: 'Alice' }, { name: 'Bob' }]);
       await tx.rollback();
+    });
+  });
+
+  describe('findPage', () => {
+    it('walks a tied-fixture across three pages with no row repeated or skipped', async () => {
+      // P11 negative control: deliberate sort-key ties mean a naive predicate
+      // (omitting the tiebreaker) would lose rows. The fixture seeds 6 rows
+      // with only two distinct `createdAt` values, so the tiebreaker on `id`
+      // is load-bearing.
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'a', createdAt: '2024-01-01', name: '1' });
+      await ds.create({ id: 'b', createdAt: '2024-01-01', name: '2' });
+      await ds.create({ id: 'c', createdAt: '2024-01-01', name: '3' });
+      await ds.create({ id: 'd', createdAt: '2024-01-02', name: '4' });
+      await ds.create({ id: 'e', createdAt: '2024-01-02', name: '5' });
+      await ds.create({ id: 'f', createdAt: '2024-01-02', name: '6' });
+
+      const seenIds = [] as string[];
+      let cursor: string | null = null;
+      for (let page = 1; page <= 3; page++) {
+        const result = await ds.findPage!({
+          where: {},
+          orderBy: { createdAt: 'asc', id: 'asc' },
+          limit: 2,
+          offset: 0,
+          select: [],
+          ...(cursor !== null ? { cursor } : {}),
+        });
+        if (page < 3) {
+          expect(result.nextCursor).not.toBeNull();
+          cursor = result.nextCursor;
+        } else {
+          expect(result.nextCursor).toBeNull();
+        }
+        for (const row of result.rows) {
+          const id = row.id as string;
+          expect(seenIds).not.toContain(id);
+          seenIds.push(id);
+        }
+      }
+      expect(seenIds.sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    });
+
+    it('reports nextCursor: null on the last page', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('Item');
+      await ds.create({ id: 'x', score: 1 });
+      await ds.create({ id: 'y', score: 2 });
+      await ds.create({ id: 'z', score: 3 });
+
+      const p1 = await ds.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+      expect(p1.rows.length).toBe(2);
+      expect(p1.nextCursor).not.toBeNull();
+
+      const p2 = await ds.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor: p1.nextCursor!,
+      });
+      expect(p2.rows.length).toBe(1);
+      expect(p2.nextCursor).toBeNull();
+    });
+
+    it('rejects by name when the cursor token is malformed', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+
+      await expect(
+        ds.findPage!({
+          where: {},
+          orderBy: { name: 'asc' },
+          limit: 10,
+          offset: 0,
+          select: [],
+          cursor: 'not-base64!!!',
+        }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+    });
+
+    it('rejects by name when the cursor fingerprint does not match the sort', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+
+      // Mint a cursor under one sort ...
+      const first = await ds.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 10,
+        offset: 0,
+        select: [],
+      });
+      // ... then present it under a DIFFERENT sort.
+      await expect(
+        ds.findPage!({
+          where: {},
+          orderBy: { name: 'desc' },
+          limit: 10,
+          offset: 0,
+          select: [],
+          cursor: first.nextCursor ?? '',
+        }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+    });
+
+    it('strips key columns from returned rows when a projection is present', async () => {
+      // Plan §8 risk: when a projection is active the key columns must be
+      // added to the internal select so they participate in the probe and
+      // are available for cursor minting; they must then be stripped from
+      // the returned rows so the caller sees only their projection.
+      await adapter.connect();
+      const ds = adapter.createDataSource('Secret', ['code']);
+      await ds.create({ code: 'alpha', value: 1, secret: 'x' });
+      await ds.create({ code: 'beta', value: 2, secret: 'y' });
+      await ds.create({ code: 'gamma', value: 3, secret: 'z' });
+
+      const result = await ds.findPage!({
+        where: {},
+        orderBy: { value: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: ['value'],
+      });
+      expect(result.rows.length).toBe(2);
+      expect(result.nextCursor).not.toBeNull();
+      // Caller's projection is what comes back — key column is stripped.
+      for (const row of result.rows) {
+        expect('code' in row).toBe(false);
+        expect(row).toHaveProperty('value');
+      }
+
+      // Walk the second page using the cursor and confirm the projection
+      // still strips the key column.
+      const p2 = await ds.findPage!({
+        where: {},
+        orderBy: { value: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: ['value'],
+        cursor: result.nextCursor!,
+      });
+      expect(p2.rows.length).toBe(1);
+      expect(p2.nextCursor).toBeNull();
+      for (const row of p2.rows) {
+        expect('code' in row).toBe(false);
+        expect(row).toHaveProperty('value');
+      }
+    });
+
+    it('honors findPage on the transaction overlay', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('TxItem');
+      await ds.create({ id: '1', score: 10 });
+      await ds.create({ id: '2', score: 20 });
+      await ds.create({ id: '3', score: 30 });
+
+      const txn = await adapter.beginTransaction();
+      const txDs: DataSource = (txn as IAdapterTransaction).createDataSource('TxItem');
+      await txDs.create({ id: '4', score: 40 }); // buffered, visible inside tx
+
+      const p1 = await txDs.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+      expect(p1.rows.map((r) => r.score)).toEqual([10, 20]);
+      expect(p1.nextCursor).not.toBeNull();
+
+      await txn.rollback();
+      // After rollback — the buffered create is gone.
+      const afterRollback = await ds.findAll({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: -1,
+        offset: 0,
+        select: [],
+      });
+      expect(afterRollback.length).toBe(3);
     });
   });
 });

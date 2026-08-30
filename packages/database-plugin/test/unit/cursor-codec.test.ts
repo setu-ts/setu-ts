@@ -5,9 +5,9 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { decodeCursor, encodeCursor, keysetPredicate } from '../../src/services/cursor.ts';
-import type { CursorPayload } from '../../src/services/cursor.ts';
-import type { FilterExpression } from '../../src/services/database.ts';
+import { decodeCursor, encodeCursor, keysetPredicate } from '@setu-ts/common';
+import type { CursorPayload } from '@setu-ts/common';
+import type { FilterExpression } from '@setu-ts/common';
 
 describe('encodeCursor / decodeCursor round-trip', () => {
   it('round-trips a simple asc keyset payload', () => {
@@ -24,6 +24,7 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     const decoded = decodeCursor(token);
     expect(decoded).not.toBeNull();
     expect(decoded!.orderedValues).toEqual([1]);
+    expect(decoded!.keyValues).toEqual([1]);
     expect(decoded!.sortFingerprint).toBe('id:asc');
   });
 
@@ -37,6 +38,7 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     const decoded = decodeCursor(token);
     expect(decoded).not.toBeNull();
     expect(decoded!.orderedValues).toEqual(['last-id']);
+    expect(decoded!.keyValues).toEqual(['last-id']);
     expect(decoded!.sortFingerprint).toBe('createdAt:desc');
   });
 
@@ -50,25 +52,29 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     const decoded = decodeCursor(token);
     expect(decoded).not.toBeNull();
     expect(decoded!.orderedValues).toEqual(['tenant-1', 42]);
+    expect(decoded!.keyValues).toEqual(['tenant-1', 42]);
     expect(decoded!.sortFingerprint).toBe('tenantId:asc,id:asc');
   });
 
-  it('copies orderedValues so the returned array is independent', () => {
-    const original = [1, 2] as ReadonlyArray<string | number>;
+  it('copies orderedValues and keyValues so the returned arrays are independent', () => {
+    const originalOrdered = [1, 2] as ReadonlyArray<string | number>;
+    const originalKeys = [1, 2] as ReadonlyArray<string | number>;
     const payload: CursorPayload = {
-      orderedValues: original,
-      keyValues: original,
+      orderedValues: originalOrdered,
+      keyValues: originalKeys,
       sortFingerprint: 'a:asc',
     };
     const decoded = decodeCursor(encodeCursor(payload));
     expect(decoded).not.toBeNull();
-    expect(decoded!.orderedValues).not.toBe(original);
+    expect(decoded!.orderedValues).not.toBe(originalOrdered);
+    expect(decoded!.keyValues).not.toBe(originalKeys);
     // Reassign via a mutable copy to prove independence.
     const copy = [...decoded!.orderedValues] as (string | number)[];
     copy.push(3);
     expect(copy).toEqual([1, 2, 3]);
     // Original payload is unchanged.
     expect(payload.orderedValues).toEqual([1, 2]);
+    expect(payload.keyValues).toEqual([1, 2]);
   });
 
   it('round-trips non-ASCII Unicode characters (2-byte UTF-8)', () => {
@@ -82,6 +88,7 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     const decoded = decodeCursor(token);
     expect(decoded).not.toBeNull();
     expect(decoded!.orderedValues).toEqual(['café']);
+    expect(decoded!.keyValues).toEqual(['café']);
     expect(decoded!.sortFingerprint).toBe('name:asc');
   });
 
@@ -96,6 +103,7 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     const decoded = decodeCursor(token);
     expect(decoded).not.toBeNull();
     expect(decoded!.orderedValues).toEqual(['中文']);
+    expect(decoded!.keyValues).toEqual(['中文']);
   });
 
   it('round-trips emoji/surrogate pairs (4-byte UTF-8)', () => {
@@ -112,6 +120,7 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     // (not 0x400) as the low-surrogate base offset; a wrong offset would
     // produce garbled characters here.
     expect(decoded!.orderedValues).toEqual(['😀🎉']);
+    expect(decoded!.keyValues).toEqual(['😀🎉']);
     expect(decoded!.sortFingerprint).toBe('emoji:asc');
   });
 
@@ -121,10 +130,12 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     const single: CursorPayload = { orderedValues: ['A'], keyValues: ['A'], sortFingerprint: 's' };
     const d1 = decodeCursor(encodeCursor(single));
     expect(d1!.orderedValues).toEqual(['A']);
+    expect(d1!.keyValues).toEqual(['A']);
 
     const two: CursorPayload = { orderedValues: ['ab'], keyValues: ['ab'], sortFingerprint: 't' };
     const d2 = decodeCursor(encodeCursor(two));
     expect(d2!.orderedValues).toEqual(['ab']);
+    expect(d2!.keyValues).toEqual(['ab']);
   });
 
   it('handles base64url with padding stripped correctly', () => {
@@ -143,6 +154,7 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     const decoded = decodeCursor(encoded);
     expect(decoded).not.toBeNull();
     expect(decoded!.orderedValues).toEqual(['test']);
+    expect(decoded!.keyValues).toEqual(['test']);
   });
 
   it('decodeCursor handles empty string and whitespace gracefully', () => {
@@ -170,25 +182,51 @@ describe('encodeCursor / decodeCursor round-trip', () => {
   });
 
   it('returns null for a JSON object missing orderedValues', () => {
-    const bad = encodeCursor({ sortFingerprint: 'x:asc' } as unknown as CursorPayload);
+    const bad = encodeCursor(
+      { keyValues: [1], sortFingerprint: 'x:asc' } as unknown as CursorPayload,
+    );
+    expect(decodeCursor(bad)).toBeNull();
+  });
+
+  it('returns null for a JSON object missing keyValues', () => {
+    const bad = encodeCursor(
+      { orderedValues: [1], sortFingerprint: 'x:asc' } as unknown as CursorPayload,
+    );
     expect(decodeCursor(bad)).toBeNull();
   });
 
   it('returns null for a JSON object missing sortFingerprint', () => {
-    const bad = encodeCursor({ orderedValues: [1] } as unknown as CursorPayload);
+    const bad = encodeCursor(
+      { orderedValues: [1], keyValues: [1] } as unknown as CursorPayload,
+    );
     expect(decodeCursor(bad)).toBeNull();
   });
 
   it('returns null for a JSON object with wrong orderedValues type', () => {
     const bad = encodeCursor(
-      { orderedValues: 'not-an-array', sortFingerprint: 'x:asc' } as unknown as CursorPayload,
+      {
+        orderedValues: 'not-an-array',
+        keyValues: [1],
+        sortFingerprint: 'x:asc',
+      } as unknown as CursorPayload,
+    );
+    expect(decodeCursor(bad)).toBeNull();
+  });
+
+  it('returns null for a JSON object with wrong keyValues type', () => {
+    const bad = encodeCursor(
+      {
+        orderedValues: [1],
+        keyValues: 'not-an-array',
+        sortFingerprint: 'x:asc',
+      } as unknown as CursorPayload,
     );
     expect(decodeCursor(bad)).toBeNull();
   });
 
   it('returns null for a JSON object with wrong sortFingerprint type', () => {
     const bad = encodeCursor(
-      { orderedValues: [1], sortFingerprint: 42 } as unknown as CursorPayload,
+      { orderedValues: [1], keyValues: [1], sortFingerprint: 42 } as unknown as CursorPayload,
     );
     expect(decodeCursor(bad)).toBeNull();
   });
@@ -215,7 +253,7 @@ describe('keysetPredicate', () => {
 
   it('appends the key tiebreaker when the orderBy does not end with it', () => {
     // orderBy on `name` only; key columns end in `id` → tiebreaker appended.
-    // The absent key column uses cursorValues[0] because it has no position in orderBy.
+    // The absent key column uses keyValues[0] because it has no position in orderBy.
     const pred: FilterExpression = keysetPredicate(['alice', 5], [5], { name: 'asc' }, ['id']);
     expect(pred).toEqual({
       type: 'and',
@@ -234,16 +272,16 @@ describe('keysetPredicate', () => {
 
   it('does NOT duplicate the key tiebreaker when orderBy already ends with it', () => {
     // orderBy ends with `id`; appending another `id` term would duplicate.
-    // cursorValues mirrors the sort: [nameValue, idValue].
+    // orderedValues mirrors the sort: [nameValue, idValue].
     const pred: FilterExpression = keysetPredicate([42, 5], [5], { name: 'asc', id: 'asc' }, [
       'id',
     ]);
     expect(pred).toEqual({
       type: 'or',
       filters: [
-        // Position 0: field `name`, gt value `42` (cursorValues[0]).
+        // Position 0: field `name`, gt value `42` (orderedValues[0]).
         { type: 'comparison', field: 'name', operator: 'gt', value: 42 },
-        // Position 1: field `id`, gt value `5` (cursorValues[1]).
+        // Position 1: field `id`, gt value `5` (orderedValues[1]).
         { type: 'comparison', field: 'id', operator: 'gt', value: 5 },
       ],
     });
@@ -251,20 +289,25 @@ describe('keysetPredicate', () => {
 
   it('looks up values by column position in the sort, not by name', () => {
     // Empty keyColumns means no tiebreaker; the or contains just the orderBy comparisons.
-    const pred: FilterExpression = keysetPredicate(['b', 2], [], { a: 'asc', b: 'desc' }, []);
+    const pred: FilterExpression = keysetPredicate(['b', 2], [1], { a: 'asc', b: 'desc' }, []);
     expect(pred).toEqual({
       type: 'or',
       filters: [
-        // Position 0: field `a`, gt value `b` (cursorValues[0]).
+        // Position 0: field `a`, gt value `b` (orderedValues[0]).
         { type: 'comparison', field: 'a', operator: 'gt', value: 'b' },
-        // Position 1: field `b`, lt value `2` (cursorValues[1]).
+        // Position 1: field `b`, lt value `2` (orderedValues[1]).
         { type: 'comparison', field: 'b', operator: 'lt', value: 2 },
       ],
     });
   });
 
-  it('uses the first cursor value for a key column absent from the sort', () => {
-    const pred: FilterExpression = keysetPredicate([77], [77], { name: 'asc' }, ['tenantId', 'id']);
+  it('uses keyValues[0] for a key column absent from the sort', () => {
+    const pred: FilterExpression = keysetPredicate(
+      ['alice'],
+      [77],
+      { name: 'asc' },
+      ['tenantId', 'id'],
+    );
     const and = pred as FilterExpression & { type: 'and' };
     expect(and.filters).toHaveLength(2);
     const eqOr = and.filters![1] as FilterExpression & { type: 'or' };
@@ -283,14 +326,14 @@ describe('keysetPredicate', () => {
     });
   });
 
-  it('uses cursorValues[0] for all key columns when orderBy is empty', () => {
-    // With empty orderBy, every key column falls back to cursorValues[0].
-    const pred: FilterExpression = keysetPredicate([1, 2], [1, 2], {}, ['a', 'b']);
+  it('uses keyValues[0] for all key columns when orderBy is empty', () => {
+    // With empty orderBy, every key column falls back to keyValues[0].
+    const pred: FilterExpression = keysetPredicate([], [1], {}, ['a', 'b']);
     const and = pred as FilterExpression & { type: 'and' };
     expect(and.filters).toHaveLength(2);
     const eqOr = and.filters![1] as FilterExpression & { type: 'or' };
     expect(eqOr.filters).toHaveLength(2);
-    // Both get cursorValues[0] = 1, not cursorValues[1] = 2.
+    // Both get keyValues[0] = 1, not keyValues[1] = 2.
     expect(eqOr.filters![0]).toEqual({ type: 'comparison', field: 'a', operator: 'eq', value: 1 });
     expect(eqOr.filters![1]).toEqual({ type: 'comparison', field: 'b', operator: 'eq', value: 1 });
   });
@@ -299,6 +342,31 @@ describe('keysetPredicate', () => {
     const pred: FilterExpression = keysetPredicate([], [], {}, []);
     expect(pred).toEqual({ type: 'or', filters: [] });
   });
+
+  it('uses keyValues for tiebreakers even when orderedValues[0] differs', () => {
+    // Critical test: orderedValues carries non-key field values; keyValues
+    // carries the primary-key values. When a key column is absent from
+    // orderBy (pure tiebreaker), the predicate must use keyValues, not
+    // orderedValues[0], which would be the non-key field value.
+    //
+    // Example: orderBy = { score: 'asc' }, keyColumns = ['id'].
+    // orderedValues = [2] (the score of the last row), keyValues = ['y'] (the id).
+    // The tiebreaker eq(id, ...) must use 'y', not 2.
+    const pred: FilterExpression = keysetPredicate([2], ['y'], { score: 'asc' }, ['id']);
+    expect(pred).toEqual({
+      type: 'and',
+      filters: [
+        {
+          type: 'or',
+          filters: [{ type: 'comparison', field: 'score', operator: 'gt', value: 2 }],
+        },
+        {
+          type: 'or',
+          filters: [{ type: 'comparison', field: 'id', operator: 'eq', value: 'y' }],
+        },
+      ],
+    });
+  });
 });
 
 describe('cursor.ts defensive edge cases', () => {
@@ -306,12 +374,15 @@ describe('cursor.ts defensive edge cases', () => {
     // base64url decoding strips '=', but a standard base64 token with '='
     // in the middle should be handled without crashing (the decode loop
     // breaks on '=').
-    const token = btoa('{"orderedValues":[1],"keyValues":[1],"sortFingerprint":"x"}')
+    const token = btoa(
+      '{"orderedValues":[1],"keyValues":[1],"sortFingerprint":"x"}',
+    )
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     // Normal round-trip still works.
     const d = decodeCursor(token);
     expect(d).not.toBeNull();
     expect(d!.orderedValues).toEqual([1]);
+    expect(d!.keyValues).toEqual([1]);
   });
 
   it('handles truncated base64url input gracefully', () => {
@@ -331,6 +402,7 @@ describe('cursor.ts defensive edge cases', () => {
     const decoded = decodeCursor(stripped);
     expect(decoded).not.toBeNull();
     expect(decoded!.orderedValues).toEqual([42]);
+    expect(decoded!.keyValues).toEqual([42]);
   });
 
   it('base64url strips padding so decoded bytes have exact length', () => {
@@ -344,6 +416,7 @@ describe('cursor.ts defensive edge cases', () => {
     const decoded = decodeCursor(stripped);
     expect(decoded).not.toBeNull();
     expect(decoded!.orderedValues).toEqual(['x']);
+    expect(decoded!.keyValues).toEqual(['x']);
   });
 
   it('handles base64url with only 1 value (exercises ??0 fallbacks)', () => {
@@ -361,5 +434,37 @@ describe('cursor.ts defensive edge cases', () => {
   it('handles base64url with only 3 values (exercises ??0 fallback)', () => {
     // 3 base64 chars -> values.length=3 -> n3 is undefined -> ??0
     expect(decodeCursor('QQQ')).toBeNull();
+  });
+
+  it('stops decoding at an embedded padding character', () => {
+    // A '=' mid-token terminates the byte-decode loop early, so the tail is
+    // ignored; the result is not valid JSON, so decodeCursor returns null.
+    expect(decodeCursor('QUJD=')).toBeNull();
+  });
+
+  it('handles a truncated 2-byte UTF-8 sequence at end of input', () => {
+    // 'ww' decodes to the single byte 0xC3 — a 2-byte lead with no
+    // continuation. The decoder's ??0 fallback completes the sequence with a
+    // zero byte; the resulting garbage is not valid JSON, so decodeCursor
+    // still refuses the token rather than throwing.
+    expect(decodeCursor('ww')).toBeNull();
+  });
+
+  it('handles a truncated 4-byte UTF-8 lead byte at end of input', () => {
+    // '8A' decodes to the single byte 0xF0 — a 4-byte lead with no
+    // continuation bytes at all.
+    expect(decodeCursor('8A')).toBeNull();
+  });
+
+  it('handles a truncated 3-byte UTF-8 sequence at end of input', () => {
+    // '5Li' decodes to [0xE4, 0x2C] — a 3-byte lead with one continuation
+    // but the final byte missing.
+    expect(decodeCursor('5Li')).toBeNull();
+  });
+
+  it('handles a truncated surrogate-pair tail at end of input', () => {
+    // '8J-Y' decodes to [0xF0, 0x9F, 0x98] — the first three bytes of the
+    // four-byte emoji sequence, with the final byte missing.
+    expect(decodeCursor('8J-Y')).toBeNull();
   });
 });
