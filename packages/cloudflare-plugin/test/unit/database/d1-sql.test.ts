@@ -21,7 +21,8 @@ import {
   quoteIdentifier,
 } from '../../../src/database/d1-sql.ts';
 
-const TARGET = { table: 'users', primaryKey: 'id' } as const;
+const TARGET = { table: 'users', primaryKey: ['id'] } as const;
+const COMPOSITE_TARGET = { table: 'orders', primaryKey: ['tenantId', 'orderId'] } as const;
 
 /** A normalized query with every field at its documented default. */
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
@@ -211,7 +212,7 @@ describe('buildSelect', () => {
 
   it('rejects an injected table, filter, order and select identifier', () => {
     const bad = 'x" OR "1"="1';
-    expect(() => buildSelect({ table: bad, primaryKey: 'id' }, query())).toThrow(
+    expect(() => buildSelect({ table: bad, primaryKey: ['id'] }, query())).toThrow(
       CloudflareUnsupportedError,
     );
     expect(() => buildSelect(TARGET, query({ where: { [bad]: 1 } }))).toThrow(
@@ -242,11 +243,53 @@ describe('buildSelect', () => {
 });
 
 describe('buildSelectById', () => {
-  it('filters on the configured primary key', () => {
-    expect(buildSelectById({ table: 'users', primaryKey: 'user_id' }, 'u1')).toEqual({
+  it('filters on the configured primary key with a scalar key', () => {
+    expect(buildSelectById({ table: 'users', primaryKey: ['id'] }, 'u1')).toEqual({
+      sql: 'SELECT * FROM "users" WHERE "id" = ?1 LIMIT 1',
+      params: ['u1'],
+    });
+  });
+
+  it('filters on the configured primary key with a custom name', () => {
+    expect(buildSelectById({ table: 'users', primaryKey: ['user_id'] }, 'u1')).toEqual({
       sql: 'SELECT * FROM "users" WHERE "user_id" = ?1 LIMIT 1',
       params: ['u1'],
     });
+  });
+
+  it('emits multi-column predicates in declaration order for a composite target', () => {
+    expect(buildSelectById(COMPOSITE_TARGET, { tenantId: 't1', orderId: 'o1' })).toEqual({
+      sql: 'SELECT * FROM "orders" WHERE "tenantId" = ?1 AND "orderId" = ?2 LIMIT 1',
+      params: ['t1', 'o1'],
+    });
+  });
+
+  it('binds a scalar against a composite target, repeating the scalar for each column', () => {
+    // A scalar key against a multi-column target still works — it binds the
+    // same scalar for every declared column. This is the existing behavior
+    // that a composite adapter would refuse; the SQL builder itself accepts it.
+    expect(buildSelectById(COMPOSITE_TARGET, 'shared')).toEqual({
+      sql: 'SELECT * FROM "orders" WHERE "tenantId" = ?1 AND "orderId" = ?2 LIMIT 1',
+      params: ['shared', 'shared'],
+    });
+  });
+
+  it('refuses a composite key missing a required column', () => {
+    expect(() => buildSelectById(COMPOSITE_TARGET, { tenantId: 't1' })).toThrow(
+      CloudflareUnsupportedError,
+    );
+    expect(() => buildSelectById(COMPOSITE_TARGET, { tenantId: 't1' })).toThrow(
+      /missing required column 'orderId'/,
+    );
+  });
+
+  it('respects the parameter budget with a composite key', () => {
+    const keys = Array.from({ length: 101 }, (_, i) => `c${i}`);
+    // A record with 101 string columns, each requiring a bound value.
+    const wide = Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, string | number>;
+    expect(() => buildSelectById({ table: 'x', primaryKey: keys }, wide)).toThrow(
+      /key predicate/,
+    );
   });
 });
 
@@ -282,6 +325,15 @@ describe('buildUpdate', () => {
     });
   });
 
+  it('emits multi-column key predicates in declaration order for a composite target', () => {
+    expect(buildUpdate(COMPOSITE_TARGET, { tenantId: 't1', orderId: 'o1' }, { status: 'shipped' }))
+      .toEqual({
+        sql:
+          'UPDATE "orders" SET "status" = ?1 WHERE "tenantId" = ?2 AND "orderId" = ?3 RETURNING *',
+        params: ['shipped', 't1', 'o1'],
+      });
+  });
+
   it('refuses an empty patch', () => {
     expect(() => buildUpdate(TARGET, 'u1', {})).toThrow(CloudflareUnsupportedError);
   });
@@ -293,14 +345,40 @@ describe('buildUpdate', () => {
     // 100 columns + the key = 101 bound values.
     expect(() => buildUpdate(TARGET, 'u1', patch)).toThrow(/101 parameters/);
   });
+
+  it('refuses a composite key missing a required column', () => {
+    expect(() => buildUpdate(COMPOSITE_TARGET, { tenantId: 't1' }, { status: 'ok' })).toThrow(
+      CloudflareUnsupportedError,
+    );
+    expect(() => buildUpdate(COMPOSITE_TARGET, { tenantId: 't1' }, { status: 'ok' })).toThrow(
+      /missing required column 'orderId'/,
+    );
+  });
 });
 
 describe('buildDelete', () => {
   it('returns the key, which is how a delete reports whether anything matched', () => {
-    expect(buildDelete({ table: 'users', primaryKey: 'user_id' }, 7)).toEqual({
+    expect(buildDelete({ table: 'users', primaryKey: ['user_id'] }, 7)).toEqual({
       sql: 'DELETE FROM "users" WHERE "user_id" = ?1 RETURNING "user_id"',
       params: [7],
     });
+  });
+
+  it('returns the composite key columns in declaration order', () => {
+    expect(buildDelete(COMPOSITE_TARGET, { tenantId: 't1', orderId: 'o1' })).toEqual({
+      sql:
+        'DELETE FROM "orders" WHERE "tenantId" = ?1 AND "orderId" = ?2 RETURNING "tenantId", "orderId"',
+      params: ['t1', 'o1'],
+    });
+  });
+
+  it('refuses a composite key missing a required column', () => {
+    expect(() => buildDelete(COMPOSITE_TARGET, { tenantId: 't1' })).toThrow(
+      CloudflareUnsupportedError,
+    );
+    expect(() => buildDelete(COMPOSITE_TARGET, { tenantId: 't1' })).toThrow(
+      /missing required column 'orderId'/,
+    );
   });
 });
 

@@ -64,15 +64,8 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       return [...result.results];
     },
 
-    findById(id: EntityKey): Promise<Record<string, unknown> | null> {
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new CloudflareUnsupportedError(
-            `D1Adapter.findById: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
-      return prepareStatement(db, buildSelectById(target, id)).first();
+    async findById(id: EntityKey): Promise<Record<string, unknown> | null> {
+      return await prepareStatement(db, buildSelectById(target, id)).first();
     },
 
     async create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
@@ -90,28 +83,14 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new CloudflareUnsupportedError(
-            `D1Adapter.update: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
       const row = await prepareStatement(db, buildUpdate(target, id, data)).first();
       if (row === null) {
-        throw new Error(`Entity '${target.table}' with id '${id}' not found`);
+        throw new Error(`Entity '${target.table}' with id '${JSON.stringify(id)}' not found`);
       }
       return row;
     },
 
     async delete(id: EntityKey): Promise<boolean> {
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new CloudflareUnsupportedError(
-            `D1Adapter.delete: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
       const result = await prepareStatement(db, buildDelete(target, id)).all();
       return result.results.length > 0;
     },
@@ -206,13 +185,6 @@ export function createD1TransactionDataSource(
 
     async findById(id: EntityKey): Promise<Record<string, unknown> | null> {
       buffer.assertOpen();
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new CloudflareUnsupportedError(
-            `D1Adapter.findById: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
       return await committed.findById(id);
     },
 
@@ -223,14 +195,33 @@ export function createD1TransactionDataSource(
       // awaits create() before the flush. Rather than return a row whose id is
       // missing, or invent a client-side value that would be the wrong type for
       // an INTEGER key, refuse and name the constraint.
-      if (data[target.primaryKey] === undefined) {
-        throw new CloudflareUnsupportedError(
-          `D1: create() inside a transaction requires an explicit ` +
-            `'${target.primaryKey}' for '${target.table}'. D1 has no interactive ` +
-            'transaction, so writes are buffered and flushed as one batch() at commit, ' +
-            'and a generated key is not known until then. Supply the key, or create ' +
-            'outside the transaction where RETURNING * provides it.',
-        );
+      // A deferred INSERT cannot report a generated key back to a caller that
+      // awaits create() before the flush. Rather than return a row whose id is
+      // missing, or invent a client-side value that would be the wrong type for
+      // an INTEGER key, refuse and name the constraint.
+      if (target.primaryKey.length === 1) {
+        const pk = target.primaryKey[0];
+        if (data[pk] === undefined) {
+          throw new CloudflareUnsupportedError(
+            `D1: create() inside a transaction requires an explicit ` +
+              `'${pk}' for '${target.table}'. D1 has no interactive ` +
+              'transaction, so writes are buffered and flushed as one batch() at commit, ' +
+              'and a generated key is not known until then. Supply the key, or create ' +
+              'outside the transaction where RETURNING * provides it.',
+          );
+        }
+      } else {
+        for (const pk of target.primaryKey) {
+          if (data[pk] === undefined) {
+            throw new CloudflareUnsupportedError(
+              `D1: create() inside a transaction requires an explicit ` +
+                `'${pk}' for '${target.table}'. D1 has no interactive ` +
+                'transaction, so writes are buffered and flushed as one batch() at commit, ' +
+                'and a generated key is not known until then. Supply the key, or create ' +
+                'outside the transaction where RETURNING * provides it.',
+            );
+          }
+        }
       }
       buffer.add(buildInsert(target, data));
       return { ...data } as Record<string, unknown>;
@@ -241,16 +232,11 @@ export function createD1TransactionDataSource(
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
       buffer.assertOpen();
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new CloudflareUnsupportedError(
-            `D1Adapter.update: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
       const current = await committed.findById(id);
       if (current === null) {
-        throw new Error(`Entity '${target.table}' with id '${id}' not found`);
+        throw new Error(
+          `Entity '${target.table}' with id '${JSON.stringify(id)}' not found`,
+        );
       }
       buffer.add(buildUpdate(target, id, data));
       return { ...current, ...data };
@@ -258,13 +244,6 @@ export function createD1TransactionDataSource(
 
     async delete(id: EntityKey): Promise<boolean> {
       buffer.assertOpen();
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new CloudflareUnsupportedError(
-            `D1Adapter.delete: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
       const current = await committed.findById(id);
       if (current === null) return false;
       buffer.add(buildDelete(target, id));
