@@ -15,20 +15,6 @@ All notable changes to this project are documented here. The format follows
   startup unless it declares the explicit `@Inject(...)` tokens the runtime needs.
 - The default `rest` template now includes a functional greeting controller and service registered
   through the same seam barrels that `setu generate` maintains.
-
-### Changed
-
-- **Breaking (generated class-based modules):** `setu generate module` now emits `<name>.module.ts`;
-  the managed aggregate barrel exports `MODULES` and config passes it through
-  `DecoratorPlugin({ modules })` instead of exporting controller/service arrays. Existing generated
-  module directories are reported when their declaration is missing, rather than silently omitted.
-  The regenerated barrel retains deprecated controller/service arrays so an existing config keeps
-  compiling while it migrates. Add
-  `@Module({ controllers: [<Name>Controller], providers:
-  [<Name>Service] })` to each legacy
-  directory (or delete and regenerate it), then update `setu.config.ts` to import `MODULES` and pass
-  `modules: [...MODULES]` to `DecoratorPlugin`.
-
 - Added a native MongoDB backend to `@setu-ts/database-plugin`.
   `DatabasePlugin({ type: 'mongodb',
   options: { url } })` now provides repositories over the
@@ -47,6 +33,22 @@ All notable changes to this project are documented here. The format follows
 - Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.
+- **`@setu-ts/openapi-plugin` exports `SchemaIo`** and `ZodToOpenApi.transform` takes it as an
+  optional second argument (`transform(schema, io?)`, defaulting to `'output'`), so an existing
+  single-argument call is unchanged.
+
+### Changed
+
+- **Breaking (generated class-based modules):** `setu generate module` now emits `<name>.module.ts`;
+  the managed aggregate barrel exports `MODULES` and config passes it through
+  `DecoratorPlugin({ modules })` instead of exporting controller/service arrays. Existing generated
+  module directories are reported when their declaration is missing, rather than silently omitted.
+  The regenerated barrel retains deprecated controller/service arrays so an existing config keeps
+  compiling while it migrates. Add
+  `@Module({ controllers: [<Name>Controller], providers:
+  [<Name>Service] })` to each legacy
+  directory (or delete and regenerate it), then update `setu.config.ts` to import `MODULES` and pass
+  `modules: [...MODULES]` to `DecoratorPlugin`.
 
 ### Fixed
 
@@ -77,12 +79,6 @@ All notable changes to this project are documented here. The format follows
   registered with `addSchema('Name', …)` keeps that name on the output side and gains a `NameInput`
   twin when a request site reaches it — identified by schema rather than by name, so registering an
   unrelated `AddressInput` alongside `Address` cannot capture it.
-
-### Added
-
-- **`@setu-ts/openapi-plugin` exports `SchemaIo`** and `ZodToOpenApi.transform` takes it as an
-  optional second argument (`transform(schema, io?)`, defaulting to `'output'`), so an existing
-  single-argument call is unchanged.
 
 ## [0.1.0-alpha.10] — 2026-08-28
 
