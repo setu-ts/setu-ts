@@ -18,10 +18,10 @@ import { FakeObjectId, fakeObjectIdCtor } from '../fixtures/fake-mongo-client.ts
 describe('resolveMongoTarget — per-entity overrides and defaults', () => {
   it('an unmapped entity uses its own name and the default primary key', () => {
     const target = resolveMongoTarget('Widget', undefined);
-    expect(target).toEqual({ collection: 'Widget', primaryKey: 'id', idType: 'auto' });
+    expect(target).toEqual({ collection: 'Widget', primaryKey: ['id'], idType: 'auto' });
   });
 
-  it('honours collection, primaryKey and idType overrides', () => {
+  it('honours collection, primaryKey and idType overrides (scalar)', () => {
     const mapping = {
       User: {
         collection: 'users',
@@ -32,15 +32,26 @@ describe('resolveMongoTarget — per-entity overrides and defaults', () => {
     const target = resolveMongoTarget('User', mapping);
     expect(target).toEqual({
       collection: 'users',
-      primaryKey: 'user_id',
+      primaryKey: ['user_id'],
       idType: 'raw',
     });
   });
 
   it('a mapped entity without overrides still gets the primary-key default', () => {
     const target = resolveMongoTarget('User', { User: {} });
-    expect(target.primaryKey).toBe('id');
+    expect(target.primaryKey).toEqual(['id']);
     expect(target.idType).toBe('auto');
+  });
+
+  it('an array primaryKey passes through unchanged', () => {
+    const mapping = {
+      User: {
+        collection: 'users',
+        primaryKey: ['tenantId', 'userId'] as const,
+      },
+    };
+    const target = resolveMongoTarget('User', mapping);
+    expect(target.primaryKey).toEqual(['tenantId', 'userId']);
   });
 });
 
@@ -48,7 +59,7 @@ describe('fromDriverDocument — _id → primary key on read', () => {
   it('renames _id to the mapped primary key and drops _id', () => {
     const row = fromDriverDocument({ _id: 'abc', name: 'Bolt' }, {
       collection: 'widgets',
-      primaryKey: 'id',
+      primaryKey: ['id'],
       idType: 'auto',
     });
     expect(row).toEqual({ id: 'abc', name: 'Bolt' });
@@ -58,7 +69,7 @@ describe('fromDriverDocument — _id → primary key on read', () => {
   it('uses the mapped primary key from a per-entity override', () => {
     const row = fromDriverDocument({ _id: 'abc' }, {
       collection: 'users',
-      primaryKey: 'user_id',
+      primaryKey: ['user_id'],
       idType: 'auto',
     });
     expect(row).toEqual({ user_id: 'abc' });
@@ -67,7 +78,7 @@ describe('fromDriverDocument — _id → primary key on read', () => {
   it('leaves a document with no _id unchanged', () => {
     const row = fromDriverDocument({ name: 'Bolt' }, {
       collection: 'widgets',
-      primaryKey: 'id',
+      primaryKey: ['id'],
       idType: 'auto',
     });
     expect(row).toEqual({ name: 'Bolt' });
@@ -77,10 +88,21 @@ describe('fromDriverDocument — _id → primary key on read', () => {
     const source = { _id: 'abc', name: 'Bolt' };
     fromDriverDocument(source, {
       collection: 'widgets',
-      primaryKey: 'id',
+      primaryKey: ['id'],
       idType: 'auto',
     });
     expect(Object.hasOwn(source, '_id')).toBe(true);
+  });
+
+  it('extracts a compound-_id subdocument into named columns', () => {
+    // A compound-_id collection stores _id as a subdocument. Read returns the
+    // row with each column as a top-level field, regardless of the driver's
+    // subdocument field order.
+    const row = fromDriverDocument(
+      { _id: { userId: 'u1', tenantId: 't1' }, name: 'Alice' },
+      { collection: 'users', primaryKey: ['tenantId', 'userId'], idType: 'compound' },
+    );
+    expect(row).toEqual({ tenantId: 't1', userId: 'u1', name: 'Alice' });
   });
 });
 
@@ -88,7 +110,7 @@ describe('toDriverDocument — primary key → _id on write', () => {
   it('renames the primary key to _id and drops the primary key', () => {
     const doc = toDriverDocument({ id: 'abc', name: 'Bolt' }, {
       collection: 'widgets',
-      primaryKey: 'id',
+      primaryKey: ['id'],
       idType: 'auto',
     });
     expect(doc).toEqual({ _id: 'abc', name: 'Bolt' });
@@ -98,7 +120,7 @@ describe('toDriverDocument — primary key → _id on write', () => {
   it('leaves a row with no primary-key field unchanged', () => {
     const doc = toDriverDocument({ name: 'Bolt' }, {
       collection: 'widgets',
-      primaryKey: 'id',
+      primaryKey: ['id'],
       idType: 'auto',
     });
     expect(doc).toEqual({ name: 'Bolt' });
@@ -108,10 +130,35 @@ describe('toDriverDocument — primary key → _id on write', () => {
     const source = { id: 'abc' };
     toDriverDocument(source, {
       collection: 'widgets',
-      primaryKey: 'id',
+      primaryKey: ['id'],
       idType: 'auto',
     });
     expect(Object.hasOwn(source, 'id')).toBe(true);
+  });
+
+  it('builds a compound _id subdocument in mapping column order', () => {
+    // P5: caller may write keys in any order; the adapter always emits the
+    // mapping's declared order, because Mongo compares subdocuments by order.
+    const doc = toDriverDocument(
+      { userId: 'u1', tenantId: 't1', name: 'Alice' },
+      { collection: 'users', primaryKey: ['tenantId', 'userId'], idType: 'compound' },
+    );
+    const storedId = doc._id as Record<string, unknown>;
+    expect(Object.keys(storedId)).toEqual(['tenantId', 'userId']);
+    expect(storedId.tenantId).toBe('t1');
+    expect(storedId.userId).toBe('u1');
+    expect(Object.hasOwn(doc, 'tenantId')).toBe(false);
+    expect(Object.hasOwn(doc, 'userId')).toBe(false);
+  });
+
+  it('does not emit _id when none of the columns are present in the row', () => {
+    const doc = toDriverDocument({ name: 'Alice' }, {
+      collection: 'users',
+      primaryKey: ['tenantId', 'userId'],
+      idType: 'compound',
+    });
+    expect(doc).toEqual({ name: 'Alice' });
+    expect(Object.hasOwn(doc, '_id')).toBe(false);
   });
 });
 
@@ -161,10 +208,18 @@ describe('toDriverId — primary-key value → driver form', () => {
       /needs the driver ObjectId/,
     );
   });
+
+  it('compound idType passes scalar values through (subdocument built by caller)', () => {
+    // `toDriverId` operates on scalar values only; the compound arm builds the
+    // subdocument elsewhere (mongo-data-source). Passing `'compound'` should
+    // behave like `'raw'` for a scalar value.
+    expect(toDriverId('abc', 'compound')).toBe('abc');
+    expect(toDriverId(7, 'compound')).toBe(7);
+  });
 });
 
 describe("mapping when the primary key IS the driver's own `_id` field", () => {
-  const target = { collection: 'events', primaryKey: '_id', idType: 'raw' } as const;
+  const target = { collection: 'events', primaryKey: ['_id'], idType: 'raw' } as const;
 
   it('read keeps the id instead of writing then deleting the same field', () => {
     // `MongoEntityMapping.primaryKey` accepts any name, `'_id'` included — a
@@ -190,7 +245,7 @@ describe("mapping when the primary key IS the driver's own `_id` field", () => {
   it('a differently-named primary key still hides `_id` from the row', () => {
     // The guard is scoped to the equal-names case; the ordinary mapping is
     // unchanged.
-    const renamed = { collection: 'events', primaryKey: 'id', idType: 'raw' } as const;
+    const renamed = { collection: 'events', primaryKey: ['id'], idType: 'raw' } as const;
     expect(fromDriverDocument({ _id: 7, name: 'launch' }, renamed)).toEqual({
       id: 7,
       name: 'launch',

@@ -429,3 +429,147 @@ describe('an update with nothing left to set issues no write', () => {
     expect(calls.some((c) => c.method === 'findOneAndUpdate')).toBe(true);
   });
 });
+
+describe('composite keys — flat multi-field target', () => {
+  function makeCompositeDataSource() {
+    return createMongoDataSource(makeClient(), 'testdb', 'User', {
+      User: { primaryKey: ['tenantId', 'userId'] as const },
+    });
+  }
+
+  it('findById builds a multi-field filter and returns the row', async () => {
+    const ds = makeCompositeDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    const found = await ds.findById({ tenantId: 't1', userId: 'u1' });
+    expect(found).toEqual({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+  });
+
+  it('findById is order-independent for the caller key-object property order', async () => {
+    const ds = makeCompositeDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    // The caller writes the record in reverse order from the mapping.
+    const found = await ds.findById({ userId: 'u1', tenantId: 't1' });
+    expect(found?.name).toBe('Alice');
+  });
+
+  it('update merges on a composite key', async () => {
+    const ds = makeCompositeDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice', active: true });
+    const updated = await ds.update({ tenantId: 't1', userId: 'u1' }, { name: 'Alicia' });
+    expect(updated.name).toBe('Alicia');
+    expect(updated.active).toBe(true);
+  });
+
+  it('delete removes a composite-key row', async () => {
+    const ds = makeCompositeDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    await ds.create({ tenantId: 't1', userId: 'u2', name: 'Bob' });
+    expect(await ds.delete({ tenantId: 't1', userId: 'u1' })).toBe(true);
+    const remaining = await ds.findAll(query());
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].name).toBe('Bob');
+  });
+
+  it('rejects a scalar id with a rejected promise naming the columns', async () => {
+    const ds = makeCompositeDataSource();
+    await expect(ds.findById('scalar'))
+      .rejects
+      .toThrow(/needs a composite record for multi-column key/);
+  });
+
+  it('rejects a record missing a required column', async () => {
+    const ds = makeCompositeDataSource();
+    await expect(ds.findById({ tenantId: 't1' }))
+      .rejects
+      .toThrow(/missing required column 'userId'/);
+  });
+
+  it('findAll leaves the named columns as top-level fields (no _id rename for flat composite)', async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'User', {
+      User: { primaryKey: ['tenantId', 'userId'] as const },
+    });
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    await ds.findAll(query({ where: { tenantId: 't1', userId: 'u1' } }));
+    const calls = client.databases.get('testdb')!.collection('User').calls;
+    const findCall = calls.find((c) => c.method === 'find')!;
+    const filter = findCall.args[0] as Record<string, unknown>;
+    // Flat composite keys stay as top-level fields; only scalar keys rename to _id.
+    expect(filter).toEqual({ tenantId: 't1', userId: 'u1' });
+  });
+});
+
+describe('composite keys — compound _id subdocument (P4/P5)', () => {
+  function makeCompoundDataSource() {
+    return createMongoDataSource(makeClient(), 'testdb', 'Enrollment', {
+      Enrollment: {
+        primaryKey: ['tenantId', 'userId'] as const,
+        idType: 'compound' as const,
+      },
+    });
+  }
+
+  it('create stores _id as a subdocument in mapping column order', async () => {
+    const ds = makeCompoundDataSource();
+    const row = await ds.create({ tenantId: 't1', userId: 'u1', course: 'math' });
+    expect(row).toEqual({ tenantId: 't1', userId: 'u1', course: 'math' });
+    // The adapter does not expose the collection, so we assert via findAll.
+    const all = await ds.findAll(query());
+    expect(all).toHaveLength(1);
+    expect(all[0]).toEqual({ tenantId: 't1', userId: 'u1', course: 'math' });
+  });
+
+  it('findById matches regardless of caller property order (P5 canonical order)', async () => {
+    const ds = makeCompoundDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    // Caller writes in reverse order from the mapping.
+    const found = await ds.findById({ userId: 'u1', tenantId: 't1' });
+    expect(found?.name).toBe('Alice');
+  });
+
+  it('update merges on a compound key', async () => {
+    const ds = makeCompoundDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice', active: true });
+    const updated = await ds.update({ tenantId: 't1', userId: 'u1' }, { name: 'Alicia' });
+    expect(updated.name).toBe('Alicia');
+    expect(updated.active).toBe(true);
+  });
+
+  it('delete removes a compound-key row', async () => {
+    const ds = makeCompoundDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    expect(await ds.delete({ tenantId: 't1', userId: 'u1' })).toBe(true);
+    expect(await ds.findById({ tenantId: 't1', userId: 'u1' })).toBeNull();
+  });
+
+  it('rejects a scalar id with a rejected promise naming the columns', async () => {
+    const ds = makeCompoundDataSource();
+    await expect(ds.findById('scalar'))
+      .rejects
+      .toThrow(/needs a composite record for compound key/);
+  });
+
+  it('rejects a record missing a required column', async () => {
+    const ds = makeCompoundDataSource();
+    await expect(ds.findById({ tenantId: 't1' }))
+      .rejects
+      .toThrow(/missing required column 'userId'/);
+  });
+
+  it('findAll wraps the named columns under _id for a compound key', async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Enrollment', {
+      Enrollment: {
+        primaryKey: ['tenantId', 'userId'] as const,
+        idType: 'compound' as const,
+      },
+    });
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    await ds.findAll(query({ where: { tenantId: 't1', userId: 'u1' } }));
+    const calls = client.databases.get('testdb')!.collection('Enrollment').calls;
+    const findCall = calls.find((c) => c.method === 'find')!;
+    const filter = findCall.args[0] as Record<string, unknown>;
+    // Compound _id: the where clause is wrapped under _id as a subdocument.
+    expect(filter).toEqual({ _id: { tenantId: 't1', userId: 'u1' } });
+  });
+});

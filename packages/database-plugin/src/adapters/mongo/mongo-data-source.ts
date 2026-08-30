@@ -17,6 +17,7 @@ import type {
   IAdapterTransaction,
   IDataSource,
   NormalizedQuery,
+  OrderDirection,
 } from '@setu-ts/common';
 import {
   fromDriverDocument,
@@ -95,13 +96,81 @@ export function createMongoDataSource(
 
   const options = (): MongoCollectionOptions => (session === undefined ? {} : { session });
 
-  const convertId = (id: EntityKey): unknown => {
-    if (typeof id === 'object') {
-      throw new Error(
-        `MongoAdapter: composite keys are not supported; got ${typeof id}.`,
+  /**
+   * Resolves an {@linkcode EntityKey} into the driver-addressable form.
+   *
+   * For scalar keys the path is unchanged (the `_id` rename). For composite
+   * keys two arms exist:
+   *
+   * - `idType: 'compound'` — the first column names the subdocument stored
+   *   under `_id`; its value is the subdocument itself built in the
+   *   mapping's declared order.
+   * - absent (flat composite) — the call rejects via a rejected promise
+   *   naming the missing compound key arm. A flat composite key addresses
+   *   top-level fields, not `_id`.
+   */
+  const buildIdFilter = (
+    id: EntityKey,
+    operation: 'findById' | 'update' | 'delete',
+  ): Promise<Record<string, unknown>> => {
+    const columns = target.primaryKey;
+    if (columns.length === 1) {
+      // Scalar path — still honours `idType: 'objectId'` conversion.
+      return Promise.resolve({ _id: toDriverId(id, target.idType, objectIdCtor) });
+    }
+    // Composite path.
+    if (target.idType === 'compound') {
+      if (typeof id === 'string' || typeof id === 'number') {
+        return Promise.reject(
+          new Error(
+            `MongoAdapter: ${operation} needs a composite record for compound key, got scalar '${
+              String(id)
+            }'.`,
+          ),
+        );
+      }
+      // Build the subdocument in the mapping's declared order (P5), never the
+      // caller's object order. The real driver treats subdocument equality as
+      // "ordered" (field order matters), so passing the caller's order through
+      // would miss rows that exist under a different literal order.
+      const subdoc: Record<string, unknown> = {};
+      for (const col of columns) {
+        const value = id[col];
+        if (value === undefined) {
+          return Promise.reject(
+            new Error(
+              `MongoAdapter: ${operation} composite key is missing required column '${col}'.`,
+            ),
+          );
+        }
+        subdoc[col] = value;
+      }
+      return Promise.resolve({ _id: subdoc });
+    }
+    // Flat composite — each named column is a top-level field on the
+    // collection. The filter is order-independent.
+    if (typeof id === 'string' || typeof id === 'number') {
+      return Promise.reject(
+        new Error(
+          `MongoAdapter: ${operation} needs a composite record for multi-column key ${
+            columns.join(', ')
+          }, got scalar '${String(id)}'.`,
+        ),
       );
     }
-    return toDriverId(id, target.idType, objectIdCtor);
+    const filter: Record<string, unknown> = {};
+    for (const col of columns) {
+      const value = id[col];
+      if (value === undefined) {
+        return Promise.reject(
+          new Error(
+            `MongoAdapter: ${operation} composite key is missing required column '${col}'.`,
+          ),
+        );
+      }
+      filter[col] = toDriverId(value, target.idType, objectIdCtor);
+    }
+    return Promise.resolve(filter);
   };
 
   return {
@@ -122,8 +191,9 @@ export function createMongoDataSource(
       return rows.map((row) => fromDriverDocument(row, target));
     },
 
-    findById: async (id: string | number): Promise<Record<string, unknown> | null> => {
-      const document = await collection.findOne({ _id: convertId(id) }, options());
+    findById: async (id: EntityKey): Promise<Record<string, unknown> | null> => {
+      const filter = await buildIdFilter(id, 'findById');
+      const document = await collection.findOne(filter, options());
       return document ? fromDriverDocument(document, target) : null;
     },
 
@@ -138,7 +208,7 @@ export function createMongoDataSource(
     },
 
     update: async (
-      id: string | number,
+      id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> => {
       // The primary key never travels in an update payload: `id` already
@@ -158,12 +228,16 @@ export function createMongoDataSource(
       // collapse the two by renaming, so dropping only the mapped name would
       // let a stray `_id` reach `$set` and be refused by the server.
       const patch = { ...data };
-      delete patch[target.primaryKey];
+      for (const col of target.primaryKey) {
+        delete patch[col];
+      }
       delete patch['_id'];
 
       const missing = (): Error =>
         new Error(
-          `MongoAdapter: no ${target.collection} row with ${target.primaryKey} '${String(id)}'`,
+          `MongoAdapter: no ${target.collection} row with ${target.primaryKey.join(', ')} '${
+            JSON.stringify(id)
+          }'`,
         );
 
       // Stripping the key can leave nothing to set. Read the row instead of
@@ -172,14 +246,15 @@ export function createMongoDataSource(
       // while 4.0.28, 4.4.30 and 8.x accept it and answer with the document.
       // The driver pins no server floor, so the branch removes the question
       // rather than declaring a minimum version this package cannot enforce.
+      const filter = await buildIdFilter(id, 'update');
       if (Object.keys(patch).length === 0) {
-        const existing = await collection.findOne({ _id: convertId(id) }, options());
+        const existing = await collection.findOne(filter, options());
         if (existing === null || existing === undefined) throw missing();
         return fromDriverDocument(existing, target);
       }
 
       const result = await collection.findOneAndUpdate(
-        { _id: convertId(id) },
+        filter,
         { $set: patch },
         { returnDocument: 'after', ...options() },
       );
@@ -187,8 +262,9 @@ export function createMongoDataSource(
       return fromDriverDocument(result, target);
     },
 
-    delete: async (id: string | number): Promise<boolean> => {
-      const result = await collection.deleteOne({ _id: convertId(id) }, options());
+    delete: async (id: EntityKey): Promise<boolean> => {
+      const filter = await buildIdFilter(id, 'delete');
+      const result = await collection.deleteOne(filter, options());
       return (result.deletedCount ?? 0) > 0;
     },
 
@@ -220,38 +296,81 @@ function mapQueryToDriver(
   query: NormalizedQuery,
   target: MongoTarget,
 ): NormalizedQuery {
-  const mapField = (field: string): string => field === target.primaryKey ? '_id' : field;
-  const where = Object.fromEntries(
-    Object.entries(query.where).map(([field, value]) => [
-      mapField(field),
-      value,
-    ]),
-  );
-  const orderBy = Object.fromEntries(
-    Object.entries(query.orderBy).map(([field, direction]) => [mapField(field), direction]),
-  );
+  const columns = target.primaryKey;
+  // Flat composite (multi-column, no compound _id) uses top-level fields.
+  // Compound _id wraps the subdocument under _id.
+  // Scalar keys rename the single column to _id.
+  const isFlatComposite = columns.length > 1 && target.idType !== 'compound';
+  const isCompound = target.idType === 'compound' && columns.length > 1;
+
+  let where: Record<string, unknown>;
+  let orderBy: Record<string, OrderDirection>;
+
+  if (isCompound) {
+    // Build _id subdocument in the mapping's declared column order (P5).
+    const idSubdoc: Record<string, unknown> = {};
+    for (const col of columns) {
+      if (query.where[col] !== undefined) {
+        idSubdoc[col] = query.where[col];
+      }
+    }
+    where = Object.keys(idSubdoc).length > 0 ? { _id: idSubdoc } : {};
+    orderBy = Object.fromEntries(
+      columns.map((col) => [
+        '_id.' + col,
+        query.orderBy[col] as OrderDirection | undefined,
+      ]).filter(([, d]) => d !== undefined) as [string, OrderDirection][],
+    );
+  } else if (isFlatComposite) {
+    // Flat composite: columns remain as top-level fields; no _id mapping.
+    where = { ...query.where };
+    orderBy = { ...query.orderBy };
+  } else {
+    // Scalar: rename only the primary-key column when present; otherwise leave unchanged.
+    const key = columns[0];
+    where = key !== undefined && key in query.where
+      ? { _id: query.where[key] }
+      : { ...query.where };
+    orderBy = key !== undefined && key in query.orderBy
+      ? { _id: query.orderBy[key] }
+      : { ...query.orderBy };
+  }
+
   return {
     ...query,
     where,
     orderBy,
     ...(query.filter === undefined
       ? {}
-      : { filter: mapFilterToDriver(query.filter, target.primaryKey) }),
+      : { filter: mapFilterToDriver(query.filter, columns, isCompound, isFlatComposite) }),
   };
 }
 
 /** Recursively maps a portable primary-key filter field/value to Mongo form. */
 function mapFilterToDriver(
   expression: FilterExpression,
-  primaryKey: string,
+  columns: readonly string[],
+  isCompound: boolean,
+  isFlatComposite: boolean,
 ): FilterExpression {
   if (expression.type !== 'comparison') {
     return {
       ...expression,
-      filters: expression.filters.map((child) => mapFilterToDriver(child, primaryKey)),
+      filters: expression.filters.map((child) =>
+        mapFilterToDriver(child, columns, isCompound, isFlatComposite)
+      ),
     };
   }
-  return expression.field === primaryKey ? { ...expression, field: '_id' } : expression;
+  // Flat composite fields stay as-is (already top-level in the document).
+  // Compound keys: prepend '_id.' prefix to field paths for subdocument lookup.
+  // Scalar keys: rename to '_id'.
+  if (!isCompound && !isFlatComposite && columns.includes(expression.field)) {
+    return { ...expression, field: '_id' };
+  }
+  if (isCompound && columns.includes(expression.field)) {
+    return { ...expression, field: '_id.' + expression.field };
+  }
+  return expression;
 }
 
 /** Converts values carried by native `_id` predicates to the driver's id form. */
@@ -379,12 +498,12 @@ export class MongoTransaction implements IAdapterTransaction {
  */
 function mapProjection(
   projection: Record<string, 1>,
-  primaryKey: string,
+  primaryKey: readonly string[],
 ): Record<string, 0 | 1> {
   const mapped: Record<string, 0 | 1> = {};
   let includesPrimaryKey = false;
   for (const field of Object.keys(projection)) {
-    if (field === primaryKey) {
+    if (primaryKey.includes(field)) {
       includesPrimaryKey = true;
     } else {
       mapped[field] = 1;
