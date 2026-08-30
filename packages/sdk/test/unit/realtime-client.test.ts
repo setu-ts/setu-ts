@@ -283,4 +283,44 @@ describe('createRealtimeClient', () => {
       globalThis.WebSocket = originalWebSocket;
     }
   });
+
+  it('cancels a pending reconnect delay when the client is closed', async () => {
+    let sleepSignal: AbortSignal | undefined;
+    let sleepRejected = false;
+    const timing: IClientTiming = {
+      now: () => 0,
+      sleep: (_ms: number, signal?: AbortSignal) => {
+        sleepSignal = signal;
+        return new Promise<void>((_resolve, reject) => {
+          if (signal?.aborted) {
+            sleepRejected = true;
+            reject(new Error('aborted'));
+            return;
+          }
+          signal?.addEventListener('abort', () => {
+            sleepRejected = true;
+            reject(new Error('aborted'));
+          }, { once: true });
+        });
+      },
+    };
+    const socket = new FakeSocket();
+    const client = createRealtimeClient({
+      url: 'wss://example.test/events',
+      timing,
+      webSocket: () => socket,
+      onMessage: () => {},
+    });
+    socket.open();
+    socket.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // close() must stop the armed backoff, not merely skip the reconnect once
+    // the timer eventually fires.
+    expect(sleepSignal).toBeDefined();
+    client.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sleepRejected).toBe(true);
+  });
 });

@@ -6218,9 +6218,9 @@ is per file rather than a `--force` flag, so a mistyped `setu g service user` ca
 hand-written work.
 
 The managed files are the CLI-owned **seam barrels** — one `index.ts` per generated family
-(`src/modules/`, `src/controllers/`, `src/services/`, `src/routes/`, `src/middleware/`,
-`src/plugins/`, `src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). Nothing else is managed,
-and no flag can make it so.
+(`src/modules/`, `src/controllers/`, `src/services/`, `src/middleware/`, `src/plugins/`,
+`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). Nothing else is managed, and no flag can
+make it so.
 
 ### Generated code is wired
 
@@ -6310,10 +6310,10 @@ default export is not; an undetected export means the artifact is skipped and re
 broken barrel is written.
 
 Which seams a host carries depends on which plugins it registers: the no-template path carries the
-three that need none (`src/routes/`, `src/middleware/`, `src/plugins/`), the functional templates
-carry only the seams their plugins consume, and `class-based` additionally carries controller,
-service and module barrels. `microservice` additionally carries `src/cqrs/` and `src/events/`,
-because it is the only template registering `CqrsPlugin` and `EventsPlugin`.
+three that need none (`src/controllers/`, `src/middleware/`, `src/plugins/`), the functional
+templates carry only the seams their plugins consume, and `class-based` additionally carries
+controller, service and module barrels. `microservice` additionally carries `src/cqrs/` and
+`src/events/`, because it is the only template registering `CqrsPlugin` and `EventsPlugin`.
 
 ### Domain modules
 

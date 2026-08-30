@@ -28,6 +28,7 @@ class RealtimeClient<TIncoming, TOutgoing> implements IRealtimeClient<TOutgoing>
   readonly #options: RealtimeClientOptions<TIncoming>;
   readonly #timing: IClientTiming;
   readonly #factory: WebSocketFactory;
+  readonly #controller = new AbortController();
   #socket: IWebSocketTransport | undefined;
   #state: RealtimeClientState = 'connecting';
   #closed = false;
@@ -40,6 +41,7 @@ class RealtimeClient<TIncoming, TOutgoing> implements IRealtimeClient<TOutgoing>
     this.#factory = options.webSocket ?? defaultWebSocket;
     if (options.signal?.aborted) {
       this.#closed = true;
+      this.#controller.abort();
       this.#setState('closed');
       return;
     }
@@ -59,6 +61,10 @@ class RealtimeClient<TIncoming, TOutgoing> implements IRealtimeClient<TOutgoing>
   close(code?: number, reason?: string): void {
     if (this.#closed) return;
     this.#closed = true;
+    // Aborting disarms a reconnect delay already sleeping. Without this the
+    // timer stays pending for up to `maxDelayMs`, holding the process open
+    // long after the caller closed the client.
+    this.#controller.abort();
     this.#setState('closed');
     this.#socket?.close(code, reason);
   }
@@ -117,7 +123,7 @@ class RealtimeClient<TIncoming, TOutgoing> implements IRealtimeClient<TOutgoing>
     );
     this.#setState('connecting');
     try {
-      await this.#timing.sleep(delay, this.#options.signal);
+      await this.#timing.sleep(delay, this.#controller.signal);
     } catch {
       return;
     }

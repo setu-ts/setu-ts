@@ -177,9 +177,12 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
       ` * Registers every generated route-shaped module.\n` +
       ` *\n` +
       ` * @param router - The router to register on, normally \`app.router\`\n` +
-      ` * @param services - The service registry, normally \`app.services\`\n` +
+      ` * @param services - The service registry, normally \`app.services\`. Optional so a\n *   setu.config.ts written before this parameter existed still compiles.\n` +
       ` */\n` +
-      `export function ${REGISTER_ROUTES_EXPORT}(router: IRouterApi, services: IServiceRegistry): void {\n` +
+      `export function ${REGISTER_ROUTES_EXPORT}(\n` +
+      `  router: IRouterApi,\n` +
+      `  services?: IServiceRegistry,\n` +
+      `): void {\n` +
       `${calls}\n` +
       `}`,
     ];

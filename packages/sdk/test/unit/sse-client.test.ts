@@ -251,4 +251,59 @@ describe('createSseClient', () => {
     expect(client.state).toBe('closed');
     expect(cancelled).toBe(true);
   });
+
+  it('clamps a server retry hint to the configured maximum delay', async () => {
+    const slept: number[] = [];
+    let served = 0;
+    const client = createSseClient({
+      url: 'https://example.test/events',
+      reconnect: { delayMs: 1_000, maxDelayMs: 30_000 },
+      timing: {
+        now: () => 0,
+        sleep: (ms: number) => {
+          slept.push(ms);
+          return Promise.resolve();
+        },
+      },
+      fetch: (_input, init) => {
+        served += 1;
+        if (served > 1 || (init?.signal as AbortSignal | undefined)?.aborted) {
+          return Promise.reject(new DOMException('Aborted', 'AbortError'));
+        }
+        // A server may send any digit string; the parser accepts up to
+        // Number.MAX_SAFE_INTEGER, which overflows a 32-bit timer and fires
+        // immediately, turning the reconnect policy into a hot loop.
+        return Promise.resolve(streamResponse('retry: 9007199254740991\ndata: 1\n\n'));
+      },
+      onEvent: () => {},
+    });
+
+    await flush();
+    client.close();
+
+    expect(slept[0]).toBeLessThanOrEqual(30_000);
+  });
+
+  it('does not reopen a closed client when a custom fetch ignores the abort signal', async () => {
+    let release: ((response: Response) => void) | undefined;
+    const states: string[] = [];
+    const client = createSseClient({
+      url: 'https://example.test/events',
+      timing: immediateTiming,
+      reconnect: { maxAttempts: 0 },
+      fetch: () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+      onEvent: () => {},
+      onStateChange: (state) => states.push(state),
+    });
+
+    client.close();
+    release?.(streamResponse('data: 1\n\n'));
+    await flush();
+
+    expect(client.state).toBe('closed');
+    expect(states).not.toContain('open');
+  });
 });

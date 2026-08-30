@@ -21,8 +21,14 @@ describe('route schematic', () => {
 
   it('calls each route module through the compatibility-safe registrar list', () => {
     const barrel = barrelOf(files, 'route').contents;
-    expect(barrel).toContain(
-      'export function registerGeneratedRoutes(router: IRouterApi, services: IServiceRegistry): void',
+    expect(barrel).toContain('export function registerGeneratedRoutes(');
+    // The registry parameter is OPTIONAL on purpose. A `setu.config.ts` scaffolded
+    // before it existed calls `registerGeneratedRoutes(app.router)`, and `generate`
+    // never rewrites that file — so requiring it would fail the developer's own
+    // project with TS2554 on their next generate, from a command reporting success.
+    expect(barrel).toContain('  services?: IServiceRegistry,\n');
+    expect(barrel).not.toContain(
+      'registerGeneratedRoutes(router: IRouterApi, services: IServiceRegistry)',
     );
     expect(barrel).toContain('const GENERATED_ROUTE_REGISTRARS');
     expect(barrel).toContain('registerOrderItemRoutes,');

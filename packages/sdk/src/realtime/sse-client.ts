@@ -60,8 +60,14 @@ class SseClient<TEvents extends SseEventMap> implements ISseClient {
     while (!this.#isClosed()) {
       try {
         await this.#consume();
-        delay = this.#serverRetryMs ?? this.#options.reconnect?.delayMs ??
-          DEFAULT_RECONNECT_DELAY_MS;
+        // The server controls `retry:` and the parser accepts any safe integer,
+        // so an unclamped hint both breaks the documented `maxDelayMs` bound and
+        // overflows a 32-bit timer, which fires immediately — a hot reconnect
+        // loop driven by the peer. The configured ceiling governs it.
+        delay = Math.min(
+          this.#serverRetryMs ?? this.#options.reconnect?.delayMs ?? DEFAULT_RECONNECT_DELAY_MS,
+          this.#options.reconnect?.maxDelayMs ?? DEFAULT_MAX_RECONNECT_DELAY_MS,
+        );
       } catch (error: unknown) {
         if (this.#isClosed() || isAbortError(error)) return;
         this.#options.onError?.(error);
@@ -97,6 +103,12 @@ class SseClient<TEvents extends SseEventMap> implements ISseClient {
     if (!response.ok) throw new Error(`SSE request failed with HTTP ${response.status}.`);
     if (response.body === null) throw new Error('SSE response did not include a stream body.');
 
+    if (this.#isClosed()) {
+      // `fetch` is an injectable seam; one that ignores `init.signal` resolves
+      // after close() and would otherwise reopen a closed client and loop.
+      await response.body.cancel().catch(() => {});
+      return;
+    }
     this.#setState('open');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
