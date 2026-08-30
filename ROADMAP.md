@@ -8252,8 +8252,8 @@ missing the header leaves every generated barrel documenting a call shape that n
 one emitted beside it — quiet, and exactly the M70h `renderList` defect class, where one owner
 reached two of eight call sites. One owner for the rendered call string is therefore part of this
 change, not a tidy-up after it. Nine assertions pin the literal
-`registerGeneratedRoutes(app.router)` across 11 test files; those failing is the guard working, and
-a scaffold-and-boot run is what proves the seam still wires (`scaffold-runs-e2e`, `seam-probe`).
+`registerGeneratedRoutes(app.router)` across 6 test files; those failing is the guard working, and a
+scaffold-and-boot run is what proves the seam still wires (`scaffold-runs-e2e`, `seam-probe`).
 
 **WebSocket routes cannot move, and that is a constraint rather than a preference.**
 `IWebSocketService.route(path, handlers, options)` (`common/src/services/websocket.ts:388`)
@@ -8334,7 +8334,9 @@ for every runtime; the measurements then showed the two-arm repair was itself th
   bar the design's own evidence already met — asserting 0 heartbeat leakage under a heartbeat
   interval short enough to guarantee ticks, a bearer header reaching the server (the capability
   `EventSource` cannot offer, and the reason there is one implementation), and a reconnect that
-  resends `Last-Event-ID` after the stream is cut.
+  resends `Last-Event-ID` after the stream is cut. The four-runtime exercise lives in
+  `apps/realtime-clients` under `deno task check:apps`; CI installs Node and Bun before that gate,
+  and `realtime-clients` is never in `ALLOW_SKIP`.
 - **Packages:** `sdk`, `cli`. (`sse-plugin` and `websocket-plugin` are unchanged — this ships a
   client, not a protocol.)
 

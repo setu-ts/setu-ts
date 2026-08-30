@@ -34,6 +34,14 @@ describe('application gate configuration', () => {
     }
   });
 
+  it('keeps the realtime-client exercise out of the CI skip allowlist', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(workflow).toContain('actions/setup-node@v4');
+    expect(workflow).toContain('oven-sh/setup-bun@v2');
+    const allowSkip = workflow.match(/ALLOW_SKIP:\s*([^\n]+)/)?.[1] ?? '';
+    expect(allowSkip).not.toContain('realtime-clients');
+  });
+
   it('keeps a documented smoke skip distinct from a passing smoke check', () => {
     expect(classifySmokeExitCode({ code: 77, success: false, signal: null }))
       .toBe('skipped');

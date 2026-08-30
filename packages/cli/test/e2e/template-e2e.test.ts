@@ -522,7 +522,7 @@ describe('template scaffolding — end to end', () => {
       const config = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
 
       expect(config).toContain("from './src/controllers/index.ts'");
-      expect(config).toContain('registerGeneratedRoutes(app.router);');
+      expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
       // No plugin ARRAY exists on this path, so the plugin seam registers
       // imperatively instead of spreading.
       expect(config).toContain('app.register(generated)');

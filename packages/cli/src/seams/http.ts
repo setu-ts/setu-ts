@@ -116,12 +116,14 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
       ...(classBased && controllers.length > 0
         ? [`DecoratorPlugin({ controllers: [...${APP_CONTROLLERS_EXPORT}] })`]
         : []),
-      `${REGISTER_ROUTES_EXPORT}(app.router);`,
+      `${REGISTER_ROUTES_EXPORT}(app.router, app.services);`,
     ];
     const header = seamHeader('setu generate controller', wiring);
 
     const importLines = [
-      `import type { ${classBased ? 'Constructor, ' : ''}IRouterApi } from '@setu-ts/common';`,
+      `import type { ${
+        classBased ? 'Constructor, ' : ''
+      }IRouterApi, IServiceRegistry } from '@setu-ts/common';`,
       ...(classBased
         ? [
           renderSeamImports(
@@ -144,12 +146,23 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
       // An empty body still has to USE the parameter, or the generated project
       // fails `noUnusedParameters` — which the drift gate applies, since it
       // merges this workspace's compiler options into every project it checks.
-      ? '  void router;'
-      : registrars
-        .map((entry) => `  ${routeRegistrarSymbol(deriveNames(entry.name))}(router);`)
-        .join('\n');
+      ? '  void router;\n  void services;'
+      : `  for (const register of GENERATED_ROUTE_REGISTRARS) {\n` +
+        `    register(router, services);\n` +
+        `  }`;
 
     const declarations = [
+      ...(registrars.length > 0
+        ? [
+          `/** A generated registrar may predate the service-registry parameter. */\n` +
+          `type GeneratedRouteRegistrar = (router: IRouterApi, services?: IServiceRegistry) => void;\n\n` +
+          `const GENERATED_ROUTE_REGISTRARS: readonly GeneratedRouteRegistrar[] = [\n` +
+          registrars.map((entry) => `  ${routeRegistrarSymbol(deriveNames(entry.name))},`).join(
+            '\n',
+          ) +
+          `\n];`,
+        ]
+        : []),
       ...(classBased
         ? [
           `/** Every generated controller class, for \`DecoratorPlugin({ controllers })\`. */\n` +
@@ -164,8 +177,9 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
       ` * Registers every generated route-shaped module.\n` +
       ` *\n` +
       ` * @param router - The router to register on, normally \`app.router\`\n` +
+      ` * @param services - The service registry, normally \`app.services\`\n` +
       ` */\n` +
-      `export function ${REGISTER_ROUTES_EXPORT}(router: IRouterApi): void {\n` +
+      `export function ${REGISTER_ROUTES_EXPORT}(router: IRouterApi, services: IServiceRegistry): void {\n` +
       `${calls}\n` +
       `}`,
     ];

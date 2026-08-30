@@ -104,7 +104,7 @@ describe('seam selection', () => {
 
   it('emits a setup call only for the two families whose site is a call', () => {
     const calls = seamSetupCalls(listSeamSpecs()).join('\n');
-    expect(calls).toContain('registerGeneratedRoutes(app.router);');
+    expect(calls).toContain('registerGeneratedRoutes(app.router, app.services);');
     expect(calls).toContain('for (const generated of GENERATED_MIDDLEWARE) {');
     // The priority comes from the artifact's own module, never a literal here.
     expect(calls).toContain('priority: generated.priority,');
@@ -226,7 +226,9 @@ describe('seam hosts', () => {
       'src/middleware/index.ts',
       'src/plugins/index.ts',
     ]);
-    expect(fullStack.setupCalls ?? []).toContain('registerGeneratedRoutes(app.router);');
+    expect(fullStack.setupCalls ?? []).toContain(
+      'registerGeneratedRoutes(app.router, app.services);',
+    );
   });
 
   it('registers generated plugins through app.register, having no array to spread', () => {

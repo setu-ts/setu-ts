@@ -6229,22 +6229,24 @@ schematic emits its artifact plus its family's seam barrel; the barrel is regene
 its directory, and the scaffolded `setu.config.ts` already imports it. Three artifacts have no
 registration site, and the reason is recorded rather than left to discovery.
 
-| Schematic          | Emitted at                             | Registration site                                              |
-| ------------------ | -------------------------------------- | -------------------------------------------------------------- |
-| `module`           | `src/modules/<name>/`                  | `DecoratorPlugin({ controllers, services })` via `MODULE_*`    |
-| `controller`       | `src/controllers/<name>.controller.ts` | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS`       |
-| `service`          | `src/services/<name>.service.ts`       | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below |
-| `route`            | `src/routes/<name>.routes.ts`          | `registerGeneratedRoutes(app.router)` in `createApp()`         |
-| `middleware`       | `src/middleware/<name>.middleware.ts`  | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`          |
-| `plugin`           | `src/plugins/<name>.plugin.ts`         | `...GENERATED_PLUGINS` in `createApplication({ plugins })`     |
-| `health-indicator` | `src/health/<name>.indicator.ts`       | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`         |
-| `metric`           | `src/metrics/<name>.metric.ts`         | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`        |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`   | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`            |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`     | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`                |
-| `event-handler`    | `src/events/<name>.event-handler.ts`   | `EventsPlugin({ handlers: EVENT_HANDLERS })`                   |
-| `guard`            | `src/guards/<name>.guard.ts`           | **None** — per route, by design (see below)                    |
-| `job`              | `src/jobs/<name>.job.ts`               | **None** — the transport is your choice (see below)            |
-| `migration`        | `src/migrations/<stamp>-<name>.ts`     | **None** — the framework ships no migration runner             |
+| Schematic          | Emitted at                                                         | Registration site                                                    |
+| ------------------ | ------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `module`           | `src/modules/<name>/`                                              | `DecoratorPlugin({ controllers, services })` via `MODULE_*`          |
+| `controller`       | `src/controllers/<name>.controller.ts`                             | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS`             |
+| `service`          | `src/services/<name>.service.ts`                                   | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below       |
+| `route`            | `src/controllers/<name>.routes.ts`                                 | `registerGeneratedRoutes(app.router, app.services)` in `createApp()` |
+| `sse`              | `src/controllers/<name>.controller.ts` + `src/hooks/use-<name>.ts` | HTTP registrar; hook remains application-local                       |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`                                     | `...GENERATED_PLUGINS` in `createApplication({ plugins })`           |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                              | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`                |
+| `plugin`           | `src/plugins/<name>.plugin.ts`                                     | `...GENERATED_PLUGINS` in `createApplication({ plugins })`           |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                   | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`               |
+| `metric`           | `src/metrics/<name>.metric.ts`                                     | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`              |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                               | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`                  |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                 | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`                      |
+| `event-handler`    | `src/events/<name>.event-handler.ts`                               | `EventsPlugin({ handlers: EVENT_HANDLERS })`                         |
+| `guard`            | `src/guards/<name>.guard.ts`                                       | **None** — per route, by design (see below)                          |
+| `job`              | `src/jobs/<name>.job.ts`                                           | **None** — the transport is your choice (see below)                  |
+| `migration`        | `src/migrations/<stamp>-<name>.ts`                                 | **None** — the framework ships no migration runner                   |
 
 Notes on the three that are not wired, and one that is conditional:
 
@@ -6325,14 +6327,14 @@ Functional (the default composition):
 src/modules/<name>/<name>.service.ts        export function list<Name>()
 src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
 src/modules/<name>/index.ts                 the module's own re-exports
-src/routes/<name>.routes.ts                 register<Name>Routes — GET / and POST / (201)
-src/routes/index.ts                         the routes barrel     (managed — regenerated)
+src/controllers/<name>.routes.ts            register<Name>Routes — GET / and POST / (201)
+src/controllers/index.ts                    the HTTP barrel       (managed — regenerated)
 ```
 
 The route module registers through the same seam `setu generate route` uses, so the module answers
 `GET /<name>` and `POST /<name>` with no edit to `setu.config.ts`. Because both write
-`src/routes/<name>.routes.ts`, a `route` and a `module` sharing one name is refused by the ordinary
-overwrite check.
+`src/controllers/<name>.routes.ts`, a `route` and a `module` sharing one name is refused by the
+ordinary overwrite check.
 
 Class-based (`--template class-based`, or any project holding `decorator-plugin`):
 

@@ -101,6 +101,12 @@ export const EXCLUDED_EXAMPLES: readonly ExcludedExample[] = [
     reason: 'Same build shape as minimal; differs only in the plugins it imports.',
   },
   {
+    app: 'realtime-clients',
+    kind: 'redundant',
+    reason:
+      'Its smoke harness starts an ephemeral server; it has no long-lived production image to build.',
+  },
+  {
     app: 'static-site',
     kind: 'redundant',
     reason: 'Same build shape as minimal; differs only in the plugins it imports.',

@@ -88,8 +88,8 @@ describe('a hand-written module in a seam directory', () => {
             "import { registerAdminRoutes } from './src/controllers/admin.routes.ts';",
         )
         .replace(
-          'registerGeneratedRoutes(app.router);',
-          'registerGeneratedRoutes(app.router);\n  registerAdminRoutes(app.router);',
+          'registerGeneratedRoutes(app.router, app.services);',
+          'registerGeneratedRoutes(app.router, app.services);\n  registerAdminRoutes(app.router);',
         ),
     );
 

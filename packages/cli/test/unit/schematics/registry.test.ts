@@ -9,8 +9,8 @@ import { deriveNames } from '../../../src/utils/names.ts';
 import { options } from './_shared.ts';
 
 describe('schematic registry', () => {
-  it('registers exactly fourteen built-in schematics', () => {
-    expect(listSchematics()).toHaveLength(14);
+  it('registers exactly sixteen built-in schematics', () => {
+    expect(listSchematics()).toHaveLength(16);
   });
 
   it('names the custom pseudo-schematic', () => {
@@ -29,7 +29,7 @@ describe('schematic registry', () => {
     }
   });
 
-  it('gates exactly the seven plugin-dependent schematics', () => {
+  it('gates exactly the nine plugin-dependent schematics', () => {
     const gated = listSchematics()
       .filter((s) => s.requiresPlugin !== undefined)
       .map((s) => s.name);
@@ -43,6 +43,8 @@ describe('schematic registry', () => {
       'metric',
       'migration',
       'query-handler',
+      'sse',
+      'ws-route',
     ]);
   });
 
@@ -91,7 +93,8 @@ describe('schematic registry', () => {
     // `controller` joined the HTTP barrel in M70h/E8 — one directory, one
     // barrel, three kinds sharing it.
     expect(shared.map(([path, owners]) => [path, owners.sort()])).toEqual([
-      ['src/controllers/index.ts', ['controller', 'module', 'route']],
+      ['src/plugins/index.ts', ['plugin', 'ws-route']],
+      ['src/controllers/index.ts', ['controller', 'module', 'route', 'sse']],
       ['src/cqrs/index.ts', ['command-handler', 'query-handler']],
     ]);
   });

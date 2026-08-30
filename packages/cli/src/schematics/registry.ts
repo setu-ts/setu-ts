@@ -26,6 +26,8 @@ import { generateEventHandler } from './event-handler.ts';
 import { generateJob } from './job.ts';
 import { generateMigration } from './migration.ts';
 import { generateModule } from './module.ts';
+import { generateWsRoute } from './ws-route.ts';
+import { generateSse } from './sse.ts';
 
 export type { GeneratedFile } from '../utils/file-writer.ts';
 export type { DerivedNames } from '../utils/names.ts';
@@ -151,6 +153,8 @@ const REGISTRY: ReadonlyMap<string, SchematicMetadata> = new Map<string, Schemat
   ['event-handler', { factory: generateEventHandler, requiresPlugin: 'events-plugin' }],
   ['job', { factory: generateJob }],
   ['migration', { factory: generateMigration, requiresPlugin: 'database-plugin' }],
+  ['ws-route', { factory: generateWsRoute, requiresPlugin: 'websocket-plugin' }],
+  ['sse', { factory: generateSse, requiresPlugin: 'sse-plugin' }],
 ]);
 
 /** The name of the pseudo-schematic that loads a user-authored module. */
