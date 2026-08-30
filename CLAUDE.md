@@ -3686,7 +3686,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 83** — `@Module` declarations, generated module activation, and the default REST
   functional greeting example — complete (PR #213).
 - **Milestone 84** — first-party SSE/WebSocket SDK clients, realtime CLI starting points, and the
-  four-runtime client smoke exercise — complete (PR pending).
+  four-runtime client smoke exercise — complete (PR #214).
 - **Next milestone** — **M79** (portable data-access contract).
 
 ## Verification (run before declaring any work done)
