@@ -402,7 +402,7 @@ error[private-type-ref]: public type references private type
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the frozen baseline of 752', () => {
+    it('is the frozen baseline of 753', () => {
       // 776 when the plan was written against a pre-M56 tree; merging
       // origin/main brought M56-M61's JSDoc and the real count fell to 775.
       // M59 then added four diagnostics and removed five, so it fell to 774.
@@ -424,9 +424,16 @@ error[private-type-ref]: public type references private type
       // block sat on the interface, so its @param/@returns described a member
       // deno_doc never saw), which the ratchet caught as one `missing-jsdoc`.
       // Documenting the member cleared it rather than raising the constant.
+      // M83 added `@Module`, whose `MetadataStore.mergeModule` references the
+      // internal `ModuleMetadata` — one `private-type-ref`. Unlike M72's, this
+      // one cannot be cleared by writing a description: the only fixes are to
+      // export a type the plan (§3.1) keeps internal, or to split one member
+      // away from `mergeController`/`mergeService`, whose identical
+      // diagnostics are already in this baseline. Recorded as the measured 753
+      // rather than concealed, following M67.
       // The ratchet refused the stale constant in BOTH directions and named
       // the new number, which is exactly the behaviour §3.10 specifies.
-      expect(DOC_LINT_BASELINE).toBe(752);
+      expect(DOC_LINT_BASELINE).toBe(753);
     });
   });
 

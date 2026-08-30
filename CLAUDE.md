@@ -3683,6 +3683,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 78** — native MongoDB backend for `database-plugin`, including the `'mongodb'`
   configuration arm, native query translation, ObjectId mapping, injected-client seam, and real
   driver CI coverage — complete (PR #208).
+- **Milestone 83** — `@Module` declarations, generated module activation, and the default REST
+  functional greeting example — complete (PR #213).
 - **Next milestone** — **M79** (portable data-access contract).
 
 ## Verification (run before declaring any work done)

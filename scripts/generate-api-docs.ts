@@ -57,8 +57,17 @@ export const CLEAN_PACKAGES = new Set([
  * facades to accept the real `graphql` package replaced a number of
  * `missing-jsdoc`/`private-type-ref` diagnostics on the old narrow facade
  * members with documented, `unknown`-typed ones.
+ *
+ * M83 raised the count to 753 for one `private-type-ref`:
+ * `MetadataStore.mergeModule` references `ModuleMetadata`, which the plan
+ * (§3.1) keeps internal because `IMetadataStore` deliberately hides concrete
+ * values and no other package consumes module metadata. Its two siblings,
+ * `mergeController`/`ControllerMetadata` and `mergeService`/`ServiceMetadata`,
+ * are already in this baseline, so the only fixes available were to contradict
+ * that decision or to split one member of a three-member family away from the
+ * other two. Recorded rather than concealed, following M67.
  */
-export const DOC_LINT_BASELINE = 752;
+export const DOC_LINT_BASELINE = 753;
 
 /**
  * The Deno version {@linkcode DOC_LINT_BASELINE} was measured on.

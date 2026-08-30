@@ -23,6 +23,7 @@ import {
   Get,
   Inject,
   Injectable,
+  Module,
   Params,
   Post,
   UseGuards,
@@ -196,6 +197,72 @@ describe('DecoratorPlugin registration (integration)', () => {
     expect(services.has('user-service')).toBe(true);
     const svc = services.get('user-service')?.[0] as { greet(): string } | undefined;
     expect(svc?.greet()).toBe('hi');
+  });
+
+  it('registers an imported module provider before its controller', async () => {
+    @Injectable({ token: 'greeting-service' })
+    class GreetingService {
+      greeting(): string {
+        return 'hello';
+      }
+    }
+
+    @Controller('/greetings')
+    @Inject('greeting-service')
+    class GreetingController {
+      constructor(readonly service: GreetingService) {}
+
+      @Get('/')
+      index(): { message: string } {
+        return { message: this.service.greeting() };
+      }
+    }
+
+    @Module({ providers: [GreetingService], controllers: [GreetingController] })
+    class GreetingModule {}
+
+    @Module({ imports: [GreetingModule] })
+    class AppModule {}
+
+    const { ctx, routes, services } = createFakeContext();
+    await DecoratorPlugin({ modules: [AppModule] }).register(ctx);
+
+    expect(services.has('greeting-service')).toBe(true);
+    expect(routes.map((route) => route.path)).toEqual(['/greetings']);
+  });
+
+  it('deduplicates a module reached through a diamond and terminates a cycle', async () => {
+    @Injectable({ token: 'shared' })
+    class Shared {}
+    @Module({ providers: [Shared] })
+    class SharedModule {}
+    @Module({ imports: [SharedModule] })
+    class LeftModule {}
+    @Module({ imports: [SharedModule] })
+    class RightModule {}
+    @Module({ imports: [LeftModule, RightModule] })
+    class RootModule {}
+
+    const { ctx, services } = createFakeContext();
+    await DecoratorPlugin({ modules: [RootModule] }).register(ctx);
+    expect(services.get('shared')).toHaveLength(1);
+
+    metadataStore.mergeModule(LeftModule, { imports: [RootModule] });
+    const cyclic = createFakeContext();
+    await DecoratorPlugin({ modules: [RootModule] }).register(cyclic.ctx);
+    expect(cyclic.services.get('shared')).toHaveLength(1);
+  });
+
+  it('rejects a service with required constructor arguments and no Inject declaration', async () => {
+    @Injectable({ token: 'broken' })
+    class BrokenService {
+      constructor(_dependency: unknown) {}
+    }
+
+    const { ctx } = createFakeContext();
+    await expect(DecoratorPlugin({ services: [BrokenService] }).register(ctx)).rejects.toThrow(
+      'BrokenService has 1 required constructor parameter(s) but no `@Inject(...)` declaration',
+    );
   });
 
   it('registers services with a DI container', async () => {

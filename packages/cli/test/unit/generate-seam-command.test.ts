@@ -330,6 +330,7 @@ describe('setu generate, with seams', () => {
       const h = harness({
         ...WIRED,
         '/app/src/modules/widget/widget.controller.ts': 'export class WidgetController {}',
+        '/app/src/modules/widget/widget.module.ts': 'export class WidgetModule {}',
         '/app/src/modules/widget/widget.service.ts': 'export class WidgetService {}',
       });
 

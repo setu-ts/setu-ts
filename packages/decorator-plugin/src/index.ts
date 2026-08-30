@@ -47,6 +47,8 @@ export type {
 } from './metadata/context-bridge.ts';
 
 // --- Injection decorators ---
+export { Module } from './decorators/module.ts';
+export type { ModuleOptions } from './decorators/module.ts';
 export { Inject, Injectable, Optional } from './decorators/injection.ts';
 export type { InjectableOptions, InjectToken, OptionalToken } from './decorators/injection.ts';
 

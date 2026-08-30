@@ -105,10 +105,11 @@ describe('generateModule', () => {
   describe('in a class-based project', () => {
     const files = generateModule(names, options(CLASS_PLUGINS));
 
-    it('emits five files under the module directory', () => {
+    it('emits a module declaration alongside its other files', () => {
       expect(files.map((f) => f.path)).toEqual([
         'src/modules/user-profile/user-profile.service.ts',
         'src/modules/user-profile/user-profile.controller.ts',
+        'src/modules/user-profile/user-profile.module.ts',
         'src/modules/user-profile/user-profile.service.test.ts',
         'src/modules/user-profile/index.ts',
         'src/modules/index.ts',
@@ -162,9 +163,10 @@ describe('generateModule', () => {
       expect(source).not.toContain('Deno.test');
     });
 
-    it('re-exports both classes from the per-module barrel', () => {
+    it('re-exports the module declaration and its classes from the per-module barrel', () => {
       const source = fileAt(files, 'src/modules/user-profile/index.ts');
       expect(source).toContain('export { UserProfileController }');
+      expect(source).toContain('export { UserProfileModule }');
       expect(source).toContain('export { UserProfileService }');
     });
 
@@ -174,15 +176,15 @@ describe('generateModule', () => {
         options(CLASS_PLUGINS, ['billing', 'order']),
       );
       const barrel = fileAt(files, 'src/modules/index.ts');
-      expect(barrel).toContain('BillingController');
-      expect(barrel).toContain('OrderController');
-      expect(barrel).toContain('UserController');
+      expect(barrel).toContain('BillingModule');
+      expect(barrel).toContain('OrderModule');
+      expect(barrel).toContain('UserModule');
     });
 
     it('lists a regenerated module exactly once', () => {
       const files = generateModule(deriveNames('user'), options(CLASS_PLUGINS, ['user']));
       const barrel = fileAt(files, 'src/modules/index.ts');
-      expect(barrel.match(/from '\.\/user\/user\.controller\.ts'/g)?.length).toBe(1);
+      expect(barrel.match(/from '\.\/user\/user\.module\.ts'/g)?.length).toBe(1);
     });
 
     it('produces a barrel identical to the one the templates scaffold', () => {
@@ -192,8 +194,7 @@ describe('generateModule', () => {
         generateModule(deriveNames('user'), options(CLASS_PLUGINS)),
         'src/modules/index.ts',
       );
-      expect(barrel).toContain('export const MODULE_CONTROLLERS: readonly Constructor[] = [');
-      expect(barrel).toContain('export const MODULE_SERVICES: readonly Constructor[] = [');
+      expect(barrel).toContain('export const MODULES: readonly Constructor[] = [');
     });
 
     it('treats an absent modules option as no modules', () => {
@@ -204,7 +205,7 @@ describe('generateModule', () => {
         plugins: new Set(['decorator-plugin']),
         now: () => 0,
       });
-      expect(fileAt(files, 'src/modules/index.ts')).toContain('UserController');
+      expect(fileAt(files, 'src/modules/index.ts')).toContain('UserModule');
     });
   });
 });

@@ -115,9 +115,9 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/migration-nestjs.md': {
-    total: 34,
-    ts: 34,
-    compile: 18,
+    total: 35,
+    ts: 35,
+    compile: 19,
     external: 16,
     pseudocode: 0,
     skipped: 0,
@@ -133,12 +133,12 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
-  // 254 since M76: docs/decorators.md lost its `deno.json` "Enable Decorators"
+  // 255 since M83: docs/decorators.md lost its `deno.json` "Enable Decorators"
   // block (standard decorators need no compiler option) and a duplicated
   // `@Inject` example the migration had collapsed into a copy of its neighbour.
-  total: 254,
-  ts: 208,
-  compile: 176,
+  total: 255,
+  ts: 209,
+  compile: 177,
   external: 32,
   pseudocode: 0,
   skipped: 46,
