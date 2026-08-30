@@ -7,11 +7,12 @@
  *
  * @module
  */
-import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
+import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
 import { bindRawStatement, type RawStatementTag } from '../../query/raw-statement.ts';
 import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
+import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
 import {
   DRIZZLE_QUERY_HANDLE,
   type DrizzleQueryHandleProvider,
@@ -232,13 +233,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         'DrizzleAdapter requires options.drizzleTables with at least one real Drizzle table definition.',
       );
     }
-    // The `id` column is a REPOSITORY precondition, not a registry one:
-    // `IRepository.findById`/`update`/`delete` are single-key by contract, but
-    // a composite-key table registered only so the typed query builder can
-    // reach it needs no such column. Enforcing it here made the registry
-    // all-or-nothing and locked ordinary join and per-tenant tables out of the
-    // whole schema. `createDrizzleDataSourceInner` refuses the same table by
-    // name at the moment a repository is actually asked for.
+    // `IRepository.findById`/`update`/`delete` use the per-entity `primaryKey`
+    // override (defaulting to `['id']`) when building predicates. A composite-
+    // key table registered only so the typed query builder can reach it needs
+    // no `id` column — `createDrizzleDataSourceInner` refuses by name at the
+    // moment a repository is asked for, not at `connect()` time.
     for (const [name, table] of Object.entries(tables)) {
       if (table == null || typeof table !== 'object') {
         throw new Error(
@@ -289,6 +288,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const hold = new Deferred<void>();
     const tables = this.resolveTables();
     const operators = this._operators!;
+    const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
 
     const outer = transactionBridge(async (tx) => {
       txReady.resolve(this.validateInstance(tx));
@@ -315,7 +315,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       },
 
       createDataSource(entity: string): DataSource {
-        return createDrizzleDataSourceInner(tx, entity, tables, operators);
+        return createDrizzleDataSourceInner(tx, entity, tables, operators, entities);
       },
 
       async commit(): Promise<void> {
@@ -377,11 +377,13 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     if (!this._db) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
+    const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
     return createDrizzleDataSourceInner(
       this._db,
       entity,
       this.resolveTables(),
       this._operators!,
+      entities,
     );
   }
 
@@ -492,6 +494,7 @@ function createDrizzleDataSourceInner(
   entity: string,
   tables: Record<string, unknown>,
   operators: DrizzleOperators,
+  entities?: Readonly<Record<string, { primaryKey?: string | readonly string[] }>>,
 ): DataSource {
   const table = tables[entity];
   if (table == null || typeof table !== 'object') {
@@ -500,18 +503,17 @@ function createDrizzleDataSourceInner(
     );
   }
   const drizzleTable = table as DrizzleTable;
-  const idColumn = columnFor(drizzleTable, entity, 'id');
+  const primaryKeyOverride = entities?.[entity]?.primaryKey;
+  const keyColumns = resolveKeyColumns(primaryKeyOverride ?? 'id');
 
   return {
     async findById(id) {
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new Error(
-            `DrizzleAdapter.findById: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
-      const rows = await instance.select().from(drizzleTable).where(operators.eq(idColumn, id));
+      const values = keyValues(id, keyColumns, `findById on '${entity}'`);
+      const predicates = keyColumns.map((col, i) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+      );
+      const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
+      const rows = await instance.select().from(drizzleTable).where(predicate);
       return rows[0] ?? null;
     },
 
@@ -545,15 +547,13 @@ function createDrizzleDataSourceInner(
     },
 
     async update(id, data) {
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new Error(
-            `DrizzleAdapter.update: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
+      const values = keyValues(id, keyColumns, `update on '${entity}'`);
+      const predicates = keyColumns.map((col, i) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+      );
+      const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await returningRows(
-        instance.update(drizzleTable).set(data).where!(operators.eq(idColumn, id)),
+        instance.update(drizzleTable).set(data).where!(predicate),
         entity,
         'update',
       );
@@ -561,15 +561,13 @@ function createDrizzleDataSourceInner(
     },
 
     async delete(id) {
-      if (typeof id === 'object') {
-        return Promise.reject(
-          new Error(
-            `DrizzleAdapter.delete: composite keys are not supported; got ${typeof id}.`,
-          ),
-        );
-      }
+      const values = keyValues(id, keyColumns, `delete on '${entity}'`);
+      const predicates = keyColumns.map((col, i) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+      );
+      const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await returningRows(
-        instance.delete(drizzleTable).where(operators.eq(idColumn, id)),
+        instance.delete(drizzleTable).where(predicate),
         entity,
         'delete',
       );
@@ -754,12 +752,12 @@ function oneReturnedRow(
   entity: string,
   operation: 'create' | 'update',
   rows: readonly Record<string, unknown>[],
-  id?: string | number,
+  _id?: unknown,
 ): Record<string, unknown> {
   const row = rows[0];
   if (row !== undefined) return row;
   if (operation === 'update') {
-    throw new Error(`Entity '${entity}' with id '${id}' not found`);
+    throw new Error(`Entity '${entity}' not found`);
   }
   throw new Error(
     `Drizzle ${operation} for entity '${entity}' returned no row; configure a driver that supports RETURNING.`,

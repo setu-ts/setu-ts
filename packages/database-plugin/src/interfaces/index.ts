@@ -584,6 +584,42 @@ export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
 }
 
 /**
+ * Per-entity overrides for the Drizzle adapter.
+ *
+ * The only override exercised today is {@linkcode DrizzleCompositeKeyOptions.primaryKey},
+ * which replaces the hardcoded `'id'` column the adapter reads otherwise. A
+ * scalar name yields a single-column key; an array yields a composite-key
+ * predicate that ANDs every named column.
+ *
+ * @since 0.2.0
+ */
+export interface DrizzleCompositeKeyOptions {
+  /**
+   * Primary-key column(s) for this entity.
+   *
+   * Defaults to `['id']` when absent — the adapter's previous hardcoded path,
+   * so an unconfigured entity behaves exactly as it did before, including its
+   * refuse-by-name on an absent `id` column.
+   *
+   * Pass an array for a composite-key table that has no `id` column but carries
+   * a compound primary key (e.g. `{ tenantId, flag }`).
+   *
+   * @example
+   * ```typescript
+   * // Scalar key (default path).
+   * entities: { User: {} }
+   *
+   * // Composite key — replace the hardcoded 'id'.
+   * entities: {
+   *   TenantFlag: { primaryKey: ['tenantId', 'flag'] },
+   * }
+   * ```
+   * @since 0.2.0
+   */
+  readonly primaryKey?: string | readonly string[];
+}
+
+/**
  * {@linkcode DatabaseAdapterOptions} narrowed for the Drizzle arm: the
  * configured instance and the table registry are both required.
  *
@@ -605,6 +641,35 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
    * @since 0.2.0
    */
   readonly drizzleTables: Record<string, unknown>;
+
+  /**
+   * Per-entity overrides keyed by the entity name passed to
+   * {@linkcode IRepository.getRepository}.
+   *
+   * The only override exercised today is `primaryKey`, which replaces the
+   * hardcoded `'id'` column the adapter reads when building `findById`/
+   * `update`/`delete` predicates. An absent entry falls back to `['id']`,
+   * preserving the prior behaviour (including its refuse-by-name when `id` is
+   * missing from the table).
+   *
+   * @example
+   * ```typescript
+   * import { DatabasePlugin } from '@setu-ts/database-plugin';
+   *
+   * app.register(DatabasePlugin({
+   *   type: 'drizzle',
+   *   options: {
+   *     drizzleInstance: createDrizzleDatabase(db, bridge),
+   *     drizzleTables: { Tenant: tenants, TenantFlag: tenantFlags },
+   *     entities: {
+   *       TenantFlag: { primaryKey: ['tenantId', 'flag'] },
+   *     },
+   *   },
+   * }));
+   * ```
+   * @since 0.2.0
+   */
+  readonly entities?: Readonly<Record<string, DrizzleCompositeKeyOptions>>;
 }
 
 /**

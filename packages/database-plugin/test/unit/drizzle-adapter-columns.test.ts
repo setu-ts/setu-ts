@@ -1,12 +1,10 @@
 /**
- * X4-9 — the Drizzle table registry validates `id` lazily.
+ * Drizzle adapter — per-entity primaryKey override and composite-key support.
  *
- * `IRepository.findById`/`update`/`delete` are single-key by contract, so a
- * composite-key table genuinely cannot have a repository. The registry was
- * enforcing that repository precondition on EVERY registered table, including
- * ones only the typed query builder reads, which made the registry
- * all-or-nothing and locked ordinary join and per-tenant tables out of the
- * whole schema.
+ * T5 extends the X4-9 suite: an unconfigured entity still refuses a missing
+ * `id` by name (the prior default path), while a composite-key table now
+ * yields a working repository when `primaryKey` is configured — it previously
+ * threw.
  *
  * @module
  */
@@ -14,6 +12,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
 import { pgTable, primaryKey, text } from 'npm:drizzle-orm@0.45.2/pg-core';
+import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { createDrizzleDatabase, getDrizzleDatabase } from '../../src/index.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
@@ -30,7 +29,10 @@ const tenantFlags = pgTable('tenant_flags', {
   value: text('value').notNull(),
 }, (table) => [primaryKey({ columns: [table.tenantId, table.flag] })]);
 
-function buildAdapter(tables: Record<string, unknown>) {
+function buildAdapter(
+  tables: Record<string, unknown>,
+  extra?: Partial<DrizzleAdapterOptions>,
+) {
   const seen: string[] = [];
   const database = drizzle((sql) => {
     seen.push(sql);
@@ -40,7 +42,11 @@ function buildAdapter(tables: Record<string, unknown>) {
     database,
     (instance, work) => instance.transaction(work),
   );
-  const adapter = new DrizzleAdapter({ drizzleInstance: configured, drizzleTables: tables });
+  const adapter = new DrizzleAdapter({
+    drizzleInstance: configured,
+    drizzleTables: tables,
+    ...extra,
+  });
   return { adapter, configured, seen };
 }
 
@@ -51,12 +57,13 @@ describe('DrizzleAdapter table registry', () => {
     expect(adapter.isReady()).toBe(true);
   });
 
-  it('refuses a repository for the composite-key table, by name', async () => {
+  it('refuses a repository for the composite-key table by name when unconfigured', async () => {
     const { adapter } = buildAdapter({ Tenant: tenants, TenantFlag: tenantFlags });
     await adapter.connect();
-    expect(() => adapter.createDataSource('TenantFlag')).toThrow(
-      "Drizzle table 'TenantFlag' has no 'id' column required by the database repository.",
-    );
+    // Default primaryKey is ['id']; the composite object is handed to keyValues
+    // which names the missing required column instead of columnFor throwing.
+    await expect(adapter.createDataSource('TenantFlag').findById({ tenantId: 't1', flag: 'x' }))
+      .rejects.toThrow(/missing required column 'id'/);
   });
 
   it('still serves a repository for the single-key table beside it', async () => {
@@ -95,5 +102,97 @@ describe('DrizzleAdapter table registry', () => {
     await expect(adapter.connect()).rejects.toThrow(
       "Drizzle table 'Broken' must be a table definition",
     );
+  });
+});
+
+describe('DrizzleAdapter per-entity primaryKey override', () => {
+  it('configures key columns to replace the hardcoded id for a composite-key table', async () => {
+    const { adapter, seen } = buildAdapter(
+      { Tenant: tenants, TenantFlag: tenantFlags },
+      { entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } } },
+    );
+    await adapter.connect();
+    const ds = adapter.createDataSource('TenantFlag');
+    await ds.findById({ tenantId: 't1', flag: 'active' });
+    // A multi-column WHERE is emitted: both columns appear.
+    expect(seen[0]).toContain('"tenant_id"');
+    expect(seen[0]).toContain('"flag"');
+  });
+
+  it('rejects a scalar against a composite-key target, by name and via Promise', async () => {
+    const { adapter } = buildAdapter(
+      { Tenant: tenants, TenantFlag: tenantFlags },
+      { entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } } },
+    );
+    await adapter.connect();
+    await expect(adapter.createDataSource('TenantFlag').findById('scalar-wrong'))
+      .rejects.toThrow(/entity key must be a composite record for multi-column target/);
+  });
+
+  it('rejects a composite record missing a required column, by name and via Promise', async () => {
+    const { adapter } = buildAdapter(
+      { Tenant: tenants, TenantFlag: tenantFlags },
+      { entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } } },
+    );
+    await adapter.connect();
+    await expect(
+      adapter.createDataSource('TenantFlag').findById({ tenantId: 't1' as unknown as string }),
+    )
+      .rejects.toThrow(/composite key is missing required column 'flag'/);
+  });
+
+  it('keeps the default ["id"] for an unconfigured entity', async () => {
+    const { adapter, seen } = buildAdapter({ Tenant: tenants });
+    await adapter.connect();
+    const ds = adapter.createDataSource('Tenant');
+    await ds.findById('t1');
+    expect(seen[0]).toContain('"tenants"');
+    expect(seen[0]).toContain('"id"');
+  });
+
+  it('unconfigured entity still refuses a missing id by name', async () => {
+    const { adapter } = buildAdapter({ Tenant: tenants, TenantFlag: tenantFlags });
+    await adapter.connect();
+    await expect(adapter.createDataSource('TenantFlag').findById('t1'))
+      .rejects.toThrow(
+        "Drizzle table 'TenantFlag' has no 'id' column required by the database repository.",
+      );
+  });
+
+  it('builds a compound WHERE for update using the configured key', async () => {
+    const { adapter, seen } = buildAdapter(
+      { TenantFlag: tenantFlags },
+      { entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } } },
+    );
+    await adapter.connect();
+    const ds = adapter.createDataSource('TenantFlag');
+    // Provide a row so returningRows returns something non-empty.
+    // The proxy records SQL but returns empty rows; update will throw
+    // "returned no row" — we only care that the WHERE is multi-column.
+    try {
+      await ds.update({ tenantId: 't1', flag: 'active' }, { value: 'new' });
+    } catch {
+      // Expected: proxy returns [], so oneReturnedRow throws.
+    }
+    // The recorded statement carries both key columns in the WHERE.
+    expect(seen[0]).toContain('and');
+    expect(seen[0]).toContain('"tenant_id"');
+    expect(seen[0]).toContain('"flag"');
+  });
+
+  it('builds a compound WHERE for delete using the configured key', async () => {
+    const { adapter, seen } = buildAdapter(
+      { TenantFlag: tenantFlags },
+      { entities: { TenantFlag: { primaryKey: ['tenantId', 'flag'] } } },
+    );
+    await adapter.connect();
+    const ds = adapter.createDataSource('TenantFlag');
+    try {
+      await ds.delete({ tenantId: 't1', flag: 'active' });
+    } catch {
+      // Expected: proxy returns [].
+    }
+    expect(seen[0]).toContain('"tenant_id"');
+    expect(seen[0]).toContain('"flag"');
   });
 });
