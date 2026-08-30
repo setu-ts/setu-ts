@@ -1,9 +1,0 @@
-{
-  "name": "@setu-ts/realtime-clients-smoke",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "smoke": "deno task smoke"
-  }
-}

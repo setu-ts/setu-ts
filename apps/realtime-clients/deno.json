@@ -1,6 +1,5 @@
 {
   "tasks": {
-    "install": "npm install --ignore-scripts",
     "start": "deno run -A main.ts",
     "smoke": "deno run -A smoke.ts"
   },
