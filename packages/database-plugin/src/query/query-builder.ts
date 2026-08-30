@@ -5,7 +5,7 @@
  * @module
  */
 import type { FilterExpression, NormalizedQuery, OrderDirection } from '@setu-ts/common';
-import type { CountOptions, FindOptions } from './find-options.ts';
+import type { CountOptions, FindOptions, PageOptions } from './find-options.ts';
 
 /**
  * Normalized query representation that adapters can evaluate.
@@ -39,6 +39,67 @@ export function normalizeQuery(options?: FindOptions): NormalizedQuery {
     limit: options?.limit ?? UNLIMITED,
     offset: options?.offset ?? 0,
     select: options?.select ?? [],
+  };
+}
+
+/**
+ * Refusal type returned by {@linkcode normalizePageQuery} when the query carries
+ * both a non-zero offset and a cursor (§3.10). Carried as an error rather than a
+ * throw so callers using `.catch()` on the Promise-returning
+ * {@linkcode IRepository.findPage} see a proper rejection.
+ *
+ * @since 0.2.0
+ */
+export class PageNormalizationError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'PageNormalizationError';
+
+  /**
+   * Creates the error.
+   *
+   * @param message - The full diagnostic, safe to log
+   */
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Normalize {@linkcode PageOptions} into a {@linkcode NormalizedQuery} with
+ * every optional resolved to a concrete default, plus a refusal when both a
+ * non-zero {@linkcode offset} and a {@linkcode cursor} are present.
+ *
+ * A cursor says "after this row"; an offset says "skip this many from the
+ * start". Honouring both would require inventing a composition rule no backend
+ * has, so refusing is the only answer that cannot be wrong (§3.10). The refusal
+ * is returned (not thrown) so the caller's `Promise`-returning
+ * {@linkcode IRepository.findPage} can reject it — a synchronous throw there
+ * would bypass a caller using `.catch()`, which is the defect class documented
+ * at {@linkcode unknownColumnError}.
+ *
+ * @param options - Optional page find options
+ * @returns The normalized query, or a {@linkcode PageNormalizationError} when
+ * the query is invalid
+ * @since 0.2.0
+ */
+export function normalizePageQuery(
+  options?: PageOptions,
+): NormalizedQuery | PageNormalizationError {
+  const offset = options?.offset ?? 0;
+  const hasCursor = options?.cursor !== undefined;
+  if (offset !== 0 && hasCursor) {
+    return new PageNormalizationError(
+      `cursor-pagination: offset=${offset} conflicts with cursor; use one or the other`,
+    );
+  }
+  return {
+    where: options?.where ?? {},
+    ...(options?.filter === undefined ? {} : { filter: options.filter }),
+    orderBy: options?.orderBy ?? {},
+    limit: options?.limit ?? UNLIMITED,
+    offset,
+    select: options?.select ?? [],
+    ...(hasCursor ? { cursor: options.cursor } : {}),
   };
 }
 
