@@ -196,7 +196,10 @@ export function generateModule(
     { path: `${dir}/index.ts`, contents: classIndex(names) },
     {
       path: `${MODULES_DIR}/index.ts`,
-      contents: renderModuleBarrel([...(options.modules ?? []), names.kebab]),
+      contents: renderModuleBarrel(
+        [...(options.modules ?? []), names.kebab],
+        options.legacyModules,
+      ),
       managed: true,
     },
   ];

@@ -140,8 +140,11 @@ supported when the application should own activation: pass one `@Module({ import
 directly to `DecoratorPlugin`.
 
 Projects generated before this release have no `<name>.module.ts`. The next generation reports each
-such directory instead of silently dropping it from the activation barrel. Add the declaration, or
-delete and regenerate that module, then run the command again.
+such directory instead of silently dropping it from `MODULES`. Its regenerated barrel retains the
+deprecated `MODULE_CONTROLLERS` and `MODULE_SERVICES` exports, so an existing config continues to
+compile and register its modules while it migrates. Add the declaration (or delete and regenerate
+that module), then change `setu.config.ts` to import `MODULES` and pass `modules: [...MODULES]` to
+`DecoratorPlugin`; do not retain the deprecated arrays in the new config.
 
 **Nothing is ever overwritten.** A generate that would clobber any existing file writes none of them
 — every planned path is checked before the first write, so a multi-file schematic cannot leave a

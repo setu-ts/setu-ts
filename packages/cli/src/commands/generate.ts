@@ -240,10 +240,11 @@ export async function runGenerateCommand(
   // here would put a second dispatch beside the registry.
   const moduleScan = await scanModules(deps.fs, dir);
   const modules = moduleScan.names;
+  const legacyModules = moduleScan.skipped.map((skip) => skip.name);
   for (const skip of moduleScan.skipped) {
     deps.error(
       `Skipped ${skip.path}: it is missing ${skip.missing}, so it cannot be listed in ` +
-        'the generated module activation barrel and nothing registers it.',
+        'the MODULES activation barrel used by migrated configs.',
     );
     deps.error(
       `  Add ${skip.missing} with @Module(...) or delete and regenerate the module.`,
@@ -348,6 +349,7 @@ export async function runGenerateCommand(
     plugins: installed,
     now: deps.now,
     modules,
+    legacyModules,
     migrations,
     artifacts: scan.artifacts,
   };

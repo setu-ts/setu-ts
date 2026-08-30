@@ -6,7 +6,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { MODULES_EXPORT, renderModuleBarrel } from '../../../src/schematics/module-barrel.ts';
+import {
+  LEGACY_CONTROLLERS_EXPORT,
+  LEGACY_SERVICES_EXPORT,
+  MODULES_EXPORT,
+  renderModuleBarrel,
+} from '../../../src/schematics/module-barrel.ts';
 
 describe('renderModuleBarrel', () => {
   it('emits an empty activation list for a project with no modules', () => {
@@ -81,5 +86,23 @@ describe('renderModuleBarrel', () => {
     expect(renderModuleBarrel(['user'])).toContain(
       "import type { Constructor } from '@setu-ts/common';",
     );
+  });
+
+  it('keeps legacy controller and service exports while a project migrates', () => {
+    const source = renderModuleBarrel(['orders'], ['users']);
+
+    expect(source).toContain("import { UsersController } from './users/users.controller.ts';");
+    expect(source).toContain("import { UsersService } from './users/users.service.ts';");
+    expect(source).toContain("import { OrdersModule } from './orders/orders.module.ts';");
+    expect(source).toContain(
+      `export const ${LEGACY_CONTROLLERS_EXPORT}: readonly Constructor[] = [`,
+    );
+    expect(source).toContain(
+      `export const ${LEGACY_SERVICES_EXPORT}: readonly Constructor[] = [`,
+    );
+    expect(source).toContain('UsersController');
+    expect(source).toContain('OrdersController');
+    expect(source).toContain('UsersService');
+    expect(source).toContain('OrdersService');
   });
 });

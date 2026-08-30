@@ -64,6 +64,14 @@ export interface SchematicOptions {
    */
   readonly modules?: readonly string[];
   /**
+   * Pre-module-declaration directories that retain the old controller/service
+   * barrel exports until their application converts to `MODULES`.
+   *
+   * Optional for the same public-interface compatibility reason as `modules`.
+   * A missing value means there are no legacy directories to preserve.
+   */
+  readonly legacyModules?: readonly string[];
+  /**
    * The generated artifacts already present in the project, keyed by the schematic
    * name that emits them (`{ 'health-indicator': ['external-api'] }`).
    *

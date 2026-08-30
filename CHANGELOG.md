@@ -22,8 +22,12 @@ All notable changes to this project are documented here. The format follows
   the managed aggregate barrel exports `MODULES` and config passes it through
   `DecoratorPlugin({ modules })` instead of exporting controller/service arrays. Existing generated
   module directories are reported when their declaration is missing, rather than silently omitted.
-  Add `@Module({ controllers: [<Name>Controller], providers: [<Name>Service] })` to each legacy
-  directory, or delete and regenerate it.
+  The regenerated barrel retains deprecated controller/service arrays so an existing config keeps
+  compiling while it migrates. Add
+  `@Module({ controllers: [<Name>Controller], providers:
+  [<Name>Service] })` to each legacy
+  directory (or delete and regenerate it), then update `setu.config.ts` to import `MODULES` and pass
+  `modules: [...MODULES]` to `DecoratorPlugin`.
 
 - Added a native MongoDB backend to `@setu-ts/database-plugin`.
   `DatabasePlugin({ type: 'mongodb',

@@ -134,7 +134,7 @@ describe('readModuleNames', () => {
 
     expect(scan.names).toEqual([]);
     expect(scan.skipped).toEqual([
-      { path: 'src/modules/legacy', missing: 'legacy.module.ts' },
+      { name: 'legacy', path: 'src/modules/legacy', missing: 'legacy.module.ts' },
     ]);
   });
 

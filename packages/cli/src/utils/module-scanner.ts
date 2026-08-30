@@ -19,6 +19,8 @@ export const MODULES_DIR = 'src/modules';
 
 /** A legacy domain directory the new activation barrel cannot import yet. */
 export interface SkippedModule {
+  /** The legacy module directory name. */
+  readonly name: string;
   /** The directory relative to the project root. */
   readonly path: string;
   /** The file required to admit this module. */
@@ -109,7 +111,7 @@ export async function scanModules(
     if (controller && service && module) {
       names.push(entry);
     } else if (controller && service) {
-      skipped.push({ path: `${MODULES_DIR}/${entry}`, missing: `${entry}.module.ts` });
+      skipped.push({ name: entry, path: `${MODULES_DIR}/${entry}`, missing: `${entry}.module.ts` });
     }
   }
 

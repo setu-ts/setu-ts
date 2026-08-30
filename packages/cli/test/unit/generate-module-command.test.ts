@@ -92,6 +92,27 @@ describe('setu generate module', () => {
     expect(barrel).toContain('UserModule');
   });
 
+  it('preserves the old barrel exports while reporting a legacy module', async () => {
+    const h = harness({
+      ...CLASS_BASED,
+      '/app/src/modules/users/users.controller.ts': 'export class UsersController {}',
+      '/app/src/modules/users/users.service.ts': 'export class UsersService {}',
+      '/app/src/modules/index.ts': '// old CLI-managed module barrel',
+    });
+
+    expect(await h.run(['module', 'orders'])).toBe(0);
+
+    const barrel = h.fs.read('/app/src/modules/index.ts');
+    expect(barrel).toContain('export const MODULES');
+    expect(barrel).toContain('export const MODULE_CONTROLLERS');
+    expect(barrel).toContain('export const MODULE_SERVICES');
+    expect(barrel).toContain('UsersController');
+    expect(barrel).toContain('UsersService');
+    expect(barrel).toContain('OrdersController');
+    expect(barrel).toContain('OrdersService');
+    expect(h.err.text()).toContain('MODULES activation barrel used by migrated configs');
+  });
+
   it('refuses to regenerate a module over its own files', async () => {
     // The barrel is exempt from the overwrite check; the module's own files are
     // not, so a repeat must still refuse rather than silently rewriting work.
