@@ -38,12 +38,13 @@ deno task smoke
 
 ### Advanced Features
 
-| Example                                | What It Proves                                                    | Run                                |
-| -------------------------------------- | ----------------------------------------------------------------- | ---------------------------------- |
-| [microservices](../apps/microservices) | Cross-service communication via messaging broker                  | `deno task start` (requires Redis) |
-| [realtime](../apps/realtime)           | Real-time communication with WebSocket/SSE and cross-replica sync | `deno task start` (requires Redis) |
-| [graphql](../apps/graphql-demo)        | GraphQL server with schema-first and code-first support           | `deno task start`                  |
-| [grpc](../apps/grpc)                   | gRPC and Connect-ES on the same port as HTTP routes               | `deno task start`                  |
+| Example                                      | What It Proves                                                    | Run                                |
+| -------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------- |
+| [microservices](../apps/microservices)       | Cross-service communication via messaging broker                  | `deno task start` (requires Redis) |
+| [realtime](../apps/realtime)                 | Real-time communication with WebSocket/SSE and cross-replica sync | `deno task start` (requires Redis) |
+| [realtime-clients](../apps/realtime-clients) | SDK SSE resumption/auth and WebSocket keep-alive across runtimes  | `deno task smoke`                  |
+| [graphql](../apps/graphql-demo)              | GraphQL server with schema-first and code-first support           | `deno task start`                  |
+| [grpc](../apps/grpc)                         | gRPC and Connect-ES on the same port as HTTP routes               | `deno task start`                  |
 
 ### Platform-Specific
 

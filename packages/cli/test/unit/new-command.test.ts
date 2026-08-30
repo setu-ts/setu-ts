@@ -478,7 +478,7 @@ describe('runNewCommand', () => {
       const order = [
         'createApplication({',
         "app.middleware.add(errorHandler({ format: 'rfc9457' })",
-        'registerGeneratedRoutes(app.router);',
+        'registerGeneratedRoutes(app.router, app.services);',
         'for (const generated of GENERATED_MIDDLEWARE) {',
         "app.router.get('/'",
       ].map((needle) => config.indexOf(needle));
@@ -503,7 +503,7 @@ describe('runNewCommand', () => {
       const config = h.fs.read('/work/bare/setu.config.ts');
       expect(config).toContain('RuntimePlugin(),');
       // route: a call; plugin: an array spread; middleware: a loop.
-      expect(config).toContain('registerGeneratedRoutes(app.router);');
+      expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
       expect(config).toContain('...GENERATED_PLUGINS,');
       expect(config).toContain('for (const generated of GENERATED_MIDDLEWARE) {');
       // The barrels those imports name are emitted at scaffold time, so the

@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/sdk` realtime clients.** `createSseClient` consumes authenticated SSE streams with
+  frame parsing, `Last-Event-ID` resumption, bounded reconnects, and abort teardown;
+  `createRealtimeClient` filters and replies to the WebSocket heartbeat protocol, re-joins rooms,
+  and reconnects with bounded backoff. `setu generate sse` and `setu generate ws-route` provide
+  matching application-local starting points. The generated React hook is emitted only for a project
+  that already configures both React Router and the SDK.
+
+  The generated `src/controllers/index.ts` barrel now passes the service registry to each generated
+  registrar, so its `registerGeneratedRoutes` takes an optional second parameter. A project
+  scaffolded before this keeps compiling untouched — `generate` never rewrites `setu.config.ts` —
+  but a generated SSE controller resolves `CAPABILITIES.SSE` from that registry and throws by name
+  until the call is updated to `registerGeneratedRoutes(app.router, app.services)`.
+
 - `@setu-ts/decorator-plugin` now exports `@Module({ controllers, providers, imports })` and
   `DecoratorPlugin({ modules })`. Activated modules flatten imported modules depth-first, register
   providers before controllers, deduplicate diamonds and cycles by class identity, and warn when a

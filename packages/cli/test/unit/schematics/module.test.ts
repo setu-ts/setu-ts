@@ -74,14 +74,15 @@ describe('generateModule', () => {
       );
       const barrel = fileAt(files, 'src/controllers/index.ts');
       for (const call of ['registerGizmoRoutes', 'registerBillingRoutes', 'registerUserRoutes']) {
-        expect(barrel).toContain(`${call}(router);`);
+        expect(barrel).toContain(`${call},`);
       }
+      expect(barrel).toContain('register(router, services);');
     });
 
     it('lists a regenerated module exactly once', () => {
       const files = generateModule(deriveNames('user'), options([], [], { route: ['user'] }));
       const barrel = fileAt(files, 'src/controllers/index.ts');
-      expect(barrel.match(/registerUserRoutes\(router\);/g)?.length).toBe(1);
+      expect(barrel.match(/registerUserRoutes,/g)?.length).toBe(1);
     });
 
     it('emits a service test in the repo test style, never Deno.test', () => {

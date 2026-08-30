@@ -85,7 +85,9 @@ describe('MINIMAL_HOST', () => {
   });
 
   it('registers the HTTP seam through a call inside createApp()', () => {
-    expect(MINIMAL_HOST.setupCalls).toContain(`${REGISTER_ROUTES_EXPORT}(app.router);`);
+    expect(MINIMAL_HOST.setupCalls).toContain(
+      `${REGISTER_ROUTES_EXPORT}(app.router, app.services);`,
+    );
   });
 
   it('registers the middleware seam through the priority-preserving loop', () => {

@@ -74,6 +74,7 @@ const ADDABLE: ReadonlyMap<string, string> = new Map([
   ['resilience', 'resilience-plugin'],
   ['scheduler', 'scheduler-plugin'],
   ['secrets', 'secrets-plugin'],
+  ['sdk', 'sdk'],
   ['service-discovery', 'service-discovery-plugin'],
   ['session', 'session-plugin'],
   ['sse', 'sse-plugin'],

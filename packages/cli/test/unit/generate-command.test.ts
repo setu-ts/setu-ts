@@ -179,7 +179,11 @@ describe('runGenerateCommand', () => {
       expect(await h.run(['controller', 'widget'])).toBe(0);
 
       const module = h.fs.read('/app/src/controllers/widget.controller.ts');
-      expect(module).toContain('export function registerWidgetRoutes(router: IRouterApi)');
+      expect(module).toContain('export function registerWidgetRoutes(');
+      expect(module).toContain('router: IRouterApi,');
+      // The shared barrel passes `services` to every registrar, so a controller
+      // that drops the parameter silently stops receiving it.
+      expect(module).toContain('services?: IServiceRegistry,');
       // The whole reason the gate existed: an ungated CLASS would emit an import
       // the project cannot resolve (the M34b defect). The functional shape
       // imports only `@setu-ts/common`.
@@ -198,7 +202,8 @@ describe('runGenerateCommand', () => {
       const h = harness();
       await h.run(['controller', 'widget']);
       const barrel = h.fs.read('/app/src/controllers/index.ts');
-      expect(barrel).toContain('registerWidgetRoutes(router);');
+      expect(barrel).toContain('registerWidgetRoutes,');
+      expect(barrel).toContain('register(router, services);');
       // No APP_CONTROLLERS in a functional project: the class array would name a
       // symbol none of these modules export.
       expect(barrel).not.toContain('APP_CONTROLLERS');

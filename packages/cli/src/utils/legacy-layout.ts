@@ -28,7 +28,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { joinPath } from './file-writer.ts';
-import { HTTP_SEAM_BARREL, HTTP_SEAM_DIR } from '../seams/http.ts';
+import { HTTP_SEAM_BARREL, HTTP_SEAM_DIR, REGISTER_ROUTES_EXPORT } from '../seams/http.ts';
 
 /** Where HTTP artifacts lived before E8, relative to the project root. */
 export const LEGACY_HTTP_DIR = 'src/routes';
@@ -73,5 +73,48 @@ export function legacyLayoutNotice(files: readonly string[]): readonly string[] 
     `  imported by nothing and everything generated into it is unreachable.`,
     `  Move them, delete ${LEGACY_HTTP_DIR}/, and point setu.config.ts at ` +
     `./${HTTP_SEAM_BARREL}.`,
+  ];
+}
+
+/** The application file that wires the generated barrel into the app. */
+export const CONFIG_MODULE = 'setu.config.ts';
+
+/**
+ * Reads a project's `setu.config.ts`.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The project directory
+ * @returns The source, or an empty string when the file is absent
+ */
+export async function readConfigModule(fs: IFileSystem, dir: string): Promise<string> {
+  try {
+    return new TextDecoder().decode(await fs.readFile(joinPath(dir, CONFIG_MODULE)));
+  } catch {
+    // Absent: a bare directory, or a project that keeps its wiring elsewhere.
+    return '';
+  }
+}
+
+/**
+ * Renders the migration notice for a config still calling the registrar with
+ * only a router.
+ *
+ * The registry parameter is optional precisely so such a project keeps
+ * compiling, which means nothing else reports it: a generated SSE controller
+ * resolves its capability from that registry and throws at startup instead.
+ * Pure, so the wording is unit-testable without a filesystem.
+ *
+ * @param source - The contents of the project's `setu.config.ts`
+ * @returns The lines to report, or an empty list when the call is current
+ */
+export function legacyRegistrarNotice(source: string): readonly string[] {
+  const legacyCall = new RegExp(`${REGISTER_ROUTES_EXPORT}\\(\\s*app\\.router\\s*\\)`);
+  if (!legacyCall.test(source)) return [];
+
+  return [
+    `${CONFIG_MODULE} calls ${REGISTER_ROUTES_EXPORT}(app.router) without the service registry.`,
+    `  Generated artifacts that resolve a capability — an SSE controller does — receive`,
+    `  \`undefined\` and throw at startup.`,
+    `  Change the call to ${REGISTER_ROUTES_EXPORT}(app.router, app.services).`,
   ];
 }
