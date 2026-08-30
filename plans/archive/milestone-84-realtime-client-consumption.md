@@ -1,7 +1,8 @@
 # Milestone 84 — Realtime Client Consumption (`@setu-ts/sdk` + `@setu-ts/cli`)
 
-> **Status:** Complete. Branch: `feat/m84-realtime-client-consumption`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #214). Archived on completion. Branch:
+> `feat/m84-realtime-client-consumption`. `main` is protected — all work (implementation + fixes)
+> stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 

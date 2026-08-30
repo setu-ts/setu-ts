@@ -41,7 +41,11 @@ export class SseFrameParser {
    */
   push(chunk: string): readonly ParsedSseFrame[] {
     this.#buffer += this.#firstChunk ? stripLeadingBom(chunk) : chunk;
-    this.#firstChunk = false;
+    // Only a chunk that carried text disarms the strip. A streaming decoder
+    // returns '' when a transport chunk ends mid-sequence, and the BOM is three
+    // bytes, so clearing unconditionally would let a split BOM through and
+    // corrupt the first field name.
+    if (chunk !== '') this.#firstChunk = false;
 
     const frames: ParsedSseFrame[] = [];
     let terminator = findLineTerminator(this.#buffer);

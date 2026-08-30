@@ -16,6 +16,8 @@ import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
   LEGACY_HTTP_DIR,
   legacyLayoutNotice,
+  legacyRegistrarNotice,
+  readConfigModule,
   readLegacyHttpFiles,
 } from '../../../src/utils/legacy-layout.ts';
 
@@ -79,5 +81,39 @@ describe('legacyLayoutNotice', () => {
 
   it('reports the count so a large directory is not truncated silently', () => {
     expect(legacyLayoutNotice(['a.ts', 'b.ts', 'c.ts'])[0]).toContain('3 file(s)');
+  });
+});
+
+describe('legacyRegistrarNotice', () => {
+  it('reports a config that still calls the registrar with only a router', () => {
+    // The parameter is optional so such a project keeps COMPILING, which is
+    // exactly why nothing else reports it — a generated SSE controller resolves
+    // its capability from that registry and throws at startup instead.
+    const notice = legacyRegistrarNotice('registerGeneratedRoutes(app.router);');
+    expect(notice.length).toBeGreaterThan(0);
+    expect(notice[0]).toContain('without the service registry');
+    expect(notice.join('\n')).toContain('registerGeneratedRoutes(app.router, app.services)');
+  });
+
+  it('says nothing about a config already passing the registry', () => {
+    expect(legacyRegistrarNotice('registerGeneratedRoutes(app.router, app.services);')).toEqual([]);
+  });
+
+  it('says nothing when the project does not call the registrar at all', () => {
+    expect(legacyRegistrarNotice('export function createApp() {}')).toEqual([]);
+  });
+});
+
+describe('readConfigModule', () => {
+  it('reads the project config as text', async () => {
+    const fs = createFakeFs({ '/app/setu.config.ts': 'registerGeneratedRoutes(app.router);' });
+
+    expect(await readConfigModule(fs, '/app')).toContain('registerGeneratedRoutes');
+  });
+
+  it('reports an empty source when the project has no config', async () => {
+    // A bare directory, or a project keeping its wiring elsewhere: nothing to
+    // migrate rather than a crash.
+    expect(await readConfigModule(createFakeFs({}), '/app')).toBe('');
   });
 });

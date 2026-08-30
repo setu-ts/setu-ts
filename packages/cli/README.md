@@ -81,23 +81,23 @@ setu generate service user-profile
 setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
-| Schematic          | Emits                                     | Requires           |
-| ------------------ | ----------------------------------------- | ------------------ |
-| `plugin`           | `src/plugins/<name>.ts`                   | —                  |
-| `controller`       | `src/controllers/<name>.controller.ts`    | `decorator-plugin` |
-| `service`          | `src/services/<name>.service.ts`          | —                  |
-| `route`            | `src/controllers/<name>.routes.ts`        | —                  |
-| `sse`              | controller + application-local React hook | `sse-plugin`       |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`            | `websocket-plugin` |
-| `middleware`       | `src/middleware/<name>.middleware.ts`     | —                  |
-| `job`              | `src/jobs/<name>.job.ts`                  | —                  |
-| `guard`            | `src/guards/<name>.guard.ts`              | `auth-plugin`      |
-| `health-indicator` | `src/health/<name>.indicator.ts`          | `health-plugin`    |
-| `metric`           | `src/metrics/<name>.metric.ts`            | `metrics-plugin`   |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`      | `cqrs-plugin`      |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`        | `cqrs-plugin`      |
-| `event-handler`    | `src/events/<name>.event-handler.ts`      | `events-plugin`    |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts`    | `database-plugin`  |
+| Schematic          | Emits                                                                                                         | Requires           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                  |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin` |
+| `service`          | `src/services/<name>.service.ts`                                                                              | —                  |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                  |
+| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`       |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin` |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                  |
+| `job`              | `src/jobs/<name>.job.ts`                                                                                      | —                  |
+| `guard`            | `src/guards/<name>.guard.ts`                                                                                  | `auth-plugin`      |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`    |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`   |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`      |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`      |
+| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`    |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`  |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.

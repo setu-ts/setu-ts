@@ -281,7 +281,10 @@ describe('createSseClient', () => {
     await flush();
     client.close();
 
-    expect(slept[0]).toBeLessThanOrEqual(30_000);
+    // The exact ceiling, not merely "within it": asserting <= 30_000 would also
+    // accept the 1_000 base delay, so it would not prove the hint was clamped
+    // rather than ignored.
+    expect(slept[0]).toBe(30_000);
   });
 
   it('does not reopen a closed client when a custom fetch ignores the abort signal', async () => {

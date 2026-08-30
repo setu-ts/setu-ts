@@ -44,7 +44,12 @@ import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
-import { legacyLayoutNotice, readLegacyHttpFiles } from '../utils/legacy-layout.ts';
+import {
+  legacyLayoutNotice,
+  legacyRegistrarNotice,
+  readConfigModule,
+  readLegacyHttpFiles,
+} from '../utils/legacy-layout.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -321,6 +326,13 @@ export async function runGenerateCommand(
   // Without this the generator reports `created` and leaves the artifact unreachable —
   // the M60 defect class, reintroduced for upgrading projects by the fix for it.
   for (const line of legacyLayoutNotice(await readLegacyHttpFiles(deps.fs, dir))) {
+    deps.error(line);
+  }
+
+  // The registry parameter is optional so a pre-M84 config still COMPILES, which
+  // is what keeps existing projects working — but it also means the compiler no
+  // longer reports the gap, and a generated SSE controller throws at startup.
+  for (const line of legacyRegistrarNotice(await readConfigModule(deps.fs, dir))) {
     deps.error(line);
   }
 

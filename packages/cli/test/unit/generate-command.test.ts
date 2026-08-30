@@ -181,6 +181,9 @@ describe('runGenerateCommand', () => {
       const module = h.fs.read('/app/src/controllers/widget.controller.ts');
       expect(module).toContain('export function registerWidgetRoutes(');
       expect(module).toContain('router: IRouterApi,');
+      // The shared barrel passes `services` to every registrar, so a controller
+      // that drops the parameter silently stops receiving it.
+      expect(module).toContain('services?: IServiceRegistry,');
       // The whole reason the gate existed: an ungated CLASS would emit an import
       // the project cannot resolve (the M34b defect). The functional shape
       // imports only `@setu-ts/common`.

@@ -69,4 +69,14 @@ describe('SseFrameParser', () => {
 
     expect(parser.push('id: a\u0000b\ndata: x\n\n')).toEqual([{ data: 'x' }]);
   });
+
+  it('keeps the BOM strip armed across an empty first chunk', () => {
+    // A streaming TextDecoder yields '' when a transport chunk ends inside a
+    // multi-byte sequence, and the BOM is three bytes. Disarming on that empty
+    // push lets the BOM join the first field name, which is then unknown and
+    // dropped — the frame arrives with no data at all.
+    const parser = new SseFrameParser();
+    const frames = [...parser.push(''), ...parser.push('\uFEFFdata: hello\n\n')];
+    expect(frames).toEqual([{ data: 'hello' }]);
+  });
 });
