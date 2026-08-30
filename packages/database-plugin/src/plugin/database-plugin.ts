@@ -160,7 +160,9 @@ function createAdapter(
       // so this narrowing cannot fail for a type-checked caller.
       return Promise.resolve((options as CustomDatabaseOptions).adapter);
     case 'prisma':
-      return Promise.resolve(new PrismaAdapter(adapterOptions));
+      return Promise.resolve(
+        new PrismaAdapter(adapterOptions as import('../interfaces/index.ts').PrismaAdapterOptions),
+      );
     case 'drizzle':
       return Promise.resolve(new DrizzleAdapter(adapterOptions));
     case 'mongodb':

@@ -46,6 +46,24 @@ function createNotFoundError(model: string, id: unknown): Error {
   return error;
 }
 
+/**
+ * Check whether a record matches a Prisma-style `where` clause.
+ * Supports both scalar `{ id: value }` and compound-key `{ <field>: { col1: val1 } }` shapes.
+ */
+function matchWhere(
+  row: Record<string, unknown>,
+  where: Record<string, unknown>,
+): boolean {
+  for (const [key, val] of Object.entries(where)) {
+    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+      const compound = val as Record<string, unknown>;
+      return Object.entries(compound).every(([k, v]) => row[k] === v);
+    }
+    if (row[key] !== val) return false;
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Delegate factory — creates a model delegate backed by an in-memory store
 // ---------------------------------------------------------------------------
@@ -74,6 +92,16 @@ function createDelegate(
   return {
     async findUnique(args: { where: Record<string, unknown> }) {
       recordedCalls.push({ model: modelName, action: 'findUnique', args });
+      // Handle compound-key where: { <compoundField>: { col1: val1, col2: val2 } }
+      for (const [_key, val] of Object.entries(args.where)) {
+        if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+          const compound = val as Record<string, unknown>;
+          const found = Array.from(store.records.values()).find((row) =>
+            Object.entries(compound).every(([k, v]) => row[k] === v)
+          );
+          return found ?? null;
+        }
+      }
       const id = String(args.where.id ?? args.where[args.where.id ?? 'id']);
       const record = store.records.get(String(id ?? ''));
       return record ?? null;
@@ -147,25 +175,37 @@ function createDelegate(
 
     async update(args: { where: Record<string, unknown>; data: Record<string, unknown> }) {
       recordedCalls.push({ model: modelName, action: 'update', args });
-      const id = String(args.where.id ?? args.where[args.where.id ?? 'id']);
-      const existing = store.records.get(id);
-      if (!existing) {
-        throw createNotFoundError(modelName, id);
+      // Find the key of the matching record in the store
+      let key: string | undefined;
+      for (const [k, v] of store.records) {
+        if (matchWhere(v, args.where)) {
+          key = k;
+          break;
+        }
       }
+      if (key === undefined) {
+        throw createNotFoundError(modelName, 'composite');
+      }
+      const existing = store.records.get(key)!;
       const updated = { ...existing, ...args.data };
-      store.records.set(id, updated);
+      store.records.set(key, updated);
       return { ...updated };
     },
 
     async delete(args: { where: Record<string, unknown> }) {
       recordedCalls.push({ model: modelName, action: 'delete', args });
-      const id = String(args.where.id ?? args.where[args.where.id ?? 'id']);
-      const existing = store.records.get(id);
-      if (!existing) {
-        throw createNotFoundError(modelName, id);
+      let key: string | undefined;
+      for (const [k, v] of store.records) {
+        if (matchWhere(v, args.where)) {
+          key = k;
+          break;
+        }
       }
-      const deleted = { ...existing };
-      store.records.delete(id);
+      if (key === undefined) {
+        throw createNotFoundError(modelName, 'composite');
+      }
+      const deleted = store.records.get(key)!;
+      store.records.delete(key);
       return deleted;
     },
 

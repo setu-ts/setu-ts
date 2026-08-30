@@ -498,6 +498,53 @@ export interface DatabaseAdapterOptions {
 }
 
 /**
+ * Per-entity overrides for the Prisma adapter.
+ *
+ * Used to customise how the adapter addresses compound-key fields on a Prisma
+ * model — in particular the {@linkcode PrismaCompositeKeyOptions.compositeKeyName}
+ * override that is mandatory when a model uses a named `@@id` constraint.
+ *
+ * @since 0.2.0
+ */
+export interface PrismaCompositeKeyOptions {
+  /**
+   * Override for the derived compound-key field name.
+   *
+   * Prisma generates an unnamed `@@id([a, b])` as `a_b`; a named
+   * `@@id([...], name: "custom")` generates only `custom`. When the derived
+   * name does not match the schema (e.g. a named `@@id`), set this to the
+   * Prisma-side generated field name so `findById`/`update`/`delete` emit the
+   * correct compound-key `where` argument.
+   *
+   * @since 0.2.0
+   */
+  readonly compositeKeyName?: string;
+
+  /**
+   * The primary-key columns for this entity, in Prisma schema declaration order.
+   *
+   * Required when {@linkcode compositeKeyName} is set: the adapter needs the
+   * column names to build the compound-key object that Prisma expects inside
+   * the `where` argument. For an unnamed `@@id([tenantId, userId])` the derived
+   * name is `tenantId_userId` and this can be omitted — the adapter derives the
+   * columns from the field name by splitting on `_`. When a named `@@id` is used,
+   * the derived name is meaningless, so `keyColumns` must be supplied.
+   *
+   * Defaults to `['id']` when absent (scalar-key path).
+   *
+   * @example
+   * ```typescript
+   * // Named @@id: columns must be supplied explicitly.
+   * entities: {
+   *   Enrollment: { compositeKeyName: 'enrollmentKey', keyColumns: ['courseId', 'personId'] },
+   * }
+   * ```
+   * @since 0.2.0
+   */
+  readonly keyColumns?: readonly string[];
+}
+
+/**
  * {@linkcode DatabaseAdapterOptions} narrowed for the Prisma arm: the injected
  * client is required.
  *
@@ -512,6 +559,28 @@ export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
    * @since 0.2.0
    */
   readonly prismaClient: unknown;
+
+  /**
+   * Per-entity overrides for key resolution and other model-specific tuning.
+   *
+   * The only override exercised today is `compositeKeyName` on entities that
+   * carry a named `@@id` constraint — Prisma generates the field name from the
+   * `name:` argument rather than joining column names with `_`, so the derived
+   * name is wrong for such models. Setting the override tells the adapter the
+   * correct field to address in the compound-key `where` argument.
+   *
+   * @example
+   * ```typescript
+   * new PrismaAdapter({
+   *   prismaClient,
+   *   entities: {
+   *     Enrollment: { compositeKeyName: 'enrollmentKey' },
+   *   },
+   * });
+   * ```
+   * @since 0.2.0
+   */
+  readonly entities?: Readonly<Record<string, PrismaCompositeKeyOptions>>;
 }
 
 /**

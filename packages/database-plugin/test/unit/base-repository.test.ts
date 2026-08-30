@@ -277,10 +277,11 @@ describe('BaseRepository', () => {
       // Add findPage to the test data source.
       (dsWithFindPage as unknown as DataSource & {
         findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
-      }).findPage = async () => ({
-        rows: [{ id: '1', name: 'Page1', active: true }],
-        nextCursor: null,
-      });
+      }).findPage = () =>
+        Promise.resolve({
+          rows: [{ id: '1', name: 'Page1', active: true }],
+          nextCursor: null,
+        });
       const repoWithFindPage = new TestRepository(dsWithFindPage);
       const page = await repoWithFindPage.findPage({});
       expect(page.rows.length).toBe(1);

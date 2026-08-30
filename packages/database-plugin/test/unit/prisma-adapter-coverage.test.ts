@@ -228,7 +228,11 @@ describe('PrismaAdapter — CRUD data-source coverage', () => {
 
   describe('resolveClient generated-client requirement', () => {
     it('throws descriptive error when no client is injected', async () => {
-      const noClient = new PrismaAdapter({ url: 'postgresql://localhost/test' });
+      const noClient = new PrismaAdapter(
+        {
+          url: 'postgresql://localhost/test',
+        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
+      );
       await expect(noClient.connect()).rejects.toThrow('requires options.prismaClient');
     });
   });

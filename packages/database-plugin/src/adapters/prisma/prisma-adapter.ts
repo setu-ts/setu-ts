@@ -9,11 +9,21 @@
  *
  * @module
  */
-import type { DatabaseAdapterOptions, PrismaSqlProvider } from '../../interfaces/index.ts';
-import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type {
+  DatabaseAdapterOptions,
+  PrismaAdapterOptions,
+  PrismaSqlProvider,
+} from '../../interfaces/index.ts';
+import type {
+  EntityKey,
+  FilterExpression,
+  IAdapterTransaction,
+  IDatabaseAdapter,
+} from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
-import { UnsupportedFilterOperatorError } from '../../errors.ts';
+import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../errors.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
+import { keyValues } from '../../query/key-target.ts';
 
 // ---------------------------------------------------------------------------
 // Prisma connector (provider) — decides how `contains` is translated.
@@ -140,7 +150,7 @@ class Deferred<T> {
 export class PrismaAdapter implements IDatabaseAdapter {
   private _client: PrismaClient | null = null;
   private _connected = false;
-  private readonly _options: DatabaseAdapterOptions | undefined;
+  private readonly _options: DatabaseAdapterOptions | PrismaAdapterOptions | undefined;
   /** The resolved connector, or `undefined` when it could not be determined. */
   private _provider: PrismaSqlProvider | undefined;
 
@@ -193,6 +203,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
     // Capture for the returned transaction's data-source factory, whose `this`
     // is the transaction object, not this adapter.
     const provider = this._provider;
+    const entities = (this._options as PrismaAdapterOptions | undefined)?.entities;
 
     const txReady = new Deferred<PrismaClient>();
     const hold = new Deferred<void>();
@@ -226,7 +237,13 @@ export class PrismaAdapter implements IDatabaseAdapter {
 
     return {
       createDataSource(entity: string): DataSource {
-        return createPrismaDataSourceInner(tx, entity, provider);
+        return createPrismaDataSourceInner(
+          tx,
+          entity,
+          provider,
+          entities?.[entity]?.keyColumns ?? ['id'],
+          entities?.[entity]?.compositeKeyName,
+        );
       },
 
       async commit(): Promise<void> {
@@ -265,7 +282,14 @@ export class PrismaAdapter implements IDatabaseAdapter {
     if (!this._client) {
       throw new Error('PrismaAdapter is not connected — call connect() first');
     }
-    return createPrismaDataSourceInner(this._client, entity, this._provider);
+    const entities = (this._options as PrismaAdapterOptions | undefined)?.entities;
+    return createPrismaDataSourceInner(
+      this._client,
+      entity,
+      this._provider,
+      entities?.[entity]?.keyColumns ?? ['id'],
+      entities?.[entity]?.compositeKeyName,
+    );
   }
 
   /**
@@ -363,18 +387,87 @@ export class PrismaAdapter implements IDatabaseAdapter {
  * @returns A data source bound to the Prisma model
  * @since 0.1.0
  */
+/**
+ * Build a Prisma compound-key `where` from an {@linkcode EntityKey} and the
+ * resolved column values.
+ *
+ * For a scalar key, the shape is `{ id: value }` (today's path). For a
+ * composite key, the shape is `{ <compoundField>: { col1: val1, col2: val2 } }`
+ * — Prisma's compound-key syntax, order-insensitive (P3).
+ *
+ * @param id - The primary key value
+ * @param entity - Entity name (used for error messages)
+ * @param columns - The resolved key columns
+ * @param compoundKeyField - The compound-key field name, derived or overridden
+ * @returns The `where` argument for `findUnique`/`update`/`delete`
+ */
+function buildCompoundWhere(
+  id: EntityKey,
+  entity: string,
+  columns: readonly string[],
+  compoundKeyField: string,
+): Record<string, unknown> {
+  if (typeof id === 'string' || typeof id === 'number') {
+    return { id };
+  }
+  const values = keyValues(id, columns, `findById on '${entity}'`);
+  const record: Record<string, unknown> = {};
+  for (let i = 0; i < columns.length; i++) {
+    record[columns[i]] = values[i];
+  }
+  return { [compoundKeyField]: record };
+}
+
+/**
+ * Creates a {@linkcode DataSource} backed by a Prisma client for the given
+ * entity name.
+ *
+ * **Convention**: entity name `'User'` → delegate accessed as `client.user`
+ * (first letter lowercased). If the delegate is absent on the client, the
+ * error names the entity and the convention so the caller can fix the entity
+ * name.
+ *
+ * @param client - The Prisma client (or transaction client) instance
+ * @param entity - Entity / model name (e.g. `'User'`)
+ * @param provider - The Prisma SQL provider (connector)
+ * @param keyColumns - The resolved primary-key columns (defaults to `['id']`)
+ * @param compoundKeyField - The compound-key field name, or `undefined` for scalar keys
+ * @returns A data source bound to the Prisma model
+ * @since 0.1.0
+ */
 export function createPrismaDataSource(
   client: PrismaClient,
   entity: string,
   provider?: PrismaSqlProvider,
+  keyColumns?: readonly string[],
+  compoundKeyField?: string,
 ): DataSource {
-  return createPrismaDataSourceInner(client, entity, provider);
+  return createPrismaDataSourceInner(
+    client,
+    entity,
+    provider,
+    keyColumns ?? ['id'],
+    compoundKeyField,
+  );
 }
 
+/**
+ * Internal factory used by both the public surface and the transaction bridge.
+ *
+ * @param client - The Prisma client (or transaction client) instance
+ * @param entity - Entity / model name (e.g. `'User'`)
+ * @param provider - The Prisma SQL provider (connector)
+ * @param keyColumns - The resolved primary-key columns
+ * @param compoundKeyField - The compound-key field name, or `undefined` for scalar keys
+ * @returns A data source bound to the Prisma model
+ * @internal
+ */
 function createPrismaDataSourceInner(
   client: PrismaClient,
   entity: string,
   provider?: PrismaSqlProvider,
+  keyColumns: readonly string[] = ['id'],
+  compoundKeyField?: string,
 ): DataSource {
   // Resolve delegate: 'User' → client.user
   const delegateKey = entity.charAt(0).toLowerCase() + entity.slice(1);
@@ -389,9 +482,19 @@ function createPrismaDataSourceInner(
   return {
     findById: (id) => {
       if (typeof id === 'object') {
-        return Promise.reject(
-          new Error(`PrismaAdapter.findById: composite keys are not supported; got ${typeof id}.`),
-        );
+        if (compoundKeyField === undefined) {
+          return Promise.reject(
+            new UnsupportedQueryFeatureError(
+              'composite-key',
+              'prisma',
+              `composite-key: PrismaAdapter.findById (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
+                `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
+            ),
+          );
+        }
+        return delegate.findUnique({
+          where: buildCompoundWhere(id, entity, keyColumns, compoundKeyField),
+        });
       }
       return delegate.findUnique({ where: { id } });
     },
@@ -428,11 +531,28 @@ function createPrismaDataSourceInner(
 
     update(id, data) {
       if (typeof id === 'object') {
-        return Promise.reject(
-          new Error(`PrismaAdapter.update: composite keys are not supported; got ${typeof id}.`),
-        );
+        if (compoundKeyField === undefined) {
+          return Promise.reject(
+            new UnsupportedQueryFeatureError(
+              'composite-key',
+              'prisma',
+              `composite-key: PrismaAdapter.update (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
+                `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
+            ),
+          );
+        }
+        return delegate.update({
+          where: buildCompoundWhere(id, entity, keyColumns, compoundKeyField),
+          data,
+        }).catch((err: unknown) => {
+          const code = (err as { code?: string }).code;
+          if (code === 'P2025') {
+            throw new Error(`Entity '${entity}' with id not found`);
+          }
+          throw err;
+        });
       }
-      return delegate.update({ where: { id }, data }).catch((err) => {
+      return delegate.update({ where: { id }, data }).catch((err: unknown) => {
         const code = (err as { code?: string }).code;
         if (code === 'P2025') {
           throw new Error(`Entity '${entity}' with id '${id}' not found`);
@@ -443,9 +563,28 @@ function createPrismaDataSourceInner(
 
     async delete(id) {
       if (typeof id === 'object') {
-        return Promise.reject(
-          new Error(`PrismaAdapter.delete: composite keys are not supported; got ${typeof id}.`),
-        );
+        if (compoundKeyField === undefined) {
+          return Promise.reject(
+            new UnsupportedQueryFeatureError(
+              'composite-key',
+              'prisma',
+              `composite-key: PrismaAdapter.delete (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
+                `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
+            ),
+          );
+        }
+        try {
+          await delegate.delete({
+            where: buildCompoundWhere(id, entity, keyColumns, compoundKeyField),
+          });
+          return true;
+        } catch (err) {
+          const code = (err as { code?: string }).code;
+          if (code === 'P2025') {
+            return false;
+          }
+          throw err;
+        }
       }
       try {
         await delegate.delete({ where: { id } });

@@ -14,7 +14,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
-import { UnsupportedFilterOperatorError } from '../../src/errors.ts';
+import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
@@ -87,7 +87,11 @@ describe('PrismaAdapter', () => {
     });
 
     it('rejects missing prismaClient with a generated-client requirement', async () => {
-      const noClientAdapter = new PrismaAdapter({ url: 'postgresql://localhost/test' });
+      const noClientAdapter = new PrismaAdapter(
+        {
+          url: 'postgresql://localhost/test',
+        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
+      );
       await expect(noClientAdapter.connect()).rejects.toThrow('requires options.prismaClient');
     });
 
@@ -506,6 +510,143 @@ describe('PrismaAdapter', () => {
       expect(caught).toBeInstanceOf(UnsupportedFilterOperatorError);
       expect((caught as UnsupportedFilterOperatorError).connector).toBe('sqlite');
       expect((caught as UnsupportedFilterOperatorError).operator).toBe('contains');
+    });
+  });
+
+  describe('composite key support', () => {
+    it('emits where: { id } byte-for-byte for a scalar key', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      await ds.findById('u1');
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findUnique');
+      expect(call?.args).toEqual({ where: { id: 'u1' } });
+    });
+
+    it('refuses composite findById by name when compositeKeyName is unset', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      // Without compositeKeyName, composite keys are refused by name.
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('composite-key');
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('prisma');
+    });
+
+    it('emits the override compound name when compositeKeyName is set', async () => {
+      const entities = {
+        User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
+      };
+      const compAdapter = new PrismaAdapter(
+        {
+          prismaClient: fakeClient,
+          ...(entities !== undefined ? { entities } : {}),
+        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
+      );
+      await compAdapter.connect();
+      const ds = compAdapter.createDataSourceForEntity('User');
+      await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
+      await ds.findById({ tenantId: 't1', userId: 7 });
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findUnique');
+      expect(call?.args).toEqual({
+        where: {
+          tenantId_userId: { tenantId: 't1', userId: 7 },
+        },
+      });
+    });
+
+    it('uses the override compound name in update', async () => {
+      const entities = {
+        User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
+      };
+      const compAdapter = new PrismaAdapter(
+        {
+          prismaClient: fakeClient,
+          ...(entities !== undefined ? { entities } : {}),
+        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
+      );
+      await compAdapter.connect();
+      const ds = compAdapter.createDataSourceForEntity('User');
+      await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
+      await ds.update({ tenantId: 't1', userId: 7 }, { name: 'Alice2' });
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'update');
+      expect(call?.args).toEqual({
+        where: {
+          tenantId_userId: { tenantId: 't1', userId: 7 },
+        },
+        data: { name: 'Alice2' },
+      });
+    });
+
+    it('uses the override compound name in delete', async () => {
+      const entities = {
+        User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
+      };
+      const compAdapter = new PrismaAdapter(
+        {
+          prismaClient: fakeClient,
+          ...(entities !== undefined ? { entities } : {}),
+        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
+      );
+      await compAdapter.connect();
+      const ds = compAdapter.createDataSourceForEntity('User');
+      await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
+      await ds.delete({ tenantId: 't1', userId: 7 });
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'delete');
+      expect(call?.args).toEqual({
+        where: {
+          tenantId_userId: { tenantId: 't1', userId: 7 },
+        },
+      });
+    });
+
+    it('refuses composite findById by name with UnsupportedQueryFeatureError', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('composite-key');
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('prisma');
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('compositeKeyName');
+    });
+
+    it('refuses composite update by name with UnsupportedQueryFeatureError', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      await expect(
+        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await expect(
+        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
+      ).rejects.toThrow('composite-key');
+      await expect(
+        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
+      ).rejects.toThrow('prisma');
+    });
+
+    it('refuses composite delete by name with UnsupportedQueryFeatureError', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      await expect(
+        ds.delete({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await expect(
+        ds.delete({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('composite-key');
+      await expect(
+        ds.delete({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('prisma');
     });
   });
 });
