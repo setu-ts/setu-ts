@@ -723,10 +723,11 @@ class Application implements IKernelApplication {
   }
 
   /**
-   * Tries a WebSocket upgrade when no route matched and the request carries a
-   * raw `Request`. Consults the `IWebSocketService`'s upgrade router; when it
-   * accepts, brands the `IRequest` with the intent so the HTTP adapter can
-   * perform the handshake after the framework handler returns.
+   * Tries a WebSocket upgrade after the middleware pipeline and before route
+   * matching when the request carries a raw `Request`. Consults the
+   * `IWebSocketService`'s upgrade router; when it accepts, brands the
+   * `IRequest` with the intent so the HTTP adapter can perform the handshake
+   * after the framework handler returns.
    *
    * The brand goes on the `IRequest`, not `ctx.state`, because the adapter
    * holds the former and never sees the context — see {@linkcode
@@ -815,9 +816,9 @@ class Application implements IKernelApplication {
   }
 
   /**
-   * Tries gRPC dispatch when no route matched. Resolves `IGrpcService` from
-   * the registry, asks whether it claims the path, and dispatches with a
-   * reconstructed web `Request`.
+   * Tries gRPC dispatch after the middleware pipeline and before route
+   * matching. Resolves `IGrpcService` from the registry, asks whether it
+   * claims the path, and dispatches with a reconstructed web `Request`.
    *
    * @param ctx - The live request context
    * @returns `true` when gRPC answered (handler should return)
