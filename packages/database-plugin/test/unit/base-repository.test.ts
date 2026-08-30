@@ -271,6 +271,133 @@ describe('BaseRepository', () => {
       const deleted = await repo.delete('1');
       expect(deleted).toBe(true);
     });
+
+    it('forwards findPage when the data source exposes it', async () => {
+      const dsWithFindPage = createTestDataSource();
+      // Add findPage to the test data source.
+      (dsWithFindPage as unknown as DataSource & {
+        findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
+      }).findPage = async () => ({
+        rows: [{ id: '1', name: 'Page1', active: true }],
+        nextCursor: null,
+      });
+      const repoWithFindPage = new TestRepository(dsWithFindPage);
+      const page = await repoWithFindPage.findPage({});
+      expect(page.rows.length).toBe(1);
+      expect(page.rows[0].name).toBe('Page1');
+      expect(page.nextCursor).toBeNull();
+    });
+  });
+
+  describe('composite key round trip', () => {
+    interface CompositeEntity {
+      tenantId: string;
+      userId: string;
+      name: string;
+    }
+
+    class CompositeRepo
+      extends BaseRepository<CompositeEntity, { tenantId: string; userId: string }> {
+      constructor(dataSource: DataSource) {
+        super(dataSource);
+      }
+    }
+
+    function createCompositeDataSource(): DataSource {
+      const records: Record<string, unknown>[] = [];
+      return {
+        async findAll(query) {
+          await Promise.resolve();
+          let result = [...records] as Record<string, unknown>[];
+          if (Object.keys(query.where).length > 0) {
+            result = result.filter((row) => matchesWhere(row, query.where));
+          }
+          if (query.filter !== undefined) {
+            result = result.filter((row) => matchesFilter(row, query.filter!));
+          }
+          result = applyOrderBy(result, query.orderBy);
+          result = applyPagination(result, query.offset, query.limit);
+          if (query.select.length > 0) {
+            return result.map((row) => projectFields(row, query.select) as Record<string, unknown>);
+          }
+          return result;
+        },
+        async findById(id) {
+          await Promise.resolve();
+          if (typeof id === 'string' || typeof id === 'number') {
+            const found = records.find((r) => r.id === id);
+            return found ?? null;
+          }
+          const found = records.find(
+            (r) =>
+              (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
+              (r as Record<string, unknown>)['userId'] === id['userId'],
+          );
+          return found ?? null;
+        },
+        async create(data) {
+          await Promise.resolve();
+          const entity = { tenantId: 't1', userId: 'u1', ...data };
+          records.push(entity);
+          return entity;
+        },
+        async update(id, data) {
+          await Promise.resolve();
+          const index = records.findIndex((r) => {
+            if (typeof id === 'string' || typeof id === 'number') return r.id === id;
+            return (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
+              (r as Record<string, unknown>)['userId'] === id['userId'];
+          });
+          if (index === -1) throw new Error('not found');
+          records[index] = { ...records[index], ...data };
+          return records[index];
+        },
+        async delete(id) {
+          await Promise.resolve();
+          const index = records.findIndex((r) => {
+            if (typeof id === 'string' || typeof id === 'number') return r.id === id;
+            return (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
+              (r as Record<string, unknown>)['userId'] === id['userId'];
+          });
+          if (index === -1) return false;
+          records.splice(index, 1);
+          return true;
+        },
+        async count(where) {
+          await Promise.resolve();
+          return records.filter((r) => matchesWhere(r, where)).length;
+        },
+      };
+    }
+
+    it('round-trips findById through a repository declared with a composite key type', async () => {
+      const ds = createCompositeDataSource();
+      const repo = new CompositeRepo(ds);
+      await repo.create({ name: 'Alice' });
+      const found = await repo.findById({ tenantId: 't1', userId: 'u1' });
+      expect(found).not.toBeNull();
+      expect(found!.name).toBe('Alice');
+      const missing = await repo.findById({ tenantId: 't2', userId: 'u9' });
+      expect(missing).toBeNull();
+    });
+
+    it('round-trips update through a repository declared with a composite key type', async () => {
+      const ds = createCompositeDataSource();
+      const repo = new CompositeRepo(ds);
+      await repo.create({ name: 'Alice' });
+      const updated = await repo.update({ tenantId: 't1', userId: 'u1' }, { name: 'Alicia' });
+      expect(updated.name).toBe('Alicia');
+    });
+
+    it('round-trips delete through a repository declared with a composite key type', async () => {
+      const ds = createCompositeDataSource();
+      const repo = new CompositeRepo(ds);
+      await repo.create({ name: 'Alice' });
+      expect(await repo.delete({ tenantId: 't1', userId: 'u1' })).toBe(true);
+      const found = await repo.findById({ tenantId: 't1', userId: 'u1' });
+      expect(found).toBeNull();
+      expect(await repo.delete({ tenantId: 't1', userId: 'u1' })).toBe(false);
+    });
   });
 });
 

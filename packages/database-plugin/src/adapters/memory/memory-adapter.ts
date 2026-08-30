@@ -6,9 +6,18 @@
  * provides a simple key-value store per entity type with per-transaction
  * overlay semantics (buffered creates, update shadows, delete tombstones).
  *
+ * Supports composite keys: when `primaryKey` is a `string[]` the store
+ * matches on every named column, and the overlay composes a stable
+ * multi-column key from the column values.
+ *
  * @module
  */
-import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type {
+  EntityKey,
+  FilterExpression,
+  IAdapterTransaction,
+  IDatabaseAdapter,
+} from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,
@@ -18,6 +27,7 @@ import {
   projectFields,
   unknownColumnError,
 } from '../../query/query-builder.ts';
+import { resolveKeyColumns } from '../../query/key-target.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 
 /**
@@ -28,8 +38,11 @@ import type { DataSource } from '../../repositories/base-repository.ts';
 interface EntityStore {
   /** All entities in insertion order. */
   records: Record<string, unknown>[];
-  /** Primary key field name (defaults to `'id'`). */
-  primaryKey: string;
+  /**
+   * Primary key columns, normalised to a `readonly string[]`.
+   * The scalar case is a one-element array; composite keys are multi-element.
+   */
+  primaryKey: readonly string[];
 }
 
 /**
@@ -50,12 +63,97 @@ interface EntityStore {
  */
 interface TxOverlay {
   creates: Array<{ entity: string; record: Record<string, unknown> }>;
-  shadows: Map<string, { entity: string; id: unknown; record: Record<string, unknown> }>;
+  shadows: Map<string, { entity: string; id: EntityKey; record: Record<string, unknown> }>;
   tombstones: Set<string>;
 }
 
-function overlayKey(entity: string, id: unknown): string {
-  return `${entity}::${id}`;
+/**
+ * Compose a stable overlay key from an entity name and an {@linkcode EntityKey}.
+ *
+ * For scalar keys the shape is `entity::scalar`. For composite keys the values
+ * are joined with `|` — the delimiter is chosen so it cannot appear inside the
+ * column values we accept (`string | number`), and it preserves ordering so the
+ * same composite key always produces the same string regardless of how the
+ * caller writes the record literal.
+ *
+ * @param entity - Entity name
+ * @param id - Primary key value (scalar or composite record)
+ * @returns A stable string key for overlay maps/sets
+ * @since 0.1.0
+ */
+function overlayKey(entity: string, id: EntityKey): string {
+  if (typeof id === 'string' || typeof id === 'number') {
+    return `${entity}::${id}`;
+  }
+  // Composite record key — compose a deterministic multi-column key.
+  const parts = Object.keys(id).sort();
+  return `${entity}::${parts.map((k) => `${k}=${id[k]}`).join('|')}`;
+}
+
+/**
+ * Find the index of a record matching the given {@linkcode EntityKey} in the
+ * store's record list. Works for both scalar (one-element) and composite keys.
+ *
+ * @param store - The entity store to search
+ * @param id - The primary key value to match
+ * @returns The record index, or `-1` when not found
+ * @since 0.1.0
+ */
+function findRecordIndex(store: EntityStore, id: EntityKey): number {
+  if (store.primaryKey.length === 1) {
+    return store.records.findIndex((r) => r[store.primaryKey[0]] === id);
+  }
+  // Composite key — id is a record with known columns.
+  return store.records.findIndex((r) => {
+    for (const col of store.primaryKey) {
+      const idRecord = id as Record<string, string | number>;
+      if (r[col] !== idRecord[col]) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Parse a composite overlay key string back into an {@linkcode EntityKey}.
+ * The key format for composite records is `key1=val1|key2=val2` (the entity
+ * prefix was already stripped by the caller).
+ *
+ * @param keyString - The overlay key string after the entity prefix
+ * @param entity - Entity name (used for error messages)
+ * @param store - The entity store whose primary key columns define the shape
+ * @returns The parsed composite key record
+ * @throws {Error} When the key shape does not match the store's primary key
+ * @since 0.1.0
+ */
+function parseCompositeOverlayKey(
+  keyString: string,
+  entity: string,
+  store: EntityStore,
+): EntityKey {
+  const result: Record<string, string | number> = {};
+  for (const segment of keyString.split('|')) {
+    const eqIndex = segment.indexOf('=');
+    if (eqIndex === -1) {
+      throw new Error(
+        `MemoryAdapter: invalid overlay key format for entity '${entity}': '${segment}'`,
+      );
+    }
+    const key = segment.slice(0, eqIndex);
+    const valStr = segment.slice(eqIndex + 1);
+    const val = Number(valStr) === Number(valStr) && !isNaN(Number(valStr))
+      ? Number(valStr)
+      : valStr;
+    result[key] = val;
+  }
+  // Validate that all expected columns are present.
+  for (const col of store.primaryKey) {
+    if (result[col] === undefined) {
+      throw new Error(
+        `MemoryAdapter: overlay key for entity '${entity}' is missing column '${col}'`,
+      );
+    }
+  }
+  return result;
 }
 
 /**
@@ -123,19 +221,21 @@ export class MemoryAdapter implements IDatabaseAdapter {
         // Flush update shadows
         for (const shadow of overlay.shadows.values()) {
           const store = this.getStore(shadow.entity);
-          const idx = store.records.findIndex((r) => r[store.primaryKey] === shadow.id);
+          const idx = findRecordIndex(store, shadow.id);
           if (idx !== -1) {
             store.records[idx] = { ...shadow.record };
           }
         }
         // Flush delete tombstones
         for (const key of overlay.tombstones) {
-          const [ent, idStr] = key.split('::');
+          const [ent, ...rest] = key.split('::');
           const store = this.getStore(ent);
-          const id = Number(idStr) === Number(idStr) && !isNaN(Number(idStr))
-            ? Number(idStr)
-            : idStr;
-          const idx = store.records.findIndex((r) => r[store.primaryKey] === id);
+          const id = store.primaryKey.length === 1
+            ? (Number(rest.join('')) === Number(rest.join('')) && !isNaN(Number(rest.join('')))
+              ? Number(rest.join(''))
+              : rest.join(''))
+            : parseCompositeOverlayKey(rest.join('::'), ent, store);
+          const idx = findRecordIndex(this.getStore(ent), id);
           if (idx !== -1) {
             store.records.splice(idx, 1);
           }
@@ -171,10 +271,16 @@ export class MemoryAdapter implements IDatabaseAdapter {
      */
     const effectiveRecords = (): Record<string, unknown>[] => {
       const store = this.getStore(entity);
-      const pk = store.primaryKey;
       return store.records
         .map((r) => {
-          const key = overlayKey(entity, r[pk]);
+          const idForOverlay = store.primaryKey.length === 1
+            ? r[store.primaryKey[0]] as EntityKey
+            : (() => {
+              const rec: Record<string, string | number> = {};
+              for (const c of store.primaryKey) rec[c] = r[c] as string | number;
+              return rec;
+            })();
+          const key = overlayKey(entity, idForOverlay);
           if (overlay.tombstones.has(key)) return null; // deleted
           const shadow = overlay.shadows.get(key);
           if (shadow) return shadow.record;
@@ -214,16 +320,19 @@ export class MemoryAdapter implements IDatabaseAdapter {
       findById: (id) => {
         const records = effectiveRecords();
         const store = this.getStore(entity);
-        const record = records.find((r) => r[store.primaryKey] === id);
-        if (!record) return Promise.resolve(null);
-        return Promise.resolve({ ...record });
+        const idx = findRecordIndexForRecords(records, store, id);
+        if (idx === -1) return Promise.resolve(null);
+        return Promise.resolve({ ...records[idx] });
       },
 
       create: (data) => {
         const store = this.getStore(entity);
         const record: Record<string, unknown> = { ...data };
-        if (record[store.primaryKey] === undefined) {
-          record[store.primaryKey] = crypto.randomUUID();
+        // Generate missing key columns.
+        for (const col of store.primaryKey) {
+          if (record[col] === undefined) {
+            record[col] = crypto.randomUUID();
+          }
         }
         overlay.creates.push({ entity, record });
         return Promise.resolve({ ...record });
@@ -233,10 +342,11 @@ export class MemoryAdapter implements IDatabaseAdapter {
         const store = this.getStore(entity);
         // Find in effective records
         const effective = effectiveRecords();
-        const target = effective.find((r) => r[store.primaryKey] === id);
-        if (!target) {
-          return Promise.reject(new Error(`Entity '${entity}' with id '${id}' not found`));
+        const targetIndex = findRecordIndexForRecords(effective, store, id);
+        if (targetIndex === -1) {
+          return Promise.reject(new Error(`Entity '${entity}' with id not found`));
         }
+        const target = effective[targetIndex];
         const newRecord = { ...target, ...data };
         overlay.shadows.set(overlayKey(entity, id), { entity, id, record: newRecord });
         return Promise.resolve({ ...newRecord });
@@ -245,8 +355,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
       delete: (id) => {
         const store = this.getStore(entity);
         const effective = effectiveRecords();
-        const target = effective.find((r) => r[store.primaryKey] === id);
-        if (!target) return Promise.resolve(false);
+        const targetIndex = findRecordIndexForRecords(effective, store, id);
+        if (targetIndex === -1) return Promise.resolve(false);
         overlay.tombstones.add(overlayKey(entity, id));
         return Promise.resolve(true);
       },
@@ -272,39 +382,16 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * is what fixes the primary key for the entity before any query runs.
    *
    * @param entity - Entity name
-   * @param primaryKey - Primary key field (defaults to `'id'`)
+   * @param primaryKey - Primary key field(s), defaults to `['id']`
    */
-  createDataSource(entity: string, primaryKey: string = 'id'): DataSource {
+  createDataSource(entity: string, primaryKey: string | readonly string[] = 'id'): DataSource {
     this.getStore(entity, primaryKey); // Ensure the store (and its key) exists.
     return {
       findAll: (query) => this.queryEntities(entity, query),
-      findById: (id) => {
-        if (typeof id === 'object') {
-          return Promise.reject(
-            new Error(
-              `MemoryAdapter.findById: composite keys are not supported; got ${typeof id}.`,
-            ),
-          );
-        }
-        return this.findEntityById(entity, id);
-      },
+      findById: (id) => this.findEntityById(entity, id),
       create: (data) => this.insertEntity(entity, data),
-      update: (id, data) => {
-        if (typeof id === 'object') {
-          return Promise.reject(
-            new Error(`MemoryAdapter.update: composite keys are not supported; got ${typeof id}.`),
-          );
-        }
-        return this.updateEntity(entity, id, data);
-      },
-      delete: (id) => {
-        if (typeof id === 'object') {
-          return Promise.reject(
-            new Error(`MemoryAdapter.delete: composite keys are not supported; got ${typeof id}.`),
-          );
-        }
-        return this.deleteEntity(entity, id);
-      },
+      update: (id, data) => this.updateEntity(entity, id, data),
+      delete: (id) => this.deleteEntity(entity, id),
       count: (where, filter) => this.countEntities(entity, where, filter),
     };
   }
@@ -313,13 +400,14 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * Returns the internal store for an entity, creating it lazily.
    *
    * @param entity - Entity name
-   * @param primaryKey - Primary key field (defaults to `'id'`)
+   * @param primaryKey - Primary key field(s), defaults to `['id']`
    * @returns The entity store
    */
-  getStore(entity: string, primaryKey: string = 'id'): EntityStore {
+  getStore(entity: string, primaryKey: string | readonly string[] = 'id'): EntityStore {
+    const columns = resolveKeyColumns(primaryKey);
     let store = this._stores.get(entity);
     if (!store) {
-      store = { records: [], primaryKey };
+      store = { records: [], primaryKey: columns };
       this._stores.set(entity, store);
     }
     return store;
@@ -373,21 +461,21 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * Find a single entity by its primary key value.
    *
    * @param entity - Entity name
-   * @param id - Primary key value
+   * @param id - Primary key value (scalar or composite record)
    * @returns The entity or `null`
    */
   findEntityById(
     entity: string,
-    id: string | number, // widened to EntityKey by M79; composite keys are refused at mapping time
+    id: EntityKey,
   ): Promise<Record<string, unknown> | null> {
     const store = this.getStore(entity);
-    const record = store.records.find((r) => r[store.primaryKey] === id);
-    if (!record) return Promise.resolve(null);
-    return Promise.resolve({ ...record });
+    const idx = findRecordIndex(store, id);
+    if (idx === -1) return Promise.resolve(null);
+    return Promise.resolve({ ...store.records[idx] });
   }
 
   /**
-   * Insert a new entity. Generates an `id` if absent.
+   * Insert a new entity. Generates key values if absent.
    *
    * @param entity - Entity name
    * @param data - Entity data
@@ -399,8 +487,11 @@ export class MemoryAdapter implements IDatabaseAdapter {
   ): Promise<Record<string, unknown>> {
     const store = this.getStore(entity);
     const record: Record<string, unknown> = { ...data };
-    if (record[store.primaryKey] === undefined) {
-      record[store.primaryKey] = crypto.randomUUID();
+    // Generate missing key columns.
+    for (const col of store.primaryKey) {
+      if (record[col] === undefined) {
+        record[col] = crypto.randomUUID();
+      }
     }
     store.records.push(record);
     return Promise.resolve({ ...record });
@@ -410,20 +501,20 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * Update an existing entity by primary key, merging fields.
    *
    * @param entity - Entity name
-   * @param id - Primary key value
+   * @param id - Primary key value (scalar or composite record)
    * @param data - Fields to merge
    * @returns The updated entity
    * @throws {Error} If the entity does not exist
    */
   updateEntity(
     entity: string,
-    id: string | number, // widened to EntityKey by M79; composite keys are refused at mapping time
+    id: EntityKey,
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>> {
     const store = this.getStore(entity);
-    const index = store.records.findIndex((r) => r[store.primaryKey] === id);
+    const index = findRecordIndex(store, id);
     if (index === -1) {
-      return Promise.reject(new Error(`Entity '${entity}' with id '${id}' not found`));
+      return Promise.reject(new Error(`Entity '${entity}' with id not found`));
     }
     store.records[index] = { ...store.records[index], ...data };
     return Promise.resolve({ ...store.records[index] });
@@ -433,12 +524,12 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * Delete an entity by primary key.
    *
    * @param entity - Entity name
-   * @param id - Primary key value
+   * @param id - Primary key value (scalar or composite record)
    * @returns `true` when deleted, `false` if not found
    */
-  deleteEntity(entity: string, id: string | number): Promise<boolean> { // widened to EntityKey by M79
+  deleteEntity(entity: string, id: EntityKey): Promise<boolean> {
     const store = this.getStore(entity);
-    const index = store.records.findIndex((r) => r[store.primaryKey] === id);
+    const index = findRecordIndex(store, id);
     if (index === -1) return Promise.resolve(false);
     store.records.splice(index, 1);
     return Promise.resolve(true);
@@ -471,4 +562,32 @@ export class MemoryAdapter implements IDatabaseAdapter {
   rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     return Promise.reject(new Error('The memory adapter does not support raw SQL queries.'));
   }
+}
+
+/**
+ * Find the index of a record matching the given {@linkcode EntityKey} in a
+ * standalone record list (used by the overlay data source).
+ *
+ * @param records - The record list to search
+ * @param store - The entity store defining the primary key columns
+ * @param id - The primary key value to match
+ * @returns The record index, or `-1` when not found
+ * @since 0.1.0
+ */
+function findRecordIndexForRecords(
+  records: Record<string, unknown>[],
+  store: EntityStore,
+  id: EntityKey,
+): number {
+  if (store.primaryKey.length === 1) {
+    return records.findIndex((r) => r[store.primaryKey[0]] === id);
+  }
+  // Composite key — id is a record with known columns.
+  return records.findIndex((r) => {
+    for (const col of store.primaryKey) {
+      const idRecord = id as Record<string, string | number>;
+      if (r[col] !== idRecord[col]) return false;
+    }
+    return true;
+  });
 }
