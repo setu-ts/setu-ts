@@ -51,7 +51,7 @@ function harness(seed: Readonly<Record<string, string>> = CLASS_BASED): Harness 
 }
 
 describe('setu generate module', () => {
-  it('writes five files and reads the controller back', async () => {
+  it('writes six files and reads the generated module declaration back', async () => {
     const h = harness();
 
     expect(await h.run(['module', 'user'])).toBe(0);
@@ -59,13 +59,15 @@ describe('setu generate module', () => {
     expect(h.fs.writes).toEqual([
       '/app/src/modules/user/user.service.ts',
       '/app/src/modules/user/user.controller.ts',
+      '/app/src/modules/user/user.module.ts',
       '/app/src/modules/user/user.service.test.ts',
       '/app/src/modules/user/index.ts',
       '/app/src/modules/index.ts',
     ]);
     expect(h.fs.read('/app/src/modules/user/user.controller.ts'))
       .toContain('export class UserController');
-    expect(h.fs.read('/app/src/modules/index.ts')).toContain('UserController');
+    expect(h.fs.read('/app/src/modules/user/user.module.ts')).toContain('@Module({');
+    expect(h.fs.read('/app/src/modules/index.ts')).toContain('UserModule');
   });
 
   it('writes functional route output when decorators are absent', async () => {
@@ -86,10 +88,8 @@ describe('setu generate module', () => {
     expect(await h.run(['module', 'user'])).toBe(0);
 
     const barrel = h.fs.read('/app/src/modules/index.ts');
-    expect(barrel).toContain('BillingController');
-    expect(barrel).toContain('UserController');
-    expect(barrel).toContain('BillingService');
-    expect(barrel).toContain('UserService');
+    expect(barrel).toContain('BillingModule');
+    expect(barrel).toContain('UserModule');
   });
 
   it('refuses to regenerate a module over its own files', async () => {
@@ -108,7 +108,7 @@ describe('setu generate module', () => {
     expect(h.err.text()).not.toContain('/app/src/modules/index.ts');
   });
 
-  it('prints all five planned paths under --dry-run and writes nothing', async () => {
+  it('prints all six planned paths under --dry-run and writes nothing', async () => {
     const h = harness();
 
     expect(await h.run(['module', 'user', '--dry-run'])).toBe(0);
@@ -116,7 +116,7 @@ describe('setu generate module', () => {
     expect(h.fs.writes).toEqual([]);
     expect(h.fs.mkdirs).toEqual([]);
     const printed = h.out.lines.filter((l) => l.startsWith('would create'));
-    expect(printed.length).toBe(5);
+    expect(printed.length).toBe(6);
     expect(h.out.text()).toContain('would create /app/src/modules/index.ts');
   });
 
@@ -136,7 +136,7 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', 'first'])).toBe(0);
 
-    expect(h.fs.read('/app/src/modules/index.ts')).toContain('FirstController');
+    expect(h.fs.read('/app/src/modules/index.ts')).toContain('FirstModule');
   });
 
   it('rejects a name that cannot begin an identifier', async () => {

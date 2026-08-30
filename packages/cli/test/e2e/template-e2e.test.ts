@@ -71,7 +71,7 @@ const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
  * scaffolded project failed. A gate that skips the generated file it is least
  * sure about is a gate written around the bug.
  */
-const MODULE_FILES_PER_NAME = 4;
+const MODULE_FILES_PER_NAME = 5;
 
 /**
  * Families that can share one name, grouped so no group contains a collision.
@@ -417,8 +417,9 @@ describe('template scaffolding — end to end', () => {
     // the plugin array once all three sources are named.
     expect(config).toContain(
       'DecoratorPlugin({\n' +
-        '        controllers: [...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
-        '        services: [...APP_SERVICES, ...MODULE_SERVICES],\n' +
+        '        controllers: [...APP_CONTROLLERS],\n' +
+        '        services: [...APP_SERVICES],\n' +
+        '        modules: [...MODULES],\n' +
         '      }),',
     );
     // DiPlugin is what puts @Injectable classes on the container path. Since
@@ -654,13 +655,13 @@ describe('setu generate module, end to end', () => {
 
     // The barrel names both modules — the second generate did not drop the first.
     const barrel = await Deno.readTextFile(`${project}/src/modules/index.ts`);
-    expect(barrel).toContain('UserController');
-    expect(barrel).toContain('OrderItemController');
+    expect(barrel).toContain('UserModule');
+    expect(barrel).toContain('OrderItemModule');
 
     // And the config consumes it, so both are registered with no hand edit.
     const config = await Deno.readTextFile(`${project}/setu.config.ts`);
     expect(config).toContain("from './src/modules/index.ts'");
-    expect(config).toContain('...MODULE_CONTROLLERS');
+    expect(config).toContain('...MODULES');
 
     const sources = [
       `${project}/main.ts`,
@@ -688,7 +689,7 @@ describe('setu generate module, end to end', () => {
     // by name, so the assertion is that BOTH registration paths are present —
     // the standalone barrel (which carries the showcase) and the module barrel.
     expect(config).toContain('...APP_CONTROLLERS');
-    expect(config).toContain('...MODULE_CONTROLLERS');
+    expect(config).toContain('...MODULES');
 
     const sources = [
       `${project}/main.ts`,
@@ -713,8 +714,8 @@ describe('setu generate module, end to end', () => {
     expect(await run(['g', 'module', 'billing', '--dir', project])).toBe(0);
 
     const barrel = await Deno.readTextFile(`${project}/src/modules/index.ts`);
-    expect(barrel.match(/UserController/g)?.length).toBe(2); // import + array entry
-    expect(barrel.match(/from '\.\/user\/user\.controller\.ts'/g)?.length).toBe(1);
+    expect(barrel.match(/UserModule/g)?.length).toBe(2); // import + array entry
+    expect(barrel.match(/from '\.\/user\/user\.module\.ts'/g)?.length).toBe(1);
   });
 
   // The module schematic is UNGATED since M65, so it emits a runnable test into

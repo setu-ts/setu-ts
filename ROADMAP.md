@@ -8272,4 +8272,4 @@ its output.
 | 80        | ⬜     | dynamodb backend                                    |
 | 81        | ⬜     | cosmos db backend                                   |
 | 82        | ⬜     | cloud bigtable backend                              |
-| 83        | ⬜     | module declarations + functional example            |
+| 83        | ✅     | module declarations + functional example            |

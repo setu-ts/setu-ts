@@ -283,11 +283,13 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
         expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
       }
 
-      const result = await bootWithGeneratedPermissions(project, [
+      const paths = [
         '/health',
         '/ready',
         '/metrics',
-      ]);
+        ...(template === 'rest' ? ['/greetings', '/greetings/Setu'] : []),
+      ];
+      const result = await bootWithGeneratedPermissions(project, paths);
 
       // The assertion D2 failed: without `--allow-sys` the self indicator's
       // `runtime.hostname()` throws and the probe answers 500.
@@ -298,6 +300,13 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       // Not merely a 200: a health body reporting `down` would also be a 200
       // shaped failure on some configurations.
       expect(result.bodies['/health']).toContain('"status":"up"');
+
+      if (template === 'rest') {
+        expect(result.statuses['/greetings'], result.output).toBe(200);
+        expect(result.statuses['/greetings/Setu'], result.output).toBe(200);
+        expect(result.bodies['/greetings']).toContain('Hello, world!');
+        expect(result.bodies['/greetings/Setu']).toContain('Hello, Setu!');
+      }
     });
   }
 });

@@ -8466,7 +8466,7 @@ carry full JSDoc.
 
 | Export                                                       | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------------------------------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPlugin`                                            | function | Plugin factory — registers `MetadataStore` and routes/services                                                                                                                                                                                                                                                                                                                                                                               |
+| `DecoratorPlugin`                                            | function | Plugin factory — registers `MetadataStore`, routes/services, and explicitly activated `@Module` trees                                                                                                                                                                                                                                                                                                                                        |
 | `MetadataStore`                                              | class    | `IMetadataStore` implementation (the concrete store)                                                                                                                                                                                                                                                                                                                                                                                         |
 | `metadataStore`                                              | value    | The process-wide singleton decorators write to and the plugin reads                                                                                                                                                                                                                                                                                                                                                                          |
 | `Controller`                                                 | function | Class decorator — base path prefix                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -8482,6 +8482,7 @@ carry full JSDoc.
 | `ValidateBody`/`ValidateQuery`/`ValidateParams`              | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route |
 | `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `ApiOperation`/`ApiResponse`                                 | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                               |
+| `Module`                                                     | function | Class decorator grouping controllers, providers, and imported modules for `DecoratorPlugin({ modules })`                                                                                                                                                                                                                                                                                                                                     |
 | `createDecorator`                                            | function | Custom class/method decorator factory                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `Body`/`Query`/`Param`/`Header`/`Cookie`/`CurrentUser`/`Ctx` | function | Built-in parameter SOURCES, declared inside `@Params(...)`; `Ctx` yields the active `IRequestContext` without reserving the application custom type name `context`                                                                                                                                                                                                                                                                           |
 | `Custom`                                                     | function | Declares a parameter source resolved by a resolver registered under the same name                                                                                                                                                                                                                                                                                                                                                            |
@@ -8495,27 +8496,28 @@ carry full JSDoc.
 
 ### Types
 
-| Export                       | Kind | Purpose                                                                                                               |
-| ---------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPluginOptions`     | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `enforceSchemas?`) |
-| `InjectableOptions`          | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                      |
-| `ApiOperationConfig`         | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                             |
-| `ApiResponseConfig`          | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                     |
-| `HttpMethodDecorator`        | type | `(path?: string) => SetuMethodDecorator`                                                                              |
-| `ParamSource`                | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                            |
-| `SourceValues`               | type | Maps a source tuple onto the handler parameter tuple it binds                                                         |
-| `InjectToken`                | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                       |
-| `OptionalToken`              | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                             |
-| `SetuClassDecorator`         | type | A standard class decorator that records metadata and leaves the class unchanged                                       |
-| `SetuMethodDecorator`        | type | A standard method decorator that records metadata and leaves the method unchanged                                     |
-| `SetuClassOrMethodDecorator` | type | A standard decorator valid in either position, discriminating on `context.kind`                                       |
-| `MiddlewareLike`             | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                     |
-| `CustomParameterResolver`    | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                     |
-| `ParameterMetadata`          | type | Parameter metadata captured by a `@Params(...)` source                                                                |
-| `ParameterType`              | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                    |
-| `DiscoveryOptions`           | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                |
-| `DiscoveryResult`            | type | Result of discovery (`controllers`, `services`, `errors`)                                                             |
-| `ModuleImporter`             | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                  |
+| Export                       | Kind | Purpose                                                                                                                           |
+| ---------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`     | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `modules?`, `enforceSchemas?`) |
+| `InjectableOptions`          | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                  |
+| `ModuleOptions`              | type | Options for `@Module()` (`controllers?`, `providers?`, `imports?`; no `exports`)                                                  |
+| `ApiOperationConfig`         | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                                         |
+| `ApiResponseConfig`          | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                 |
+| `HttpMethodDecorator`        | type | `(path?: string) => SetuMethodDecorator`                                                                                          |
+| `ParamSource`                | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                        |
+| `SourceValues`               | type | Maps a source tuple onto the handler parameter tuple it binds                                                                     |
+| `InjectToken`                | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                                   |
+| `OptionalToken`              | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                                         |
+| `SetuClassDecorator`         | type | A standard class decorator that records metadata and leaves the class unchanged                                                   |
+| `SetuMethodDecorator`        | type | A standard method decorator that records metadata and leaves the method unchanged                                                 |
+| `SetuClassOrMethodDecorator` | type | A standard decorator valid in either position, discriminating on `context.kind`                                                   |
+| `MiddlewareLike`             | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                                 |
+| `CustomParameterResolver`    | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                                 |
+| `ParameterMetadata`          | type | Parameter metadata captured by a `@Params(...)` source                                                                            |
+| `ParameterType`              | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                                |
+| `DiscoveryOptions`           | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                            |
+| `DiscoveryResult`            | type | Result of discovery (`controllers`, `services`, `errors`)                                                                         |
+| `ModuleImporter`             | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                              |
 
 Contract notes:
 
@@ -8523,6 +8525,11 @@ Contract notes:
   class-definition time regardless of whether the plugin is registered. Only
   `DecoratorPlugin.register()` reads the store and calls the kernel APIs; without it, no
   routes/services/middleware are registered.
+- **Modules are activation groups, not DI boundaries**: `DecoratorPlugin({ modules })` flattens
+  `imports` depth-first, registers imported providers before the importing module's controllers, and
+  deduplicates classes by identity. A class passed as a module without `@Module` metadata logs a
+  warning and contributes nothing. There is no `exports` option because application service
+  visibility is not module-scoped.
 - **Validation schemas are enforced, not just described** (`enforceSchemas`, default `true`): for
   each of `schema.body`/`query`/`params` present on a route, `registerController` resolves
   `CAPABILITIES.VALIDATION` and appends that capability's middleware LAST in the route's chain —

@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `@setu-ts/decorator-plugin` now exports `@Module({ controllers, providers, imports })` and
+  `DecoratorPlugin({ modules })`. Activated modules flatten imported modules depth-first, register
+  providers before controllers, deduplicate diamonds and cycles by class identity, and warn when a
+  supplied class lacks module metadata. A service with required constructor parameters now refuses
+  startup unless it declares the explicit `@Inject(...)` tokens the runtime needs.
+- The default `rest` template now includes a functional greeting controller and service registered
+  through the same seam barrels that `setu generate` maintains.
+
+### Changed
+
+- **Breaking (generated class-based modules):** `setu generate module` now emits `<name>.module.ts`;
+  the managed aggregate barrel exports `MODULES` and config passes it through
+  `DecoratorPlugin({ modules })` instead of exporting controller/service arrays. Existing generated
+  module directories are reported when their declaration is missing, rather than silently omitted.
+  Add `@Module({ controllers: [<Name>Controller], providers: [<Name>Service] })` to each legacy
+  directory, or delete and regenerate it.
+
 - Added a native MongoDB backend to `@setu-ts/database-plugin`.
   `DatabasePlugin({ type: 'mongodb',
   options: { url } })` now provides repositories over the

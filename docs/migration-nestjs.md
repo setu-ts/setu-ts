@@ -204,7 +204,31 @@ export class AppModule {}
 ### Setu-TS
 
 ```typescript
-// Create a plugin factory
+import { DecoratorPlugin, Module } from '@setu-ts/decorator-plugin';
+
+class UsersController {}
+class UserService {}
+
+@Module({
+  controllers: [UsersController],
+  providers: [UserService],
+})
+export class UsersModule {}
+
+@Module({ imports: [UsersModule] })
+export class AppModule {}
+
+app.register(DecoratorPlugin({ modules: [AppModule] }));
+```
+
+`@Module` groups domain classes inside one application. It has no `exports` member because Setu-TS
+does not create a module-scoped service registry or DI container: a provider registered by one
+module is already visible to the rest of that application.
+
+Use a plugin factory instead for a self-contained capability that owns lifecycle work, publishes a
+capability, or should be reusable across applications:
+
+```typescript
 export function UsersPlugin(): IPlugin {
   return {
     name: 'users',

@@ -130,6 +130,19 @@ form an identifier — empty after normalization, or digit-leading such as `2fa`
 
 A relative `--dir` is resolved against the working directory.
 
+## Generated modules
+
+In a class-based project, `setu generate module users` writes a controller, an injectable service,
+and `src/modules/users/users.module.ts`. That application-owned file declares its contents with
+`@Module({ controllers, providers })`; the CLI-managed `src/modules/index.ts` exports `MODULES`,
+which `setu.config.ts` passes as `DecoratorPlugin({ modules: [...MODULES] })`. A root module is also
+supported when the application should own activation: pass one `@Module({ imports: [...] })` class
+directly to `DecoratorPlugin`.
+
+Projects generated before this release have no `<name>.module.ts`. The next generation reports each
+such directory instead of silently dropping it from the activation barrel. Add the declaration, or
+delete and regenerate that module, then run the command again.
+
 **Nothing is ever overwritten.** A generate that would clobber any existing file writes none of them
 — every planned path is checked before the first write, so a multi-file schematic cannot leave a
 half-written tree.

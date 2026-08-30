@@ -6,41 +6,34 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import {
-  CONTROLLERS_EXPORT,
-  renderModuleBarrel,
-  SERVICES_EXPORT,
-} from '../../../src/schematics/module-barrel.ts';
+import { MODULES_EXPORT, renderModuleBarrel } from '../../../src/schematics/module-barrel.ts';
 
 describe('renderModuleBarrel', () => {
-  it('emits both arrays empty for a project with no modules', () => {
+  it('emits an empty activation list for a project with no modules', () => {
     const source = renderModuleBarrel([]);
 
-    expect(source).toContain(`export const ${CONTROLLERS_EXPORT}: readonly Constructor[] = [];`);
-    expect(source).toContain(`export const ${SERVICES_EXPORT}: readonly Constructor[] = [];`);
+    expect(source).toContain(`export const ${MODULES_EXPORT}: readonly Constructor[] = [];`);
     // No module imports at all — only the type import.
     expect(source).not.toContain('.controller.ts');
   });
 
-  it('imports and lists a controller and service per module', () => {
+  it('imports and lists a module class per module', () => {
     const source = renderModuleBarrel(['user']);
 
     expect(source).toContain(
-      "import { UserController } from './user/user.controller.ts';",
+      "import { UserModule } from './user/user.module.ts';",
     );
-    expect(source).toContain("import { UserService } from './user/user.service.ts';");
-    expect(source).toContain(`export const ${CONTROLLERS_EXPORT}: readonly Constructor[] = [`);
-    expect(source).toContain('UserController');
-    expect(source).toContain('UserService');
+    expect(source).toContain(`export const ${MODULES_EXPORT}: readonly Constructor[] = [`);
+    expect(source).toContain('UserModule');
   });
 
   it('derives PascalCase class names from a multi-word kebab directory', () => {
     const source = renderModuleBarrel(['order-item']);
 
     expect(source).toContain(
-      "import { OrderItemController } from './order-item/order-item.controller.ts';",
+      "import { OrderItemModule } from './order-item/order-item.module.ts';",
     );
-    expect(source).toContain('OrderItemController');
+    expect(source).toContain('OrderItemModule');
   });
 
   it('sorts modules so enumeration order cannot change the output', () => {
@@ -51,10 +44,10 @@ describe('renderModuleBarrel', () => {
     const reversed = renderModuleBarrel(['billing', 'user', 'order']);
 
     expect(forward).toBe(reversed);
-    expect(forward.indexOf('BillingController')).toBeLessThan(
-      forward.indexOf('OrderController'),
+    expect(forward.indexOf('BillingModule')).toBeLessThan(
+      forward.indexOf('OrderModule'),
     );
-    expect(forward.indexOf('OrderController')).toBeLessThan(forward.indexOf('UserController'));
+    expect(forward.indexOf('OrderModule')).toBeLessThan(forward.indexOf('UserModule'));
   });
 
   it('lists a duplicated module name exactly once', () => {
@@ -62,8 +55,8 @@ describe('renderModuleBarrel', () => {
     // over an existing module passes that name twice.
     const source = renderModuleBarrel(['user', 'user']);
 
-    expect(source.match(/UserController/g)?.length).toBe(2); // one import, one array entry
-    expect(source.match(/from '\.\/user\/user\.controller\.ts'/g)?.length).toBe(1);
+    expect(source.match(/UserModule/g)?.length).toBe(2); // one import, one array entry
+    expect(source.match(/from '\.\/user\/user\.module\.ts'/g)?.length).toBe(1);
   });
 
   it('breaks a long array onto indented lines', () => {
@@ -71,8 +64,8 @@ describe('renderModuleBarrel', () => {
 
     const source = renderModuleBarrel(many);
 
-    expect(source).toContain(`export const ${CONTROLLERS_EXPORT}: readonly Constructor[] = [\n`);
-    expect(source).toContain('  AlphaController,\n');
+    expect(source).toContain(`export const ${MODULES_EXPORT}: readonly Constructor[] = [\n`);
+    expect(source).toContain('  AlphaModule,\n');
   });
 
   it('tells the reader the CLI owns the file', () => {

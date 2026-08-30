@@ -7,7 +7,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IFileSystem, StatResult } from '@setu-ts/common';
 
-import { MODULES_DIR, readModuleNames } from '../../../src/utils/module-scanner.ts';
+import { MODULES_DIR, readModuleNames, scanModules } from '../../../src/utils/module-scanner.ts';
 
 /** A directory stat, shaped as the real runtime adapters report one. */
 const DIR_STAT: StatResult = { isFile: false, isDirectory: true, size: 0 };
@@ -124,6 +124,18 @@ describe('readModuleNames', () => {
     );
 
     expect(names).toEqual(['user']);
+  });
+
+  it('reports a legacy generated module missing its declaration', async () => {
+    const scan = await scanModules(
+      fsWith(['legacy'], { 'legacy/legacy.module.ts': MISSING }),
+      '/app',
+    );
+
+    expect(scan.names).toEqual([]);
+    expect(scan.skipped).toEqual([
+      { path: 'src/modules/legacy', missing: 'legacy.module.ts' },
+    ]);
   });
 
   it('excludes a directory whose canonical paths are themselves directories', async () => {

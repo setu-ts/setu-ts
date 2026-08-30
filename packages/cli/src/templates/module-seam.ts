@@ -14,11 +14,7 @@
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { MODULES_DIR } from '../utils/module-scanner.ts';
-import {
-  CONTROLLERS_EXPORT,
-  renderModuleBarrel,
-  SERVICES_EXPORT,
-} from '../schematics/module-barrel.ts';
+import { MODULES_EXPORT, renderModuleBarrel } from '../schematics/module-barrel.ts';
 import type { LocalImport, TemplateManifest, Wiring } from './registry.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 
@@ -61,15 +57,15 @@ export const MODULE_SEAM_FILES: readonly GeneratedFile[] = [
   { path: `${MODULES_DIR}/index.ts`, contents: renderModuleBarrel([]) },
 ];
 
-/** The `setu.config.ts` import that brings both barrel arrays into scope. */
+/** The `setu.config.ts` import that brings the activation barrel into scope. */
 export const MODULE_SEAM_LOCAL_IMPORT: LocalImport = {
-  symbols: [CONTROLLERS_EXPORT, SERVICES_EXPORT],
+  symbols: [MODULES_EXPORT],
   from: BARREL_SPECIFIER,
 };
 
 /**
  * Rewrites a wiring list so the `decorator-plugin` entry passes the barrel
- * arrays.
+ * activation list, alongside standalone controller and service seam entries.
  *
  * Takes the list rather than mutating a shared constant so the class-based
  * template can apply it to its own set without changing the REST baseline.
@@ -84,8 +80,8 @@ export function withModuleSeam(
   extraControllers: readonly string[] = [],
   extraServices: readonly string[] = [],
 ): readonly Wiring[] {
-  const controllers = [...extraControllers, `...${CONTROLLERS_EXPORT}`].join(', ');
-  const services = [...extraServices, `...${SERVICES_EXPORT}`].join(', ');
+  const controllers = extraControllers.join(', ');
+  const services = extraServices.join(', ');
 
   return wirings.map((wiring) =>
     wiring.pkg === 'decorator-plugin'
@@ -111,8 +107,10 @@ export function withModuleSeam(
  * @returns The argument source, without the enclosing parentheses
  */
 function renderDecoratorArgs(controllers: string, services: string): string {
-  const inline = `{ controllers: [${controllers}], services: [${services}] }`;
+  const inline =
+    `{ controllers: [${controllers}], services: [${services}], modules: [...${MODULES_EXPORT}] }`;
   // 6 spaces of array indent + `DecoratorPlugin(` + `),` is 24 characters of overhead.
   if (inline.length <= 76) return inline;
-  return `{\n        controllers: [${controllers}],\n        services: [${services}],\n      }`;
+  return `{\n        controllers: [${controllers}],\n        services: [${services}],\n` +
+    `        modules: [...${MODULES_EXPORT}],\n      }`;
 }

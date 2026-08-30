@@ -6,6 +6,7 @@
 
 import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
 import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
+import { REST_SHOWCASE, REST_SHOWCASE_FILES } from './rest-showcase.ts';
 import {
   seamFiles,
   seamLocalImports,
@@ -103,7 +104,10 @@ export const REST_TEMPLATE: TemplateDefinition = {
   plugins: withPluginOptionSeams(REST_PLUGINS, REST_SEAMS),
   middleware: REST_MIDDLEWARE,
   localImports: seamLocalImports(REST_SEAMS),
-  files: seamFiles(REST_SEAMS),
+  files: [
+    ...REST_SHOWCASE_FILES,
+    ...seamFiles(REST_SEAMS, { controller: [REST_SHOWCASE], service: [REST_SHOWCASE] }),
+  ],
   pluginSpreads: seamPluginSpreads(REST_SEAMS),
   setupCalls: seamSetupCalls(REST_SEAMS),
   manifest: { ...FUNCTIONAL_MODULE_MANIFEST, envFilePath: '.env' },

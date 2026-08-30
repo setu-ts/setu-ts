@@ -129,6 +129,23 @@ export interface ServiceMetadata {
 }
 
 /**
+ * Concrete metadata written by `@Module`.
+ *
+ * Module declarations are owned by this package rather than `IMetadataStore`:
+ * the common port deliberately exposes only metadata other packages consume.
+ *
+ * @since 0.2.0
+ */
+export interface ModuleMetadata {
+  /** Controller classes this module contributes. */
+  readonly controllers: readonly Constructor[];
+  /** Provider classes this module contributes. */
+  readonly providers: readonly Constructor[];
+  /** Imported module classes, expanded before this module's own entries. */
+  readonly imports: readonly Constructor[];
+}
+
+/**
  * Materialized route metadata — one entry per (controller, HTTP verb). Built
  * from a {@linkcode MethodMeta} accumulator's bindings. The
  * `DecoratorPlugin` composes each entry with its controller's class-level
@@ -256,6 +273,7 @@ export class MetadataStore implements IMetadataStore {
   private readonly _methods = new Map<Constructor, Map<string, MethodMeta>>();
   private readonly _custom: CustomDecoratorRecord[] = [];
   private readonly _ctorOptional = new Map<Constructor, Set<number>>();
+  private readonly _modules = new Map<Constructor, ModuleMetadata>();
 
   /** Controllers keyed by class. */
   get controllers(): Map<Constructor, Readonly<Record<string, unknown>>> {
@@ -458,6 +476,35 @@ export class MetadataStore implements IMetadataStore {
   }
 
   /**
+   * Merges a partial module declaration into a class's metadata.
+   *
+   * Every module member is additive, matching the existing collection-valued
+   * decorator metadata behavior.
+   *
+   * @param target - The decorated module class
+   * @param partial - Module members to record
+   */
+  mergeModule(target: Constructor, partial: Partial<ModuleMetadata>): void {
+    const existing = this._modules.get(target) ?? { controllers: [], providers: [], imports: [] };
+    this._modules.set(target, {
+      controllers: [...existing.controllers, ...(partial.controllers ?? [])],
+      providers: [...existing.providers, ...(partial.providers ?? [])],
+      imports: [...existing.imports, ...(partial.imports ?? [])],
+    });
+  }
+
+  /**
+   * Returns a class's module declaration, if it has one.
+   *
+   * @param target - The class to inspect
+   * @returns Module metadata, or `undefined` for a class without `@Module`
+   */
+  getModule(target: Constructor): ModuleMetadata | undefined {
+    this.#drain(target);
+    return this._modules.get(target);
+  }
+
+  /**
    * Returns the (mutable) method accumulator for a controller method,
    * creating it if absent.
    *
@@ -592,6 +639,7 @@ export class MetadataStore implements IMetadataStore {
     this._methods.clear();
     this._custom.length = 0;
     this._ctorOptional.clear();
+    this._modules.clear();
   }
 
   /**

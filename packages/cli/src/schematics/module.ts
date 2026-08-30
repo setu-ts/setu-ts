@@ -126,8 +126,29 @@ describe('${names.pascal}Service', () => {
 `;
 }
 
+function classModule(names: DerivedNames): string {
+  return `import { Module } from '@setu-ts/decorator-plugin';
+
+import { ${names.pascal}Controller } from './${names.kebab}.controller.ts';
+import { ${names.pascal}Service } from './${names.kebab}.service.ts';
+
+/**
+ * The ${names.kebab} module.
+ *
+ * Add controllers and providers here. The CLI never rewrites this declaration;
+ * importing another module activates its controllers and providers too.
+ */
+@Module({
+  controllers: [${names.pascal}Controller],
+  providers: [${names.pascal}Service],
+})
+export class ${names.pascal}Module {}
+`;
+}
+
 function classIndex(names: DerivedNames): string {
   return `export { ${names.pascal}Controller } from './${names.kebab}.controller.ts';
+export { ${names.pascal}Module } from './${names.kebab}.module.ts';
 export { ${names.pascal}Service } from './${names.kebab}.service.ts';
 `;
 }
@@ -170,6 +191,7 @@ export function generateModule(
   return [
     { path: `${dir}/${names.kebab}.service.ts`, contents: classService(names) },
     { path: `${dir}/${names.kebab}.controller.ts`, contents: classController(names) },
+    { path: `${dir}/${names.kebab}.module.ts`, contents: classModule(names) },
     { path: `${dir}/${names.kebab}.service.test.ts`, contents: classTest(names, options.runtime) },
     { path: `${dir}/index.ts`, contents: classIndex(names) },
     {

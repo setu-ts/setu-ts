@@ -97,6 +97,7 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
   `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`/`@Head`/`@Options`
 - **Parameters** — `@Params(...)`, taking the sources `Body`, `Query`, `Param`, `Header`, `Cookie`,
   `CurrentUser`, `Ctx`, `Custom`
+- **Modules** — `@Module({ controllers, providers, imports })`
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
 - **Security** — `@Roles`, `@Permissions`, `@Public`
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
@@ -111,6 +112,7 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
 | ----------------- | --------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `controllers`     | `Constructor[]` | `[]`    | Controller classes to register explicitly.                                                                                                                                        |
 | `services`        | `Constructor[]` | `[]`    | Service classes to register explicitly.                                                                                                                                           |
+| `modules`         | `Constructor[]` | `[]`    | Root `@Module` classes to flatten depth-first; imported module providers register before controllers.                                                                             |
 | `autoDiscover`    | `boolean`       | `false` | Scan `controllersPath` for decorated classes.                                                                                                                                     |
 | `controllersPath` | `string`        | —       | Glob path used when `autoDiscover` is `true`.                                                                                                                                     |
 | `enforceSchemas`  | `boolean`       | `true`  | Append the validation capability's middleware for each present `@ValidateXxx` target. `false` keeps schemas description-only (OpenAPI) and silences the missing-provider warning. |
@@ -138,6 +140,7 @@ Discovery failures are logged as warnings and never crash the application.
 | `Header`                     | function  |
 | `Inject`                     | function  |
 | `Injectable`                 | function  |
+| `Module`                     | function  |
 | `Optional`                   | function  |
 | `Param`                      | function  |
 | `Params`                     | function  |
@@ -171,6 +174,7 @@ Discovery failures are logged as warnings and never crash the application.
 | `DiscoveryOptions`           | interface |
 | `DiscoveryResult`            | interface |
 | `InjectableOptions`          | interface |
+| `ModuleOptions`              | interface |
 | `OptionalToken`              | interface |
 | `ParameterMetadata`          | interface |
 | `ParamSource`                | interface |

@@ -39,7 +39,7 @@ import {
   type SchematicOptions,
 } from '../schematics/registry.ts';
 import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
-import { readModuleNames } from '../utils/module-scanner.ts';
+import { scanModules } from '../utils/module-scanner.ts';
 import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
@@ -238,7 +238,17 @@ export async function runGenerateCommand(
   // Read unconditionally, like `detectPlugins` above: the `module` schematic
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
-  const modules = await readModuleNames(deps.fs, dir);
+  const moduleScan = await scanModules(deps.fs, dir);
+  const modules = moduleScan.names;
+  for (const skip of moduleScan.skipped) {
+    deps.error(
+      `Skipped ${skip.path}: it is missing ${skip.missing}, so it cannot be listed in ` +
+        'the generated module activation barrel and nothing registers it.',
+    );
+    deps.error(
+      `  Add ${skip.missing} with @Module(...) or delete and regenerate the module.`,
+    );
+  }
   // Same reasoning as `modules`: the migration runner lists every migration in
   // order, and a schematic performs no I/O.
   const migrations = await readMigrationNames(deps.fs, dir);
