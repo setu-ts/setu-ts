@@ -20,7 +20,7 @@ import type {
   IDatabaseAdapter,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, encodeCursor, keysetPredicate } from '@setu-ts/common';
+import { decodeCursor, keysetPredicate } from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,
@@ -31,6 +31,7 @@ import {
   unknownColumnError,
 } from '../../query/query-builder.ts';
 import { resolveKeyColumns } from '../../query/key-target.ts';
+import { mintNextCursor, sortFingerprint } from '../../query/cursor-page.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 
@@ -567,49 +568,6 @@ export class MemoryAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Build the keyset cursor fingerprint from a {@linkcode NormalizedQuery.orderBy}
-   * specification. The fingerprint must be stable across all calls with the same
-   * sort so a cursor minted under one sort is refused when presented under another.
-   *
-   * @param orderBy - The resolved sort specification
-   * @returns A stable fingerprint string
-   */
-  private buildSortFingerprint(orderBy: NormalizedQuery['orderBy']): string {
-    return Object.entries(orderBy).map(([field, direction]) => `${field}:${direction}`).join(',');
-  }
-
-  /**
-   * Mint the next-page cursor from the last row of a non-terminal page.
-   *
-   * The cursor is only ever produced when {@linkcode hasMore} is true AND the
-   * page is non-empty: on a terminal page there is no next row to continue to,
-   * and reading the ordered/key values off an empty page would crash on the
-   * missing last row.
-   *
-   * @param pageRows - The rows of the page about to be returned (empty is fine)
-   * @param orderBy - The resolved sort specification
-   * @param keyColumns - The primary-key columns for cursor minting
-   * @param fingerprint - The sort fingerprint to embed in the cursor
-   * @param hasMore - Whether a further page exists
-   * @returns The encoded cursor, or `null` when the page is terminal
-   */
-  private mintNextCursor(
-    pageRows: Record<string, unknown>[],
-    orderBy: NormalizedQuery['orderBy'],
-    keyColumns: readonly string[],
-    fingerprint: string,
-    hasMore: boolean,
-  ): string | null {
-    if (!hasMore || pageRows.length === 0) return null;
-    const lastRow = pageRows[pageRows.length - 1];
-    const orderedValues = Object.entries(orderBy).map(
-      ([field]) => lastRow[field] as string | number,
-    );
-    const keyValues = keyColumns.map((col) => lastRow[col] as string | number);
-    return encodeCursor({ orderedValues, keyValues, sortFingerprint: fingerprint });
-  }
-
-  /**
    * Core `findPage` implementation shared between the non-transactional data
    * source and the transaction overlay. The `getRecords` thunk lets the two
    * callers — the committed store and the per-tx overlay — each supply their
@@ -669,7 +627,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
 
     // 2. Sort fingerprint guard. A cursor minted under a different sort must be
     //    refused by name rather than served a silently wrong page.
-    const fingerprint = this.buildSortFingerprint(query.orderBy);
+    const fingerprint = sortFingerprint(query.orderBy);
     if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
       return Promise.reject(
         new UnsupportedQueryFeatureError(
@@ -738,7 +696,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       projected = applyPagination(projected, 0, probeLimit);
       const more = query.limit > 0 && projected.length > query.limit;
       const slice = more ? projected.slice(0, query.limit) : projected;
-      const nextCursor = this.mintNextCursor(
+      const nextCursor = mintNextCursor(
         more ? slice : [],
         query.orderBy,
         keyColumns,
@@ -751,7 +709,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       });
     }
 
-    const nextCursor = this.mintNextCursor(
+    const nextCursor = mintNextCursor(
       hasMore ? pageRows : [],
       query.orderBy,
       keyColumns,

@@ -15,8 +15,10 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import { PageNormalizationError } from '../../src/query/query-builder.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
+import { encodeCursor } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 import type { PrismaSqlProvider } from '../../src/interfaces/index.ts';
@@ -647,6 +649,373 @@ describe('PrismaAdapter', () => {
       await expect(
         ds.delete({ tenantId: 't1', userId: 7 }),
       ).rejects.toThrow('prisma');
+    });
+  });
+
+  describe('findPage — keyset cursor pagination (§3.8)', () => {
+    /** Build the sort fingerprint in the format every minted cursor carries. */
+    function fingerprintOf(orderBy: Record<string, string>): string {
+      return Object.entries(orderBy).map(([field, dir]) => `${field}:${dir}`).join(',');
+    }
+
+    it('pages against the recorded arguments: take is limit+1 and no skip is sent', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', createdAt: '2024-01-01' });
+      await ds.create({ id: 'u2', createdAt: '2024-01-02' });
+      await ds.create({ id: 'u3', createdAt: '2024-01-03' });
+
+      const page = await ds.findPage!({
+        where: {},
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+
+      // One findMany call, carrying limit + 1 (the one-extra-row probe) and
+      // NO skip — the keyset position replaces offset (§3.10).
+      const findManyCalls = fakeClient.recordedCalls.filter((c) => c.action === 'findMany');
+      expect(findManyCalls.length).toBe(1);
+      expect(findManyCalls[0]?.args).toEqual({
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        take: 3,
+      });
+
+      // The minted next cursor IS encodeCursor's output for the LAST returned
+      // row's key values, carrying the resolved sort fingerprint.
+      expect(page.rows.length).toBe(2);
+      expect(page.nextCursor).toBe(
+        encodeCursor({
+          orderedValues: ['2024-01-02', 'u2'],
+          keyValues: ['u2'],
+          sortFingerprint: fingerprintOf({ createdAt: 'asc', id: 'asc' }),
+        }),
+      );
+    });
+
+    it('decodes the presented cursor into the keyset where via prismaFilter', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', createdAt: '2024-01-01' });
+      await ds.create({ id: 'u2', createdAt: '2024-01-02' });
+      await ds.create({ id: 'u3', createdAt: '2024-01-03' });
+
+      const p1 = await ds.findPage!({
+        where: {},
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+      fakeClient.recordedCalls.length = 0;
+
+      const p2 = await ds.findPage!({
+        where: {},
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor: p1.nextCursor!,
+      });
+
+      // The where is the decoded payload's keyset tree — or(lt, and(eq, gt)) —
+      // translated through the existing prismaFilter path; its leaf values are
+      // exactly the values the previous page minted into the token.
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      expect(call?.args.where).toEqual({
+        OR: [
+          { createdAt: { gt: '2024-01-02' } },
+          { AND: [{ createdAt: '2024-01-02' }, { id: { gt: 'u2' } }] },
+        ],
+      });
+      expect(call?.args.take).toBe(3);
+      expect(p2.rows.map((r) => r.id)).toEqual(['u3']);
+      expect(p2.nextCursor).toBeNull();
+    });
+
+    it('conjoins the keyset predicate with the caller where and filter', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', name: 'Alice', role: 'admin' });
+      await ds.create({ id: 'u2', name: 'Bob', role: 'user' });
+      await ds.create({ id: 'u3', name: 'Carol', role: 'admin' });
+
+      // A hand-minted cursor for the position after u2, so the recorded where
+      // is assertable exactly.
+      const cursor = encodeCursor({
+        orderedValues: ['2024-01-02', 'u2'],
+        keyValues: ['u2'],
+        sortFingerprint: fingerprintOf({ createdAt: 'asc', id: 'asc' }),
+      });
+
+      await ds.findPage!({
+        where: { role: 'admin' },
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'a' },
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor,
+      });
+
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      expect(call?.args.where).toEqual({
+        AND: [
+          { role: 'admin' },
+          {
+            AND: [
+              { name: { contains: 'a' } },
+              {
+                OR: [
+                  { createdAt: { gt: '2024-01-02' } },
+                  { AND: [{ createdAt: '2024-01-02' }, { id: { gt: 'u2' } }] },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('pages with a caller filter alone on the first page (no cursor yet)', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', name: 'Alice', role: 'admin' });
+      await ds.create({ id: 'u2', name: 'Bob', role: 'user' });
+      await ds.create({ id: 'u3', name: 'Carol', role: 'admin' });
+
+      const page = await ds.findPage!({
+        where: {},
+        filter: { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+        orderBy: { name: 'asc' },
+        limit: 1,
+        offset: 0,
+        select: [],
+      });
+
+      // No keyset predicate yet, so the where is the caller filter alone.
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      expect(call?.args.where).toEqual({ role: 'admin' });
+      expect(call?.args.take).toBe(2);
+      expect(page.rows.map((r) => r.name)).toEqual(['Alice']);
+      expect(page.nextCursor).not.toBeNull();
+    });
+
+    it('walks a tied fixture across three pages with no row repeated or skipped (P10/P11)', async () => {
+      // Deliberate sort-key ties: six rows over only two distinct createdAt
+      // values, so the appended key tiebreaker is load-bearing — a naive
+      // createdAt-only predicate silently loses rows (P11).
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'a', createdAt: '2024-01-01', name: '1' });
+      await ds.create({ id: 'b', createdAt: '2024-01-01', name: '2' });
+      await ds.create({ id: 'c', createdAt: '2024-01-01', name: '3' });
+      await ds.create({ id: 'd', createdAt: '2024-01-02', name: '4' });
+      await ds.create({ id: 'e', createdAt: '2024-01-02', name: '5' });
+      await ds.create({ id: 'f', createdAt: '2024-01-02', name: '6' });
+
+      const seenIds: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 1; page <= 3; page++) {
+        const result = await ds.findPage!({
+          where: {},
+          orderBy: { createdAt: 'asc', id: 'asc' },
+          limit: 2,
+          offset: 0,
+          select: [],
+          ...(cursor !== null ? { cursor } : {}),
+        });
+        if (page < 3) {
+          expect(result.nextCursor).not.toBeNull();
+          cursor = result.nextCursor;
+        } else {
+          expect(result.nextCursor).toBeNull();
+        }
+        for (const row of result.rows) {
+          const id = row.id as string;
+          expect(seenIds).not.toContain(id);
+          seenIds.push(id);
+        }
+      }
+      expect(seenIds.sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    });
+
+    it('reports nextCursor: null on the last page', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', score: 10 });
+      await ds.create({ id: '2', score: 20 });
+      await ds.create({ id: '3', score: 30 });
+
+      const p1 = await ds.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+      expect(p1.rows.length).toBe(2);
+      expect(p1.nextCursor).not.toBeNull();
+
+      const p2 = await ds.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor: p1.nextCursor!,
+      });
+      expect(p2.rows.length).toBe(1);
+      expect(p2.nextCursor).toBeNull();
+    });
+
+    it('rejects by name when the cursor token is malformed', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+
+      await expect(
+        ds.findPage!({
+          where: {},
+          orderBy: { name: 'asc' },
+          limit: 10,
+          offset: 0,
+          select: [],
+          cursor: 'not-base64!!!',
+        }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+    });
+
+    it('rejects by name when the cursor fingerprint does not match the sort', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+      await ds.create({ id: '2', name: 'Bob' });
+
+      // Mint a cursor under one sort ...
+      const first = await ds.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 1,
+        offset: 0,
+        select: [],
+      });
+      expect(first.nextCursor).not.toBeNull();
+      // ... then present it under a DIFFERENT sort.
+      await expect(
+        ds.findPage!({
+          where: {},
+          orderBy: { name: 'desc' },
+          limit: 1,
+          offset: 0,
+          select: [],
+          cursor: first.nextCursor ?? '',
+        }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+    });
+
+    it('refuses a non-zero offset beside a cursor at findPage (§3.10)', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+
+      const cursor = encodeCursor({
+        orderedValues: ['Alice'],
+        keyValues: ['1'],
+        sortFingerprint: fingerprintOf({ name: 'asc' }),
+      });
+      await expect(
+        ds.findPage!({
+          where: {},
+          orderBy: { name: 'asc' },
+          limit: 10,
+          offset: 5,
+          select: [],
+          cursor,
+        }),
+      ).rejects.toThrow(PageNormalizationError);
+      // Refused BEFORE any backend call.
+      expect(fakeClient.recordedCalls.find((c) => c.action === 'findMany')).toBeUndefined();
+    });
+
+    it('adds key columns to the internal select and strips them from returned rows', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', name: 'Alice', role: 'admin' });
+      await ds.create({ id: 'u2', name: 'Bob', role: 'user' });
+      await ds.create({ id: 'u3', name: 'Carol', role: 'admin' });
+
+      const page = await ds.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: ['role'],
+      });
+
+      // The internal select carries the caller's projection PLUS the key
+      // column and the ordered field the cursor minting reads.
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      expect(call?.args.select).toEqual({ role: true, id: true, name: true });
+
+      // The caller's projection is what comes back — key column stripped.
+      expect(page.rows.length).toBe(2);
+      expect(page.nextCursor).not.toBeNull();
+      for (const row of page.rows) {
+        expect('id' in row).toBe(false);
+        expect('name' in row).toBe(false);
+        expect(row).toHaveProperty('role');
+      }
+
+      // A cursor minted from a projected page still walks page two, stripped
+      // too — the projection never leaks a key column.
+      const p2 = await ds.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: ['role'],
+        cursor: page.nextCursor!,
+      });
+      expect(p2.rows.length).toBe(1);
+      expect(p2.nextCursor).toBeNull();
+      for (const row of p2.rows) {
+        expect('id' in row).toBe(false);
+        expect(row).toHaveProperty('role');
+      }
+    });
+
+    it('serves findPage from the transaction data source — one shared implementation', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+      await ds.create({ id: '2', name: 'Bob' });
+      await ds.create({ id: '3', name: 'Carol' });
+
+      const txn = await adapter.beginTransaction();
+      const txDs: DataSource = (txn as IAdapterTransaction).createDataSource('User');
+      const p1 = await txDs.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+      expect(p1.rows.map((r) => r.name)).toEqual(['Alice', 'Bob']);
+      expect(p1.nextCursor).not.toBeNull();
+
+      const p2 = await txDs.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor: p1.nextCursor!,
+      });
+      expect(p2.rows.map((r) => r.name)).toEqual(['Carol']);
+      expect(p2.nextCursor).toBeNull();
+      await txn.commit();
     });
   });
 });

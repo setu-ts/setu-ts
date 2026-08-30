@@ -284,6 +284,32 @@ describe('MemoryAdapter', () => {
       await txn.rollback();
     });
 
+    it('overlay findAll and count honor a portable filter', async () => {
+      await adapter.connect();
+      await adapter.insertEntity('User', { id: '1', name: 'Alice', role: 'admin' });
+      await adapter.insertEntity('User', { id: '2', name: 'Bob', role: 'user' });
+      const txn = await adapter.beginTransaction();
+      const ds: DataSource = (txn as IAdapterTransaction).createDataSource('User');
+      const matched = await ds.findAll({
+        where: {},
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'li' },
+        orderBy: {},
+        limit: -1,
+        offset: 0,
+        select: [],
+      });
+      expect(matched.map((r) => r.name)).toEqual(['Alice']);
+      expect(
+        await ds.count({}, {
+          type: 'comparison',
+          field: 'name',
+          operator: 'contains',
+          value: 'li',
+        }),
+      ).toBe(1);
+      await txn.rollback();
+    });
+
     it('overlay update rejects when the row is absent', async () => {
       await adapter.connect();
       const txn = await adapter.beginTransaction();
@@ -443,26 +469,63 @@ describe('MemoryAdapter', () => {
       await adapter.connect();
       const ds = adapter.createDataSource('User');
       await ds.create({ id: '1', name: 'Alice' });
+      await ds.create({ id: '2', name: 'Bob' });
 
-      // Mint a cursor under one sort ...
+      // Mint a cursor under one sort. Two rows against a one-row page make the
+      // first page non-terminal, so a REAL token is minted — presenting an
+      // empty string here would hit the malformed branch, not this one.
       const first = await ds.findPage!({
         where: {},
         orderBy: { name: 'asc' },
-        limit: 10,
+        limit: 1,
         offset: 0,
         select: [],
       });
+      expect(first.nextCursor).not.toBeNull();
       // ... then present it under a DIFFERENT sort.
       await expect(
         ds.findPage!({
           where: {},
           orderBy: { name: 'desc' },
-          limit: 10,
+          limit: 1,
           offset: 0,
           select: [],
           cursor: first.nextCursor ?? '',
         }),
       ).rejects.toThrow(UnsupportedQueryFeatureError);
+    });
+
+    it('conjoins the caller filter with the keyset predicate while walking', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice', role: 'admin' });
+      await ds.create({ id: '2', name: 'Bob', role: 'user' });
+      await ds.create({ id: '3', name: 'Carol', role: 'admin' });
+
+      // Page one with the filter applied; its cursor continues the walk with
+      // the SAME filter conjoined beside the keyset predicate.
+      const p1 = await ds.findPage!({
+        where: {},
+        filter: { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+        orderBy: { name: 'asc' },
+        limit: 1,
+        offset: 0,
+        select: [],
+      });
+      expect(p1.rows.map((r) => r.name)).toEqual(['Alice']);
+      expect(p1.nextCursor).not.toBeNull();
+
+      const p2 = await ds.findPage!({
+        where: {},
+        filter: { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+        orderBy: { name: 'asc' },
+        limit: 1,
+        offset: 0,
+        select: [],
+        cursor: p1.nextCursor!,
+      });
+      expect(p2.rows.map((r) => r.name)).toEqual(['Carol']);
+      expect(p2.nextCursor).toBeNull();
     });
 
     it('strips key columns from returned rows when a projection is present', async () => {

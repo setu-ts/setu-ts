@@ -15,15 +15,26 @@ import type {
   PrismaSqlProvider,
 } from '../../interfaces/index.ts';
 import type {
+  CursorPayload,
   EntityKey,
   FilterExpression,
   IAdapterTransaction,
   IDatabaseAdapter,
+  NormalizedQuery,
+  OrderDirection,
+  PageResult,
 } from '@setu-ts/common';
+import { decodeCursor, keysetPredicate } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../errors.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
 import { keyValues } from '../../query/key-target.ts';
+import { mintNextCursor, sortFingerprint } from '../../query/cursor-page.ts';
+import {
+  normalizePageQuery,
+  PageNormalizationError,
+  projectFields,
+} from '../../query/query-builder.ts';
 
 // ---------------------------------------------------------------------------
 // Prisma connector (provider) — decides how `contains` is translated.
@@ -419,6 +430,194 @@ function buildCompoundWhere(
 }
 
 /**
+ * Translate a normalized query into a Prisma `findMany` argument object.
+ *
+ * The ONE argument builder behind both entry points — {@linkcode DataSource.findAll}
+ * and {@linkcode DataSource.findPage} — so the two cannot drift about how a
+ * where clause, a sort, a limit, a skip or a projection reach the delegate.
+ * `take` is set only for a positive limit (Prisma treats an absent `take` as
+ * unbounded) and `skip` only for a positive offset.
+ *
+ * @param where - The translated Prisma `where` input, or `undefined` for none
+ * @param orderBy - Field-to-direction sort specification (empty for no sort)
+ * @param limit - Maximum rows, or a non-positive value for unbounded
+ * @param offset - Leading rows to skip, or `0` for none
+ * @param select - Projected fields (empty means all fields)
+ * @returns The `findMany` argument object
+ */
+function buildFindManyArgs(
+  where: Record<string, unknown> | undefined,
+  orderBy: Record<string, OrderDirection>,
+  limit: number,
+  offset: number,
+  select: readonly string[],
+): Parameters<ModelDelegate['findMany']>[0] {
+  const args: Parameters<ModelDelegate['findMany']>[0] = {};
+  if (where !== undefined) {
+    args.where = where;
+  }
+  if (Object.keys(orderBy).length > 0) {
+    // Translate { field: 'asc'|'desc' } → Prisma { field: 'asc' }
+    args.orderBy = {} as Record<string, unknown>;
+    for (const [field, dir] of Object.entries(orderBy)) {
+      (args.orderBy as Record<string, unknown>)[field] = dir;
+    }
+  }
+  if (limit > 0) {
+    args.take = limit;
+  }
+  if (offset > 0) {
+    args.skip = offset;
+  }
+  if (select.length > 0) {
+    args.select = {} as Record<string, unknown>;
+    for (const field of select) {
+      (args.select as Record<string, unknown>)[field] = true;
+    }
+  }
+  return args;
+}
+
+/**
+ * Conjoin two optional portable filters, preferring the single expression when
+ * only one is present — an `and` node with one child would be a shape the
+ * caller never wrote and every backend translates differently.
+ *
+ * @param base - The caller's own filter, or `undefined`
+ * @param extra - The keyset predicate, or `undefined` on the first page
+ * @returns The conjoined expression, or `undefined` when neither is present
+ */
+function conjoinFilters(
+  base: FilterExpression | undefined,
+  extra: FilterExpression | undefined,
+): FilterExpression | undefined {
+  if (base === undefined) return extra;
+  if (extra === undefined) return base;
+  return { type: 'and', filters: [base, extra] };
+}
+
+/**
+ * Core `findPage` for the Prisma data source — the §3.8 keyset pipeline, one
+ * implementation shared with the transaction data source (both are built by
+ * {@linkcode createPrismaDataSourceInner}).
+ *
+ * Pipeline:
+ * 1. `normalizePageQuery` — a non-zero `offset` beside a `cursor` is refused
+ *    by name before any backend call (§3.10).
+ * 2. Decode the incoming cursor. Malformed is refused by name; absent starts
+ *    the walk at page one.
+ * 3. Verify the sort fingerprint, so a cursor minted under one sort and
+ *    presented under another is refused rather than served a silently wrong
+ *    page.
+ * 4. Build the portable keyset predicate with {@linkcode keysetPredicate} and
+ *    conjoin it with the caller's `where` and `filter` — the predicate is a
+ *    `FilterExpression`, so it translates through the existing
+ *    {@linkcode prismaFilter} path with no new translation code.
+ * 5. `findMany` with `take: limit + 1` (the one-extra-row probe): more than
+ *    `limit` rows means a next page exists and the LAST returned row mints the
+ *    next cursor; otherwise the page is terminal and `nextCursor` is `null`.
+ * 6. When a projection is present, the key columns (and the ordered fields the
+ *    cursor minting reads) join the internal select so they participate in the
+ *    probe and cursor minting, and are stripped from the returned rows so the
+ *    caller's projection is what comes back — plan §8 risk.
+ *
+ * @param delegate - The Prisma model delegate for the entity
+ * @param query - The normalized page query, carrying an optional `cursor`
+ * @param entity - Entity name, quoted in every refusal
+ * @param provider - The Prisma SQL provider (connector)
+ * @param keyColumns - The resolved primary-key columns
+ * @returns A {@linkcode PageResult} carrying `rows` and the `nextCursor`
+ * @throws {UnsupportedQueryFeatureError} When the token is malformed or the
+ *   fingerprint does not match the current sort (rejected, never a synchronous
+ *   throw)
+ */
+async function findPrismaPage(
+  delegate: ModelDelegate,
+  query: NormalizedQuery,
+  entity: string,
+  provider: PrismaSqlProvider | undefined,
+  keyColumns: readonly string[],
+): Promise<PageResult> {
+  // 1. §3.10 — offset and cursor are contradictory; refuse before any call.
+  const normalized = normalizePageQuery(query);
+  if (normalized instanceof PageNormalizationError) {
+    return Promise.reject(normalized);
+  }
+
+  // 2. Decode cursor. A missing cursor means start of the walk; a malformed
+  //    token is refused by name.
+  let decoded: CursorPayload | null = null;
+  if (normalized.cursor !== undefined) {
+    decoded = decodeCursor(normalized.cursor);
+    if (decoded === null) {
+      return Promise.reject(
+        new UnsupportedQueryFeatureError(
+          'cursor-pagination',
+          'prisma',
+          `cursor-pagination: entity '${entity}': malformed cursor token`,
+        ),
+      );
+    }
+  }
+
+  // 3. Sort-fingerprint guard — a cross-sort cursor would return a silently
+  //    wrong page.
+  const fingerprint = sortFingerprint(normalized.orderBy);
+  if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
+    return Promise.reject(
+      new UnsupportedQueryFeatureError(
+        'cursor-pagination',
+        'prisma',
+        `cursor-pagination: entity '${entity}': cursor fingerprint mismatch — expected ` +
+          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
+      ),
+    );
+  }
+
+  // 4. Keyset predicate through the shared builder; it is a FilterExpression,
+  //    so it reaches the delegate through the existing prismaFilter path.
+  const keyset = decoded === null
+    ? undefined
+    : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
+
+  // 5. One-extra-row probe. A non-zero skip is never applied: the keyset
+  //    position replaces offset (and §3.10 refused the two together).
+  const probeLimit = normalized.limit > 0 ? normalized.limit + 1 : normalized.limit;
+  const internalSelect = normalized.select.length > 0
+    ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+    : [];
+  const found = await delegate.findMany(
+    buildFindManyArgs(
+      prismaWhere(normalized.where, conjoinFilters(normalized.filter, keyset), provider),
+      normalized.orderBy,
+      probeLimit,
+      0,
+      internalSelect,
+    ),
+  );
+
+  // 6. Probe outcome: more than `limit` rows means a next page exists and the
+  //    LAST returned row mints the cursor; otherwise the page is terminal.
+  const hasMore = normalized.limit > 0 && found.length > normalized.limit;
+  const pageRows = hasMore ? found.slice(0, normalized.limit) : found;
+  const nextCursor = mintNextCursor(
+    pageRows,
+    normalized.orderBy,
+    keyColumns,
+    fingerprint,
+    hasMore,
+  );
+
+  // 7. The caller's projection is what comes back — the key columns and the
+  //    ordered fields joined the internal select only for the probe and the
+  //    cursor minting, and are stripped here.
+  const rows = internalSelect.length > 0
+    ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
+    : pageRows;
+  return { rows, nextCursor };
+}
+
+/**
  * Creates a {@linkcode DataSource} backed by a Prisma client for the given
  * entity name.
  *
@@ -500,32 +699,18 @@ function createPrismaDataSourceInner(
     },
 
     findAll: (query) => {
-      const args: Parameters<ModelDelegate['findMany']>[0] = {};
-      const where = prismaWhere(query.where, query.filter, provider);
-      if (where !== undefined) {
-        args.where = where;
-      }
-      if (query.orderBy && Object.keys(query.orderBy).length > 0) {
-        // Translate { field: 'asc'|'desc' } → Prisma { field: 'asc' }
-        args.orderBy = {} as Record<string, unknown>;
-        for (const [field, dir] of Object.entries(query.orderBy)) {
-          (args.orderBy as Record<string, unknown>)[field] = dir;
-        }
-      }
-      if (query.limit !== undefined && query.limit > 0) {
-        args.take = query.limit;
-      }
-      if (query.offset !== undefined && query.offset > 0) {
-        args.skip = query.offset;
-      }
-      if (query.select && query.select.length > 0) {
-        args.select = {} as Record<string, unknown>;
-        for (const field of query.select) {
-          (args.select as Record<string, unknown>)[field] = true;
-        }
-      }
-      return delegate.findMany(args);
+      return delegate.findMany(
+        buildFindManyArgs(
+          prismaWhere(query.where, query.filter, provider),
+          query.orderBy,
+          query.limit,
+          query.offset,
+          query.select,
+        ),
+      );
     },
+
+    findPage: (query) => findPrismaPage(delegate, query, entity, provider, keyColumns),
 
     create: (data) => delegate.create({ data }),
 

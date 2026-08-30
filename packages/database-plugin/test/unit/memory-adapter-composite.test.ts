@@ -134,6 +134,29 @@ describe('MemoryAdapter — composite keys', () => {
       expect(outside?.name).toBe('Alice');
     });
 
+    it('commit flushes a composite tombstone and removes the committed row', async () => {
+      // The commit path re-parses each composite tombstone key back into its
+      // named columns (string and numeric values take different parse arms).
+      await adapter.connect();
+      const ds = adapter.createDataSource('Item', ['tenantId', 'position']);
+      await ds.create({ tenantId: 't1', position: 7, name: 'Keep' });
+      await ds.create({ tenantId: 't1', position: 8, name: 'Drop' });
+
+      const txn = await adapter.beginTransaction();
+      const txDs: DataSource = (txn as IAdapterTransaction).createDataSource('Item');
+      await txDs.delete({ tenantId: 't1', position: 8 });
+      await txn.commit();
+
+      const remaining = await ds.findAll({
+        where: {},
+        orderBy: {},
+        limit: -1,
+        offset: 0,
+        select: [],
+      });
+      expect(remaining.map((r) => r.name)).toEqual(['Keep']);
+    });
+
     it('commit applies composite overlay to committed store', async () => {
       await adapter.connect();
       const ds = adapter.createDataSource('User', ['tenantId', 'userId']);
