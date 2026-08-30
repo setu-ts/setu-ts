@@ -346,6 +346,18 @@ function mapQueryToDriver(
   };
 }
 
+/**
+ * Resolve a filter comparison's field to a string key — for comparison against
+ * the primary-key column list. A path array is NOT a primary key column, so it
+ * passes through as its first segment (the root field).
+ */
+function filterFieldKey(field: string | readonly string[]): string {
+  if (Array.isArray(field)) {
+    return field[0];
+  }
+  return field as string;
+}
+
 /** Recursively maps a portable primary-key filter field/value to Mongo form. */
 function mapFilterToDriver(
   expression: FilterExpression,
@@ -364,11 +376,14 @@ function mapFilterToDriver(
   // Flat composite fields stay as-is (already top-level in the document).
   // Compound keys: prepend '_id.' prefix to field paths for subdocument lookup.
   // Scalar keys: rename to '_id'.
-  if (!isCompound && !isFlatComposite && columns.includes(expression.field)) {
+  // A path array (nested field) is NOT a primary-key column, so it passes
+  // through unchanged — the mapper does not touch nested paths.
+  const fieldKey = filterFieldKey(expression.field);
+  if (!isCompound && !isFlatComposite && columns.includes(fieldKey)) {
     return { ...expression, field: '_id' };
   }
-  if (isCompound && columns.includes(expression.field)) {
-    return { ...expression, field: '_id.' + expression.field };
+  if (isCompound && columns.includes(fieldKey)) {
+    return { ...expression, field: '_id.' + fieldKey };
   }
   return expression;
 }

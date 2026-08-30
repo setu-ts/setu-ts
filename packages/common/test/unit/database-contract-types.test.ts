@@ -63,17 +63,28 @@ describe('M79 portable data-access contract types', () => {
     void _badContains;
   });
 
-  it('allows a two-element field in a comparison (nested path root)', () => {
-    // `field` is `string`, not `readonly string[]`. A two-element path is
-    // represented as a dotted string, which type-checks without `as const`.
+  it('allows a two-element field array in a comparison (nested path)', () => {
+    // `field` is `string | readonly string[]`. A two-element path literal
+    // type-checks without `as const` because `readonly string[]` is the union arm.
     const comp: FilterComparison = {
       type: 'comparison',
-      field: 'address.city',
+      field: ['address', 'city'],
       operator: 'eq',
       value: 'NYC',
     };
-    expect(comp.field).toBe('address.city');
+    expect(comp.field).toEqual(['address', 'city']);
     expect(comp.value).toBe('NYC');
+  });
+
+  it('allows a single-element field array in an ordered arm (Date value)', () => {
+    const date = new Date();
+    const comp: FilterComparison = {
+      type: 'comparison',
+      field: 'createdAt',
+      operator: 'gt',
+      value: date,
+    };
+    expect(comp.value).toBe(date);
   });
 
   it('IDataSource.findById accepts EntityKey (not just scalar)', () => {

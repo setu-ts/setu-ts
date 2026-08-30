@@ -617,6 +617,17 @@ function prismaWhere(
   return { AND: [equality, expression] };
 }
 
+/** Build a Prisma path-form operator object from a path array and operator name. */
+function pathOperator(
+  field: readonly string[],
+  operator: string,
+  value: unknown,
+): Record<string, unknown> {
+  const root = field[0];
+  const path = field.slice(1);
+  return { [root]: { path, [operator]: value } };
+}
+
 function prismaFilter(
   filter: FilterExpression,
   provider?: PrismaSqlProvider,
@@ -626,31 +637,60 @@ function prismaFilter(
       ? { AND: filter.filters.map((f) => prismaFilter(f, provider)) }
       : { OR: filter.filters.map((f) => prismaFilter(f, provider)) };
   }
+  const field = Array.isArray(filter.field) ? filter.field : [filter.field];
   switch (filter.operator) {
     case 'eq':
-      return { [filter.field]: filter.value };
+      return field.length === 1
+        ? { [field[0]]: filter.value }
+        : pathOperator(field, 'equals', filter.value);
     case 'contains':
-      return { [filter.field]: { contains: prismaContainsValue(filter.value, provider) } };
+      return field.length === 1
+        ? { [field[0]]: { contains: prismaContainsValue(filter.value, provider) } }
+        : pathOperator(field, 'contains', prismaContainsValue(filter.value, provider));
     case 'gt':
-      return { [filter.field]: { gt: filter.value } };
+      return field.length === 1
+        ? { [field[0]]: { gt: filter.value } }
+        : pathOperator(field, 'gt', filter.value);
     case 'gte':
-      return { [filter.field]: { gte: filter.value } };
+      return field.length === 1
+        ? { [field[0]]: { gte: filter.value } }
+        : pathOperator(field, 'gte', filter.value);
     case 'lt':
-      return { [filter.field]: { lt: filter.value } };
+      return field.length === 1
+        ? { [field[0]]: { lt: filter.value } }
+        : pathOperator(field, 'lt', filter.value);
     case 'lte':
-      return { [filter.field]: { lte: filter.value } };
+      return field.length === 1
+        ? { [field[0]]: { lte: filter.value } }
+        : pathOperator(field, 'lte', filter.value);
     case 'in': {
       const nonNullValues = filter.value.filter((value) => value !== null);
+      if (field.length === 1) {
+        if (!filter.value.includes(null)) {
+          return { [field[0]]: { in: nonNullValues } };
+        }
+        if (nonNullValues.length === 0) {
+          return { [field[0]]: null };
+        }
+        return {
+          OR: [
+            { [field[0]]: null },
+            { [field[0]]: { in: nonNullValues } },
+          ],
+        };
+      }
+      // Multi-segment path: build the OR-based null/in predicate under the path object.
+      const pathEq = pathOperator(field, 'equals', null);
       if (!filter.value.includes(null)) {
-        return { [filter.field]: { in: nonNullValues } };
+        return pathOperator(field, 'in', nonNullValues);
       }
       if (nonNullValues.length === 0) {
-        return { [filter.field]: null };
+        return pathEq;
       }
       return {
         OR: [
-          { [filter.field]: null },
-          { [filter.field]: { in: nonNullValues } },
+          pathEq,
+          pathOperator(field, 'in', nonNullValues),
         ],
       };
     }

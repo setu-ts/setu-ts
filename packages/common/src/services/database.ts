@@ -80,22 +80,22 @@ export type FilterOperator = 'eq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | '
  */
 export type FilterComparison = {
   readonly type: 'comparison';
-  readonly field: string;
+  readonly field: string | readonly string[];
   readonly operator: 'eq';
   readonly value: unknown;
 } | {
   readonly type: 'comparison';
-  readonly field: string;
+  readonly field: string | readonly string[];
   readonly operator: 'contains';
   readonly value: string;
 } | {
   readonly type: 'comparison';
-  readonly field: string;
+  readonly field: string | readonly string[];
   readonly operator: 'gt' | 'gte' | 'lt' | 'lte';
   readonly value: string | number | Date;
 } | {
   readonly type: 'comparison';
-  readonly field: string;
+  readonly field: string | readonly string[];
   readonly operator: 'in';
   readonly value: readonly unknown[];
 };

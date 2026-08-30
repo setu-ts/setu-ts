@@ -128,7 +128,25 @@ function buildFilter(filter: FilterExpression, params: unknown[]): string {
     return `(${filter.filters.map((item) => buildFilter(item, params)).join(joiner)})`;
   }
 
-  const column = quoteIdentifier(filter.field, 'filter column');
+  // D1 refuses nested paths and Date values in ordered arms — SQLite has no
+  // portable path form and no date type.
+  if (Array.isArray(filter.field)) {
+    throw new CloudflareUnsupportedError(
+      `D1: nested field paths are not supported (adapter 'd1'); ` +
+        'use a scalar string field name instead.',
+    );
+  }
+  if (
+    filter.value instanceof Date && (filter.operator === 'gt' || filter.operator === 'gte' ||
+      filter.operator === 'lt' || filter.operator === 'lte')
+  ) {
+    throw new CloudflareUnsupportedError(
+      `D1: Date values in ordered comparisons are not supported (adapter 'd1'); ` +
+        'SQLite has no date type — store dates as ISO strings or epoch integers instead.',
+    );
+  }
+
+  const column = quoteIdentifier(filter.field as string, 'filter column');
   if (filter.operator === 'eq') {
     if (filter.value === null) return `${column} IS NULL`;
     params.push(filter.value);

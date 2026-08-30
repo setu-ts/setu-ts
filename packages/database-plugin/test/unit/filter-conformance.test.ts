@@ -344,7 +344,8 @@ function mongoWhere(filter: FilterExpression): Record<string, unknown> {
   // comparison must be folded into the match document as a field equality to
   // match the reference (Memory's `actual === value`).
   if (filter.type === 'comparison' && filter.operator === 'eq') {
-    return { [filter.field]: filter.value };
+    const field = Array.isArray(filter.field) ? filter.field.join('.') : (filter.field as string);
+    return { [field]: filter.value };
   }
   const expression = { type: 'and', filters: [filter] } as FilterExpression;
   return translateFilter(expression);

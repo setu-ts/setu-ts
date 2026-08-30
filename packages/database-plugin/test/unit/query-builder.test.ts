@@ -165,6 +165,64 @@ describe('matchesFilter', () => {
     expect(matchesFilter(entity, { type: 'and', filters: [] })).toBe(true);
     expect(matchesFilter(entity, { type: 'or', filters: [] })).toBe(false);
   });
+
+  it('resolves a two-segment path and matches a nested value', () => {
+    const addressEntity = {
+      id: 'e1',
+      name: 'Alice',
+      profile: { address: { city: 'NYC' } },
+    };
+    expect(
+      matchesFilter(addressEntity, {
+        type: 'comparison',
+        field: ['profile', 'address', 'city'],
+        operator: 'eq',
+        value: 'NYC',
+      }),
+    ).toBe(true);
+    expect(
+      matchesFilter(addressEntity, {
+        type: 'comparison',
+        field: ['profile', 'address', 'city'],
+        operator: 'eq',
+        value: 'London',
+      }),
+    ).toBe(false);
+  });
+
+  it('returns false for a missing intermediate path segment rather than throwing', () => {
+    const sparseEntity = { id: 'e1', profile: null };
+    expect(
+      matchesFilter(sparseEntity, {
+        type: 'comparison',
+        field: ['profile', 'address', 'city'],
+        operator: 'eq',
+        value: 'NYC',
+      }),
+    ).toBe(false);
+  });
+
+  it('orders two Date values via comparableGreaterThan', () => {
+    const earlier = new Date('2024-01-01');
+    const later = new Date('2024-06-01');
+    const dateEntity = { id: 'e1', createdAt: later };
+    expect(
+      matchesFilter(dateEntity, {
+        type: 'comparison',
+        field: 'createdAt',
+        operator: 'gt',
+        value: earlier,
+      }),
+    ).toBe(true);
+    expect(
+      matchesFilter(dateEntity, {
+        type: 'comparison',
+        field: 'createdAt',
+        operator: 'lt',
+        value: later,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('applyOrderBy', () => {

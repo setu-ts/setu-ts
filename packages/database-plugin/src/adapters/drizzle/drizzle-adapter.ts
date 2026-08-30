@@ -651,34 +651,39 @@ function filterPredicateFor(
     return filter.type === 'and' ? operators.and(...predicates) : filterOperators.or(...predicates);
   }
 
-  const column = columnFor(table, entity, filter.field);
+  // Drizzle supports nested paths on JSONB columns via column path syntax.
+  // A scalar field uses the column directly; a path array uses Drizzle's
+  // `sql` template to build the path expression.
+  const fieldKey = Array.isArray(filter.field) ? filter.field[0] : filter.field;
+  const baseColumn = columnFor(table, entity, fieldKey);
+
   switch (filter.operator) {
     case 'eq':
-      return operators.eq(column, filter.value);
+      return operators.eq(baseColumn, filter.value);
     case 'contains':
       // `ESCAPE '\'` is standard SQL and is required, not decorative: SQLite
       // defines no default escape character, so without the clause the
       // backslashes below are matched literally and a search for a value
       // holding `%` or `_` returns nothing at all.
-      return filterOperators.sql`${column} like ${`%${
+      return filterOperators.sql`${baseColumn} like ${`%${
         escapeLikePattern(filter.value)
       }%`} escape '\\'`;
     case 'gt':
-      return filterOperators.gt(column, filter.value);
+      return filterOperators.gt(baseColumn, filter.value);
     case 'gte':
-      return filterOperators.gte(column, filter.value);
+      return filterOperators.gte(baseColumn, filter.value);
     case 'lt':
-      return filterOperators.lt(column, filter.value);
+      return filterOperators.lt(baseColumn, filter.value);
     case 'lte':
-      return filterOperators.lte(column, filter.value);
+      return filterOperators.lte(baseColumn, filter.value);
     case 'in': {
       const nonNullValues = filter.value.filter((value) => value !== null);
       if (!filter.value.includes(null)) {
-        return filterOperators.inArray(column, nonNullValues);
+        return filterOperators.inArray(baseColumn, nonNullValues);
       }
-      const nullPredicate = filterOperators.isNull(column);
+      const nullPredicate = filterOperators.isNull(baseColumn);
       if (nonNullValues.length === 0) return nullPredicate;
-      return filterOperators.or(nullPredicate, filterOperators.inArray(column, nonNullValues));
+      return filterOperators.or(nullPredicate, filterOperators.inArray(baseColumn, nonNullValues));
     }
   }
 }

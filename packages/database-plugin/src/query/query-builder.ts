@@ -75,6 +75,22 @@ export function matchesWhere<Entity extends Record<string, unknown>>(
   return true;
 }
 
+/** Resolves a value from an entity by walking a path. */
+function resolveEntityPath<Entity extends Record<string, unknown>>(
+  entity: Entity,
+  path: string | readonly string[],
+): unknown {
+  const segments = Array.isArray(path) ? path : [path];
+  let current: unknown = entity;
+  for (const segment of segments) {
+    if (current == null || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
 /** Evaluates one portable filter expression against an in-memory entity. */
 export function matchesFilter<Entity extends Record<string, unknown>>(
   entity: Entity,
@@ -86,7 +102,7 @@ export function matchesFilter<Entity extends Record<string, unknown>>(
       : filter.filters.some((child) => matchesFilter(entity, child));
   }
 
-  const actual = entity[filter.field];
+  const actual = resolveEntityPath(entity, filter.field);
   switch (filter.operator) {
     case 'eq':
       return actual === filter.value;
@@ -107,6 +123,9 @@ export function matchesFilter<Entity extends Record<string, unknown>>(
 }
 
 function comparableGreaterThan(left: unknown, right: unknown): boolean {
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() > right.getTime();
+  }
   return typeof left === 'number' && typeof right === 'number' && left > right ||
     typeof left === 'string' && typeof right === 'string' && left > right;
 }
@@ -252,8 +271,10 @@ export function unknownColumnError(
   query: Pick<NormalizedQuery, 'orderBy' | 'select'>,
 ): Error | undefined {
   const fields = [
-    ...query.select.map((field) => ['select', field] as const),
-    ...Object.keys(query.orderBy).map((field) => ['orderBy', field] as const),
+    ...query.select.map((field) => ['select', Array.isArray(field) ? field[0] : field] as const),
+    ...Object.keys(query.orderBy).map((field) =>
+      ['orderBy', Array.isArray(field) ? field[0] : field] as const
+    ),
   ];
   if (fields.length === 0 || rows.length === 0) return undefined;
 
