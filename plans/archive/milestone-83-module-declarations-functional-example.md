@@ -1,8 +1,8 @@
 # Milestone 83 — Module Declarations and a Worked Functional Example (`@setu-ts/decorator-plugin`, `@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m83-module-declarations-functional-example`. `main` is
-> protected — all work (implementation + fixes) stays on this one branch until it merges via a
-> single PR.
+> **Status:** Complete (PR #213). Archived on completion. Branch:
+> `feat/m83-module-declarations-functional-example`. `main` is protected — all work
+> (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
