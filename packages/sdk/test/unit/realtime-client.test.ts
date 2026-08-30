@@ -79,6 +79,32 @@ describe('createRealtimeClient', () => {
     expect(new URL(urls[1]!).searchParams.get('tab')).toBe('scoreboard');
   });
 
+  it('enforces reconnect bounds across sockets that opened before closing', async () => {
+    const sockets: FakeSocket[] = [];
+    const client = createRealtimeClient({
+      url: 'wss://example.test/live',
+      timing: immediateTiming,
+      reconnect: { maxAttempts: 1, delayMs: 0 },
+      webSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      onMessage: () => {},
+    });
+
+    sockets[0]?.open();
+    sockets[0]?.close();
+    await Promise.resolve();
+    await Promise.resolve();
+    sockets[1]?.open();
+    sockets[1]?.close();
+    await Promise.resolve();
+
+    expect(sockets).toHaveLength(2);
+    expect(client.state).toBe('closed');
+  });
+
   it('serializes object messages and rejects sends before open', () => {
     const socket = new FakeSocket();
     const client = createRealtimeClient<{ readonly ignored: boolean }, { readonly id: number }>({
@@ -190,6 +216,9 @@ describe('createRealtimeClient', () => {
         { maxAttempts: 0.5 },
         { delayMs: -1 },
         { maxDelayMs: -1 },
+        { delayMs: Number.NaN },
+        { delayMs: Infinity },
+        { maxDelayMs: -Infinity },
       ]
     ) {
       expect(() =>
@@ -213,6 +242,24 @@ describe('createRealtimeClient', () => {
     socket.close();
     await Promise.resolve();
 
+    expect(client.state).toBe('closed');
+  });
+
+  it('does not open when its external signal was already aborted', () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    const client = createRealtimeClient({
+      url: 'wss://example.test/live',
+      signal: controller.signal,
+      webSocket: () => {
+        calls++;
+        return new FakeSocket();
+      },
+      onMessage: () => {},
+    });
+
+    expect(calls).toBe(0);
     expect(client.state).toBe('closed');
   });
 

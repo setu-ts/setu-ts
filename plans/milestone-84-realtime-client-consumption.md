@@ -1,6 +1,6 @@
 # Milestone 84 — Realtime Client Consumption (`@setu-ts/sdk` + `@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m84-realtime-client-consumption`. `main` is protected — all
+> **Status:** Complete. Branch: `feat/m84-realtime-client-consumption`. `main` is protected — all
 > work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
@@ -82,9 +82,10 @@ those artifacts belong to the consuming application.
 
 ### 3.4 Generated artifacts stay in application code
 
-- **Decision:** `setu generate sse <name>` emits an SSE controller plus application-local React
-  hook; `setu generate ws-route <name>` emits a WebSocket plugin route. Each is gated on its
-  transport package.
+- **Decision:** `setu generate sse <name>` always emits an SSE controller and emits its
+  application-local React hook only when `react-router-plugin` and `sdk` are already configured;
+  `setu generate ws-route <name>` emits a WebSocket plugin route. Each is gated on its transport
+  package.
 - **Why:** React cannot enter a JSR package graph; SSE routes use the generated registry seam while
   WebSocket routes need the plugin’s exact-path API.
 - **Test home:** schematic unit tests, generation e2e, scaffold boot and seam-probe tests.

@@ -89,7 +89,7 @@ export class SseFrameParser {
         }
         break;
       case 'retry':
-        if (/^\d+$/.test(value)) {
+        if (/^\d+$/.test(value) && Number.isSafeInteger(Number(value))) {
           this.#retry = Number(value);
           this.#hasField = true;
         }

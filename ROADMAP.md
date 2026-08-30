@@ -8463,4 +8463,4 @@ for every runtime; the measurements then showed the two-arm repair was itself th
 | 81        | ⬜     | cosmos db backend                                   |
 | 82        | ⬜     | cloud bigtable backend                              |
 | 83        | ✅     | module declarations + functional example            |
-| 84        | ⬜     | realtime client consumption (sdk + cli)             |
+| 84        | ✅     | realtime client consumption (sdk + cli)             |

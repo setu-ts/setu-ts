@@ -58,6 +58,12 @@ describe('SseFrameParser', () => {
     ]);
   });
 
+  it("ignores retry values outside JavaScript's safe integer range", () => {
+    const parser = new SseFrameParser();
+
+    expect(parser.push(`retry: ${'9'.repeat(400)}\n\n`)).toEqual([]);
+  });
+
   it('ignores id values containing a null character', () => {
     const parser = new SseFrameParser();
 

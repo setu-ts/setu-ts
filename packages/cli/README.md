@@ -136,9 +136,11 @@ A relative `--dir` is resolved against the working directory.
 
 ## Realtime starting points
 
-`setu generate sse <name>` writes an SSE controller under `src/controllers/` and an
-application-local `src/hooks/use-<name>.ts` React hook that imports `createSseClient` from
-`@setu-ts/sdk`. React belongs to the consuming application, never a published Setu package.
+`setu generate sse <name>` writes an SSE controller under `src/controllers/`. When the project
+already has both `@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also
+writes an application-local `src/hooks/use-<name>.ts` React hook that imports `createSseClient`. Add
+the SDK with `setu add sdk` before generating the hook. React belongs to the consuming application,
+never a published Setu package.
 
 `setu generate ws-route <name>` writes a WebSocket plugin under `src/plugins/`. It registers an
 exact `/ws/<name>` route, joins the requested room, and broadcasts to other members.

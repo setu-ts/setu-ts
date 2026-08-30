@@ -38,6 +38,11 @@ class RealtimeClient<TIncoming, TOutgoing> implements IRealtimeClient<TOutgoing>
     this.#options = options;
     this.#timing = timing;
     this.#factory = options.webSocket ?? defaultWebSocket;
+    if (options.signal?.aborted) {
+      this.#closed = true;
+      this.#setState('closed');
+      return;
+    }
     options.signal?.addEventListener('abort', () => this.close(), { once: true });
     this.#connect();
   }
@@ -72,7 +77,6 @@ class RealtimeClient<TIncoming, TOutgoing> implements IRealtimeClient<TOutgoing>
     this.#socket = socket;
     socket.onopen = () => {
       if (this.#closed || socket !== this.#socket) return;
-      this.#attempts = 0;
       this.#setState('open');
     };
     socket.onmessage = (event) => this.#onMessage(socket, event);
@@ -150,10 +154,15 @@ function validateReconnect(options: RealtimeReconnectOptions | undefined): void 
   ) {
     throw new Error('reconnect.maxAttempts must be a non-negative integer.');
   }
-  if (options?.delayMs !== undefined && options.delayMs < 0) {
-    throw new Error('reconnect.delayMs must be non-negative.');
+  if (!isNonNegativeFinite(options?.delayMs)) {
+    throw new Error('reconnect.delayMs must be a finite non-negative number.');
   }
-  if (options?.maxDelayMs !== undefined && options.maxDelayMs < 0) {
-    throw new Error('reconnect.maxDelayMs must be non-negative.');
+  if (!isNonNegativeFinite(options?.maxDelayMs)) {
+    throw new Error('reconnect.maxDelayMs must be a finite non-negative number.');
   }
+}
+
+/** Rejects timer values that native platforms would coerce into a hot loop. */
+function isNonNegativeFinite(value: number | undefined): boolean {
+  return value === undefined || (Number.isFinite(value) && value >= 0);
 }

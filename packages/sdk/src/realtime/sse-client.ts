@@ -36,6 +36,10 @@ class SseClient<TEvents extends SseEventMap> implements ISseClient {
     this.#validate(options.reconnect);
     this.#options = options;
     this.#timing = timing;
+    if (options.signal?.aborted) {
+      this.#setState('closed');
+      return;
+    }
     options.signal?.addEventListener('abort', () => this.close(), { once: true });
     void this.#run();
   }
@@ -169,11 +173,11 @@ class SseClient<TEvents extends SseEventMap> implements ISseClient {
     ) {
       throw new Error('reconnect.maxAttempts must be a non-negative integer.');
     }
-    if (reconnect?.delayMs !== undefined && reconnect.delayMs < 0) {
-      throw new Error('reconnect.delayMs must be non-negative.');
+    if (!isNonNegativeFinite(reconnect?.delayMs)) {
+      throw new Error('reconnect.delayMs must be a finite non-negative number.');
     }
-    if (reconnect?.maxDelayMs !== undefined && reconnect.maxDelayMs < 0) {
-      throw new Error('reconnect.maxDelayMs must be non-negative.');
+    if (!isNonNegativeFinite(reconnect?.maxDelayMs)) {
+      throw new Error('reconnect.maxDelayMs must be a finite non-negative number.');
     }
   }
 }
@@ -187,4 +191,9 @@ function defaultFetch(input: RequestInfo, init?: RequestInit): Promise<Response>
 function isAbortError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'name' in error &&
     error.name === 'AbortError';
+}
+
+/** Rejects timer values that native platforms would coerce into a hot loop. */
+function isNonNegativeFinite(value: number | undefined): boolean {
+  return value === undefined || (Number.isFinite(value) && value >= 0);
 }

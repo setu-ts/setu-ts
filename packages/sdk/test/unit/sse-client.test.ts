@@ -172,6 +172,9 @@ describe('createSseClient', () => {
         { maxAttempts: 1.5 },
         { delayMs: -1 },
         { maxDelayMs: -1 },
+        { delayMs: Number.NaN },
+        { delayMs: Infinity },
+        { maxDelayMs: -Infinity },
       ]
     ) {
       expect(() =>
@@ -182,6 +185,24 @@ describe('createSseClient', () => {
         })
       ).toThrow();
     }
+  });
+
+  it('does not start when its external signal was already aborted', () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    const client = createSseClient({
+      url: 'https://example.test/events',
+      signal: controller.signal,
+      fetch: () => {
+        calls++;
+        return Promise.resolve(streamResponse('data: null\n\n'));
+      },
+      onEvent: () => {},
+    });
+
+    expect(calls).toBe(0);
+    expect(client.state).toBe('closed');
   });
 
   it('uses the global fetch fallback and reports rejected HTTP responses', async () => {
