@@ -10,9 +10,24 @@
 import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
 import { bindRawStatement, type RawStatementTag } from '../../query/raw-statement.ts';
-import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type {
+  CursorPayload,
+  FilterExpression,
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  NormalizedQuery,
+  PageResult,
+} from '@setu-ts/common';
+import { decodeCursor, keysetPredicate } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
+import { mintNextCursor, sortFingerprint } from '../../query/cursor-page.ts';
+import {
+  normalizePageQuery,
+  PageNormalizationError,
+  projectFields,
+} from '../../query/query-builder.ts';
 import {
   DRIZZLE_QUERY_HANDLE,
   type DrizzleQueryHandleProvider,
@@ -537,6 +552,16 @@ function createDrizzleDataSourceInner(
       return await builder;
     },
 
+    findPage: (query) =>
+      findDrizzlePage(
+        instance,
+        drizzleTable,
+        entity,
+        query,
+        operators,
+        keyColumns,
+      ),
+
     async create(data) {
       const rows = await returningRows(
         instance.insert(drizzleTable).values(data),
@@ -587,6 +612,152 @@ function createDrizzleDataSourceInner(
       return Number(rows[0]?.[COUNT_ALIAS] ?? 0);
     },
   };
+}
+
+/** Conjoin the caller's filter with the keyset predicate, preferring either single term. */
+function conjoinFilters(
+  base: FilterExpression | undefined,
+  extra: FilterExpression | undefined,
+): FilterExpression | undefined {
+  if (base === undefined) return extra;
+  if (extra === undefined) return base;
+  return { type: 'and', filters: [base, extra] };
+}
+
+/**
+ * Core `findPage` for the Drizzle data source — the §3.8 keyset pipeline,
+ * shared with the transaction data source (both are built by
+ * {@linkcode createDrizzleDataSourceInner}).
+ *
+ * Pipeline:
+ * 1. `normalizePageQuery` — a non-zero `offset` beside a `cursor` is refused
+ *    by name before any backend call (§3.10).
+ * 2. Decode the incoming cursor. Malformed is refused by name; absent starts
+ *    the walk at page one.
+ * 3. Verify the sort fingerprint, so a cursor minted under one sort and
+ *    presented under another is refused rather than served a silently wrong
+ *    page.
+ * 4. Build the portable keyset predicate with {@linkcode keysetPredicate} and
+ *    conjoin it with the caller's `where` and `filter` — the predicate is a
+ *    `FilterExpression`, so it translates through the existing `predicateFor`
+ *    operator-tree path with no new translation code.
+ * 5. `select` with `where` conjoined, ordered as the caller asked, with
+ *    `limit + 1` (the one-extra-row probe): more than `limit` rows means a
+ *    next page exists and the LAST returned row mints the next cursor;
+ *    otherwise the page is terminal and `nextCursor` is `null`.
+ * 6. When a projection is present, the key columns (and the ordered fields the
+ *    cursor minting reads) join the internal select so they participate in the
+ *    probe and cursor minting, and are stripped from the returned rows so the
+ *    caller's projection is what comes back — plan §8 risk.
+ *
+ * @param instance - The Drizzle instance (or transaction instance)
+ * @param table - The Drizzle table for the entity
+ * @param entity - Entity name, quoted in every refusal
+ * @param query - The normalized page query, carrying an optional `cursor`
+ * @param operators - Drizzle operators loaded at connect
+ * @param keyColumns - The resolved primary-key columns
+ * @returns A {@linkcode PageResult} carrying `rows` and the `nextCursor`
+ * @throws {UnsupportedQueryFeatureError} When the token is malformed or the
+ *   fingerprint does not match the current sort (rejected, never a synchronous
+ *   throw)
+ */
+async function findDrizzlePage(
+  instance: DrizzleInstance,
+  table: DrizzleTable,
+  entity: string,
+  query: NormalizedQuery,
+  operators: DrizzleOperators,
+  keyColumns: readonly string[],
+): Promise<PageResult> {
+  // 1. §3.10 — offset and cursor are contradictory; refuse before any call.
+  const normalized = normalizePageQuery(query);
+  if (normalized instanceof PageNormalizationError) {
+    return Promise.reject(normalized);
+  }
+
+  // 2. Decode cursor. A missing cursor means start of the walk; a malformed
+  //    token is refused by name.
+  let decoded: CursorPayload | null = null;
+  if (normalized.cursor !== undefined) {
+    decoded = decodeCursor(normalized.cursor);
+    if (decoded === null) {
+      return Promise.reject(
+        new UnsupportedQueryFeatureError(
+          'cursor-pagination',
+          'drizzle',
+          `cursor-pagination: entity '${entity}': malformed cursor token`,
+        ),
+      );
+    }
+  }
+
+  // 3. Sort-fingerprint guard — a cross-sort cursor would return a silently
+  //    wrong page.
+  const fingerprint = sortFingerprint(normalized.orderBy);
+  if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
+    return Promise.reject(
+      new UnsupportedQueryFeatureError(
+        'cursor-pagination',
+        'drizzle',
+        `cursor-pagination: entity '${entity}': cursor fingerprint mismatch — expected ` +
+          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
+      ),
+    );
+  }
+
+  // 4. Keyset predicate through the shared builder; it is a FilterExpression,
+  //    so it reaches the delegate through the existing predicateFor path.
+  const keyset = decoded === null
+    ? undefined
+    : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
+
+  // 5. One-extra-row probe. A non-zero skip is never applied: the keyset
+  //    position replaces offset (and §3.10 refused the two together).
+  const probeLimit = normalized.limit > 0 ? normalized.limit + 1 : normalized.limit;
+  const internalSelect = normalized.select.length > 0
+    ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+    : [];
+  const where = predicateFor(
+    table,
+    entity,
+    normalized.where,
+    operators,
+    conjoinFilters(normalized.filter, keyset),
+  );
+  let builder = instance.select(
+    selectedColumns(table, entity, internalSelect),
+  ).from(table);
+  if (where !== undefined) {
+    builder = builder.where(where);
+  }
+  const order = orderFor(table, entity, normalized.orderBy, operators);
+  if (order.length > 0) {
+    builder = builder.orderBy(...order);
+  }
+  if (probeLimit > 0) {
+    builder = builder.limit(probeLimit);
+  }
+  const found = await builder;
+
+  // 6. Probe outcome: more than `limit` rows means a next page exists and the
+  //    LAST returned row mints the cursor; otherwise the page is terminal.
+  const hasMore = normalized.limit > 0 && found.length > normalized.limit;
+  const pageRows = hasMore ? found.slice(0, normalized.limit) : found;
+  const nextCursor = mintNextCursor(
+    pageRows,
+    normalized.orderBy,
+    keyColumns,
+    fingerprint,
+    hasMore,
+  );
+
+  // 7. The caller's projection is what comes back — the key columns and the
+  //    ordered fields joined the internal select only for the probe and the
+  //    cursor minting, and are stripped here.
+  const rows = internalSelect.length > 0
+    ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
+    : pageRows;
+  return { rows, nextCursor };
 }
 
 /** Result alias the `count(*)` aggregate is read back under. */
