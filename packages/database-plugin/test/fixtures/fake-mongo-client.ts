@@ -219,13 +219,22 @@ export class FakeMongoCollection implements IMongoCollection {
     this.calls.push({ method: 'find', args: [filter, options] });
     let rows = this.#docs.filter((d) => matchFilter(d, filter));
     if (options?.sort !== undefined) {
-      const [field, dir] = Object.entries(options.sort)[0] ?? [undefined, 'asc'];
+      // EVERY sort key, in declared order, with a type-aware comparison. The
+      // previous build read `Object.entries(sort)[0]` alone and compared with
+      // `Number(av) > Number(bv)`, so a multi-key sort silently ignored its
+      // tiebreakers and a STRING key coerced to `NaN` on both sides — where
+      // the comparator answers `-1` unconditionally and reverses the array.
+      // The real driver (mongod 8) honours every key and accepts `1`/`-1` as
+      // well as `'asc'`/`'desc'`, so a double doing less than that hides a
+      // sort defect instead of exposing it.
+      const keys = Object.entries(options.sort);
       rows = [...rows].sort((a, b) => {
-        const av = a[field as string];
-        const bv = b[field as string];
-        if (av === bv) return 0;
-        const cmp = Number(av) > Number(bv) ? 1 : -1;
-        return dir === 'desc' ? -cmp : cmp;
+        for (const [field, dir] of keys) {
+          const descending = dir === 'desc' || dir === 'descending' || dir === -1;
+          const cmp = compareForSort(a[field], b[field]);
+          if (cmp !== 0) return descending ? -cmp : cmp;
+        }
+        return 0;
       });
     }
     if (options?.skip !== undefined) rows = rows.slice(options.skip);
@@ -323,6 +332,30 @@ export class FakeMongoDatabase implements IMongoDatabase {
 }
 
 /** An in-memory `IMongoClient` that never performs network I/O. */
+/**
+ * Compare two field values the way mongod orders them for a `sort`.
+ *
+ * Numbers compare numerically, strings lexicographically, and dates by
+ * instant; `null`/`undefined` sort before any present value. A `Number()`
+ * coercion cannot stand in for this — it answers `NaN` for every string, which
+ * makes a comparator return the same sign for every pair.
+ *
+ * @param a - The left value
+ * @param b - The right value
+ * @returns A negative number, zero, or a positive number
+ */
+function compareForSort(a: unknown, b: unknown): number {
+  const aMissing = a === null || a === undefined;
+  const bMissing = b === null || b === undefined;
+  if (aMissing || bMissing) return aMissing && bMissing ? 0 : aMissing ? -1 : 1;
+  const av = a instanceof Date ? a.getTime() : a;
+  const bv = b instanceof Date ? b.getTime() : b;
+  if (typeof av === 'number' && typeof bv === 'number') return av - bv;
+  const as = String(av);
+  const bs = String(bv);
+  return as < bs ? -1 : as > bs ? 1 : 0;
+}
+
 export class FakeMongoClient implements IMongoClient {
   #connected = false;
   readonly databases = new Map<string, FakeMongoDatabase>();

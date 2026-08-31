@@ -15,6 +15,7 @@ import { expect } from '@std/expect';
 import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
 import type { IMongoSession } from '../../src/adapters/mongo/mongo-client-types.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
+import { encodeCursor } from '@setu-ts/common';
 import { FakeMongoClient, fakeObjectIdCtor, FakeSession } from '../fixtures/fake-mongo-client.ts';
 
 /** A fresh client per test — the real driver hands back the same collection
@@ -37,6 +38,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
     ...(partial.filter === undefined ? {} : { filter: partial.filter }),
+    ...(partial.cursor === undefined ? {} : { cursor: partial.cursor }),
   };
 }
 
@@ -427,5 +429,383 @@ describe('an update with nothing left to set issues no write', () => {
     await ds.update(7, { name: 'second' });
     const calls = client.db('testdb').collection('Widget').calls;
     expect(calls.some((c) => c.method === 'findOneAndUpdate')).toBe(true);
+  });
+});
+
+describe('composite keys — flat multi-field target', () => {
+  function makeCompositeDataSource() {
+    return createMongoDataSource(makeClient(), 'testdb', 'User', {
+      User: { primaryKey: ['tenantId', 'userId'] as const },
+    });
+  }
+
+  it('findById builds a multi-field filter and returns the row', async () => {
+    const ds = makeCompositeDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    const found = await ds.findById({ tenantId: 't1', userId: 'u1' });
+    expect(found).toEqual({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+  });
+
+  it('findById is order-independent for the caller key-object property order', async () => {
+    const ds = makeCompositeDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    // The caller writes the record in reverse order from the mapping.
+    const found = await ds.findById({ userId: 'u1', tenantId: 't1' });
+    expect(found?.name).toBe('Alice');
+  });
+
+  it('update merges on a composite key', async () => {
+    const ds = makeCompositeDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice', active: true });
+    const updated = await ds.update({ tenantId: 't1', userId: 'u1' }, { name: 'Alicia' });
+    expect(updated.name).toBe('Alicia');
+    expect(updated.active).toBe(true);
+  });
+
+  it('delete removes a composite-key row', async () => {
+    const ds = makeCompositeDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    await ds.create({ tenantId: 't1', userId: 'u2', name: 'Bob' });
+    expect(await ds.delete({ tenantId: 't1', userId: 'u1' })).toBe(true);
+    const remaining = await ds.findAll(query());
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].name).toBe('Bob');
+  });
+
+  it('rejects a scalar id with a rejected promise naming the columns', async () => {
+    const ds = makeCompositeDataSource();
+    await expect(ds.findById('scalar'))
+      .rejects
+      .toThrow(/needs a composite record for multi-column key/);
+  });
+
+  it('rejects a record missing a required column', async () => {
+    const ds = makeCompositeDataSource();
+    await expect(ds.findById({ tenantId: 't1' }))
+      .rejects
+      .toThrow(/missing required column 'userId'/);
+  });
+
+  it('findAll leaves the named columns as top-level fields (no _id rename for flat composite)', async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'User', {
+      User: { primaryKey: ['tenantId', 'userId'] as const },
+    });
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    await ds.findAll(query({ where: { tenantId: 't1', userId: 'u1' } }));
+    const calls = client.databases.get('testdb')!.collection('User').calls;
+    const findCall = calls.find((c) => c.method === 'find')!;
+    const filter = findCall.args[0] as Record<string, unknown>;
+    // Flat composite keys stay as top-level fields; only scalar keys rename to _id.
+    expect(filter).toEqual({ tenantId: 't1', userId: 'u1' });
+  });
+});
+
+describe('composite keys — compound _id subdocument (P4/P5)', () => {
+  function makeCompoundDataSource() {
+    return createMongoDataSource(makeClient(), 'testdb', 'Enrollment', {
+      Enrollment: {
+        primaryKey: ['tenantId', 'userId'] as const,
+        idType: 'compound' as const,
+      },
+    });
+  }
+
+  it('create stores _id as a subdocument in mapping column order', async () => {
+    const ds = makeCompoundDataSource();
+    const row = await ds.create({ tenantId: 't1', userId: 'u1', course: 'math' });
+    expect(row).toEqual({ tenantId: 't1', userId: 'u1', course: 'math' });
+    // The adapter does not expose the collection, so we assert via findAll.
+    const all = await ds.findAll(query());
+    expect(all).toHaveLength(1);
+    expect(all[0]).toEqual({ tenantId: 't1', userId: 'u1', course: 'math' });
+  });
+
+  it('findById matches regardless of caller property order (P5 canonical order)', async () => {
+    const ds = makeCompoundDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    // Caller writes in reverse order from the mapping.
+    const found = await ds.findById({ userId: 'u1', tenantId: 't1' });
+    expect(found?.name).toBe('Alice');
+  });
+
+  it('update merges on a compound key', async () => {
+    const ds = makeCompoundDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice', active: true });
+    const updated = await ds.update({ tenantId: 't1', userId: 'u1' }, { name: 'Alicia' });
+    expect(updated.name).toBe('Alicia');
+    expect(updated.active).toBe(true);
+  });
+
+  it('delete removes a compound-key row', async () => {
+    const ds = makeCompoundDataSource();
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    expect(await ds.delete({ tenantId: 't1', userId: 'u1' })).toBe(true);
+    expect(await ds.findById({ tenantId: 't1', userId: 'u1' })).toBeNull();
+  });
+
+  it('rejects a scalar id with a rejected promise naming the columns', async () => {
+    const ds = makeCompoundDataSource();
+    await expect(ds.findById('scalar'))
+      .rejects
+      .toThrow(/needs a composite record for compound key/);
+  });
+
+  it('rejects a record missing a required column', async () => {
+    const ds = makeCompoundDataSource();
+    await expect(ds.findById({ tenantId: 't1' }))
+      .rejects
+      .toThrow(/missing required column 'userId'/);
+  });
+
+  it('findAll wraps the named columns under _id for a compound key', async () => {
+    const client = makeClient();
+    const ds = createMongoDataSource(client, 'testdb', 'Enrollment', {
+      Enrollment: {
+        primaryKey: ['tenantId', 'userId'] as const,
+        idType: 'compound' as const,
+      },
+    });
+    await ds.create({ tenantId: 't1', userId: 'u1', name: 'Alice' });
+    await ds.findAll(query({ where: { tenantId: 't1', userId: 'u1' } }));
+    const calls = client.databases.get('testdb')!.collection('Enrollment').calls;
+    const findCall = calls.find((c) => c.method === 'find')!;
+    const filter = findCall.args[0] as Record<string, unknown>;
+    // Compound _id: the where clause is wrapped under _id as a subdocument.
+    expect(filter).toEqual({ _id: { tenantId: 't1', userId: 'u1' } });
+  });
+});
+
+describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
+  /**
+   * Six rows over a `size` sort carrying deliberate ties (two rows per size) —
+   * the P10/P11 fixture. Without the key-tiebreaker the walk would silently
+   * lose rows, so this seeded tie is the proof the tiebreaker is load-bearing.
+   */
+  // 24-hex ids so the values round-trip through the `fakeObjectIdCtor` /
+  // `toDriverId` conversion path (the scalar key renames to `_id` and the
+  // keyset predicate's `id` comparisons pass through that same conversion).
+  const SEED = [
+    { id: '000000000000000000000001', size: 1, name: 's1a' },
+    { id: '000000000000000000000002', size: 1, name: 's1b' },
+    { id: '000000000000000000000003', size: 2, name: 's2a' },
+    { id: '000000000000000000000004', size: 2, name: 's2b' },
+    { id: '000000000000000000000005', size: 3, name: 's3a' },
+    { id: '000000000000000000000006', size: 3, name: 's3b' },
+  ];
+  const ID = {
+    a: '000000000000000000000001',
+    b: '000000000000000000000002',
+    c: '000000000000000000000003',
+    d: '000000000000000000000004',
+    e: '000000000000000000000005',
+    f: '000000000000000000000006',
+  } as const;
+
+  /** Seeds the fixture into a fresh client and returns both for inspection. */
+  /**
+   * Seeds the fixture into a fresh client and returns both the client (for
+   * inspecting recorded driver arguments) and the data source bound to it.
+   */
+  function seededClient(): { client: FakeMongoClient; ds: ReturnType<typeof makeDataSource> } {
+    const client = makeClient();
+    const ds = makeDataSource(client);
+    for (const row of SEED) void ds.create(row);
+    return { client, ds };
+  }
+
+  it('walks a tied fixture across three pages, every row exactly once, last page null', async () => {
+    const { ds } = seededClient();
+    let cursor: string | undefined;
+    const seen: string[] = [];
+    for (let page = 0; page < 3; page++) {
+      const result = await ds.findPage!(query({
+        orderBy: { size: 'asc' },
+        limit: 2,
+        ...(cursor === undefined ? {} : { cursor }),
+      }));
+      for (const row of result.rows) seen.push(String(row.id));
+      cursor = result.nextCursor ?? undefined;
+      if (cursor === undefined) break;
+    }
+    // Every row exactly once, none repeated, none skipped.
+    expect(seen.sort()).toEqual([ID.a, ID.b, ID.c, ID.d, ID.e, ID.f]);
+    expect(new Set(seen).size).toBe(6);
+  });
+
+  it('reports nextCursor: null on the last page', async () => {
+    const { ds } = seededClient();
+    // Walk to the final page by consuming the cursors.
+    const p1 = await ds.findPage!(query({ orderBy: { size: 'asc' }, limit: 2 }));
+    const p2 = await ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      cursor: p1.nextCursor as string,
+    }));
+    const p3 = await ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      cursor: p2.nextCursor as string,
+    }));
+    // Six rows over three pages of two: the last page is a full page of two,
+    // and the probe fetched exactly two (no extra), so nextCursor is null.
+    expect(p3.nextCursor).toBeNull();
+    expect(p3.rows).toHaveLength(2);
+    expect(p3.rows.map((r) => r.id)).toEqual([ID.e, ID.f]);
+  });
+
+  it('records the conjoined keyset filter, the limit+1 probe and the minted next cursor', async () => {
+    const { client, ds } = seededClient();
+    // First page: mint a cursor from the returned last row.
+    const p1 = await ds.findPage!(query({ orderBy: { size: 'asc' }, limit: 2 }));
+    expect(p1.rows).toHaveLength(2);
+    expect(p1.nextCursor).not.toBeNull();
+
+    // Second page: assert on the recorded driver arguments.
+    const p2 = await ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      cursor: p1.nextCursor as string,
+    }));
+    const calls = client.databases.get('testdb')!.collection('Widget').calls;
+    const findCall = calls.filter((c) => c.method === 'find').at(-1)!;
+    const args = findCall.args as [
+      Record<string, unknown>,
+      { sort?: Record<string, string>; limit?: number },
+    ];
+    // The conjoined keyset predicate is a FilterExpression translated to native
+    // Mongo: or(gt(size, cursorSize), and(eq(size, cursorSize), gt(id, cursorId))).
+    const filter = args[0] as { $or: unknown[] };
+    expect(filter.$or.length).toBe(2);
+    // The one-extra-row probe: limit + 1 reached the driver.
+    expect(args[1].limit).toBe(3);
+    // The minted next cursor is asserted to be encodeCursor's output for the
+    // last row's ordered + key values under the current sort. The tiebreaker
+    // column `id` is undefined on the seeded rows, so the key value is undefined
+    // (JSON-encoded to null) — the minting reads it off the raw row.
+    expect(p2.nextCursor).toBe(
+      encodeCursor({
+        orderedValues: [2],
+        keyValues: [p2.rows[1].id as string | number],
+        sortFingerprint: 'size:asc',
+      }),
+    );
+  });
+
+  it('rejects a malformed cursor token by name (never a synchronous throw)', async () => {
+    const { ds } = seededClient();
+    await expect(ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      cursor: 'bm90anNvbg', // base64url of 'notjson' — decodes, fails JSON.parse
+    }))).rejects.toThrow(/malformed cursor token/);
+  });
+
+  it('rejects a cursor whose fingerprint does not match the current sort by name', async () => {
+    const { ds } = seededClient();
+    await expect(ds.findPage!(query({
+      orderBy: { size: 'desc' },
+      limit: 2,
+      cursor: encodeCursor({
+        orderedValues: [1],
+        keyValues: [ID.a],
+        sortFingerprint: 'size:asc',
+      }),
+    }))).rejects.toThrow(/cursor fingerprint mismatch/);
+  });
+
+  it('strips the key columns from the returned rows when a projection is present', async () => {
+    const { client, ds } = seededClient();
+    const result = await ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      select: ['name'],
+    }));
+    // The caller's projection is what comes back — `id` (a key column) is stripped.
+    expect(result.rows[0]).toEqual({ name: 's1a' });
+    expect(Object.hasOwn(result.rows[0], 'id')).toBe(false);
+    // But the key column AND the ordered field (minting reads `size`) reached the
+    // driver so the probe and cursor minting could read them.
+    const calls = client.databases.get('testdb')!.collection('Widget').calls;
+    const findOptions = calls.find((c) => c.method === 'find')!.args[1] as {
+      projection: Record<string, 0 | 1>;
+    };
+    expect(findOptions.projection).toEqual({ name: 1, _id: 1, size: 1 });
+  });
+
+  it('refuses a query carrying both offset and cursor by name before any call', async () => {
+    const { ds } = seededClient();
+    await expect(ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      offset: 1,
+      cursor: encodeCursor({
+        orderedValues: [1],
+        keyValues: [ID.a],
+        sortFingerprint: 'size:asc',
+      }),
+    }))).rejects.toThrow(/offset=1 conflicts with cursor/);
+  });
+});
+
+describe('scalar-key mapping renames in place (M79 review regression)', () => {
+  /**
+   * `mapQueryToDriver`'s scalar branch REPLACED the whole `where`/`orderBy`
+   * object with `{ _id: … }` whenever the key column was present, discarding
+   * every other member.
+   *
+   * The sort half is reached on EVERY scalar-key `findPage`, because
+   * `resolveKeysetSort` always appends the key column as the keyset
+   * tiebreaker — so a page ordered by `score` was silently ordered by `_id`
+   * alone, which is a different page from the one asked for and one the keyset
+   * predicate does not agree with.
+   */
+  it('carries a non-key condition through beside the key', async () => {
+    const client = makeClient();
+    const source = makeDataSource(client);
+    await source.findAll({
+      where: { id: 'w1', status: 'active' },
+      orderBy: {},
+      limit: -1,
+      offset: 0,
+      select: [],
+    });
+    const call = client.db('testdb').collection('Widget').calls.find((c) => c.method === 'find');
+    // `status` must survive; without it the query matches rows it was never
+    // asked for — more rows, not fewer, so no assertion on a result COUNT
+    // would necessarily catch it.
+    expect(call?.args[0]).toEqual({ _id: 'w1', status: 'active' });
+  });
+
+  it('keeps the caller sort and appends the renamed key as the tiebreaker', async () => {
+    const client = makeClient();
+    const source = makeDataSource(client);
+    for (
+      const row of [
+        { id: 'a', score: 1 },
+        { id: 'b', score: 2 },
+        { id: 'c', score: 3 },
+      ]
+    ) await source.create(row);
+
+    const page = await source.findPage!({
+      where: {},
+      orderBy: { score: 'asc' },
+      limit: 2,
+      offset: 0,
+      select: [],
+    });
+
+    const call = client
+      .db('testdb')
+      .collection('Widget')
+      .calls
+      .filter((c) => c.method === 'find')
+      .at(-1);
+    const sort = (call?.args[1] as { sort?: Record<string, unknown> } | undefined)?.sort;
+    // Both keys, in precedence order: the caller's field FIRST, the renamed
+    // key column second. The defect produced `{ _id: 'asc' }` alone.
+    expect(Object.entries(sort ?? {})).toEqual([['score', 'asc'], ['_id', 'asc']]);
+    expect(page.rows.map((r) => r.id)).toEqual(['a', 'b']);
   });
 });

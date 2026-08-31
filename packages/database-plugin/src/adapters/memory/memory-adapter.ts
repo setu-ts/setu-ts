@@ -6,9 +6,27 @@
  * provides a simple key-value store per entity type with per-transaction
  * overlay semantics (buffered creates, update shadows, delete tombstones).
  *
+ * Supports composite keys: when `primaryKey` is a `string[]` the store
+ * matches on every named column, and the overlay composes a stable
+ * multi-column key from the column values.
+ *
  * @module
  */
-import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type {
+  CursorPayload,
+  EntityKey,
+  FilterExpression,
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  PageResult,
+} from '@setu-ts/common';
+import {
+  decodeCursor,
+  keysetPredicate,
+  mintNextCursor,
+  resolveKeysetSort,
+  sortFingerprint,
+} from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,
@@ -18,7 +36,9 @@ import {
   projectFields,
   unknownColumnError,
 } from '../../query/query-builder.ts';
+import { resolveKeyColumns } from '../../query/key-target.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
 
 /**
  * A single in-memory entity store keyed by entity name.
@@ -28,8 +48,11 @@ import type { DataSource } from '../../repositories/base-repository.ts';
 interface EntityStore {
   /** All entities in insertion order. */
   records: Record<string, unknown>[];
-  /** Primary key field name (defaults to `'id'`). */
-  primaryKey: string;
+  /**
+   * Primary key columns, normalised to a `readonly string[]`.
+   * The scalar case is a one-element array; composite keys are multi-element.
+   */
+  primaryKey: readonly string[];
 }
 
 /**
@@ -50,12 +73,54 @@ interface EntityStore {
  */
 interface TxOverlay {
   creates: Array<{ entity: string; record: Record<string, unknown> }>;
-  shadows: Map<string, { entity: string; id: unknown; record: Record<string, unknown> }>;
-  tombstones: Set<string>;
+  shadows: Map<string, { entity: string; id: EntityKey; record: Record<string, unknown> }>;
+  tombstones: Map<string, { entity: string; id: EntityKey }>;
 }
 
-function overlayKey(entity: string, id: unknown): string {
-  return `${entity}::${id}`;
+/**
+ * Compose a stable overlay key from an entity name and an {@linkcode EntityKey}.
+ *
+ * For scalar keys the shape is `entity::scalar`. For composite keys the values
+ * are joined with `|` — the delimiter is chosen so it cannot appear inside the
+ * column values we accept (`string | number`), and it preserves ordering so the
+ * same composite key always produces the same string regardless of how the
+ * caller writes the record literal.
+ *
+ * @param entity - Entity name
+ * @param id - Primary key value (scalar or composite record)
+ * @returns A stable string key for overlay maps/sets
+ * @since 0.1.0
+ */
+function overlayKey(entity: string, id: EntityKey): string {
+  if (typeof id === 'string' || typeof id === 'number') {
+    return `${entity}::${id}`;
+  }
+  // Composite record key — compose a deterministic multi-column key.
+  const parts = Object.keys(id).sort();
+  return `${entity}::${parts.map((k) => `${k}=${id[k]}`).join('|')}`;
+}
+
+/**
+ * Find the index of a record matching the given {@linkcode EntityKey} in the
+ * store's record list. Works for both scalar (one-element) and composite keys.
+ *
+ * @param store - The entity store to search
+ * @param id - The primary key value to match
+ * @returns The record index, or `-1` when not found
+ * @since 0.1.0
+ */
+function findRecordIndex(store: EntityStore, id: EntityKey): number {
+  if (store.primaryKey.length === 1) {
+    return store.records.findIndex((r) => r[store.primaryKey[0]] === id);
+  }
+  // Composite key — id is a record with known columns.
+  return store.records.findIndex((r) => {
+    for (const col of store.primaryKey) {
+      const idRecord = id as Record<string, string | number>;
+      if (r[col] !== idRecord[col]) return false;
+    }
+    return true;
+  });
 }
 
 /**
@@ -100,7 +165,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
     const overlay: TxOverlay = {
       creates: [],
       shadows: new Map(),
-      tombstones: new Set(),
+      tombstones: new Map(),
     };
 
     let committed = false;
@@ -123,19 +188,19 @@ export class MemoryAdapter implements IDatabaseAdapter {
         // Flush update shadows
         for (const shadow of overlay.shadows.values()) {
           const store = this.getStore(shadow.entity);
-          const idx = store.records.findIndex((r) => r[store.primaryKey] === shadow.id);
+          const idx = findRecordIndex(store, shadow.id);
           if (idx !== -1) {
             store.records[idx] = { ...shadow.record };
           }
         }
-        // Flush delete tombstones
-        for (const key of overlay.tombstones) {
-          const [ent, idStr] = key.split('::');
+        // Flush delete tombstones. The ORIGINAL key object is replayed, never
+        // a value parsed back out of the overlay's map key: that parser
+        // coerced any numeric-looking segment with `Number()`, so a string key
+        // such as '42' or '0042' came back as a number and matched no record —
+        // the delete then survived commit, or removed the wrong row.
+        for (const { entity: ent, id } of overlay.tombstones.values()) {
           const store = this.getStore(ent);
-          const id = Number(idStr) === Number(idStr) && !isNaN(Number(idStr))
-            ? Number(idStr)
-            : idStr;
-          const idx = store.records.findIndex((r) => r[store.primaryKey] === id);
+          const idx = findRecordIndex(store, id);
           if (idx !== -1) {
             store.records.splice(idx, 1);
           }
@@ -171,10 +236,16 @@ export class MemoryAdapter implements IDatabaseAdapter {
      */
     const effectiveRecords = (): Record<string, unknown>[] => {
       const store = this.getStore(entity);
-      const pk = store.primaryKey;
       return store.records
         .map((r) => {
-          const key = overlayKey(entity, r[pk]);
+          const idForOverlay = store.primaryKey.length === 1
+            ? r[store.primaryKey[0]] as EntityKey
+            : (() => {
+              const rec: Record<string, string | number> = {};
+              for (const c of store.primaryKey) rec[c] = r[c] as string | number;
+              return rec;
+            })();
+          const key = overlayKey(entity, idForOverlay);
           if (overlay.tombstones.has(key)) return null; // deleted
           const shadow = overlay.shadows.get(key);
           if (shadow) return shadow.record;
@@ -211,19 +282,24 @@ export class MemoryAdapter implements IDatabaseAdapter {
         return Promise.resolve(results.map((r) => ({ ...r })));
       },
 
+      findPage: (query) => this.findPageInternal(entity, query, effectiveRecords),
+
       findById: (id) => {
         const records = effectiveRecords();
         const store = this.getStore(entity);
-        const record = records.find((r) => r[store.primaryKey] === id);
-        if (!record) return Promise.resolve(null);
-        return Promise.resolve({ ...record });
+        const idx = findRecordIndexForRecords(records, store, id);
+        if (idx === -1) return Promise.resolve(null);
+        return Promise.resolve({ ...records[idx] });
       },
 
       create: (data) => {
         const store = this.getStore(entity);
         const record: Record<string, unknown> = { ...data };
-        if (record[store.primaryKey] === undefined) {
-          record[store.primaryKey] = crypto.randomUUID();
+        // Generate missing key columns.
+        for (const col of store.primaryKey) {
+          if (record[col] === undefined) {
+            record[col] = crypto.randomUUID();
+          }
         }
         overlay.creates.push({ entity, record });
         return Promise.resolve({ ...record });
@@ -233,10 +309,11 @@ export class MemoryAdapter implements IDatabaseAdapter {
         const store = this.getStore(entity);
         // Find in effective records
         const effective = effectiveRecords();
-        const target = effective.find((r) => r[store.primaryKey] === id);
-        if (!target) {
-          return Promise.reject(new Error(`Entity '${entity}' with id '${id}' not found`));
+        const targetIndex = findRecordIndexForRecords(effective, store, id);
+        if (targetIndex === -1) {
+          return Promise.reject(new Error(`Entity '${entity}' with id not found`));
         }
+        const target = effective[targetIndex];
         const newRecord = { ...target, ...data };
         overlay.shadows.set(overlayKey(entity, id), { entity, id, record: newRecord });
         return Promise.resolve({ ...newRecord });
@@ -245,9 +322,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
       delete: (id) => {
         const store = this.getStore(entity);
         const effective = effectiveRecords();
-        const target = effective.find((r) => r[store.primaryKey] === id);
-        if (!target) return Promise.resolve(false);
-        overlay.tombstones.add(overlayKey(entity, id));
+        const targetIndex = findRecordIndexForRecords(effective, store, id);
+        if (targetIndex === -1) return Promise.resolve(false);
+        overlay.tombstones.set(overlayKey(entity, id), { entity, id });
         return Promise.resolve(true);
       },
 
@@ -272,9 +349,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * is what fixes the primary key for the entity before any query runs.
    *
    * @param entity - Entity name
-   * @param primaryKey - Primary key field (defaults to `'id'`)
+   * @param primaryKey - Primary key field(s), defaults to `['id']`
    */
-  createDataSource(entity: string, primaryKey: string = 'id'): DataSource {
+  createDataSource(entity: string, primaryKey: string | readonly string[] = 'id'): DataSource {
     this.getStore(entity, primaryKey); // Ensure the store (and its key) exists.
     return {
       findAll: (query) => this.queryEntities(entity, query),
@@ -283,6 +360,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
       update: (id, data) => this.updateEntity(entity, id, data),
       delete: (id) => this.deleteEntity(entity, id),
       count: (where, filter) => this.countEntities(entity, where, filter),
+      findPage: (query) =>
+        this.findPageInternal(entity, query, () => this.getStore(entity).records),
     };
   }
 
@@ -290,13 +369,14 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * Returns the internal store for an entity, creating it lazily.
    *
    * @param entity - Entity name
-   * @param primaryKey - Primary key field (defaults to `'id'`)
+   * @param primaryKey - Primary key field(s), defaults to `['id']`
    * @returns The entity store
    */
-  getStore(entity: string, primaryKey: string = 'id'): EntityStore {
+  getStore(entity: string, primaryKey: string | readonly string[] = 'id'): EntityStore {
+    const columns = resolveKeyColumns(primaryKey);
     let store = this._stores.get(entity);
     if (!store) {
-      store = { records: [], primaryKey };
+      store = { records: [], primaryKey: columns };
       this._stores.set(entity, store);
     }
     return store;
@@ -350,21 +430,21 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * Find a single entity by its primary key value.
    *
    * @param entity - Entity name
-   * @param id - Primary key value
+   * @param id - Primary key value (scalar or composite record)
    * @returns The entity or `null`
    */
   findEntityById(
     entity: string,
-    id: string | number,
+    id: EntityKey,
   ): Promise<Record<string, unknown> | null> {
     const store = this.getStore(entity);
-    const record = store.records.find((r) => r[store.primaryKey] === id);
-    if (!record) return Promise.resolve(null);
-    return Promise.resolve({ ...record });
+    const idx = findRecordIndex(store, id);
+    if (idx === -1) return Promise.resolve(null);
+    return Promise.resolve({ ...store.records[idx] });
   }
 
   /**
-   * Insert a new entity. Generates an `id` if absent.
+   * Insert a new entity. Generates key values if absent.
    *
    * @param entity - Entity name
    * @param data - Entity data
@@ -376,8 +456,11 @@ export class MemoryAdapter implements IDatabaseAdapter {
   ): Promise<Record<string, unknown>> {
     const store = this.getStore(entity);
     const record: Record<string, unknown> = { ...data };
-    if (record[store.primaryKey] === undefined) {
-      record[store.primaryKey] = crypto.randomUUID();
+    // Generate missing key columns.
+    for (const col of store.primaryKey) {
+      if (record[col] === undefined) {
+        record[col] = crypto.randomUUID();
+      }
     }
     store.records.push(record);
     return Promise.resolve({ ...record });
@@ -387,20 +470,20 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * Update an existing entity by primary key, merging fields.
    *
    * @param entity - Entity name
-   * @param id - Primary key value
+   * @param id - Primary key value (scalar or composite record)
    * @param data - Fields to merge
    * @returns The updated entity
    * @throws {Error} If the entity does not exist
    */
   updateEntity(
     entity: string,
-    id: string | number,
+    id: EntityKey,
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>> {
     const store = this.getStore(entity);
-    const index = store.records.findIndex((r) => r[store.primaryKey] === id);
+    const index = findRecordIndex(store, id);
     if (index === -1) {
-      return Promise.reject(new Error(`Entity '${entity}' with id '${id}' not found`));
+      return Promise.reject(new Error(`Entity '${entity}' with id not found`));
     }
     store.records[index] = { ...store.records[index], ...data };
     return Promise.resolve({ ...store.records[index] });
@@ -410,12 +493,12 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * Delete an entity by primary key.
    *
    * @param entity - Entity name
-   * @param id - Primary key value
+   * @param id - Primary key value (scalar or composite record)
    * @returns `true` when deleted, `false` if not found
    */
-  deleteEntity(entity: string, id: string | number): Promise<boolean> {
+  deleteEntity(entity: string, id: EntityKey): Promise<boolean> {
     const store = this.getStore(entity);
-    const index = store.records.findIndex((r) => r[store.primaryKey] === id);
+    const index = findRecordIndex(store, id);
     if (index === -1) return Promise.resolve(false);
     store.records.splice(index, 1);
     return Promise.resolve(true);
@@ -444,8 +527,167 @@ export class MemoryAdapter implements IDatabaseAdapter {
     );
   }
 
+  /**
+   * Core `findPage` implementation shared between the non-transactional data
+   * source and the transaction overlay. The `getRecords` thunk lets the two
+   * callers — the committed store and the per-tx overlay — each supply their
+   * visible row set without duplicating the cursor-handling logic.
+   *
+   * Pipeline:
+   * 1. Decode the incoming cursor. When absent, the walk starts at page one.
+   *    When malformed, reject by name.
+   * 2. When present, verify the sort fingerprint so a cross-sort cursor is
+   *    refused rather than served a silently wrong page.
+   * 3. Build the portable keyset predicate with {@linkcode keysetPredicate},
+   *    conjoin it with the caller's own filter (when present), and apply
+   *    `where` / `filter` / `orderBy` in the same order as {@linkcode findAll}.
+   * 4. Fetch `limit + 1` rows (the one-extra-row probe): if more than `limit`
+   *    are returned there IS a next page and the last returned row yields the
+   *    next cursor; otherwise the page is terminal and `nextCursor` is `null`.
+   * 5. When a projection is active, the key columns are added to the internal
+   *    select so they participate in the probe and are available for cursor
+   *    minting; they are stripped from the returned rows so the caller's
+   *    projection is what comes back — plan §8 risk.
+   *
+   * `decoded.orderedValues` carries the value of EVERY ordered field (in
+   * `orderBy` order) from the last row of the previous page — not just key
+   * column values. This is what {@linkcode keysetPredicate} indexes by
+   * position to build the "row after this one" comparison.
+   *
+   * @param entity - Entity name
+   * @param query - Normalized page query (carries `cursor`, `filter`,
+   *   `orderBy`, `limit`, and `select`)
+   * @param getRecords - Thunk supplying the visible rows at call time
+   * @returns A {@linkcode PageResult} carrying `rows` and the `nextCursor`
+   * @throws {UnsupportedQueryFeatureError} When the token is malformed or the
+   *   fingerprint does not match the current sort
+   */
+  findPageInternal(
+    entity: string,
+    query: NormalizedQuery,
+    getRecords: () => Record<string, unknown>[],
+  ): Promise<PageResult> {
+    const store = this.getStore(entity);
+    const keyColumns = store.primaryKey;
+
+    // 1. Decode cursor. A missing cursor means start of the walk.
+    let decoded: CursorPayload | null = null;
+    if (query.cursor !== undefined) {
+      decoded = decodeCursor(query.cursor);
+      if (decoded === null) {
+        return Promise.reject(
+          new UnsupportedQueryFeatureError(
+            'cursor-pagination',
+            'memory',
+            `entity '${entity}': malformed cursor token`,
+          ),
+        );
+      }
+    }
+
+    // 2. Sort fingerprint guard. A cursor minted under a different sort must be
+    //    refused by name rather than served a silently wrong page.
+    const fingerprint = sortFingerprint(query.orderBy);
+    if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
+      return Promise.reject(
+        new UnsupportedQueryFeatureError(
+          'cursor-pagination',
+          'memory',
+          `entity '${entity}': cursor fingerprint mismatch — expected '${fingerprint}', ` +
+            `got '${decoded.sortFingerprint}'`,
+        ),
+      );
+    }
+
+    // 3. Build and apply the keyset predicate. Conjoin it with the caller's
+    //    filter when both are present.
+    let results = getRecords();
+    if (decoded !== null) {
+      const predicate = keysetPredicate(
+        decoded.orderedValues,
+        decoded.keyValues,
+        query.orderBy,
+        keyColumns,
+      );
+      results = results.filter((row) => matchesFilter(row, predicate));
+    }
+
+    if (query.filter !== undefined) {
+      const filter = query.filter;
+      results = results.filter((row) => matchesFilter(row, filter));
+    }
+    results = applyOrderBy(results, resolveKeysetSort(query.orderBy, keyColumns));
+
+    // 4. One-extra-row probe. `limit + 1` rows tells us whether a next page
+    //    exists: more than `limit` means there is, and the LAST row mints the
+    //    next cursor; otherwise the page is terminal.
+    const probeLimit = query.limit > 0 ? query.limit + 1 : -1;
+    results = applyPagination(results, 0, probeLimit);
+
+    const hasMore = query.limit > 0 && results.length > query.limit;
+    const pageRows = hasMore ? results.slice(0, query.limit) : results;
+
+    // 5. Mint from the UNPROJECTED page rows, then project.
+    //
+    // The cursor is minted before projection deliberately: `pageRows` still
+    // carry every field, so the ordered and key columns are always present
+    // even when the caller's `select` names neither. A previous build instead
+    // re-ran the whole pipeline with `select` augmented by the key columns, so
+    // that a projected row would still carry them — which produced an
+    // identical page by construction (in an in-memory store `select` affects
+    // only the final projection, never filtering, ordering or pagination) and
+    // duplicated every step above. That duplicate is how the keyset-sort fix
+    // reached one branch and not the other: the projected path kept ordering
+    // by `query.orderBy` while its predicate was expanded over the resolved
+    // sort, so a tied page silently skipped or repeated rows whenever the
+    // caller passed a non-empty `select`. One path now, so the two cannot
+    // disagree again.
+    const nextCursor = mintNextCursor(
+      hasMore ? pageRows : [],
+      query.orderBy,
+      keyColumns,
+      fingerprint,
+      hasMore,
+    );
+
+    return Promise.resolve({
+      rows: query.select.length > 0
+        ? pageRows.map((r) => projectFields(r, query.select) as Record<string, unknown>)
+        : pageRows.map((r) => ({ ...r })),
+      nextCursor,
+    });
+  }
+
   /** @inheritdoc — raw query not supported on memory adapter. */
   rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     return Promise.reject(new Error('The memory adapter does not support raw SQL queries.'));
   }
+}
+
+/**
+ * Find the index of a record matching the given {@linkcode EntityKey} in a
+ * standalone record list (used by the overlay data source).
+ *
+ * @param records - The record list to search
+ * @param store - The entity store defining the primary key columns
+ * @param id - The primary key value to match
+ * @returns The record index, or `-1` when not found
+ * @since 0.1.0
+ */
+function findRecordIndexForRecords(
+  records: Record<string, unknown>[],
+  store: EntityStore,
+  id: EntityKey,
+): number {
+  if (store.primaryKey.length === 1) {
+    return records.findIndex((r) => r[store.primaryKey[0]] === id);
+  }
+  // Composite key — id is a record with known columns.
+  return records.findIndex((r) => {
+    for (const col of store.primaryKey) {
+      const idRecord = id as Record<string, string | number>;
+      if (r[col] !== idRecord[col]) return false;
+    }
+    return true;
+  });
 }

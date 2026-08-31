@@ -19,7 +19,7 @@
  * @module
  */
 
-import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
+import type { EntityKey, FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { CloudflareUnsupportedError } from '../errors.ts';
 
 /**
@@ -45,8 +45,8 @@ export interface D1Statement {
 export interface D1Target {
   /** The physical table name. */
   readonly table: string;
-  /** The primary-key column. */
-  readonly primaryKey: string;
+  /** The primary-key column(s), in declaration order. A scalar entity uses `['id']`. */
+  readonly primaryKey: readonly string[];
 }
 
 /** SQLite identifiers this module will emit. Anything else is rejected. */
@@ -128,7 +128,25 @@ function buildFilter(filter: FilterExpression, params: unknown[]): string {
     return `(${filter.filters.map((item) => buildFilter(item, params)).join(joiner)})`;
   }
 
-  const column = quoteIdentifier(filter.field, 'filter column');
+  // D1 refuses nested paths and Date values in ordered arms — SQLite has no
+  // portable path form and no date type.
+  if (Array.isArray(filter.field)) {
+    throw new CloudflareUnsupportedError(
+      `D1: nested field paths are not supported (adapter 'd1'); ` +
+        'use a scalar string field name instead.',
+    );
+  }
+  if (
+    filter.value instanceof Date && (filter.operator === 'gt' || filter.operator === 'gte' ||
+      filter.operator === 'lt' || filter.operator === 'lte')
+  ) {
+    throw new CloudflareUnsupportedError(
+      `D1: Date values in ordered comparisons are not supported (adapter 'd1'); ` +
+        'SQLite has no date type — store dates as ISO strings or epoch integers instead.',
+    );
+  }
+
+  const column = quoteIdentifier(filter.field as string, 'filter column');
   if (filter.operator === 'eq') {
     if (filter.value === null) return `${column} IS NULL`;
     params.push(filter.value);
@@ -216,17 +234,59 @@ export function buildSelect(target: D1Target, query: NormalizedQuery): D1Stateme
 }
 
 /**
+ * Build a multi-column key predicate in column order.
+ *
+ * A scalar key (one-column target) becomes a single `= ?N` clause. A composite
+ * key produces one equality per column, binding values in declaration order.
+ *
+ * @param target - The entity the statement targets
+ * @param id - The primary-key value
+ * @param params - The parameter accumulator, appended to in place
+ * @returns The predicate fragment including its leading space
+ * @throws {CloudflareUnsupportedError} On an invalid identifier or parameter overflow
+ */
+function buildCompositeKeyPredicate(
+  target: D1Target,
+  id: EntityKey,
+  params: unknown[],
+): string {
+  const parts: string[] = [];
+  let nextIndex = params.length;
+  for (const column of target.primaryKey) {
+    if (typeof id === 'object') {
+      const value = id[column];
+      if (value === undefined) {
+        throw new CloudflareUnsupportedError(
+          `D1: primary key is missing required column '${column}'. ` +
+            'Supply a composite record with every key column present.',
+        );
+      }
+      nextIndex += 1;
+      parts.push(`${quoteIdentifier(column, 'primary key')} = ?${nextIndex}`);
+      params.push(value);
+    } else {
+      nextIndex += 1;
+      parts.push(`${quoteIdentifier(column, 'primary key')} = ?${nextIndex}`);
+      params.push(id);
+    }
+  }
+  assertParamBudget(params, 'key predicate');
+  return ` WHERE ${parts.join(' AND ')}`;
+}
+
+/**
  * Build a `SELECT` for a single row by primary key.
  *
  * @param target - The table being queried
  * @param id - The primary-key value
  * @returns The statement and its parameters
- * @throws {CloudflareUnsupportedError} On an invalid identifier
+ * @throws {CloudflareUnsupportedError} On an invalid identifier or a key missing a column
  */
-export function buildSelectById(target: D1Target, id: string | number): D1Statement {
-  const sql = `SELECT * FROM ${quoteIdentifier(target.table, 'table name')} WHERE ` +
-    `${quoteIdentifier(target.primaryKey, 'primary key')} = ?1 LIMIT 1`;
-  return { sql, params: [id] };
+export function buildSelectById(target: D1Target, id: EntityKey): D1Statement {
+  const params: unknown[] = [];
+  const sql = `SELECT * FROM ${quoteIdentifier(target.table, 'table name')}` +
+    buildCompositeKeyPredicate(target, id, params) + ' LIMIT 1';
+  return { sql, params };
 }
 
 /**
@@ -275,11 +335,11 @@ export function buildInsert(
  * @param data - Columns to merge into the row
  * @returns The statement and its parameters
  * @throws {CloudflareUnsupportedError} On an invalid identifier, a parameter
- * overflow, or an empty patch
+ * overflow, an empty patch, or a key missing a column
  */
 export function buildUpdate(
   target: D1Target,
-  id: string | number,
+  id: EntityKey,
   data: Partial<Record<string, unknown>>,
 ): D1Statement {
   const entries = Object.entries(data);
@@ -295,9 +355,9 @@ export function buildUpdate(
     return `${quoteIdentifier(column, 'update column')} = ?${params.length}`;
   }).join(', ');
 
-  params.push(id);
-  const sql = `UPDATE ${quoteIdentifier(target.table, 'table name')} SET ${assignments} ` +
-    `WHERE ${quoteIdentifier(target.primaryKey, 'primary key')} = ?${params.length} RETURNING *`;
+  const keyPred = buildCompositeKeyPredicate(target, id, params);
+  const sql = `UPDATE ${quoteIdentifier(target.table, 'table name')} SET ${assignments}` +
+    `${keyPred} RETURNING *`;
 
   assertParamBudget(params, 'update');
   return { sql, params };
@@ -312,15 +372,15 @@ export function buildUpdate(
  * @param target - The table being written
  * @param id - The primary-key value
  * @returns The statement and its parameters
- * @throws {CloudflareUnsupportedError} On an invalid identifier
+ * @throws {CloudflareUnsupportedError} On an invalid identifier or a key missing a column
  */
-export function buildDelete(target: D1Target, id: string | number): D1Statement {
-  const key = quoteIdentifier(target.primaryKey, 'primary key');
-  return {
-    sql: `DELETE FROM ${quoteIdentifier(target.table, 'table name')} ` +
-      `WHERE ${key} = ?1 RETURNING ${key}`,
-    params: [id],
-  };
+export function buildDelete(target: D1Target, id: EntityKey): D1Statement {
+  const params: unknown[] = [];
+  const keyPred = buildCompositeKeyPredicate(target, id, params);
+  const returningCols = target.primaryKey.map((c) => quoteIdentifier(c, 'primary key')).join(', ');
+  const sql = `DELETE FROM ${quoteIdentifier(target.table, 'table name')}` +
+    `${keyPred} RETURNING ${returningCols}`;
+  return { sql, params };
 }
 
 /** The column alias the count query projects into. */

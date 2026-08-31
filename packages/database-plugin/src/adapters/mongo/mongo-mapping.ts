@@ -26,12 +26,15 @@ export interface MongoEntityMapping {
   readonly collection?: string;
 
   /**
-   * The primary-key field name. Defaults to `'id'`.
+   * The primary-key field name(s). Defaults to `'id'`.
    *
-   * This is the name a caller addresses with `findById`/`update`/`delete` —
-   * it is the name the returned document carries, not the driver's `_id`.
+   * A scalar names a single-column key (the driver's `_id` maps to that one
+   * field). An array names a composite key: each named column is a top-level
+   * field on the collection (`idType` absent) or, when `idType: 'compound'`,
+   * the keys of the subdocument stored under the driver's `_id` in the
+   * mapping's declared order (P4/P5).
    */
-  readonly primaryKey?: string;
+  readonly primaryKey?: string | readonly string[];
 
   /**
    * How the collection stores its `_id` values.
@@ -39,7 +42,9 @@ export interface MongoEntityMapping {
    * - `'objectId'` forces the id to a driver `ObjectId` on read and write.
    * - `'raw'` forbids conversion, so a `string` id is passed to the driver
    *   verbatim.
-   * - absent converts a **string** id that `ObjectId.isValid` accepts — a
+   * - `'compound'` stores a composite key as a subdocument `_id`, built in the
+   *   mapping's declared column order (P5 — canonical order, not caller order).
+   *   Absent converts a **string** id that `ObjectId.isValid` accepts — a
    *   24-hex string. A non-string id (a `number` key) is passed through
    *   verbatim, because the driver's `isValid` answers `true` for any number
    *   while its constructor rejects one.
@@ -48,7 +53,7 @@ export interface MongoEntityMapping {
    * **strings** rather than `ObjectId`s — cannot be distinguished at runtime,
    * so the override exists rather than being guessed.
    */
-  readonly idType?: 'objectId' | 'raw';
+  readonly idType?: 'objectId' | 'raw' | 'compound';
 }
 
 /**
@@ -56,7 +61,7 @@ export interface MongoEntityMapping {
  *
  * This is the internal half of the two-layer mapping: the public
  * {@linkcode MongoEntityMapping} is the override bag, and this is the
- * concrete collection name, primary-key name, and id strategy the builders
+ * concrete collection name, primary-key columns, and id strategy the builders
  * read. It is deliberately NOT exported — the mapping surface is the public
  * type, and leaking the resolved target would make one adapter's collection
  * naming part of the package's published contract (the M56 defect class).
@@ -66,10 +71,13 @@ export interface MongoEntityMapping {
 export interface MongoTarget {
   /** The collection name. */
   readonly collection: string;
-  /** The primary-key field name (the name a caller addresses). */
-  readonly primaryKey: string;
+  /**
+   * The primary-key column names a caller addresses. Normalised to an array:
+   * a scalar mapping yields `['id']`, a composite mapping passes through.
+   */
+  readonly primaryKey: readonly string[];
   /** How the collection stores its `_id` values. */
-  readonly idType: 'objectId' | 'raw' | 'auto';
+  readonly idType: 'objectId' | 'raw' | 'compound' | 'auto';
 }
 
 /** The `_id` field the native driver stores every document under. */
@@ -107,9 +115,13 @@ export function resolveMongoTarget(
   mapping: Readonly<Record<string, MongoEntityMapping>> | undefined,
 ): MongoTarget {
   const override = mapping?.[entity];
+  const rawKey = override?.primaryKey ?? DEFAULT_PRIMARY_KEY;
   return {
     collection: override?.collection ?? entity,
-    primaryKey: override?.primaryKey ?? DEFAULT_PRIMARY_KEY,
+    // Normalise to an array: a scalar overrides yield a one-element list; a
+    // composite overrides pass through unchanged. Callers on MongoTarget.read
+    // primaryKey never see a bare string — every builder treats it as an array.
+    primaryKey: Array.isArray(rawKey) ? rawKey : [rawKey],
     // The adapter resolves the strategy once at connect() into a value the
     // data source carries; 'auto' is the unresolved form of the optional type.
     idType: override?.idType ?? 'auto',
@@ -138,12 +150,35 @@ export function fromDriverDocument(
   const row: Record<string, unknown> = { ...document };
   const rawId = row[DRIVER_ID_FIELD];
   if (rawId !== undefined) {
-    row[target.primaryKey] = fromDriverId(rawId);
-    // `primaryKey: '_id'` is a legal mapping — a collection addressed by the
-    // driver's own field name. Deleting unconditionally wrote the id and then
-    // removed it, so the row came back with no primary key at all.
-    if (target.primaryKey !== DRIVER_ID_FIELD) {
+    if (
+      target.idType === 'compound' && Array.isArray(target.primaryKey) &&
+      target.primaryKey.length > 1
+    ) {
+      // A compound-_id subdocument stores one field per column. Read them out
+      // in the mapping's declared order so the row carries the keys the caller
+      // sees regardless of the document's internal field order. The _id field
+      // itself is dropped from the row since the columns now carry the values.
+      const compound = rawId as Record<string, unknown> | null;
+      if (compound !== null && typeof compound === 'object') {
+        for (const col of target.primaryKey) {
+          row[col] = compound[col];
+        }
+      }
       delete row[DRIVER_ID_FIELD];
+    } else if (Array.isArray(target.primaryKey) && target.primaryKey.length > 1) {
+      // Flat composite — each named column is a top-level field on the
+      // collection, NOT under `_id`. The raw _id (if any) is dropped.
+      delete row[DRIVER_ID_FIELD];
+    } else {
+      // Scalar path — a single field carries the _id value. When the target's
+      // declared primary-key column IS the driver's own `_id` field, keep it
+      // instead of overwriting it with a renamed copy and then deleting the
+      // original.
+      const key = target.primaryKey[0];
+      if (key !== DRIVER_ID_FIELD) {
+        row[key] = fromDriverId(rawId);
+        delete row[DRIVER_ID_FIELD];
+      }
     }
   }
   return row;
@@ -200,14 +235,47 @@ export function toDriverDocument(
   objectIdCtor?: IMongoObjectIdCtor,
 ): Record<string, unknown> {
   const document: Record<string, unknown> = { ...row };
-  if (Object.prototype.hasOwnProperty.call(document, target.primaryKey)) {
-    const converted = toDriverId(document[target.primaryKey], target.idType, objectIdCtor);
-    // Delete before assigning, and only when the two names differ: under
-    // `primaryKey: '_id'` the source and destination are the same field, so an
-    // unconditional delete dropped the caller's key and let the driver
-    // generate a fresh one.
-    if (target.primaryKey !== DRIVER_ID_FIELD) {
-      delete document[target.primaryKey];
+  if (
+    target.idType === 'compound' && Array.isArray(target.primaryKey) && target.primaryKey.length > 1
+  ) {
+    // A compound-_id collection stores the composite key as a subdocument
+    // _id in the mapping's declared column order (P5). Every named column is
+    // extracted from the row and assembled into the subdocument; the driver
+    // does not accept the raw fields alongside `_id` for a compound _id.
+    // EVERY key column must be present, not merely one of them. A compound
+    // `_id` subdocument is matched by exact equality (P4), so a PARTIAL
+    // subdocument writes a document that no `findById` can ever retrieve —
+    // the read path already requires every column. Partial keys therefore
+    // fall through to the flat path rather than writing an unreachable row.
+    const compound: Record<string, unknown> = {};
+    for (const col of target.primaryKey) {
+      if (Object.prototype.hasOwnProperty.call(row, col)) {
+        compound[col] = row[col];
+      }
+    }
+    if (Object.keys(compound).length === target.primaryKey.length) {
+      for (const col of target.primaryKey) {
+        delete document[col];
+      }
+      document[DRIVER_ID_FIELD] = compound;
+    }
+    return document;
+  }
+  if (Array.isArray(target.primaryKey) && target.primaryKey.length > 1) {
+    // Flat composite — each named column stays as a top-level field on the
+    // collection. No `_id` rename, no special handling. The row passes
+    // through unchanged (the caller's data becomes the document directly).
+    return document;
+  }
+  // Scalar path: map the named column onto `_id`.
+  const key = target.primaryKey[0];
+  if (key !== undefined && Object.prototype.hasOwnProperty.call(document, key)) {
+    const converted = toDriverId(document[key], target.idType, objectIdCtor);
+    // When the target's declared key IS the driver's own field, the rename
+    // would be a no-op write followed by a delete — which drops the id. Keep
+    // the field in place instead.
+    if (key !== DRIVER_ID_FIELD) {
+      delete document[key];
     }
     document[DRIVER_ID_FIELD] = converted;
   }
@@ -260,7 +328,7 @@ export function toIdString(value: unknown): string {
  */
 export function toDriverId(
   value: unknown,
-  idType: 'objectId' | 'raw' | 'auto',
+  idType: 'objectId' | 'raw' | 'compound' | 'auto',
   objectIdCtor?: IMongoObjectIdCtor,
 ): unknown {
   if (idType === 'raw') return value;
@@ -291,9 +359,10 @@ export function toDriverId(
  * (measured on `mongodb@6.21.0` — `isValid(5)`, `isValid(0)` and
  * `isValid(1234567890)` are all `true`), while `new ObjectId('5')` throws
  * `BSONError: input must be a 24 character hex string, 12 byte Uint8Array, or
- * an integer`. `IDataSource.findById`/`update`/`delete` accept `string |
- * number`, so a collection keyed by application-assigned numbers reached that
- * throw on every entry point under the default `'auto'` mapping.
+ * an integer`. `IDataSource.findById`/`update`/`delete` accept an `EntityKey`,
+ * whose scalar arms are `string` and `number`, so a collection keyed by
+ * application-assigned numbers reached that throw on every entry point under
+ * the default `'auto'` mapping.
  *
  * @param value - The repository id value
  * @param objectIdCtor - The driver `ObjectId` constructor

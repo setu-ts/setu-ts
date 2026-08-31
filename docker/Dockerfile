@@ -17,7 +17,7 @@
 # Pinned, not floating. A base older than the Deno that wrote the committed lockfiles fails with
 # `Unsupported lockfile version '5'`. Both Dockerfiles read this same constant so a Deno bump is a
 # one-line change; test/deploy-gate.test.ts asserts they agree.
-ARG DENO_VERSION=2.9.5
+ARG DENO_VERSION=2.9.6
 
 FROM denoland/deno:alpine-${DENO_VERSION}
 

@@ -18,6 +18,7 @@ import {
   translateFilter,
   translateQuery,
 } from '../../src/adapters/mongo/mongo-query.ts';
+import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
   return {
@@ -246,5 +247,48 @@ describe('empty filter groups compile to their boolean identity', () => {
         filters: [{ type: 'comparison', field: 'n', operator: 'eq', value: 1 }],
       }),
     ).toEqual({ $or: [{ n: { $eq: 1 } }] });
+  });
+});
+
+describe('nested field paths compile to dotted keys', () => {
+  it('a two-segment path becomes a dotted key in the match document', () => {
+    const expression: FilterExpression = {
+      type: 'comparison',
+      field: ['address', 'city'],
+      operator: 'eq',
+      value: 'NYC',
+    };
+    expect(translateFilter(expression)).toEqual({ 'address.city': { $eq: 'NYC' } });
+  });
+
+  it('a three-segment path joins all segments with dots', () => {
+    const expression: FilterExpression = {
+      type: 'comparison',
+      field: ['profile', 'address', 'city'],
+      operator: 'eq',
+      value: 'Kolkata',
+    };
+    expect(translateFilter(expression)).toEqual({ 'profile.address.city': { $eq: 'Kolkata' } });
+  });
+
+  it('a scalar string field stays unchanged', () => {
+    const expression: FilterExpression = {
+      type: 'comparison',
+      field: 'name',
+      operator: 'eq',
+      value: 'Bolt',
+    };
+    expect(translateFilter(expression)).toEqual({ name: { $eq: 'Bolt' } });
+  });
+
+  it('refuses an empty path array by name', () => {
+    const expression: FilterExpression = {
+      type: 'comparison',
+      field: [],
+      operator: 'eq',
+      value: 'x',
+    };
+    expect(() => translateFilter(expression)).toThrow(UnsupportedQueryFeatureError);
+    expect(() => translateFilter(expression)).toThrow('empty path');
   });
 });

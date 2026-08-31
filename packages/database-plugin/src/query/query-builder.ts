@@ -5,7 +5,7 @@
  * @module
  */
 import type { FilterExpression, NormalizedQuery, OrderDirection } from '@setu-ts/common';
-import type { CountOptions, FindOptions } from './find-options.ts';
+import type { CountOptions, FindOptions, PageOptions } from './find-options.ts';
 
 /**
  * Normalized query representation that adapters can evaluate.
@@ -43,6 +43,67 @@ export function normalizeQuery(options?: FindOptions): NormalizedQuery {
 }
 
 /**
+ * Refusal type returned by {@linkcode normalizePageQuery} when the query carries
+ * both a non-zero offset and a cursor (§3.10). Carried as an error rather than a
+ * throw so callers using `.catch()` on the Promise-returning
+ * {@linkcode IRepository.findPage} see a proper rejection.
+ *
+ * @since 0.2.0
+ */
+export class PageNormalizationError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'PageNormalizationError';
+
+  /**
+   * Creates the error.
+   *
+   * @param message - The full diagnostic, safe to log
+   */
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Normalize {@linkcode PageOptions} into a {@linkcode NormalizedQuery} with
+ * every optional resolved to a concrete default, plus a refusal when both a
+ * non-zero {@linkcode offset} and a {@linkcode cursor} are present.
+ *
+ * A cursor says "after this row"; an offset says "skip this many from the
+ * start". Honouring both would require inventing a composition rule no backend
+ * has, so refusing is the only answer that cannot be wrong (§3.10). The refusal
+ * is returned (not thrown) so the caller's `Promise`-returning
+ * {@linkcode IRepository.findPage} can reject it — a synchronous throw there
+ * would bypass a caller using `.catch()`, which is the defect class documented
+ * at {@linkcode unknownColumnError}.
+ *
+ * @param options - Optional page find options
+ * @returns The normalized query, or a {@linkcode PageNormalizationError} when
+ * the query is invalid
+ * @since 0.2.0
+ */
+export function normalizePageQuery(
+  options?: PageOptions,
+): NormalizedQuery | PageNormalizationError {
+  const offset = options?.offset ?? 0;
+  const hasCursor = options?.cursor !== undefined;
+  if (offset !== 0 && hasCursor) {
+    return new PageNormalizationError(
+      `cursor-pagination: offset=${offset} conflicts with cursor; use one or the other`,
+    );
+  }
+  return {
+    where: options?.where ?? {},
+    ...(options?.filter === undefined ? {} : { filter: options.filter }),
+    orderBy: options?.orderBy ?? {},
+    limit: options?.limit ?? UNLIMITED,
+    offset,
+    select: options?.select ?? [],
+    ...(hasCursor ? { cursor: options.cursor } : {}),
+  };
+}
+
+/**
  * Normalize {@linkcode CountOptions} into a filter map.
  *
  * @param options - Optional count options
@@ -75,6 +136,22 @@ export function matchesWhere<Entity extends Record<string, unknown>>(
   return true;
 }
 
+/** Resolves a value from an entity by walking a path. */
+function resolveEntityPath<Entity extends Record<string, unknown>>(
+  entity: Entity,
+  path: string | readonly string[],
+): unknown {
+  const segments = Array.isArray(path) ? path : [path];
+  let current: unknown = entity;
+  for (const segment of segments) {
+    if (current == null || typeof current !== 'object') {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
 /** Evaluates one portable filter expression against an in-memory entity. */
 export function matchesFilter<Entity extends Record<string, unknown>>(
   entity: Entity,
@@ -86,7 +163,7 @@ export function matchesFilter<Entity extends Record<string, unknown>>(
       : filter.filters.some((child) => matchesFilter(entity, child));
   }
 
-  const actual = entity[filter.field];
+  const actual = resolveEntityPath(entity, filter.field);
   switch (filter.operator) {
     case 'eq':
       return actual === filter.value;
@@ -96,17 +173,34 @@ export function matchesFilter<Entity extends Record<string, unknown>>(
     case 'gt':
       return comparableGreaterThan(actual, filter.value);
     case 'gte':
-      return actual === filter.value || comparableGreaterThan(actual, filter.value);
+      return comparableEquals(actual, filter.value) || comparableGreaterThan(actual, filter.value);
     case 'lt':
       return comparableGreaterThan(filter.value, actual);
     case 'lte':
-      return actual === filter.value || comparableGreaterThan(filter.value, actual);
+      return comparableEquals(actual, filter.value) || comparableGreaterThan(filter.value, actual);
     case 'in':
       return filter.value.some((candidate) => actual === candidate);
   }
 }
 
+/**
+ * Equality for the inclusive comparisons, where `===` is wrong for a `Date`.
+ *
+ * Two `Date` instances for the same instant are never `===`, so `gte`/`lte`
+ * dropped the boundary row of every date range — the inclusive half of the
+ * `Date` widening was inoperative while the strict half worked.
+ */
+function comparableEquals(left: unknown, right: unknown): boolean {
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() === right.getTime();
+  }
+  return left === right;
+}
+
 function comparableGreaterThan(left: unknown, right: unknown): boolean {
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() > right.getTime();
+  }
   return typeof left === 'number' && typeof right === 'number' && left > right ||
     typeof left === 'string' && typeof right === 'string' && left > right;
 }
@@ -252,8 +346,10 @@ export function unknownColumnError(
   query: Pick<NormalizedQuery, 'orderBy' | 'select'>,
 ): Error | undefined {
   const fields = [
-    ...query.select.map((field) => ['select', field] as const),
-    ...Object.keys(query.orderBy).map((field) => ['orderBy', field] as const),
+    ...query.select.map((field) => ['select', Array.isArray(field) ? field[0] : field] as const),
+    ...Object.keys(query.orderBy).map((field) =>
+      ['orderBy', Array.isArray(field) ? field[0] : field] as const
+    ),
   ];
   if (fields.length === 0 || rows.length === 0) return undefined;
 

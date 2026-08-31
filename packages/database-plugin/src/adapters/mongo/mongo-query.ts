@@ -16,6 +16,7 @@ import type {
   NormalizedQuery,
   OrderDirection,
 } from '@setu-ts/common';
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
 
 /**
  * The native driver `find` options the query builder emits.
@@ -53,6 +54,19 @@ export function escapeRegex(value: string): string {
 }
 
 /**
+ * Resolves a field name from a `FilterComparison.field` — either a scalar
+ * string or a path array joined with dots for Mongo's native dotted-key form.
+ *
+ * @param field - The field, as declared on the comparison
+ * @returns The resolved key string
+ * @since 0.2.0
+ */
+export function resolveMongoField(field: string | readonly string[]): string {
+  if (Array.isArray(field)) return field.join('.');
+  return field as string;
+}
+
+/**
  * Translates a single {@linkcode FilterComparison} onto native Mongo match
  * operators.
  *
@@ -72,22 +86,22 @@ export function escapeRegex(value: string): string {
 export function translateComparison(
   comparison: FilterComparison,
 ): Record<string, unknown> | undefined {
-  const { operator } = comparison;
+  const { operator, value } = comparison;
   switch (operator) {
     case 'eq':
-      return { $eq: comparison.value };
+      return { $eq: value };
     case 'contains':
-      return { $regex: escapeRegex(comparison.value), $options: '' };
+      return { $regex: escapeRegex(value), $options: '' };
     case 'gt':
-      return { $gt: comparison.value };
+      return { $gt: value };
     case 'gte':
-      return { $gte: comparison.value };
+      return { $gte: value };
     case 'lt':
-      return { $lt: comparison.value };
+      return { $lt: value };
     case 'lte':
-      return { $lte: comparison.value };
+      return { $lte: value };
     case 'in': {
-      const values = comparison.value;
+      const values = value;
       if (values.length === 0) {
         // An empty `$in` matches nothing — a deliberate, documented edge
         // (M68's `IN` never matched `NULL`, so this is a new Mongo-specific
@@ -133,8 +147,19 @@ export function translateFilter(expression: FilterExpression): Record<string, un
   }
   // Every comparison is nested under its field path so a filter-only `eq`
   // remains a predicate rather than silently matching every document.
+  // Path arrays join to Mongo's native dotted key (P8).
+  // An empty path array is a caller bug — refuse by name (§3.6).
+  if (Array.isArray(expression.field) && expression.field.length === 0) {
+    throw new UnsupportedQueryFeatureError(
+      'nested-path',
+      'mongo',
+      'Mongo adapter refused an empty path (operator ' + expression.operator + ') — ' +
+        'a path array must carry at least one segment.',
+    );
+  }
+  const field = resolveMongoField(expression.field);
   const operators = translateComparison(expression);
-  return { [expression.field]: operators };
+  return { [field]: operators };
 }
 
 /**

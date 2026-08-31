@@ -17,7 +17,7 @@
 # The build stage uses the DEBIAN base, not alpine: alpine links against musl, and a musl-linked
 # binary will not run on a glibc distroless base.
 
-ARG DENO_VERSION=2.9.5
+ARG DENO_VERSION=2.9.6
 
 FROM denoland/deno:${DENO_VERSION} AS build
 

@@ -66,8 +66,16 @@ export const CLEAN_PACKAGES = new Set([
  * are already in this baseline, so the only fixes available were to contradict
  * that decision or to split one member of a three-member family away from the
  * other two. Recorded rather than concealed, following M67.
+ *
+ * M79 re-measured against **Deno 2.9.6** when the CI pin moved off 2.9.5, and
+ * the count fell to 497. That drop is the TOOLCHAIN, not paid-down debt — 2.9.6
+ * reports far fewer diagnostics over an identical tree — so it is neither a
+ * ratchet win nor a regression. It is recorded as a re-measurement so a later
+ * reader does not mistake 753 -> 497 for 256 documentation fixes. Moving the
+ * pin BACK to 2.9.5 requires re-measuring in the same change; the two constants
+ * are only meaningful together.
  */
-export const DOC_LINT_BASELINE = 753;
+export const DOC_LINT_BASELINE = 497;
 
 /**
  * The Deno version {@linkcode DOC_LINT_BASELINE} was measured on.
@@ -77,7 +85,8 @@ export const DOC_LINT_BASELINE = 753;
  * reports **752** diagnostics on Deno 2.9.5 and **496** on 2.9.6, a 256
  * difference from the toolchain alone. So a count is only meaningful against
  * the version that produced the baseline, and comparing across versions is not
- * a stricter check, it is a meaningless one.
+ * a stricter check, it is a meaningless one. The baseline now tracks the 2.9.6
+ * side of that pair.
  *
  * Before this constant existed the ratchet had no way to know that, so a
  * developer on any other Deno saw a permanently red gate whose message told
@@ -89,8 +98,16 @@ export const DOC_LINT_BASELINE = 753;
  * Keep this in step with the `deno-version` pin in `.github/workflows/ci.yml`;
  * CI is the authoritative reading. When that pin moves, re-measure and update
  * BOTH constants in the same change.
+ *
+ * M79 moved that pin from 2.9.5 to 2.9.6 to match the version developers
+ * actually run, which makes the ratchet **comparable locally** rather than
+ * skipped. That matters beyond convenience: while the two disagreed, a local
+ * run reported SKIPPED and a contributor could only learn a new diagnostic's
+ * existence from a red CI job, then had to reproduce it through a Docker
+ * container to find out which symbol it was. This milestone paid that cost once
+ * and closed it.
  */
-export const DOC_LINT_BASELINE_DENO = '2.9.5';
+export const DOC_LINT_BASELINE_DENO = '2.9.6';
 
 /** The outcome of comparing a diagnostic count against the frozen baseline. */
 export interface BaselineVerdict {

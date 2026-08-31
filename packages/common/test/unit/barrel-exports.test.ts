@@ -92,3 +92,26 @@ describe('@setu-ts/common barrel — SessionView (M73)', () => {
     expect(sessionViewShapePinned).toBe(true);
   });
 });
+
+describe('@setu-ts/common barrel — M79 portable data-access contract', () => {
+  it('exports the cursor contract symbols from the barrel', () => {
+    // Type-level: these imports succeed only if the barrel re-exports the names.
+    const _entityKey: import('../../src/index.ts').EntityKey = 'id';
+    const _pageResult: import('../../src/index.ts').PageResult = { rows: [], nextCursor: null };
+    const _cursorPayload: import('../../src/index.ts').CursorPayload = {
+      orderedValues: [1],
+      keyValues: [1],
+      sortFingerprint: 'a:asc',
+    };
+    const _cursorValue: import('../../src/index.ts').CursorValue = new Date(
+      '2026-08-31T00:00:00.000Z',
+    );
+    expect(typeof common.encodeCursor).toBe('function');
+    expect(typeof common.decodeCursor).toBe('function');
+    expect(typeof common.keysetPredicate).toBe('function');
+    expect(_entityKey).toBe('id');
+    expect(_pageResult.rows).toEqual([]);
+    expect(_cursorPayload.orderedValues).toEqual([1]);
+    expect(_cursorValue).toBeInstanceOf(Date);
+  });
+});

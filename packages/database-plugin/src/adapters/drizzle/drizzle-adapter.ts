@@ -7,11 +7,39 @@
  *
  * @module
  */
-import type { DatabaseAdapterOptions } from '../../interfaces/index.ts';
+import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
+import type { FilterComparison } from '@setu-ts/common';
 import { escapeLikePattern } from '../../query/like-escape.ts';
+import {
+  dialectFromDrizzleClassName,
+  jsonPathString,
+  postgresPathArray,
+  type SqlJsonDialect,
+} from '../../query/json-path.ts';
 import { bindRawStatement, type RawStatementTag } from '../../query/raw-statement.ts';
-import type { FilterExpression, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type {
+  CursorPayload,
+  FilterExpression,
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  NormalizedQuery,
+  PageResult,
+} from '@setu-ts/common';
+import {
+  decodeCursor,
+  keysetPredicate,
+  mintNextCursor,
+  resolveKeysetSort,
+  sortFingerprint,
+} from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
+import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
+import {
+  normalizePageQuery,
+  PageNormalizationError,
+  projectFields,
+} from '../../query/query-builder.ts';
 import {
   DRIZZLE_QUERY_HANDLE,
   type DrizzleQueryHandleProvider,
@@ -137,6 +165,14 @@ export type DrizzleOperators = {
    * back for the adapter to measure.
    */
   count: () => unknown;
+  /**
+   * The SQL dialect, needed only to translate a nested JSON filter path — no
+   * two dialects spell JSON extraction alike. Resolved from the explicit
+   * `dialect` option, else from the Drizzle instance's own dialect object.
+   * `undefined` means it could not be determined, and a nested path is then
+   * refused BY NAME rather than emitted in a guessed syntax.
+   */
+  jsonDialect?: SqlJsonDialect;
 };
 
 // ---------------------------------------------------------------------------
@@ -177,6 +213,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     try {
       const orm = await import('npm:drizzle-orm@0.45.2');
       const ns = orm as Record<string, unknown>;
+      // The explicit option wins; otherwise the instance's own dialect object
+      // names it. Drizzle publishes no dialect discriminant, so the class name
+      // is the only signal — which is why the option exists, and why an
+      // unrecognised name refuses a nested path instead of guessing.
+      const jsonDialect = (this._options as DrizzleAdapterOptions | undefined)?.dialect ??
+        dialectFromDrizzleClassName(
+          (this._db as { dialect?: { constructor?: { name?: string } } } | undefined)
+            ?.dialect?.constructor?.name,
+        );
       const operators: DrizzleOperators = {
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
         and: ns.and as (...exprs: unknown[]) => unknown,
@@ -192,6 +237,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         asc: ns.asc as (col: unknown) => unknown,
         desc: ns.desc as (col: unknown) => unknown,
         count: ns.count as () => unknown,
+        ...(jsonDialect === undefined ? {} : { jsonDialect }),
       };
       if (
         typeof operators.eq !== 'function' ||
@@ -232,13 +278,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         'DrizzleAdapter requires options.drizzleTables with at least one real Drizzle table definition.',
       );
     }
-    // The `id` column is a REPOSITORY precondition, not a registry one:
-    // `IRepository.findById`/`update`/`delete` are single-key by contract, but
-    // a composite-key table registered only so the typed query builder can
-    // reach it needs no such column. Enforcing it here made the registry
-    // all-or-nothing and locked ordinary join and per-tenant tables out of the
-    // whole schema. `createDrizzleDataSourceInner` refuses the same table by
-    // name at the moment a repository is actually asked for.
+    // `IRepository.findById`/`update`/`delete` use the per-entity `primaryKey`
+    // override (defaulting to `['id']`) when building predicates. A composite-
+    // key table registered only so the typed query builder can reach it needs
+    // no `id` column — `createDrizzleDataSourceInner` refuses by name at the
+    // moment a repository is asked for, not at `connect()` time.
     for (const [name, table] of Object.entries(tables)) {
       if (table == null || typeof table !== 'object') {
         throw new Error(
@@ -289,6 +333,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const hold = new Deferred<void>();
     const tables = this.resolveTables();
     const operators = this._operators!;
+    const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
 
     const outer = transactionBridge(async (tx) => {
       txReady.resolve(this.validateInstance(tx));
@@ -315,7 +360,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       },
 
       createDataSource(entity: string): DataSource {
-        return createDrizzleDataSourceInner(tx, entity, tables, operators);
+        return createDrizzleDataSourceInner(tx, entity, tables, operators, entities);
       },
 
       async commit(): Promise<void> {
@@ -377,11 +422,13 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     if (!this._db) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
+    const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
     return createDrizzleDataSourceInner(
       this._db,
       entity,
       this.resolveTables(),
       this._operators!,
+      entities,
     );
   }
 
@@ -492,6 +539,7 @@ function createDrizzleDataSourceInner(
   entity: string,
   tables: Record<string, unknown>,
   operators: DrizzleOperators,
+  entities?: Readonly<Record<string, { primaryKey?: string | readonly string[] }>>,
 ): DataSource {
   const table = tables[entity];
   if (table == null || typeof table !== 'object') {
@@ -500,11 +548,17 @@ function createDrizzleDataSourceInner(
     );
   }
   const drizzleTable = table as DrizzleTable;
-  const idColumn = columnFor(drizzleTable, entity, 'id');
+  const primaryKeyOverride = entities?.[entity]?.primaryKey;
+  const keyColumns = resolveKeyColumns(primaryKeyOverride ?? 'id');
 
   return {
     async findById(id) {
-      const rows = await instance.select().from(drizzleTable).where(operators.eq(idColumn, id));
+      const values = keyValues(id, keyColumns, `findById on '${entity}'`);
+      const predicates = keyColumns.map((col, i) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+      );
+      const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
+      const rows = await instance.select().from(drizzleTable).where(predicate);
       return rows[0] ?? null;
     },
 
@@ -528,6 +582,16 @@ function createDrizzleDataSourceInner(
       return await builder;
     },
 
+    findPage: (query) =>
+      findDrizzlePage(
+        instance,
+        drizzleTable,
+        entity,
+        query,
+        operators,
+        keyColumns,
+      ),
+
     async create(data) {
       const rows = await returningRows(
         instance.insert(drizzleTable).values(data),
@@ -538,8 +602,13 @@ function createDrizzleDataSourceInner(
     },
 
     async update(id, data) {
+      const values = keyValues(id, keyColumns, `update on '${entity}'`);
+      const predicates = keyColumns.map((col, i) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+      );
+      const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await returningRows(
-        instance.update(drizzleTable).set(data).where!(operators.eq(idColumn, id)),
+        instance.update(drizzleTable).set(data).where!(predicate),
         entity,
         'update',
       );
@@ -547,8 +616,13 @@ function createDrizzleDataSourceInner(
     },
 
     async delete(id) {
+      const values = keyValues(id, keyColumns, `delete on '${entity}'`);
+      const predicates = keyColumns.map((col, i) =>
+        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+      );
+      const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await returningRows(
-        instance.delete(drizzleTable).where(operators.eq(idColumn, id)),
+        instance.delete(drizzleTable).where(predicate),
         entity,
         'delete',
       );
@@ -568,6 +642,157 @@ function createDrizzleDataSourceInner(
       return Number(rows[0]?.[COUNT_ALIAS] ?? 0);
     },
   };
+}
+
+/** Conjoin the caller's filter with the keyset predicate, preferring either single term. */
+function conjoinFilters(
+  base: FilterExpression | undefined,
+  extra: FilterExpression | undefined,
+): FilterExpression | undefined {
+  if (base === undefined) return extra;
+  if (extra === undefined) return base;
+  return { type: 'and', filters: [base, extra] };
+}
+
+/**
+ * Core `findPage` for the Drizzle data source — the §3.8 keyset pipeline,
+ * shared with the transaction data source (both are built by
+ * {@linkcode createDrizzleDataSourceInner}).
+ *
+ * Pipeline:
+ * 1. `normalizePageQuery` — a non-zero `offset` beside a `cursor` is refused
+ *    by name before any backend call (§3.10).
+ * 2. Decode the incoming cursor. Malformed is refused by name; absent starts
+ *    the walk at page one.
+ * 3. Verify the sort fingerprint, so a cursor minted under one sort and
+ *    presented under another is refused rather than served a silently wrong
+ *    page.
+ * 4. Build the portable keyset predicate with {@linkcode keysetPredicate} and
+ *    conjoin it with the caller's `where` and `filter` — the predicate is a
+ *    `FilterExpression`, so it translates through the existing `predicateFor`
+ *    operator-tree path with no new translation code.
+ * 5. `select` with `where` conjoined, ordered as the caller asked, with
+ *    `limit + 1` (the one-extra-row probe): more than `limit` rows means a
+ *    next page exists and the LAST returned row mints the next cursor;
+ *    otherwise the page is terminal and `nextCursor` is `null`.
+ * 6. When a projection is present, the key columns (and the ordered fields the
+ *    cursor minting reads) join the internal select so they participate in the
+ *    probe and cursor minting, and are stripped from the returned rows so the
+ *    caller's projection is what comes back — plan §8 risk.
+ *
+ * @param instance - The Drizzle instance (or transaction instance)
+ * @param table - The Drizzle table for the entity
+ * @param entity - Entity name, quoted in every refusal
+ * @param query - The normalized page query, carrying an optional `cursor`
+ * @param operators - Drizzle operators loaded at connect
+ * @param keyColumns - The resolved primary-key columns
+ * @returns A {@linkcode PageResult} carrying `rows` and the `nextCursor`
+ * @throws {UnsupportedQueryFeatureError} When the token is malformed or the
+ *   fingerprint does not match the current sort (rejected, never a synchronous
+ *   throw)
+ */
+async function findDrizzlePage(
+  instance: DrizzleInstance,
+  table: DrizzleTable,
+  entity: string,
+  query: NormalizedQuery,
+  operators: DrizzleOperators,
+  keyColumns: readonly string[],
+): Promise<PageResult> {
+  // 1. §3.10 — offset and cursor are contradictory; refuse before any call.
+  const normalized = normalizePageQuery(query);
+  if (normalized instanceof PageNormalizationError) {
+    return Promise.reject(normalized);
+  }
+
+  // 2. Decode cursor. A missing cursor means start of the walk; a malformed
+  //    token is refused by name.
+  let decoded: CursorPayload | null = null;
+  if (normalized.cursor !== undefined) {
+    decoded = decodeCursor(normalized.cursor);
+    if (decoded === null) {
+      return Promise.reject(
+        new UnsupportedQueryFeatureError(
+          'cursor-pagination',
+          'drizzle',
+          `cursor-pagination: entity '${entity}': malformed cursor token`,
+        ),
+      );
+    }
+  }
+
+  // 3. Sort-fingerprint guard — a cross-sort cursor would return a silently
+  //    wrong page.
+  const fingerprint = sortFingerprint(normalized.orderBy);
+  if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
+    return Promise.reject(
+      new UnsupportedQueryFeatureError(
+        'cursor-pagination',
+        'drizzle',
+        `cursor-pagination: entity '${entity}': cursor fingerprint mismatch — expected ` +
+          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
+      ),
+    );
+  }
+
+  // 4. Keyset predicate through the shared builder; it is a FilterExpression,
+  //    so it reaches the delegate through the existing predicateFor path.
+  // ORDER BY must use the RESOLVED sort, not the caller's `orderBy`: the
+  // keyset comparison is expanded over `orderBy` + the key columns, so
+  // sorting by `orderBy` alone leaves tied rows in an order the backend
+  // picks freely and the predicate skips or repeats them.
+  const keysetSort = resolveKeysetSort(normalized.orderBy, keyColumns);
+  const keyset = decoded === null
+    ? undefined
+    : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
+
+  // 5. One-extra-row probe. A non-zero skip is never applied: the keyset
+  //    position replaces offset (and §3.10 refused the two together).
+  const probeLimit = normalized.limit > 0 ? normalized.limit + 1 : normalized.limit;
+  const internalSelect = normalized.select.length > 0
+    ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+    : [];
+  const where = predicateFor(
+    table,
+    entity,
+    normalized.where,
+    operators,
+    conjoinFilters(normalized.filter, keyset),
+  );
+  let builder = instance.select(
+    selectedColumns(table, entity, internalSelect),
+  ).from(table);
+  if (where !== undefined) {
+    builder = builder.where(where);
+  }
+  const order = orderFor(table, entity, keysetSort, operators);
+  if (order.length > 0) {
+    builder = builder.orderBy(...order);
+  }
+  if (probeLimit > 0) {
+    builder = builder.limit(probeLimit);
+  }
+  const found = await builder;
+
+  // 6. Probe outcome: more than `limit` rows means a next page exists and the
+  //    LAST returned row mints the cursor; otherwise the page is terminal.
+  const hasMore = normalized.limit > 0 && found.length > normalized.limit;
+  const pageRows = hasMore ? found.slice(0, normalized.limit) : found;
+  const nextCursor = mintNextCursor(
+    pageRows,
+    normalized.orderBy,
+    keyColumns,
+    fingerprint,
+    hasMore,
+  );
+
+  // 7. The caller's projection is what comes back — the key columns and the
+  //    ordered fields joined the internal select only for the probe and the
+  //    cursor minting, and are stripped here.
+  const rows = internalSelect.length > 0
+    ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
+    : pageRows;
+  return { rows, nextCursor };
 }
 
 /** Result alias the `count(*)` aggregate is read back under. */
@@ -632,36 +857,163 @@ function filterPredicateFor(
     return filter.type === 'and' ? operators.and(...predicates) : filterOperators.or(...predicates);
   }
 
-  const column = columnFor(table, entity, filter.field);
+  // A scalar field addresses the column directly. A multi-segment path
+  // addresses INSIDE a JSON document, which no two dialects spell alike, so it
+  // is translated per dialect below. Reading only `field[0]` compared the ROOT
+  // column and silently returned wrong rows.
+  const segments = Array.isArray(filter.field) ? filter.field : [filter.field];
+  if (segments.length === 0) {
+    throw new UnsupportedQueryFeatureError(
+      'nested-path',
+      'drizzle',
+      `Filter on entity '${entity}' carries an empty field path. ` +
+        'Name at least one column.',
+    );
+  }
+  const baseColumn = columnFor(table, entity, segments[0]);
+  if (segments.length > 1) {
+    return jsonPathPredicate(entity, baseColumn, segments.slice(1), filter, operators);
+  }
+
   switch (filter.operator) {
     case 'eq':
-      return operators.eq(column, filter.value);
+      return operators.eq(baseColumn, filter.value);
     case 'contains':
       // `ESCAPE '\'` is standard SQL and is required, not decorative: SQLite
       // defines no default escape character, so without the clause the
       // backslashes below are matched literally and a search for a value
       // holding `%` or `_` returns nothing at all.
-      return filterOperators.sql`${column} like ${`%${
+      return filterOperators.sql`${baseColumn} like ${`%${
         escapeLikePattern(filter.value)
       }%`} escape '\\'`;
     case 'gt':
-      return filterOperators.gt(column, filter.value);
+      return filterOperators.gt(baseColumn, filter.value);
     case 'gte':
-      return filterOperators.gte(column, filter.value);
+      return filterOperators.gte(baseColumn, filter.value);
     case 'lt':
-      return filterOperators.lt(column, filter.value);
+      return filterOperators.lt(baseColumn, filter.value);
     case 'lte':
-      return filterOperators.lte(column, filter.value);
+      return filterOperators.lte(baseColumn, filter.value);
     case 'in': {
       const nonNullValues = filter.value.filter((value) => value !== null);
       if (!filter.value.includes(null)) {
-        return filterOperators.inArray(column, nonNullValues);
+        return filterOperators.inArray(baseColumn, nonNullValues);
       }
-      const nullPredicate = filterOperators.isNull(column);
+      const nullPredicate = filterOperators.isNull(baseColumn);
       if (nonNullValues.length === 0) return nullPredicate;
-      return filterOperators.or(nullPredicate, filterOperators.inArray(column, nonNullValues));
+      return filterOperators.or(nullPredicate, filterOperators.inArray(baseColumn, nonNullValues));
     }
   }
+}
+
+/**
+ * Build a predicate over a nested JSON path, in the active dialect's syntax.
+ *
+ * Extraction is normalised to TEXT on every dialect and cast back to a number
+ * only for an ordered comparison against a number — see `json-path.ts` for why
+ * the alternative (comparing SQLite's native JSON types against PostgreSQL's
+ * text) makes one filter mean two different things.
+ *
+ * @param entity - Entity name, for diagnostics
+ * @param column - The root column the path descends from
+ * @param path - The path segments below the column, at least one
+ * @param filter - The comparison to translate
+ * @param operators - The Drizzle operator set
+ * @returns The dialect-specific predicate
+ * @throws {UnsupportedQueryFeatureError} When the dialect cannot be determined
+ * or the operator has no JSON-path form
+ */
+function jsonPathPredicate(
+  entity: string,
+  column: unknown,
+  path: readonly string[],
+  filter: FilterComparison,
+  operators: DrizzleOperators,
+): unknown {
+  const ops = requireFilterOperators(operators);
+  const dialect = operators.jsonDialect;
+  if (dialect === undefined) {
+    throw new UnsupportedQueryFeatureError(
+      'nested-path',
+      'drizzle',
+      `Nested filter path on entity '${entity}' needs the SQL dialect, which ` +
+        'could not be determined from the Drizzle instance. Pass ' +
+        "`dialect: 'postgresql' | 'mysql' | 'sqlite'` in DrizzleAdapterOptions.",
+    );
+  }
+
+  // A `Date` has no JSON representation to compare against — a JSON document
+  // stores it as whatever string the writer chose — so it is refused by name
+  // rather than compared as text, the same call D1 makes for its own columns.
+  if (filter.value instanceof Date) {
+    throw new UnsupportedQueryFeatureError(
+      'nested-path',
+      'drizzle',
+      `Nested filter path on entity '${entity}' cannot compare a Date: a JSON ` +
+        'document has no date type, so the stored representation is unknown. ' +
+        'Compare an ISO string, or store the value in its own column.',
+    );
+  }
+
+  const text = (): unknown => {
+    switch (dialect) {
+      case 'postgresql':
+        return ops.sql`(${column} #>> ${postgresPathArray(path)})`;
+      case 'mysql':
+        return ops.sql`JSON_UNQUOTE(JSON_EXTRACT(${column}, ${jsonPathString(path)}))`;
+      case 'sqlite':
+        return ops.sql`CAST(json_extract(${column}, ${jsonPathString(path)}) AS TEXT)`;
+    }
+  };
+  const numeric = (): unknown => {
+    switch (dialect) {
+      case 'postgresql':
+        return ops.sql`(${column} #>> ${postgresPathArray(path)})::numeric`;
+      case 'mysql':
+        return ops
+          .sql`CAST(JSON_UNQUOTE(JSON_EXTRACT(${column}, ${
+          jsonPathString(path)
+        })) AS DECIMAL(65,30))`;
+      case 'sqlite':
+        return ops.sql`json_extract(${column}, ${jsonPathString(path)})`;
+    }
+  };
+  // An ordered comparison against a number must compare numerically; text
+  // ordering makes '9' > '35'.
+  const ordered = typeof filter.value === 'number' ? numeric() : text();
+
+  switch (filter.operator) {
+    case 'eq':
+      return filter.value === null
+        ? ops.sql`${text()} is null`
+        : ops.sql`${text()} = ${String(filter.value)}`;
+    case 'contains':
+      return ops.sql`${text()} like ${`%${escapeLikePattern(filter.value)}%`} escape '\\'`;
+    case 'gt':
+      return ops.sql`${ordered} > ${filter.value}`;
+    case 'gte':
+      return ops.sql`${ordered} >= ${filter.value}`;
+    case 'lt':
+      return ops.sql`${ordered} < ${filter.value}`;
+    case 'lte':
+      return ops.sql`${ordered} <= ${filter.value}`;
+    case 'in': {
+      const values = filter.value.filter((value) => value !== null);
+      const nullLeg = filter.value.includes(null) ? ops.sql`${text()} is null` : undefined;
+      if (values.length === 0) {
+        return nullLeg ?? ops.sql`1 = 0`;
+      }
+      const legs = values.map((value) => ops.sql`${text()} = ${String(value)}`);
+      const anyMatch = legs.length === 1 ? legs[0] : ops.or(...legs);
+      return nullLeg === undefined ? anyMatch : ops.or(nullLeg, anyMatch);
+    }
+  }
+  // Unreachable: `filter.operator` is a closed union and every arm returns.
+  throw new UnsupportedQueryFeatureError(
+    'nested-path',
+    'drizzle',
+    `Unsupported filter operator on entity '${entity}'.`,
+  );
 }
 
 type FilterOperators = Required<
@@ -733,12 +1085,12 @@ function oneReturnedRow(
   entity: string,
   operation: 'create' | 'update',
   rows: readonly Record<string, unknown>[],
-  id?: string | number,
+  _id?: unknown,
 ): Record<string, unknown> {
   const row = rows[0];
   if (row !== undefined) return row;
   if (operation === 'update') {
-    throw new Error(`Entity '${entity}' with id '${id}' not found`);
+    throw new Error(`Entity '${entity}' not found`);
   }
   throw new Error(
     `Drizzle ${operation} for entity '${entity}' returned no row; configure a driver that supports RETURNING.`,

@@ -46,6 +46,159 @@ function createNotFoundError(model: string, id: unknown): Error {
   return error;
 }
 
+/**
+ * Check whether a record matches a Prisma-style `where` clause.
+ * Supports both scalar `{ id: value }` and compound-key `{ <field>: { col1: val1 } }` shapes.
+ */
+function matchWhere(
+  row: Record<string, unknown>,
+  where: Record<string, unknown>,
+): boolean {
+  for (const [key, val] of Object.entries(where)) {
+    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+      const compound = val as Record<string, unknown>;
+      return Object.entries(compound).every(([k, v]) => row[k] === v);
+    }
+    if (row[key] !== val) return false;
+  }
+  return true;
+}
+
+/**
+ * Operators the translated `where` can carry inside a field object. An object
+ * under a field that carries none of these keys is a compound-key match
+ * (`{ tenantId_userId: { tenantId: 't1', userId: 7 } }`) instead.
+ */
+const OPERATOR_KEYS: ReadonlySet<string> = new Set([
+  'equals',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'contains',
+  'in',
+  'path',
+]);
+
+/**
+ * Evaluate a Prisma-style `where` object against a row — the subset of the
+ * operator grammar the adapter emits: flat equality, `AND`/`OR` composition,
+ * field operator objects (`equals`/`gt`/`gte`/`lt`/`lte`/`contains`/`in`,
+ * optionally under a JSON `path`), and compound-key objects whose every entry
+ * must equal the row's fields. A real driver evaluates this grammar on the
+ * backend; the fake evaluates it in memory so cursor walks and filter tests
+ * exercise the emitted predicate rather than accepting it unexamined.
+ *
+ * @param row - The candidate row
+ * @param where - The `where` input a real Prisma client would receive
+ * @returns `true` when the row matches every clause
+ */
+function matchesPrismaWhere(
+  row: Record<string, unknown>,
+  where: Record<string, unknown>,
+): boolean {
+  for (const [key, val] of Object.entries(where)) {
+    if (key === 'AND') {
+      const clauses = val as Record<string, unknown>[];
+      if (!clauses.every((clause) => matchesPrismaWhere(row, clause))) return false;
+      continue;
+    }
+    if (key === 'OR') {
+      const clauses = val as Record<string, unknown>[];
+      if (!clauses.some((clause) => matchesPrismaWhere(row, clause))) return false;
+      continue;
+    }
+    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+      const cond = val as Record<string, unknown>;
+      const keys = Object.keys(cond);
+      if (keys.some((k) => OPERATOR_KEYS.has(k))) {
+        if (!matchesFieldCondition(row, key, cond)) return false;
+        continue;
+      }
+      // Compound-key object: every named column must equal the row's field.
+      if (!keys.every((col) => row[col] === cond[col])) return false;
+      continue;
+    }
+    if (row[key] !== val) return false;
+  }
+  return true;
+}
+
+/**
+ * Evaluate one field condition object (`{ gt: v }`, `{ path: [...], in: [...] }`, …).
+ *
+ * @param row - The candidate row
+ * @param field - The root field the condition hangs on
+ * @param cond - The operator object under the field
+ * @returns `true` when every operator in the condition matches
+ */
+function matchesFieldCondition(
+  row: Record<string, unknown>,
+  field: string,
+  cond: Record<string, unknown>,
+): boolean {
+  let target: unknown = row[field];
+  const path = cond['path'];
+  if (Array.isArray(path)) {
+    for (const segment of path) {
+      if (target === null || typeof target !== 'object') return false;
+      target = (target as Record<string, unknown>)[segment as string];
+    }
+  }
+  for (const [op, value] of Object.entries(cond)) {
+    if (op === 'path') continue;
+    if (!compareOperator(target, op, value)) return false;
+  }
+  return true;
+}
+
+/**
+ * Order two scalar values the way the fake's comparisons need: numeric when
+ * both are numbers, lexicographic otherwise.
+ *
+ * @param a - Left value
+ * @param b - Right value
+ * @returns A negative number, zero, or a positive number
+ */
+function compareScalar(a: unknown, b: unknown): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  const as = String(a ?? '');
+  const bs = String(b ?? '');
+  return as < bs ? -1 : as > bs ? 1 : 0;
+}
+
+/**
+ * Apply one comparison/membership operator to a resolved value.
+ *
+ * @param actual - The row's value (after any `path` navigation)
+ * @param op - The operator name
+ * @param expected - The operator's operand
+ * @returns `true` when the operator matches
+ */
+function compareOperator(actual: unknown, op: string, expected: unknown): boolean {
+  switch (op) {
+    case 'equals':
+      return actual === expected;
+    case 'gt':
+      return compareScalar(actual, expected) > 0;
+    case 'gte':
+      return compareScalar(actual, expected) >= 0;
+    case 'lt':
+      return compareScalar(actual, expected) < 0;
+    case 'lte':
+      return compareScalar(actual, expected) <= 0;
+    case 'contains':
+      return typeof actual === 'string' && typeof expected === 'string' &&
+        actual.includes(expected);
+    case 'in':
+      return Array.isArray(expected) && expected.includes(actual);
+    default:
+      // An operator shape the fake does not model never matches — the honest
+      // wrong answer in a test double, rather than a silent universal match.
+      return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Delegate factory — creates a model delegate backed by an in-memory store
 // ---------------------------------------------------------------------------
@@ -74,6 +227,16 @@ function createDelegate(
   return {
     async findUnique(args: { where: Record<string, unknown> }) {
       recordedCalls.push({ model: modelName, action: 'findUnique', args });
+      // Handle compound-key where: { <compoundField>: { col1: val1, col2: val2 } }
+      for (const [_key, val] of Object.entries(args.where)) {
+        if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
+          const compound = val as Record<string, unknown>;
+          const found = Array.from(store.records.values()).find((row) =>
+            Object.entries(compound).every(([k, v]) => row[k] === v)
+          );
+          return found ?? null;
+        }
+      }
       const id = String(args.where.id ?? args.where[args.where.id ?? 'id']);
       const record = store.records.get(String(id ?? ''));
       return record ?? null;
@@ -83,27 +246,26 @@ function createDelegate(
       recordedCalls.push({ model: modelName, action: 'findMany', args: args ?? {} });
       let rows = Array.from(store.records.values());
 
-      // Simple where filter
+      // Where: evaluate the operator grammar a real driver would (AND/OR,
+      // operator objects, compound keys), not only flat equality — a fake that
+      // matched nothing for a predicate it never parsed would let a cursor
+      // walk "pass" while every page came back empty.
       if (args?.where) {
         const where = args.where;
-        rows = rows.filter((row) => {
-          for (const [key, val] of Object.entries(where)) {
-            if (row[key] !== val) return false;
-          }
-          return true;
-        });
+        rows = rows.filter((row) => matchesPrismaWhere(row, where));
       }
 
-      // Order by (simple asc)
+      // Order by: apply the keys in REVERSE declaration order so the FIRST
+      // declared key is primary, matching Prisma's lexicographic orderBy
+      // semantics (the stable sort keeps the earlier key's order inside ties).
       if (args?.orderBy) {
-        for (const [key, dir] of Object.entries(args.orderBy)) {
+        const entries = Object.entries(args.orderBy).reverse();
+        for (const [key, dir] of entries) {
           const ascending = dir === 'asc' || dir === 'Asc';
           rows.sort((a, b) => {
-            const av = String(a[key] ?? '');
-            const bv = String(b[key] ?? '');
-            if (av < bv) return ascending ? -1 : 1;
-            if (av > bv) return ascending ? 1 : -1;
-            return 0;
+            const cmp = compareScalar(a[key], b[key]);
+            if (cmp === 0) return 0;
+            return ascending ? cmp : -cmp;
           });
         }
       }
@@ -147,25 +309,37 @@ function createDelegate(
 
     async update(args: { where: Record<string, unknown>; data: Record<string, unknown> }) {
       recordedCalls.push({ model: modelName, action: 'update', args });
-      const id = String(args.where.id ?? args.where[args.where.id ?? 'id']);
-      const existing = store.records.get(id);
-      if (!existing) {
-        throw createNotFoundError(modelName, id);
+      // Find the key of the matching record in the store
+      let key: string | undefined;
+      for (const [k, v] of store.records) {
+        if (matchWhere(v, args.where)) {
+          key = k;
+          break;
+        }
       }
+      if (key === undefined) {
+        throw createNotFoundError(modelName, 'composite');
+      }
+      const existing = store.records.get(key)!;
       const updated = { ...existing, ...args.data };
-      store.records.set(id, updated);
+      store.records.set(key, updated);
       return { ...updated };
     },
 
     async delete(args: { where: Record<string, unknown> }) {
       recordedCalls.push({ model: modelName, action: 'delete', args });
-      const id = String(args.where.id ?? args.where[args.where.id ?? 'id']);
-      const existing = store.records.get(id);
-      if (!existing) {
-        throw createNotFoundError(modelName, id);
+      let key: string | undefined;
+      for (const [k, v] of store.records) {
+        if (matchWhere(v, args.where)) {
+          key = k;
+          break;
+        }
       }
-      const deleted = { ...existing };
-      store.records.delete(id);
+      if (key === undefined) {
+        throw createNotFoundError(modelName, 'composite');
+      }
+      const deleted = store.records.get(key)!;
+      store.records.delete(key);
       return deleted;
     },
 
@@ -174,12 +348,7 @@ function createDelegate(
       let rows = Array.from(store.records.values());
       if (args?.where) {
         const where = args.where;
-        rows = rows.filter((row) => {
-          for (const [key, val] of Object.entries(where)) {
-            if (row[key] !== val) return false;
-          }
-          return true;
-        });
+        rows = rows.filter((row) => matchesPrismaWhere(row, where));
       }
       return rows.length;
     },

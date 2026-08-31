@@ -6,14 +6,21 @@
  *
  * @module
  */
-import type { IDatabaseAdapter } from '@setu-ts/common';
+import type { EntityKey, IDatabaseAdapter } from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
-import type { CountOptions, FindOptions } from '../query/find-options.ts';
+import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
+import type { SqlJsonDialect } from '../query/json-path.ts';
 import type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
 import type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
 // Re-export query option types so consumers don't need internal paths.
-export type { CountOptions, FindOptions, OrderDirection } from '../query/find-options.ts';
+export type {
+  CountOptions,
+  FindOptions,
+  OrderDirection,
+  Page,
+  PageOptions,
+} from '../query/find-options.ts';
 
 /**
  * The SQL connector a Prisma client is bound to.
@@ -55,10 +62,10 @@ export type PrismaSqlProvider =
  * Generic repository providing CRUD operations over an entity type.
  *
  * @typeParam Entity - The entity shape the repository manages
- * @typeParam Id - Primary key type (defaults to `string`)
+ * @typeParam Id - Primary key type, constrained to {@linkcode EntityKey} (scalar `string`/`number` or composite record). Defaults to `string`.
  * @since 0.1.0
  */
-export interface IRepository<Entity, Id = string> {
+export interface IRepository<Entity, Id extends EntityKey = string> {
   /**
    * Fetch a single entity by its primary key.
    *
@@ -132,6 +139,16 @@ export interface IRepository<Entity, Id = string> {
    * @since 0.1.0
    */
   count(options?: CountOptions): Promise<number>;
+
+  /**
+   * Find a page of entities by cursor pagination.
+   *
+   * @param options - Find options, optionally carrying a cursor position
+   * @returns The page of entities plus a `nextCursor` that is `null` when the page is the last
+   * @throws {UnsupportedQueryFeatureError} When the bound data source lacks `findPage`
+   * @since 0.2.0
+   */
+  findPage(options: PageOptions): Promise<Page<Entity>>;
 }
 
 /**
@@ -152,7 +169,7 @@ export interface IUnitOfWork {
    * @returns Repository bound to the current transaction
    * @since 0.1.0
    */
-  getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id>;
+  getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id>;
 }
 
 /**
@@ -171,7 +188,7 @@ export interface IDatabaseService {
    * @returns Repository for the entity
    * @since 0.1.0
    */
-  getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id>;
+  getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id>;
 
   /**
    * Execute the `work` callback within a database transaction.
@@ -482,6 +499,54 @@ export interface DatabaseAdapterOptions {
 }
 
 /**
+ * Per-entity overrides for the Prisma adapter.
+ *
+ * Used to customise how the adapter addresses compound-key fields on a Prisma
+ * model — in particular the {@linkcode PrismaCompositeKeyOptions.compositeKeyName}
+ * override that is mandatory when a model uses a named `@@id` constraint.
+ *
+ * @since 0.2.0
+ */
+export interface PrismaCompositeKeyOptions {
+  /**
+   * Override for the derived compound-key field name.
+   *
+   * Prisma generates an unnamed `@@id([a, b])` as `a_b`; a named
+   * `@@id([...], name: "custom")` generates only `custom`. When the derived
+   * name does not match the schema (e.g. a named `@@id`), set this to the
+   * Prisma-side generated field name so `findById`/`update`/`delete` emit the
+   * correct compound-key `where` argument.
+   *
+   * @since 0.2.0
+   */
+  readonly compositeKeyName?: string;
+
+  /**
+   * The primary-key columns for this entity, in Prisma schema declaration order.
+   *
+   * Required when {@linkcode compositeKeyName} is set: the adapter needs the
+   * column names to build the compound-key object that Prisma expects inside
+   * the `where` argument. Omitting it while naming a `compositeKeyName` leaves
+   * the columns at the scalar default `['id']`, and every composite key is
+   * refused for missing the `id` column — measured against live PostgreSQL in
+   * the M79 live suite. Supply every column, in declaration order, for both
+   * unnamed `@@id` (derived field `tenantId_userId`) and named `@@id` models.
+   *
+   * Defaults to `['id']` when absent (scalar-key path).
+   *
+   * @example
+   * ```typescript
+   * // Named @@id: columns must be supplied explicitly.
+   * entities: {
+   *   Enrollment: { compositeKeyName: 'enrollmentKey', keyColumns: ['courseId', 'personId'] },
+   * }
+   * ```
+   * @since 0.2.0
+   */
+  readonly keyColumns?: readonly string[];
+}
+
+/**
  * {@linkcode DatabaseAdapterOptions} narrowed for the Prisma arm: the injected
  * client is required.
  *
@@ -496,6 +561,64 @@ export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
    * @since 0.2.0
    */
   readonly prismaClient: unknown;
+
+  /**
+   * Per-entity overrides for key resolution and other model-specific tuning.
+   *
+   * The only override exercised today is `compositeKeyName` on entities that
+   * carry a named `@@id` constraint — Prisma generates the field name from the
+   * `name:` argument rather than joining column names with `_`, so the derived
+   * name is wrong for such models. Setting the override tells the adapter the
+   * correct field to address in the compound-key `where` argument.
+   *
+   * @example
+   * ```typescript
+   * new PrismaAdapter({
+   *   prismaClient,
+   *   entities: {
+   *     Enrollment: { compositeKeyName: 'enrollmentKey' },
+   *   },
+   * });
+   * ```
+   * @since 0.2.0
+   */
+  readonly entities?: Readonly<Record<string, PrismaCompositeKeyOptions>>;
+}
+
+/**
+ * Per-entity overrides for the Drizzle adapter.
+ *
+ * The only override exercised today is {@linkcode DrizzleCompositeKeyOptions.primaryKey},
+ * which replaces the hardcoded `'id'` column the adapter reads otherwise. A
+ * scalar name yields a single-column key; an array yields a composite-key
+ * predicate that ANDs every named column.
+ *
+ * @since 0.2.0
+ */
+export interface DrizzleCompositeKeyOptions {
+  /**
+   * Primary-key column(s) for this entity.
+   *
+   * Defaults to `['id']` when absent — the adapter's previous hardcoded path,
+   * so an unconfigured entity behaves exactly as it did before, including its
+   * refuse-by-name on an absent `id` column.
+   *
+   * Pass an array for a composite-key table that has no `id` column but carries
+   * a compound primary key (e.g. `{ tenantId, flag }`).
+   *
+   * @example
+   * ```typescript
+   * // Scalar key (default path).
+   * entities: { User: {} }
+   *
+   * // Composite key — replace the hardcoded 'id'.
+   * entities: {
+   *   TenantFlag: { primaryKey: ['tenantId', 'flag'] },
+   * }
+   * ```
+   * @since 0.2.0
+   */
+  readonly primaryKey?: string | readonly string[];
 }
 
 /**
@@ -514,12 +637,56 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
   readonly drizzleInstance: DrizzleDatabaseIdentity;
 
   /**
+   * The SQL dialect, used only to translate a **nested JSON filter path**
+   * (`field: ['profile', 'city']`). No two dialects spell JSON extraction
+   * alike: PostgreSQL uses `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` and
+   * SQLite `json_extract`.
+   *
+   * Absent, the adapter reads the dialect off the Drizzle instance, which
+   * covers every instance Drizzle ships. Set it when that detection cannot
+   * name the dialect — a nested-path filter is then refused by name rather
+   * than emitted in a guessed syntax that would return wrong rows.
+   *
+   * @since 0.2.0
+   */
+  readonly dialect?: SqlJsonDialect;
+
+  /**
    * Entity name → real Drizzle table definition. Required, and must hold at
    * least one entry.
    *
    * @since 0.2.0
    */
   readonly drizzleTables: Record<string, unknown>;
+
+  /**
+   * Per-entity overrides keyed by the entity name passed to
+   * {@linkcode IRepository.getRepository}.
+   *
+   * The only override exercised today is `primaryKey`, which replaces the
+   * hardcoded `'id'` column the adapter reads when building `findById`/
+   * `update`/`delete` predicates. An absent entry falls back to `['id']`,
+   * preserving the prior behaviour (including its refuse-by-name when `id` is
+   * missing from the table).
+   *
+   * @example
+   * ```typescript
+   * import { DatabasePlugin } from '@setu-ts/database-plugin';
+   *
+   * app.register(DatabasePlugin({
+   *   type: 'drizzle',
+   *   options: {
+   *     drizzleInstance: createDrizzleDatabase(db, bridge),
+   *     drizzleTables: { Tenant: tenants, TenantFlag: tenantFlags },
+   *     entities: {
+   *       TenantFlag: { primaryKey: ['tenantId', 'flag'] },
+   *     },
+   *   },
+   * }));
+   * ```
+   * @since 0.2.0
+   */
+  readonly entities?: Readonly<Record<string, DrizzleCompositeKeyOptions>>;
 }
 
 /**

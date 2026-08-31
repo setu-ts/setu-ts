@@ -1108,14 +1108,15 @@ interface IDatabaseService {
   close(): Promise<void>;
 }
 
-interface IRepository<Entity> {
-  findById(id: string): Promise<Entity | null>;
+interface IRepository<Entity, Id extends EntityKey = string> {
+  findById(id: Id): Promise<Entity | null>;
   findAll(options?: FindOptions): Promise<Entity[]>;
   findOne(options?: FindOptions): Promise<Entity | null>;
+  findPage(options: PageOptions): Promise<Page<Entity>>;
   create(data: Partial<Entity>): Promise<Entity>;
-  update(id: string, data: Partial<Entity>): Promise<Entity>;
-  delete(id: string): Promise<boolean>;
-  exists(id: string): Promise<boolean>;
+  update(id: Id, data: Partial<Entity>): Promise<Entity>;
+  delete(id: Id): Promise<boolean>;
+  exists(id: Id): Promise<boolean>;
   count(options?: CountOptions): Promise<number>;
 }
 ```
@@ -1218,19 +1219,183 @@ interface IDatabaseAdapter extends IOrmAdapter {
 
 interface IDataSource {
   findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]>;
-  findById(id: string | number): Promise<Record<string, unknown> | null>;
+  findById(id: EntityKey): Promise<Record<string, unknown> | null>;
   create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>>;
   update(
-    id: string | number,
+    id: EntityKey,
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>>;
-  delete(id: string | number): Promise<boolean>;
+  delete(id: EntityKey): Promise<boolean>;
+  findPage?(query: NormalizedQuery): Promise<PageResult>;
   count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number>;
 }
 ```
 
 A data source owns query evaluation end to end — it applies `where`, `orderBy`, `offset`/`limit` and
 `select` itself, and `BaseRepository` must not re-apply any of them.
+
+**Breaking for implementors as of M79.** `findById`/`update`/`delete` moved from `string | number`
+to `EntityKey`, which adds a composite-record arm. A parameter is contravariant, so an adapter still
+declaring the scalar-only form is a compile error; callers passing a scalar are unaffected. The same
+release widened `FilterComparison.field` to `string | readonly string[]` (an array is a nested
+document path) and the `gt`/`gte`/`lt`/`lte` value to accept `Date`, so any code READING those
+fields must handle both forms.
+
+`findPage` is **optional**. Every adapter this framework ships implements it; an adapter that cannot
+page by cursor omits it, and the repository refuses by name rather than returning an empty page — so
+absence means "this backend cannot page by cursor", never "there are no more rows".
+
+### Composite keys, nested paths and cursor pagination (M79)
+
+`@setu-ts/common` exports the portable data-access contract these three features rest on, and is
+where a backend author imports it from — the codec lives there because `cloudflare-plugin` needs the
+identical encoding and a plugin may not import another plugin (AI_GUIDELINES §2.2).
+
+`@setu-ts/database-plugin` re-exports the subset its own consumers reach for — `EntityKey`,
+`PageResult`, `CursorPayload`, `CursorValue`, `encodeCursor`, `decodeCursor` and `keysetPredicate`.
+`sortFingerprint`, `mintNextCursor` and `resolveKeysetSort` are **not** re-exported; import them
+from `@setu-ts/common`.
+
+| Symbol              | Kind      | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EntityKey`         | type      | A primary key: a scalar `string`/`number`, or a composite `Readonly<Record<string, string \| number>>`. A record rather than an array, because a composite key is named columns and an array would make the caller depend on a column order the mapping owns.                                                                                                                                                              |
+| `PageResult`        | interface | `{ rows, nextCursor }` returned by `IDataSource.findPage`. `nextCursor` is `null` exactly when the page is the last.                                                                                                                                                                                                                                                                                                       |
+| `CursorPayload`     | interface | The decoded contents of a cursor: `orderedValues`, `keyValues`, and a `sortFingerprint`.                                                                                                                                                                                                                                                                                                                                   |
+| `CursorValue`       | type      | A scalar a cursor can carry: `string \| number \| Date`. Dates survive the round trip as `Date`, not as ISO strings.                                                                                                                                                                                                                                                                                                       |
+| `encodeCursor`      | function  | Encodes a `CursorPayload` as an opaque base64url token.                                                                                                                                                                                                                                                                                                                                                                    |
+| `decodeCursor`      | function  | Decodes a token, or returns `null` when it is malformed — it never throws, because the token is untrusted caller input.                                                                                                                                                                                                                                                                                                    |
+| `keysetPredicate`   | function  | Builds the "row after this one" comparison as a portable `FilterExpression`.                                                                                                                                                                                                                                                                                                                                               |
+| `sortFingerprint`   | function  | The stable fingerprint embedded in every cursor.                                                                                                                                                                                                                                                                                                                                                                           |
+| `mintNextCursor`    | function  | Mints the next-page cursor from the last row of a non-terminal page. Refuses a value that cannot survive the wire — `null`/`undefined`, a non-finite number, an invalid `Date`, or a non-scalar — naming the field, because each of those otherwise fails on the NEXT request or one frame from its cause.                                                                                                                 |
+| `resolveKeysetSort` | function  | The sort a keyset comparison is expanded over: the caller's `orderBy` plus any key columns it lacks, appended ascending. **A backend must order by this, not by `orderBy`** — ordering by the caller's fields alone leaves tied rows in an order the database picks freely, and the predicate then skips or repeats them. `keysetPredicate` derives its own comparison from the same function, so the two cannot disagree. |
+
+#### Composite keys
+
+`findById`, `update` and `delete` accept a composite record. Each adapter learns its key columns
+from a per-entity mapping whose primary-key field accepts a column list:
+
+```typescript
+// Cloudflare D1
+new D1Adapter(env.DB as ID1Database, {
+  tables: { Membership: { table: 'memberships', primaryKey: ['tenant_id', 'user_id'] } },
+});
+
+// MongoDB — flat top-level key columns (the default for a composite key)
+DatabasePlugin({
+  type: 'mongodb',
+  options: { url },
+  mongoEntities: { Membership: { primaryKey: ['tenantId', 'userId'] } },
+});
+```
+
+A repository declares its key type and addresses rows with a record:
+
+```typescript
+const repo = db.getRepository<Membership, { tenantId: string; userId: string }>('Membership');
+await repo.findById({ tenantId: 't1', userId: 'u1' });
+```
+
+A scalar key against a multi-column entity, or a record missing a column, is refused by name.
+
+**MongoDB `idType: 'compound'`** stores the composite key as a subdocument `_id`. The subdocument is
+built in the **mapping's** declared column order, never the caller's key-object order: a Mongo
+subdocument `_id` is matched by exact, order-sensitive equality, so `{userId, tenantId}` does not
+match a document stored as `{tenantId, userId}`. The default for a composite key is flat top-level
+columns, which are order-independent and constrained by a unique index.
+
+**Prisma** addresses a compound key through Prisma's own compound-key field. The name is derived by
+joining the key columns with `_`, matching what Prisma generates for an unnamed `@@id`. A model
+declaring a **named** `@@id` must set `compositeKeyName` — Prisma rejects the derived name on such a
+model, so this is required rather than optional:
+
+```typescript
+DatabasePlugin({
+  type: 'prisma',
+  options: { prismaClient },
+  entities: {
+    Membership: { keyColumns: ['tenantId', 'userId'] },
+    Enrollment: { keyColumns: ['courseId', 'personId'], compositeKeyName: 'enrollmentKey' },
+  },
+});
+```
+
+#### Nested field paths
+
+`FilterComparison.field` accepts a `readonly string[]` as a document path. A plain `string` is a
+flat field, unchanged. A dotted string is **not** a path — a column whose name legitimately contains
+a dot keeps its meaning.
+
+```typescript
+await repo.findAll({
+  filter: { type: 'comparison', field: ['address', 'city'], operator: 'eq', value: 'Kolkata' },
+});
+```
+
+Every adapter that supports a path translates it natively; none filters in JavaScript. **D1 is the
+explicit exception** and refuses one by name. An empty path array is always refused — a filter that
+quietly matches everything is a data-exposure defect, not a no-op.
+
+| Adapter | Translation                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------- |
+| Memory  | walks the document                                                                          |
+| Mongo   | the native dotted key (`address.city`)                                                      |
+| Prisma  | the JSON `path` filter — an array on PostgreSQL/CockroachDB, `$.a.b` on MySQL               |
+| Drizzle | per dialect: PostgreSQL `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(…))`, SQLite `json_extract` |
+| D1      | refused by name (SQLite's `LIKE` has no expressible escape character)                       |
+
+Two translation facts are worth knowing before relying on a path filter, both measured rather than
+inferred:
+
+- **`in` is expanded, not translated.** Neither Prisma's JSON path filter nor any SQL dialect offers
+  a path membership operator, so `in` becomes an `OR` of equality legs. An empty list compiles to a
+  match-nothing predicate that binds no values.
+- **Extraction normalises to text, and an ordered comparison against a `number` casts back.**
+  PostgreSQL's `#>>` and MySQL's `JSON_UNQUOTE` are text-valued while SQLite's `json_extract`
+  preserves the JSON type, so without normalising, one filter would mean two different things.
+  Casting back for `gt`/`gte`/`lt`/`lte` on a number is what makes `age > 9` match `30` — as text,
+  `'30' > '9'` is false.
+
+A `Date` is refused on a path filter on every SQL adapter: a JSON document has no date type, so the
+stored representation is whatever the writer chose. Compare an ISO string, or give the value its own
+column.
+
+**Prisma requires `provider`** and **Drizzle may require `dialect`** for a path filter, because the
+syntax differs per connector and neither library publishes a discriminant the adapter can read
+reliably. Drizzle detects its dialect from the instance and needs the option only when detection
+fails; either way, an adapter that cannot determine the syntax **refuses by name** rather than
+emitting a guess — a guessed syntax returns wrong rows on the engine it guessed wrong about, where a
+refusal names the option that fixes it.
+
+```typescript
+DatabasePlugin({
+  type: 'drizzle',
+  options: { drizzleInstance, drizzleTables, dialect: 'postgresql' },
+});
+```
+
+#### Cursor pagination
+
+```typescript
+let cursor: string | null = null;
+do {
+  const page = await repo.findPage({ orderBy: { createdAt: 'desc' }, limit: 50, cursor });
+  handle(page.rows);
+  cursor = page.nextCursor;
+} while (cursor !== null);
+```
+
+`offset` is unchanged and not deprecated; the cursor is additive beside it. A query carrying
+**both** a non-zero `offset` and a `cursor` is refused, because the two express contradictory
+positions — "skip this many from the start" and "after this row".
+
+The cursor is opaque and carries a fingerprint of the sort it was minted under, so presenting it
+under a different `orderBy` is refused rather than served a silently wrong page. The resolved sort
+always ends in the entity's key columns: over rows sharing a sort value, a walk without that
+tiebreaker silently **loses rows** — measured at four of six against live PostgreSQL and MongoDB.
+
+`ORDER BY` on a `Date` column requires the `Date` arm of the ordered comparison, which is why that
+widening ships alongside. Cloudflare D1 refuses a `Date` by name: SQLite has no date type, so the
+adapter cannot know whether the column stores an ISO string or an epoch integer.
 
 ### MongoDB backend (`'mongodb'` arm)
 
@@ -1306,9 +1471,14 @@ return types are nameable from the package entry, as are the collection-level sh
 | `BaseRepository`, `UnitOfWork`                                                                                              | classes                            |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`                                                          | classes                            |
 | `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                            |
-| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`                                                                | classes                            |
+| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                | classes                            |
+| `PageOptions`, `Page`                                                                                                       | types                              |
+| `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                   | types                              |
+| `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                       | types                              |
+| `encodeCursor`, `decodeCursor`, `keysetPredicate` (re-exported from `common`)                                               | functions                          |
 | `MongoTransactionUnavailableError`                                                                                          | class                              |
 | `PrismaSqlProvider`                                                                                                         | type                               |
+| `SqlJsonDialect`                                                                                                            | type                               |
 | `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                          |
 | `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                              |
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                         |

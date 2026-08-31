@@ -7,6 +7,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { DatabaseSync } from 'node:sqlite';
+import type { SQLInputValue } from 'node:sqlite';
+import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
+import { sqliteTable, text as sqliteText } from 'npm:drizzle-orm@0.45.2/sqlite-core';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 import { createDrizzleDatabase } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';
@@ -19,6 +24,7 @@ import type {
   IMetricsApi,
   IMiddlewareApi,
   IOpenApiApi,
+  IPlugin,
   IPluginContext,
   IRouterApi,
 } from '@setu-ts/common';
@@ -137,6 +143,62 @@ function createFakeContext(): IPluginContext {
     options: {},
     app: {} as never,
   };
+}
+
+/**
+ * A runtime-provider test plugin, the `test/e2e/database-application.test.ts`
+ * pattern, that also registers a capturing logger under `CAPABILITIES.LOGGER`
+ * so `logQueries: true` runs have an observable sink.
+ */
+function createTestRuntimePlugin(logs: string[]): IPlugin {
+  const runtime = createFakeRuntime();
+  return {
+    name: 'test-runtime',
+    version: '0.1.0',
+    provides: [CAPABILITIES.RUNTIME, CAPABILITIES.LOGGER],
+    register(ctx: IPluginContext) {
+      ctx.services.register(CAPABILITIES.RUNTIME, runtime);
+      ctx.services.register(CAPABILITIES.LOGGER, {
+        debug: (msg: string) => logs.push(msg),
+      });
+    },
+  };
+}
+
+/** The composite-key table the Drizzle arm drives over real SQLite. */
+const enrollments = sqliteTable('enrollments', {
+  tenantId: sqliteText('tenant_id').primaryKey(),
+  userId: sqliteText('user_id').primaryKey(),
+  course: sqliteText('course').notNull(),
+});
+
+interface ArrayReturningStatement {
+  run(...params: SQLInputValue[]): unknown;
+  all(...params: SQLInputValue[]): unknown[][];
+  setReturnArrays(enabled: boolean): void;
+}
+
+/**
+ * Bridge Drizzle's sqlite-proxy protocol onto a real `node:sqlite` engine —
+ * the `drizzle-query-sqlite.test.ts` precedent. Local file, no network
+ * database.
+ */
+function executeSqlite(
+  engine: DatabaseSync,
+  statement: string,
+  params: readonly SQLInputValue[],
+  method: 'run' | 'all' | 'values' | 'get',
+): Promise<{ rows: unknown[] }> {
+  // Deno's node:sqlite runtime exposes setReturnArrays(), but its Node type
+  // snapshot does not yet declare the method.
+  const prepared = engine.prepare(statement) as unknown as ArrayReturningStatement;
+  if (method === 'run') {
+    prepared.run(...params);
+    return Promise.resolve({ rows: [] });
+  }
+  prepared.setReturnArrays(true);
+  const rows = prepared.all(...params);
+  return Promise.resolve({ rows });
 }
 
 describe('DatabasePlugin integration', () => {
@@ -469,6 +531,135 @@ describe('DatabasePlugin integration', () => {
       expect(await repo.findAll({ where: { n: 7 } })).toEqual([{ id: 'u7', n: 7 }]);
       expect(await repo.count({ where: { n: 7 } })).toBe(1);
       expect(await repo.count()).toBe(10);
+    });
+  });
+
+  // M79 T14 — the cursor-pagination surface wired through the repository and
+  // service layers, proven through real kernel applications rather than a
+  // fake plugin context.
+  describe('cursor pagination through a real kernel application', () => {
+    it('writes and reads back a composite-key repository (drizzle + node:sqlite)', async () => {
+      // The composite key is configured through the PLUGIN options — the
+      // per-entity `entities` bag — which is the only way a key mapping
+      // reaches an adapter through `IDataSource.createDataSource(entity)`.
+      // The table has NO `id` column, so if the bag were dropped at the
+      // plugin boundary every query below would refuse by name instead.
+      const engine = new DatabaseSync(':memory:');
+      engine.exec(
+        'CREATE TABLE enrollments (' +
+          'tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, course TEXT NOT NULL, ' +
+          'PRIMARY KEY (tenant_id, user_id))',
+      );
+      const drizzleDb = sqliteDrizzle((statement, params, method) =>
+        executeSqlite(engine, statement, params, method)
+      );
+      const app = createApplication({
+        plugins: [
+          createTestRuntimePlugin([]),
+          DatabasePlugin({
+            type: 'drizzle',
+            options: {
+              drizzleInstance: createDrizzleDatabase(
+                drizzleDb,
+                (configured, work) => configured.transaction(work),
+              ),
+              drizzleTables: { Enrollment: enrollments },
+              entities: { Enrollment: { primaryKey: ['tenantId', 'userId'] } },
+            },
+          }),
+        ],
+      });
+      await app.start();
+
+      const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      type EnrollmentId = { tenantId: string; userId: string };
+      const repo = db.getRepository<
+        { tenantId: string; userId: string; course: string },
+        EnrollmentId
+      >('Enrollment');
+
+      // Write.
+      await repo.create({ tenantId: 'acme', userId: 'u1', course: 'algebra' });
+      await repo.create({ tenantId: 'acme', userId: 'u2', course: 'biology' });
+
+      // Read back through the composite key.
+      const found = await repo.findById({ tenantId: 'acme', userId: 'u2' });
+      expect(found?.course).toBe('biology');
+
+      // Update through the composite key; the other key half is untouched.
+      const updated = await repo.update({ tenantId: 'acme', userId: 'u2' }, {
+        course: 'chemistry',
+      });
+      expect(updated.course).toBe('chemistry');
+      expect((await repo.findById({ tenantId: 'acme', userId: 'u1' }))?.course).toBe('algebra');
+
+      // Delete through the composite key.
+      expect(await repo.delete({ tenantId: 'acme', userId: 'u1' })).toBe(true);
+      expect(await repo.findById({ tenantId: 'acme', userId: 'u1' })).toBeNull();
+      const survivor = await repo.findById({ tenantId: 'acme', userId: 'u2' });
+      expect(survivor?.course).toBe('chemistry');
+
+      await app.stop();
+    });
+
+    it('cursor walk over a seeded table with sort-key ties returns every row exactly once', async () => {
+      // logQueries: true runs every read through the ONE query-logging
+      // wrapper, so this walk also proves the wrapper forwards findPage
+      // through a real application — without losing the member (the walk
+      // would refuse by name) and while logging the operation.
+      const logs: string[] = [];
+      const app = createApplication({
+        plugins: [
+          createTestRuntimePlugin(logs),
+          DatabasePlugin({ options: { logQueries: true } }),
+        ],
+      });
+      await app.start();
+
+      const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const repo = db.getRepository<{ id: string; n: number }>('User');
+
+      // Deliberate ties on the sort key (the P11 fixture shape): a naive walk
+      // without the key tiebreaker silently loses the tied rows and reports
+      // success.
+      const seeded: ReadonlyArray<readonly [string, number]> = [
+        ['u1', 10],
+        ['u2', 10],
+        ['u3', 20],
+        ['u4', 20],
+        ['u5', 30],
+        ['u6', 40],
+        ['u7', 40],
+      ];
+      for (const [id, n] of seeded) {
+        await repo.create({ id, n });
+      }
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      for (let page = 0; page < 10; page++) {
+        const result = await repo.findPage({
+          orderBy: { n: 'asc' },
+          limit: 3,
+          ...(cursor === null ? {} : { cursor }),
+        });
+        pages += 1;
+        seen.push(...result.rows.map((row) => row.id));
+        if (result.nextCursor === null) break;
+        cursor = result.nextCursor;
+      }
+
+      // Every row exactly once: no duplicates, none skipped.
+      expect([...seen].sort()).toEqual(['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7']);
+      expect(new Set(seen).size).toBe(7);
+      // 7 rows at limit 3 = 3 pages; the last reports a null cursor.
+      expect(pages).toBe(3);
+      // The walk ran through the service's wrapped data source, so the
+      // forwarded findPage operation is what the wrapper logged.
+      expect(logs).toContain('[User] findPage');
+
+      await app.stop();
     });
   });
 });

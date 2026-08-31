@@ -21,6 +21,7 @@ export type {
   DatabaseConnectionOptions,
   DatabasePluginOptions,
   DrizzleAdapterOptions,
+  DrizzleCompositeKeyOptions,
   DrizzleDatabaseOptions,
   FindOptions,
   IDatabaseService,
@@ -32,7 +33,10 @@ export type {
   MongoDatabaseOptions,
   MongoEntityMapping,
   OrderDirection,
+  Page,
+  PageOptions,
   PrismaAdapterOptions,
+  PrismaCompositeKeyOptions,
   PrismaDatabaseOptions,
   PrismaSqlProvider,
 } from './interfaces/index.ts';
@@ -57,6 +61,7 @@ export type {
 export {
   MongoTransactionUnavailableError,
   UnsupportedFilterOperatorError,
+  UnsupportedQueryFeatureError,
   UnsupportedRawQueryError,
 } from './errors.ts';
 
@@ -64,6 +69,9 @@ export {
 // backend author can reach the whole contract from one import, and so the
 // already-exported `DataSource.findAll` parameter type is finally nameable.
 export type {
+  CursorPayload,
+  CursorValue,
+  EntityKey,
   FilterComparison,
   FilterExpression,
   FilterOperator,
@@ -71,7 +79,9 @@ export type {
   IDatabaseAdapter,
   IDataSource,
   NormalizedQuery,
+  PageResult,
 } from '@setu-ts/common';
+export { decodeCursor, encodeCursor, keysetPredicate } from '@setu-ts/common';
 
 // Services
 export { DatabaseService } from './services/database-service.ts';
@@ -88,6 +98,12 @@ export type {
   DrizzleTransaction,
   DrizzleTransactionBridge,
 } from './query/drizzle-query.ts';
+
+// The SQL dialect a nested JSON filter path is translated for. Exported
+// because `DrizzleAdapterOptions.dialect` is typed by it: without this the
+// option's own type is unnameable by a consumer, which is the defect M52c
+// found on `NormalizedQuery` reaching a published `DataSource` signature.
+export type { SqlJsonDialect } from './query/json-path.ts';
 
 // Repository
 export { BaseRepository } from './repositories/base-repository.ts';

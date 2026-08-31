@@ -1,7 +1,7 @@
 // deno-lint-ignore-file require-await -- structural service doubles implement async contracts
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type { EntityKey, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type {
   DatabaseAdapterType,
   IDatabaseService,
@@ -51,7 +51,7 @@ function transaction(): IAdapterTransaction {
 
 function externalService(): IDatabaseService {
   return {
-    getRepository: <Entity, Id = string>(): IRepository<Entity, Id> => {
+    getRepository: <Entity, Id extends EntityKey = string>(): IRepository<Entity, Id> => {
       throw new Error('unused');
     },
     transaction: <T>(): Promise<T> => Promise.reject(new Error('unused')),
@@ -115,7 +115,7 @@ describe('typed Drizzle accessors', () => {
     );
     expect(() => getDrizzleDatabase(externalService(), database)).toThrow(invalid);
     const externalUow: IUnitOfWork = {
-      getRepository: <Entity, Id = string>(): IRepository<Entity, Id> => {
+      getRepository: <Entity, Id extends EntityKey = string>(): IRepository<Entity, Id> => {
         throw new Error('unused');
       },
     };

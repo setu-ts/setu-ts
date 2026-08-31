@@ -43,6 +43,19 @@ function describeBinding(value: unknown): string {
 }
 
 /**
+ * Normalise a public primary-key shape to the internal `readonly string[]`
+ * form a statement builder reads. A scalar name yields a one-element array;
+ * an array passes through unchanged.
+ *
+ * @param primaryKey - The public mapping shape: a single column name or a list
+ * @returns The normalised column list
+ */
+function normalisePrimaryKey(primaryKey: string | readonly string[]): readonly string[] {
+  if (Array.isArray(primaryKey)) return primaryKey;
+  return [primaryKey] as readonly string[];
+}
+
+/**
  * How one entity name maps onto a physical D1 table.
  *
  * @since 0.2.0
@@ -54,9 +67,11 @@ export interface D1EntityMapping {
    */
   readonly table?: string;
   /**
-   * The primary-key column. Defaults to `'id'`.
+   * The primary-key column(s). A scalar name keeps today's single-column
+   * behaviour; an array enables a composite key whose columns are matched
+   * in declaration order. Defaults to `['id']`.
    */
-  readonly primaryKey?: string;
+  readonly primaryKey?: string | readonly string[];
 }
 
 /**
@@ -238,7 +253,7 @@ export class D1Adapter implements IDatabaseAdapter {
     const mapping = this.#tables[entity];
     return {
       table: mapping?.table ?? entity,
-      primaryKey: mapping?.primaryKey ?? DEFAULT_PRIMARY_KEY,
+      primaryKey: normalisePrimaryKey(mapping?.primaryKey ?? DEFAULT_PRIMARY_KEY),
     };
   }
 

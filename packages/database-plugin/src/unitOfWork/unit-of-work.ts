@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { ITransaction } from '@setu-ts/common';
+import type { EntityKey, ITransaction } from '@setu-ts/common';
 import type { IRepository, IUnitOfWork } from '../interfaces/index.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 import {
@@ -35,7 +35,7 @@ export class UnitOfWork implements IUnitOfWork {
   ) {}
 
   /** @inheritdoc */
-  getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id> {
+  getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id> {
     return this._repoFactory(entity) as IRepository<Entity, Id>;
   }
 

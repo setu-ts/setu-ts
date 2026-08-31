@@ -13,10 +13,12 @@
  */
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
-import { UnsupportedFilterOperatorError } from '../../src/errors.ts';
+import { createPrismaDataSource, PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
+import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import { PageNormalizationError } from '../../src/query/query-builder.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
+import { encodeCursor } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 import type { PrismaSqlProvider } from '../../src/interfaces/index.ts';
@@ -87,7 +89,11 @@ describe('PrismaAdapter', () => {
     });
 
     it('rejects missing prismaClient with a generated-client requirement', async () => {
-      const noClientAdapter = new PrismaAdapter({ url: 'postgresql://localhost/test' });
+      const noClientAdapter = new PrismaAdapter(
+        {
+          url: 'postgresql://localhost/test',
+        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
+      );
       await expect(noClientAdapter.connect()).rejects.toThrow('requires options.prismaClient');
     });
 
@@ -189,9 +195,13 @@ describe('PrismaAdapter', () => {
       );
       expect(rows).toEqual([{ name: 'Carol' }]);
       const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      // `orderBy` is an ARRAY of single-key objects, never one multi-key
+      // object: measured against Prisma 7.10 on live PostgreSQL, a two-key
+      // object is rejected outright while an array of any length is accepted
+      // and honours element order as sort precedence.
       expect(call?.args).toEqual({
         where: { role: 'admin' },
-        orderBy: { name: 'asc' },
+        orderBy: [{ name: 'asc' }],
         take: 1,
         skip: 1,
         select: { name: true },
@@ -508,4 +518,607 @@ describe('PrismaAdapter', () => {
       expect((caught as UnsupportedFilterOperatorError).operator).toBe('contains');
     });
   });
+
+  describe('composite key support', () => {
+    it('emits where: { id } byte-for-byte for a scalar key', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      await ds.findById('u1');
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findUnique');
+      expect(call?.args).toEqual({ where: { id: 'u1' } });
+    });
+
+    it('refuses composite findById by name when compositeKeyName is unset', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      // Without compositeKeyName, composite keys are refused by name.
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('composite-key');
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('prisma');
+    });
+
+    /**
+     * A connected data source over an entity whose compound key is named
+     * explicitly.
+     *
+     * One helper rather than three byte-identical setups: the previous form
+     * also carried a `...(entities !== undefined ? …)` spread over a `const`
+     * object literal, a condition that can never be false — drafting residue
+     * flagged by the code-quality bot on all three copies.
+     */
+    async function compoundNameSource(
+      client: ReturnType<typeof createFakePrismaClient>,
+    ): Promise<ReturnType<PrismaAdapter['createDataSourceForEntity']>> {
+      const compAdapter = new PrismaAdapter(
+        {
+          prismaClient: client,
+          entities: {
+            User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
+          },
+        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
+      );
+      await compAdapter.connect();
+      return compAdapter.createDataSourceForEntity('User');
+    }
+
+    it('emits the override compound name when compositeKeyName is set', async () => {
+      const ds = await compoundNameSource(fakeClient);
+      await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
+      await ds.findById({ tenantId: 't1', userId: 7 });
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findUnique');
+      expect(call?.args).toEqual({
+        where: {
+          tenantId_userId: { tenantId: 't1', userId: 7 },
+        },
+      });
+    });
+
+    it('uses the override compound name in update', async () => {
+      const ds = await compoundNameSource(fakeClient);
+      await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
+      await ds.update({ tenantId: 't1', userId: 7 }, { name: 'Alice2' });
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'update');
+      expect(call?.args).toEqual({
+        where: {
+          tenantId_userId: { tenantId: 't1', userId: 7 },
+        },
+        data: { name: 'Alice2' },
+      });
+    });
+
+    it('uses the override compound name in delete', async () => {
+      const ds = await compoundNameSource(fakeClient);
+      await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
+      await ds.delete({ tenantId: 't1', userId: 7 });
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'delete');
+      expect(call?.args).toEqual({
+        where: {
+          tenantId_userId: { tenantId: 't1', userId: 7 },
+        },
+      });
+    });
+
+    it('refuses composite findById by name with UnsupportedQueryFeatureError', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('composite-key');
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('prisma');
+      await expect(
+        ds.findById({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('compositeKeyName');
+    });
+
+    it('refuses composite update by name with UnsupportedQueryFeatureError', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      await expect(
+        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await expect(
+        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
+      ).rejects.toThrow('composite-key');
+      await expect(
+        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
+      ).rejects.toThrow('prisma');
+    });
+
+    it('refuses composite delete by name with UnsupportedQueryFeatureError', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSourceForEntity('User');
+      await expect(
+        ds.delete({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await expect(
+        ds.delete({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('composite-key');
+      await expect(
+        ds.delete({ tenantId: 't1', userId: 7 }),
+      ).rejects.toThrow('prisma');
+    });
+  });
+
+  describe('findPage — keyset cursor pagination (§3.8)', () => {
+    /** Build the sort fingerprint in the format every minted cursor carries. */
+    function fingerprintOf(orderBy: Record<string, string>): string {
+      return Object.entries(orderBy).map(([field, dir]) => `${field}:${dir}`).join(',');
+    }
+
+    it('pages against the recorded arguments: take is limit+1 and no skip is sent', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', createdAt: '2024-01-01' });
+      await ds.create({ id: 'u2', createdAt: '2024-01-02' });
+      await ds.create({ id: 'u3', createdAt: '2024-01-03' });
+
+      const page = await ds.findPage!({
+        where: {},
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+
+      // One findMany call, carrying limit + 1 (the one-extra-row probe) and
+      // NO skip — the keyset position replaces offset (§3.10).
+      const findManyCalls = fakeClient.recordedCalls.filter((c) => c.action === 'findMany');
+      expect(findManyCalls.length).toBe(1);
+      expect(findManyCalls[0]?.args).toEqual({
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: 3,
+      });
+
+      // The minted next cursor IS encodeCursor's output for the LAST returned
+      // row's key values, carrying the resolved sort fingerprint.
+      expect(page.rows.length).toBe(2);
+      expect(page.nextCursor).toBe(
+        encodeCursor({
+          orderedValues: ['2024-01-02', 'u2'],
+          keyValues: ['u2'],
+          sortFingerprint: fingerprintOf({ createdAt: 'asc', id: 'asc' }),
+        }),
+      );
+    });
+
+    it('decodes the presented cursor into the keyset where via prismaFilter', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', createdAt: '2024-01-01' });
+      await ds.create({ id: 'u2', createdAt: '2024-01-02' });
+      await ds.create({ id: 'u3', createdAt: '2024-01-03' });
+
+      const p1 = await ds.findPage!({
+        where: {},
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+      fakeClient.recordedCalls.length = 0;
+
+      const p2 = await ds.findPage!({
+        where: {},
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor: p1.nextCursor!,
+      });
+
+      // The where is the decoded payload's keyset tree — or(lt, and(eq, gt)) —
+      // translated through the existing prismaFilter path; its leaf values are
+      // exactly the values the previous page minted into the token.
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      expect(call?.args.where).toEqual({
+        OR: [
+          { createdAt: { gt: '2024-01-02' } },
+          { AND: [{ createdAt: '2024-01-02' }, { id: { gt: 'u2' } }] },
+        ],
+      });
+      expect(call?.args.take).toBe(3);
+      expect(p2.rows.map((r) => r.id)).toEqual(['u3']);
+      expect(p2.nextCursor).toBeNull();
+    });
+
+    it('conjoins the keyset predicate with the caller where and filter', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', name: 'Alice', role: 'admin' });
+      await ds.create({ id: 'u2', name: 'Bob', role: 'user' });
+      await ds.create({ id: 'u3', name: 'Carol', role: 'admin' });
+
+      // A hand-minted cursor for the position after u2, so the recorded where
+      // is assertable exactly.
+      const cursor = encodeCursor({
+        orderedValues: ['2024-01-02', 'u2'],
+        keyValues: ['u2'],
+        sortFingerprint: fingerprintOf({ createdAt: 'asc', id: 'asc' }),
+      });
+
+      await ds.findPage!({
+        where: { role: 'admin' },
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'a' },
+        orderBy: { createdAt: 'asc', id: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor,
+      });
+
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      expect(call?.args.where).toEqual({
+        AND: [
+          { role: 'admin' },
+          {
+            AND: [
+              { name: { contains: 'a' } },
+              {
+                OR: [
+                  { createdAt: { gt: '2024-01-02' } },
+                  { AND: [{ createdAt: '2024-01-02' }, { id: { gt: 'u2' } }] },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('pages with a caller filter alone on the first page (no cursor yet)', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', name: 'Alice', role: 'admin' });
+      await ds.create({ id: 'u2', name: 'Bob', role: 'user' });
+      await ds.create({ id: 'u3', name: 'Carol', role: 'admin' });
+
+      const page = await ds.findPage!({
+        where: {},
+        filter: { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+        orderBy: { name: 'asc' },
+        limit: 1,
+        offset: 0,
+        select: [],
+      });
+
+      // No keyset predicate yet, so the where is the caller filter alone.
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      expect(call?.args.where).toEqual({ role: 'admin' });
+      expect(call?.args.take).toBe(2);
+      expect(page.rows.map((r) => r.name)).toEqual(['Alice']);
+      expect(page.nextCursor).not.toBeNull();
+    });
+
+    it('walks a tied fixture across three pages with no row repeated or skipped (P10/P11)', async () => {
+      // Deliberate sort-key ties: six rows over only two distinct createdAt
+      // values, so the appended key tiebreaker is load-bearing — a naive
+      // createdAt-only predicate silently loses rows (P11).
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'a', createdAt: '2024-01-01', name: '1' });
+      await ds.create({ id: 'b', createdAt: '2024-01-01', name: '2' });
+      await ds.create({ id: 'c', createdAt: '2024-01-01', name: '3' });
+      await ds.create({ id: 'd', createdAt: '2024-01-02', name: '4' });
+      await ds.create({ id: 'e', createdAt: '2024-01-02', name: '5' });
+      await ds.create({ id: 'f', createdAt: '2024-01-02', name: '6' });
+
+      const seenIds: string[] = [];
+      let cursor: string | null = null;
+      for (let page = 1; page <= 3; page++) {
+        const result = await ds.findPage!({
+          where: {},
+          orderBy: { createdAt: 'asc', id: 'asc' },
+          limit: 2,
+          offset: 0,
+          select: [],
+          ...(cursor !== null ? { cursor } : {}),
+        });
+        if (page < 3) {
+          expect(result.nextCursor).not.toBeNull();
+          cursor = result.nextCursor;
+        } else {
+          expect(result.nextCursor).toBeNull();
+        }
+        for (const row of result.rows) {
+          const id = row.id as string;
+          expect(seenIds).not.toContain(id);
+          seenIds.push(id);
+        }
+      }
+      expect(seenIds.sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    });
+
+    it('reports nextCursor: null on the last page', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', score: 10 });
+      await ds.create({ id: '2', score: 20 });
+      await ds.create({ id: '3', score: 30 });
+
+      const p1 = await ds.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+      expect(p1.rows.length).toBe(2);
+      expect(p1.nextCursor).not.toBeNull();
+
+      const p2 = await ds.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor: p1.nextCursor!,
+      });
+      expect(p2.rows.length).toBe(1);
+      expect(p2.nextCursor).toBeNull();
+    });
+
+    it('rejects by name when the cursor token is malformed', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+
+      await expect(
+        ds.findPage!({
+          where: {},
+          orderBy: { name: 'asc' },
+          limit: 10,
+          offset: 0,
+          select: [],
+          cursor: 'not-base64!!!',
+        }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+    });
+
+    it('rejects by name when the cursor fingerprint does not match the sort', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+      await ds.create({ id: '2', name: 'Bob' });
+
+      // Mint a cursor under one sort ...
+      const first = await ds.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 1,
+        offset: 0,
+        select: [],
+      });
+      expect(first.nextCursor).not.toBeNull();
+      // ... then present it under a DIFFERENT sort.
+      await expect(
+        ds.findPage!({
+          where: {},
+          orderBy: { name: 'desc' },
+          limit: 1,
+          offset: 0,
+          select: [],
+          cursor: first.nextCursor ?? '',
+        }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+    });
+
+    it('refuses a non-zero offset beside a cursor at findPage (§3.10)', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+
+      const cursor = encodeCursor({
+        orderedValues: ['Alice'],
+        keyValues: ['1'],
+        sortFingerprint: fingerprintOf({ name: 'asc' }),
+      });
+      await expect(
+        ds.findPage!({
+          where: {},
+          orderBy: { name: 'asc' },
+          limit: 10,
+          offset: 5,
+          select: [],
+          cursor,
+        }),
+      ).rejects.toThrow(PageNormalizationError);
+      // Refused BEFORE any backend call.
+      expect(fakeClient.recordedCalls.find((c) => c.action === 'findMany')).toBeUndefined();
+    });
+
+    it('adds key columns to the internal select and strips them from returned rows', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: 'u1', name: 'Alice', role: 'admin' });
+      await ds.create({ id: 'u2', name: 'Bob', role: 'user' });
+      await ds.create({ id: 'u3', name: 'Carol', role: 'admin' });
+
+      const page = await ds.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: ['role'],
+      });
+
+      // The internal select carries the caller's projection PLUS the key
+      // column and the ordered field the cursor minting reads.
+      const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      expect(call?.args.select).toEqual({ role: true, id: true, name: true });
+
+      // The caller's projection is what comes back — key column stripped.
+      expect(page.rows.length).toBe(2);
+      expect(page.nextCursor).not.toBeNull();
+      for (const row of page.rows) {
+        expect('id' in row).toBe(false);
+        expect('name' in row).toBe(false);
+        expect(row).toHaveProperty('role');
+      }
+
+      // A cursor minted from a projected page still walks page two, stripped
+      // too — the projection never leaks a key column.
+      const p2 = await ds.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: ['role'],
+        cursor: page.nextCursor!,
+      });
+      expect(p2.rows.length).toBe(1);
+      expect(p2.nextCursor).toBeNull();
+      for (const row of p2.rows) {
+        expect('id' in row).toBe(false);
+        expect(row).toHaveProperty('role');
+      }
+    });
+
+    it('serves findPage from the transaction data source — one shared implementation', async () => {
+      await adapter.connect();
+      const ds = adapter.createDataSource('User');
+      await ds.create({ id: '1', name: 'Alice' });
+      await ds.create({ id: '2', name: 'Bob' });
+      await ds.create({ id: '3', name: 'Carol' });
+
+      const txn = await adapter.beginTransaction();
+      const txDs: DataSource = (txn as IAdapterTransaction).createDataSource('User');
+      const p1 = await txDs.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+      });
+      expect(p1.rows.map((r) => r.name)).toEqual(['Alice', 'Bob']);
+      expect(p1.nextCursor).not.toBeNull();
+
+      const p2 = await txDs.findPage!({
+        where: {},
+        orderBy: { name: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        cursor: p1.nextCursor!,
+      });
+      expect(p2.rows.map((r) => r.name)).toEqual(['Carol']);
+      expect(p2.nextCursor).toBeNull();
+      await txn.commit();
+    });
+  });
+});
+
+/**
+ * Regression guards for the three Prisma key-handling defects found in the
+ * M79 milestone review. Each one passed every gate, the per-file coverage bar
+ * and both publish gates, and each fails without its fix.
+ */
+describe('Prisma key handling — M79 review regressions', () => {
+  /** Records the `where` argument each delegate method receives. */
+  function recordingClient(): { client: never; seen: Record<string, unknown>[] } {
+    const seen: Record<string, unknown>[] = [];
+    const delegate = {
+      findUnique: (a: Record<string, unknown>) => {
+        seen.push(a);
+        return Promise.resolve(null);
+      },
+      update: (a: Record<string, unknown>) => {
+        seen.push(a);
+        return Promise.resolve({});
+      },
+      delete: (a: Record<string, unknown>) => {
+        seen.push(a);
+        return Promise.resolve({});
+      },
+      findMany: () => Promise.resolve([]),
+      create: () => Promise.resolve({}),
+      count: () => Promise.resolve(0),
+    };
+    return { client: { membership: delegate } as never, seen };
+  }
+
+  /**
+   * A malformed composite key must REJECT, never throw synchronously. A
+   * synchronous throw out of a `Promise`-typed method bypasses a caller using
+   * `.catch()` — the M52b/M52c/M70j defect class. Before the fix `findById`
+   * and `update` threw synchronously while `delete` rejected, so one adapter
+   * disagreed with itself about how the same fault surfaces.
+   */
+  for (const method of ['findById', 'update', 'delete'] as const) {
+    it(`rejects rather than throwing synchronously when the composite key is incomplete (${method})`, async () => {
+      const { client } = recordingClient();
+      const source = createSource(client);
+      let threwSynchronously = false;
+      let rejected = false;
+      try {
+        const call = method === 'update'
+          ? source.update({ tenantId: 't1' }, { role: 'x' })
+          : method === 'delete'
+          ? source.delete({ tenantId: 't1' })
+          : source.findById({ tenantId: 't1' });
+        await call.catch(() => {
+          rejected = true;
+        });
+      } catch {
+        threwSynchronously = true;
+      }
+      expect(threwSynchronously).toBe(false);
+      expect(rejected).toBe(true);
+    });
+  }
+
+  /**
+   * The refusal must name the method the caller invoked. `buildCompoundWhere`
+   * hardcoded `findById` into every diagnostic, so an `update` failure sent
+   * the reader to the wrong call site.
+   */
+  it('names the operation that actually failed, not always findById', async () => {
+    const { client } = recordingClient();
+    const source = createSource(client);
+    await expect(source.update({ tenantId: 't1' }, { role: 'x' })).rejects.toThrow(/update on/);
+    await expect(source.delete({ tenantId: 't1' })).rejects.toThrow(/delete on/);
+    await expect(source.findById({ tenantId: 't1' })).rejects.toThrow(/findById on/);
+  });
+
+  /**
+   * A single-column entity configured with a non-`id` key column must address
+   * THAT column. The scalar path emitted a hardcoded `{ id }`, so a scalar
+   * lookup silently queried the wrong column — a wrong row where the model
+   * also has an `id`, and an unknown-field error where it does not.
+   */
+  it('addresses the configured key column on the scalar path, not a hardcoded id', async () => {
+    const { client, seen } = recordingClient();
+    const source = createPrismaDataSource(client, 'Membership', undefined, ['user_id'], undefined);
+    await source.findById('u1');
+    expect(seen[0]).toEqual({ where: { user_id: 'u1' } });
+  });
+
+  /** The default `['id']` keeps the pre-M79 shape byte-identical. */
+  it('keeps the default single-column shape byte-identical to the pre-M79 path', async () => {
+    const { client, seen } = recordingClient();
+    const source = createPrismaDataSource(client, 'Membership');
+    await source.findById('u1');
+    expect(seen[0]).toEqual({ where: { id: 'u1' } });
+  });
+
+  /** Composite key wired end to end through the compound-key field. */
+  function createSource(client: never): DataSource {
+    return createPrismaDataSource(
+      client,
+      'Membership',
+      undefined,
+      ['tenantId', 'userId'],
+      'tenantId_userId',
+    );
+  }
 });

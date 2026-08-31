@@ -5,14 +5,21 @@
  * Mongo service. It drives the lazy import path and reads each write back
  * through the public adapter contract, which a structural double cannot prove.
  *
+ * M79 §6.1 added the behavioural commit of the §1A probes: flat and compound
+ * composite keys with the P4/P5 order-sensitivity guard, the dotted nested
+ * path (P8), the `Date` range (P9), the tied-fixture cursor walk (P10/P11)
+ * and the P11 negative control. §1B carries the container command (a
+ * single-node replica set — the transaction case below needs it).
+ *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
-import type { NormalizedQuery } from '@setu-ts/common';
+import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 
-const mongoUrl = Deno.env.get('MONGODB_URI');
+/** `MONGO_URL` is the §7 gate variable; `MONGODB_URI` is the CI's name. */
+const mongoUrl = Deno.env.get('MONGO_URL') ?? Deno.env.get('MONGODB_URI');
 /**
  * Whether the real-server cases run. They are declared with the BDD `ignore`
  * option rather than an early `return`, so an unset `MONGODB_URI` is reported
@@ -33,8 +40,12 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
     ...(partial.filter === undefined ? {} : { filter: partial.filter }),
+    ...(partial.cursor === undefined ? {} : { cursor: partial.cursor }),
   };
 }
+
+/** A per-run discriminator keeping this run's documents from any other's. */
+const suffix = crypto.randomUUID().replaceAll('-', '');
 
 describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   it('lazily imports the driver and reads CRUD operations back through IDataSource', {
@@ -208,6 +219,351 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
       await abandoned.rollback();
       // The rolled-back write must be absent — the assertion a fake cannot make.
       expect((await source.findAll(query())).map((row) => row.name)).toEqual(['committed']);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // M79 §6.1 — the §1A probes committed as behaviour against the real server.
+  // ---------------------------------------------------------------------------
+
+  it('round-trips a flat composite key regardless of caller key-object order (P3)', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `m79_flat_${suffix}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m79',
+      collections: { Grant: { collection, primaryKey: ['tenantId', 'userId'] } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Grant');
+      // A flat composite stores each named column as a top-level field — the
+      // row reads back without the driver's `_id` at all.
+      const created = await source.create({ tenantId: 'acme', userId: 'u1', role: 'admin' });
+      expect(created).toEqual({ tenantId: 'acme', userId: 'u1', role: 'admin' });
+
+      // Canonical key order…
+      await expect(source.findById({ tenantId: 'acme', userId: 'u1' })).resolves.toEqual(created);
+      // …and the REVERSED caller object: a flat composite filter is a field
+      // map, so it is order-independent (P3 measured Prisma the same way —
+      // the two backends agree here and disagree on compound `_id` below).
+      await expect(source.findById({ userId: 'u1', tenantId: 'acme' })).resolves.toEqual(
+        created,
+      );
+
+      // update returns the updated row; delete reports true.
+      const updated = await source.update({ userId: 'u1', tenantId: 'acme' }, { role: 'owner' });
+      expect(updated).toEqual({ tenantId: 'acme', userId: 'u1', role: 'owner' });
+      await expect(source.delete({ tenantId: 'acme', userId: 'u1' })).resolves.toBe(true);
+      await expect(source.findById({ tenantId: 'acme', userId: 'u1' })).resolves.toBeNull();
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('round-trips a compound-`_id` collection and matches a REVERSE-order key (P4/P5)', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `m79_compound_${suffix}`;
+    // A second, raw client drives the order-sensitivity probe directly against
+    // the server; the driver import stays inside the guarded body.
+    const { MongoClient } = await import('mongodb');
+    const raw = new MongoClient(url);
+    await raw.connect();
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m79',
+      collections: {
+        Grant: { collection, primaryKey: ['tenantId', 'userId'], idType: 'compound' },
+      },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Grant');
+      const created = await source.create({ tenantId: 'acme', userId: 'u1', role: 'admin' });
+      expect(created).toEqual({ tenantId: 'acme', userId: 'u1', role: 'admin' });
+
+      // THE ORDER-SENSITIVITY GUARD (P4) — no fake can produce it. The raw
+      // driver treats `_id` subdocument equality LITERALLY: the row is there,
+      // its `_id` carries the mapping's declared order, and the same key
+      // written in the reverse property order MISSES.
+      const handle = raw.db('setu_m79').collection(collection);
+      const stored = await handle.findOne({ role: 'admin' });
+      expect(stored?._id).toEqual({ tenantId: 'acme', userId: 'u1' });
+      await expect(
+        handle.findOne({ _id: { userId: 'u1', tenantId: 'acme' } }),
+      ).resolves.toBeNull();
+      // The adapter's REVERSE-order caller key still matches (P5): the
+      // adapter rebuilds the subdocument in the MAPPING's declared order,
+      // never the caller's — the reason the `'compound'` arm is safe to ship.
+      await expect(source.findById({ userId: 'u1', tenantId: 'acme' })).resolves.toEqual(
+        created,
+      );
+
+      // update returns the updated row; delete reports true — both through
+      // the same imposed-order key builder.
+      const updated = await source.update({ userId: 'u1', tenantId: 'acme' }, { role: 'owner' });
+      expect(updated).toEqual({ tenantId: 'acme', userId: 'u1', role: 'owner' });
+      await expect(source.delete({ userId: 'u1', tenantId: 'acme' })).resolves.toBe(true);
+      await expect(source.findById({ tenantId: 'acme', userId: 'u1' })).resolves.toBeNull();
+    } finally {
+      await adapter.disconnect();
+      await raw.close();
+    }
+  });
+
+  it('matches a dotted nested-path filter against a real subdocument (P8)', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `m79_nested_${suffix}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m79',
+      collections: { Profile: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Profile');
+      const run = `n-${suffix}`;
+      const cities = ['Kolkata', 'Kolkata', 'Kolkata', 'Mumbai'];
+      for (const [i, city] of cities.entries()) {
+        await source.create({
+          id: `${run}-${i + 1}`,
+          run,
+          profile: { address: { city } },
+        });
+      }
+
+      // P8: the two-segment path joins to Mongo's native dotted key and
+      // matches exactly the three Kolkata subdocuments.
+      const found = await source.findAll(query({
+        where: { run },
+        filter: {
+          type: 'comparison',
+          field: ['profile', 'address', 'city'],
+          operator: 'eq',
+          value: 'Kolkata',
+        },
+      }));
+      expect(found.map((row) => row.id).sort()).toEqual([
+        `${run}-1`,
+        `${run}-2`,
+        `${run}-3`,
+      ]);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('filters a Date range over real BSON dates (P9)', { ignore: skipReal }, async () => {
+    const collection = `m79_dates_${suffix}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m79',
+      collections: { Event: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Event');
+      const run = `d-${suffix}`;
+      const times = [
+        new Date('2026-03-01T00:00:00Z'),
+        new Date('2026-03-02T00:00:00Z'),
+        new Date('2026-03-03T00:00:00Z'),
+      ];
+      for (const [i, createdAt] of times.entries()) {
+        await source.create({ id: `${run}-${i + 1}`, run, createdAt });
+      }
+
+      // P9: a `Date` reaches the driver natively — `gte` from day two…
+      const from = await source.findAll(query({
+        where: { run },
+        filter: {
+          type: 'comparison',
+          field: 'createdAt',
+          operator: 'gte',
+          value: new Date('2026-03-02T00:00:00Z'),
+        },
+      }));
+      expect(from.map((row) => row.id).sort()).toEqual([`${run}-2`, `${run}-3`]);
+
+      // …and strictly before day two.
+      const before = await source.findAll(query({
+        where: { run },
+        filter: {
+          type: 'comparison',
+          field: 'createdAt',
+          operator: 'lt',
+          value: new Date('2026-03-02T00:00:00Z'),
+        },
+      }));
+      expect(before.map((row) => row.id)).toEqual([`${run}-1`]);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('walks a tied fixture across three pages returning every row exactly once (P10/P11)', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `m79_walk_${suffix}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m79',
+      collections: { Walk: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Walk');
+      const run = `w-${suffix}`;
+      // The P11 fixture shape: six rows over only TWO distinct sort values.
+      // The original P10 walk seeded distinct values, so the tiebreaker branch
+      // never executed and the test would have passed against a builder that
+      // omitted it entirely — the ties are deliberate. The sort key is the
+      // numeric `score` (the P10 shape with a JSON-round-trip-stable value).
+      const scores = [30, 30, 30, 10, 10, 10];
+      const ids = scores.map((_, i) => `r${i + 1}-${suffix}`);
+      for (const [i, score] of scores.entries()) {
+        await source.create({ id: ids[i], run, score });
+      }
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      for (let page = 0; page < 10; page++) {
+        const result = await source.findPage!(query({
+          where: { run },
+          orderBy: { score: 'desc' },
+          limit: 2,
+          ...(cursor === null ? {} : { cursor }),
+        }));
+        pages += 1;
+        seen.push(...result.rows.map((row) => String(row.id)));
+        if (result.nextCursor === null) break;
+        cursor = result.nextCursor;
+      }
+
+      // Every row exactly once: no duplicates, none skipped — 6 rows at limit
+      // 2 is exactly 3 pages, and the last reports a null cursor.
+      expect([...seen].sort()).toEqual([...ids].sort());
+      expect(new Set(seen).size).toBe(6);
+      expect(pages).toBe(3);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('walks tied BSON Date values across three pages without losing rows', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `m79_date_walk_${suffix}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m79',
+      collections: { Walk: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Walk');
+      const run = `dw-${suffix}`;
+      const createdAt = [
+        new Date('2026-06-01T00:00:00Z'),
+        new Date('2026-06-01T00:00:00Z'),
+        new Date('2026-06-01T00:00:00Z'),
+        new Date('2026-05-01T00:00:00Z'),
+        new Date('2026-05-01T00:00:00Z'),
+        new Date('2026-05-01T00:00:00Z'),
+      ];
+      const ids = createdAt.map((_, i) => `date-${i + 1}-${suffix}`);
+      for (const [i, value] of createdAt.entries()) {
+        await source.create({ id: ids[i], run, createdAt: value });
+      }
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      for (let page = 0; page < 10; page++) {
+        const result = await source.findPage!(query({
+          where: { run },
+          orderBy: { createdAt: 'desc' },
+          limit: 2,
+          ...(cursor === null ? {} : { cursor }),
+        }));
+        pages += 1;
+        seen.push(...result.rows.map((row) => String(row.id)));
+        if (result.nextCursor === null) break;
+        cursor = result.nextCursor;
+      }
+
+      expect([...seen].sort()).toEqual([...ids].sort());
+      expect(new Set(seen).size).toBe(6);
+      expect(pages).toBe(3);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('LOSES rows on the tied fixture when the key tiebreaker is omitted (P11 negative control)', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `m79_naive_${suffix}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m79',
+      collections: { Walk: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Walk');
+      const run = `x-${suffix}`;
+      const scores = [30, 30, 30, 10, 10, 10];
+      const ids = scores.map((_, i) => `x${i + 1}-${suffix}`);
+      for (const [i, score] of scores.entries()) {
+        await source.create({ id: ids[i], run, score });
+      }
+
+      // The naive walk a builder WITHOUT the key appendix would produce: one
+      // `score < cursor` comparison per page, no key tiebreaker. P11's poison
+      // is silence — the walk must complete without error AND lose rows,
+      // asserted as a loss so a future change that makes the naive walk
+      // correct by accident fails here.
+      const seen: string[] = [];
+      let cursorScore: number | null = null;
+      for (let page = 0; page < 10; page++) {
+        const found = await source.findAll(query({
+          where: { run },
+          orderBy: { score: 'desc' },
+          limit: 2,
+          ...(cursorScore === null ? {} : {
+            filter: {
+              type: 'comparison',
+              field: 'score',
+              operator: 'lt',
+              value: cursorScore,
+            } as FilterExpression,
+          }),
+        }));
+        if (found.length === 0) break;
+        seen.push(...found.map((row) => String(row.id)));
+        cursorScore = found[found.length - 1].score as number;
+      }
+
+      // Three rows share the high score: the first page swallows two of them
+      // and `score < 30` hides the third forever; page two then swallows one
+      // low row and `score < 10` hides two more.
+      expect(seen.length).toBe(4);
+      expect(new Set(seen).size).toBe(4);
+      expect(ids.filter((id) => !seen.includes(id)).length).toBe(2);
     } finally {
       await adapter.disconnect();
     }

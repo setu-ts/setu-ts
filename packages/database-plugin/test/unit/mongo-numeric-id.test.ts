@@ -90,7 +90,7 @@ describe('a legal `_id: null` document', () => {
     // One document per collection may carry `_id: null`, and `toIdString`
     // dereferenced `.toString` before any nullish check, so reading such a
     // document raised `TypeError: Cannot read properties of null`.
-    const target = { collection: 'Widget', primaryKey: 'id', idType: 'auto' } as const;
+    const target = { collection: 'Widget', primaryKey: ['id'], idType: 'auto' } as const;
     expect(fromDriverDocument({ _id: null, name: 'null-key' }, target)).toEqual({
       id: null,
       name: 'null-key',

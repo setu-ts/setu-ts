@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as database from '../../src/index.ts';
 import type {
+  CursorValue,
   DrizzleAdapterOptions,
   DrizzleDatabaseOptions,
   MemoryDatabaseOptions,
@@ -10,6 +11,7 @@ import type {
   MongoEntityMapping,
   PrismaAdapterOptions,
   PrismaDatabaseOptions,
+  SqlJsonDialect,
 } from '../../src/index.ts';
 
 describe('database-plugin barrel exports', () => {
@@ -67,6 +69,28 @@ describe('database-plugin barrel exports', () => {
       'mongodb',
       'users',
     ]);
+  });
+
+  it('re-exports CursorValue from the application-facing data-access contract', () => {
+    const cursorValue: CursorValue = new Date('2026-08-31T00:00:00.000Z');
+    expect(cursorValue).toBeInstanceOf(Date);
+  });
+
+  it('re-exports SqlJsonDialect, which types a published option', () => {
+    // `DrizzleAdapterOptions.dialect` is typed by this union, so without the
+    // re-export the option's own type is unnameable by a consumer — the defect
+    // M52c found on `NormalizedQuery` reaching a published `DataSource`
+    // signature. Pinned at COMPILE time rather than by a runtime assertion: a
+    // type export leaves no runtime trace, so dropping it would keep every
+    // other assertion in this file green (the M56 defect class).
+    const dialects: readonly SqlJsonDialect[] = ['postgresql', 'mysql', 'sqlite'];
+    const configured: DrizzleAdapterOptions['dialect'] = dialects[0];
+    expect(configured).toBe('postgresql');
+    // The whole union is assignable to the option, so the two cannot drift.
+    for (const dialect of dialects) {
+      const arm: DrizzleAdapterOptions['dialect'] = dialect;
+      expect(typeof arm).toBe('string');
+    }
   });
 
   it('exports the Mongo adapter and only its application-facing surface', () => {

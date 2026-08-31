@@ -17,7 +17,7 @@ import type { IUnitOfWork } from '../interfaces/index.ts';
 import { BaseRepository, type DataSource } from '../repositories/base-repository.ts';
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
-import type { IDatabaseAdapter } from '@setu-ts/common';
+import type { EntityKey, IDatabaseAdapter, NormalizedQuery, PageResult } from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
@@ -36,7 +36,7 @@ import {
  *
  * @internal
  */
-class InternalRepo<Entity, Id = string> extends BaseRepository<Entity, Id> {
+class InternalRepo<Entity, Id extends EntityKey = string> extends BaseRepository<Entity, Id> {
   constructor(dataSource: DataSource) {
     super(dataSource);
   }
@@ -74,7 +74,7 @@ export class DatabaseService implements IDatabaseService {
   ) {}
 
   /** Returns a repository bound to the named entity on the outer database scope. */
-  getRepository<Entity, Id = string>(entity: string): IRepository<Entity, Id> {
+  getRepository<Entity, Id extends EntityKey = string>(entity: string): IRepository<Entity, Id> {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
     }
@@ -173,6 +173,19 @@ export class DatabaseService implements IDatabaseService {
     const logger = this._logger;
     const now = this._now;
 
+    // `findPage` is OPTIONAL on `IDataSource` and is bound here, before the
+    // spread, for two reasons. (1) The spread below carries only OWN ENUMERABLE
+    // members — a data source whose `findPage` lives on its PROTOTYPE (a class
+    // implementation, which the contract's method signatures invite) would be
+    // silently dropped, and `BaseRepository.findPage` would then refuse by name
+    // on an adapter that supports cursor pagination exactly when
+    // `logQueries` is on. (2) Forwarding is the wrapper's job, not the
+    // spread's: the override below logs the operation like every other
+    // member. The conditional spread also preserves the §3.7 semantics — when
+    // the underlying source has no `findPage`, the wrapper fabricates none, so
+    // absence still means "cannot page by cursor", never "no more rows".
+    const findPageImpl = ds.findPage?.bind(ds);
+
     return {
       // Spread FIRST, so an OWN ENUMERABLE member `IDataSource` does not
       // REQUIRE — an optional method added to the contract later, or an
@@ -195,6 +208,17 @@ export class DatabaseService implements IDatabaseService {
       // override below calls `ds.method(...)`, so a class-based data source
       // keeps its receiver and its private state (pinned by a test).
       ...ds,
+      ...(findPageImpl === undefined ? {} : {
+        async findPage(query: NormalizedQuery): Promise<PageResult> {
+          const start = now();
+          const result = await findPageImpl(query);
+          logger.debug(`[${entity}] findPage`, {
+            operation: 'findPage',
+            durationMs: now() - start,
+          });
+          return result;
+        },
+      }),
       async findAll(query) {
         const start = now();
         const result = await ds.findAll(query);

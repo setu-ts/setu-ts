@@ -10,6 +10,13 @@
  * on SQLite). This is the regression gate for §3.5: a future adapter cannot
  * reintroduce the `%`/`_` wildcard divergence without failing here.
  *
+ * The M70b table grew a second row kind for M79 (§3.8): the findPage
+ * cursor-walk conformance at the bottom of this file — one seeded fixture
+ * paged through every data source, asserting identical rows and a
+ * byte-identical minted cursor. It extends THIS table rather than living in a
+ * second conformance file, so one file answers "do all five adapters agree?"
+ * for both row kinds.
+ *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
@@ -21,16 +28,20 @@ import {
   type DrizzleOperators,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
+import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { UnsupportedFilterOperatorError } from '../../src/errors.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 import { translateFilter } from '../../src/adapters/mongo/mongo-query.ts';
+import { createD1DataSource } from '../../../cloudflare-plugin/src/database/d1-data-source.ts';
 import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
+import { FakeMongoClient, fakeObjectIdCtor } from '../fixtures/fake-mongo-client.ts';
+import { SqliteD1 } from '../../../cloudflare-plugin/test/d1-fakes.ts';
 
 /**
  * Mock Drizzle operators — the same shape the adapter's `contains` arm builds
@@ -344,7 +355,8 @@ function mongoWhere(filter: FilterExpression): Record<string, unknown> {
   // comparison must be folded into the match document as a field equality to
   // match the reference (Memory's `actual === value`).
   if (filter.type === 'comparison' && filter.operator === 'eq') {
-    return { [filter.field]: filter.value };
+    const field = Array.isArray(filter.field) ? filter.field.join('.') : (filter.field as string);
+    return { [field]: filter.value };
   }
   const expression = { type: 'and', filters: [filter] } as FilterExpression;
   return translateFilter(expression);
@@ -539,5 +551,194 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
     await expect(
       drizzleSource.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: ['sku'] }),
     ).rejects.toThrow("has no 'sku' column");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The §3.8 cursor-walk row of the M70b table — one walk, every data source.
+//
+// Extends the filter table above rather than adding a second conformance
+// file: the same "one query, every adapter" shape, now over `findPage`. The
+// five data sources seed one shared fixture, take the first page, and must
+// return IDENTICAL rows and MINT A BYTE-IDENTICAL cursor token — the token is
+// `encodeCursor` over the last row's ordered + key values under the shared
+// fingerprint, so identity is the guarantee the common helpers sell.
+//
+// Package-boundary seam (§2.2): no plugin depends on another at RUNTIME, and
+// the M79 plan forbids cloudflare-plugin importing database-plugin test
+// fixtures. This row lives in database-plugin's test tree and reaches across
+// to cloudflare-plugin's `createD1DataSource` + `SqliteD1` harness so the D1
+// leg runs on the REAL node:sqlite engine — the one direction the seam
+// allows, and the reason a duplicated D1-side copy of this row in
+// cloudflare-plugin was rejected. The multi-page walk itself is asserted per
+// adapter where the engine models it faithfully (D1: d1-data-source.test.ts
+// three-page tied walk; Mongo/Prisma: the guarded real-server suites).
+//
+// Why the FIRST page only: the Drizzle and Mongo fakes here sort by the first
+// column only and cannot model the keyset tiebreaker faithfully, so a
+// multi-page walk through them would assert behavior the fakes — not the
+// adapters — own. The first page and the minted token are exactly what the
+// shared `@setu-ts/common` helpers guarantee, and they are faithful across
+// all five.
+// ---------------------------------------------------------------------------
+
+/** The shared cursor-walk fixture: distinct `score` values keep page one unambiguous. */
+const WALK_SEED = [
+  { id: 'a', name: 'alpha', score: 1 },
+  { id: 'b', name: 'bravo', score: 2 },
+  { id: 'c', name: 'charlie', score: 3 },
+  { id: 'd', name: 'delta', score: 4 },
+  { id: 'e', name: 'echo', score: 5 },
+  { id: 'f', name: 'foxtrot', score: 6 },
+];
+
+const WALK_ORDER_BY = { score: 'asc' as const };
+const WALK_LIMIT = 3;
+
+/** A normalized page query with one member overridden. */
+function pageQuery(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
+  return {
+    where: partial.where ?? {},
+    orderBy: partial.orderBy ?? {},
+    limit: partial.limit ?? -1,
+    offset: partial.offset ?? 0,
+    select: partial.select ?? [],
+    ...(partial.cursor === undefined ? {} : { cursor: partial.cursor }),
+  };
+}
+
+/**
+ * The data-source shape the walk seeds through and pages with. Only
+ * `findPage` is asserted, but seeding runs through `create`; the five data
+ * sources type these members differently, so a local structural alias keeps
+ * the harness generic without widening to `IDataSource` (whose `findPage?` is
+ * optional).
+ */
+interface IDataSourceLike {
+  create(data: Record<string, unknown>): Promise<Record<string, unknown>>;
+  findPage(
+    query: NormalizedQuery,
+  ): Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
+}
+
+describe('findPage cursor-walk conformance — one walk, every data source (§3.8, M70b table)', () => {
+  it('returns identical rows and mints an identical cursor across all five data sources', async () => {
+    // Memory — the reference adapter.
+    const memory = new MemoryAdapter();
+    await memory.connect();
+    const memorySource = memory.createDataSource('Widget') as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await memorySource.create(row);
+
+    // Prisma — in-memory fake store (the delegate is `client.user`).
+    const prismaClient = createFakePrismaClient({ activeProvider: 'postgresql' });
+    const prismaAdapter = new PrismaAdapter({ prismaClient });
+    await prismaAdapter.connect();
+    const prismaSource = prismaAdapter.createDataSource('User') as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await prismaSource.create(row);
+
+    // Drizzle — in-memory fake instance, extended with the `score` column the
+    // keyset predicate orders by.
+    const drizzleSource = createDrizzleDataSource(
+      createFakeDrizzleInstance() as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'Widget',
+      {
+        Widget: {
+          ...createFakeDrizzleTable('Widget'),
+          score: { name: 'score', table: 'Widget' },
+        },
+      },
+      DRIZZLE_OPERATORS,
+    ) as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await drizzleSource.create(row);
+
+    // Mongo — in-memory fake client.
+    const mongoSource = createMongoDataSource(
+      new FakeMongoClient(),
+      'testdb',
+      'Widget',
+      undefined,
+      fakeObjectIdCtor,
+    ) as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await mongoSource.create(row);
+
+    // D1 — REAL SQLite engine.
+    const d1Db = new SqliteD1(
+      'CREATE TABLE Widget (id TEXT PRIMARY KEY, name TEXT, score INTEGER)',
+    );
+    const d1Source = createD1DataSource(d1Db, {
+      table: 'Widget',
+      primaryKey: ['id'],
+    }) as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await d1Source.create(row);
+
+    const pages = await Promise.all([
+      memorySource.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+      prismaSource.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+      drizzleSource.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+      mongoSource.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+      d1Source.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+    ]);
+
+    const names = ['memory', 'prisma', 'drizzle', 'mongo', 'd1'] as const;
+    const referenceRows = pages[0].rows.map((r) => r.id);
+    const referenceCursor = pages[0].nextCursor;
+
+    for (const [name, page] of names.map((n, i) => [n, pages[i]] as const)) {
+      expect(page.rows.map((r) => r.id), `${name} rows`).toEqual(referenceRows);
+      // The shared `mintNextCursor` produces a byte-identical token on every
+      // adapter — the whole point of the helpers living in `common`.
+      expect(page.nextCursor, `${name} cursor`).toBe(referenceCursor);
+      expect(referenceCursor, 'a cursor was minted').not.toBeNull();
+    }
+  });
+});
+
+describe('keyset ORDER BY includes the key tiebreaker (CodeRabbit #3896481561/#3896481581)', () => {
+  /**
+   * `keysetPredicate` expands its comparison over `orderBy` PLUS the key
+   * columns, so a backend that orders by `orderBy` alone leaves tied rows in
+   * an order it picks freely — and the predicate then skips or repeats them.
+   * That is the P11 row loss arriving through ORDER BY instead of WHERE.
+   *
+   * The fixture seeds each tie group in DESCENDING id order, deliberately
+   * opposite to the ascending key tiebreaker. A store that returns insertion
+   * order therefore disagrees with the predicate unless the sort is resolved,
+   * which is what the original ascending-order fixture could not show.
+   */
+  const rows = [
+    { id: 'e', createdAt: '2026-02-02' },
+    { id: 'd', createdAt: '2026-02-02' },
+    { id: 'c', createdAt: '2026-02-02' },
+    { id: 'b', createdAt: '2026-02-01' },
+    { id: 'a', createdAt: '2026-02-01' },
+  ];
+
+  it('resolves the sort so a tied walk returns every row exactly once', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const source = adapter.createDataSource('Tied');
+    for (const row of rows) await source.create(row);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const q: NormalizedQuery = {
+        where: {},
+        orderBy: { createdAt: 'desc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        ...(cursor === undefined ? {} : { cursor }),
+      };
+      const result = await source.findPage!(q);
+      seen.push(...result.rows.map((r) => String(r.id)));
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+    expect(seen).toHaveLength(rows.length);
+    expect(new Set(seen).size).toBe(rows.length);
+    // The resolved sort is `createdAt desc, id asc`, so within each tie group
+    // the ids come back ascending even though they were inserted descending.
+    expect(seen).toEqual(['c', 'd', 'e', 'a', 'b']);
   });
 });

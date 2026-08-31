@@ -1,4 +1,3 @@
-// deno-lint-ignore-file require-await -- test fixtures must be async to satisfy IRepository
 /**
  * Unit tests for BaseRepository.
  *
@@ -12,8 +11,11 @@ import {
   applyPagination,
   matchesFilter,
   matchesWhere,
+  PageNormalizationError,
   projectFields,
 } from '../../src/query/query-builder.ts';
+import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import type { FindOptions } from '../../src/query/find-options.ts';
 
 interface TestEntity {
   id: string;
@@ -35,6 +37,7 @@ function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] }
   return {
     records,
     async findAll(query) {
+      await Promise.resolve();
       let result = [...records] as unknown as Record<string, unknown>[];
       if (Object.keys(query.where).length > 0) {
         result = result.filter((row) => matchesWhere(row, query.where));
@@ -51,27 +54,32 @@ function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] }
       return result;
     },
     async findById(id: string | number) {
+      await Promise.resolve();
       const found = records.find((r) => r.id === id);
       return found ? { ...found } as unknown as Record<string, unknown> : null;
     },
     async create(data) {
+      await Promise.resolve();
       const entity = { id: crypto.randomUUID(), ...data };
       records.push(entity);
       return entity as unknown as Record<string, unknown>;
     },
     async update(id: string | number, data) {
+      await Promise.resolve();
       const index = records.findIndex((r) => r.id === id);
       if (index === -1) throw new Error('not found');
       records[index] = { ...records[index], ...data };
       return { ...records[index] } as unknown as Record<string, unknown>;
     },
     async delete(id: string | number) {
+      await Promise.resolve();
       const index = records.findIndex((r) => r.id === id);
       if (index === -1) return false;
       records.splice(index, 1);
       return true;
     },
     async count(where) {
+      await Promise.resolve();
       let result = [...records];
       for (const [key, value] of Object.entries(where)) {
         result = result.filter((r) => r[key as keyof TestEntity] === value);
@@ -82,7 +90,7 @@ function createTestDataSource(): DataSource & { records: Partial<TestEntity>[] }
 }
 
 class TestRepository extends BaseRepository<TestEntity, string> {
-  constructor(dataSource: ReturnType<typeof createTestDataSource>) {
+  constructor(dataSource: DataSource & { records: Partial<TestEntity>[] }) {
     super(dataSource);
   }
 }
@@ -226,4 +234,224 @@ describe('BaseRepository', () => {
       expect(await repo.count({ where: { active: true } })).toBe(1);
     });
   });
+
+  describe('findPage', () => {
+    it('refuses by name when the data source omits findPage', async () => {
+      // Build a fake data source that has all required members EXCEPT findPage.
+      // Use an anonymous subclass to bypass the protected constructor.
+      class StubRepo extends BaseRepository<TestEntity, string> {
+        constructor() {
+          super({
+            findAll: async () => await Promise.resolve([]),
+            findById: async () => await Promise.resolve(null),
+            create: async () => await Promise.resolve({}),
+            update: async () => await Promise.resolve({}),
+            delete: async () => await Promise.resolve(false),
+            count: async () => await Promise.resolve(0),
+          } as unknown as DataSource);
+        }
+      }
+      const repoWithoutFindPage = new StubRepo();
+      await expect(repoWithoutFindPage.findPage({} as FindOptions)).rejects.toThrow(
+        UnsupportedQueryFeatureError,
+      );
+      await expect(repoWithoutFindPage.findPage({} as FindOptions)).rejects.toThrow(
+        'cursor pagination',
+      );
+    });
+
+    it('still passes scalar round trips through findById/update/delete', async () => {
+      ds.records.push({ id: '1', name: 'Alice', active: true });
+      const entity = await repo.findById('1');
+      expect(entity).not.toBeNull();
+      expect(entity!.name).toBe('Alice');
+
+      const updated = await repo.update('1', { name: 'Alicia' });
+      expect(updated.name).toBe('Alicia');
+
+      const deleted = await repo.delete('1');
+      expect(deleted).toBe(true);
+    });
+
+    it('forwards findPage when the data source exposes it', async () => {
+      const dsWithFindPage = createTestDataSource();
+      // Add findPage to the test data source.
+      (dsWithFindPage as unknown as DataSource & {
+        findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
+      }).findPage = () =>
+        Promise.resolve({
+          rows: [{ id: '1', name: 'Page1', active: true }],
+          nextCursor: null,
+        });
+      const repoWithFindPage = new TestRepository(dsWithFindPage);
+      const page = await repoWithFindPage.findPage({});
+      expect(page.rows.length).toBe(1);
+      expect(page.rows[0].name).toBe('Page1');
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it('carries the cursor into the query the adapter receives', async () => {
+      // The repository is the layer that turns PageOptions.cursor into
+      // NormalizedQuery.cursor. A normalizer without a cursor member drops it
+      // silently, and every page through this surface becomes page one — the
+      // caller cannot distinguish a broken walk from an empty table.
+      const dsWithFindPage = createTestDataSource();
+      const seen: unknown[] = [];
+      (dsWithFindPage as unknown as DataSource & {
+        findPage?: (query: unknown) => Promise<{
+          rows: Record<string, unknown>[];
+          nextCursor: string | null;
+        }>;
+      }).findPage = (query: unknown) => {
+        seen.push(query);
+        return Promise.resolve({ rows: [], nextCursor: null });
+      };
+      const repoWithFindPage = new TestRepository(dsWithFindPage);
+      await repoWithFindPage.findPage({ cursor: 'tok-1', limit: 3 });
+      expect(seen.length).toBe(1);
+      expect((seen[0] as { cursor?: string }).cursor).toBe('tok-1');
+    });
+
+    it('rejects a cursor beside a non-zero offset before reaching the adapter', async () => {
+      // §3.10 — the two members answer the same question from contradictory
+      // positions. The refusal rejects (§3.12), and the adapter is never called.
+      const dsWithFindPage = createTestDataSource();
+      let reached = false;
+      (dsWithFindPage as unknown as DataSource & {
+        findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
+      }).findPage = () => {
+        reached = true;
+        return Promise.resolve({ rows: [], nextCursor: null });
+      };
+      const repoWithFindPage = new TestRepository(dsWithFindPage);
+      await expect(
+        repoWithFindPage.findPage({ offset: 5, cursor: 'tok-1' }),
+      ).rejects.toThrow(PageNormalizationError);
+      await expect(
+        repoWithFindPage.findPage({ offset: 5, cursor: 'tok-1' }),
+      ).rejects.toThrow('conflicts with cursor');
+      expect(reached).toBe(false);
+    });
+  });
+
+  describe('composite key round trip', () => {
+    interface CompositeEntity {
+      tenantId: string;
+      userId: string;
+      name: string;
+    }
+
+    class CompositeRepo
+      extends BaseRepository<CompositeEntity, { tenantId: string; userId: string }> {
+      constructor(dataSource: DataSource) {
+        super(dataSource);
+      }
+    }
+
+    function createCompositeDataSource(): DataSource {
+      const records: Record<string, unknown>[] = [];
+      return {
+        async findAll(query) {
+          await Promise.resolve();
+          let result = [...records] as Record<string, unknown>[];
+          if (Object.keys(query.where).length > 0) {
+            result = result.filter((row) => matchesWhere(row, query.where));
+          }
+          if (query.filter !== undefined) {
+            result = result.filter((row) => matchesFilter(row, query.filter!));
+          }
+          result = applyOrderBy(result, query.orderBy);
+          result = applyPagination(result, query.offset, query.limit);
+          if (query.select.length > 0) {
+            return result.map((row) => projectFields(row, query.select) as Record<string, unknown>);
+          }
+          return result;
+        },
+        async findById(id) {
+          await Promise.resolve();
+          if (typeof id === 'string' || typeof id === 'number') {
+            const found = records.find((r) => r.id === id);
+            return found ?? null;
+          }
+          const found = records.find(
+            (r) =>
+              (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
+              (r as Record<string, unknown>)['userId'] === id['userId'],
+          );
+          return found ?? null;
+        },
+        async create(data) {
+          await Promise.resolve();
+          const entity = { tenantId: 't1', userId: 'u1', ...data };
+          records.push(entity);
+          return entity;
+        },
+        async update(id, data) {
+          await Promise.resolve();
+          const index = records.findIndex((r) => {
+            if (typeof id === 'string' || typeof id === 'number') return r.id === id;
+            return (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
+              (r as Record<string, unknown>)['userId'] === id['userId'];
+          });
+          if (index === -1) throw new Error('not found');
+          records[index] = { ...records[index], ...data };
+          return records[index];
+        },
+        async delete(id) {
+          await Promise.resolve();
+          const index = records.findIndex((r) => {
+            if (typeof id === 'string' || typeof id === 'number') return r.id === id;
+            return (r as Record<string, unknown>)['tenantId'] === id['tenantId'] &&
+              (r as Record<string, unknown>)['userId'] === id['userId'];
+          });
+          if (index === -1) return false;
+          records.splice(index, 1);
+          return true;
+        },
+        async count(where) {
+          await Promise.resolve();
+          return records.filter((r) => matchesWhere(r, where)).length;
+        },
+      };
+    }
+
+    it('round-trips findById through a repository declared with a composite key type', async () => {
+      const ds = createCompositeDataSource();
+      const repo = new CompositeRepo(ds);
+      await repo.create({ name: 'Alice' });
+      const found = await repo.findById({ tenantId: 't1', userId: 'u1' });
+      expect(found).not.toBeNull();
+      expect(found!.name).toBe('Alice');
+      const missing = await repo.findById({ tenantId: 't2', userId: 'u9' });
+      expect(missing).toBeNull();
+    });
+
+    it('round-trips update through a repository declared with a composite key type', async () => {
+      const ds = createCompositeDataSource();
+      const repo = new CompositeRepo(ds);
+      await repo.create({ name: 'Alice' });
+      const updated = await repo.update({ tenantId: 't1', userId: 'u1' }, { name: 'Alicia' });
+      expect(updated.name).toBe('Alicia');
+    });
+
+    it('round-trips delete through a repository declared with a composite key type', async () => {
+      const ds = createCompositeDataSource();
+      const repo = new CompositeRepo(ds);
+      await repo.create({ name: 'Alice' });
+      expect(await repo.delete({ tenantId: 't1', userId: 'u1' })).toBe(true);
+      const found = await repo.findById({ tenantId: 't1', userId: 'u1' });
+      expect(found).toBeNull();
+      expect(await repo.delete({ tenantId: 't1', userId: 'u1' })).toBe(false);
+    });
+  });
 });
+
+// @ts-expect-error — `Date` is not assignable to `EntityKey` (`string | number | Record<...>`).
+// This pins that an out-of-constraint `Id` type is refused at the declaration site.
+// A type that is not a subtype of EntityKey (e.g. `Date`, `symbol`, `null`) would be rejected
+// by the `Id extends EntityKey` constraint on `IRepository` / `BaseRepository`.
+class _BadIdRepo extends BaseRepository<TestEntity, Date> {
+  constructor(ds: DataSource) {
+    super(ds);
+  }
+}

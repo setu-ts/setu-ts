@@ -402,7 +402,7 @@ error[private-type-ref]: public type references private type
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the frozen baseline of 753', () => {
+    it('is the frozen baseline of 497, measured on the pinned Deno', () => {
       // 776 when the plan was written against a pre-M56 tree; merging
       // origin/main brought M56-M61's JSDoc and the real count fell to 775.
       // M59 then added four diagnostics and removed five, so it fell to 774.
@@ -433,7 +433,19 @@ error[private-type-ref]: public type references private type
       // rather than concealed, following M67.
       // The ratchet refused the stale constant in BOTH directions and named
       // the new number, which is exactly the behaviour §3.10 specifies.
-      expect(DOC_LINT_BASELINE).toBe(753);
+      //
+      // M79 moved the CI `deno-version` pin from 2.9.5 to 2.9.6 so the ratchet
+      // is comparable on the version developers actually run, and re-measured:
+      // 497. That 753 -> 497 fall is the TOOLCHAIN, not 256 documentation
+      // fixes — 2.9.6 reports far fewer diagnostics over an identical tree —
+      // so it is neither a ratchet win nor a regression. Reproduced on the host
+      // and in the official `denoland/deno:2.9.6` container, which is what
+      // distinguishes a real reading from a local artifact.
+      expect(DOC_LINT_BASELINE).toBe(497);
+      // The pin and the baseline are only meaningful together, so the version
+      // is asserted beside the count: moving one without the other is exactly
+      // the drift this pair exists to make impossible.
+      expect(DOC_LINT_BASELINE_DENO).toBe('2.9.6');
     });
   });
 

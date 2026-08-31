@@ -39,6 +39,43 @@ export interface FindOptions {
   readonly offset?: number;
   /** Select only specific fields (projection). */
   readonly select?: readonly string[];
+  /**
+   * A keyset cursor position, or `undefined` when the query starts at the
+   * first page. Carried alongside {@linkcode offset} rather than replacing it:
+   * an offset says "skip this many from the start" and a cursor says "after
+   * this row", and the two are contradictory — a query carrying both is
+   * refused by name (`UnsupportedQueryFeatureError`).
+   */
+  readonly cursor?: string;
+}
+
+/**
+ * Options for {@linkcode IRepository.findPage} — the parameter shape.
+ *
+ * Extends {@linkcode FindOptions} with no additional members; included as a
+ * distinct named type so the repository surface can document it separately
+ * from the `findAll` options.
+ *
+ * @since 0.1.0
+ */
+export type PageOptions = FindOptions;
+
+/**
+ * A single page of entities returned by {@linkcode IRepository.findPage},
+ * plus the cursor that continues to the next page (or `null` when the page
+ * is the last).
+ *
+ * The typed form of {@linkcode PageResult}: `rows` carries `Entity[]` rather
+ * than `Record<string, unknown>[]`.
+ *
+ * @typeParam Entity - The entity shape the repository manages
+ * @since 0.2.0
+ */
+export interface Page<Entity = Record<string, unknown>> {
+  /** The rows in this page, already filtered, sorted, paginated and projected. */
+  readonly rows: Entity[];
+  /** A cursor to fetch the next page, or `null` when no further page exists. */
+  readonly nextCursor: string | null;
 }
 
 /**

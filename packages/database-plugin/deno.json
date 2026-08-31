@@ -3,7 +3,9 @@
   "version": "0.1.0-alpha.10",
   "license": "MIT",
   "exports": "./src/index.ts",
+  "exclude": ["test/fixtures/prisma-client-generated"],
   "imports": {
+    "@prisma/client": "npm:@prisma/client@^7.10.0",
     "mongodb": "npm:mongodb@^6.21.0"
   },
   "test": {
@@ -12,7 +14,7 @@
       "import": true,
       "env": true,
       "sys": ["hostname", "osRelease"],
-      "net": ["127.0.0.1:27017", "localhost:27017"]
+      "net": ["127.0.0.1:27017", "localhost:27017", "127.0.0.1:5433"]
     }
   }
 }
