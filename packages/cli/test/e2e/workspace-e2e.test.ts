@@ -480,7 +480,8 @@ describe('workspace scaffolding — end to end', () => {
     const project = `${ws}/apps/web`;
     const config = await Deno.readTextFile(`${project}/setu.config.ts`);
     expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
-    expect(config).toContain('app.register(GrpcPlugin());');
+    expect(config).toContain("app.register(GrpcPlugin({ basePath: '/grpc' }));");
+    expect(config).toContain('csrf: { exclude: [/^\\/grpc(?:\\/|$)/] },');
 
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, [

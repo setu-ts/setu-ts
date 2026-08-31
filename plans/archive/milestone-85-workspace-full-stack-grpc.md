@@ -5,16 +5,17 @@
 
 ## 0. Objective & scope
 
-Close smoke finding X14-1: permit `setu generate app <name> --template full-stack` in a workspace
-whose transport is `grpc`, and render the transport's `GrpcPlugin()` registration after the
-full-stack starter factory has created the application. The repair is confined to the CLI renderer,
-its regression coverage, and the public CLI contract that describes the supported composition.
+Close smoke findings X14-1 and X14-2: permit `setu generate app <name> --template full-stack` in a
+`grpc` workspace, preserve its `GrpcPlugin()` registration after the starter factory, and exempt
+only the transport's mounted RPC path from the full-stack form-CSRF middleware. The repair covers
+the CLI renderer, session-plugin's explicit exclusion surface, generated-project runtime coverage,
+and the public contracts that describe the composition.
 
 - **In scope:** app-factory rendering of appended transport plugin wirings; lifting the gRPC-only
   refusal; generated-project regression coverage; the public transport documentation.
-- **NOT this milestone:** X14-2's CSRF path exemption and a full-stack gRPC default exemption;
-  broker transports, whose contribution rewrites starter-owned `MessagingPlugin` arguments; native
-  gRPC-binary support, which Milestone 70i deliberately withdrew.
+- **NOT this milestone:** broker transports, whose contribution rewrites starter-owned
+  `MessagingPlugin` arguments; native gRPC-binary support, which Milestone 70i deliberately
+  withdrew.
 
 ## 1. Contracts verified from SOURCE (not names)
 
@@ -45,15 +46,18 @@ its regression coverage, and the public CLI contract that describes the supporte
 - **Test home:** `packages/cli/test/unit/app-command.test.ts` checks the generated full-stack gRPC
   config; `packages/cli/test/e2e/workspace-e2e.test.ts` type-checks that generated config.
 
-### 3.2 Refusal boundary
+### 3.2 CSRF-safe gRPC mount and refusal boundary
 
-- **Decision:** `planMember` will refuse an app-factory template only when the workspace transport
-  supplies `messagingArgs`, not merely when it appends direct plugin wirings.
-- **Why:** gRPC is an append-only plugin contribution and the renderer can preserve it. Broker arms
-  modify the starter-owned messaging configuration; accepting one would still produce a member that
-  appears configured while using the wrong broker.
-- **Test home:** `packages/cli/test/unit/app-command.test.ts` proves gRPC succeeds and Redis retains
-  the existing no-write refusal.
+- **Decision:** The workspace gRPC wiring explicitly mounts at `/grpc`; `CsrfFormOptions.exclude`
+  accepts exact paths and regular expressions, and the full-stack renderer exempts that mounted
+  prefix only for a gRPC workspace. `planMember` still refuses a starter factory transport that
+  rewrites starter-owned messaging or queue options.
+- **Why:** root-mounted gRPC has no finite path prefix to exempt safely. A named `/grpc` mount makes
+  the protocol boundary explicit, protects application form posts everywhere else, and covers both
+  the built-in health service and user-added protobuf methods.
+- **Test home:** session middleware tests prove an exclusion bypasses only its selected path;
+  workspace E2E boots generated full-stack output and asserts a gRPC health POST returns 200 while
+  an unrelated POST remains CSRF-protected.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -69,14 +73,15 @@ its regression coverage, and the public CLI contract that describes the supporte
 
 ## 5. Implementation files
 
-| File                                          | Purpose                                                                                              |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `packages/cli/src/templates/project-files.ts` | Register resolved direct plugins after an app factory returns an application.                        |
-| `packages/cli/src/commands/app.ts`            | Restrict the starter-template refusal to transports requiring messaging-argument rewrites.           |
-| `packages/cli/src/templates/registry.ts`      | Correct the `TemplateHost.plugins` documentation to describe supported factory-time registrations.   |
-| `packages/cli/test/unit/app-command.test.ts`  | Prove a full-stack gRPC workspace member is generated and brokers remain refused.                    |
-| `packages/cli/test/e2e/workspace-e2e.test.ts` | Type-check a real generated full-stack member on the gRPC transport.                                 |
-| `PUBLIC_API.md`                               | Document that the full-stack factory registers the workspace gRPC plugin before application startup. |
+| File                                                    | Purpose                                                                                    |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `packages/cli/src/templates/project-files.ts`           | Register resolved direct plugins after an app factory returns an application.              |
+| `packages/cli/src/commands/app.ts`                      | Restrict the starter-template refusal to transports requiring messaging-argument rewrites. |
+| `packages/cli/src/workspace/transport.ts`               | Mount workspace gRPC at `/grpc`, establishing a finite protocol boundary.                  |
+| `packages/cli/src/templates/full-stack.ts`              | Emit the `/grpc` CSRF exclusion only for full-stack gRPC members.                          |
+| `packages/session-plugin/src/*`                         | Expose and apply the explicit form-CSRF path exclusion.                                    |
+| `packages/cli/test/*`, `packages/session-plugin/test/*` | Prove generated gRPC wiring and that the exclusion does not weaken an ordinary POST.       |
+| `PUBLIC_API.md`, `CHANGELOG.md`                         | Document the mounted gRPC/CSRF contract and the public exclusion surface.                  |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 

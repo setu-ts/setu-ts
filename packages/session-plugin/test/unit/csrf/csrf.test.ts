@@ -12,6 +12,9 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRequestContext } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { GrpcPlugin } from '@setu-ts/grpc-plugin';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
 import { CSRF_SESSION_KEY, getCsrfToken, readCsrfToken } from '../../../src/csrf/token.ts';
@@ -19,6 +22,7 @@ import { verifyCsrfToken } from '../../../src/csrf/verify.ts';
 import { csrfFormMiddleware } from '../../../src/middleware/csrf-form-middleware.ts';
 import { CsrfTokenMismatchError, SessionMiddlewareMissingError } from '../../../src/errors.ts';
 import { resolveSessionConfig } from '../../../src/options.ts';
+import { SessionPlugin } from '../../../src/plugin/session-plugin.ts';
 import { SESSION_STATE_KEY, SessionService } from '../../../src/services/session-service.ts';
 import type { MakeContextOptions } from '../../fixtures/context.ts';
 import { fakeRandomBytes, makeClock, makeContext } from '../../fixtures/context.ts';
@@ -270,6 +274,60 @@ describe('csrfFormMiddleware', () => {
     const harness = await withSession({ method: 'POST' });
     const { handlerRan } = await run(harness.ctx, { ignoreMethods: ['POST'] });
     expect(handlerRan).toBe(true);
+  });
+
+  it('exempts only configured paths, including a mounted gRPC prefix', async () => {
+    const rpc = await withSession({
+      method: 'POST',
+      url: 'http://localhost/grpc/example.Echo/Call',
+    });
+    expect((await run(rpc.ctx, { exclude: [/^\/grpc(?:\/|$)/] })).handlerRan).toBe(true);
+
+    const form = await withSession({ method: 'POST', url: 'http://localhost/orders' });
+    expect((await run(form.ctx, { exclude: ['/not-orders', /^\/grpc(?:\/|$)/] })).handlerRan).toBe(
+      false,
+    );
+    expect(form.response.statusCode).toBe(403);
+
+    const exact = await withSession({ method: 'POST', url: 'http://localhost/rpc-health' });
+    expect((await run(exact.ctx, { exclude: ['/rpc-health'] })).handlerRan).toBe(true);
+  });
+
+  it('makes the inline verifier honor the same exclusion', async () => {
+    const rpc = await withSession({
+      method: 'POST',
+      url: 'http://localhost/grpc/example.Echo/Call',
+    });
+    await expect(verifyCsrfToken(rpc.ctx, { exclude: [/^\/grpc(?:\/|$)/] })).resolves
+      .toBeUndefined();
+  });
+
+  it('lets mounted gRPC through the real pipeline while retaining CSRF on form posts', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SessionPlugin({ secret: SECRET, csrf: { exclude: [/^\/grpc(?:\/|$)/] } }),
+        GrpcPlugin({ basePath: '/grpc' }),
+      ],
+    });
+    app.router.post('/orders', (ctx) => ctx.response.json({ created: true }));
+    await app.start();
+
+    try {
+      const rpc = await app.fetch(
+        new Request('http://localhost/grpc/grpc.health.v1.Health/Check', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ service: '' }),
+        }),
+      );
+      expect(rpc.status).toBe(200);
+
+      const form = await app.fetch(new Request('http://localhost/orders', { method: 'POST' }));
+      expect(form.status).toBe(403);
+    } finally {
+      await app.stop();
+    }
   });
 
   it('short-circuits with 403 and never reaches the handler on a wrong token', async () => {

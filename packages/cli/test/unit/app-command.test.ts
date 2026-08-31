@@ -168,7 +168,8 @@ describe('runAppCommand', () => {
       const config = h.fs.read('/ws/apps/web/setu.config.ts');
       expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
       expect(config).toContain('const app = await createFullStackAppFromConfig(');
-      expect(config).toContain('app.register(GrpcPlugin());');
+      expect(config).toContain("app.register(GrpcPlugin({ basePath: '/grpc' }));");
+      expect(config).toContain('csrf: { exclude: [/^\\/grpc(?:\\/|$)/] },');
       expect(h.fs.writes).toContain('/ws/apps/web/setu.config.ts');
     });
 
@@ -527,7 +528,7 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'orders', '--template', 'microservice'])).toBe(0);
       const config = h.fs.read('/ws/apps/orders/setu.config.ts');
       expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
-      expect(config).toContain('GrpcPlugin(),');
+      expect(config).toContain("GrpcPlugin({ basePath: '/grpc' }),");
       // …and declares it, or the member imports a package it does not have.
       expect(h.fs.read('/ws/apps/orders/deno.json')).toContain('@setu-ts/grpc-plugin');
     });

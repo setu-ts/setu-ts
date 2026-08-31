@@ -59,7 +59,7 @@ export const FULL_STACK_APP_FRAMEWORK_PACKAGES = ['react-router-plugin', 'common
  * @returns Source for the call's arguments, without the enclosing parentheses
  */
 function fullStackArgs(context: AppFactoryRenderContext): string {
-  const { runtime, serviceEndpoints } = context;
+  const { runtime, serviceEndpoints, grpcBasePath } = context;
   const assets = runtime === 'cloudflare-workers'
     // Assets are served by the platform binding, not the framework.
     ? ''
@@ -78,6 +78,9 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const config = runtime === 'cloudflare-workers'
     ? ''
     : `, config: ${renderConfigOptions(context.envFilePath ?? '.env')}`;
+  const csrf = grpcBasePath === undefined
+    ? '{}'
+    : `{ exclude: [/^${grpcBasePath.replaceAll('/', '\\/')}(?:\\/|$)/] }`;
 
   // The RETURN TYPE annotation is X5-2's whole fix, and it is load-bearing
   // rather than decorative. TypeScript does NOT apply excess-property checking
@@ -108,7 +111,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
     },
     session: {
       secret: config.getOrThrow<string>('SESSION_SECRET'),
-      csrf: {},
+      csrf: ${csrf},
     },${discovery}
   }), { env${config} }`;
 }

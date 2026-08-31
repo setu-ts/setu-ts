@@ -275,14 +275,16 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
   },
   ['grpc']: {
     name: 'grpc',
-    // Verified by probe, not assumed: a bare `GrpcPlugin()` answers
+    // Mounted rather than root-owned: the stable prefix lets a full-stack
+    // member exempt RPCs from form CSRF without exempting its own POST routes.
+    // Verified by probe, not assumed: this `GrpcPlugin()` answers
     // `POST /grpc/grpc.health.v1.Health/Check` with `200 {"status":"SERVING"}`,
     // so a member is callable over Connect the moment it boots — no proto
     // toolchain, no generated descriptors. Serving YOUR OWN protos still needs
     // descriptors from buf/protoc handed to `grpc.addService`, which the CLI
     // emits a toolchain for rather than generating itself.
     description: 'Members co-serve Connect/gRPC on their own port, alongside HTTP',
-    plugins: [{ pkg: 'grpc-plugin', symbol: 'GrpcPlugin' }],
+    plugins: [{ pkg: 'grpc-plugin', symbol: 'GrpcPlugin', args: "{ basePath: '/grpc' }" }],
     // The health service needs none of this — the plugin carries that descriptor
     // itself. Serving the member's OWN protos needs a compiler, so the toolchain
     // ships instead of the descriptors.

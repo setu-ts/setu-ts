@@ -136,6 +136,8 @@ export interface AppFactoryRenderContext {
   readonly serviceEndpoints?: string;
   /** Dotenv file passed through a config-driven starter factory. */
   readonly envFilePath?: string;
+  /** Mounted RPC prefix supplied by a workspace transport, when any. */
+  readonly grpcBasePath?: string;
 }
 
 /**

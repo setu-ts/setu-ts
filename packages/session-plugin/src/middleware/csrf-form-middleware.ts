@@ -20,6 +20,7 @@ import { respondWithError } from '@setu-ts/common';
 import { CsrfTokenMismatchError } from '../errors.ts';
 import type { CsrfFormOptions } from '../options.ts';
 import { resolveCsrfConfig } from '../options.ts';
+import { isCsrfExcluded } from '../csrf/exclude.ts';
 import { verifyWithConfig } from '../csrf/verify.ts';
 
 /** Status returned when verification fails. */
@@ -55,7 +56,10 @@ export function csrfFormMiddleware(options: CsrfFormOptions = {}): MiddlewareFun
     ctx: IRequestContext,
     next: NextFunction,
   ): Promise<void | HandlerResult> => {
-    if (config.ignoreMethods.has(ctx.request.method.toUpperCase())) {
+    if (
+      config.ignoreMethods.has(ctx.request.method.toUpperCase()) ||
+      isCsrfExcluded(ctx, options.exclude)
+    ) {
       await next();
       return;
     }
