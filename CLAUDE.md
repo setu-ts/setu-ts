@@ -3723,7 +3723,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the scaffolding and the corruption path together. Review also found ~500 lines of duplicated codec
   tests across two packages (§11.1), trimmed to the one thing the second copy uniquely proves —
   evaluating the predicate against real rows through `matchesFilter`, since asserting the tree's
-  SHAPE proves only that it was built) — complete (PR pending)
+  SHAPE proves only that it was built) — complete (PR #217)
 - **Next milestone** — **M80** (DynamoDB backend), gated on this milestone.
 
 ## Verification (run before declaring any work done)
