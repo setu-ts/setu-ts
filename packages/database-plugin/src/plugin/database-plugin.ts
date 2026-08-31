@@ -202,6 +202,12 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('provider');
   carry('drizzleInstance');
   carry('drizzleTables');
+  // The Drizzle arm's per-entity key bag (T5). Without this carry a
+  // `DatabasePlugin({ type: 'drizzle', options: { entities } })` silently lost
+  // the composite-key mapping at the plugin boundary — the adapter kept its
+  // default `['id']`, so a composite table refused its first query as if it
+  // had never been configured.
+  carry('entities');
   carry('transactionTimeout');
   carry('client');
   carry('objectIdCtor');

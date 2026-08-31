@@ -16,7 +16,8 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { DatabaseService } from '../../src/services/database-service.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
-import type { IDatabaseAdapter } from '@setu-ts/common';
+import type { IDatabaseAdapter, NormalizedQuery, PageResult } from '@setu-ts/common';
+import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import {
@@ -308,6 +309,140 @@ describe('DatabaseService', () => {
       const repo = service2.getRepository('User');
       await repo.create({ name: 'Alice' });
       expect(nowLogs.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('findPage forwarding through the logging wrapper', () => {
+    /**
+     * A data source whose members live on the PROTOTYPE — the shape a class
+     * implementation of `IDataSource` has. The wrapper's `...ds` spread
+     * carries only own enumerable members, so this member reaches the wrapped
+     * source only through the wrapper's explicit forwarding.
+     */
+    class PrototypeDataSource {
+      readonly #ma: MemoryAdapter;
+      readonly #entity: string;
+
+      constructor(ma: MemoryAdapter, entity: string) {
+        this.#ma = ma;
+        this.#entity = entity;
+      }
+
+      findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]> {
+        return this.#ma.queryEntities(this.#entity, query);
+      }
+
+      findById(id: string | number): Promise<Record<string, unknown> | null> {
+        return this.#ma.findEntityById(this.#entity, String(id));
+      }
+
+      create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
+        return this.#ma.insertEntity(this.#entity, data);
+      }
+
+      update(
+        id: string | number,
+        data: Partial<Record<string, unknown>>,
+      ): Promise<Record<string, unknown>> {
+        return this.#ma.updateEntity(this.#entity, String(id), data);
+      }
+
+      delete(id: string | number): Promise<boolean> {
+        return this.#ma.deleteEntity(this.#entity, String(id));
+      }
+
+      count(where: Record<string, unknown>): Promise<number> {
+        return this.#ma.countEntities(this.#entity, where);
+      }
+
+      /**
+       * A minimal honest page over the store: evaluate the query as-is. The
+       * cursor-walk CORRECTNESS is proven against the real adapters; this
+       * member only needs to exist on the prototype so the forwarding (and
+       * its logging) is observable through the wrapper.
+       */
+      async findPage(query: NormalizedQuery): Promise<PageResult> {
+        const rows = await this.#ma.queryEntities(this.#entity, query);
+        return { rows, nextCursor: null };
+      }
+    }
+
+    it('forwards a prototype findPage — the wrapper does not lose the member', async () => {
+      // A bare object spread drops prototype members, so before the explicit
+      // forwarding this configuration made `BaseRepository.findPage` refuse by
+      // name on an adapter that supports cursor pagination — exactly when
+      // `logQueries` was on.
+      const logs: string[] = [];
+      const protoAdapter = new MemoryAdapter() as unknown as IDatabaseAdapter;
+      await protoAdapter.connect();
+      const protoService = new DatabaseService(
+        protoAdapter,
+        (entity) => new PrototypeDataSource(protoAdapter as MemoryAdapter, entity),
+        'memory',
+        { logQueries: true },
+        { debug: (msg: string) => logs.push(msg) },
+        () => 10,
+      );
+
+      const repo = protoService.getRepository<{ id: string; n: number }>('User');
+      await repo.create({ id: 'u1', n: 1 });
+      await repo.create({ id: 'u2', n: 2 });
+
+      const page = await repo.findPage({ orderBy: { n: 'asc' }, limit: 5 });
+      expect(page.rows.map((row) => row.id)).toEqual(['u1', 'u2']);
+      expect(page.nextCursor).toBeNull();
+      // The forwarded operation is logged like every other member.
+      expect(logs).toContain('[User] findPage');
+    });
+
+    it('logs findPage for an own-member source too, through the same override', async () => {
+      // The memory adapter's data source carries `findPage` as an own
+      // property, so the spread alone forwards it — but only the explicit
+      // override logs it. This is the one-capability-one-implementation rule:
+      // both source shapes funnel through the single logged forward.
+      const logs: string[] = [];
+      const ownAdapter = new MemoryAdapter() as unknown as IDatabaseAdapter;
+      await ownAdapter.connect();
+      const ownService = new DatabaseService(
+        ownAdapter,
+        (entity) => (ownAdapter as MemoryAdapter).createDataSource(entity),
+        'memory',
+        { logQueries: true },
+        { debug: (msg: string) => logs.push(msg) },
+        () => 10,
+      );
+
+      const repo = ownService.getRepository<{ id: string; n: number }>('User');
+      await repo.create({ id: 'u1', n: 1 });
+      const page = await repo.findPage({ orderBy: { n: 'asc' }, limit: 5 });
+      expect(page.rows.map((row) => row.id)).toEqual(['u1']);
+      expect(logs).toContain('[User] findPage');
+    });
+
+    it('keeps absence as absence — a source without findPage still refuses by name', async () => {
+      // §3.7: absence of the member means "this adapter cannot page by
+      // cursor", never "there are no more rows". The wrapper must not
+      // fabricate a `findPage` for a source that has none.
+      const plainAdapter = new MemoryAdapter() as unknown as IDatabaseAdapter;
+      await plainAdapter.connect();
+      const plainService = new DatabaseService(
+        plainAdapter,
+        createDs,
+        'memory',
+        { logQueries: true },
+        { debug: () => {} },
+        () => 10,
+      );
+
+      const repo = plainService.getRepository<{ id: string; n: number }>('User');
+      await repo.create({ id: 'u1', n: 1 });
+      // Refusals reject — never a synchronous throw (§3.12).
+      await expect(repo.findPage({ orderBy: { n: 'asc' } })).rejects.toThrow(
+        UnsupportedQueryFeatureError,
+      );
+      await expect(repo.findPage({ orderBy: { n: 'asc' } })).rejects.toThrow(
+        'no findPage member',
+      );
     });
   });
 });

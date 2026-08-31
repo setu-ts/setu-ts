@@ -11,6 +11,7 @@ import {
   applyPagination,
   matchesFilter,
   matchesWhere,
+  PageNormalizationError,
   projectFields,
 } from '../../src/query/query-builder.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
@@ -287,6 +288,49 @@ describe('BaseRepository', () => {
       expect(page.rows.length).toBe(1);
       expect(page.rows[0].name).toBe('Page1');
       expect(page.nextCursor).toBeNull();
+    });
+
+    it('carries the cursor into the query the adapter receives', async () => {
+      // The repository is the layer that turns PageOptions.cursor into
+      // NormalizedQuery.cursor. A normalizer without a cursor member drops it
+      // silently, and every page through this surface becomes page one — the
+      // caller cannot distinguish a broken walk from an empty table.
+      const dsWithFindPage = createTestDataSource();
+      const seen: unknown[] = [];
+      (dsWithFindPage as unknown as DataSource & {
+        findPage?: (query: unknown) => Promise<{
+          rows: Record<string, unknown>[];
+          nextCursor: string | null;
+        }>;
+      }).findPage = (query: unknown) => {
+        seen.push(query);
+        return Promise.resolve({ rows: [], nextCursor: null });
+      };
+      const repoWithFindPage = new TestRepository(dsWithFindPage);
+      await repoWithFindPage.findPage({ cursor: 'tok-1', limit: 3 });
+      expect(seen.length).toBe(1);
+      expect((seen[0] as { cursor?: string }).cursor).toBe('tok-1');
+    });
+
+    it('rejects a cursor beside a non-zero offset before reaching the adapter', async () => {
+      // §3.10 — the two members answer the same question from contradictory
+      // positions. The refusal rejects (§3.12), and the adapter is never called.
+      const dsWithFindPage = createTestDataSource();
+      let reached = false;
+      (dsWithFindPage as unknown as DataSource & {
+        findPage?: () => Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
+      }).findPage = () => {
+        reached = true;
+        return Promise.resolve({ rows: [], nextCursor: null });
+      };
+      const repoWithFindPage = new TestRepository(dsWithFindPage);
+      await expect(
+        repoWithFindPage.findPage({ offset: 5, cursor: 'tok-1' }),
+      ).rejects.toThrow(PageNormalizationError);
+      await expect(
+        repoWithFindPage.findPage({ offset: 5, cursor: 'tok-1' }),
+      ).rejects.toThrow('conflicts with cursor');
+      expect(reached).toBe(false);
     });
   });
 

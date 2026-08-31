@@ -6,7 +6,12 @@
  */
 import type { EntityKey, IDataSource } from '@setu-ts/common';
 import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
-import { normalizeCountOptions, normalizeQuery } from '../query/query-builder.ts';
+import {
+  normalizeCountOptions,
+  normalizePageQuery,
+  normalizeQuery,
+  PageNormalizationError,
+} from '../query/query-builder.ts';
 import type { IRepository } from '../interfaces/index.ts';
 import { UnsupportedQueryFeatureError } from '../errors.ts';
 
@@ -119,9 +124,20 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string>
    * @param options - Find options, optionally carrying a cursor
    * @returns The page of entities plus a `nextCursor`
    * @throws {UnsupportedQueryFeatureError} When the data source lacks `findPage`
+   * @throws {PageNormalizationError} When the query carries both a non-zero
+   *   offset and a cursor (§3.10 — rejected, never a synchronous throw)
    */
   async findPage(options: PageOptions): Promise<Page<Entity>> {
-    const query = normalizeQuery(options);
+    // normalizePageQuery — NOT normalizeQuery, which has no cursor member and
+    // silently DROPS one — carries the cursor into the query and owns the §3.10
+    // refusal of a non-zero offset beside a cursor. The old call meant every
+    // page requested through this surface was page one, whatever cursor the
+    // caller passed.
+    const query = normalizePageQuery(options);
+    if (query instanceof PageNormalizationError) {
+      // §3.12 — reject, never a synchronous throw.
+      return Promise.reject(query);
+    }
     const { findPage } = this._dataSource;
     if (findPage === undefined) {
       return Promise.reject(
