@@ -78,26 +78,72 @@ interface TxOverlay {
 }
 
 /**
+ * Encode one component of an overlay key so the concatenation is injective.
+ *
+ * The component is written `<tag><length>:<text>`, which is self-delimiting —
+ * so no value can forge a component boundary and no separator character is
+ * needed at all. The tag distinguishes a `string` from a `number`, because
+ * record lookup compares with `===` and therefore treats `'42'` and `42` as
+ * different rows; an overlay that conflated them would let one delete hide two
+ * records.
+ *
+ * A length-prefixed encoding is used rather than an escaped separator
+ * deliberately: an escape scheme has to be got right in two directions, and a
+ * separator embedded in the source has bitten this repository before (M50's
+ * ejection key used a raw NUL, which made `grep` skip the file silently).
+ *
+ * @param value - The component value
+ * @returns The self-delimiting encoding
+ */
+function overlayKeyPart(value: unknown): string {
+  if (typeof value === 'string') return `s${value.length}:${value}`;
+  if (typeof value === 'number') {
+    const text = String(value);
+    return `n${text.length}:${text}`;
+  }
+  // A column absent from the caller's key object. Tagged distinctly so a
+  // partial key can never encode to the same string as a complete one.
+  if (value === undefined) return 'u0:';
+  const text = String(value);
+  return `x${text.length}:${text}`;
+}
+
+/**
  * Compose a stable overlay key from an entity name and an {@linkcode EntityKey}.
  *
- * For scalar keys the shape is `entity::scalar`. For composite keys the values
- * are joined with `|` — the delimiter is chosen so it cannot appear inside the
- * column values we accept (`string | number`), and it preserves ordering so the
- * same composite key always produces the same string regardless of how the
- * caller writes the record literal.
+ * The key must agree with {@linkcode findRecordIndex}, which compares each
+ * primary-key column with `===` in the mapping's declared order — so this reads
+ * the same columns in the same order, and encodes each component with
+ * {@linkcode overlayKeyPart} so that neither a type difference nor a delimiter
+ * inside a value can collide.
+ *
+ * The previous encoding (`entity::scalar`, or `col=value` joined with `|`) had
+ * both collisions, and both let ONE delete hide TWO rows inside a transaction
+ * and then commit a delete for only one — so an in-transaction read reported a
+ * state that never existed. Reproduced before the fix:
+ *
+ * - scalar `'42'` and `42` both encoded to `W::42`;
+ * - `{ a: 'x|b=y', b: 'z' }` and `{ a: 'x', b: 'y|b=z' }` both encoded to
+ *   `W::a=x|b=y|b=z`.
+ *
+ * A scalar and a single-column record naming the same value encode identically
+ * — which is correct, because record lookup treats them as the same row.
  *
  * @param entity - Entity name
  * @param id - Primary key value (scalar or composite record)
+ * @param keyColumns - The store's primary-key columns, in declared order
  * @returns A stable string key for overlay maps/sets
  * @since 0.1.0
  */
-function overlayKey(entity: string, id: EntityKey): string {
+function overlayKey(entity: string, id: EntityKey, keyColumns: readonly string[]): string {
+  const head = overlayKeyPart(entity);
   if (typeof id === 'string' || typeof id === 'number') {
-    return `${entity}::${id}`;
+    return `${head}${overlayKeyPart(id)}`;
   }
-  // Composite record key — compose a deterministic multi-column key.
-  const parts = Object.keys(id).sort();
-  return `${entity}::${parts.map((k) => `${k}=${id[k]}`).join('|')}`;
+  const record = id as Record<string, string | number>;
+  // The mapping's column order, NOT the caller's key order — `findRecordIndex`
+  // matches by column, so the two must agree about identity.
+  return `${head}${keyColumns.map((column) => overlayKeyPart(record[column])).join('')}`;
 }
 
 /**
@@ -109,18 +155,40 @@ function overlayKey(entity: string, id: EntityKey): string {
  * @returns The record index, or `-1` when not found
  * @since 0.1.0
  */
-function findRecordIndex(store: EntityStore, id: EntityKey): number {
+function findRecordIndexForRecords(
+  records: readonly Record<string, unknown>[],
+  store: EntityStore,
+  id: EntityKey,
+): number {
   if (store.primaryKey.length === 1) {
-    return store.records.findIndex((r) => r[store.primaryKey[0]] === id);
+    return records.findIndex((r) => r[store.primaryKey[0]] === id);
   }
   // Composite key — id is a record with known columns.
-  return store.records.findIndex((r) => {
+  return records.findIndex((r) => {
     for (const col of store.primaryKey) {
       const idRecord = id as Record<string, string | number>;
       if (r[col] !== idRecord[col]) return false;
     }
     return true;
   });
+}
+
+/**
+ * Find the index of an {@linkcode EntityKey} in the store's own record list.
+ *
+ * A thin call through {@linkcode findRecordIndexForRecords} with
+ * `store.records`. The two used to be separate copies of the same body,
+ * differing only in where the list came from — so a change to matching
+ * semantics had to be made twice, and the transaction paths (which pass the
+ * overlay's effective records) could silently drift from the committed ones.
+ *
+ * @param store - The entity store to search
+ * @param id - The primary key value to match
+ * @returns The record index, or `-1` when not found
+ * @since 0.1.0
+ */
+function findRecordIndex(store: EntityStore, id: EntityKey): number {
+  return findRecordIndexForRecords(store.records, store, id);
 }
 
 /**
@@ -245,7 +313,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
               for (const c of store.primaryKey) rec[c] = r[c] as string | number;
               return rec;
             })();
-          const key = overlayKey(entity, idForOverlay);
+          const key = overlayKey(entity, idForOverlay, store.primaryKey);
           if (overlay.tombstones.has(key)) return null; // deleted
           const shadow = overlay.shadows.get(key);
           if (shadow) return shadow.record;
@@ -315,7 +383,10 @@ export class MemoryAdapter implements IDatabaseAdapter {
         }
         const target = effective[targetIndex];
         const newRecord = { ...target, ...data };
-        overlay.shadows.set(overlayKey(entity, id), { entity, id, record: newRecord });
+        overlay.shadows.set(
+          overlayKey(entity, id, store.primaryKey),
+          { entity, id, record: newRecord },
+        );
         return Promise.resolve({ ...newRecord });
       },
 
@@ -324,7 +395,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
         const effective = effectiveRecords();
         const targetIndex = findRecordIndexForRecords(effective, store, id);
         if (targetIndex === -1) return Promise.resolve(false);
-        overlay.tombstones.set(overlayKey(entity, id), { entity, id });
+        overlay.tombstones.set(overlayKey(entity, id, store.primaryKey), { entity, id });
         return Promise.resolve(true);
       },
 
@@ -599,9 +670,17 @@ export class MemoryAdapter implements IDatabaseAdapter {
       );
     }
 
-    // 3. Build and apply the keyset predicate. Conjoin it with the caller's
-    //    filter when both are present.
+    // 3. Filter. The caller's `where` FIRST, then the keyset predicate, then
+    //    the caller's `filter` — the same three the other read paths apply.
+    //
+    //    `where` was omitted here while `findAll` applied it, so
+    //    `findPage({ where: { role: 'admin' } })` returned every row: a caller
+    //    scoping a page by tenant, owner or role received rows outside its own
+    //    criteria. Reproduced before the fix, on the public surface.
     let results = getRecords();
+    if (query.where && Object.keys(query.where).length > 0) {
+      results = results.filter((row) => matchesWhere(row, query.where));
+    }
     if (decoded !== null) {
       const predicate = keysetPredicate(
         decoded.orderedValues,
@@ -662,32 +741,4 @@ export class MemoryAdapter implements IDatabaseAdapter {
   rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     return Promise.reject(new Error('The memory adapter does not support raw SQL queries.'));
   }
-}
-
-/**
- * Find the index of a record matching the given {@linkcode EntityKey} in a
- * standalone record list (used by the overlay data source).
- *
- * @param records - The record list to search
- * @param store - The entity store defining the primary key columns
- * @param id - The primary key value to match
- * @returns The record index, or `-1` when not found
- * @since 0.1.0
- */
-function findRecordIndexForRecords(
-  records: Record<string, unknown>[],
-  store: EntityStore,
-  id: EntityKey,
-): number {
-  if (store.primaryKey.length === 1) {
-    return records.findIndex((r) => r[store.primaryKey[0]] === id);
-  }
-  // Composite key — id is a record with known columns.
-  return records.findIndex((r) => {
-    for (const col of store.primaryKey) {
-      const idRecord = id as Record<string, string | number>;
-      if (r[col] !== idRecord[col]) return false;
-    }
-    return true;
-  });
 }

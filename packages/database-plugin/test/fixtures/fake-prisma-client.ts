@@ -47,24 +47,6 @@ function createNotFoundError(model: string, id: unknown): Error {
 }
 
 /**
- * Check whether a record matches a Prisma-style `where` clause.
- * Supports both scalar `{ id: value }` and compound-key `{ <field>: { col1: val1 } }` shapes.
- */
-function matchWhere(
-  row: Record<string, unknown>,
-  where: Record<string, unknown>,
-): boolean {
-  for (const [key, val] of Object.entries(where)) {
-    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
-      const compound = val as Record<string, unknown>;
-      return Object.entries(compound).every(([k, v]) => row[k] === v);
-    }
-    if (row[key] !== val) return false;
-  }
-  return true;
-}
-
-/**
  * Operators the translated `where` can carry inside a field object. An object
  * under a field that carries none of these keys is a compound-key match
  * (`{ tenantId_userId: { tenantId: 't1', userId: 7 } }`) instead.
@@ -312,7 +294,7 @@ function createDelegate(
       // Find the key of the matching record in the store
       let key: string | undefined;
       for (const [k, v] of store.records) {
-        if (matchWhere(v, args.where)) {
+        if (matchesPrismaWhere(v, args.where)) {
           key = k;
           break;
         }
@@ -330,7 +312,7 @@ function createDelegate(
       recordedCalls.push({ model: modelName, action: 'delete', args });
       let key: string | undefined;
       for (const [k, v] of store.records) {
-        if (matchWhere(v, args.where)) {
+        if (matchesPrismaWhere(v, args.where)) {
           key = k;
           break;
         }

@@ -415,9 +415,10 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
         cursorDate = found[found.length - 1].createdAt as Date;
       }
 
-      // Three late rows share one timestamp: the first page swallows two of
-      // them and `createdAt < late` hides the third forever; page two then
-      // swallows one early row and `createdAt < early` hides two more.
+      // Three late rows share one timestamp: page one takes two of them and
+      // `createdAt < late` then hides the third forever. Page two takes two of
+      // the three early rows, and `createdAt < early` hides the last one. Four
+      // seen, two lost — one from each tie group.
       expect(seen.length).toBe(4);
       expect(new Set(seen).size).toBe(4);
       expect(ids.filter((id) => !seen.includes(id)).length).toBe(2);

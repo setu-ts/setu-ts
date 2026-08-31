@@ -612,7 +612,7 @@ function createDrizzleDataSourceInner(
         entity,
         'update',
       );
-      return oneReturnedRow(entity, 'update', rows, id);
+      return oneReturnedRow(entity, 'update', rows);
     },
 
     async delete(id) {
@@ -1085,7 +1085,6 @@ function oneReturnedRow(
   entity: string,
   operation: 'create' | 'update',
   rows: readonly Record<string, unknown>[],
-  _id?: unknown,
 ): Record<string, unknown> {
   const row = rows[0];
   if (row !== undefined) return row;

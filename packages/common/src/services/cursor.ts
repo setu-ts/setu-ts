@@ -360,6 +360,25 @@ export function mintNextCursor(
  * without changing the wire representation of ordinary strings or numbers.
  */
 function encodeCursorValue(value: CursorValue): EncodedCursorValue {
+  // Validated HERE rather than only in `mintNextCursor`, because `encodeCursor`
+  // is exported and reaches this directly — an adapter or an application
+  // building a cursor by hand bypassed the mint-time guard entirely. Both
+  // arms fail late and confusingly without it: a non-finite number serializes
+  // as `null` and is rejected only on the NEXT request's decode, and an invalid
+  // `Date` throws a bare `RangeError: Invalid time value` from `toISOString()`
+  // naming neither the cursor nor the value.
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(
+      `cursor-pagination: cannot encode ${
+        Number.isNaN(value) ? 'NaN' : String(value)
+      } into a cursor — JSON serializes it as null, which no decode can recover.`,
+    );
+  }
+  if (value instanceof Date && !Number.isFinite(value.getTime())) {
+    throw new Error(
+      'cursor-pagination: cannot encode an invalid Date into a cursor.',
+    );
+  }
   return value instanceof Date ? { t: 'D', v: value.toISOString() } : value;
 }
 
@@ -459,7 +478,16 @@ function base64ToBytes(input: string): number[] {
   for (const ch of input) {
     if (ch === '=') break;
     const code = table.get(ch);
-    if (code !== undefined) values.push(code);
+    if (code === undefined) {
+      // A character outside the alphabet is REFUSED, not skipped. Skipping made
+      // the decoder lenient in a way a token-validating function must not be:
+      // appending any junk to a valid token still decoded to the original
+      // payload, so `token + '$'` was accepted as if it were `token`. A cursor
+      // is untrusted caller input, so two different strings must not decode to
+      // one payload. `decodeCursor` catches this and answers `null`.
+      throw new Error(`base64url: character '${ch}' is outside the alphabet`);
+    }
+    values.push(code);
   }
   const bytes: number[] = [];
   for (let i = 0; i < values.length; i += 4) {

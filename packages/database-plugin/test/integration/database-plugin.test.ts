@@ -11,7 +11,7 @@ import { createApplication } from '@setu-ts/kernel';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
 import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
-import { sqliteTable, text as sqliteText } from 'npm:drizzle-orm@0.45.2/sqlite-core';
+import { primaryKey, sqliteTable, text as sqliteText } from 'npm:drizzle-orm@0.45.2/sqlite-core';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
 import { createDrizzleDatabase } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/interfaces/index.ts';
@@ -167,10 +167,15 @@ function createTestRuntimePlugin(logs: string[]): IPlugin {
 
 /** The composite-key table the Drizzle arm drives over real SQLite. */
 const enrollments = sqliteTable('enrollments', {
-  tenantId: sqliteText('tenant_id').primaryKey(),
-  userId: sqliteText('user_id').primaryKey(),
+  tenantId: sqliteText('tenant_id').notNull(),
+  userId: sqliteText('user_id').notNull(),
   course: sqliteText('course').notNull(),
-});
+}, (table) => [
+  // ONE composite primary key. Calling `.primaryKey()` on each column declares
+  // two separate single-column keys, which is a different schema from the one
+  // the adapter is configured for — and SQLite would reject its DDL.
+  primaryKey({ columns: [table.tenantId, table.userId] }),
+]);
 
 interface ArrayReturningStatement {
   run(...params: SQLInputValue[]): unknown;

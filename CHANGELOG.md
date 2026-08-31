@@ -125,6 +125,32 @@ _implements_ `IDataSource` or declares a custom repository key type does.
 
 ### Fixed
 
+- **`findPage` on the memory adapter ignored the caller's `where`.** It applied the cursor predicate
+  and `filter` but not `where`, while `findAll` applied all three — so a page scoped by tenant,
+  owner or role returned rows outside the caller's own criteria. Reproduced on the public surface:
+  `findPage({ where: { role: 'admin' } })` over three rows returned all three. It returns MORE rows
+  than asked for, so no assertion on a row count alone would necessarily have caught it.
+- **A memory-adapter transaction could hide rows its delete never targeted.** The overlay key
+  encoded a scalar as `entity::value` and a composite as `col=value` joined with `|`, and both forms
+  collide: string `'42'` and number `42` produced the same key although record lookup compares with
+  `===`, and `{ a: 'x|b=y', b: 'z' }` produced the same key as `{ a: 'x', b: 'y|b=z' }`. Deleting
+  one of a colliding pair made BOTH invisible inside the transaction and then committed a delete for
+  only one, so an in-transaction read reported a state that never existed. The key is now
+  type-tagged and length-prefixed — self-delimiting, so no value can forge a component boundary —
+  and canonicalized by the mapping's declared column order, which is what record lookup uses. The
+  JSDoc claiming the delimiter "cannot appear inside the column values we accept" was simply false
+  for a string.
+- **`encodeCursor` did not validate on its public path.** `mintNextCursor` guards its inputs, but
+  `encodeCursor` is exported and reaches the value encoder directly, so an adapter or application
+  building a cursor by hand bypassed the guard: a non-finite number serialized as `null` and was
+  refused only on the NEXT request's decode, and an invalid `Date` threw a bare
+  `RangeError: Invalid time value` naming neither the cursor nor the value.
+- **`decodeCursor` accepted a token with junk appended.** The base64url decoder SKIPPED any
+  character outside the alphabet, so `token + '$'` decoded to the same payload as `token` — two
+  different strings decoding to one payload, in a function whose input is untrusted. Non-alphabet
+  characters are now refused; trailing `=` padding is still tolerated, since it is padding rather
+  than data.
+
 - **A `--transport grpc` workspace can now add a `full-stack` member without disabling form CSRF.**
   The CLI mounts `GrpcPlugin` at `/grpc`, preserves that direct contribution by registering it after
   `createFullStackAppFromConfig()` creates the application and before startup, and emits a form-CSRF
