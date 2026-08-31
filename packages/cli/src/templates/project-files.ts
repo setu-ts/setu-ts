@@ -348,6 +348,13 @@ function configModule(
     // No hello-world route here: this application's routes come from its own
     // route module, and an exact '/' handler would take precedence over the
     // SSR catch-all and shadow the app's index route.
+    // A workspace transport may append a direct plugin such as GrpcPlugin()
+    // to a starter-composed host. The starter still owns its curated set; these
+    // additions are registered before createApp() returns, so the kernel can
+    // resolve their declared dependencies at start() in the usual way.
+    const factoryPluginLines = plugins.length === 0
+      ? ''
+      : `\n${plugins.map((p) => `  app.register(${p.symbol}(${pluginArgs(p)}));`).join('\n')}\n`;
     return `${imports}
 
 /**
@@ -367,7 +374,7 @@ export async function ${CONFIG_EXPORT}(
         ...host.appFactoryContext,
       }) ?? ''
     });
-${middlewareLines}${setupLines}
+${factoryPluginLines}${middlewareLines}${setupLines}
   return app;
 }
 `;

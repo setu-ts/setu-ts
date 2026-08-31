@@ -3687,6 +3687,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   functional greeting example — complete (PR #213).
 - **Milestone 84** — first-party SSE/WebSocket SDK clients, realtime CLI starting points, and the
   four-runtime client smoke exercise — complete (PR #214).
+- **Milestone 85** (`packages/cli` — full-stack gRPC workspace members: renders the existing
+  `GrpcPlugin()` transport contribution as `app.register(...)` after
+  `createFullStackAppFromConfig()` returns, while retaining the broker-transport refusal because its
+  starter-owned messaging/queue option rewrites cannot be represented as appended plugins) —
+  complete (PR pending).
 - **Next milestone** — **M79** (portable data-access contract).
 
 ## Verification (run before declaring any work done)

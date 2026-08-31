@@ -472,6 +472,27 @@ describe('workspace scaffolding — end to end', () => {
     expect(code).toBe(0);
   });
 
+  it('type-checks a full-stack member in a grpc workspace', async () => {
+    expect(await run(['new', 'shop', '--workspace', '--transport', 'grpc'])).toBe(0);
+    const ws = `${root}/shop`;
+    expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
+
+    const project = `${ws}/apps/web`;
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
+    expect(config).toContain("app.register(GrpcPlugin({ basePath: '/grpc' }));");
+    expect(config).toContain('csrf: { exclude: [/^\\/grpc(?:\\/|$)/] },');
+
+    await useWorkspacePackages(project);
+    const { code, stderr } = await denoCheck(project, [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      `${project}/app/lib/load-context.ts`,
+    ]);
+    expect(stderr).not.toContain('SyntaxError');
+    expect(code).toBe(0);
+  });
+
   // The whole claim of a library member is that it needs NO wiring: a Deno
   // workspace resolves a member by its declared name, so a sibling importing
   // `@acme/shared` resolves with no entry in its own import map and none in the

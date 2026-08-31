@@ -65,6 +65,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A `--transport grpc` workspace can now add a `full-stack` member without disabling form CSRF.**
+  The CLI mounts `GrpcPlugin` at `/grpc`, preserves that direct contribution by registering it after
+  `createFullStackAppFromConfig()` creates the application and before startup, and emits a form-CSRF
+  exclusion for that protocol prefix only. `CsrfFormOptions.exclude` also lets an application
+  explicitly exempt exact paths or regular expressions for another separately-mounted non-browser
+  protocol surface. Broker transports remain refused because they need to rewrite the starter-owned
+  messaging configuration, which cannot be expressed as a safe appended plugin.
+
 - **`@setu-ts/openapi-plugin` documented a zod v4 REQUEST body as the shape the server holds after
   parsing, so a document could contradict the application serving it.** `ZodToOpenApi` converted
   every schema with `io: 'output'`. A field carrying `.default('free')` was therefore listed in the

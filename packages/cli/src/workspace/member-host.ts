@@ -125,6 +125,9 @@ function withTransport(
 
   return {
     ...next,
+    ...(host.appFactory === undefined || transport.name !== 'grpc'
+      ? {}
+      : { appFactoryContext: { ...next.appFactoryContext, grpcBasePath: '/grpc' } }),
     // The transport's own plugins are appended, so a template that already
     // registers one of them would collide — none does, and a unit test pins
     // that across the registry.

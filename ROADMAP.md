@@ -8340,6 +8340,19 @@ for every runtime; the measurements then showed the two-arm repair was itself th
 - **Packages:** `sdk`, `cli`. (`sse-plugin` and `websocket-plugin` are unchanged — this ships a
   client, not a protocol.)
 
+## Milestone 85: Workspace Full-Stack gRPC ✅ COMPLETE
+
+**Package:** `@setu-ts/cli`
+
+Closes smoke findings X14-1 and X14-2: a workspace configured with `--transport grpc` may add a
+`full-stack` member. The CLI mounts `GrpcPlugin` at `/grpc`, renders it as an `app.register(...)`
+call after `createFullStackAppFromConfig()` returns and before startup, and emits a form-CSRF
+exclusion for that RPC prefix only. Its browser form routes remain protected. The new public
+`CsrfFormOptions.exclude` supports the same explicit exact-path/regular-expression boundary for
+another separately-mounted non-browser protocol surface. Broker transports remain refused: they
+rewrite starter-owned messaging and queue options rather than append a direct plugin, so accepting
+them would still silently select the wrong transport — complete (PR pending).
+
 ---
 
 ## Progress Tracking
@@ -8464,3 +8477,4 @@ for every runtime; the measurements then showed the two-arm repair was itself th
 | 82        | ⬜     | cloud bigtable backend                              |
 | 83        | ✅     | module declarations + functional example            |
 | 84        | ✅     | realtime client consumption (sdk + cli)             |
+| 85        | ✅     | cli (workspace full-stack gRPC, PR pending)         |

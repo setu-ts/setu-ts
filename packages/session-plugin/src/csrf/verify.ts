@@ -15,6 +15,7 @@ import type { CsrfFormOptions, ResolvedCsrfConfig } from '../options.ts';
 import { resolveCsrfConfig } from '../options.ts';
 import { getSession } from '../services/get-session.ts';
 import { readCsrfToken } from './token.ts';
+import { isCsrfExcluded } from './exclude.ts';
 
 /** Content type carrying a plain HTML form post. */
 const FORM_URLENCODED = 'application/x-www-form-urlencoded';
@@ -49,6 +50,7 @@ export async function verifyCsrfToken(
   ctx: IRequestContext,
   options: CsrfFormOptions = {},
 ): Promise<void> {
+  if (isCsrfExcluded(ctx, options.exclude)) return;
   await verifyWithConfig(ctx, resolveCsrfConfig(options));
 }
 
