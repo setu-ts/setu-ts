@@ -360,6 +360,25 @@ export function mintNextCursor(
  * without changing the wire representation of ordinary strings or numbers.
  */
 function encodeCursorValue(value: CursorValue): EncodedCursorValue {
+  // Validated HERE rather than only in `mintNextCursor`, because `encodeCursor`
+  // is exported and reaches this directly — an adapter or an application
+  // building a cursor by hand bypassed the mint-time guard entirely. Both
+  // arms fail late and confusingly without it: a non-finite number serializes
+  // as `null` and is rejected only on the NEXT request's decode, and an invalid
+  // `Date` throws a bare `RangeError: Invalid time value` from `toISOString()`
+  // naming neither the cursor nor the value.
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new Error(
+      `cursor-pagination: cannot encode ${
+        Number.isNaN(value) ? 'NaN' : String(value)
+      } into a cursor — JSON serializes it as null, which no decode can recover.`,
+    );
+  }
+  if (value instanceof Date && !Number.isFinite(value.getTime())) {
+    throw new Error(
+      'cursor-pagination: cannot encode an invalid Date into a cursor.',
+    );
+  }
   return value instanceof Date ? { t: 'D', v: value.toISOString() } : value;
 }
 
@@ -423,10 +442,16 @@ function base64Url(input: string): string {
  * @since 0.2.0
  */
 function base64UrlDecode(input: string): string {
-  return utf8FromBytes(base64ToBytes(input.replace(/-/g, '+').replace(/_/g, '/')));
+  return utf8FromBytes(base64UrlToBytes(input));
 }
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * The base64url alphabet: the same 62 leading symbols, with `-`/`_` in place of
+ * base64's `+`/`/`. Derived from {@linkcode ALPHABET} so the two cannot drift.
+ */
+const URL_ALPHABET = `${ALPHABET.slice(0, 62)}-_`;
 
 /**
  * @param bytes - The raw bytes to encode
@@ -448,18 +473,48 @@ function base64FromBytes(bytes: number[]): string {
 }
 
 /**
- * @param input - The standard base64 string to decode
+ * Decode a **base64url** string to raw bytes, refusing anything the alphabet
+ * does not contain.
+ *
+ * The validation happens here, on the RAW token, rather than after normalising
+ * `-`/`_` to `+`/`/` — which is the only place it can be correct. Once
+ * normalised, a legitimately-decoded `+` is indistinguishable from a `+` the
+ * caller supplied, so a post-normalisation check has to accept both and
+ * therefore accepts a standard-base64 token as if it were base64url. Two
+ * spellings of one payload, in a function whose input is untrusted.
+ *
+ * Padding is accepted only as a trailing run of at most two `=`. A previous
+ * build stopped the scan at the first `=` and never inspected what followed, so
+ * `token + '=$'` decoded to the original payload.
+ *
+ * @param input - The base64url string to decode
  * @returns The raw bytes
+ * @throws {Error} When a character is outside the alphabet, or padding is
+ * malformed or not at the end. {@linkcode decodeCursor} catches this and
+ * answers `null`.
  * @since 0.2.0
  */
-function base64ToBytes(input: string): number[] {
+function base64UrlToBytes(input: string): number[] {
   const table = new Map<string, number>();
-  for (let i = 0; i < ALPHABET.length; i++) table.set(ALPHABET[i], i);
+  for (let i = 0; i < URL_ALPHABET.length; i++) table.set(URL_ALPHABET[i], i);
   const values: number[] = [];
+  let padding = 0;
   for (const ch of input) {
-    if (ch === '=') break;
+    if (ch === '=') {
+      padding += 1;
+      if (padding > 2) throw new Error('base64url: more than two padding characters');
+      continue;
+    }
+    if (padding > 0) {
+      // Padding is terminal by definition, so a data character after one means
+      // the token carries junk rather than valid padding.
+      throw new Error(`base64url: character '${ch}' follows padding`);
+    }
     const code = table.get(ch);
-    if (code !== undefined) values.push(code);
+    if (code === undefined) {
+      throw new Error(`base64url: character '${ch}' is outside the alphabet`);
+    }
+    values.push(code);
   }
   const bytes: number[] = [];
   for (let i = 0; i < values.length; i += 4) {

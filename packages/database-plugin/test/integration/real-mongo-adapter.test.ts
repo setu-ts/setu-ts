@@ -282,8 +282,10 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
       },
     });
 
-    await adapter.connect();
     try {
+      // Inside the try: the `finally` below owns the raw client, so a throwing
+      // connect() must not escape before it can close it.
+      await adapter.connect();
       const source = adapter.createDataSource('Grant');
       const created = await source.create({ tenantId: 'acme', userId: 'u1', role: 'admin' });
       expect(created).toEqual({ tenantId: 'acme', userId: 'u1', role: 'admin' });
@@ -558,9 +560,10 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
         cursorScore = found[found.length - 1].score as number;
       }
 
-      // Three rows share the high score: the first page swallows two of them
-      // and `score < 30` hides the third forever; page two then swallows one
-      // low row and `score < 10` hides two more.
+      // Three rows share the high score: page one takes two of them and
+      // `score < 30` then hides the third forever. Page two takes two of the
+      // three low rows, and `score < 10` hides the last one. Four seen, two
+      // lost — one from each tie group.
       expect(seen.length).toBe(4);
       expect(new Set(seen).size).toBe(4);
       expect(ids.filter((id) => !seen.includes(id)).length).toBe(2);

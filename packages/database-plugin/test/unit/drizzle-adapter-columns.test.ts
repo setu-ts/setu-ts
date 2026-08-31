@@ -169,56 +169,65 @@ function orderOf(sql: unknown): Order {
  * `findPage` pipeline runs against the same SQL the real driver would.
  */
 function makeEvaluator(rows: Record<string, unknown>[]) {
-  let predicate: unknown;
-  let order: Order[] = [];
-  let limit: number | undefined;
-  const query = {
-    where(expr: unknown) {
-      predicate = expr;
-      return query;
-    },
-    orderBy(...expressions: unknown[]) {
-      order = expressions.map(orderOf);
-      return query;
-    },
-    limit(value: number) {
-      limit = value;
-      return query;
-    },
-    then(onFulfilled: (rows: Record<string, unknown>[]) => unknown) {
-      const out = rows.filter((row) => (predicate ? evalSql(predicate, row) : true));
-      if (order.length > 0) {
-        out.sort((a, b) => {
-          for (const o of order) {
-            const av = a[o.field] as number;
-            const bv = b[o.field] as number;
-            if (av === bv) continue;
-            const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-            return o.dir === 'desc' ? -cmp : cmp;
-          }
-          return 0;
-        });
-      }
-      const sliced = limit !== undefined ? out.slice(0, limit) : out;
-      return Promise.resolve(sliced).then(() => onFulfilled(sliced));
-    },
+  // A FRESH builder per entry point, because a real Drizzle builder is a new
+  // object per `select()`. The previous double kept `predicate`/`order`/`limit`
+  // as shared closure state and never reset it, so a second query that omitted
+  // `.where()` silently inherited the first query's predicate — a fixture that
+  // reports a filter the adapter never asked for is the contract-violating
+  // double this repository keeps tripping over.
+  const makeQuery = () => {
+    let predicate: unknown;
+    let order: Order[] = [];
+    let limit: number | undefined;
+    const query = {
+      where(expr: unknown) {
+        predicate = expr;
+        return query;
+      },
+      orderBy(...expressions: unknown[]) {
+        order = expressions.map(orderOf);
+        return query;
+      },
+      limit(value: number) {
+        limit = value;
+        return query;
+      },
+      then(onFulfilled: (rows: Record<string, unknown>[]) => unknown) {
+        const out = rows.filter((row) => (predicate ? evalSql(predicate, row) : true));
+        if (order.length > 0) {
+          out.sort((a, b) => {
+            for (const o of order) {
+              const av = a[o.field] as number;
+              const bv = b[o.field] as number;
+              if (av === bv) continue;
+              const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+              return o.dir === 'desc' ? -cmp : cmp;
+            }
+            return 0;
+          });
+        }
+        const sliced = limit !== undefined ? out.slice(0, limit) : out;
+        return Promise.resolve(sliced).then(() => onFulfilled(sliced));
+      },
+    };
+    return query;
   };
   const instance = {
     select() {
       return {
         from() {
-          return query;
+          return makeQuery();
         },
       };
     },
     insert() {
-      return query;
+      return makeQuery();
     },
     update() {
-      return query;
+      return makeQuery();
     },
     delete() {
-      return query;
+      return makeQuery();
     },
     transaction: <T>(cb: (tx: unknown) => Promise<T>) => cb({}),
   };

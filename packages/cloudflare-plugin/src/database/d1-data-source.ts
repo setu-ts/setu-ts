@@ -345,12 +345,12 @@ export function createD1TransactionDataSource(
       // awaits create() before the flush. Rather than return a row whose id is
       // missing, or invent a client-side value that would be the wrong type for
       // an INTEGER key, refuse and name the constraint.
-      // A deferred INSERT cannot report a generated key back to a caller that
-      // awaits create() before the flush. Rather than return a row whose id is
-      // missing, or invent a client-side value that would be the wrong type for
-      // an INTEGER key, refuse and name the constraint.
-      if (target.primaryKey.length === 1) {
-        const pk = target.primaryKey[0];
+      //
+      // One loop covers both key shapes: a scalar key is a one-column list, so
+      // the previous scalar branch was the loop's single iteration written out
+      // again — with the identical message, which is how the two came to sit
+      // under a comment that had itself been pasted twice.
+      for (const pk of target.primaryKey) {
         if (data[pk] === undefined) {
           throw new CloudflareUnsupportedError(
             `D1: create() inside a transaction requires an explicit ` +
@@ -359,18 +359,6 @@ export function createD1TransactionDataSource(
               'and a generated key is not known until then. Supply the key, or create ' +
               'outside the transaction where RETURNING * provides it.',
           );
-        }
-      } else {
-        for (const pk of target.primaryKey) {
-          if (data[pk] === undefined) {
-            throw new CloudflareUnsupportedError(
-              `D1: create() inside a transaction requires an explicit ` +
-                `'${pk}' for '${target.table}'. D1 has no interactive ` +
-                'transaction, so writes are buffered and flushed as one batch() at commit, ' +
-                'and a generated key is not known until then. Supply the key, or create ' +
-                'outside the transaction where RETURNING * provides it.',
-            );
-          }
         }
       }
       buffer.add(buildInsert(target, data));

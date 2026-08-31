@@ -372,3 +372,239 @@ describe('memory findPage honours the resolved keyset sort in the projected path
     expect([...seen].sort()).toEqual(['n-a1', 'n-a2', 'n-a3', 'n-b1', 'n-b2']);
   });
 });
+
+describe('memory findPage applies the caller where (outside-diff review, M79)', () => {
+  /**
+   * `findPageInternal` applied the cursor predicate and `query.filter` but NOT
+   * `query.where`, while `findAll` applied all three — so a page scoped by
+   * tenant, owner or role returned rows outside the caller's own criteria.
+   * More rows than asked for, so no assertion on a row COUNT alone would
+   * necessarily have caught it.
+   */
+  it('returns only rows matching where, as findAll does', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    await ds.create({ id: 'u1', role: 'admin' });
+    await ds.create({ id: 'u2', role: 'user' });
+    await ds.create({ id: 'u3', role: 'admin' });
+
+    const page = await ds.findPage!({
+      where: { role: 'admin' },
+      orderBy: { id: 'asc' },
+      limit: 10,
+      offset: 0,
+      select: [],
+    });
+    expect(page.rows.map((r) => r.id)).toEqual(['u1', 'u3']);
+    // The two read paths agree, which is the property that was broken.
+    const all = await ds.findAll({
+      where: { role: 'admin' },
+      orderBy: { id: 'asc' },
+      limit: -1,
+      offset: 0,
+      select: [],
+    });
+    expect(page.rows.map((r) => r.id)).toEqual(all.map((r) => r.id));
+  });
+
+  it('conjoins where with the keyset predicate across a walk', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    for (const i of [1, 2, 3, 4, 5, 6]) {
+      await ds.create({ id: `u${i}`, role: i % 2 === 0 ? 'user' : 'admin', score: i });
+    }
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page++) {
+      const result = await ds.findPage!({
+        where: { role: 'admin' },
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        ...(cursor === null ? {} : { cursor }),
+      });
+      seen.push(...result.rows.map((r) => String(r.id)));
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+    // Only the three admins, each once — the where survives paging.
+    expect(seen).toEqual(['u1', 'u3', 'u5']);
+  });
+});
+
+describe('overlay keys are collision-free (outside-diff review, M79)', () => {
+  /** Every row currently visible, whether inside a transaction or not. */
+  async function visible(
+    source: { findAll: (q: never) => Promise<Record<string, unknown>[]> },
+  ): Promise<Record<string, unknown>[]> {
+    return await source.findAll(
+      { where: {}, orderBy: {}, limit: -1, offset: 0, select: [] } as never,
+    );
+  }
+
+  it('distinguishes a string key from the numerically equal number key', async () => {
+    // Record lookup compares with `===`, so `'42'` and `42` are different
+    // rows — but both encoded to `W::42`, so deleting one hid BOTH inside the
+    // transaction and then committed a delete for only one. The transaction
+    // reported a state that never existed.
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    await ds.create({ id: '42', tag: 'string-key' });
+    await ds.create({ id: 42, tag: 'number-key' });
+
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+    expect(await tds.delete('42')).toBe(true);
+    expect((await visible(tds)).map((r) => r.tag)).toEqual(['number-key']);
+    await tx.commit();
+    expect((await visible(ds)).map((r) => r.tag)).toEqual(['number-key']);
+  });
+
+  it('does not let a delimiter inside a value forge a composite key', async () => {
+    // `{ a: 'x|b=y', b: 'z' }` and `{ a: 'x', b: 'y|b=z' }` both encoded to
+    // `W::a=x|b=y|b=z` under the old `col=value` join.
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W', ['a', 'b']);
+    await ds.create({ a: 'x|b=y', b: 'z', tag: 'first' });
+    await ds.create({ a: 'x', b: 'y|b=z', tag: 'second' });
+
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+    expect(await tds.delete({ a: 'x|b=y', b: 'z' })).toBe(true);
+    expect((await visible(tds)).map((r) => r.tag)).toEqual(['second']);
+    await tx.commit();
+    expect((await visible(ds)).map((r) => r.tag)).toEqual(['second']);
+  });
+
+  it('is independent of the caller key order, as record lookup is', async () => {
+    // The key is canonicalized by the mapping's declared column order, not by
+    // the caller's object-key order, so overlay identity agrees with lookup.
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W', ['a', 'b']);
+    await ds.create({ a: 'p', b: 'q', tag: 'only' });
+
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+    await tds.update({ b: 'q', a: 'p' }, { tag: 'updated' });
+    expect((await visible(tds)).map((r) => r.tag)).toEqual(['updated']);
+    await tx.commit();
+    expect((await visible(ds)).map((r) => r.tag)).toEqual(['updated']);
+  });
+
+  it('keeps a partial composite key distinct from a complete one', async () => {
+    // An absent column is tagged distinctly, so a partial key cannot encode to
+    // the same string as a complete one and shadow a row it does not name.
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W', ['a', 'b']);
+    await ds.create({ a: 'p', b: 'q', tag: 'complete' });
+
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+    // A partial key matches no record, so the delete reports false and the
+    // overlay records nothing.
+    expect(await tds.delete({ a: 'p' } as never)).toBe(false);
+    expect((await visible(tds)).map((r) => r.tag)).toEqual(['complete']);
+    await tx.commit();
+    expect((await visible(ds)).map((r) => r.tag)).toEqual(['complete']);
+  });
+});
+
+describe('overlay mutations reach rows created in the same transaction (PR #218 review)', () => {
+  /** Every row currently visible through the given source. */
+  async function tags(
+    source: { findAll: (q: never) => Promise<Record<string, unknown>[]> },
+  ): Promise<unknown[]> {
+    const found = await source.findAll(
+      { where: {}, orderBy: {}, limit: -1, offset: 0, select: [] } as never,
+    );
+    return found.map((r) => r.tag);
+  }
+
+  it('reads back an update applied to a row created in the same transaction', async () => {
+    // `effectiveRecords` applied shadows and tombstones while mapping the
+    // COMMITTED rows and then appended buffered creates untouched — so
+    // `update()` returned the new record while the very next read returned the
+    // original. The divergence was confined to reads inside the transaction,
+    // which is where a caller is least likely to be suspicious of it.
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+
+    await tds.create({ id: 'n1', tag: 'created' });
+    const updated = await tds.update('n1', { tag: 'updated' });
+    expect(updated.tag).toBe('updated');
+    // The read-back must agree with what `update()` reported.
+    expect(await tags(tds)).toEqual(['updated']);
+    expect((await tds.findById('n1'))?.tag).toBe('updated');
+
+    await tx.commit();
+    expect(await tags(ds)).toEqual(['updated']);
+  });
+
+  it('hides a row created and then deleted in the same transaction', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+
+    await tds.create({ id: 'n2', tag: 'created' });
+    expect(await tds.delete('n2')).toBe(true);
+    // `delete()` reported true, so the row must be gone from the same read.
+    expect(await tags(tds)).toEqual([]);
+    expect(await tds.findById('n2')).toBeNull();
+
+    await tx.commit();
+    expect(await tags(ds)).toEqual([]);
+  });
+
+  it('discards a created-then-updated row entirely on rollback', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+
+    await tds.create({ id: 'n3', tag: 'created' });
+    await tds.update('n3', { tag: 'updated' });
+    await tx.rollback();
+    expect(await tags(ds)).toEqual([]);
+  });
+
+  it('still applies an update to a COMMITTED row, the pre-existing path', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    await ds.create({ id: 'c1', tag: 'committed' });
+
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+    await tds.update('c1', { tag: 'updated' });
+    expect(await tags(tds)).toEqual(['updated']);
+    await tx.commit();
+    expect(await tags(ds)).toEqual(['updated']);
+  });
+
+  it('applies a composite-key update to a row created in the same transaction', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W', ['a', 'b']);
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+
+    await tds.create({ a: 'p', b: 'q', tag: 'created' });
+    await tds.update({ a: 'p', b: 'q' }, { tag: 'updated' });
+    expect(await tags(tds)).toEqual(['updated']);
+    await tx.commit();
+    expect(await tags(ds)).toEqual(['updated']);
+  });
+});

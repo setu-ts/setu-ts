@@ -633,3 +633,120 @@ describe('mintNextCursor refuses a value that cannot survive the wire', () => {
     expect(mintNextCursor([], orderBy, ['id'], fingerprint, true)).toBeNull();
   });
 });
+
+describe('encodeCursor validates on the public path (outside-diff review, M79)', () => {
+  /**
+   * `mintNextCursor` guards its inputs, but `encodeCursor` is exported and
+   * reaches `encodeCursorValue` directly — so an adapter or an application
+   * building a cursor by hand bypassed the guard entirely. Both arms fail late
+   * and confusingly: a non-finite number serializes as `null` and is refused
+   * only on the NEXT request's decode, and an invalid `Date` throws a bare
+   * `RangeError: Invalid time value` naming neither the cursor nor the value.
+   */
+  it('refuses a non-finite number, naming the value', () => {
+    for (
+      const [label, value] of [['NaN', NaN], ['Infinity', Infinity], [
+        '-Infinity',
+        -Infinity,
+      ]] as const
+    ) {
+      expect(
+        () => encodeCursor({ orderedValues: [value], keyValues: ['u1'], sortFingerprint: 's:asc' }),
+        label,
+      ).toThrow(new RegExp(`cannot encode ${label.replace('-', '\\-')} into a cursor`));
+    }
+    // The key position is guarded by the same helper.
+    expect(() => encodeCursor({ orderedValues: ['a'], keyValues: [NaN], sortFingerprint: 's:asc' }))
+      .toThrow(/cannot encode NaN/);
+  });
+
+  it('refuses an invalid Date rather than throwing RangeError from toISOString', () => {
+    expect(() =>
+      encodeCursor({
+        orderedValues: [new Date('nope')],
+        keyValues: ['u1'],
+        sortFingerprint: 's:asc',
+      })
+    ).toThrow(/cannot encode an invalid Date/);
+  });
+
+  it('still encodes every valid value, Dates round-tripping as Dates', () => {
+    const at = new Date('2026-08-31T00:00:00.000Z');
+    const token = encodeCursor({
+      orderedValues: [at, 0, -1.5, ''],
+      keyValues: ['u1'],
+      sortFingerprint: 's:asc',
+    });
+    const back = decodeCursor(token);
+    expect(back?.orderedValues[0]).toBeInstanceOf(Date);
+    expect((back?.orderedValues[0] as Date).toISOString()).toBe(at.toISOString());
+    expect(back?.orderedValues.slice(1)).toEqual([0, -1.5, '']);
+  });
+});
+
+describe('decodeCursor refuses a token carrying junk (outside-diff review, M79)', () => {
+  const token = encodeCursor({
+    orderedValues: ['a'],
+    keyValues: ['u1'],
+    sortFingerprint: 's:asc',
+  });
+
+  it('decodes the unmodified token', () => {
+    expect(decodeCursor(token)).not.toBeNull();
+  });
+
+  it('refuses any character outside the base64url alphabet', () => {
+    // The decoder used to SKIP an unknown character, which made it lenient in
+    // the one way a token validator must not be: two different strings decoded
+    // to one payload, so `token + '$'` was accepted as if it were `token`. A
+    // cursor is untrusted caller input.
+    for (const junk of ['$', '!!', '  ', '\n', '@@@@', '#', '~', 'á']) {
+      expect(decodeCursor(token + junk), JSON.stringify(junk)).toBeNull();
+      expect(decodeCursor(junk + token), `leading ${JSON.stringify(junk)}`).toBeNull();
+    }
+  });
+
+  it('inspects the whole token, not just up to the first padding character', () => {
+    // The scan used to STOP at the first `=` and never look at what followed,
+    // so `token + '=$'` decoded to the original payload.
+    for (const junk of ['=$', '=!!', '==@@', '=\n', '===']) {
+      expect(decodeCursor(token + junk), JSON.stringify(junk)).toBeNull();
+    }
+  });
+
+  it('refuses the standard-base64 spelling of the same payload', () => {
+    // Validation runs on the RAW token, before `-`/`_` are normalised — the
+    // only place it can be correct. After normalisation a decoded `+` is
+    // indistinguishable from one the caller supplied, so a post-normalisation
+    // check has to accept both, which admits two spellings of one payload.
+    let withUrlChars: string | null = null;
+    for (let i = 0; i < 400 && withUrlChars === null; i++) {
+      const candidate = encodeCursor({
+        orderedValues: [`v${i}~`],
+        keyValues: [`k${i}?`],
+        sortFingerprint: 's:asc',
+      });
+      if (/[-_]/.test(candidate)) withUrlChars = candidate;
+    }
+    // Vacuity guard: without a `-` or `_` there is nothing to swap and the
+    // assertion below would pass for the wrong reason.
+    expect(withUrlChars, 'a token carrying - or _').not.toBeNull();
+    const token64 = (withUrlChars as string).replace(/-/g, '+').replace(/_/g, '/');
+    expect(token64).not.toBe(withUrlChars);
+    expect(decodeCursor(withUrlChars as string)).not.toBeNull();
+    expect(decodeCursor(token64)).toBeNull();
+  });
+
+  it('refuses a bare + or / appended to a token', () => {
+    expect(decodeCursor(token + '+')).toBeNull();
+    expect(decodeCursor(token + '/')).toBeNull();
+  });
+
+  it('still tolerates trailing base64 padding', () => {
+    // `=` is padding, not data: `base64UrlEncode` strips it, so a token this
+    // module minted never carries any — but accepting it is conventional
+    // base64 leniency and is deliberately preserved.
+    expect(decodeCursor(token + '=')).not.toBeNull();
+    expect(decodeCursor(token + '==')).not.toBeNull();
+  });
+});

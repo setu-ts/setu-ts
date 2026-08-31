@@ -35,6 +35,7 @@ import {
 import { drizzle as mysqlDrizzle } from 'npm:drizzle-orm@0.45.2/mysql-proxy';
 import { mysqlTable, text as mysqlText } from 'npm:drizzle-orm@0.45.2/mysql-core';
 import { DatabaseSync } from 'node:sqlite';
+import type { SQLInputValue } from 'node:sqlite';
 import {
   createDrizzleDataSource,
   DrizzleAdapter,
@@ -128,8 +129,8 @@ const suffix = crypto.randomUUID().replaceAll('-', '');
  * T14 integration suite's helper).
  */
 interface ArrayReturningStatement {
-  run(...params: string[]): unknown;
-  all(...params: string[]): unknown[];
+  run(...params: SQLInputValue[]): unknown;
+  all(...params: SQLInputValue[]): unknown[];
   setReturnArrays(returnArrays: boolean): void;
 }
 
@@ -145,11 +146,11 @@ function executeSqlite(
 ): Promise<{ rows: unknown[] }> {
   const prepared = engine.prepare(statement) as unknown as ArrayReturningStatement;
   if (method === 'run') {
-    prepared.run(...(params as string[]));
+    prepared.run(...(params as SQLInputValue[]));
     return Promise.resolve({ rows: [] });
   }
   prepared.setReturnArrays(true);
-  const rows = prepared.all(...(params as string[]));
+  const rows = prepared.all(...(params as SQLInputValue[]));
   return Promise.resolve({ rows });
 }
 
@@ -273,7 +274,7 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     );
 
     const database = sqliteDrizzle((statement, params) => {
-      const rows = engine.prepare(statement).all(...(params as string[]));
+      const rows = engine.prepare(statement).all(...(params as SQLInputValue[]));
       return Promise.resolve({ rows: rows.map((row) => Object.values(row)) });
     });
     const source = createDrizzleDataSource(

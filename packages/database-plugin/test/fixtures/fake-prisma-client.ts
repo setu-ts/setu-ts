@@ -47,24 +47,6 @@ function createNotFoundError(model: string, id: unknown): Error {
 }
 
 /**
- * Check whether a record matches a Prisma-style `where` clause.
- * Supports both scalar `{ id: value }` and compound-key `{ <field>: { col1: val1 } }` shapes.
- */
-function matchWhere(
-  row: Record<string, unknown>,
-  where: Record<string, unknown>,
-): boolean {
-  for (const [key, val] of Object.entries(where)) {
-    if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
-      const compound = val as Record<string, unknown>;
-      return Object.entries(compound).every(([k, v]) => row[k] === v);
-    }
-    if (row[key] !== val) return false;
-  }
-  return true;
-}
-
-/**
  * Operators the translated `where` can carry inside a field object. An object
  * under a field that carries none of these keys is a compound-key match
  * (`{ tenantId_userId: { tenantId: 't1', userId: 7 } }`) instead.
@@ -79,6 +61,26 @@ const OPERATOR_KEYS: ReadonlySet<string> = new Set([
   'in',
   'path',
 ]);
+
+/**
+ * Normalize an `AND`/`OR` value to a clause list.
+ *
+ * Prisma accepts a SINGLETON `WhereInput` as well as an array, so a bare
+ * `as Record<string, unknown>[]` cast left `.every`/`.some` `undefined` and
+ * threw a `TypeError` on that shape. The adapter only ever emits arrays today,
+ * so this is not reachable from `src` — but this fixture's contract is to
+ * evaluate "the `where` input a real Prisma client would receive", and a double
+ * that refuses input the real client accepts is the class of infidelity this
+ * file exists to avoid.
+ *
+ * @param value - The `AND`/`OR` value from a `where` input
+ * @returns The clauses as a list
+ */
+function clausesOf(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value as Record<string, unknown>[]
+    : [value as Record<string, unknown>];
+}
 
 /**
  * Evaluate a Prisma-style `where` object against a row — the subset of the
@@ -99,13 +101,27 @@ function matchesPrismaWhere(
 ): boolean {
   for (const [key, val] of Object.entries(where)) {
     if (key === 'AND') {
-      const clauses = val as Record<string, unknown>[];
-      if (!clauses.every((clause) => matchesPrismaWhere(row, clause))) return false;
+      if (!clausesOf(val).every((clause) => matchesPrismaWhere(row, clause))) return false;
       continue;
     }
     if (key === 'OR') {
-      const clauses = val as Record<string, unknown>[];
-      if (!clauses.some((clause) => matchesPrismaWhere(row, clause))) return false;
+      if (!clausesOf(val).some((clause) => matchesPrismaWhere(row, clause))) return false;
+      continue;
+    }
+    if (key === 'NOT') {
+      // `!some` rather than `!every`, which is what the ARRAY form means.
+      // Measured against real Prisma 7.10 on live PostgreSQL over four rows
+      // spanning two conditions A and B: `NOT: [A, B]` returned only the row
+      // matching NEITHER, so the array negates each condition and ANDs them
+      // (`NOT A AND NOT B`) rather than negating their conjunction
+      // (`NOT (A AND B)`), which would have returned three rows. `!some` gives
+      // both readings correctly for a singleton and, on an empty array,
+      // constrains nothing — which is also what Prisma answered.
+      //
+      // Without this arm `{ NOT: … }` fell through to the compound-key branch
+      // and MATCHED the rows it was asked to exclude — fully inverted, on
+      // `findMany`, `update`, `delete` and `count` alike.
+      if (clausesOf(val).some((clause) => matchesPrismaWhere(row, clause))) return false;
       continue;
     }
     if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
@@ -312,7 +328,7 @@ function createDelegate(
       // Find the key of the matching record in the store
       let key: string | undefined;
       for (const [k, v] of store.records) {
-        if (matchWhere(v, args.where)) {
+        if (matchesPrismaWhere(v, args.where)) {
           key = k;
           break;
         }
@@ -330,7 +346,7 @@ function createDelegate(
       recordedCalls.push({ model: modelName, action: 'delete', args });
       let key: string | undefined;
       for (const [k, v] of store.records) {
-        if (matchWhere(v, args.where)) {
+        if (matchesPrismaWhere(v, args.where)) {
           key = k;
           break;
         }
