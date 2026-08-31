@@ -214,7 +214,7 @@ export type {
 // it lives in `common` and is reached by every adapter — including
 // `cloudflare-plugin`, which cannot import `database-plugin` (AI_GUIDELINES §2.2).
 export { decodeCursor, encodeCursor, keysetPredicate } from './services/cursor.ts';
-export type { CursorPayload } from './services/cursor.ts';
+export type { CursorPayload, CursorValue } from './services/cursor.ts';
 export { mintNextCursor, sortFingerprint } from './services/cursor.ts';
 export type { ICacheStore } from './services/cache.ts';
 export type { EventHandler, IDomainEvent, IEventBus, Unsubscribe } from './services/events.ts';

@@ -402,6 +402,7 @@ imperative begin/commit.
 | `PrismaAdapterOptions`                    | interface |
 | `PrismaDatabaseOptions`                   | interface |
 | `BuiltInDatabaseOptions`                  | type      |
+| `CursorValue`                             | type      |
 | `DatabaseAdapterType`                     | type      |
 | `DatabasePluginOptions`                   | type      |
 | `DataSource`                              | type      |

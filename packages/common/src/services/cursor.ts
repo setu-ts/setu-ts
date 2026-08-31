@@ -16,7 +16,20 @@
  */
 import type { FilterComparison, FilterExpression, OrderDirection } from './database.ts';
 
-type CursorValue = string | number | Date;
+/**
+ * A scalar value retained by a portable keyset cursor.
+ *
+ * Dates remain `Date` instances after decoding so adapters can preserve their
+ * comparison semantics instead of treating them as ordinary ISO strings.
+ *
+ * @see {@linkcode CursorPayload}
+ * @example
+ * ```typescript
+ * const createdAt: CursorValue = new Date('2026-08-31T00:00:00.000Z');
+ * ```
+ * @since 0.2.0
+ */
+export type CursorValue = string | number | Date;
 
 interface EncodedDate {
   readonly t: 'D';

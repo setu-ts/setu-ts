@@ -322,6 +322,7 @@ package fits the plugin architecture.
 | `CircuitState`               | type      |
 | `CliCommandHandler`          | type      |
 | `Constructor`                | type      |
+| `CursorValue`                | type      |
 | `DecoratorHandler`           | type      |
 | `EntityKey`                  | type      |
 | `EventHandler`               | type      |

@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as database from '../../src/index.ts';
 import type {
+  CursorValue,
   DrizzleAdapterOptions,
   DrizzleDatabaseOptions,
   MemoryDatabaseOptions,
@@ -67,6 +68,11 @@ describe('database-plugin barrel exports', () => {
       'mongodb',
       'users',
     ]);
+  });
+
+  it('re-exports CursorValue from the application-facing data-access contract', () => {
+    const cursorValue: CursorValue = new Date('2026-08-31T00:00:00.000Z');
+    expect(cursorValue).toBeInstanceOf(Date);
   });
 
   it('exports the Mongo adapter and only its application-facing surface', () => {

@@ -66,6 +66,7 @@ export {
 // already-exported `DataSource.findAll` parameter type is finally nameable.
 export type {
   CursorPayload,
+  CursorValue,
   EntityKey,
   FilterComparison,
   FilterExpression,
