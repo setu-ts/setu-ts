@@ -374,6 +374,7 @@ imperative begin/commit.
 | `DatabaseAdapterOptions`                  | interface |
 | `DatabaseConnectionOptions`               | interface |
 | `DrizzleAdapterOptions`                   | interface |
+| `DrizzleCompositeKeyOptions`              | interface |
 | `DrizzleDatabase`                         | interface |
 | `DrizzleDatabaseIdentity`                 | interface |
 | `DrizzleDatabaseOptions`                  | interface |
@@ -398,8 +399,10 @@ imperative begin/commit.
 | `MongoEntityMapping`                      | interface |
 | `MongoOptions`                            | interface |
 | `NormalizedQuery`                         | interface |
+| `Page`                                    | interface |
 | `PageResult`                              | interface |
 | `PrismaAdapterOptions`                    | interface |
+| `PrismaCompositeKeyOptions`               | interface |
 | `PrismaDatabaseOptions`                   | interface |
 | `BuiltInDatabaseOptions`                  | type      |
 | `CursorValue`                             | type      |
@@ -415,6 +418,7 @@ imperative begin/commit.
 | `MongoAdapterOptions`                     | type      |
 | `MongoWriteOptions`                       | type      |
 | `OrderDirection`                          | type      |
+| `PageOptions`                             | type      |
 | `PrismaSqlProvider`                       | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

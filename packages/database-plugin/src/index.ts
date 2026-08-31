@@ -21,6 +21,7 @@ export type {
   DatabaseConnectionOptions,
   DatabasePluginOptions,
   DrizzleAdapterOptions,
+  DrizzleCompositeKeyOptions,
   DrizzleDatabaseOptions,
   FindOptions,
   IDatabaseService,
@@ -32,7 +33,10 @@ export type {
   MongoDatabaseOptions,
   MongoEntityMapping,
   OrderDirection,
+  Page,
+  PageOptions,
   PrismaAdapterOptions,
+  PrismaCompositeKeyOptions,
   PrismaDatabaseOptions,
   PrismaSqlProvider,
 } from './interfaces/index.ts';
