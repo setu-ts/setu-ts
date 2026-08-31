@@ -15,6 +15,7 @@ import { expect } from '@std/expect';
 import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
 import type { IMongoSession } from '../../src/adapters/mongo/mongo-client-types.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
+import { encodeCursor } from '@setu-ts/common';
 import { FakeMongoClient, fakeObjectIdCtor, FakeSession } from '../fixtures/fake-mongo-client.ts';
 
 /** A fresh client per test — the real driver hands back the same collection
@@ -37,6 +38,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
     ...(partial.filter === undefined ? {} : { filter: partial.filter }),
+    ...(partial.cursor === undefined ? {} : { cursor: partial.cursor }),
   };
 }
 
@@ -571,5 +573,177 @@ describe('composite keys — compound _id subdocument (P4/P5)', () => {
     const filter = findCall.args[0] as Record<string, unknown>;
     // Compound _id: the where clause is wrapped under _id as a subdocument.
     expect(filter).toEqual({ _id: { tenantId: 't1', userId: 'u1' } });
+  });
+});
+
+describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
+  /**
+   * Six rows over a `size` sort carrying deliberate ties (two rows per size) —
+   * the P10/P11 fixture. Without the key-tiebreaker the walk would silently
+   * lose rows, so this seeded tie is the proof the tiebreaker is load-bearing.
+   */
+  // 24-hex ids so the values round-trip through the `fakeObjectIdCtor` /
+  // `toDriverId` conversion path (the scalar key renames to `_id` and the
+  // keyset predicate's `id` comparisons pass through that same conversion).
+  const SEED = [
+    { id: '000000000000000000000001', size: 1, name: 's1a' },
+    { id: '000000000000000000000002', size: 1, name: 's1b' },
+    { id: '000000000000000000000003', size: 2, name: 's2a' },
+    { id: '000000000000000000000004', size: 2, name: 's2b' },
+    { id: '000000000000000000000005', size: 3, name: 's3a' },
+    { id: '000000000000000000000006', size: 3, name: 's3b' },
+  ];
+  const ID = {
+    a: '000000000000000000000001',
+    b: '000000000000000000000002',
+    c: '000000000000000000000003',
+    d: '000000000000000000000004',
+    e: '000000000000000000000005',
+    f: '000000000000000000000006',
+  } as const;
+
+  /** Seeds the fixture into a fresh client and returns both for inspection. */
+  /**
+   * Seeds the fixture into a fresh client and returns both the client (for
+   * inspecting recorded driver arguments) and the data source bound to it.
+   */
+  function seededClient(): { client: FakeMongoClient; ds: ReturnType<typeof makeDataSource> } {
+    const client = makeClient();
+    const ds = makeDataSource(client);
+    for (const row of SEED) void ds.create(row);
+    return { client, ds };
+  }
+
+  it('walks a tied fixture across three pages, every row exactly once, last page null', async () => {
+    const { ds } = seededClient();
+    let cursor: string | undefined;
+    const seen: string[] = [];
+    for (let page = 0; page < 3; page++) {
+      const result = await ds.findPage!(query({
+        orderBy: { size: 'asc' },
+        limit: 2,
+        ...(cursor === undefined ? {} : { cursor }),
+      }));
+      for (const row of result.rows) seen.push(String(row.id));
+      cursor = result.nextCursor ?? undefined;
+      if (cursor === undefined) break;
+    }
+    // Every row exactly once, none repeated, none skipped.
+    expect(seen.sort()).toEqual([ID.a, ID.b, ID.c, ID.d, ID.e, ID.f]);
+    expect(new Set(seen).size).toBe(6);
+  });
+
+  it('reports nextCursor: null on the last page', async () => {
+    const { ds } = seededClient();
+    // Walk to the final page by consuming the cursors.
+    const p1 = await ds.findPage!(query({ orderBy: { size: 'asc' }, limit: 2 }));
+    const p2 = await ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      cursor: p1.nextCursor as string,
+    }));
+    const p3 = await ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      cursor: p2.nextCursor as string,
+    }));
+    // Six rows over three pages of two: the last page is a full page of two,
+    // and the probe fetched exactly two (no extra), so nextCursor is null.
+    expect(p3.nextCursor).toBeNull();
+    expect(p3.rows).toHaveLength(2);
+    expect(p3.rows.map((r) => r.id)).toEqual([ID.e, ID.f]);
+  });
+
+  it('records the conjoined keyset filter, the limit+1 probe and the minted next cursor', async () => {
+    const { client, ds } = seededClient();
+    // First page: mint a cursor from the returned last row.
+    const p1 = await ds.findPage!(query({ orderBy: { size: 'asc' }, limit: 2 }));
+    expect(p1.rows).toHaveLength(2);
+    expect(p1.nextCursor).not.toBeNull();
+
+    // Second page: assert on the recorded driver arguments.
+    const p2 = await ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      cursor: p1.nextCursor as string,
+    }));
+    const calls = client.databases.get('testdb')!.collection('Widget').calls;
+    const findCall = calls.filter((c) => c.method === 'find').at(-1)!;
+    const args = findCall.args as [
+      Record<string, unknown>,
+      { sort?: Record<string, string>; limit?: number },
+    ];
+    // The conjoined keyset predicate is a FilterExpression translated to native
+    // Mongo: or(gt(size, cursorSize), and(eq(size, cursorSize), gt(id, cursorId))).
+    const filter = args[0] as { $or: unknown[] };
+    expect(filter.$or.length).toBe(2);
+    // The one-extra-row probe: limit + 1 reached the driver.
+    expect(args[1].limit).toBe(3);
+    // The minted next cursor is asserted to be encodeCursor's output for the
+    // last row's ordered + key values under the current sort. The tiebreaker
+    // column `id` is undefined on the seeded rows, so the key value is undefined
+    // (JSON-encoded to null) — the minting reads it off the raw row.
+    expect(p2.nextCursor).toBe(
+      encodeCursor({
+        orderedValues: [2],
+        keyValues: [p2.rows[1].id as string | number],
+        sortFingerprint: 'size:asc',
+      }),
+    );
+  });
+
+  it('rejects a malformed cursor token by name (never a synchronous throw)', async () => {
+    const { ds } = seededClient();
+    await expect(ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      cursor: 'bm90anNvbg', // base64url of 'notjson' — decodes, fails JSON.parse
+    }))).rejects.toThrow(/malformed cursor token/);
+  });
+
+  it('rejects a cursor whose fingerprint does not match the current sort by name', async () => {
+    const { ds } = seededClient();
+    await expect(ds.findPage!(query({
+      orderBy: { size: 'desc' },
+      limit: 2,
+      cursor: encodeCursor({
+        orderedValues: [1],
+        keyValues: [ID.a],
+        sortFingerprint: 'size:asc',
+      }),
+    }))).rejects.toThrow(/cursor fingerprint mismatch/);
+  });
+
+  it('strips the key columns from the returned rows when a projection is present', async () => {
+    const { client, ds } = seededClient();
+    const result = await ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      select: ['name'],
+    }));
+    // The caller's projection is what comes back — `id` (a key column) is stripped.
+    expect(result.rows[0]).toEqual({ name: 's1a' });
+    expect(Object.hasOwn(result.rows[0], 'id')).toBe(false);
+    // But the key column AND the ordered field (minting reads `size`) reached the
+    // driver so the probe and cursor minting could read them.
+    const calls = client.databases.get('testdb')!.collection('Widget').calls;
+    const findOptions = calls.find((c) => c.method === 'find')!.args[1] as {
+      projection: Record<string, 0 | 1>;
+    };
+    expect(findOptions.projection).toEqual({ name: 1, _id: 1, size: 1 });
+  });
+
+  it('refuses a query carrying both offset and cursor by name before any call', async () => {
+    const { ds } = seededClient();
+    await expect(ds.findPage!(query({
+      orderBy: { size: 'asc' },
+      limit: 2,
+      offset: 1,
+      cursor: encodeCursor({
+        orderedValues: [1],
+        keyValues: [ID.a],
+        sortFingerprint: 'size:asc',
+      }),
+    }))).rejects.toThrow(/offset=1 conflicts with cursor/);
   });
 });

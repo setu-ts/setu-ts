@@ -12,6 +12,7 @@
  * @module
  */
 import type {
+  CursorPayload,
   EntityKey,
   FilterExpression,
   IAdapterTransaction,
@@ -19,6 +20,7 @@ import type {
   NormalizedQuery,
   OrderDirection,
 } from '@setu-ts/common';
+import { decodeCursor, keysetPredicate } from '@setu-ts/common';
 import {
   fromDriverDocument,
   resolveMongoTarget,
@@ -35,6 +37,13 @@ import type {
   IMongoObjectIdCtor,
   IMongoSession,
 } from './mongo-client-types.ts';
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
+import { mintNextCursor, sortFingerprint } from '../../query/cursor-page.ts';
+import {
+  normalizePageQuery,
+  PageNormalizationError,
+  projectFields,
+} from '../../query/query-builder.ts';
 
 // Re-export the driver structural types the data source carries.
 export type {
@@ -288,7 +297,150 @@ export function createMongoDataSource(
         options(),
       );
     },
+
+    /**
+     * §3.8 keyset pagination. One implementation, shared with the transaction
+     * data source: normalize (refusing an offset/cursor pair, §3.10), decode
+     * the incoming cursor (malformed → refuse by name), verify the sort
+     * fingerprint (cross-sort → refuse by name), build the portable keyset
+     * predicate with the shared builder and conjoin it with the caller's
+     * `where`/`filter`, then `find` with `limit + 1` (the one-extra-row
+     * probe). The LAST returned row mints the next cursor when a further page
+     * exists (`nextCursor` is `null` on the last page); the key columns and
+     * ordered fields are added to the internal projection only for the probe
+     * and cursor minting, then stripped so the caller's projection is what
+     * comes back (§8).
+     *
+     * @param query - The normalized page query, carrying an optional `cursor`
+     * @returns A {@linkcode PageResult} carrying `rows` and the `nextCursor`
+     * @throws {UnsupportedQueryFeatureError} When the token is malformed or the
+     *   fingerprint does not match the current sort (rejected, never a
+     *   synchronous throw)
+     */
+    findPage: async (query) => {
+      // §3.8 keyset pipeline. `normalized`, `decoded`, `fingerprint`, `keyset`,
+      // the internal projection, and the probe all live in this closure so the
+      // one implementation is shared with the transaction data source.
+      const normalized = normalizePageQuery(query);
+      if (normalized instanceof PageNormalizationError) {
+        return Promise.reject(normalized);
+      }
+
+      // 2. Decode cursor. A missing cursor means start of the walk; a malformed
+      //    token is refused by name.
+      let decoded: CursorPayload | null = null;
+      if (normalized.cursor !== undefined) {
+        decoded = decodeCursor(normalized.cursor);
+        if (decoded === null) {
+          return Promise.reject(
+            new UnsupportedQueryFeatureError(
+              'cursor-pagination',
+              'mongo',
+              `cursor-pagination: entity '${target.collection}': malformed cursor token`,
+            ),
+          );
+        }
+      }
+
+      // 3. Sort-fingerprint guard — a cross-sort cursor would return a
+      //    silently wrong page.
+      const fingerprint = sortFingerprint(normalized.orderBy);
+      if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
+        return Promise.reject(
+          new UnsupportedQueryFeatureError(
+            'cursor-pagination',
+            'mongo',
+            `cursor-pagination: entity '${target.collection}': cursor fingerprint ` +
+              `mismatch — expected '${fingerprint}', got '${decoded.sortFingerprint}'`,
+          ),
+        );
+      }
+
+      // 4. Keyset predicate through the shared builder; it is a FilterExpression,
+      //    so it reaches the collection through the existing translateQuery
+      //    path with no new translation code.
+      const keyset = decoded === null ? undefined : keysetPredicate(
+        decoded.orderedValues,
+        decoded.keyValues,
+        normalized.orderBy,
+        target.primaryKey,
+      );
+      const keysetFilter = conjoinFilters(normalized.filter, keyset);
+
+      // 5. One-extra-row probe. A non-zero skip is never applied: the keyset
+      //    position replaces offset (and §3.10 refused the two together). The
+      //    `limit + 1` is folded directly into the driver `find` below.
+      const keyColumns = target.primaryKey;
+      const internalSelect = normalized.select.length > 0
+        ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+        : [];
+      const mapped = mapQueryToDriver(
+        {
+          ...normalized,
+          limit: normalized.limit > 0 ? normalized.limit + 1 : normalized.limit,
+          select: internalSelect,
+          ...(keysetFilter === undefined ? {} : { filter: keysetFilter }),
+        },
+        target,
+      );
+      const { filter: translatedFilter, options: findOptions } = translateQuery(mapped);
+      const filter = mapMongoIdValues(translatedFilter, target, objectIdCtor);
+      const projection = findOptions.projection === undefined
+        ? undefined
+        : mapProjection(findOptions.projection, keyColumns);
+      const found = await collection.find(
+        filter,
+        projection === undefined
+          ? { ...findOptions, ...options() }
+          : { ...findOptions, projection, ...options() },
+      ).toArray();
+
+      // The driver returns raw documents keyed by `_id`; the cursor minting
+      // reads the repository primary-key columns and the caller expects
+      // repository-shaped rows, so map BEFORE minting and returning.
+      const mappedRows = found.map((row) => fromDriverDocument(row, target));
+
+      // 6. Probe outcome: more than `limit` rows means a next page exists and
+      //    the LAST returned row mints the cursor; otherwise the page is terminal.
+      const hasMore = normalized.limit > 0 && mappedRows.length > normalized.limit;
+      const pageRows = hasMore ? mappedRows.slice(0, normalized.limit) : mappedRows;
+      const nextCursor = mintNextCursor(
+        pageRows,
+        normalized.orderBy,
+        keyColumns,
+        fingerprint,
+        hasMore,
+      );
+
+      // 7. The caller's projection is what comes back — the key columns and the
+      //    ordered fields joined the internal select only for the probe and the
+      //    cursor minting, and are stripped here.
+      const rows = internalSelect.length > 0
+        ? pageRows.map(
+          (row) => projectFields(row, normalized.select) as Record<string, unknown>,
+        )
+        : pageRows;
+      return Promise.resolve({ rows, nextCursor });
+    },
   };
+}
+
+/**
+ * Conjoin two optional portable filters, preferring the single expression when
+ * only one is present — an `and` node with one child would be a shape the
+ * caller never wrote and every backend translates differently.
+ *
+ * @param base - The caller's own filter, or `undefined`
+ * @param extra - The keyset predicate, or `undefined` on the first page
+ * @returns The conjoined expression, or `undefined` when neither is present
+ */
+function conjoinFilters(
+  base: FilterExpression | undefined,
+  extra: FilterExpression | undefined,
+): FilterExpression | undefined {
+  if (base === undefined) return extra;
+  if (extra === undefined) return base;
+  return { type: 'and', filters: [base, extra] };
 }
 
 /** Maps repository-visible primary-key fields onto Mongo's `_id` field. */
