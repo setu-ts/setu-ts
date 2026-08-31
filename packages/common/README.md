@@ -104,6 +104,7 @@ package fits the plugin architecture.
 | `isWorkerTaskReply`          | function  |
 | `isWorkerTaskRequest`        | function  |
 | `keysetPredicate`            | function  |
+| `mintNextCursor`             | function  |
 | `none`                       | function  |
 | `ok`                         | function  |
 | `parseCookie`                | function  |
@@ -118,6 +119,7 @@ package fits the plugin architecture.
 | `serializeError`             | function  |
 | `setUpgradeIntent`           | function  |
 | `some`                       | function  |
+| `sortFingerprint`            | function  |
 | `splitWorkerEnv`             | function  |
 | `unwrap`                     | function  |
 | `upgradeIntentOf`            | function  |
