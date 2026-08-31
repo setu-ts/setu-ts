@@ -82,6 +82,28 @@ describe('encodeCursor / decodeCursor round-trip', () => {
     expect(decoded!.sortFingerprint).toBe('tenantId:asc,id:asc');
   });
 
+  it('restores Date values while preserving numbers and strings', () => {
+    const createdAt = new Date('2026-06-01T00:00:00.123Z');
+    const decoded = decodeCursor(encodeCursor({
+      orderedValues: [createdAt, 42, 'event-1'],
+      keyValues: [createdAt, 42, 'event-1'],
+      sortFingerprint: 'createdAt:desc,id:asc',
+    }));
+
+    expect(decoded).not.toBeNull();
+    const orderedDate = decoded!.orderedValues[0];
+    const keyDate = decoded!.keyValues[0];
+    expect(orderedDate).toBeInstanceOf(Date);
+    expect(keyDate).toBeInstanceOf(Date);
+    if (!(orderedDate instanceof Date) || !(keyDate instanceof Date)) {
+      throw new Error('cursor date was not restored');
+    }
+    expect(orderedDate.getTime()).toBe(createdAt.getTime());
+    expect(keyDate.getTime()).toBe(createdAt.getTime());
+    expect(typeof decoded!.orderedValues[1]).toBe('number');
+    expect(typeof decoded!.orderedValues[2]).toBe('string');
+  });
+
   it('copies orderedValues so the returned array is independent', () => {
     const original = [1, 2] as ReadonlyArray<string | number>;
     const payload: CursorPayload = {

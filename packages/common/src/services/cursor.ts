@@ -16,6 +16,21 @@
  */
 import type { FilterComparison, FilterExpression, OrderDirection } from './database.ts';
 
+type CursorValue = string | number | Date;
+
+interface EncodedDate {
+  readonly t: 'D';
+  readonly v: string;
+}
+
+type EncodedCursorValue = string | number | EncodedDate;
+
+interface EncodedCursorPayload {
+  readonly orderedValues: ReadonlyArray<EncodedCursorValue>;
+  readonly keyValues: ReadonlyArray<EncodedCursorValue>;
+  readonly sortFingerprint: string;
+}
+
 /**
  * The decoded contents of a cursor minted by {@linkcode encodeCursor}: the
  * values of every ordered field (in `orderBy` order) plus the primary-key
@@ -43,13 +58,13 @@ export interface CursorPayload {
    * the row the cursor was minted against. Index `i` is the value of the
    * i-th entry of `Object.entries(orderBy)`.
    */
-  readonly orderedValues: ReadonlyArray<string | number>;
+  readonly orderedValues: ReadonlyArray<CursorValue>;
   /**
    * The primary-key column values (in key-column order), from the row the
    * cursor was minted against. Used by {@linkcode keysetPredicate} as the
    * tiebreaker fallback when a key column is absent from `orderBy`.
    */
-  readonly keyValues: ReadonlyArray<string | number>;
+  readonly keyValues: ReadonlyArray<CursorValue>;
   /**
    * A stable fingerprint of the resolved sort specification: each ordered
    * field paired with its direction, in order. A cursor minted under one sort
@@ -70,7 +85,15 @@ export interface CursorPayload {
  * @since 0.1.0
  */
 export function encodeCursor(payload: CursorPayload): string {
-  return base64Url(JSON.stringify(payload));
+  if (!Array.isArray(payload.orderedValues) || !Array.isArray(payload.keyValues)) {
+    return base64Url(JSON.stringify(payload));
+  }
+  const encoded: EncodedCursorPayload = {
+    orderedValues: payload.orderedValues.map(encodeCursorValue),
+    keyValues: payload.keyValues.map(encodeCursorValue),
+    sortFingerprint: payload.sortFingerprint,
+  };
+  return base64Url(JSON.stringify(encoded));
 }
 
 /**
@@ -92,10 +115,13 @@ export function decodeCursor(token: string): CursorPayload | null {
   } catch {
     return null;
   }
-  if (!isPayload(parsed)) return null;
+  if (!isEncodedPayload(parsed)) return null;
+  const orderedValues = decodeCursorValues(parsed.orderedValues);
+  const keyValues = decodeCursorValues(parsed.keyValues);
+  if (orderedValues === null || keyValues === null) return null;
   return {
-    orderedValues: [...parsed.orderedValues],
-    keyValues: [...parsed.keyValues],
+    orderedValues,
+    keyValues,
     sortFingerprint: parsed.sortFingerprint,
   };
 }
@@ -141,8 +167,8 @@ export function decodeCursor(token: string): CursorPayload | null {
  * @since 0.1.0
  */
 export function keysetPredicate(
-  orderedValues: ReadonlyArray<string | number>,
-  keyValues: ReadonlyArray<string | number>,
+  orderedValues: ReadonlyArray<CursorValue>,
+  keyValues: ReadonlyArray<CursorValue>,
   orderBy: Readonly<Record<string, OrderDirection>>,
   keyColumns: ReadonlyArray<string>,
 ): FilterExpression {
@@ -159,7 +185,7 @@ export function keysetPredicate(
   // a pure-tiebreaker key column's value sits at its own key-column position
   // in `keyValues` — never `orderedValues[0]`, which may belong to a non-key
   // field.
-  const valueOf = (field: string): string | number => {
+  const valueOf = (field: string): CursorValue => {
     const orderByIndex = entries.findIndex(([name]) => name === field);
     if (orderByIndex !== -1) return orderedValues[orderByIndex];
     return keyValues[keyColumns.indexOf(field)];
@@ -235,26 +261,57 @@ export function mintNextCursor(
   if (!hasMore || pageRows.length === 0) return null;
   const lastRow = pageRows[pageRows.length - 1];
   const orderedValues = Object.entries(orderBy).map(
-    ([field]) => lastRow[field] as string | number,
+    ([field]) => lastRow[field] as CursorValue,
   );
-  const keyValues = keyColumns.map((col) => lastRow[col] as string | number);
+  const keyValues = keyColumns.map((col) => lastRow[col] as CursorValue);
   return encodeCursor({ orderedValues, keyValues, sortFingerprint: fingerprint });
 }
 
 /**
- * Type guard for a decoded {@linkcode CursorPayload}: the shape a well-formed
- * token must have, and the reason a corrupt token is refused rather than
- * coerced.
+ * Encode one in-memory cursor value into its JSON-safe wire representation.
  *
- * @param value - The candidate value to test
- * @returns `true` when `value` is a payload
- * @since 0.1.0
+ * JSON serializes a Date as an ISO string, which loses the fact that it must
+ * later be compared as a Date. The reserved object tag restores that type
+ * without changing the wire representation of ordinary strings or numbers.
  */
-function isPayload(value: unknown): value is CursorPayload {
-  return typeof value === 'object' && value !== null &&
-    Array.isArray((value as CursorPayload).orderedValues) &&
-    Array.isArray((value as CursorPayload).keyValues) &&
-    typeof (value as CursorPayload).sortFingerprint === 'string';
+function encodeCursorValue(value: CursorValue): EncodedCursorValue {
+  return value instanceof Date ? { t: 'D', v: value.toISOString() } : value;
+}
+
+/** Decode all cursor values, refusing malformed values rather than coercing. */
+function decodeCursorValues(values: ReadonlyArray<unknown>): CursorValue[] | null {
+  const decoded: CursorValue[] = [];
+  for (const value of values) {
+    const cursorValue = decodeCursorValue(value);
+    if (cursorValue === null) return null;
+    decoded.push(cursorValue);
+  }
+  return decoded;
+}
+
+/** Decode one cursor wire value, including the reserved Date tag. */
+function decodeCursorValue(value: unknown): CursorValue | null {
+  if (typeof value === 'string' || typeof value === 'number') return value;
+  if (!isEncodedDate(value)) return null;
+  const date = new Date(value.v);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Type guard for the exact reserved Date wire representation. */
+function isEncodedDate(value: unknown): value is EncodedDate {
+  if (!isRecord(value) || value.t !== 'D' || typeof value.v !== 'string') return false;
+  return Object.keys(value).length === 2;
+}
+
+/** Type guard for a decoded cursor token's outer JSON payload shape. */
+function isEncodedPayload(value: unknown): value is EncodedCursorPayload {
+  return isRecord(value) && Array.isArray(value.orderedValues) &&
+    Array.isArray(value.keyValues) && typeof value.sortFingerprint === 'string';
+}
+
+/** Narrow an unknown value to an object whose string keys carry unknown values. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

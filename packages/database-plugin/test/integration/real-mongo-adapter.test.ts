@@ -461,6 +461,57 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
     }
   });
 
+  it('walks tied BSON Date values across three pages without losing rows', {
+    ignore: skipReal,
+  }, async () => {
+    const collection = `m79_date_walk_${suffix}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_m79',
+      collections: { Walk: { collection } },
+    });
+
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Walk');
+      const run = `dw-${suffix}`;
+      const createdAt = [
+        new Date('2026-06-01T00:00:00Z'),
+        new Date('2026-06-01T00:00:00Z'),
+        new Date('2026-06-01T00:00:00Z'),
+        new Date('2026-05-01T00:00:00Z'),
+        new Date('2026-05-01T00:00:00Z'),
+        new Date('2026-05-01T00:00:00Z'),
+      ];
+      const ids = createdAt.map((_, i) => `date-${i + 1}-${suffix}`);
+      for (const [i, value] of createdAt.entries()) {
+        await source.create({ id: ids[i], run, createdAt: value });
+      }
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      for (let page = 0; page < 10; page++) {
+        const result = await source.findPage!(query({
+          where: { run },
+          orderBy: { createdAt: 'desc' },
+          limit: 2,
+          ...(cursor === null ? {} : { cursor }),
+        }));
+        pages += 1;
+        seen.push(...result.rows.map((row) => String(row.id)));
+        if (result.nextCursor === null) break;
+        cursor = result.nextCursor;
+      }
+
+      expect([...seen].sort()).toEqual([...ids].sort());
+      expect(new Set(seen).size).toBe(6);
+      expect(pages).toBe(3);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
   it('LOSES rows on the tied fixture when the key tiebreaker is omitted (P11 negative control)', {
     ignore: skipReal,
   }, async () => {
