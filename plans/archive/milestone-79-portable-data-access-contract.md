@@ -1,7 +1,8 @@
 # Milestone 79 — Portable Data-Access Contract (`@setu-ts/common`, `@setu-ts/database-plugin`, `@setu-ts/cloudflare-plugin`)
 
-> **Status:** Planning. Branch: `feat/m79-portable-data-access-contract`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (archived). Branch: `feat/m79-portable-data-access-contract`. `main` is
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR.
 
 ## 0. Objective & scope
 
