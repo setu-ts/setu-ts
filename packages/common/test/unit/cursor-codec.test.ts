@@ -266,6 +266,77 @@ describe('encodeCursor / decodeCursor round-trip', () => {
       decodeCursor(malformedToken({ orderedValues: [1], keyValues: [1], sortFingerprint: 42 })),
     ).toBeNull();
   });
+  /**
+   * A malformed VALUE inside the arrays, as distinct from a malformed outer
+   * payload. `decodeCursor` takes untrusted input, so every non-scalar that is
+   * not the reserved Date tag must answer `null` rather than coerce — a
+   * coerced value would silently change which rows a keyset page selects.
+   */
+  it('returns null for a boolean inside orderedValues', () => {
+    expect(decodeCursor(malformedToken({
+      orderedValues: [true],
+      keyValues: [1],
+      sortFingerprint: 'x:asc',
+    }))).toBeNull();
+  });
+
+  it('returns null for a null inside keyValues', () => {
+    expect(decodeCursor(malformedToken({
+      orderedValues: [1],
+      keyValues: [null],
+      sortFingerprint: 'x:asc',
+    }))).toBeNull();
+  });
+
+  it('returns null for an object that is not the reserved Date tag', () => {
+    expect(decodeCursor(malformedToken({
+      orderedValues: [{ t: 'X', v: '2026-01-01T00:00:00.000Z' }],
+      keyValues: [1],
+      sortFingerprint: 'x:asc',
+    }))).toBeNull();
+  });
+
+  it('returns null for a Date tag whose value is not a string', () => {
+    expect(decodeCursor(malformedToken({
+      orderedValues: [{ t: 'D', v: 42 }],
+      keyValues: [1],
+      sortFingerprint: 'x:asc',
+    }))).toBeNull();
+  });
+
+  it('returns null for a Date tag carrying extra keys', () => {
+    expect(decodeCursor(malformedToken({
+      orderedValues: [{ t: 'D', v: '2026-01-01T00:00:00.000Z', extra: 1 }],
+      keyValues: [1],
+      sortFingerprint: 'x:asc',
+    }))).toBeNull();
+  });
+
+  it('returns null for a Date tag carrying an unparseable date', () => {
+    expect(decodeCursor(malformedToken({
+      orderedValues: [{ t: 'D', v: 'not-a-date' }],
+      keyValues: [1],
+      sortFingerprint: 'x:asc',
+    }))).toBeNull();
+  });
+
+  /**
+   * A token carrying base64 `=` padding. `encodeCursor` strips it, but a
+   * caller may hand back a token that some intermediary re-padded, and the
+   * decoder must accept it rather than fail a legitimate round trip.
+   */
+  it('decodes a token that carries base64 padding', () => {
+    // 'xy:asc' makes the JSON 64 bytes, which is NOT a multiple of 3, so
+    // base64 pads it with '=='. 'x:asc' yields 63 bytes and pads with nothing,
+    // which would make this assertion vacuous.
+    const payload = { orderedValues: [1], keyValues: [1], sortFingerprint: 'xy:asc' };
+    const bytes = new TextEncoder().encode(JSON.stringify(payload));
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    const padded = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_');
+    expect(padded.endsWith('=')).toBe(true);
+    expect(decodeCursor(padded)).toEqual(payload);
+  });
 });
 
 describe('keysetPredicate', () => {
