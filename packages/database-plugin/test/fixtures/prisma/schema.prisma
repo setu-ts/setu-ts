@@ -1,0 +1,62 @@
+// M79 live-suite schema (plan §6.1) — carries BOTH compound-key models,
+// because the two behave differently (P2): an unnamed @@id derives the
+// compound-key field `tenantId_userId` (P1), a named @@id generates ONLY
+// `enrollmentKey` and rejects the derived name (P2).
+//
+// The datasource block keeps ONLY `provider`: Prisma 7 removed `url` from the
+// schema file — carrying one fails validation with P1012. The URL lives in
+// prisma.config.ts beside this directory (plan §1B).
+//
+// Setup (run from test/fixtures, per the suite header):
+//   DATABASE_URL='postgresql://postgres:probe@127.0.0.1:5433/m79probe' \
+//     npx prisma@7.10.0 db push && npx prisma@7.10.0 generate
+//
+// The generated client lands in `../prisma-client-generated/`, which is
+// git-ignored — the M70j precedent commits no generated client.
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../prisma-client-generated"
+  runtime                = "nodejs"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Unnamed @@id — the composite round trip through the repository surface
+// (assertion 1) addresses this model via the derived `tenantId_userId` field.
+model TenantMember {
+  tenantId  String
+  userId    String
+  role      String
+  createdAt DateTime @default(now())
+
+  @@id([tenantId, userId])
+}
+
+// Named @@id — refuses by name without `compositeKeyName` and succeeds with it
+// (assertion 2, P2).
+model Enrollment {
+  courseId  String
+  personId  String
+  grade     String
+  createdAt DateTime @default(now())
+
+  @@id([courseId, personId], name: "enrollmentKey")
+}
+
+// Scalar-key model carrying the JSONB nested-path fixture (P7), the Date-range
+// fixture (P9) and the tied-fixture cursor walk (P10/P11). `run` isolates each
+// test run's rows from whatever a previous run left behind.
+model AuditEvent {
+  id        String   @id
+  run       String
+  userId    String
+  createdAt DateTime
+  profile   Json
+
+  @@index([run])
+}

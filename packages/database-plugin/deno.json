@@ -3,8 +3,13 @@
   "version": "0.1.0-alpha.10",
   "license": "MIT",
   "exports": "./src/index.ts",
+  "exclude": ["test/fixtures/prisma-client-generated"],
   "imports": {
-    "mongodb": "npm:mongodb@^6.21.0"
+    "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7.10.0",
+    "@prisma/client": "npm:@prisma/client@^7.10.0",
+    "mongodb": "npm:mongodb@^6.21.0",
+    "pg": "npm:pg@^8.23.0",
+    "prisma": "npm:prisma@^7.10.0"
   },
   "test": {
     "permissions": {
@@ -12,7 +17,7 @@
       "import": true,
       "env": true,
       "sys": ["hostname", "osRelease"],
-      "net": ["127.0.0.1:27017", "localhost:27017"]
+      "net": ["127.0.0.1:27017", "localhost:27017", "127.0.0.1:5433"]
     }
   }
 }

@@ -141,9 +141,13 @@ describe('real-backend CI wiring', () => {
     const config = await readJson<{
       readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
     }>('packages/database-plugin/deno.json');
+    // M79 §7 added `127.0.0.1:5433` for the live Prisma/PostgreSQL suite
+    // (guarded on POSTGRES_URL) — endpoint-scoped in the manifest, because a
+    // CLI `--allow-net` would REPLACE this block rather than union with it.
     expect(config.test?.permissions?.net).toEqual([
       '127.0.0.1:27017',
       'localhost:27017',
+      '127.0.0.1:5433',
     ]);
   });
 

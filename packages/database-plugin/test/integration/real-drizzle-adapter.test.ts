@@ -12,7 +12,11 @@ import { expect } from '@std/expect';
 import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
 import { pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
 import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
-import { sqliteTable, text as sqliteText } from 'npm:drizzle-orm@0.45.2/sqlite-core';
+import {
+  integer as sqliteInteger,
+  sqliteTable,
+  text as sqliteText,
+} from 'npm:drizzle-orm@0.45.2/sqlite-core';
 import {
   and,
   asc,
@@ -34,6 +38,7 @@ import {
   DrizzleAdapter,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { createDrizzleDatabase } from '../../src/index.ts';
+import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
 
 const users = pgTable('users', {
@@ -41,6 +46,54 @@ const users = pgTable('users', {
   name: text('name').notNull(),
   role: text('role').notNull(),
 });
+
+/** The composite-key table the M79 extension exercises on real SQLite. */
+const enrollments = sqliteTable('enrollments', {
+  tenantId: sqliteText('tenant_id').notNull(),
+  userId: sqliteText('user_id').notNull(),
+  course: sqliteText('course').notNull(),
+});
+
+/** The tied-fixture table the M79 keyset walk exercises on real SQLite. */
+const events = sqliteTable('events', {
+  id: sqliteText('id').primaryKey(),
+  score: sqliteInteger('score').notNull(),
+  run: sqliteText('run').notNull(),
+});
+
+/** A per-run discriminator keeping this run's rows from any other's. */
+const suffix = crypto.randomUUID().replaceAll('-', '');
+
+/**
+ * node:sqlite statement widened with `setReturnArrays`, which the runtime
+ * exposes but the Node type snapshot does not yet declare (same shape as the
+ * T14 integration suite's helper).
+ */
+interface ArrayReturningStatement {
+  run(...params: string[]): unknown;
+  all(...params: string[]): unknown[];
+  setReturnArrays(returnArrays: boolean): void;
+}
+
+/**
+ * Execute one Drizzle statement against the real engine, returning array rows
+ * for every reading method — the shape the sqlite-proxy callback must answer.
+ */
+function executeSqlite(
+  engine: DatabaseSync,
+  statement: string,
+  params: readonly unknown[],
+  method: 'run' | 'all' | 'values' | 'get',
+): Promise<{ rows: unknown[] }> {
+  const prepared = engine.prepare(statement) as unknown as ArrayReturningStatement;
+  if (method === 'run') {
+    prepared.run(...(params as string[]));
+    return Promise.resolve({ rows: [] });
+  }
+  prepared.setReturnArrays(true);
+  const rows = prepared.all(...(params as string[]));
+  return Promise.resolve({ rows });
+}
 
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
   return {
@@ -50,6 +103,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
     offset: partial.offset ?? 0,
     select: partial.select ?? [],
     ...(partial.filter === undefined ? {} : { filter: partial.filter }),
+    ...(partial.cursor === undefined ? {} : { cursor: partial.cursor }),
   };
 }
 
@@ -273,5 +327,129 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     expect(seen[0]?.sql).toBe('select * from users where name = $1');
     expect(seen[0]?.sql).not.toContain('drop table');
     expect(seen[0]?.params).toEqual([hostile]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // M79 — composite keys and the keyset predicate asserted in the emitted SQL
+  // AND executed against the real node:sqlite engine (the M68 precedent: a
+  // string assertion alone missed a live defect).
+  // ---------------------------------------------------------------------------
+
+  it('builds the composite-key WHERE and executes it on the real SQLite engine', async () => {
+    const engine = new DatabaseSync(':memory:');
+    engine.exec(
+      'CREATE TABLE enrollments (' +
+        'tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, course TEXT NOT NULL, ' +
+        'PRIMARY KEY (tenant_id, user_id))',
+    );
+    engine.exec(
+      `INSERT INTO enrollments VALUES ('acme', 'u1', 'algebra'), ('acme', 'u2', 'biology')`,
+    );
+    const calls: Array<{ sql: string; params: readonly unknown[] }> = [];
+    const database = sqliteDrizzle((statement, params, method) => {
+      calls.push({ sql: statement, params });
+      return executeSqlite(engine, statement, params, method);
+    });
+    const extra: Partial<DrizzleAdapterOptions> = {
+      entities: { Enrollment: { primaryKey: ['tenantId', 'userId'] } },
+    };
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        database,
+        (configured, work) => configured.transaction(work),
+      ),
+      drizzleTables: { Enrollment: enrollments },
+      ...extra,
+    });
+    await adapter.connect();
+    const source = adapter.createDataSource('Enrollment');
+
+    // The composite WHERE in the EMITTED SQL — both columns, mapping order…
+    const found = await source.findById({ tenantId: 'acme', userId: 'u2' });
+    expect(calls[0]?.sql).toContain('"enrollments"."tenant_id" = ?');
+    expect(calls[0]?.sql).toContain('"enrollments"."user_id" = ?');
+    expect(calls[0]?.params).toEqual(['acme', 'u2']);
+    // …AND EXECUTED — the row the predicate addresses actually comes back,
+    // which the string assertion alone cannot prove (M68).
+    expect(found).toEqual({ tenantId: 'acme', userId: 'u2', course: 'biology' });
+
+    // update returns the updated row; delete reports true — both executed.
+    const updated = await source.update({ tenantId: 'acme', userId: 'u2' }, {
+      course: 'chemistry',
+    });
+    expect(updated).toEqual({ tenantId: 'acme', userId: 'u2', course: 'chemistry' });
+    expect(await source.delete({ tenantId: 'acme', userId: 'u1' })).toBe(true);
+    expect(await source.findById({ tenantId: 'acme', userId: 'u1' })).toBeNull();
+  });
+
+  it('emits the keyset predicate and walks a tied fixture on the real SQLite engine', async () => {
+    const engine = new DatabaseSync(':memory:');
+    engine.exec(
+      'CREATE TABLE events (id TEXT PRIMARY KEY, score INTEGER NOT NULL, run TEXT NOT NULL)',
+    );
+    const run = `w-${suffix}`;
+    const scores = [30, 30, 30, 10, 10, 10];
+    const ids = scores.map((_, i) => `r${i + 1}-${suffix}`);
+    for (const [i, id] of ids.entries()) {
+      engine.exec(`INSERT INTO events VALUES ('${id}', ${scores[i]}, '${run}')`);
+    }
+    const calls: Array<{ sql: string; params: readonly unknown[] }> = [];
+    const database = sqliteDrizzle((statement, params, method) => {
+      calls.push({ sql: statement, params });
+      return executeSqlite(engine, statement, params, method);
+    });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        database,
+        (configured, work) => configured.transaction(work),
+      ),
+      drizzleTables: { Event: events },
+    });
+    await adapter.connect();
+    const source = adapter.createDataSource('Event');
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    for (let page = 0; page < 10; page++) {
+      const result = await source.findPage!(query({
+        where: { run },
+        orderBy: { score: 'desc' },
+        limit: 2,
+        ...(cursor === null ? {} : { cursor }),
+      }));
+      pages += 1;
+      seen.push(...result.rows.map((row) => String(row.id)));
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+
+    // The executed walk: every row exactly once over three pages (P10/P11 —
+    // six rows over two distinct scores, ties deliberate).
+    expect([...seen].sort()).toEqual([...ids].sort());
+    expect(new Set(seen).size).toBe(6);
+    expect(pages).toBe(3);
+
+    // The keyset predicate is IN the second page's EMITTED SQL: the
+    // `or(lt(score), and(eq(score), gt(id)))` tree over the tiebreaker the
+    // walk's correctness rests on.
+    const keysetSql = calls[1]?.sql ?? '';
+    expect(keysetSql).toContain('"events"."score" < ?');
+    expect(keysetSql).toContain('"events"."score" = ?');
+    expect(keysetSql).toContain('"events"."id" > ?');
+    expect(keysetSql).toContain(' or (');
+    // The caller's where is conjoined beside the predicate, and the bound
+    // parameters carry the cursor row's values in predicate order.
+    expect(keysetSql).toContain('"events"."run" = ?');
+    expect(calls[1]?.params[0]).toBe(run);
+    // The trailing 3 is the one-extra-row probe LIMIT — the SQLite dialect
+    // binds `limit ?` where the PG dialect inlines it.
+    expect(calls[1]?.params).toEqual([
+      run,
+      30,
+      30,
+      `r2-${suffix}`,
+      3,
+    ]);
   });
 });

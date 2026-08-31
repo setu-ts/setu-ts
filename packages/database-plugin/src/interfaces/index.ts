@@ -525,10 +525,11 @@ export interface PrismaCompositeKeyOptions {
    *
    * Required when {@linkcode compositeKeyName} is set: the adapter needs the
    * column names to build the compound-key object that Prisma expects inside
-   * the `where` argument. For an unnamed `@@id([tenantId, userId])` the derived
-   * name is `tenantId_userId` and this can be omitted — the adapter derives the
-   * columns from the field name by splitting on `_`. When a named `@@id` is used,
-   * the derived name is meaningless, so `keyColumns` must be supplied.
+   * the `where` argument. Omitting it while naming a `compositeKeyName` leaves
+   * the columns at the scalar default `['id']`, and every composite key is
+   * refused for missing the `id` column — measured against live PostgreSQL in
+   * the M79 live suite. Supply every column, in declaration order, for both
+   * unnamed `@@id` (derived field `tenantId_userId`) and named `@@id` models.
    *
    * Defaults to `['id']` when absent (scalar-key path).
    *

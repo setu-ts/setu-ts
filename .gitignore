@@ -55,3 +55,8 @@ test/fixtures/snippets/deno.lock
 compat/package-lock.json
 compat/bun.lock
 compat/bun.lockb
+
+# Prisma generated client for the live-suite fixtures (M79 §6.1). The M70j
+# precedent commits no generated client — regenerate locally with
+# `npx prisma@7.10.0 generate` from packages/database-plugin/test/fixtures.
+packages/database-plugin/test/fixtures/prisma-client-generated/
