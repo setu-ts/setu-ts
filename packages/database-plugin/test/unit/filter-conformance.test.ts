@@ -10,6 +10,13 @@
  * on SQLite). This is the regression gate for §3.5: a future adapter cannot
  * reintroduce the `%`/`_` wildcard divergence without failing here.
  *
+ * The M70b table grew a second row kind for M79 (§3.8): the findPage
+ * cursor-walk conformance at the bottom of this file — one seeded fixture
+ * paged through every data source, asserting identical rows and a
+ * byte-identical minted cursor. It extends THIS table rather than living in a
+ * second conformance file, so one file answers "do all five adapters agree?"
+ * for both row kinds.
+ *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
@@ -21,16 +28,20 @@ import {
   type DrizzleOperators,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
+import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { UnsupportedFilterOperatorError } from '../../src/errors.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 import { translateFilter } from '../../src/adapters/mongo/mongo-query.ts';
+import { createD1DataSource } from '../../../cloudflare-plugin/src/database/d1-data-source.ts';
 import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
+import { FakeMongoClient, fakeObjectIdCtor } from '../fixtures/fake-mongo-client.ts';
+import { SqliteD1 } from '../../../cloudflare-plugin/test/d1-fakes.ts';
 
 /**
  * Mock Drizzle operators — the same shape the adapter's `contains` arm builds
@@ -540,5 +551,144 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
     await expect(
       drizzleSource.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: ['sku'] }),
     ).rejects.toThrow("has no 'sku' column");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The §3.8 cursor-walk row of the M70b table — one walk, every data source.
+//
+// Extends the filter table above rather than adding a second conformance
+// file: the same "one query, every adapter" shape, now over `findPage`. The
+// five data sources seed one shared fixture, take the first page, and must
+// return IDENTICAL rows and MINT A BYTE-IDENTICAL cursor token — the token is
+// `encodeCursor` over the last row's ordered + key values under the shared
+// fingerprint, so identity is the guarantee the common helpers sell.
+//
+// Package-boundary seam (§2.2): no plugin depends on another at RUNTIME, and
+// the M79 plan forbids cloudflare-plugin importing database-plugin test
+// fixtures. This row lives in database-plugin's test tree and reaches across
+// to cloudflare-plugin's `createD1DataSource` + `SqliteD1` harness so the D1
+// leg runs on the REAL node:sqlite engine — the one direction the seam
+// allows, and the reason a duplicated D1-side copy of this row in
+// cloudflare-plugin was rejected. The multi-page walk itself is asserted per
+// adapter where the engine models it faithfully (D1: d1-data-source.test.ts
+// three-page tied walk; Mongo/Prisma: the guarded real-server suites).
+//
+// Why the FIRST page only: the Drizzle and Mongo fakes here sort by the first
+// column only and cannot model the keyset tiebreaker faithfully, so a
+// multi-page walk through them would assert behavior the fakes — not the
+// adapters — own. The first page and the minted token are exactly what the
+// shared `@setu-ts/common` helpers guarantee, and they are faithful across
+// all five.
+// ---------------------------------------------------------------------------
+
+/** The shared cursor-walk fixture: distinct `score` values keep page one unambiguous. */
+const WALK_SEED = [
+  { id: 'a', name: 'alpha', score: 1 },
+  { id: 'b', name: 'bravo', score: 2 },
+  { id: 'c', name: 'charlie', score: 3 },
+  { id: 'd', name: 'delta', score: 4 },
+  { id: 'e', name: 'echo', score: 5 },
+  { id: 'f', name: 'foxtrot', score: 6 },
+];
+
+const WALK_ORDER_BY = { score: 'asc' as const };
+const WALK_LIMIT = 3;
+
+/** A normalized page query with one member overridden. */
+function pageQuery(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
+  return {
+    where: partial.where ?? {},
+    orderBy: partial.orderBy ?? {},
+    limit: partial.limit ?? -1,
+    offset: partial.offset ?? 0,
+    select: partial.select ?? [],
+    ...(partial.cursor === undefined ? {} : { cursor: partial.cursor }),
+  };
+}
+
+/**
+ * The data-source shape the walk seeds through and pages with. Only
+ * `findPage` is asserted, but seeding runs through `create`; the five data
+ * sources type these members differently, so a local structural alias keeps
+ * the harness generic without widening to `IDataSource` (whose `findPage?` is
+ * optional).
+ */
+interface IDataSourceLike {
+  create(data: Record<string, unknown>): Promise<Record<string, unknown>>;
+  findPage(
+    query: NormalizedQuery,
+  ): Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }>;
+}
+
+describe('findPage cursor-walk conformance — one walk, every data source (§3.8, M70b table)', () => {
+  it('returns identical rows and mints an identical cursor across all five data sources', async () => {
+    // Memory — the reference adapter.
+    const memory = new MemoryAdapter();
+    await memory.connect();
+    const memorySource = memory.createDataSource('Widget') as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await memorySource.create(row);
+
+    // Prisma — in-memory fake store (the delegate is `client.user`).
+    const prismaClient = createFakePrismaClient({ activeProvider: 'postgresql' });
+    const prismaAdapter = new PrismaAdapter({ prismaClient });
+    await prismaAdapter.connect();
+    const prismaSource = prismaAdapter.createDataSource('User') as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await prismaSource.create(row);
+
+    // Drizzle — in-memory fake instance, extended with the `score` column the
+    // keyset predicate orders by.
+    const drizzleSource = createDrizzleDataSource(
+      createFakeDrizzleInstance() as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'Widget',
+      {
+        Widget: {
+          ...createFakeDrizzleTable('Widget'),
+          score: { name: 'score', table: 'Widget' },
+        },
+      },
+      DRIZZLE_OPERATORS,
+    ) as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await drizzleSource.create(row);
+
+    // Mongo — in-memory fake client.
+    const mongoSource = createMongoDataSource(
+      new FakeMongoClient(),
+      'testdb',
+      'Widget',
+      undefined,
+      fakeObjectIdCtor,
+    ) as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await mongoSource.create(row);
+
+    // D1 — REAL SQLite engine.
+    const d1Db = new SqliteD1(
+      'CREATE TABLE Widget (id TEXT PRIMARY KEY, name TEXT, score INTEGER)',
+    );
+    const d1Source = createD1DataSource(d1Db, {
+      table: 'Widget',
+      primaryKey: ['id'],
+    }) as unknown as IDataSourceLike;
+    for (const row of WALK_SEED) await d1Source.create(row);
+
+    const pages = await Promise.all([
+      memorySource.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+      prismaSource.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+      drizzleSource.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+      mongoSource.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+      d1Source.findPage(pageQuery({ orderBy: WALK_ORDER_BY, limit: WALK_LIMIT })),
+    ]);
+
+    const names = ['memory', 'prisma', 'drizzle', 'mongo', 'd1'] as const;
+    const referenceRows = pages[0].rows.map((r) => r.id);
+    const referenceCursor = pages[0].nextCursor;
+
+    for (const [name, page] of names.map((n, i) => [n, pages[i]] as const)) {
+      expect(page.rows.map((r) => r.id), `${name} rows`).toEqual(referenceRows);
+      // The shared `mintNextCursor` produces a byte-identical token on every
+      // adapter — the whole point of the helpers living in `common`.
+      expect(page.nextCursor, `${name} cursor`).toBe(referenceCursor);
+      expect(referenceCursor, 'a cursor was minted').not.toBeNull();
+    }
   });
 });

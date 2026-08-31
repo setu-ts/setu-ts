@@ -470,6 +470,31 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
     }))).rejects.toThrow(/malformed cursor token/);
   });
 
+  it('refuses a cross-sort walk: a cursor minted under one sort is not served under another', async () => {
+    // The pipeline-minted cursor embeds the CURRENT sort's fingerprint, so
+    // presenting it under a DIFFERENT sort must be refused — the §6 control-1
+    // guard. This test mints through the real pipeline (not a hand-built
+    // token), which is exactly the path a constant fingerprint would defeat:
+    // under negative control 1 (`sortFingerprint` returning a constant) this
+    // walk SERVES a silently wrong page instead of rejecting.
+    const db = await seedTiedFixture();
+    const source = createD1DataSource(db, PAGE_TARGET);
+
+    const p1 = await source.findPage!(query({ orderBy: { score: 'asc' }, limit: 2 }));
+    expect(p1.nextCursor).not.toBeNull();
+
+    await expect(source.findPage!(query({
+      orderBy: { score: 'desc' },
+      limit: 2,
+      cursor: p1.nextCursor as string,
+    }))).rejects.toThrow(CloudflareUnsupportedError);
+    await expect(source.findPage!(query({
+      orderBy: { score: 'desc' },
+      limit: 2,
+      cursor: p1.nextCursor as string,
+    }))).rejects.toThrow(/cursor fingerprint mismatch/);
+  });
+
   it('rejects a cursor whose fingerprint does not match the current sort by name', async () => {
     const db = await seedTiedFixture();
     const source = createD1DataSource(db, PAGE_TARGET);
