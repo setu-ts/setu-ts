@@ -1247,9 +1247,13 @@ absence means "this backend cannot page by cursor", never "there are no more row
 
 ### Composite keys, nested paths and cursor pagination (M79)
 
-`@setu-ts/common` exports the portable data-access contract these three features rest on. Every
-symbol below is re-exported from `@setu-ts/database-plugin`, so a backend author reaches the whole
-contract from one import.
+`@setu-ts/common` exports the portable data-access contract these three features rest on, and is
+where a backend author imports it from — the codec lives there because `cloudflare-plugin` needs the
+identical encoding and a plugin may not import another plugin (AI_GUIDELINES §2.2).
+
+`@setu-ts/database-plugin` re-exports the subset its own consumers reach for — `EntityKey`,
+`PageResult`, `CursorPayload`, `CursorValue`, `encodeCursor`, `decodeCursor` and `keysetPredicate`.
+`sortFingerprint` and `mintNextCursor` are **not** re-exported; import them from `@setu-ts/common`.
 
 | Symbol            | Kind      | Purpose                                                                                                                                                                                                                                                       |
 | ----------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
