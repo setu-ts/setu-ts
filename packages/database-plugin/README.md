@@ -441,6 +441,7 @@ imperative begin/commit.
 | `OrderDirection`                          | type      |
 | `PageOptions`                             | type      |
 | `PrismaSqlProvider`                       | type      |
+| `SqlJsonDialect`                          | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

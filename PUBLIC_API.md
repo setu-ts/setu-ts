@@ -1475,6 +1475,7 @@ return types are nameable from the package entry, as are the collection-level sh
 | `encodeCursor`, `decodeCursor`, `keysetPredicate`, `sortFingerprint`, `mintNextCursor` (re-exported from `common`)          | functions                          |
 | `MongoTransactionUnavailableError`                                                                                          | class                              |
 | `PrismaSqlProvider`                                                                                                         | type                               |
+| `SqlJsonDialect`                                                                                                            | type                               |
 | `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                          |
 | `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                              |
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                         |

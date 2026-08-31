@@ -99,6 +99,12 @@ export type {
   DrizzleTransactionBridge,
 } from './query/drizzle-query.ts';
 
+// The SQL dialect a nested JSON filter path is translated for. Exported
+// because `DrizzleAdapterOptions.dialect` is typed by it: without this the
+// option's own type is unnameable by a consumer, which is the defect M52c
+// found on `NormalizedQuery` reaching a published `DataSource` signature.
+export type { SqlJsonDialect } from './query/json-path.ts';
+
 // Repository
 export { BaseRepository } from './repositories/base-repository.ts';
 export type { DataSource } from './repositories/base-repository.ts';
