@@ -51,3 +51,25 @@ export type {
   SdkOpenApiResponse,
   SdkOpenApiSchema,
 } from './codegen/openapi-types.ts';
+
+// Realtime clients
+export { createSseClient } from './realtime/sse-client.ts';
+export type {
+  ISseClient,
+  RawSseEvent,
+  SseClientOptions,
+  SseClientState,
+  SseEvent,
+  SseEventMap,
+  SseReconnectOptions,
+} from './realtime/sse-contracts.ts';
+export { createRealtimeClient } from './realtime/realtime-client.ts';
+export type {
+  IRealtimeClient,
+  IWebSocketTransport,
+  RealtimeClientOptions,
+  RealtimeClientState,
+  RealtimeMessage,
+  RealtimeReconnectOptions,
+  WebSocketFactory,
+} from './realtime/websocket-contracts.ts';

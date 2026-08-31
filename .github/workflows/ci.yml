@@ -115,6 +115,16 @@ jobs:
         with:
           deno-version: 2.9.5
 
+      # apps/realtime-clients executes the SDK's portable transports under the
+      # native Node and Bun globals; neither runtime may be an accidental skip.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
       # Requires the committed lockfile and refuses a dependency graph that
       # would alter it. The tests below therefore run only against the reviewed
       # resolution rather than silently absorbing a new range result.

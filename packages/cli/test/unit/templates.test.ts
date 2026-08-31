@@ -277,8 +277,9 @@ describe('class-based template', () => {
     const decorator = CLASS_BASED_TEMPLATE.plugins.find((w) => w.pkg === 'decorator-plugin');
     expect(decorator?.args).toBe(
       '{\n' +
-        '        controllers: [...APP_CONTROLLERS, ...MODULE_CONTROLLERS],\n' +
-        '        services: [...APP_SERVICES, ...MODULE_SERVICES],\n' +
+        '        controllers: [...APP_CONTROLLERS],\n' +
+        '        services: [...APP_SERVICES],\n' +
+        '        modules: [...MODULES],\n' +
         '      }',
     );
   });
@@ -336,8 +337,7 @@ describe('class-based template', () => {
     const imported = (CLASS_BASED_TEMPLATE.localImports ?? []).flatMap((l) => l.symbols);
     expect(imported).toContain('APP_CONTROLLERS');
     expect(imported).toContain('APP_SERVICES');
-    expect(imported).toContain('MODULE_CONTROLLERS');
-    expect(imported).toContain('MODULE_SERVICES');
+    expect(imported).toContain('MODULES');
   });
 
   it('reaches the showcase through the seam barrels, not an explicit path', () => {

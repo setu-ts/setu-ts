@@ -3683,6 +3683,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 78** — native MongoDB backend for `database-plugin`, including the `'mongodb'`
   configuration arm, native query translation, ObjectId mapping, injected-client seam, and real
   driver CI coverage — complete (PR #208).
+- **Milestone 83** — `@Module` declarations, generated module activation, and the default REST
+  functional greeting example — complete (PR #213).
+- **Milestone 84** — first-party SSE/WebSocket SDK clients, realtime CLI starting points, and the
+  four-runtime client smoke exercise — complete (PR #214).
+- **Milestone 85** (`packages/cli` — full-stack gRPC workspace members: renders the existing
+  `GrpcPlugin()` transport contribution as `app.register(...)` after
+  `createFullStackAppFromConfig()` returns, while retaining the broker-transport refusal because its
+  starter-owned messaging/queue option rewrites cannot be represented as appended plugins) —
+  complete (PR pending).
 - **Milestone 79** (`common` + `database-plugin` + `cloudflare-plugin` — portable data-access
   contract: composite keys, nested field paths and keyset cursor pagination, implemented across all
   **five** shipped adapters. The ROADMAP scoped four; `MongoAdapter` shipped in M78, so the in-scope
@@ -3724,7 +3733,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tests across two packages (§11.1), trimmed to the one thing the second copy uniquely proves —
   evaluating the predicate against real rows through `matchesFilter`, since asserting the tree's
   SHAPE proves only that it was built) — complete (PR #217)
-- **Next milestone** — **M80** (DynamoDB backend), gated on this milestone.
+- **Next milestone** — **M80** (DynamoDB backend), gated on M79 and now unblocked.
 
 ## Verification (run before declaring any work done)
 

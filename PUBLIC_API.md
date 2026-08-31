@@ -2631,6 +2631,7 @@ app.router.post('/login', (ctx) => {
 | `csrf.fieldName`     | `string`                               | `'_csrf'`                  | Form field carrying the token                                                                                                                                                                          |
 | `csrf.headerName`    | `string`                               | `'x-csrf-token'`           | Header accepted as an alternative token source for `fetch` posts; an explicit name still wins. REQUIRED for `multipart/form-data`, which is not parsed for the field                                   |
 | `csrf.ignoreMethods` | `readonly string[]`                    | `['GET','HEAD','OPTIONS']` | Methods that skip verification                                                                                                                                                                         |
+| `csrf.exclude`       | `readonly (string \| RegExp)[]`        | —                          | Exact paths or regular expressions that skip form CSRF. Use only for a separately-mounted non-browser protocol surface; application form paths must remain protected.                                  |
 | `tenantBinding`      | `boolean`                              | `true`                     | Seals the resolved tenant id into the session on commit; replaying it under a different tenant is refused with `403` before the handler. Inert when either side has no tenant; `false` disables both   |
 
 ### Exports
@@ -6186,16 +6187,16 @@ handler. Probes are `tcpSocket`, because `/live` and `/ready` exist only when a 
 `HealthPlugin`. No Ingress is generated: which controller, host and issuer are cluster decisions,
 and a guessed Ingress routes nothing.
 
-| Refusal                                             | Why                                                                                                                                                                                                                                                                                                                                                                                           |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `generate app` outside a workspace                  | No `setu.workspace.json` in the target directory. Exits `1` naming `setu new <name> --workspace`.                                                                                                                                                                                                                                                                                             |
-| A member name already in use                        | Exits `1` naming the directory it already has. The `managed` exemption covers regenerated modules only, never a member's own source.                                                                                                                                                                                                                                                          |
-| `--runtime cloudflare-workers`                      | `deno`, `node` and `bun` all host a workspace; Workers does not, and that is a topology difference rather than a missing profile — each Worker is its own deploy unit with its own `wrangler.toml`, so several in one repository are several deployments, not members sharing a root manifest and a lockfile. Exits `2` naming `setu new <name> --runtime <target>` for a standalone project. |
-| `--template full-stack` on a broker transport       | That template composes its whole plugin set through a starter factory, so a transport that appends a plugin or rewrites `MessagingPlugin` would have its contribution silently dropped — the member would look connected and reach nobody. Allowed on `http` and `memory`, where the transport contributes nothing; the root gains `nodeModulesDir` when it arrives.                          |
-| `generate app --port` on a taken port               | Two members on one port cannot both bind, while every sibling's map names both — so one name would resolve to the other service. Exits `1` naming the member that holds it. A free port is honoured, and allocation still derives from the highest in use, so a hand-picked port moves the ceiling rather than being reused.                                                                  |
-| `new --workspace --di`                              | The independent DI switch is retired. Exits `2` directing the caller to `--template class-based`.                                                                                                                                                                                                                                                                                             |
-| A port in `setu.workspace.json` outside `1`–`65535` | Refused on read, naming the value and the field. Every port there is written into a member's entry point AND into every sibling's map, so one bad number breaks the workspace: `app.start()` throws `Invalid port (out of range)`, and `0` is worse still — it binds an arbitrary free port, so the member looks healthy while every sibling is refused. Exits `1`.                           |
-| A workspace with no port left                       | `basePort` and its members reach `65535`. Exits `1` rather than allocating `65536`.                                                                                                                                                                                                                                                                                                           |
+| Refusal                                             | Why                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `generate app` outside a workspace                  | No `setu.workspace.json` in the target directory. Exits `1` naming `setu new <name> --workspace`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| A member name already in use                        | Exits `1` naming the directory it already has. The `managed` exemption covers regenerated modules only, never a member's own source.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `--runtime cloudflare-workers`                      | `deno`, `node` and `bun` all host a workspace; Workers does not, and that is a topology difference rather than a missing profile — each Worker is its own deploy unit with its own `wrangler.toml`, so several in one repository are several deployments, not members sharing a root manifest and a lockfile. Exits `2` naming `setu new <name> --runtime <target>` for a standalone project.                                                                                                                                                                                  |
+| `--template full-stack` on a broker transport       | That template composes its curated plugin set through a starter factory, so a broker's `MessagingPlugin` rewrite cannot be applied without silently leaving the starter default in place. The command refuses it rather than scaffolding a member that reaches nobody. `grpc` is supported: its `GrpcPlugin({ basePath: '/grpc' })` contribution is registered after the starter factory returns, and the generated form-CSRF policy exempts that RPC prefix only. `http`, `grpc`, and `memory` are allowed; the root gains `nodeModulesDir` when the frontend member arrives. |
+| `generate app --port` on a taken port               | Two members on one port cannot both bind, while every sibling's map names both — so one name would resolve to the other service. Exits `1` naming the member that holds it. A free port is honoured, and allocation still derives from the highest in use, so a hand-picked port moves the ceiling rather than being reused.                                                                                                                                                                                                                                                   |
+| `new --workspace --di`                              | The independent DI switch is retired. Exits `2` directing the caller to `--template class-based`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| A port in `setu.workspace.json` outside `1`–`65535` | Refused on read, naming the value and the field. Every port there is written into a member's entry point AND into every sibling's map, so one bad number breaks the workspace: `app.start()` throws `Invalid port (out of range)`, and `0` is worse still — it binds an arbitrary free port, so the member looks healthy while every sibling is refused. Exits `1`.                                                                                                                                                                                                            |
+| A workspace with no port left                       | `basePort` and its members reach `65535`. Exits `1` rather than allocating `65536`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 #### Inter-service transport
 
@@ -6203,15 +6204,15 @@ The workspace decides how its services reach each other, because members can onl
 share — a per-member choice would make a workspace whose services silently cannot talk expressible
 in one flag. `generate app` therefore refuses `--transport` and names the workspace flag.
 
-| `--transport`                 | What every member gets                                                                                          | Proven by                                                                                                                  |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `http` (default)              | Nothing extra. Members call each other at `discovery.resolveUrl(name)`.                                         | Three members, one calling both peers, asserting `200` and the body.                                                       |
-| `grpc`                        | `GrpcPlugin()`, co-serving Connect/gRPC on the member's own port alongside HTTP.                                | Three members, one calling both peers at `/grpc/grpc.health.v1.Health/Check`, asserting the decoded `SERVING`.             |
-| `memory`                      | The messaging plugin's own in-process default, named rather than implied. **Messages never leave the process.** | —                                                                                                                          |
-| `redis`                       | `MessagingPlugin({ broker: 'redis-streams', url })`                                                             | A real Redis: one service publishes, another receives the payload. Swapping to `memory` makes that test fail.              |
-| `rabbitmq` / `nats` / `kafka` | The matching `MessagingPlugin` arm.                                                                             | Type-checked in the generated project against the plugin's discriminated union; not run in CI, which holds no such broker. |
-| `pubsub`                      | `MessagingPlugin({ broker: 'pubsub', projectId })`, the project id read from `PUBSUB_PROJECT_ID`.               | Two generated members over the real Pub/Sub emulator: one publishes, the other receives the payload.                       |
-| `service-bus`                 | `MessagingPlugin({ broker: 'service-bus', connectionString })`, read from `SERVICE_BUS_CONNECTION_STRING`.      | Two generated members over Microsoft's emulator, started from the generated compose file and its generated entity config.  |
+| `--transport`                 | What every member gets                                                                                                                                                                                            | Proven by                                                                                                                  |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `http` (default)              | Nothing extra. Members call each other at `discovery.resolveUrl(name)`.                                                                                                                                           | Three members, one calling both peers, asserting `200` and the body.                                                       |
+| `grpc`                        | `GrpcPlugin({ basePath: '/grpc' })`, co-serving Connect/gRPC on the member's own port alongside HTTP. The full-stack template exempts this protocol prefix from form CSRF, leaving its own form routes protected. | Three members, one calling both peers at `/grpc/grpc.health.v1.Health/Check`, asserting the decoded `SERVING`.             |
+| `memory`                      | The messaging plugin's own in-process default, named rather than implied. **Messages never leave the process.**                                                                                                   | —                                                                                                                          |
+| `redis`                       | `MessagingPlugin({ broker: 'redis-streams', url })`                                                                                                                                                               | A real Redis: one service publishes, another receives the payload. Swapping to `memory` makes that test fail.              |
+| `rabbitmq` / `nats` / `kafka` | The matching `MessagingPlugin` arm.                                                                                                                                                                               | Type-checked in the generated project against the plugin's discriminated union; not run in CI, which holds no such broker. |
+| `pubsub`                      | `MessagingPlugin({ broker: 'pubsub', projectId })`, the project id read from `PUBSUB_PROJECT_ID`.                                                                                                                 | Two generated members over the real Pub/Sub emulator: one publishes, the other receives the payload.                       |
+| `service-bus`                 | `MessagingPlugin({ broker: 'service-bus', connectionString })`, read from `SERVICE_BUS_CONNECTION_STRING`.                                                                                                        | Two generated members over Microsoft's emulator, started from the generated compose file and its generated entity config.  |
 
 > **There is no raw-TCP transport, and `--transport tcp` says so** rather than quietly handing back
 > HTTP under another name. Every inter-service path here is HTTP over TCP or a broker client over
@@ -6346,9 +6347,9 @@ is per file rather than a `--force` flag, so a mistyped `setu g service user` ca
 hand-written work.
 
 The managed files are the CLI-owned **seam barrels** — one `index.ts` per generated family
-(`src/modules/`, `src/controllers/`, `src/services/`, `src/routes/`, `src/middleware/`,
-`src/plugins/`, `src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). Nothing else is managed,
-and no flag can make it so.
+(`src/modules/`, `src/controllers/`, `src/services/`, `src/middleware/`, `src/plugins/`,
+`src/health/`, `src/metrics/`, `src/cqrs/`, `src/events/`). Nothing else is managed, and no flag can
+make it so.
 
 ### Generated code is wired
 
@@ -6357,22 +6358,24 @@ schematic emits its artifact plus its family's seam barrel; the barrel is regene
 its directory, and the scaffolded `setu.config.ts` already imports it. Three artifacts have no
 registration site, and the reason is recorded rather than left to discovery.
 
-| Schematic          | Emitted at                             | Registration site                                              |
-| ------------------ | -------------------------------------- | -------------------------------------------------------------- |
-| `module`           | `src/modules/<name>/`                  | `DecoratorPlugin({ controllers, services })` via `MODULE_*`    |
-| `controller`       | `src/controllers/<name>.controller.ts` | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS`       |
-| `service`          | `src/services/<name>.service.ts`       | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below |
-| `route`            | `src/routes/<name>.routes.ts`          | `registerGeneratedRoutes(app.router)` in `createApp()`         |
-| `middleware`       | `src/middleware/<name>.middleware.ts`  | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`          |
-| `plugin`           | `src/plugins/<name>.plugin.ts`         | `...GENERATED_PLUGINS` in `createApplication({ plugins })`     |
-| `health-indicator` | `src/health/<name>.indicator.ts`       | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`         |
-| `metric`           | `src/metrics/<name>.metric.ts`         | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`        |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`   | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`            |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`     | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`                |
-| `event-handler`    | `src/events/<name>.event-handler.ts`   | `EventsPlugin({ handlers: EVENT_HANDLERS })`                   |
-| `guard`            | `src/guards/<name>.guard.ts`           | **None** — per route, by design (see below)                    |
-| `job`              | `src/jobs/<name>.job.ts`               | **None** — the transport is your choice (see below)            |
-| `migration`        | `src/migrations/<stamp>-<name>.ts`     | **None** — the framework ships no migration runner             |
+| Schematic          | Emitted at                                                                                                                          | Registration site                                                    |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `module`           | `src/modules/<name>/`                                                                                                               | `DecoratorPlugin({ controllers, services })` via `MODULE_*`          |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                                              | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS`             |
+| `service`          | `src/services/<name>.service.ts`                                                                                                    | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below       |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                                                  | `registerGeneratedRoutes(app.router, app.services)` in `createApp()` |
+| `sse`              | `src/controllers/<name>.controller.ts`, plus `src/hooks/use-<name>.ts` ONLY when `react-router-plugin` and `sdk` are both installed | HTTP registrar; the hook, when emitted, remains application-local    |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                                      | `...GENERATED_PLUGINS` in `createApplication({ plugins })`           |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                               | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`                |
+| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                      | `...GENERATED_PLUGINS` in `createApplication({ plugins })`           |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                    | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`               |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                      | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`              |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                                                | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`                  |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                                                  | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`                      |
+| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                                                | `EventsPlugin({ handlers: EVENT_HANDLERS })`                         |
+| `guard`            | `src/guards/<name>.guard.ts`                                                                                                        | **None** — per route, by design (see below)                          |
+| `job`              | `src/jobs/<name>.job.ts`                                                                                                            | **None** — the transport is your choice (see below)                  |
+| `migration`        | `src/migrations/<stamp>-<name>.ts`                                                                                                  | **None** — the framework ships no migration runner                   |
 
 Notes on the three that are not wired, and one that is conditional:
 
@@ -6436,10 +6439,10 @@ default export is not; an undetected export means the artifact is skipped and re
 broken barrel is written.
 
 Which seams a host carries depends on which plugins it registers: the no-template path carries the
-three that need none (`src/routes/`, `src/middleware/`, `src/plugins/`), the functional templates
-carry only the seams their plugins consume, and `class-based` additionally carries controller,
-service and module barrels. `microservice` additionally carries `src/cqrs/` and `src/events/`,
-because it is the only template registering `CqrsPlugin` and `EventsPlugin`.
+three that need none (`src/controllers/`, `src/middleware/`, `src/plugins/`), the functional
+templates carry only the seams their plugins consume, and `class-based` additionally carries
+controller, service and module barrels. `microservice` additionally carries `src/cqrs/` and
+`src/events/`, because it is the only template registering `CqrsPlugin` and `EventsPlugin`.
 
 ### Domain modules
 
@@ -6453,14 +6456,14 @@ Functional (the default composition):
 src/modules/<name>/<name>.service.ts        export function list<Name>()
 src/modules/<name>/<name>.service.test.ts   describe/it + expect (runnable — see below)
 src/modules/<name>/index.ts                 the module's own re-exports
-src/routes/<name>.routes.ts                 register<Name>Routes — GET / and POST / (201)
-src/routes/index.ts                         the routes barrel     (managed — regenerated)
+src/controllers/<name>.routes.ts            register<Name>Routes — GET / and POST / (201)
+src/controllers/index.ts                    the HTTP barrel       (managed — regenerated)
 ```
 
 The route module registers through the same seam `setu generate route` uses, so the module answers
 `GET /<name>` and `POST /<name>` with no edit to `setu.config.ts`. Because both write
-`src/routes/<name>.routes.ts`, a `route` and a `module` sharing one name is refused by the ordinary
-overwrite check.
+`src/controllers/<name>.routes.ts`, a `route` and a `module` sharing one name is refused by the
+ordinary overwrite check.
 
 Class-based (`--template class-based`, or any project holding `decorator-plugin`):
 
@@ -8594,7 +8597,7 @@ carry full JSDoc.
 
 | Export                                                       | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------------------------------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPlugin`                                            | function | Plugin factory — registers `MetadataStore` and routes/services                                                                                                                                                                                                                                                                                                                                                                               |
+| `DecoratorPlugin`                                            | function | Plugin factory — registers `MetadataStore`, routes/services, and explicitly activated `@Module` trees                                                                                                                                                                                                                                                                                                                                        |
 | `MetadataStore`                                              | class    | `IMetadataStore` implementation (the concrete store)                                                                                                                                                                                                                                                                                                                                                                                         |
 | `metadataStore`                                              | value    | The process-wide singleton decorators write to and the plugin reads                                                                                                                                                                                                                                                                                                                                                                          |
 | `Controller`                                                 | function | Class decorator — base path prefix                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -8610,6 +8613,7 @@ carry full JSDoc.
 | `ValidateBody`/`ValidateQuery`/`ValidateParams`              | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route |
 | `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `ApiOperation`/`ApiResponse`                                 | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                               |
+| `Module`                                                     | function | Class decorator grouping controllers, providers, and imported modules for `DecoratorPlugin({ modules })`                                                                                                                                                                                                                                                                                                                                     |
 | `createDecorator`                                            | function | Custom class/method decorator factory                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `Body`/`Query`/`Param`/`Header`/`Cookie`/`CurrentUser`/`Ctx` | function | Built-in parameter SOURCES, declared inside `@Params(...)`; `Ctx` yields the active `IRequestContext` without reserving the application custom type name `context`                                                                                                                                                                                                                                                                           |
 | `Custom`                                                     | function | Declares a parameter source resolved by a resolver registered under the same name                                                                                                                                                                                                                                                                                                                                                            |
@@ -8623,27 +8627,28 @@ carry full JSDoc.
 
 ### Types
 
-| Export                       | Kind | Purpose                                                                                                               |
-| ---------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------- |
-| `DecoratorPluginOptions`     | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `enforceSchemas?`) |
-| `InjectableOptions`          | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                      |
-| `ApiOperationConfig`         | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                             |
-| `ApiResponseConfig`          | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                     |
-| `HttpMethodDecorator`        | type | `(path?: string) => SetuMethodDecorator`                                                                              |
-| `ParamSource`                | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                            |
-| `SourceValues`               | type | Maps a source tuple onto the handler parameter tuple it binds                                                         |
-| `InjectToken`                | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                       |
-| `OptionalToken`              | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                             |
-| `SetuClassDecorator`         | type | A standard class decorator that records metadata and leaves the class unchanged                                       |
-| `SetuMethodDecorator`        | type | A standard method decorator that records metadata and leaves the method unchanged                                     |
-| `SetuClassOrMethodDecorator` | type | A standard decorator valid in either position, discriminating on `context.kind`                                       |
-| `MiddlewareLike`             | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                     |
-| `CustomParameterResolver`    | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                     |
-| `ParameterMetadata`          | type | Parameter metadata captured by a `@Params(...)` source                                                                |
-| `ParameterType`              | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                    |
-| `DiscoveryOptions`           | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                |
-| `DiscoveryResult`            | type | Result of discovery (`controllers`, `services`, `errors`)                                                             |
-| `ModuleImporter`             | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                  |
+| Export                       | Kind | Purpose                                                                                                                           |
+| ---------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `DecoratorPluginOptions`     | type | Options for `DecoratorPlugin()` (`autoDiscover?`, `controllersPath?`, `controllers?`, `services?`, `modules?`, `enforceSchemas?`) |
+| `InjectableOptions`          | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                  |
+| `ModuleOptions`              | type | Options for `@Module()` (`controllers?`, `providers?`, `imports?`; no `exports`)                                                  |
+| `ApiOperationConfig`         | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`)                                                         |
+| `ApiResponseConfig`          | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                 |
+| `HttpMethodDecorator`        | type | `(path?: string) => SetuMethodDecorator`                                                                                          |
+| `ParamSource`                | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                        |
+| `SourceValues`               | type | Maps a source tuple onto the handler parameter tuple it binds                                                                     |
+| `InjectToken`                | type | `string \| OptionalToken` — one entry in an `@Inject(...)` list                                                                   |
+| `OptionalToken`              | type | A token wrapped by `Optional(...)`, marking that argument absent-tolerant                                                         |
+| `SetuClassDecorator`         | type | A standard class decorator that records metadata and leaves the class unchanged                                                   |
+| `SetuMethodDecorator`        | type | A standard method decorator that records metadata and leaves the method unchanged                                                 |
+| `SetuClassOrMethodDecorator` | type | A standard decorator valid in either position, discriminating on `context.kind`                                                   |
+| `MiddlewareLike`             | type | `MiddlewareFunction \| (new () => IMiddleware)` — accepted by pipeline decorators                                                 |
+| `CustomParameterResolver`    | type | `(ctx, metadata?) => unknown \| Promise<unknown>`                                                                                 |
+| `ParameterMetadata`          | type | Parameter metadata captured by a `@Params(...)` source                                                                            |
+| `ParameterType`              | type | `'body' \| 'query' \| 'param' \| 'header' \| 'cookie' \| 'custom'`                                                                |
+| `DiscoveryOptions`           | type | Config for `discoverControllers()` (`path`, `extensions?`, `exclude?`)                                                            |
+| `DiscoveryResult`            | type | Result of discovery (`controllers`, `services`, `errors`)                                                                         |
+| `ModuleImporter`             | type | `(specifier: string) => Promise<unknown>` — injectable module loader                                                              |
 
 Contract notes:
 
@@ -8651,6 +8656,11 @@ Contract notes:
   class-definition time regardless of whether the plugin is registered. Only
   `DecoratorPlugin.register()` reads the store and calls the kernel APIs; without it, no
   routes/services/middleware are registered.
+- **Modules are activation groups, not DI boundaries**: `DecoratorPlugin({ modules })` flattens
+  `imports` depth-first, registers imported providers before the importing module's controllers, and
+  deduplicates classes by identity. A class passed as a module without `@Module` metadata logs a
+  warning and contributes nothing. There is no `exports` option because application service
+  visibility is not module-scoped.
 - **Validation schemas are enforced, not just described** (`enforceSchemas`, default `true`): for
   each of `schema.body`/`query`/`params` present on a route, `registerController` resolves
   `CAPABILITIES.VALIDATION` and appends that capability's middleware LAST in the route's chain —

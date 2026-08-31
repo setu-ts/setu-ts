@@ -80,6 +80,20 @@ async function startWith(controllers: readonly (new () => object)[]): Promise<Wa
   return warnings;
 }
 
+async function startWithModules(modules: readonly (new () => object)[]): Promise<Warning[]> {
+  const warnings: Warning[] = [];
+  const app = createApplication({
+    plugins: [
+      testRuntimePlugin(),
+      collectingLoggerPlugin(warnings),
+      DecoratorPlugin({ modules }),
+    ],
+  });
+  await app.start();
+  await app.stop();
+  return warnings;
+}
+
 describe('startup warnings', () => {
   beforeEach(() => {
     metadataStore.clear();
@@ -115,6 +129,17 @@ describe('startup warnings', () => {
     }
 
     expect(await startWith([Ok])).toEqual([]);
+  });
+
+  it('warns when an activated class has no Module metadata', async () => {
+    class UndecoratedModule {}
+
+    const warnings = await startWithModules([UndecoratedModule]);
+    const warning = warnings.find((entry) =>
+      entry.message ===
+        'Class passed in DecoratorPlugin({ modules }) has no @Module metadata and contributes nothing'
+    );
+    expect(warning?.metadata?.['module']).toBe('UndecoratedModule');
   });
 
   it('warns about a custom parameter that no registered resolver can satisfy', async () => {

@@ -17,6 +17,24 @@ import { joinPath } from './file-writer.ts';
 /** Where `setu generate module` places domain modules, relative to the project root. */
 export const MODULES_DIR = 'src/modules';
 
+/** A legacy domain directory the new activation barrel cannot import yet. */
+export interface SkippedModule {
+  /** The legacy module directory name. */
+  readonly name: string;
+  /** The directory relative to the project root. */
+  readonly path: string;
+  /** The file required to admit this module. */
+  readonly missing: string;
+}
+
+/** The usable modules plus legacy generated modules that need migration. */
+export interface ModuleScan {
+  /** Valid module directory names, sorted. */
+  readonly names: readonly string[];
+  /** Old module directories that have controller/service files but lack a declaration. */
+  readonly skipped: readonly SkippedModule[];
+}
+
 /**
  * Reports whether a path is an existing regular file.
  *
@@ -57,12 +75,12 @@ async function isFile(fs: IFileSystem, path: string): Promise<boolean> {
  *
  * @param fs - The filesystem to read through
  * @param dir - The project's root directory (absolute)
- * @returns The module directory names, sorted, or `[]` when there are none
+ * @returns Valid module directory names and legacy generated module diagnostics
  */
-export async function readModuleNames(
+export async function scanModules(
   fs: IFileSystem,
   dir: string,
-): Promise<readonly string[]> {
+): Promise<ModuleScan> {
   const root = joinPath(dir, MODULES_DIR);
 
   let entries: readonly string[];
@@ -70,10 +88,11 @@ export async function readModuleNames(
     entries = await fs.readdir(root);
   } catch {
     // No `src/modules/` yet, or it is unreadable: there are no modules to list.
-    return [];
+    return { names: [], skipped: [] };
   }
 
   const names: string[] = [];
+  const skipped: SkippedModule[] = [];
   for (const entry of entries) {
     let stat;
     try {
@@ -86,13 +105,29 @@ export async function readModuleNames(
     if (!stat.isDirectory) continue;
 
     const base = joinPath(root, entry, entry);
-    if (
-      await isFile(fs, `${base}.controller.ts`) &&
-      await isFile(fs, `${base}.service.ts`)
-    ) {
+    const controller = await isFile(fs, `${base}.controller.ts`);
+    const service = await isFile(fs, `${base}.service.ts`);
+    const module = await isFile(fs, `${base}.module.ts`);
+    if (controller && service && module) {
       names.push(entry);
+    } else if (controller && service) {
+      skipped.push({ name: entry, path: `${MODULES_DIR}/${entry}`, missing: `${entry}.module.ts` });
     }
   }
 
-  return names.sort();
+  return { names: names.sort(), skipped: skipped.sort((a, b) => a.path.localeCompare(b.path)) };
+}
+
+/**
+ * Lists valid module names for callers that need no migration diagnostics.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The project's root directory
+ * @returns Valid module directory names, sorted
+ */
+export async function readModuleNames(
+  fs: IFileSystem,
+  dir: string,
+): Promise<readonly string[]> {
+  return (await scanModules(fs, dir)).names;
 }

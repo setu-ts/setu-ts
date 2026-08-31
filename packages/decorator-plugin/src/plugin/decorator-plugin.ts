@@ -58,6 +58,11 @@ export interface DecoratorPluginOptions {
   /** Explicit list of service classes to register. */
   readonly services?: readonly Constructor[];
   /**
+   * Module classes to expand before registration. Imported modules are visited
+   * depth-first; each module's providers are collected before its controllers.
+   */
+  readonly modules?: readonly Constructor[];
+  /**
    * When `true` (the default), a route decorated with `@ValidateBody` /
    * `@ValidateQuery` / `@ValidateParams` gets the registered validation
    * capability's enforcing middleware appended LAST in its chain (innermost,
@@ -85,6 +90,37 @@ function dedup(classes: readonly Constructor[]): Constructor[] {
     }
   }
   return out;
+}
+
+/** Expands activated modules into the lists the plugin already registers. */
+function flattenModules(
+  modules: readonly Constructor[],
+  ctx: IPluginContext,
+): { readonly controllers: Constructor[]; readonly providers: Constructor[] } {
+  const controllers: Constructor[] = [];
+  const providers: Constructor[] = [];
+  const seen = new Set<Constructor>();
+
+  const visit = (target: Constructor): void => {
+    if (seen.has(target)) return;
+    seen.add(target);
+
+    const meta = metadataStore.getModule(target);
+    if (meta === undefined) {
+      ctx.logger?.warn(
+        'Class passed in DecoratorPlugin({ modules }) has no @Module metadata and contributes nothing',
+        { module: className(target) },
+      );
+      return;
+    }
+
+    for (const imported of meta.imports) visit(imported);
+    providers.push(...meta.providers);
+    controllers.push(...meta.controllers);
+  };
+
+  for (const target of modules) visit(target);
+  return { controllers, providers };
 }
 
 /** Default capability token for a service without an explicit `@Injectable` token. */
@@ -244,6 +280,13 @@ function instantiate(target: Constructor, ctx: IPluginContext): unknown {
  */
 function registerService(ctx: IPluginContext, target: Constructor): void {
   const meta = metadataStore.getService(target);
+  if (meta?.inject === undefined && target.length > 0) {
+    throw new Error(
+      `${className(target)} has ${target.length} required constructor parameter(s) but no ` +
+        '`@Inject(...)` declaration. Setu-TS cannot infer dependency tokens; name one token per ' +
+        'constructor argument.',
+    );
+  }
   const token = serviceToken(meta, target);
   if (ctx.container !== undefined) {
     registerInContainer(ctx, target, meta);
@@ -673,8 +716,18 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
 
       warnControllersWithoutMetadata(ctx, opts.controllers ?? []);
 
-      const controllers = dedup([...(opts.controllers ?? []), ...discoveredControllers]);
-      const services = dedup([...(opts.services ?? []), ...discoveredServices]);
+      const fromModules = flattenModules(opts.modules ?? [], ctx);
+
+      const controllers = dedup([
+        ...(opts.controllers ?? []),
+        ...fromModules.controllers,
+        ...discoveredControllers,
+      ]);
+      const services = dedup([
+        ...fromModules.providers,
+        ...(opts.services ?? []),
+        ...discoveredServices,
+      ]);
 
       for (const svc of services) {
         registerService(ctx, svc);

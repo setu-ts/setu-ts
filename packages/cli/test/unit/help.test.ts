@@ -69,9 +69,9 @@ describe('help output', () => {
     expect(text).toContain('custom');
   });
 
-  it('lists all fourteen built-in schematics plus custom in generate help', async () => {
+  it('lists all sixteen built-in schematics plus custom in generate help', async () => {
     const text = await helpText(['generate', '--help']);
-    expect(listSchematics()).toHaveLength(14);
+    expect(listSchematics()).toHaveLength(16);
     for (const { name } of listSchematics()) {
       expect(text).toContain(name);
     }

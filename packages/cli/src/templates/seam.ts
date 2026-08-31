@@ -101,7 +101,7 @@ export function seamSetupCalls(seams: readonly SeamSpec[]): readonly string[] {
   // does, so gating on `route` alone would leave a functional project's
   // controllers wired by nothing.
   if (schematics.has('route') || schematics.has('controller')) {
-    calls.push(`${REGISTER_ROUTES_EXPORT}(app.router);`);
+    calls.push(`${REGISTER_ROUTES_EXPORT}(app.router, app.services);`);
   }
   if (schematics.has('middleware')) {
     // The priority comes from the artifact's OWN module, not from a default here: a

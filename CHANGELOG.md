@@ -6,36 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Changed — BREAKING (portable data-access contract, M79)
-
-Three widenings to `@setu-ts/common`'s data-access contract. All three are **source-compatible for
-callers** and **breaking for implementors**, because each widens a type in a position an implementor
-must satisfy. No application that only _calls_ repositories needs a change; an application that
-_implements_ `IDataSource` or declares a custom repository key type does.
-
-- **`IDataSource.findById`/`update`/`delete` take `EntityKey`, not `string | number`.** The new arm
-  is a composite record (`Readonly<Record<string, string | number>>`), so a join table or a
-  tenant-scoped table can finally be addressed through a repository. A parameter is contravariant,
-  so an out-of-repo adapter still declaring the scalar-only form is a compile error.
-
-  ```typescript
-  // Before — still valid, nothing to change for a scalar key.
-  findById(id: string | number): Promise<Record<string, unknown> | null>;
-  // After — an implementor must widen the parameter.
-  findById(id: EntityKey): Promise<Record<string, unknown> | null>;
-  ```
-
-- **`FilterComparison.field` accepts `string | readonly string[]`.** An array is a nested document
-  path (`['address', 'city']`); a plain `string` is unchanged. Any code that READS `filter.field`
-  and assumes `string` must handle both. A dotted string is deliberately NOT a path — a column whose
-  name contains a dot keeps its meaning.
-
-- **The ordered-comparison arm (`gt`/`gte`/`lt`/`lte`) accepts `Date`.** Required for keyset
-  pagination over a timestamp column, and it makes a portable date-range filter expressible for the
-  first time. `IRepository`'s key type parameter is now constrained to `EntityKey`, which is
-  breaking only for a declaration that was never supported at runtime.
-
 ### Added
+
+- **`@setu-ts/sdk` realtime clients.** `createSseClient` consumes authenticated SSE streams with
+  frame parsing, `Last-Event-ID` resumption, bounded reconnects, and abort teardown;
+  `createRealtimeClient` filters and replies to the WebSocket heartbeat protocol, re-joins rooms,
+  and reconnects with bounded backoff. `setu generate sse` and `setu generate ws-route` provide
+  matching application-local starting points. The generated React hook is emitted only for a project
+  that already configures both React Router and the SDK.
+
+  The generated `src/controllers/index.ts` barrel now passes the service registry to each generated
+  registrar, so its `registerGeneratedRoutes` takes an optional second parameter. A project
+  scaffolded before this keeps compiling untouched — `generate` never rewrites `setu.config.ts` —
+  but a generated SSE controller resolves `CAPABILITIES.SSE` from that registry and throws by name
+  until the call is updated to `registerGeneratedRoutes(app.router, app.services)`.
+
+- `@setu-ts/decorator-plugin` now exports `@Module({ controllers, providers, imports })` and
+  `DecoratorPlugin({ modules })`. Activated modules flatten imported modules depth-first, register
+  providers before controllers, deduplicate diamonds and cycles by class identity, and warn when a
+  supplied class lacks module metadata. A service with required constructor parameters now refuses
+  startup unless it declares the explicit `@Inject(...)` tokens the runtime needs.
+- The default `rest` template now includes a functional greeting controller and service registered
+  through the same seam barrels that `setu generate` maintains.
 
 - **Keyset cursor pagination.** `IDataSource.findPage?(query)` returns `{ rows, nextCursor }`, and
   `NormalizedQuery.cursor` carries the incoming position. The member is **optional** so an
@@ -68,18 +60,6 @@ _implements_ `IDataSource` or declares a custom repository key type does.
   optional second argument (`transform(schema, io?)`, defaulting to `'output'`), so an existing
   single-argument call is unchanged.
 
-### Fixed
-
-- **Prisma's `findById` and `update` threw synchronously on a malformed composite key**, bypassing a
-  caller using `.catch()`, while `delete` on the same object rejected correctly. All three now
-  reject.
-- **Prisma's scalar key path addressed a hardcoded `id`**, ignoring a configured single-column
-  `keyColumns`, so a lookup silently queried the wrong column. It now addresses the resolved column;
-  the default `['id']` keeps the pre-M79 shape byte-identical.
-- Prisma's composite-key refusals named `findById` regardless of the method that failed.
-- **Mongo could write a partial compound `_id`** when a key column was absent from the row, storing
-  a document that no `findById` could retrieve, since the read path requires every column.
-
 - Added a native MongoDB backend to `@setu-ts/database-plugin`.
   `DatabasePlugin({ type: 'mongodb',
   options: { url } })` now provides repositories over the
@@ -98,6 +78,73 @@ _implements_ `IDataSource` or declares a custom repository key type does.
 - Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.
+- **`@setu-ts/openapi-plugin` exports `SchemaIo`** and `ZodToOpenApi.transform` takes it as an
+  optional second argument (`transform(schema, io?)`, defaulting to `'output'`), so an existing
+  single-argument call is unchanged.
+
+### Changed
+
+- **Breaking (generated class-based modules):** `setu generate module` now emits `<name>.module.ts`;
+  the managed aggregate barrel exports `MODULES` and config passes it through
+  `DecoratorPlugin({ modules })` instead of exporting controller/service arrays. Existing generated
+  module directories are reported when their declaration is missing, rather than silently omitted.
+  The regenerated barrel retains deprecated controller/service arrays so an existing config keeps
+  compiling while it migrates. Add
+  `@Module({ controllers: [<Name>Controller], providers:
+  [<Name>Service] })` to each legacy
+  directory (or delete and regenerate it), then update `setu.config.ts` to import `MODULES` and pass
+  `modules: [...MODULES]` to `DecoratorPlugin`.
+
+**Breaking, portable data-access contract (M79).** Three widenings to `@setu-ts/common`. All three
+are **source-compatible for callers** and **breaking for implementors**, because each widens a type
+in a position an implementor must satisfy.
+
+Three widenings to `@setu-ts/common`'s data-access contract. All three are **source-compatible for
+callers** and **breaking for implementors**, because each widens a type in a position an implementor
+must satisfy. No application that only _calls_ repositories needs a change; an application that
+_implements_ `IDataSource` or declares a custom repository key type does.
+
+- **`IDataSource.findById`/`update`/`delete` take `EntityKey`, not `string | number`.** The new arm
+  is a composite record (`Readonly<Record<string, string | number>>`), so a join table or a
+  tenant-scoped table can finally be addressed through a repository. A parameter is contravariant,
+  so an out-of-repo adapter still declaring the scalar-only form is a compile error.
+
+  ```typescript
+  // Before — still valid, nothing to change for a scalar key.
+  findById(id: string | number): Promise<Record<string, unknown> | null>;
+  // After — an implementor must widen the parameter.
+  findById(id: EntityKey): Promise<Record<string, unknown> | null>;
+  ```
+
+- **`FilterComparison.field` accepts `string | readonly string[]`.** An array is a nested document
+  path (`['address', 'city']`); a plain `string` is unchanged. Any code that READS `filter.field`
+  and assumes `string` must handle both. A dotted string is deliberately NOT a path — a column whose
+  name contains a dot keeps its meaning.
+
+- **The ordered-comparison arm (`gt`/`gte`/`lt`/`lte`) accepts `Date`.** Required for keyset
+  pagination over a timestamp column, and it makes a portable date-range filter expressible for the
+  first time. `IRepository`'s key type parameter is now constrained to `EntityKey`, which is
+  breaking only for a declaration that was never supported at runtime.
+
+### Fixed
+
+- **A `--transport grpc` workspace can now add a `full-stack` member without disabling form CSRF.**
+  The CLI mounts `GrpcPlugin` at `/grpc`, preserves that direct contribution by registering it after
+  `createFullStackAppFromConfig()` creates the application and before startup, and emits a form-CSRF
+  exclusion for that protocol prefix only. `CsrfFormOptions.exclude` also lets an application
+  explicitly exempt exact paths or regular expressions for another separately-mounted non-browser
+  protocol surface. Broker transports remain refused because they need to rewrite the starter-owned
+  messaging configuration, which cannot be expressed as a safe appended plugin.
+
+- **Prisma's `findById` and `update` threw synchronously on a malformed composite key**, bypassing a
+  caller using `.catch()`, while `delete` on the same object rejected correctly. All three now
+  reject.
+- **Prisma's scalar key path addressed a hardcoded `id`**, ignoring a configured single-column
+  `keyColumns`, so a lookup silently queried the wrong column. It now addresses the resolved column;
+  the default `['id']` keeps the pre-M79 shape byte-identical.
+- Prisma's composite-key refusals named `findById` regardless of the method that failed.
+- **Mongo could write a partial compound `_id`** when a key column was absent from the row, storing
+  a document that no `findById` could retrieve, since the read path requires every column.
 
 - **`@setu-ts/openapi-plugin` documented a zod v4 REQUEST body as the shape the server holds after
   parsing, so a document could contradict the application serving it.** `ZodToOpenApi` converted

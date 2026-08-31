@@ -39,12 +39,17 @@ import {
   type SchematicOptions,
 } from '../schematics/registry.ts';
 import { loadCustomSchematic, type ModuleLoader } from '../schematics/custom.ts';
-import { readModuleNames } from '../utils/module-scanner.ts';
+import { scanModules } from '../utils/module-scanner.ts';
 import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
-import { legacyLayoutNotice, readLegacyHttpFiles } from '../utils/legacy-layout.ts';
+import {
+  legacyLayoutNotice,
+  legacyRegistrarNotice,
+  readConfigModule,
+  readLegacyHttpFiles,
+} from '../utils/legacy-layout.ts';
 
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
@@ -238,7 +243,18 @@ export async function runGenerateCommand(
   // Read unconditionally, like `detectPlugins` above: the `module` schematic
   // needs it to render its aggregate barrel, and branching on the schematic name
   // here would put a second dispatch beside the registry.
-  const modules = await readModuleNames(deps.fs, dir);
+  const moduleScan = await scanModules(deps.fs, dir);
+  const modules = moduleScan.names;
+  const legacyModules = moduleScan.skipped.map((skip) => skip.name);
+  for (const skip of moduleScan.skipped) {
+    deps.error(
+      `Skipped ${skip.path}: it is missing ${skip.missing}, so it cannot be listed in ` +
+        'the MODULES activation barrel used by migrated configs.',
+    );
+    deps.error(
+      `  Add ${skip.missing} with @Module(...) or delete and regenerate the module.`,
+    );
+  }
   // Same reasoning as `modules`: the migration runner lists every migration in
   // order, and a schematic performs no I/O.
   const migrations = await readMigrationNames(deps.fs, dir);
@@ -313,6 +329,13 @@ export async function runGenerateCommand(
     deps.error(line);
   }
 
+  // The registry parameter is optional so a pre-M84 config still COMPILES, which
+  // is what keeps existing projects working — but it also means the compiler no
+  // longer reports the gap, and a generated SSE controller throws at startup.
+  for (const line of legacyRegistrarNotice(await readConfigModule(deps.fs, dir))) {
+    deps.error(line);
+  }
+
   // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
   // output cannot work is not a plan worth printing. Both collisions this catches were
   // observed as real failures against a booted application — see `name-conflicts.ts`.
@@ -338,6 +361,7 @@ export async function runGenerateCommand(
     plugins: installed,
     now: deps.now,
     modules,
+    legacyModules,
     migrations,
     artifacts: scan.artifacts,
   };

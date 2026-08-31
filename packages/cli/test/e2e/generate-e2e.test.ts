@@ -92,12 +92,13 @@ describe('setu end-to-end on a real filesystem', () => {
     expect(await run(['g', 'route', 'orders', '--dir', project])).toBe(0);
 
     const barrel = await Deno.readTextFile(`${project}/src/controllers/index.ts`);
-    expect(barrel).toContain('registerOrdersRoutes(router);');
+    expect(barrel).toContain('registerOrdersRoutes,');
+    expect(barrel).toContain('register(router, services);');
 
     // The scaffolded config already calls the barrel, so nothing further is needed.
     const config = await Deno.readTextFile(`${project}/setu.config.ts`);
     expect(config).toContain("from './src/controllers/index.ts'");
-    expect(config).toContain('registerGeneratedRoutes(app.router);');
+    expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
   });
 
   it('honours the plugin gate against a real manifest on disk', async () => {

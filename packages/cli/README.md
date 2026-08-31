@@ -81,21 +81,23 @@ setu generate service user-profile
 setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
-| Schematic          | Emits                                  | Requires           |
-| ------------------ | -------------------------------------- | ------------------ |
-| `plugin`           | `src/plugins/<name>.ts`                | —                  |
-| `controller`       | `src/controllers/<name>.controller.ts` | `decorator-plugin` |
-| `service`          | `src/services/<name>.service.ts`       | —                  |
-| `route`            | `src/routes/<name>.routes.ts`          | —                  |
-| `middleware`       | `src/middleware/<name>.middleware.ts`  | —                  |
-| `job`              | `src/jobs/<name>.job.ts`               | —                  |
-| `guard`            | `src/guards/<name>.guard.ts`           | `auth-plugin`      |
-| `health-indicator` | `src/health/<name>.indicator.ts`       | `health-plugin`    |
-| `metric`           | `src/metrics/<name>.metric.ts`         | `metrics-plugin`   |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`   | `cqrs-plugin`      |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`     | `cqrs-plugin`      |
-| `event-handler`    | `src/events/<name>.event-handler.ts`   | `events-plugin`    |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts` | `database-plugin`  |
+| Schematic          | Emits                                                                                                         | Requires           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `plugin`           | `src/plugins/<name>.ts`                                                                                       | —                  |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                        | `decorator-plugin` |
+| `service`          | `src/services/<name>.service.ts`                                                                              | —                  |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                            | —                  |
+| `sse`              | controller, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`       |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`                                                                                | `websocket-plugin` |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                         | —                  |
+| `job`              | `src/jobs/<name>.job.ts`                                                                                      | —                  |
+| `guard`            | `src/guards/<name>.guard.ts`                                                                                  | `auth-plugin`      |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                              | `health-plugin`    |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                | `metrics-plugin`   |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`                                                                          | `cqrs-plugin`      |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`                                                                            | `cqrs-plugin`      |
+| `event-handler`    | `src/events/<name>.event-handler.ts`                                                                          | `events-plugin`    |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                        | `database-plugin`  |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.
@@ -129,6 +131,36 @@ error (unknown command or schematic, missing argument, unknown `--runtime`, or a
 form an identifier — empty after normalization, or digit-leading such as `2fa`).
 
 A relative `--dir` is resolved against the working directory.
+
+## Generated modules
+
+## Realtime starting points
+
+`setu generate sse <name>` writes an SSE controller under `src/controllers/`. When the project
+already has both `@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also
+writes an application-local `src/hooks/use-<name>.ts` React hook that imports `createSseClient`. Add
+the SDK with `setu add sdk` before generating the hook. React belongs to the consuming application,
+never a published Setu package.
+
+`setu generate ws-route <name>` writes a WebSocket plugin under `src/plugins/`. It registers an
+exact `/ws/<name>` route, joins the requested room, and broadcasts to other members.
+
+Generated HTTP artifacts register through `registerGeneratedRoutes(app.router, app.services)`;
+regenerated barrels also accept older one-argument route registrars.
+
+In a class-based project, `setu generate module users` writes a controller, an injectable service,
+and `src/modules/users/users.module.ts`. That application-owned file declares its contents with
+`@Module({ controllers, providers })`; the CLI-managed `src/modules/index.ts` exports `MODULES`,
+which `setu.config.ts` passes as `DecoratorPlugin({ modules: [...MODULES] })`. A root module is also
+supported when the application should own activation: pass one `@Module({ imports: [...] })` class
+directly to `DecoratorPlugin`.
+
+Projects generated before this release have no `<name>.module.ts`. The next generation reports each
+such directory instead of silently dropping it from `MODULES`. Its regenerated barrel retains the
+deprecated `MODULE_CONTROLLERS` and `MODULE_SERVICES` exports, so an existing config continues to
+compile and register its modules while it migrates. Add the declaration (or delete and regenerate
+that module), then change `setu.config.ts` to import `MODULES` and pass `modules: [...MODULES]` to
+`DecoratorPlugin`; do not retain the deprecated arrays in the new config.
 
 **Nothing is ever overwritten.** A generate that would clobber any existing file writes none of them
 — every planned path is checked before the first write, so a multi-file schematic cannot leave a

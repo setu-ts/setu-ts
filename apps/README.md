@@ -18,6 +18,7 @@ dependencies cannot enter a published package graph. Run its `smoke` task to ver
 | [`grpc`](./grpc)                             | A descriptor-backed Connect RPC and HTTP route share one application.       |
 | [`cloudflare`](./cloudflare)                 | Worker bindings wire KV and cron (requires Wrangler).                       |
 | [`realtime`](./realtime)                     | A publish on A reaches B's SSE client through Redis (requires Redis).       |
+| [`realtime-clients`](./realtime-clients)     | SDK SSE resume/auth and WebSocket keep-alive on a real server.              |
 | [`full-stack`](./full-stack)                 | An SSR React Router page renders rows read through the database capability. |
 | [`static-site`](./static-site)               | Static file serving with caching, ETags, and range requests.                |
 
@@ -34,3 +35,6 @@ default, so every skip remains a warning and the gate does not block.
 runs the real React Router / Vite frontend build first. That build needs no Node toolchain — it runs
 under Deno's own npm support — and costs a few seconds, so the example is deliberately **not** in
 `ALLOW_SKIP`, and `test/apps-gate.test.ts` asserts that it never becomes so.
+
+`realtime-clients` drives the SDK from Deno, Node, Bun, and workerd. CI provisions Node and Bun; the
+example is deliberately absent from `ALLOW_SKIP`.

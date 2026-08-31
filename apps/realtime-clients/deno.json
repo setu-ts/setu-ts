@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "start": "deno run -A main.ts",
+    "smoke": "deno run -A smoke.ts"
+  },
+  "imports": {
+    "@setu-ts/common": "../../packages/common/src/index.ts",
+    "@setu-ts/kernel": "../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "../../packages/runtime/src/index.ts",
+    "@setu-ts/sse-plugin": "../../packages/sse-plugin/src/index.ts",
+    "@setu-ts/websocket-plugin": "../../packages/websocket-plugin/src/index.ts",
+    "@setu-ts/sdk": "../../packages/sdk/src/index.ts"
+  }
+}

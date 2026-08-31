@@ -12,11 +12,11 @@ describe('module generation styles', () => {
     const paths = (template.files ?? []).map((file) => file.path);
     expect(paths).toContain('src/modules/index.ts');
     expect(template.localImports).toContainEqual({
-      symbols: ['MODULE_CONTROLLERS', 'MODULE_SERVICES'],
+      symbols: ['MODULES'],
       from: './src/modules/index.ts',
     });
     expect(template.plugins.find((plugin) => plugin.pkg === 'decorator-plugin')?.args)
-      .toContain('...MODULE_CONTROLLERS');
+      .toContain('...MODULES');
   });
 
   it('keeps functional templates free of class module wiring', () => {
@@ -28,8 +28,7 @@ describe('module generation styles', () => {
   });
 
   it('starts the class-based module barrel empty', () => {
-    expect(renderModuleBarrel([])).toContain('export const MODULE_CONTROLLERS');
-    expect(renderModuleBarrel([])).toContain('export const MODULE_SERVICES');
+    expect(renderModuleBarrel([])).toContain('export const MODULES');
   });
 
   it('rewrites only the decorator wiring and wraps long module registration', () => {
@@ -40,7 +39,7 @@ describe('module generation styles', () => {
     );
 
     expect(wiring[0]).toBe(DI_WIRING);
-    expect(wiring[1].args).toContain('...MODULE_CONTROLLERS');
+    expect(wiring[1].args).toContain('...MODULES');
     expect(wiring[1].args).toContain('\n        controllers:');
   });
 
@@ -48,7 +47,7 @@ describe('module generation styles', () => {
     const [wiring] = withModuleSeam([{ pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' }]);
 
     expect(wiring.args).toBe(
-      '{ controllers: [...MODULE_CONTROLLERS], services: [...MODULE_SERVICES] }',
+      '{ controllers: [], services: [], modules: [...MODULES] }',
     );
   });
 });

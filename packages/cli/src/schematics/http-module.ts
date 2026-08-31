@@ -43,20 +43,25 @@ export function renderHttpModule(names: DerivedNames, kind: HttpModuleKind): str
       ` * both generator modes: a \`@Controller\` has no wildcard decorator and cannot\n` +
       ` * compute routes in a loop, so a proxy or a computed route table belongs here.\n`;
 
-  return `import type { IRouterApi } from '@setu-ts/common';
+  return `import type { IRouterApi, IServiceRegistry } from '@setu-ts/common';
 
 /**
  * Registers the ${names.kebab} routes.
  *
 ${framing} *
  * Called for you by \`registerGeneratedRoutes\` in \`src/controllers/index.ts\`,
- * which \`setu.config.ts\` invokes with \`app.router\` — so this module needs no
+ * which \`setu.config.ts\` invokes with \`app.router\` and \`app.services\` — so this module needs no
  * further wiring. Call it directly with \`ctx.router\` to register these routes
  * from inside a plugin instead.
  *
  * @param router - The router to register on
+ * @param services - The application service registry
  */
-export function ${routeRegistrarSymbol(names)}(router: IRouterApi): void {
+export function ${routeRegistrarSymbol(names)}(
+  router: IRouterApi,
+  services?: IServiceRegistry,
+): void {
+  void services;
   router.group('/${names.kebab}', (routes) => {
     routes.get('/', (ctx) => ctx.response.json({ items: [] }));
 

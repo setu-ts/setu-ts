@@ -203,11 +203,10 @@ describe('the transport registry', () => {
     });
   });
 
-  // A bare `GrpcPlugin()` serves `grpc.health.v1.Health/Check` immediately, so
-  // registering it is the whole of what this transport needs.
+  // A stable mount lets the full-stack CSRF policy exempt only RPC requests.
   it('adds the gRPC plugin and nothing else for the grpc arm', () => {
     expect(transportSpec('grpc').plugins).toEqual([
-      { pkg: 'grpc-plugin', symbol: 'GrpcPlugin' },
+      { pkg: 'grpc-plugin', symbol: 'GrpcPlugin', args: "{ basePath: '/grpc' }" },
     ]);
     expect(transportSpec('grpc').messagingArgs).toBeUndefined();
   });

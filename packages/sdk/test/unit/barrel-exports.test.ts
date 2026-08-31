@@ -14,6 +14,8 @@ describe('@setu-ts/sdk barrel', () => {
       'ClientCircuitOpenError',
       'OpenApiCodegenError',
       'generateOpenApiClient',
+      'createSseClient',
+      'createRealtimeClient',
     ].sort();
     expect(actual).toEqual(expected);
   });

@@ -19,10 +19,20 @@ describe('route schematic', () => {
     assertSeamContract('route', 'order-item', ['gizmo', 'billing']);
   });
 
-  it('calls each route module from the barrel, which takes the router', () => {
+  it('calls each route module through the compatibility-safe registrar list', () => {
     const barrel = barrelOf(files, 'route').contents;
-    expect(barrel).toContain('export function registerGeneratedRoutes(router: IRouterApi): void');
-    expect(barrel).toContain('registerOrderItemRoutes(router);');
+    expect(barrel).toContain('export function registerGeneratedRoutes(');
+    // The registry parameter is OPTIONAL on purpose. A `setu.config.ts` scaffolded
+    // before it existed calls `registerGeneratedRoutes(app.router)`, and `generate`
+    // never rewrites that file — so requiring it would fail the developer's own
+    // project with TS2554 on their next generate, from a command reporting success.
+    expect(barrel).toContain('  services?: IServiceRegistry,\n');
+    expect(barrel).not.toContain(
+      'registerGeneratedRoutes(router: IRouterApi, services: IServiceRegistry)',
+    );
+    expect(barrel).toContain('const GENERATED_ROUTE_REGISTRARS');
+    expect(barrel).toContain('registerOrderItemRoutes,');
+    expect(barrel).toContain('register(router, services);');
   });
 
   it('uses the router parameter even when no route module exists yet', () => {
@@ -30,11 +40,11 @@ describe('route schematic', () => {
     // `noUnusedParameters` to a generated project — so an empty body still has to
     // consume `router` or the project fails to compile before anything is generated.
     const empty = barrelOf(generateRoute(deriveNames('x'), options()), 'route');
-    expect(empty.contents).toContain('registerXRoutes(router);');
+    expect(empty.contents).toContain('registerXRoutes,');
     const scaffolded = barrelOf(files, 'route').contents;
-    expect(scaffolded.includes('void router;') || scaffolded.includes('Routes(router);')).toBe(
-      true,
-    );
+    expect(
+      scaffolded.includes('void router;') || scaffolded.includes('register(router, services);'),
+    ).toBe(true);
   });
 
   it('emits it at src/controllers/order-item.routes.ts', () => {
@@ -56,7 +66,9 @@ describe('route schematic', () => {
   });
 
   it('exports the register function', () => {
-    expect(file.contents).toContain('export function registerOrderItemRoutes(router: IRouterApi)');
+    expect(file.contents).toContain(
+      'export function registerOrderItemRoutes(\n  router: IRouterApi,\n  services?: IServiceRegistry,\n)',
+    );
   });
 
   it('groups the routes under the kebab path', () => {

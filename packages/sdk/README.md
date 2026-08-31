@@ -9,6 +9,38 @@ This package does **not** register a plugin or resolve capability tokens. It is 
 library with no dependency on `kernel`, `runtime`, or any plugin — its only in-repo import is
 type-level from `@setu-ts/common`.
 
+## Realtime clients
+
+`createSseClient` consumes an SSE endpoint through `fetch` on every supported runtime. It sends
+configured headers on every reconnect, ignores comment-frame heartbeats, parses JSON events, applies
+server `retry:` delays, and sends `Last-Event-ID` after an identified event. It does not delegate to
+`EventSource`, so bearer authentication works equally in browsers and server runtimes.
+
+```typescript
+import { createSseClient } from '@setu-ts/sdk';
+
+const events = createSseClient({
+  url: 'https://api.example.com/sse/scores',
+  headers: { Authorization: 'Bearer token' },
+  onEvent: ({ event, data }) => console.log(event, data),
+});
+// later: events.close()
+```
+
+`createRealtimeClient` wraps the global WebSocket with the server's application-level keep-alive
+contract. It filters the heartbeat payload (`'ping'` by default), replies to keep the server's
+inbound-idle timer fresh, reconnects with backoff, and re-applies the configured room query value.
+
+```typescript
+import { createRealtimeClient } from '@setu-ts/sdk';
+
+const board = createRealtimeClient({
+  url: 'wss://api.example.com/ws/board',
+  room: 'game-7',
+  onMessage: ({ data }) => console.log(data),
+});
+```
+
 ## Installation
 
 ```bash
@@ -439,6 +471,8 @@ publish or format it has nowhere to go.
 | `createBearerAuthInterceptor` | function  |
 | `createClient`                | function  |
 | `createDefaultClientTiming`   | function  |
+| `createRealtimeClient`        | function  |
+| `createSseClient`             | function  |
 | `generateOpenApiClient`       | function  |
 | `ClientCircuitOpenError`      | class     |
 | `HttpClientError`             | class     |
@@ -451,7 +485,14 @@ publish or format it has nowhere to go.
 | `ClientResponse`              | interface |
 | `IClientTiming`               | interface |
 | `IHttpClient`                 | interface |
+| `IRealtimeClient`             | interface |
+| `ISseClient`                  | interface |
+| `IWebSocketTransport`         | interface |
 | `OpenApiCodegenOptions`       | interface |
+| `RawSseEvent`                 | interface |
+| `RealtimeClientOptions`       | interface |
+| `RealtimeMessage`             | interface |
+| `RealtimeReconnectOptions`    | interface |
 | `RetryPolicy`                 | interface |
 | `SdkOpenApiDocument`          | interface |
 | `SdkOpenApiOperation`         | interface |
@@ -460,9 +501,16 @@ publish or format it has nowhere to go.
 | `SdkOpenApiRequestBody`       | interface |
 | `SdkOpenApiResponse`          | interface |
 | `SdkOpenApiSchema`            | interface |
+| `SseClientOptions`            | interface |
+| `SseEvent`                    | interface |
+| `SseReconnectOptions`         | interface |
 | `BackoffStrategy`             | type      |
 | `ClientRequestInterceptor`    | type      |
 | `ClientResponseInterceptor`   | type      |
+| `RealtimeClientState`         | type      |
+| `SseClientState`              | type      |
+| `SseEventMap`                 | type      |
+| `WebSocketFactory`            | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

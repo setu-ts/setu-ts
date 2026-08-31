@@ -4,6 +4,7 @@ import { expect } from '@std/expect';
 import * as barrel from '../../src/index.ts';
 import type {
   InjectToken,
+  ModuleOptions,
   OptionalToken,
   ParamSource,
   SetuClassDecorator,
@@ -31,6 +32,7 @@ const _source: ParamSource<string> = { descriptor: { type: 'param', name: 'id' }
 const _values: SourceValues<[ParamSource<string>]> = ['x'];
 const _optionalToken: OptionalToken = { token: 'cache', optional: true };
 const _injectToken: InjectToken = _optionalToken;
+const _moduleOptions: ModuleOptions = {};
 
 /** The complete published surface, in barrel order. */
 const EXPECTED_VALUES = [
@@ -56,6 +58,7 @@ const EXPECTED_VALUES = [
   'Query',
   'Inject',
   'Injectable',
+  'Module',
   'Optional',
   'Permissions',
   'Public',
@@ -112,6 +115,7 @@ describe('published barrel surface', () => {
     expect(_values[0]).toBe('x');
     expect(_optionalToken.optional).toBe(true);
     expect(typeof _injectToken).toBe('object');
+    expect(_moduleOptions).toEqual({});
     expect(
       [_classDecorator, _methodDecorator, _classOrMethod].every((f) => typeof f === 'function'),
     )

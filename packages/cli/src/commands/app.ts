@@ -196,13 +196,14 @@ function planMember(
   // may enable. Measured: a real `react-router build` and an SSR 200 both work
   // inside a member once the root declares it.
   if (choice.template?.manifest?.npmBuild !== undefined) {
-    // …but the transport must be able to reach it first. A starter-composed
-    // template owns its whole plugin set, so a transport that appends a plugin
-    // or rewrites `MessagingPlugin`'s arguments would have its contribution
-    // SILENTLY DROPPED by the renderer's factory branch — the member would join
-    // a workspace on a bus it is not actually connected to.
-    const contributes = transport.plugins.length > 0 || transport.messagingArgs !== undefined;
-    if (choice.template.appFactory !== undefined && contributes) {
+    // …but a starter-composed template cannot accept a transport that rewrites
+    // its starter-owned messaging or queue arguments. Direct plugin additions
+    // are registered after the factory returns — gRPC uses that path — but an
+    // argument rewrite would otherwise be silently dropped and leave the member
+    // connected to the template default instead of its workspace transport.
+    const rewritesStarterPlugin = transport.messagingArgs !== undefined ||
+      transport.queueArgs !== undefined;
+    if (choice.template.appFactory !== undefined && rewritesStarterPlugin) {
       // The advice is narrowed per what each transport actually delivers: for a
       // BROKER the standalone escape now restores the choice (`--broker`
       // exists), but a standalone full-stack project still cannot take one, so

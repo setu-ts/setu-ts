@@ -34,6 +34,22 @@ describe('application gate configuration', () => {
     }
   });
 
+  it('keeps the realtime-client exercise out of the CI skip allowlist', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    // Scoped to the `deno` job, not the whole file: `node-compat` and
+    // `bun-compat` declare the same two actions, so a repo-wide `toContain`
+    // stays green after they are removed from the job that runs `check:apps`.
+    const denoJob = workflow.slice(
+      workflow.indexOf('\n  deno:'),
+      workflow.indexOf('\n  publish-dry-run:'),
+    );
+    expect(denoJob).not.toBe('');
+    expect(denoJob).toContain('actions/setup-node@v4');
+    expect(denoJob).toContain('oven-sh/setup-bun@v2');
+    const allowSkip = workflow.match(/ALLOW_SKIP:\s*([^\n]+)/)?.[1] ?? '';
+    expect(allowSkip).not.toContain('realtime-clients');
+  });
+
   it('keeps a documented smoke skip distinct from a passing smoke check', () => {
     expect(classifySmokeExitCode({ code: 77, success: false, signal: null }))
       .toBe('skipped');

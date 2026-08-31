@@ -68,6 +68,15 @@ export interface CsrfFormOptions {
   readonly headerName?: string;
   /** Methods that skip verification. Default `['GET', 'HEAD', 'OPTIONS']`. */
   readonly ignoreMethods?: readonly string[];
+  /**
+   * Request paths exempt from form-CSRF verification, matched by exact string
+   * equality or `RegExp.test`. Omitted means no path is exempt.
+   *
+   * Use this only for a protocol endpoint that cannot carry a browser session
+   * token (for example, a separately-mounted Connect/gRPC surface). Do not use
+   * it to bypass CSRF for application form routes.
+   */
+  readonly exclude?: readonly (string | RegExp)[];
 }
 
 /**
