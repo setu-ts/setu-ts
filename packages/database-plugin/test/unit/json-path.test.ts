@@ -24,6 +24,16 @@ describe('jsonPathString', () => {
     expect(jsonPathString(['a_1', 'B2', '_c'])).toBe('$.a_1.B2._c');
   });
 
+  it('refuses an EMPTY path below the root column', () => {
+    // `$.` addresses nothing and both SQLite and MySQL answer it with NULL
+    // rather than an error, so an empty path would match nothing while
+    // reporting success.
+    expect(() => jsonPathString([])).toThrow(/path is empty/);
+    // `postgresPathArray` validates through this function, so it inherits the
+    // refusal rather than rendering `{}`.
+    expect(() => postgresPathArray([])).toThrow(/path is empty/);
+  });
+
   it('refuses a segment carrying a path metacharacter rather than escaping it', () => {
     // A wrong escape reads a DIFFERENT field instead of failing, which is the
     // silent-divergence class this package keeps closing — so every one of

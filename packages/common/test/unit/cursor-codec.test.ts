@@ -5,7 +5,14 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { decodeCursor, encodeCursor, keysetPredicate } from '../../src/services/cursor.ts';
+import {
+  decodeCursor,
+  encodeCursor,
+  keysetPredicate,
+  mintNextCursor,
+  resolveKeysetSort,
+  sortFingerprint,
+} from '../../src/services/cursor.ts';
 import type { CursorPayload } from '../../src/services/cursor.ts';
 import type { FilterExpression } from '../../src/services/database.ts';
 
@@ -569,5 +576,60 @@ describe('cursor.ts defensive edge cases', () => {
   it('handles base64url with only 3 values (exercises ??0 fallback)', () => {
     // 3 base64 chars -> values.length=3 -> n3 is undefined -> ??0
     expect(decodeCursor('QQQ')).toBeNull();
+  });
+});
+
+describe('mintNextCursor refuses a value that cannot survive the wire', () => {
+  const orderBy = { score: 'asc' } as const;
+  const fingerprint = sortFingerprint(resolveKeysetSort(orderBy, ['id']));
+
+  /** Mint from one row, so each case names exactly one offending value. */
+  function mint(row: Record<string, unknown>): string | null {
+    return mintNextCursor([row], orderBy, ['id'], fingerprint, true);
+  }
+
+  it('mints from a string, a finite number and a valid Date', () => {
+    expect(mint({ id: 'u1', score: 10 })).not.toBeNull();
+    expect(mint({ id: 'u1', score: -0.5 })).not.toBeNull();
+    expect(mint({ id: 'u1', score: new Date('2026-08-31T00:00:00.000Z') })).not.toBeNull();
+  });
+
+  it('refuses null and undefined, naming the field', () => {
+    // A token carrying `null` survives `JSON.stringify` and then fails
+    // `decodeCursor` on the NEXT request, so the walk cannot be continued and
+    // the refusal names a malformed token rather than the nullable column.
+    expect(() => mint({ id: 'u1', score: null })).toThrow(/field 'score'.*holds null/);
+    expect(() => mint({ id: 'u1' })).toThrow(/field 'score'/);
+    expect(() => mint({ score: 10 })).toThrow(/field 'id'/);
+  });
+
+  it('refuses NaN and the infinities, though typeof says number', () => {
+    // `JSON.stringify` writes all three as `null` (probed), so they mint a
+    // token that cannot be decoded — the `null` failure by another door.
+    expect(JSON.stringify([NaN, Infinity, -Infinity])).toBe('[null,null,null]');
+    expect(() => mint({ id: 'u1', score: NaN })).toThrow(/holds NaN/);
+    expect(() => mint({ id: 'u1', score: Infinity })).toThrow(/holds Infinity/);
+    expect(() => mint({ id: 'u1', score: -Infinity })).toThrow(/holds -Infinity/);
+  });
+
+  it('refuses an invalid Date, though instanceof says Date', () => {
+    // `toISOString()` on one throws `RangeError: Invalid time value` DURING
+    // minting, so a request that would otherwise have succeeded fails — and
+    // with a message naming neither the field nor the cursor.
+    const invalid = new Date('nope');
+    expect(invalid instanceof Date).toBe(true);
+    expect(() => invalid.toISOString()).toThrow(RangeError);
+    expect(() => mint({ id: 'u1', score: invalid })).toThrow(/holds an invalid Date/);
+  });
+
+  it('refuses a non-scalar value by type name', () => {
+    expect(() => mint({ id: 'u1', score: { nested: true } })).toThrow(/holds object/);
+    expect(() => mint({ id: 'u1', score: true })).toThrow(/holds boolean/);
+  });
+
+  it('mints nothing for a terminal or empty page', () => {
+    expect(mintNextCursor([{ id: 'u1', score: 1 }], orderBy, ['id'], fingerprint, false))
+      .toBeNull();
+    expect(mintNextCursor([], orderBy, ['id'], fingerprint, true)).toBeNull();
   });
 });

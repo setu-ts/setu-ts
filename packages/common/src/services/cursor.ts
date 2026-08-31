@@ -279,6 +279,24 @@ export function sortFingerprint(
 }
 
 /**
+ * Describe a value that cannot be minted into a cursor, for the refusal
+ * message.
+ *
+ * Names the specific reason rather than only the type: `number` alone would not
+ * tell a reader why a numeric column was refused, and `NaN`/`Infinity` are
+ * exactly the numeric values that cannot survive the wire.
+ *
+ * @param value - The offending column value
+ * @returns A short human-readable description
+ */
+function describeUnmintable(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value === 'number') return Number.isNaN(value) ? 'NaN' : String(value);
+  if (value instanceof Date) return 'an invalid Date';
+  return typeof value;
+}
+
+/**
  * Mint the next-page cursor from the last row of a non-terminal page.
  *
  * The cursor is only ever produced when {@linkcode hasMore} is true AND the
@@ -309,15 +327,24 @@ export function mintNextCursor(
   // could not be continued, and the refusal named a malformed token rather
   // than the nullable column that caused it. `undefined` takes the same path,
   // because `JSON.stringify` writes an `undefined` array element as `null`.
+  // A bare `typeof`/`instanceof` test is not enough, and both gaps have the
+  // same shape as the `null` one — the failure surfaces on the NEXT request, or
+  // one frame away from its cause (probed, not assumed):
+  //
+  // - `typeof NaN === 'number'` and so is `Infinity`, but `JSON.stringify`
+  //   writes BOTH as `null`, so they mint a token that cannot be decoded.
+  // - `new Date('nope') instanceof Date` is true, and `toISOString()` on it
+  //   throws `RangeError: Invalid time value` — during minting, so a request
+  //   that would otherwise have SUCCEEDED fails instead.
   const read = (field: string): CursorValue => {
     const value = lastRow[field];
-    if (typeof value === 'string' || typeof value === 'number' || value instanceof Date) {
-      return value;
-    }
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (value instanceof Date && Number.isFinite(value.getTime())) return value;
     throw new Error(
       `cursor-pagination: cannot mint a cursor from field '${field}', which holds ` +
-        `${value === null ? 'null' : typeof value}. Order and key columns must be ` +
-        'non-null string, number or Date values.',
+        `${describeUnmintable(value)}. Order and key columns must be non-null ` +
+        'string, finite number or valid Date values.',
     );
   };
   const orderedValues = Object.keys(orderBy).map(read);

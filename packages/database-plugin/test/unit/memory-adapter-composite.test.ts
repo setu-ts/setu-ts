@@ -291,3 +291,84 @@ describe('transaction overlay preserves key identity (CodeRabbit #3896481569)', 
     expect(await source.findById({ a: 'x', b: '1|y=2' })).not.toBeNull();
   });
 });
+
+describe('memory findPage honours the resolved keyset sort in the projected path', () => {
+  /**
+   * The projected path used to be a full re-run of the pipeline, and the
+   * keyset-sort fix reached only the unprojected copy — so a `findPage`
+   * carrying a non-empty `select` ordered by `query.orderBy` while its
+   * predicate was expanded over `orderBy` + the key columns. On a tied sort
+   * key the two disagree and the walk skips or repeats rows.
+   *
+   * The tie group is deliberately seeded DESCENDING by id, so ordering
+   * without the key tiebreaker does NOT coincide with the order the predicate
+   * assumes — the vacuity trap the five-source conformance fixture fell into.
+   */
+  it('walks a tied fixture with a projection, returning every row exactly once', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('Widget');
+    // Two tie groups of three, each seeded in DESCENDING id order.
+    for (const id of ['a3', 'a2', 'a1']) await ds.create({ id, score: 10, note: `n-${id}` });
+    for (const id of ['b3', 'b2', 'b1']) await ds.create({ id, score: 20, note: `n-${id}` });
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    for (let page = 0; page < 10; page++) {
+      const result = await ds.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        // The projection is the whole point: this is the branch the earlier
+        // build left ordering by the unresolved sort.
+        select: ['id', 'note'],
+        ...(cursor === null ? {} : { cursor }),
+      });
+      pages += 1;
+      seen.push(...result.rows.map((r) => String(r.id)));
+      // The caller's projection is what comes back — the key column is here
+      // only because it was asked for, and `score` is absent.
+      for (const row of result.rows) {
+        expect(Object.keys(row).sort()).toEqual(['id', 'note']);
+      }
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+
+    expect([...seen].sort()).toEqual(['a1', 'a2', 'a3', 'b1', 'b2', 'b3']);
+    expect(new Set(seen).size).toBe(6);
+    expect(pages).toBe(3);
+  });
+
+  it('mints a cursor from a projection naming neither the sort nor the key', async () => {
+    // The cursor is minted from the UNPROJECTED rows, so a projection that
+    // names neither the ordered column nor the key column can still page.
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('Widget');
+    for (const id of ['a3', 'a2', 'a1']) await ds.create({ id, score: 10, note: `n-${id}` });
+    for (const id of ['b2', 'b1']) await ds.create({ id, score: 20, note: `n-${id}` });
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page++) {
+      const result = await ds.findPage!({
+        where: {},
+        orderBy: { score: 'asc' },
+        limit: 2,
+        offset: 0,
+        select: ['note'],
+        ...(cursor === null ? {} : { cursor }),
+      });
+      for (const row of result.rows) {
+        expect(Object.keys(row)).toEqual(['note']);
+        seen.push(String(row.note));
+      }
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+    expect([...seen].sort()).toEqual(['n-a1', 'n-a2', 'n-a3', 'n-b1', 'n-b2']);
+  });
+});

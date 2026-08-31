@@ -39,6 +39,17 @@ export type SqlJsonDialect = 'postgresql' | 'mysql' | 'sqlite';
  * @since 0.2.0
  */
 export function jsonPathString(segments: readonly string[]): string {
+  if (segments.length === 0) {
+    // `$.` is a path expression addressing nothing, which SQLite and MySQL
+    // answer with NULL rather than an error — so an empty path would make a
+    // filter match nothing while reporting success. Refused for the reason the
+    // portable contract refuses an empty path array: a filter that quietly
+    // matches nothing (or everything) is a defect, not a no-op.
+    throw new Error(
+      'Nested filter path is empty below its root column. A path must name at ' +
+        'least one JSON key.',
+    );
+  }
   for (const segment of segments) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(segment)) {
       throw new Error(

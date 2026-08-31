@@ -627,48 +627,21 @@ export class MemoryAdapter implements IDatabaseAdapter {
     const hasMore = query.limit > 0 && results.length > query.limit;
     const pageRows = hasMore ? results.slice(0, query.limit) : results;
 
-    // 5. Project. When the caller asked for specific fields we add the key
-    //    columns to the internal select so they participate in the probe and are
-    //    available for cursor minting; then strip them from the returned rows so
-    //    the caller's projection is what comes back — plan §8 risk.
-    const effectiveSelect = query.select.length > 0
-      ? [...new Set([...query.select, ...keyColumns])]
-      : [];
-    if (effectiveSelect.length > 0) {
-      // Re-run the full pipeline with the augmented select to ensure the
-      // probe rows carry the key columns. (We re-evaluate rather than
-      // project afterward because the projection must touch every probe row.)
-      let projected = getRecords();
-      if (decoded !== null) {
-        const predicate = keysetPredicate(
-          decoded.orderedValues,
-          decoded.keyValues,
-          query.orderBy,
-          keyColumns,
-        );
-        projected = projected.filter((row) => matchesFilter(row, predicate));
-      }
-      if (query.filter !== undefined) {
-        const filter = query.filter;
-        projected = projected.filter((row) => matchesFilter(row, filter));
-      }
-      projected = applyOrderBy(projected, query.orderBy);
-      projected = applyPagination(projected, 0, probeLimit);
-      const more = query.limit > 0 && projected.length > query.limit;
-      const slice = more ? projected.slice(0, query.limit) : projected;
-      const nextCursor = mintNextCursor(
-        more ? slice : [],
-        query.orderBy,
-        keyColumns,
-        fingerprint,
-        more,
-      );
-      return Promise.resolve({
-        rows: slice.map((r) => projectFields(r, query.select) as Record<string, unknown>),
-        nextCursor,
-      });
-    }
-
+    // 5. Mint from the UNPROJECTED page rows, then project.
+    //
+    // The cursor is minted before projection deliberately: `pageRows` still
+    // carry every field, so the ordered and key columns are always present
+    // even when the caller's `select` names neither. A previous build instead
+    // re-ran the whole pipeline with `select` augmented by the key columns, so
+    // that a projected row would still carry them — which produced an
+    // identical page by construction (in an in-memory store `select` affects
+    // only the final projection, never filtering, ordering or pagination) and
+    // duplicated every step above. That duplicate is how the keyset-sort fix
+    // reached one branch and not the other: the projected path kept ordering
+    // by `query.orderBy` while its predicate was expanded over the resolved
+    // sort, so a tied page silently skipped or repeated rows whenever the
+    // caller passed a non-empty `select`. One path now, so the two cannot
+    // disagree again.
     const nextCursor = mintNextCursor(
       hasMore ? pageRows : [],
       query.orderBy,
@@ -678,7 +651,9 @@ export class MemoryAdapter implements IDatabaseAdapter {
     );
 
     return Promise.resolve({
-      rows: pageRows.map((r) => ({ ...r })),
+      rows: query.select.length > 0
+        ? pageRows.map((r) => projectFields(r, query.select) as Record<string, unknown>)
+        : pageRows.map((r) => ({ ...r })),
       nextCursor,
     });
   }
