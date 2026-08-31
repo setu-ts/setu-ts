@@ -137,6 +137,40 @@ export function decodeCursor(token: string): CursorPayload | null {
 }
 
 /**
+ * The sort a keyset walk actually runs under: the caller's `orderBy` followed
+ * by every primary-key column it does not already carry, each ascending.
+ *
+ * **This is the sort an adapter must ORDER BY, not the caller's `orderBy`.**
+ * {@linkcode keysetPredicate} expands the lexicographic comparison over this
+ * resolved sort, so a backend that orders by the caller's `orderBy` alone
+ * leaves rows sharing a sort value in an order the database picks freely —
+ * and the predicate then skips or repeats them. That is the same row-loss the
+ * key tiebreaker exists to prevent, arriving through the ORDER BY instead of
+ * the WHERE, and it is invisible to a fixture whose tie groups happen to be
+ * stored in key order.
+ *
+ * Both the predicate and every adapter's sort read this one function, so the
+ * two cannot disagree about what "the next row" means.
+ *
+ * @param orderBy - The caller's sort specification
+ * @param keyColumns - The entity's primary-key columns
+ * @returns The resolved sort, in evaluation order
+ * @since 0.2.0
+ */
+export function resolveKeysetSort(
+  orderBy: Readonly<Record<string, OrderDirection>>,
+  keyColumns: ReadonlyArray<string>,
+): Record<string, OrderDirection> {
+  const resolved: Record<string, OrderDirection> = { ...orderBy };
+  for (const column of keyColumns) {
+    if (resolved[column] === undefined) {
+      resolved[column] = 'asc';
+    }
+  }
+  return resolved;
+}
+
+/**
  * Build the "row after this one" keyset comparison as a portable
  * {@linkcode FilterExpression}.
  *
@@ -183,13 +217,12 @@ export function keysetPredicate(
   keyColumns: ReadonlyArray<string>,
 ): FilterExpression {
   const entries = Object.entries(orderBy);
-  // The resolved sort: the caller's orderBy fields, then every key column not
-  // already ordered as an ascending tiebreaker. A key column already present
-  // in orderBy is a sort position already and must not be appended twice.
-  const tiebreaker: ReadonlyArray<[string, OrderDirection]> = keyColumns
-    .filter((column) => orderBy[column] === undefined)
-    .map((column): [string, OrderDirection] => [column, 'asc']);
-  const sort: ReadonlyArray<[string, OrderDirection]> = [...entries, ...tiebreaker];
+  // The resolved sort comes from `resolveKeysetSort`, which every adapter also
+  // uses for its ORDER BY — one definition, so the comparison and the sort
+  // cannot drift about what "the next row" is.
+  const sort: ReadonlyArray<[string, OrderDirection]> = Object.entries(
+    resolveKeysetSort(orderBy, keyColumns),
+  );
 
   // An orderBy field's value sits at its orderBy position in `orderedValues`;
   // a pure-tiebreaker key column's value sits at its own key-column position
@@ -270,10 +303,25 @@ export function mintNextCursor(
 ): string | null {
   if (!hasMore || pageRows.length === 0) return null;
   const lastRow = pageRows[pageRows.length - 1];
-  const orderedValues = Object.entries(orderBy).map(
-    ([field]) => lastRow[field] as CursorValue,
-  );
-  const keyValues = keyColumns.map((col) => lastRow[col] as CursorValue);
+  // A cursor can only carry a `CursorValue`. Casting an arbitrary column value
+  // minted a token whose `null` survived `JSON.stringify` and then failed
+  // `decodeCursor` on the NEXT request — so a walk that started successfully
+  // could not be continued, and the refusal named a malformed token rather
+  // than the nullable column that caused it. `undefined` takes the same path,
+  // because `JSON.stringify` writes an `undefined` array element as `null`.
+  const read = (field: string): CursorValue => {
+    const value = lastRow[field];
+    if (typeof value === 'string' || typeof value === 'number' || value instanceof Date) {
+      return value;
+    }
+    throw new Error(
+      `cursor-pagination: cannot mint a cursor from field '${field}', which holds ` +
+        `${value === null ? 'null' : typeof value}. Order and key columns must be ` +
+        'non-null string, number or Date values.',
+    );
+  };
+  const orderedValues = Object.keys(orderBy).map(read);
+  const keyValues = keyColumns.map(read);
   return encodeCursor({ orderedValues, keyValues, sortFingerprint: fingerprint });
 }
 

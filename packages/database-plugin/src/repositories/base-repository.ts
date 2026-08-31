@@ -138,8 +138,11 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string>
       // §3.12 — reject, never a synchronous throw.
       return Promise.reject(query);
     }
-    const { findPage } = this._dataSource;
-    if (findPage === undefined) {
+    // Read presence WITHOUT detaching the method: calling an extracted
+    // `findPage` loses its receiver, so a class-backed data source reading a
+    // private field rejects. This repository shipped that defect once already
+    // (`resolveLogger`, M52c), where every logged repository call threw.
+    if (this._dataSource.findPage === undefined) {
       return Promise.reject(
         new UnsupportedQueryFeatureError(
           'cursor-pagination',
@@ -149,7 +152,7 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string>
         ),
       );
     }
-    const result = await findPage(query);
+    const result = await this._dataSource.findPage(query);
     return {
       rows: result.rows.map((row) => this.toEntity(row)),
       nextCursor: result.nextCursor,

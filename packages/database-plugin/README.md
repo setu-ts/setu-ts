@@ -128,6 +128,27 @@ DatabasePlugin({
 });
 ```
 
+### Nested JSON path filters
+
+A `filter` whose `field` is a path array (`['profile', 'city']`) addresses inside a JSON column, and
+no two SQL dialects spell that extraction alike — PostgreSQL uses `#>>`, MySQL
+`JSON_UNQUOTE(JSON_EXTRACT(…))`, SQLite `json_extract`. The adapter reads the dialect off the
+Drizzle instance, which works for every dialect Drizzle ships; pass `dialect` explicitly when
+detection cannot name it, and a path filter is otherwise **refused by name** rather than emitted in
+a guessed syntax:
+
+```typescript
+DatabasePlugin({
+  type: 'drizzle',
+  options: { drizzleInstance: drizzleDatabase, drizzleTables, dialect: 'postgresql' },
+});
+```
+
+Two behaviours are worth knowing: `in` expands to an `OR` of equality legs, because no dialect
+offers a path membership operator; and extraction normalises to text, casting back to numeric for an
+ordered comparison against a number, so `age > 9` matches `30` rather than comparing `'30' > '9'` as
+text.
+
 The registry accepts **any** table, including one with a composite primary key. The `id` column is a
 repository precondition rather than a registry one — `IRepository.findById`/`update`/`delete` are
 single-key by contract — so `getRepository('TenantFlag')` on an `id`-less table is refused by name

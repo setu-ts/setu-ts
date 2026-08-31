@@ -20,7 +20,13 @@ import type {
   IDatabaseAdapter,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
+import {
+  decodeCursor,
+  keysetPredicate,
+  mintNextCursor,
+  resolveKeysetSort,
+  sortFingerprint,
+} from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,
@@ -68,7 +74,7 @@ interface EntityStore {
 interface TxOverlay {
   creates: Array<{ entity: string; record: Record<string, unknown> }>;
   shadows: Map<string, { entity: string; id: EntityKey; record: Record<string, unknown> }>;
-  tombstones: Set<string>;
+  tombstones: Map<string, { entity: string; id: EntityKey }>;
 }
 
 /**
@@ -118,49 +124,6 @@ function findRecordIndex(store: EntityStore, id: EntityKey): number {
 }
 
 /**
- * Parse a composite overlay key string back into an {@linkcode EntityKey}.
- * The key format for composite records is `key1=val1|key2=val2` (the entity
- * prefix was already stripped by the caller).
- *
- * @param keyString - The overlay key string after the entity prefix
- * @param entity - Entity name (used for error messages)
- * @param store - The entity store whose primary key columns define the shape
- * @returns The parsed composite key record
- * @throws {Error} When the key shape does not match the store's primary key
- * @since 0.1.0
- */
-function parseCompositeOverlayKey(
-  keyString: string,
-  entity: string,
-  store: EntityStore,
-): EntityKey {
-  const result: Record<string, string | number> = {};
-  for (const segment of keyString.split('|')) {
-    const eqIndex = segment.indexOf('=');
-    if (eqIndex === -1) {
-      throw new Error(
-        `MemoryAdapter: invalid overlay key format for entity '${entity}': '${segment}'`,
-      );
-    }
-    const key = segment.slice(0, eqIndex);
-    const valStr = segment.slice(eqIndex + 1);
-    const val = Number(valStr) === Number(valStr) && !isNaN(Number(valStr))
-      ? Number(valStr)
-      : valStr;
-    result[key] = val;
-  }
-  // Validate that all expected columns are present.
-  for (const col of store.primaryKey) {
-    if (result[col] === undefined) {
-      throw new Error(
-        `MemoryAdapter: overlay key for entity '${entity}' is missing column '${col}'`,
-      );
-    }
-  }
-  return result;
-}
-
-/**
  * In-memory implementation of {@linkcode IDatabaseAdapter}.
  *
  * Stores entities in plain `Map` structures, supporting basic CRUD,
@@ -202,7 +165,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
     const overlay: TxOverlay = {
       creates: [],
       shadows: new Map(),
-      tombstones: new Set(),
+      tombstones: new Map(),
     };
 
     let committed = false;
@@ -230,16 +193,14 @@ export class MemoryAdapter implements IDatabaseAdapter {
             store.records[idx] = { ...shadow.record };
           }
         }
-        // Flush delete tombstones
-        for (const key of overlay.tombstones) {
-          const [ent, ...rest] = key.split('::');
+        // Flush delete tombstones. The ORIGINAL key object is replayed, never
+        // a value parsed back out of the overlay's map key: that parser
+        // coerced any numeric-looking segment with `Number()`, so a string key
+        // such as '42' or '0042' came back as a number and matched no record —
+        // the delete then survived commit, or removed the wrong row.
+        for (const { entity: ent, id } of overlay.tombstones.values()) {
           const store = this.getStore(ent);
-          const id = store.primaryKey.length === 1
-            ? (Number(rest.join('')) === Number(rest.join('')) && !isNaN(Number(rest.join('')))
-              ? Number(rest.join(''))
-              : rest.join(''))
-            : parseCompositeOverlayKey(rest.join('::'), ent, store);
-          const idx = findRecordIndex(this.getStore(ent), id);
+          const idx = findRecordIndex(store, id);
           if (idx !== -1) {
             store.records.splice(idx, 1);
           }
@@ -363,7 +324,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
         const effective = effectiveRecords();
         const targetIndex = findRecordIndexForRecords(effective, store, id);
         if (targetIndex === -1) return Promise.resolve(false);
-        overlay.tombstones.add(overlayKey(entity, id));
+        overlay.tombstones.set(overlayKey(entity, id), { entity, id });
         return Promise.resolve(true);
       },
 
@@ -655,7 +616,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       const filter = query.filter;
       results = results.filter((row) => matchesFilter(row, filter));
     }
-    results = applyOrderBy(results, query.orderBy);
+    results = applyOrderBy(results, resolveKeysetSort(query.orderBy, keyColumns));
 
     // 4. One-extra-row probe. `limit + 1` rows tells us whether a next page
     //    exists: more than `limit` means there is, and the LAST row mints the

@@ -9,6 +9,7 @@
 import type { EntityKey, IDatabaseAdapter } from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
+import type { SqlJsonDialect } from '../query/json-path.ts';
 import type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
 import type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 
@@ -634,6 +635,21 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
    * @since 0.2.0
    */
   readonly drizzleInstance: DrizzleDatabaseIdentity;
+
+  /**
+   * The SQL dialect, used only to translate a **nested JSON filter path**
+   * (`field: ['profile', 'city']`). No two dialects spell JSON extraction
+   * alike: PostgreSQL uses `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` and
+   * SQLite `json_extract`.
+   *
+   * Absent, the adapter reads the dialect off the Drizzle instance, which
+   * covers every instance Drizzle ships. Set it when that detection cannot
+   * name the dialect — a nested-path filter is then refused by name rather
+   * than emitted in a guessed syntax that would return wrong rows.
+   *
+   * @since 0.2.0
+   */
+  readonly dialect?: SqlJsonDialect;
 
   /**
    * Entity name → real Drizzle table definition. Required, and must hold at

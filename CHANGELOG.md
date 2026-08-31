@@ -136,6 +136,31 @@ _implements_ `IDataSource` or declares a custom repository key type does.
 - **Prisma's `findById` and `update` threw synchronously on a malformed composite key**, bypassing a
   caller using `.catch()`, while `delete` on the same object rejected correctly. All three now
   reject.
+- **A multi-column `orderBy` failed outright on Prisma 7**, and had since the connector's `findMany`
+  path was written. The adapter emitted one multi-key object (`{ a: 'asc', b: 'desc' }`), which
+  Prisma 7 rejects with
+  `Argument 'orderBy': Invalid value provided. Expected …OrderByWithRelationInput[], provided
+  Object`
+  — measured against 7.10 on live PostgreSQL, where a single-key object is accepted and an array of
+  any length is accepted and honours element order as sort precedence. It now always emits an ARRAY
+  of single-key objects, so no sort arity is a special case. Latent until this release, because a
+  two-column sort was the first thing the framework itself produced: the keyset cursor walk appends
+  the primary key as its tiebreaker.
+- **A nested JSON path filter now translates on Drizzle rather than being refused**, per dialect —
+  PostgreSQL `#>>` against a text-array path, MySQL `JSON_UNQUOTE(JSON_EXTRACT(…))`, SQLite
+  `json_extract` — with the dialect read off the Drizzle instance and a new `dialect` option for
+  when detection cannot name it. Extraction normalises to text on every dialect and casts back to
+  numeric for an ordered comparison against a number, so `age > 9` matches `30` instead of comparing
+  `'30' > '9'` as text; `in` expands to an `OR` of equality legs, since no dialect offers a path
+  membership operator. On Prisma the operator names were established the same way: `contains` maps
+  to `string_contains` (raw `contains` is rejected on a path) and `in` has no path form at all.
+- **A Mongo query naming the primary key discarded every other member of `where` and `orderBy`.**
+  The scalar-key branch REPLACED the whole object with `{ _id: … }` rather than renaming the column
+  in place, so `{ id, status }` silently dropped `status` and matched rows it was never asked for,
+  and a sort of `{ score: 'asc', id: 'asc' }` collapsed to `{ _id: 'asc' }`. The sort half was
+  reached on EVERY scalar-key `findPage`, because the keyset tiebreaker always appends the key
+  column — so a page was ordered by a column the caller did not ask for and the keyset predicate did
+  not agree with. The rename is now in place.
 - **Prisma's scalar key path addressed a hardcoded `id`**, ignoring a configured single-column
   `keyColumns`, so a lookup silently queried the wrong column. It now addresses the resolved column;
   the default `['id']` keeps the pre-M79 shape byte-identical.

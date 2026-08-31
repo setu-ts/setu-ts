@@ -195,9 +195,13 @@ describe('PrismaAdapter', () => {
       );
       expect(rows).toEqual([{ name: 'Carol' }]);
       const call = fakeClient.recordedCalls.find((c) => c.action === 'findMany');
+      // `orderBy` is an ARRAY of single-key objects, never one multi-key
+      // object: measured against Prisma 7.10 on live PostgreSQL, a two-key
+      // object is rejected outright while an array of any length is accepted
+      // and honours element order as sort precedence.
       expect(call?.args).toEqual({
         where: { role: 'admin' },
-        orderBy: { name: 'asc' },
+        orderBy: [{ name: 'asc' }],
         take: 1,
         skip: 1,
         select: { name: true },
@@ -678,7 +682,7 @@ describe('PrismaAdapter', () => {
       const findManyCalls = fakeClient.recordedCalls.filter((c) => c.action === 'findMany');
       expect(findManyCalls.length).toBe(1);
       expect(findManyCalls[0]?.args).toEqual({
-        orderBy: { createdAt: 'asc', id: 'asc' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         take: 3,
       });
 

@@ -692,3 +692,53 @@ describe('findPage cursor-walk conformance — one walk, every data source (§3.
     }
   });
 });
+
+describe('keyset ORDER BY includes the key tiebreaker (CodeRabbit #3896481561/#3896481581)', () => {
+  /**
+   * `keysetPredicate` expands its comparison over `orderBy` PLUS the key
+   * columns, so a backend that orders by `orderBy` alone leaves tied rows in
+   * an order it picks freely — and the predicate then skips or repeats them.
+   * That is the P11 row loss arriving through ORDER BY instead of WHERE.
+   *
+   * The fixture seeds each tie group in DESCENDING id order, deliberately
+   * opposite to the ascending key tiebreaker. A store that returns insertion
+   * order therefore disagrees with the predicate unless the sort is resolved,
+   * which is what the original ascending-order fixture could not show.
+   */
+  const rows = [
+    { id: 'e', createdAt: '2026-02-02' },
+    { id: 'd', createdAt: '2026-02-02' },
+    { id: 'c', createdAt: '2026-02-02' },
+    { id: 'b', createdAt: '2026-02-01' },
+    { id: 'a', createdAt: '2026-02-01' },
+  ];
+
+  it('resolves the sort so a tied walk returns every row exactly once', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const source = adapter.createDataSource('Tied');
+    for (const row of rows) await source.create(row);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const q: NormalizedQuery = {
+        where: {},
+        orderBy: { createdAt: 'desc' },
+        limit: 2,
+        offset: 0,
+        select: [],
+        ...(cursor === undefined ? {} : { cursor }),
+      };
+      const result = await source.findPage!(q);
+      seen.push(...result.rows.map((r) => String(r.id)));
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+    expect(seen).toHaveLength(rows.length);
+    expect(new Set(seen).size).toBe(rows.length);
+    // The resolved sort is `createdAt desc, id asc`, so within each tie group
+    // the ids come back ascending even though they were inserted descending.
+    expect(seen).toEqual(['c', 'd', 'e', 'a', 'b']);
+  });
+});

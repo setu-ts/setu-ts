@@ -19,6 +19,15 @@ describe('resolveKeyColumns', () => {
   it('yields a one-element array for a single-column list', () => {
     expect(resolveKeyColumns(['id'])).toEqual(['id']);
   });
+
+  it('refuses an EMPTY column list where the mapping is read', () => {
+    // An empty list passes every downstream shape check while producing no
+    // predicates at all — a Drizzle `update`/`delete` would address EVERY ROW
+    // and D1 would emit a malformed `WHERE`/`RETURNING`. There is no honest
+    // default to pick, so it is a configuration fault raised at the mapping
+    // rather than a silently destructive query at the first write.
+    expect(() => resolveKeyColumns([])).toThrow(/must name at least one column/);
+  });
 });
 
 describe('keyValues', () => {

@@ -111,6 +111,7 @@ package fits the plugin architecture.
 | `parseTraceparentToContext`  | function  |
 | `replacePrincipal`           | function  |
 | `replaceTenant`              | function  |
+| `resolveKeysetSort`          | function  |
 | `resolveRegistryEntry`       | function  |
 | `respondWithError`           | function  |
 | `sealRequestIdentity`        | function  |

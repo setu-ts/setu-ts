@@ -32,6 +32,8 @@ import {
   or,
   sql,
 } from 'npm:drizzle-orm@0.45.2';
+import { drizzle as mysqlDrizzle } from 'npm:drizzle-orm@0.45.2/mysql-proxy';
+import { mysqlTable, text as mysqlText } from 'npm:drizzle-orm@0.45.2/mysql-core';
 import { DatabaseSync } from 'node:sqlite';
 import {
   createDrizzleDataSource,
@@ -60,6 +62,62 @@ const events = sqliteTable('events', {
   score: sqliteInteger('score').notNull(),
   run: sqliteText('run').notNull(),
 });
+
+/** The JSON-column table the M79 nested-path translation exercises. */
+const jsonRows = sqliteTable('json_rows', {
+  id: sqliteText('id').primaryKey(),
+  profile: sqliteText('profile').notNull(),
+  run: sqliteText('run').notNull(),
+});
+
+/** The Postgres mirror of {@linkcode jsonRows}, for the PG dialect's SQL. */
+const pgJsonRows = pgTable('json_rows', {
+  id: text('id').primaryKey(),
+  profile: text('profile').notNull(),
+  run: text('run').notNull(),
+});
+
+/** The MySQL mirror of {@linkcode jsonRows}, for the MySQL dialect's SQL. */
+const mysqlJsonRows = mysqlTable('json_rows', {
+  id: mysqlText('id').primaryKey(),
+  profile: mysqlText('profile').notNull(),
+  run: mysqlText('run').notNull(),
+});
+
+/**
+ * Drizzle's REAL operator namespace, cast once.
+ *
+ * Drizzle's own operators take `SQLWrapper`, so they are not assignable to the
+ * adapter's structural `(col: unknown, …)` signatures — the adapter casts them
+ * the same way when it loads the namespace. Declared once so five call sites
+ * cannot drift about which operators the adapter is given.
+ */
+const REAL_OPERATORS = {
+  eq,
+  and,
+  or,
+  gt,
+  gte,
+  lt,
+  lte,
+  inArray,
+  isNull,
+  sql,
+  asc,
+  desc,
+  count,
+} as unknown as Parameters<typeof createDrizzleDataSource>[3];
+
+/** {@linkcode REAL_OPERATORS} with an explicit JSON dialect for a nested path. */
+function operatorsFor(
+  dialect: 'postgresql' | 'mysql' | 'sqlite' | undefined,
+): Parameters<typeof createDrizzleDataSource>[3] {
+  // `exactOptionalPropertyTypes`: an absent dialect is OMITTED, never assigned
+  // `undefined` — which is also what an adapter that could not detect one does.
+  return dialect === undefined
+    ? { ...REAL_OPERATORS }
+    : { ...REAL_OPERATORS, jsonDialect: dialect };
+}
 
 /** A per-run discriminator keeping this run's rows from any other's. */
 const suffix = crypto.randomUUID().replaceAll('-', '');
@@ -451,5 +509,232 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
       `r2-${suffix}`,
       3,
     ]);
+  });
+  it('translates a nested JSON path per dialect and executes it on real SQLite', async () => {
+    // A JSON path below a real column reaches a different function on every
+    // dialect, and getting one wrong returns WRONG ROWS rather than failing —
+    // so all three are pinned as emitted SQL and one is executed for real.
+    const engine = new DatabaseSync(':memory:');
+    engine.exec(
+      'CREATE TABLE json_rows (id TEXT PRIMARY KEY, profile TEXT NOT NULL, run TEXT NOT NULL)',
+    );
+    const run = `j-${suffix}`;
+    const seed: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+      ['a', { city: 'Kolkata', age: 30 }],
+      ['b', { city: 'Delhi', age: 41 }],
+      ['c', { city: '50% off', age: 9 }],
+    ];
+    for (const [id, profile] of seed) {
+      engine
+        .prepare('INSERT INTO json_rows VALUES (?, ?, ?)')
+        .run(`${id}-${suffix}`, JSON.stringify(profile), run);
+    }
+
+    const sqliteCalls: Array<{ sql: string; params: readonly unknown[] }> = [];
+    const sqliteSource = createDrizzleDataSource(
+      sqliteDrizzle((statement, params, method) => {
+        sqliteCalls.push({ sql: statement, params });
+        return executeSqlite(engine, statement, params, method);
+      }) as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'JsonRow',
+      { JsonRow: jsonRows },
+      operatorsFor('sqlite'),
+    );
+
+    const idsFor = async (
+      filter: NonNullable<NormalizedQuery['filter']>,
+    ): Promise<string[]> => {
+      const rows = await sqliteSource.findAll(query({ where: { run }, filter }));
+      return rows.map((row) => String(row.id).split('-')[0] as string).sort();
+    };
+
+    // Equality through the path.
+    expect(
+      await idsFor({
+        type: 'comparison',
+        field: ['profile', 'city'],
+        operator: 'eq',
+        value: 'Kolkata',
+      }),
+    ).toEqual(['a']);
+
+    // `contains` escapes LIKE metacharacters, so a stored '50% off' is found
+    // by its LITERAL text and a searched '%' matches nothing else.
+    expect(
+      await idsFor({
+        type: 'comparison',
+        field: ['profile', 'city'],
+        operator: 'contains',
+        value: '50%',
+      }),
+    ).toEqual(['c']);
+
+    // The discriminating case: an ordered comparison against a NUMBER must
+    // compare numerically. As text, '30' > '9' and '41' > '9' are both FALSE,
+    // so a text comparison would answer with no rows at all.
+    expect(
+      await idsFor({
+        type: 'comparison',
+        field: ['profile', 'age'],
+        operator: 'gt',
+        value: 9,
+      }),
+    ).toEqual(['a', 'b']);
+    expect(
+      await idsFor({
+        type: 'comparison',
+        field: ['profile', 'age'],
+        operator: 'gte',
+        value: 41,
+      }),
+    ).toEqual(['b']);
+    expect(
+      await idsFor({
+        type: 'comparison',
+        field: ['profile', 'age'],
+        operator: 'lt',
+        value: 30,
+      }),
+    ).toEqual(['c']);
+
+    // `in` has no JSON-path membership form, so it expands to an OR of
+    // equality legs; an EMPTY list compiles to a match-nothing predicate.
+    expect(
+      await idsFor({
+        type: 'comparison',
+        field: ['profile', 'city'],
+        operator: 'in',
+        value: ['Kolkata', 'Delhi'],
+      }),
+    ).toEqual(['a', 'b']);
+    expect(
+      await idsFor({
+        type: 'comparison',
+        field: ['profile', 'city'],
+        operator: 'in',
+        value: [],
+      }),
+    ).toEqual([]);
+
+    // SQLite extracts to TEXT for equality and leaves `json_extract` bare for
+    // an ordered numeric comparison (its extraction preserves the JSON type).
+    const sqliteSql = sqliteCalls.map((c) => c.sql).join('\n');
+    expect(sqliteSql).toContain('CAST(json_extract("json_rows"."profile", ?) AS TEXT) = ?');
+    expect(sqliteSql).toContain('json_extract("json_rows"."profile", ?) > ?');
+    expect(sqliteSql).toContain("like ? escape '\\'");
+    // The path travels as a BOUND parameter, never as statement text.
+    expect(sqliteCalls[0]?.params).toContain('$.city');
+
+    // Postgres: `#>>` against a text-array path, cast to numeric for an
+    // ordered numeric comparison.
+    const pgCalls: Array<{ sql: string; params: readonly unknown[] }> = [];
+    const pgSource = createDrizzleDataSource(
+      drizzle((statement, params) => {
+        pgCalls.push({ sql: statement, params });
+        return Promise.resolve({ rows: [] });
+      }) as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'JsonRow',
+      { JsonRow: pgJsonRows },
+      operatorsFor('postgresql'),
+    );
+    await pgSource.findAll(query({
+      filter: {
+        type: 'comparison',
+        field: ['profile', 'city'],
+        operator: 'eq',
+        value: 'Kolkata',
+      },
+    }));
+    await pgSource.findAll(query({
+      filter: { type: 'comparison', field: ['profile', 'age'], operator: 'gt', value: 9 },
+    }));
+    expect(pgCalls[0]?.sql).toContain('("json_rows"."profile" #>> $1) = $2');
+    expect(pgCalls[0]?.params).toContain('{city}');
+    expect(pgCalls[1]?.sql).toContain('("json_rows"."profile" #>> $1)::numeric > $2');
+
+    // MySQL: JSON_UNQUOTE(JSON_EXTRACT(...)), cast to DECIMAL for ordering.
+    const mysqlCalls: Array<{ sql: string; params: readonly unknown[] }> = [];
+    const mysqlSource = createDrizzleDataSource(
+      mysqlDrizzle((statement, params) => {
+        mysqlCalls.push({ sql: statement, params });
+        return Promise.resolve({ rows: [] });
+      }) as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'JsonRow',
+      { JsonRow: mysqlJsonRows },
+      operatorsFor('mysql'),
+    );
+    await mysqlSource.findAll(query({
+      filter: {
+        type: 'comparison',
+        field: ['profile', 'city'],
+        operator: 'eq',
+        value: 'Kolkata',
+      },
+    }));
+    await mysqlSource.findAll(query({
+      filter: { type: 'comparison', field: ['profile', 'age'], operator: 'gt', value: 9 },
+    }));
+    expect(mysqlCalls[0]?.sql).toContain(
+      'JSON_UNQUOTE(JSON_EXTRACT(`json_rows`.`profile`, ?)) = ?',
+    );
+    expect(mysqlCalls[1]?.sql).toContain('AS DECIMAL(65,30)) > ?');
+  });
+
+  it('refuses a nested path it cannot translate, by name', async () => {
+    // A dialect that cannot be determined is refused rather than guessed at:
+    // guessing emits syntax another engine reads differently and returns wrong
+    // rows, where a refusal names the option that fixes it.
+    const source = createDrizzleDataSource(
+      sqliteDrizzle(() => Promise.resolve({ rows: [] })) as unknown as Parameters<
+        typeof createDrizzleDataSource
+      >[0],
+      'JsonRow',
+      { JsonRow: jsonRows },
+      operatorsFor(undefined),
+    );
+    await expect(
+      source.findAll(query({
+        filter: {
+          type: 'comparison',
+          field: ['profile', 'city'],
+          operator: 'eq',
+          value: 'x',
+        },
+      })),
+    ).rejects.toThrow(/could not be determined/);
+
+    // A Date has no JSON representation, so it is refused rather than
+    // compared as whatever text the writer happened to store.
+    const dated = createDrizzleDataSource(
+      sqliteDrizzle(() => Promise.resolve({ rows: [] })) as unknown as Parameters<
+        typeof createDrizzleDataSource
+      >[0],
+      'JsonRow',
+      { JsonRow: jsonRows },
+      operatorsFor('sqlite'),
+    );
+    await expect(
+      dated.findAll(query({
+        filter: {
+          type: 'comparison',
+          field: ['profile', 'at'],
+          operator: 'gt',
+          value: new Date('2024-01-01T00:00:00Z'),
+        },
+      })),
+    ).rejects.toThrow(/cannot compare a Date/);
+
+    // A path segment carrying a path metacharacter is refused rather than
+    // escaped — a wrong escape reads a DIFFERENT field instead of failing.
+    await expect(
+      dated.findAll(query({
+        filter: {
+          type: 'comparison',
+          field: ['profile', 'city"]. $.other'],
+          operator: 'eq',
+          value: 'x',
+        },
+      })),
+    ).rejects.toThrow(/not a plain JSON key/);
   });
 });

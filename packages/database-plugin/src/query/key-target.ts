@@ -31,6 +31,18 @@ export function resolveKeyColumns(
   primaryKey: string | readonly string[],
 ): readonly string[] {
   if (Array.isArray(primaryKey)) {
+    // An EMPTY list is refused here rather than at the first query. It passes
+    // every downstream shape check while producing no predicates at all, so a
+    // Drizzle `update`/`delete` would address EVERY ROW and D1 would emit a
+    // malformed `WHERE`/`RETURNING`. There is no honest default to pick — an
+    // entity's key is either configured or it is `['id']` — so this is a
+    // configuration fault, raised where the mapping is read.
+    if (primaryKey.length === 0) {
+      throw new Error(
+        'Database mapping: primary key must name at least one column; got an empty list. ' +
+          "Remove the override to use the default 'id', or name the key columns.",
+      );
+    }
     return primaryKey;
   }
   return [primaryKey] as readonly string[];

@@ -173,14 +173,28 @@ export function matchesFilter<Entity extends Record<string, unknown>>(
     case 'gt':
       return comparableGreaterThan(actual, filter.value);
     case 'gte':
-      return actual === filter.value || comparableGreaterThan(actual, filter.value);
+      return comparableEquals(actual, filter.value) || comparableGreaterThan(actual, filter.value);
     case 'lt':
       return comparableGreaterThan(filter.value, actual);
     case 'lte':
-      return actual === filter.value || comparableGreaterThan(filter.value, actual);
+      return comparableEquals(actual, filter.value) || comparableGreaterThan(filter.value, actual);
     case 'in':
       return filter.value.some((candidate) => actual === candidate);
   }
+}
+
+/**
+ * Equality for the inclusive comparisons, where `===` is wrong for a `Date`.
+ *
+ * Two `Date` instances for the same instant are never `===`, so `gte`/`lte`
+ * dropped the boundary row of every date range — the inclusive half of the
+ * `Date` widening was inoperative while the strict half worked.
+ */
+function comparableEquals(left: unknown, right: unknown): boolean {
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() === right.getTime();
+  }
+  return left === right;
 }
 
 function comparableGreaterThan(left: unknown, right: unknown): boolean {

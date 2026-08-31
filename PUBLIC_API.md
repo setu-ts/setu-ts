@@ -1329,9 +1329,46 @@ await repo.findAll({
 });
 ```
 
-Mongo translates a path to its native dotted key; Prisma to its JSON `path` form. An adapter that
-cannot express a path refuses by name. An empty path array is always refused — a filter that quietly
-matches everything is a data-exposure defect, not a no-op.
+Every shipped adapter translates a path natively; none filters in JavaScript. An empty path array is
+always refused — a filter that quietly matches everything is a data-exposure defect, not a no-op.
+
+| Adapter | Translation                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------- |
+| Memory  | walks the document                                                                          |
+| Mongo   | the native dotted key (`address.city`)                                                      |
+| Prisma  | the JSON `path` filter — an array on PostgreSQL/CockroachDB, `$.a.b` on MySQL               |
+| Drizzle | per dialect: PostgreSQL `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(…))`, SQLite `json_extract` |
+| D1      | refused by name (SQLite's `LIKE` has no expressible escape character)                       |
+
+Two translation facts are worth knowing before relying on a path filter, both measured rather than
+inferred:
+
+- **`in` is expanded, not translated.** Neither Prisma's JSON path filter nor any SQL dialect offers
+  a path membership operator, so `in` becomes an `OR` of equality legs. An empty list compiles to a
+  match-nothing predicate that binds no values.
+- **Extraction normalises to text, and an ordered comparison against a `number` casts back.**
+  PostgreSQL's `#>>` and MySQL's `JSON_UNQUOTE` are text-valued while SQLite's `json_extract`
+  preserves the JSON type, so without normalising, one filter would mean two different things.
+  Casting back for `gt`/`gte`/`lt`/`lte` on a number is what makes `age > 9` match `30` — as text,
+  `'30' > '9'` is false.
+
+A `Date` is refused on a path filter on every SQL adapter: a JSON document has no date type, so the
+stored representation is whatever the writer chose. Compare an ISO string, or give the value its own
+column.
+
+**Prisma requires `provider`** and **Drizzle may require `dialect`** for a path filter, because the
+syntax differs per connector and neither library publishes a discriminant the adapter can read
+reliably. Drizzle detects its dialect from the instance and needs the option only when detection
+fails; either way, an adapter that cannot determine the syntax **refuses by name** rather than
+emitting a guess — a guessed syntax returns wrong rows on the engine it guessed wrong about, where a
+refusal names the option that fixes it.
+
+```typescript
+DatabasePlugin({
+  type: 'drizzle',
+  options: { drizzleInstance, drizzleTables, dialect: 'postgresql' },
+});
+```
 
 #### Cursor pagination
 

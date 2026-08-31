@@ -24,10 +24,17 @@ import type {
   OrderDirection,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
+import {
+  decodeCursor,
+  keysetPredicate,
+  mintNextCursor,
+  resolveKeysetSort,
+  sortFingerprint,
+} from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../errors.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
+import { jsonPathString } from '../../query/json-path.ts';
 import { keyValues } from '../../query/key-target.ts';
 import {
   normalizePageQuery,
@@ -98,7 +105,12 @@ type ModelDelegate = {
   findUnique(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
   findMany(args?: {
     where?: Record<string, unknown>;
-    orderBy?: Record<string, unknown>;
+    /**
+     * An ARRAY of single-key sort objects, in precedence order. Prisma 7
+     * rejects a multi-key object outright, so this facade declares only the
+     * shape {@linkcode buildFindManyArgs} emits.
+     */
+    orderBy?: readonly Record<string, unknown>[];
     take?: number;
     skip?: number;
     select?: Record<string, unknown>;
@@ -458,12 +470,17 @@ function buildFindManyArgs(
   if (where !== undefined) {
     args.where = where;
   }
-  if (Object.keys(orderBy).length > 0) {
-    // Translate { field: 'asc'|'desc' } → Prisma { field: 'asc' }
-    args.orderBy = {} as Record<string, unknown>;
-    for (const [field, dir] of Object.entries(orderBy)) {
-      (args.orderBy as Record<string, unknown>)[field] = dir;
-    }
+  const sortFields = Object.entries(orderBy);
+  if (sortFields.length > 0) {
+    // Translate { a: 'asc', b: 'desc' } → Prisma [{ a: 'asc' }, { b: 'desc' }].
+    // An ARRAY of single-key objects, never one multi-key object: measured
+    // against Prisma 7.10 on live PostgreSQL, a two-key object is REJECTED
+    // outright (`Expected …OrderByWithRelationInput[], provided Object`) while
+    // an array of any length is accepted and honours element order as sort
+    // precedence. The single-key object arm Prisma does accept is not used, so
+    // one shape covers every sort and the two entry points cannot diverge at
+    // the arity boundary.
+    args.orderBy = sortFields.map(([field, dir]) => ({ [field]: dir }));
   }
   if (limit > 0) {
     args.take = limit;
@@ -578,6 +595,11 @@ async function findPrismaPage(
 
   // 4. Keyset predicate through the shared builder; it is a FilterExpression,
   //    so it reaches the delegate through the existing prismaFilter path.
+  // The sort the keyset comparison is expanded over — the caller's `orderBy`
+  // plus the key columns it lacks. ORDER BY must use THIS, not `orderBy`:
+  // ordering by the caller's fields alone leaves tied rows in an order the
+  // database picks freely, and the predicate then skips or repeats them.
+  const keysetSort = resolveKeysetSort(normalized.orderBy, keyColumns);
   const keyset = decoded === null
     ? undefined
     : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
@@ -591,9 +613,12 @@ async function findPrismaPage(
   const found = await delegate.findMany(
     buildFindManyArgs(
       prismaWhere(normalized.where, conjoinFilters(normalized.filter, keyset), provider),
-      normalized.orderBy,
+      keysetSort,
       probeLimit,
-      0,
+      // A cursor replaces the offset outright (§3.10 refuses the two
+      // together), but a cursor-LESS page must still honour it — passing a
+      // literal 0 silently served page one for `findPage({ offset: 20 })`.
+      decoded === null ? normalized.offset : 0,
       internalSelect,
     ),
   );
@@ -774,14 +799,76 @@ function prismaWhere(
   return { AND: [equality, expression] };
 }
 
-/** Build a Prisma path-form operator object from a path array and operator name. */
+/**
+ * The connectors whose JSON path filters this adapter emits, and the path form
+ * each one takes.
+ *
+ * PostgreSQL-family connectors take the path as a **string array**; MySQL
+ * requires the `$.a.b` **string** form. Every other connector is absent on
+ * purpose: SQLite and SQL Server have no JSON path filter in Prisma's query
+ * API, and the `'mongodb'` arm is unreachable on Prisma v7 (M78). A nested
+ * path on those is refused by name rather than emitted in a form the connector
+ * will reject at execution time.
+ */
+const JSON_PATH_FORM: Readonly<Record<string, 'array' | 'string'>> = {
+  postgresql: 'array',
+  postgres: 'array',
+  cockroachdb: 'array',
+  mysql: 'string',
+};
+
+/**
+ * Build a Prisma JSON path filter.
+ *
+ * The operator names are Prisma's own, not the portable ones, and the mapping
+ * was measured against a live PostgreSQL 16 with a generated Prisma 7.10
+ * client rather than read from documentation:
+ *
+ * - `eq` → `equals`, and `gt`/`gte`/`lt`/`lte` keep their names — all verified.
+ * - `contains` → **`string_contains`**. Passing the portable name straight
+ *   through is REJECTED by Prisma; `contains` is not a JSON path operator.
+ * - `in` has **no JSON path form at all** (also rejected), so it is expanded
+ *   into an `OR` of `equals` legs — which is what it means.
+ *
+ * @param field - The full field path, first segment the column
+ * @param operator - The portable operator
+ * @param value - The comparison value
+ * @param provider - The resolved connector, or `undefined` when unknown
+ * @returns The Prisma `where` fragment
+ * @throws {UnsupportedQueryFeatureError} When the connector has no JSON path filter
+ */
 function pathOperator(
   field: readonly string[],
   operator: string,
   value: unknown,
+  provider: PrismaSqlProvider | undefined,
 ): Record<string, unknown> {
+  const form = provider === undefined ? undefined : JSON_PATH_FORM[provider];
+  if (form === undefined) {
+    throw new UnsupportedQueryFeatureError(
+      'nested-path',
+      'prisma',
+      `Nested filter path '${field.join('.')}' is not expressible on connector ` +
+        `'${provider ?? 'unknown'}'. Prisma offers JSON path filters on ` +
+        'PostgreSQL, CockroachDB and MySQL only; pass `provider` if the ' +
+        'connector could not be determined.',
+    );
+  }
   const root = field[0];
-  const path = field.slice(1);
+  const segments = field.slice(1);
+  const path = form === 'array' ? segments : jsonPathString(segments);
+
+  // `in` is not a JSON path operator on any connector — expanded to the OR of
+  // equality legs it denotes. An empty list matches nothing, and a `null`
+  // member becomes its own `equals` leg.
+  if (operator === 'in') {
+    const members = value as readonly unknown[];
+    if (members.length === 0) {
+      return { AND: [{ [root]: { path, equals: '' } }, { NOT: { [root]: { path, equals: '' } } }] };
+    }
+    const legs = members.map((member) => ({ [root]: { path, equals: member } }));
+    return legs.length === 1 ? legs[0] : { OR: legs };
+  }
   return { [root]: { path, [operator]: value } };
 }
 
@@ -799,27 +886,32 @@ function prismaFilter(
     case 'eq':
       return field.length === 1
         ? { [field[0]]: filter.value }
-        : pathOperator(field, 'equals', filter.value);
+        : pathOperator(field, 'equals', filter.value, provider);
     case 'contains':
       return field.length === 1
         ? { [field[0]]: { contains: prismaContainsValue(filter.value, provider) } }
-        : pathOperator(field, 'contains', prismaContainsValue(filter.value, provider));
+        : pathOperator(
+          field,
+          'string_contains',
+          prismaContainsValue(filter.value, provider),
+          provider,
+        );
     case 'gt':
       return field.length === 1
         ? { [field[0]]: { gt: filter.value } }
-        : pathOperator(field, 'gt', filter.value);
+        : pathOperator(field, 'gt', filter.value, provider);
     case 'gte':
       return field.length === 1
         ? { [field[0]]: { gte: filter.value } }
-        : pathOperator(field, 'gte', filter.value);
+        : pathOperator(field, 'gte', filter.value, provider);
     case 'lt':
       return field.length === 1
         ? { [field[0]]: { lt: filter.value } }
-        : pathOperator(field, 'lt', filter.value);
+        : pathOperator(field, 'lt', filter.value, provider);
     case 'lte':
       return field.length === 1
         ? { [field[0]]: { lte: filter.value } }
-        : pathOperator(field, 'lte', filter.value);
+        : pathOperator(field, 'lte', filter.value, provider);
     case 'in': {
       const nonNullValues = filter.value.filter((value) => value !== null);
       if (field.length === 1) {
@@ -837,9 +929,9 @@ function prismaFilter(
         };
       }
       // Multi-segment path: build the OR-based null/in predicate under the path object.
-      const pathEq = pathOperator(field, 'equals', null);
+      const pathEq = pathOperator(field, 'equals', null, provider);
       if (!filter.value.includes(null)) {
-        return pathOperator(field, 'in', nonNullValues);
+        return pathOperator(field, 'in', nonNullValues, provider);
       }
       if (nonNullValues.length === 0) {
         return pathEq;
@@ -847,7 +939,7 @@ function prismaFilter(
       return {
         OR: [
           pathEq,
-          pathOperator(field, 'in', nonNullValues),
+          pathOperator(field, 'in', nonNullValues, provider),
         ],
       };
     }

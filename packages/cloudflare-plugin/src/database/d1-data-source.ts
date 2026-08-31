@@ -17,7 +17,13 @@ import type {
   NormalizedQuery,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
+import {
+  decodeCursor,
+  keysetPredicate,
+  mintNextCursor,
+  resolveKeysetSort,
+  sortFingerprint,
+} from '@setu-ts/common';
 import type { ID1Database, ID1PreparedStatement } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import type { D1Statement, D1Target } from './d1-sql.ts';
@@ -128,6 +134,11 @@ async function findD1Page(
   //    caller's own filter. buildWhere already joins query.filter with
   //    query.where, so injecting the keyset predicate into query.filter
   //    yields the full WHERE with one AND leg per source.
+  // ORDER BY must use the RESOLVED sort, not the caller's `orderBy`: the
+  // keyset comparison is expanded over `orderBy` + the key columns, so
+  // sorting by `orderBy` alone leaves tied rows in an order the backend
+  // picks freely and the predicate skips or repeats them.
+  const keysetSort = resolveKeysetSort(query.orderBy, target.primaryKey);
   const keyset = decoded === null
     ? undefined
     : keysetPredicate(decoded.orderedValues, decoded.keyValues, query.orderBy, target.primaryKey);
@@ -144,6 +155,7 @@ async function findD1Page(
     : [...new Set([...query.select, ...target.primaryKey, ...Object.keys(query.orderBy)])];
   const probeQuery: NormalizedQuery = {
     ...query,
+    orderBy: keysetSort,
     select: effectiveSelect,
     limit: query.limit > 0 ? query.limit + 1 : query.limit,
     ...(filter === undefined ? {} : { filter }),

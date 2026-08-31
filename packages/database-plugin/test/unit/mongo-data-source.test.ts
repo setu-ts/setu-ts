@@ -747,3 +747,65 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
     }))).rejects.toThrow(/offset=1 conflicts with cursor/);
   });
 });
+
+describe('scalar-key mapping renames in place (M79 review regression)', () => {
+  /**
+   * `mapQueryToDriver`'s scalar branch REPLACED the whole `where`/`orderBy`
+   * object with `{ _id: … }` whenever the key column was present, discarding
+   * every other member.
+   *
+   * The sort half is reached on EVERY scalar-key `findPage`, because
+   * `resolveKeysetSort` always appends the key column as the keyset
+   * tiebreaker — so a page ordered by `score` was silently ordered by `_id`
+   * alone, which is a different page from the one asked for and one the keyset
+   * predicate does not agree with.
+   */
+  it('carries a non-key condition through beside the key', async () => {
+    const client = makeClient();
+    const source = makeDataSource(client);
+    await source.findAll({
+      where: { id: 'w1', status: 'active' },
+      orderBy: {},
+      limit: -1,
+      offset: 0,
+      select: [],
+    });
+    const call = client.db('testdb').collection('Widget').calls.find((c) => c.method === 'find');
+    // `status` must survive; without it the query matches rows it was never
+    // asked for — more rows, not fewer, so no assertion on a result COUNT
+    // would necessarily catch it.
+    expect(call?.args[0]).toEqual({ _id: 'w1', status: 'active' });
+  });
+
+  it('keeps the caller sort and appends the renamed key as the tiebreaker', async () => {
+    const client = makeClient();
+    const source = makeDataSource(client);
+    for (
+      const row of [
+        { id: 'a', score: 1 },
+        { id: 'b', score: 2 },
+        { id: 'c', score: 3 },
+      ]
+    ) await source.create(row);
+
+    const page = await source.findPage!({
+      where: {},
+      orderBy: { score: 'asc' },
+      limit: 2,
+      offset: 0,
+      select: [],
+    });
+
+    const call = client
+      .db('testdb')
+      .collection('Widget')
+      .calls
+      .filter((c) => c.method === 'find')
+      .at(-1);
+    const sort = (call?.args[1] as { sort?: Record<string, unknown> } | undefined)?.sort;
+    // Both keys, in precedence order: the caller's field FIRST, the renamed
+    // key column second. The defect produced `{ _id: 'asc' }` alone.
+    expect(Object.entries(sort ?? {})).toEqual([['score', 'asc'], ['_id', 'asc']]);
+    expect(page.rows.map((r) => r.id)).toEqual(['a', 'b']);
+  });
+});

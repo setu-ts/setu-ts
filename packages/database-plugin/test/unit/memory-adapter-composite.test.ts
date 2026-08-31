@@ -251,3 +251,43 @@ describe('MemoryAdapter — composite keys', () => {
     });
   });
 });
+
+describe('transaction overlay preserves key identity (CodeRabbit #3896481569)', () => {
+  /**
+   * The tombstone commit path used to reconstruct the key from the overlay's
+   * own map key, coercing any numeric-looking segment with `Number()`. A
+   * STRING key such as '42' came back as the number 42, matched no record, and
+   * the delete silently survived commit — the row was still there.
+   */
+  it('commits a delete for a numeric-LOOKING string key', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const source = adapter.createDataSource('Doc');
+    await source.create({ id: '42', title: 'forty-two' });
+    await source.create({ id: '0042', title: 'padded' });
+
+    const tx = await adapter.beginTransaction();
+    expect(await tx.createDataSource('Doc').delete('42')).toBe(true);
+    await tx.commit();
+
+    expect(await source.findById('42')).toBeNull();
+    // The padded sibling is untouched: '0042' and '42' are different keys, and
+    // numeric coercion would have collapsed them.
+    expect(await source.findById('0042')).not.toBeNull();
+  });
+
+  it('commits a delete for a composite key whose values contain the delimiters', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const source = adapter.createDataSource('Pair', ['a', 'b']);
+    await source.create({ a: 'x=1|y', b: '2', v: 'first' });
+    await source.create({ a: 'x', b: '1|y=2', v: 'second' });
+
+    const tx = await adapter.beginTransaction();
+    expect(await tx.createDataSource('Pair').delete({ a: 'x=1|y', b: '2' })).toBe(true);
+    await tx.commit();
+
+    expect(await source.findById({ a: 'x=1|y', b: '2' })).toBeNull();
+    expect(await source.findById({ a: 'x', b: '1|y=2' })).not.toBeNull();
+  });
+});

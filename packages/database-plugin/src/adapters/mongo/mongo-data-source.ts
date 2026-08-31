@@ -20,7 +20,13 @@ import type {
   NormalizedQuery,
   OrderDirection,
 } from '@setu-ts/common';
-import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
+import {
+  decodeCursor,
+  keysetPredicate,
+  mintNextCursor,
+  resolveKeysetSort,
+  sortFingerprint,
+} from '@setu-ts/common';
 import {
   fromDriverDocument,
   resolveMongoTarget,
@@ -187,9 +193,11 @@ export function createMongoDataSource(
         mapQueryToDriver(query, target),
       );
       const filter = mapMongoIdValues(translatedFilter, target, objectIdCtor);
-      const projection = findOptions.projection === undefined
-        ? undefined
-        : mapProjection(findOptions.projection, target.primaryKey);
+      const projection = findOptions.projection === undefined ? undefined : mapProjection(
+        findOptions.projection,
+        target.primaryKey,
+        target.primaryKey.length === 1 || target.idType === 'compound',
+      );
       const rows = await collection.find(
         filter,
         projection === undefined
@@ -358,6 +366,11 @@ export function createMongoDataSource(
       // 4. Keyset predicate through the shared builder; it is a FilterExpression,
       //    so it reaches the collection through the existing translateQuery
       //    path with no new translation code.
+      // ORDER BY must use the RESOLVED sort, not the caller's `orderBy`: the
+      // keyset comparison is expanded over `orderBy` + the key columns, so
+      // sorting by `orderBy` alone leaves tied rows in an order the backend
+      // picks freely and the predicate skips or repeats them.
+      const keysetSort = resolveKeysetSort(normalized.orderBy, target.primaryKey);
       const keyset = decoded === null ? undefined : keysetPredicate(
         decoded.orderedValues,
         decoded.keyValues,
@@ -376,6 +389,7 @@ export function createMongoDataSource(
       const mapped = mapQueryToDriver(
         {
           ...normalized,
+          orderBy: keysetSort,
           limit: normalized.limit > 0 ? normalized.limit + 1 : normalized.limit,
           select: internalSelect,
           ...(keysetFilter === undefined ? {} : { filter: keysetFilter }),
@@ -384,9 +398,11 @@ export function createMongoDataSource(
       );
       const { filter: translatedFilter, options: findOptions } = translateQuery(mapped);
       const filter = mapMongoIdValues(translatedFilter, target, objectIdCtor);
-      const projection = findOptions.projection === undefined
-        ? undefined
-        : mapProjection(findOptions.projection, keyColumns);
+      const projection = findOptions.projection === undefined ? undefined : mapProjection(
+        findOptions.projection,
+        keyColumns,
+        target.primaryKey.length === 1 || target.idType === 'compound',
+      );
       const found = await collection.find(
         filter,
         projection === undefined
@@ -458,14 +474,25 @@ function mapQueryToDriver(
   let orderBy: Record<string, OrderDirection>;
 
   if (isCompound) {
-    // Build _id subdocument in the mapping's declared column order (P5).
-    const idSubdoc: Record<string, unknown> = {};
-    for (const col of columns) {
-      if (query.where[col] !== undefined) {
-        idSubdoc[col] = query.where[col];
-      }
+    // Non-key conditions are carried through untouched — the previous build
+    // rebuilt `where` from the key columns alone, so `status: 'active'` beside
+    // a key silently vanished and the query matched more rows than asked.
+    where = {};
+    for (const [field, value] of Object.entries(query.where)) {
+      if (!columns.includes(field)) where[field] = value;
     }
-    where = Object.keys(idSubdoc).length > 0 ? { _id: idSubdoc } : {};
+    // A compound `_id` is matched by EXACT subdocument equality (P4), so a
+    // PARTIAL key can never match one. Only a complete key becomes an `_id`
+    // subdocument, in the mapping's declared column order; a partial key
+    // addresses `_id.<column>` per present column, which does match.
+    const present = columns.filter((col) => query.where[col] !== undefined);
+    if (present.length === columns.length && columns.length > 0) {
+      const idSubdoc: Record<string, unknown> = {};
+      for (const col of columns) idSubdoc[col] = query.where[col];
+      where._id = idSubdoc;
+    } else {
+      for (const col of present) where['_id.' + col] = query.where[col];
+    }
     orderBy = Object.fromEntries(
       columns.map((col) => [
         '_id.' + col,
@@ -477,14 +504,24 @@ function mapQueryToDriver(
     where = { ...query.where };
     orderBy = { ...query.orderBy };
   } else {
-    // Scalar: rename only the primary-key column when present; otherwise leave unchanged.
+    // Scalar: rename the primary-key column to `_id` IN PLACE, carrying every
+    // other member through. The previous build REPLACED the whole object with
+    // `{ _id: … }` whenever the key was present, so a non-key condition beside
+    // a key (`{ id, status }`) silently vanished and a sort naming the key
+    // alongside another field (`{ score: 'asc', id: 'asc' }`) collapsed to
+    // `{ _id: 'asc' }` — discarding the caller's actual sort. The second is
+    // reached on EVERY scalar-key `findPage`, because `resolveKeysetSort`
+    // always appends the key column as the tiebreaker.
     const key = columns[0];
-    where = key !== undefined && key in query.where
-      ? { _id: query.where[key] }
-      : { ...query.where };
-    orderBy = key !== undefined && key in query.orderBy
-      ? { _id: query.orderBy[key] }
-      : { ...query.orderBy };
+    const renameKey = <T>(source: Readonly<Record<string, T>>): Record<string, T> => {
+      const out: Record<string, T> = {};
+      for (const [field, value] of Object.entries(source)) {
+        out[key !== undefined && field === key ? '_id' : field] = value;
+      }
+      return out;
+    };
+    where = renameKey(query.where);
+    orderBy = renameKey(query.orderBy);
   }
 
   return {
@@ -665,16 +702,23 @@ export class MongoTransaction implements IAdapterTransaction {
 function mapProjection(
   projection: Record<string, 1>,
   primaryKey: readonly string[],
+  storedUnderId: boolean,
 ): Record<string, 0 | 1> {
   const mapped: Record<string, 0 | 1> = {};
   let includesPrimaryKey = false;
   for (const field of Object.keys(projection)) {
     if (primaryKey.includes(field)) {
       includesPrimaryKey = true;
+      // A key column only lives under `_id` when the collection actually
+      // stores it there. A FLAT composite key is ordinary top-level fields, so
+      // dropping them here requested `_id` alone — `fromDriverDocument` then
+      // removed that too and the projected rows came back with no key at all,
+      // which also left `findPage` minting cursors from absent values.
+      if (!storedUnderId) mapped[field] = 1;
     } else {
       mapped[field] = 1;
     }
   }
-  mapped._id = includesPrimaryKey ? 1 : 0;
+  mapped._id = includesPrimaryKey && storedUnderId ? 1 : 0;
   return mapped;
 }

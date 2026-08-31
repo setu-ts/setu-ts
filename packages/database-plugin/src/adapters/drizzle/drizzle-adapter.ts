@@ -8,7 +8,14 @@
  * @module
  */
 import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
+import type { FilterComparison } from '@setu-ts/common';
 import { escapeLikePattern } from '../../query/like-escape.ts';
+import {
+  dialectFromDrizzleClassName,
+  jsonPathString,
+  postgresPathArray,
+  type SqlJsonDialect,
+} from '../../query/json-path.ts';
 import { bindRawStatement, type RawStatementTag } from '../../query/raw-statement.ts';
 import type {
   CursorPayload,
@@ -18,7 +25,13 @@ import type {
   NormalizedQuery,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
+import {
+  decodeCursor,
+  keysetPredicate,
+  mintNextCursor,
+  resolveKeysetSort,
+  sortFingerprint,
+} from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
@@ -152,6 +165,14 @@ export type DrizzleOperators = {
    * back for the adapter to measure.
    */
   count: () => unknown;
+  /**
+   * The SQL dialect, needed only to translate a nested JSON filter path — no
+   * two dialects spell JSON extraction alike. Resolved from the explicit
+   * `dialect` option, else from the Drizzle instance's own dialect object.
+   * `undefined` means it could not be determined, and a nested path is then
+   * refused BY NAME rather than emitted in a guessed syntax.
+   */
+  jsonDialect?: SqlJsonDialect;
 };
 
 // ---------------------------------------------------------------------------
@@ -192,6 +213,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     try {
       const orm = await import('npm:drizzle-orm@0.45.2');
       const ns = orm as Record<string, unknown>;
+      // The explicit option wins; otherwise the instance's own dialect object
+      // names it. Drizzle publishes no dialect discriminant, so the class name
+      // is the only signal — which is why the option exists, and why an
+      // unrecognised name refuses a nested path instead of guessing.
+      const jsonDialect = (this._options as DrizzleAdapterOptions | undefined)?.dialect ??
+        dialectFromDrizzleClassName(
+          (this._db as { dialect?: { constructor?: { name?: string } } } | undefined)
+            ?.dialect?.constructor?.name,
+        );
       const operators: DrizzleOperators = {
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
         and: ns.and as (...exprs: unknown[]) => unknown,
@@ -207,6 +237,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         asc: ns.asc as (col: unknown) => unknown,
         desc: ns.desc as (col: unknown) => unknown,
         count: ns.count as () => unknown,
+        ...(jsonDialect === undefined ? {} : { jsonDialect }),
       };
       if (
         typeof operators.eq !== 'function' ||
@@ -706,6 +737,11 @@ async function findDrizzlePage(
 
   // 4. Keyset predicate through the shared builder; it is a FilterExpression,
   //    so it reaches the delegate through the existing predicateFor path.
+  // ORDER BY must use the RESOLVED sort, not the caller's `orderBy`: the
+  // keyset comparison is expanded over `orderBy` + the key columns, so
+  // sorting by `orderBy` alone leaves tied rows in an order the backend
+  // picks freely and the predicate skips or repeats them.
+  const keysetSort = resolveKeysetSort(normalized.orderBy, keyColumns);
   const keyset = decoded === null
     ? undefined
     : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
@@ -729,7 +765,7 @@ async function findDrizzlePage(
   if (where !== undefined) {
     builder = builder.where(where);
   }
-  const order = orderFor(table, entity, normalized.orderBy, operators);
+  const order = orderFor(table, entity, keysetSort, operators);
   if (order.length > 0) {
     builder = builder.orderBy(...order);
   }
@@ -821,11 +857,23 @@ function filterPredicateFor(
     return filter.type === 'and' ? operators.and(...predicates) : filterOperators.or(...predicates);
   }
 
-  // Drizzle supports nested paths on JSONB columns via column path syntax.
-  // A scalar field uses the column directly; a path array uses Drizzle's
-  // `sql` template to build the path expression.
-  const fieldKey = Array.isArray(filter.field) ? filter.field[0] : filter.field;
-  const baseColumn = columnFor(table, entity, fieldKey);
+  // A scalar field addresses the column directly. A multi-segment path
+  // addresses INSIDE a JSON document, which no two dialects spell alike, so it
+  // is translated per dialect below. Reading only `field[0]` compared the ROOT
+  // column and silently returned wrong rows.
+  const segments = Array.isArray(filter.field) ? filter.field : [filter.field];
+  if (segments.length === 0) {
+    throw new UnsupportedQueryFeatureError(
+      'nested-path',
+      'drizzle',
+      `Filter on entity '${entity}' carries an empty field path. ` +
+        'Name at least one column.',
+    );
+  }
+  const baseColumn = columnFor(table, entity, segments[0]);
+  if (segments.length > 1) {
+    return jsonPathPredicate(entity, baseColumn, segments.slice(1), filter, operators);
+  }
 
   switch (filter.operator) {
     case 'eq':
@@ -856,6 +904,116 @@ function filterPredicateFor(
       return filterOperators.or(nullPredicate, filterOperators.inArray(baseColumn, nonNullValues));
     }
   }
+}
+
+/**
+ * Build a predicate over a nested JSON path, in the active dialect's syntax.
+ *
+ * Extraction is normalised to TEXT on every dialect and cast back to a number
+ * only for an ordered comparison against a number — see `json-path.ts` for why
+ * the alternative (comparing SQLite's native JSON types against PostgreSQL's
+ * text) makes one filter mean two different things.
+ *
+ * @param entity - Entity name, for diagnostics
+ * @param column - The root column the path descends from
+ * @param path - The path segments below the column, at least one
+ * @param filter - The comparison to translate
+ * @param operators - The Drizzle operator set
+ * @returns The dialect-specific predicate
+ * @throws {UnsupportedQueryFeatureError} When the dialect cannot be determined
+ * or the operator has no JSON-path form
+ */
+function jsonPathPredicate(
+  entity: string,
+  column: unknown,
+  path: readonly string[],
+  filter: FilterComparison,
+  operators: DrizzleOperators,
+): unknown {
+  const ops = requireFilterOperators(operators);
+  const dialect = operators.jsonDialect;
+  if (dialect === undefined) {
+    throw new UnsupportedQueryFeatureError(
+      'nested-path',
+      'drizzle',
+      `Nested filter path on entity '${entity}' needs the SQL dialect, which ` +
+        'could not be determined from the Drizzle instance. Pass ' +
+        "`dialect: 'postgresql' | 'mysql' | 'sqlite'` in DrizzleAdapterOptions.",
+    );
+  }
+
+  // A `Date` has no JSON representation to compare against — a JSON document
+  // stores it as whatever string the writer chose — so it is refused by name
+  // rather than compared as text, the same call D1 makes for its own columns.
+  if (filter.value instanceof Date) {
+    throw new UnsupportedQueryFeatureError(
+      'nested-path',
+      'drizzle',
+      `Nested filter path on entity '${entity}' cannot compare a Date: a JSON ` +
+        'document has no date type, so the stored representation is unknown. ' +
+        'Compare an ISO string, or store the value in its own column.',
+    );
+  }
+
+  const text = (): unknown => {
+    switch (dialect) {
+      case 'postgresql':
+        return ops.sql`(${column} #>> ${postgresPathArray(path)})`;
+      case 'mysql':
+        return ops.sql`JSON_UNQUOTE(JSON_EXTRACT(${column}, ${jsonPathString(path)}))`;
+      case 'sqlite':
+        return ops.sql`CAST(json_extract(${column}, ${jsonPathString(path)}) AS TEXT)`;
+    }
+  };
+  const numeric = (): unknown => {
+    switch (dialect) {
+      case 'postgresql':
+        return ops.sql`(${column} #>> ${postgresPathArray(path)})::numeric`;
+      case 'mysql':
+        return ops
+          .sql`CAST(JSON_UNQUOTE(JSON_EXTRACT(${column}, ${
+          jsonPathString(path)
+        })) AS DECIMAL(65,30))`;
+      case 'sqlite':
+        return ops.sql`json_extract(${column}, ${jsonPathString(path)})`;
+    }
+  };
+  // An ordered comparison against a number must compare numerically; text
+  // ordering makes '9' > '35'.
+  const ordered = typeof filter.value === 'number' ? numeric() : text();
+
+  switch (filter.operator) {
+    case 'eq':
+      return filter.value === null
+        ? ops.sql`${text()} is null`
+        : ops.sql`${text()} = ${String(filter.value)}`;
+    case 'contains':
+      return ops.sql`${text()} like ${`%${escapeLikePattern(filter.value)}%`} escape '\\'`;
+    case 'gt':
+      return ops.sql`${ordered} > ${filter.value}`;
+    case 'gte':
+      return ops.sql`${ordered} >= ${filter.value}`;
+    case 'lt':
+      return ops.sql`${ordered} < ${filter.value}`;
+    case 'lte':
+      return ops.sql`${ordered} <= ${filter.value}`;
+    case 'in': {
+      const values = filter.value.filter((value) => value !== null);
+      const nullLeg = filter.value.includes(null) ? ops.sql`${text()} is null` : undefined;
+      if (values.length === 0) {
+        return nullLeg ?? ops.sql`1 = 0`;
+      }
+      const legs = values.map((value) => ops.sql`${text()} = ${String(value)}`);
+      const anyMatch = legs.length === 1 ? legs[0] : ops.or(...legs);
+      return nullLeg === undefined ? anyMatch : ops.or(nullLeg, anyMatch);
+    }
+  }
+  // Unreachable: `filter.operator` is a closed union and every arm returns.
+  throw new UnsupportedQueryFeatureError(
+    'nested-path',
+    'drizzle',
+    `Unsupported filter operator on entity '${entity}'.`,
+  );
 }
 
 type FilterOperators = Required<
