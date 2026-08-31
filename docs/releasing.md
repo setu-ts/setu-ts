@@ -346,27 +346,35 @@ deno task check:api-docs
 deno task check:docs
 ```
 
-The ratchet (`DOC_LINT_BASELINE = 752`) is frozen in `scripts/generate-api-docs.ts`. If the total
+The ratchet (`DOC_LINT_BASELINE = 497`) is frozen in `scripts/generate-api-docs.ts`. If the total
 diagnostic count drops below the baseline, the script prints a message instructing you to lower the
 constant in the same commit — do not ship a lower count without updating the constant, and do not
 raise the constant to accommodate new debt. The ten `CLEAN_PACKAGES` are permanently exempt: any
 finding in those packages fails the gate regardless of the baseline.
 
 **The count is only comparable on the Deno version that produced it.** `deno doc --lint` emits a
-different number per version — the identical tree reports 752 diagnostics on Deno 2.9.5 and 496 on
-2.9.6 — so the baseline is paired with `DOC_LINT_BASELINE_DENO`, which tracks the `deno-version` pin
-in `.github/workflows/ci.yml`. On any other version the gate reports the count and **skips** the
-comparison rather than failing, because failing would block every contributor whose toolchain
-differs from CI's; clean-package findings still fail. Never lower the constant from a run whose
-output says `SKIPPED` — CI is the authoritative reading, and to reproduce it locally:
+different number per version, and not marginally so: one identical tree reported 752 diagnostics on
+Deno 2.9.5 and 496 on 2.9.6, a 256 difference from the toolchain alone. So the baseline is paired
+with `DOC_LINT_BASELINE_DENO`, which tracks the `deno-version` pin in `.github/workflows/ci.yml`. On
+any other version the gate reports the count and **skips** the comparison rather than failing,
+because failing would block every contributor whose toolchain differs from CI's; clean-package
+findings still fail. Never lower the constant from a run whose output says `SKIPPED`.
+
+The pin is currently **2.9.6**, chosen to match the version developers run, so the ratchet is
+comparable in an ordinary local run and a new diagnostic is visible before a push. While the two
+disagreed it was not: a local run said `SKIPPED`, a contributor learned of a new diagnostic only
+from a red CI job, and finding out _which symbol_ meant reproducing CI's reading in a container. If
+your toolchain differs from the pin, that container is still the way to reproduce it:
 
 ```bash
-docker run --rm -v "$PWD":/w -w /w -e DENO_DIR=/tmp/dc denoland/deno:2.9.5 \
+docker run --rm -v "$PWD":/w -w /w -e DENO_DIR=/tmp/dc denoland/deno:2.9.6 \
   run --allow-read --allow-run --allow-env --allow-write=/tmp/dc \
   scripts/generate-api-docs.ts --check
 ```
 
-When the CI pin moves, re-measure and update both constants in the same change.
+When the CI pin moves, re-measure and update both constants in the same change — and say in the
+commit whether a change in the count is paid-down debt or just the new toolchain, because the two
+are indistinguishable from the number alone.
 
 Generated output lives under `docs/api/`, which is gitignored. Verify it is not tracked:
 

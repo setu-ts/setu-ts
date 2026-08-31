@@ -113,7 +113,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: 2.9.5
+          deno-version: 2.9.6
 
       # apps/realtime-clients executes the SDK's portable transports under the
       # native Node and Bun globals; neither runtime may be an accidental skip.
@@ -167,7 +167,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: 2.9.5
+          deno-version: 2.9.6
 
       - name: Install frozen dependencies
         run: deno ci
@@ -193,7 +193,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: 2.9.5
+          deno-version: 2.9.6
 
       # Docker is preinstalled on ubuntu-latest; kind, kubectl and helm are not.
       - uses: helm/kind-action@v1
@@ -238,7 +238,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: 2.9.5
+          deno-version: 2.9.6
 
       # Validates every workspace package against JSR's publish rules without
       # publishing: exports resolve, package metadata is complete, and the
@@ -311,7 +311,7 @@ jobs:
 
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: 2.9.5
+          deno-version: 2.9.6
 
       # Native dependency audit (JSR + npm deps in deno.lock).
       # OSV-Scanner is not used: it has no deno.lock support.
