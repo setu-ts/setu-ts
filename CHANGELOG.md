@@ -146,6 +146,9 @@ _implements_ `IDataSource` or declares a custom repository key type does.
   of single-key objects, so no sort arity is a special case. Latent until this release, because a
   two-column sort was the first thing the framework itself produced: the keyset cursor walk appends
   the primary key as its tiebreaker.
+- **`SqlJsonDialect` is exported from `@setu-ts/database-plugin`.** `DrizzleAdapterOptions.dialect`
+  is typed by it, so without the re-export the option's own type was unnameable by a consumer — the
+  defect M52c found on `NormalizedQuery` reaching a published `DataSource` signature.
 - **A nested JSON path filter now translates on Drizzle rather than being refused**, per dialect —
   PostgreSQL `#>>` against a text-array path, MySQL `JSON_UNQUOTE(JSON_EXTRACT(…))`, SQLite
   `json_extract` — with the dialect read off the Drizzle instance and a new `dialect` option for
