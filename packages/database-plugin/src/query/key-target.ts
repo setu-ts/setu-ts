@@ -25,7 +25,7 @@ import type { EntityKey } from '@setu-ts/common';
  *
  * @param primaryKey - The public mapping shape: a single column name or a list
  * @returns The normalised column list
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function resolveKeyColumns(
   primaryKey: string | readonly string[],
@@ -52,7 +52,7 @@ export function resolveKeyColumns(
  * @param operation - The repository operation being performed (for the error message)
  * @returns The key values in column order
  * @throws {Error} When the key shape does not match the target
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function keyValues(
   id: EntityKey,

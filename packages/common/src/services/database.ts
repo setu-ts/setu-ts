@@ -119,7 +119,7 @@ export type FilterExpression = FilterComparison | {
  * order the mapping owns. The scalar arms are retained so every existing call
  * site and every existing adapter keeps compiling.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export type EntityKey = string | number | Readonly<Record<string, string | number>>;
 
@@ -127,7 +127,7 @@ export type EntityKey = string | number | Readonly<Record<string, string | numbe
  * A single page of rows returned by {@linkcode IDataSource.findPage}, plus the
  * cursor that continues to the next page (or `null` when the page is the last).
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface PageResult {
   /** The rows in this page, already filtered, sorted, paginated and projected. */

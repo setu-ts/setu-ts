@@ -145,7 +145,7 @@ export interface IRepository<Entity, Id extends EntityKey = string> {
    * @param options - Find options, optionally carrying a cursor position
    * @returns The page of entities plus a `nextCursor` that is `null` when the page is the last
    * @throws {UnsupportedQueryFeatureError} When the bound data source lacks `findPage`
-   * @since 0.1.0
+   * @since 0.2.0
    */
   findPage(options: PageOptions): Promise<Page<Entity>>;
 }

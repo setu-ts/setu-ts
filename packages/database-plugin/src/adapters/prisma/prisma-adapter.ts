@@ -384,43 +384,46 @@ export class PrismaAdapter implements IDatabaseAdapter {
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a {@linkcode DataSource} backed by a Prisma client for the given
- * entity name.
- *
- * **Convention**: entity name `'User'` → delegate accessed as `client.user`
- * (first letter lowercased). If the delegate is absent on the client, the
- * error names the entity and the convention so the caller can fix the entity
- * name.
- *
- * @param client - The Prisma client (or transaction client) instance
- * @param entity - Entity / model name (e.g. `'User'`)
- * @returns A data source bound to the Prisma model
- * @since 0.1.0
- */
-/**
- * Build a Prisma compound-key `where` from an {@linkcode EntityKey} and the
+ * Build a Prisma key `where` from an {@linkcode EntityKey} and the
  * resolved column values.
  *
- * For a scalar key, the shape is `{ id: value }` (today's path). For a
- * composite key, the shape is `{ <compoundField>: { col1: val1, col2: val2 } }`
- * — Prisma's compound-key syntax, order-insensitive (P3).
+ * For a scalar key the shape is `{ <keyColumn>: value }`, where the column is
+ * the entity's resolved key column rather than a hardcoded `'id'` — a
+ * single-column entity configured with `keyColumns: ['user_id']` must address
+ * `user_id`, not `id`. The default `['id']` makes this byte-identical to the
+ * pre-M79 path. For a composite key the shape is
+ * `{ <compoundField>: { col1: val1, col2: val2 } }` — Prisma's compound-key
+ * syntax, order-insensitive (P3).
+ *
+ * `operation` is threaded through rather than hardcoded so a refusal names the
+ * method the caller actually invoked; reporting `findById` from `update` sent
+ * the reader to the wrong call site.
+ *
+ * This THROWS on a key-shape mismatch (via {@linkcode keyValues}). Every caller
+ * is an `async` method, so the throw surfaces as a rejection — a synchronous
+ * throw out of a `Promise`-typed method bypasses a caller using `.catch()`,
+ * which is the M52b/M52c/M70j defect class.
  *
  * @param id - The primary key value
  * @param entity - Entity name (used for error messages)
  * @param columns - The resolved key columns
- * @param compoundKeyField - The compound-key field name, derived or overridden
+ * @param compoundKeyField - The compound-key field name, or `undefined` for a scalar key
+ * @param operation - The repository operation, for the diagnostic
  * @returns The `where` argument for `findUnique`/`update`/`delete`
+ * @throws {Error} When the key shape does not match the resolved columns
  */
-function buildCompoundWhere(
+function buildKeyWhere(
   id: EntityKey,
   entity: string,
   columns: readonly string[],
-  compoundKeyField: string,
+  compoundKeyField: string | undefined,
+  operation: string,
 ): Record<string, unknown> {
-  if (typeof id === 'string' || typeof id === 'number') {
-    return { id };
+  const values = keyValues(id, columns, `${operation} on '${entity}'`);
+  if (compoundKeyField === undefined) {
+    // Single-column key: address the resolved column by name.
+    return { [columns[0]]: values[0] };
   }
-  const values = keyValues(id, columns, `findById on '${entity}'`);
   const record: Record<string, unknown> = {};
   for (let i = 0; i < columns.length; i++) {
     record[columns[i]] = values[i];
@@ -678,23 +681,18 @@ function createPrismaDataSourceInner(
   }
 
   return {
-    findById: (id) => {
-      if (typeof id === 'object') {
-        if (compoundKeyField === undefined) {
-          return Promise.reject(
-            new UnsupportedQueryFeatureError(
-              'composite-key',
-              'prisma',
-              `composite-key: PrismaAdapter.findById (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
-                `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
-            ),
-          );
-        }
-        return delegate.findUnique({
-          where: buildCompoundWhere(id, entity, keyColumns, compoundKeyField),
-        });
+    async findById(id) {
+      if (typeof id === 'object' && compoundKeyField === undefined) {
+        throw new UnsupportedQueryFeatureError(
+          'composite-key',
+          'prisma',
+          `composite-key: PrismaAdapter.findById (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
+            `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
+        );
       }
-      return delegate.findUnique({ where: { id } });
+      return await delegate.findUnique({
+        where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'findById'),
+      });
     },
 
     findAll: (query) => {
@@ -713,65 +711,40 @@ function createPrismaDataSourceInner(
 
     create: (data) => delegate.create({ data }),
 
-    update(id, data) {
-      if (typeof id === 'object') {
-        if (compoundKeyField === undefined) {
-          return Promise.reject(
-            new UnsupportedQueryFeatureError(
-              'composite-key',
-              'prisma',
-              `composite-key: PrismaAdapter.update (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
-                `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
-            ),
-          );
-        }
-        return delegate.update({
-          where: buildCompoundWhere(id, entity, keyColumns, compoundKeyField),
-          data,
-        }).catch((err: unknown) => {
-          const code = (err as { code?: string }).code;
-          if (code === 'P2025') {
-            throw new Error(`Entity '${entity}' with id not found`);
-          }
-          throw err;
-        });
+    async update(id, data) {
+      if (typeof id === 'object' && compoundKeyField === undefined) {
+        throw new UnsupportedQueryFeatureError(
+          'composite-key',
+          'prisma',
+          `composite-key: PrismaAdapter.update (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
+            `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
+        );
       }
-      return delegate.update({ where: { id }, data }).catch((err: unknown) => {
+      return await delegate.update({
+        where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'update'),
+        data,
+      }).catch((err: unknown) => {
         const code = (err as { code?: string }).code;
         if (code === 'P2025') {
-          throw new Error(`Entity '${entity}' with id '${id}' not found`);
+          throw new Error(`Entity '${entity}' with id '${String(id)}' not found`);
         }
         throw err;
       });
     },
 
     async delete(id) {
-      if (typeof id === 'object') {
-        if (compoundKeyField === undefined) {
-          return Promise.reject(
-            new UnsupportedQueryFeatureError(
-              'composite-key',
-              'prisma',
-              `composite-key: PrismaAdapter.delete (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
-                `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
-            ),
-          );
-        }
-        try {
-          await delegate.delete({
-            where: buildCompoundWhere(id, entity, keyColumns, compoundKeyField),
-          });
-          return true;
-        } catch (err) {
-          const code = (err as { code?: string }).code;
-          if (code === 'P2025') {
-            return false;
-          }
-          throw err;
-        }
+      if (typeof id === 'object' && compoundKeyField === undefined) {
+        throw new UnsupportedQueryFeatureError(
+          'composite-key',
+          'prisma',
+          `composite-key: PrismaAdapter.delete (adapter 'prisma') requires a composite key configuration; got ${typeof id}. ` +
+            `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
+        );
       }
       try {
-        await delegate.delete({ where: { id } });
+        await delegate.delete({
+          where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'delete'),
+        });
         return true;
       } catch (err) {
         const code = (err as { code?: string }).code;

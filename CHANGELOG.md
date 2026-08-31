@@ -6,6 +6,80 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed — BREAKING (portable data-access contract, M79)
+
+Three widenings to `@setu-ts/common`'s data-access contract. All three are **source-compatible for
+callers** and **breaking for implementors**, because each widens a type in a position an implementor
+must satisfy. No application that only _calls_ repositories needs a change; an application that
+_implements_ `IDataSource` or declares a custom repository key type does.
+
+- **`IDataSource.findById`/`update`/`delete` take `EntityKey`, not `string | number`.** The new arm
+  is a composite record (`Readonly<Record<string, string | number>>`), so a join table or a
+  tenant-scoped table can finally be addressed through a repository. A parameter is contravariant,
+  so an out-of-repo adapter still declaring the scalar-only form is a compile error.
+
+  ```typescript
+  // Before — still valid, nothing to change for a scalar key.
+  findById(id: string | number): Promise<Record<string, unknown> | null>;
+  // After — an implementor must widen the parameter.
+  findById(id: EntityKey): Promise<Record<string, unknown> | null>;
+  ```
+
+- **`FilterComparison.field` accepts `string | readonly string[]`.** An array is a nested document
+  path (`['address', 'city']`); a plain `string` is unchanged. Any code that READS `filter.field`
+  and assumes `string` must handle both. A dotted string is deliberately NOT a path — a column whose
+  name contains a dot keeps its meaning.
+
+- **The ordered-comparison arm (`gt`/`gte`/`lt`/`lte`) accepts `Date`.** Required for keyset
+  pagination over a timestamp column, and it makes a portable date-range filter expressible for the
+  first time. `IRepository`'s key type parameter is now constrained to `EntityKey`, which is
+  breaking only for a declaration that was never supported at runtime.
+
+### Added
+
+- **Keyset cursor pagination.** `IDataSource.findPage?(query)` returns `{ rows, nextCursor }`, and
+  `NormalizedQuery.cursor` carries the incoming position. The member is **optional** so an
+  out-of-repo adapter keeps compiling; when it is absent the repository refuses by name, so absence
+  means "cannot page by cursor" and never "there are no more rows". Implemented on all five shipped
+  adapters — Memory, Prisma, Drizzle, Mongo and D1. `offset` is untouched and not deprecated; a
+  query carrying both a non-zero `offset` and a `cursor` is refused, because the two express
+  contradictory positions.
+- `@setu-ts/common` gains `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue`, and the pure
+  `encodeCursor`/`decodeCursor`/`keysetPredicate`/`sortFingerprint`/`mintNextCursor` codec. The
+  codec lives in `common` because `cloudflare-plugin` needs the identical encoding and a plugin may
+  not import another plugin (AI_GUIDELINES §2.2) — one copy, not two.
+- **The primary-key tiebreaker is a correctness requirement, not a refinement.** Measured against
+  live PostgreSQL and MongoDB: over six rows carrying only two distinct sort values, a keyset walk
+  omitting the key tiebreaker returned **four of six** and reported success. `keysetPredicate`
+  always appends the resolved key columns, and the negative control is committed as a test.
+- Composite primary keys per adapter: `D1EntityMapping.primaryKey` and
+  `MongoEntityMapping.primaryKey` accept a column list, `MongoEntityMapping.idType` gains
+  `'compound'` (a subdocument `_id`, built in the mapping's declared column order — a Mongo
+  subdocument `_id` is matched by exact, order-sensitive equality, so the caller's key-object
+  property order must never reach the driver), and `PrismaAdapterOptions.entities` /
+  `DrizzleAdapterOptions.entities` carry per-entity key configuration. Prisma's compound-key field
+  name is derived by joining the key columns with `_`; a model declaring a named `@@id` **must** set
+  `compositeKeyName`, because Prisma rejects the derived name on such a model.
+- `UnsupportedQueryFeatureError` in `@setu-ts/database-plugin`, for a query feature the active
+  adapter cannot serve. `cloudflare-plugin` continues to refuse with `CloudflareUnsupportedError`;
+  no error class is added to `common`, which exports none.
+
+- **`@setu-ts/openapi-plugin` exports `SchemaIo`** and `ZodToOpenApi.transform` takes it as an
+  optional second argument (`transform(schema, io?)`, defaulting to `'output'`), so an existing
+  single-argument call is unchanged.
+
+### Fixed
+
+- **Prisma's `findById` and `update` threw synchronously on a malformed composite key**, bypassing a
+  caller using `.catch()`, while `delete` on the same object rejected correctly. All three now
+  reject.
+- **Prisma's scalar key path addressed a hardcoded `id`**, ignoring a configured single-column
+  `keyColumns`, so a lookup silently queried the wrong column. It now addresses the resolved column;
+  the default `['id']` keeps the pre-M79 shape byte-identical.
+- Prisma's composite-key refusals named `findById` regardless of the method that failed.
+- **Mongo could write a partial compound `_id`** when a key column was absent from the row, storing
+  a document that no `findById` could retrieve, since the read path requires every column.
+
 - Added a native MongoDB backend to `@setu-ts/database-plugin`.
   `DatabasePlugin({ type: 'mongodb',
   options: { url } })` now provides repositories over the
@@ -24,8 +98,6 @@ All notable changes to this project are documented here. The format follows
 - Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.
-
-### Fixed
 
 - **`@setu-ts/openapi-plugin` documented a zod v4 REQUEST body as the shape the server holds after
   parsing, so a document could contradict the application serving it.** `ZodToOpenApi` converted
@@ -54,12 +126,6 @@ All notable changes to this project are documented here. The format follows
   registered with `addSchema('Name', …)` keeps that name on the output side and gains a `NameInput`
   twin when a request site reaches it — identified by schema rather than by name, so registering an
   unrelated `AddressInput` alongside `Address` cannot capture it.
-
-### Added
-
-- **`@setu-ts/openapi-plugin` exports `SchemaIo`** and `ZodToOpenApi.transform` takes it as an
-  optional second argument (`transform(schema, io?)`, defaulting to `'output'`), so an existing
-  single-argument call is unchanged.
 
 ## [0.1.0-alpha.10] — 2026-08-28
 

@@ -118,7 +118,7 @@ export class UnsupportedRawQueryError extends Error {
  *   }
  * }
  * ```
- * @since 0.1.0
+ * @since 0.2.0
  */
 export class UnsupportedQueryFeatureError extends Error {
   /** Discriminant for consumers that cannot use `instanceof` across realms. */

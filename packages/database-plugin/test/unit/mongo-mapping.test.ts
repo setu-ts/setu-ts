@@ -256,3 +256,35 @@ describe("mapping when the primary key IS the driver's own `_id` field", () => {
     });
   });
 });
+
+describe('compound `_id` write path — M79 review regression', () => {
+  /**
+   * A compound `_id` subdocument is matched by EXACT equality (probe P4: the
+   * same document matched `{tenantId,userId}` and missed `{userId,tenantId}`).
+   * A partial subdocument therefore writes a document that the read path —
+   * which requires every key column — can never retrieve. Before the fix the
+   * guard admitted any non-empty subset, so `create()` with one of two key
+   * columns stored an unreachable row and reported success.
+   */
+  it('does not write a PARTIAL compound `_id` when a key column is missing', () => {
+    const target = resolveMongoTarget('Membership', {
+      Membership: { primaryKey: ['tenantId', 'userId'], idType: 'compound' },
+    });
+    const doc = toDriverDocument({ tenantId: 't1', role: 'admin' }, target);
+    // The row keeps its own fields and gains no half-built `_id`.
+    expect(doc._id).toBeUndefined();
+    expect(doc.tenantId).toBe('t1');
+  });
+
+  it('writes a compound `_id` in the mapping order once every column is present', () => {
+    const target = resolveMongoTarget('Membership', {
+      Membership: { primaryKey: ['tenantId', 'userId'], idType: 'compound' },
+    });
+    // Caller supplies the key columns in the REVERSE order; the subdocument is
+    // still built in the mapping's order, which is what makes the exact-match
+    // lookup reliable (P5).
+    const doc = toDriverDocument({ userId: 'u1', tenantId: 't1', role: 'admin' }, target);
+    expect(Object.keys(doc._id as Record<string, unknown>)).toEqual(['tenantId', 'userId']);
+    expect(doc._id).toEqual({ tenantId: 't1', userId: 'u1' });
+  });
+});

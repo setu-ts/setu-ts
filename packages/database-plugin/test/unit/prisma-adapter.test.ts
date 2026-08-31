@@ -13,7 +13,7 @@
  */
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
+import { createPrismaDataSource, PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { PageNormalizationError } from '../../src/query/query-builder.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
@@ -1018,4 +1018,109 @@ describe('PrismaAdapter', () => {
       await txn.commit();
     });
   });
+});
+
+/**
+ * Regression guards for the three Prisma key-handling defects found in the
+ * M79 milestone review. Each one passed every gate, the per-file coverage bar
+ * and both publish gates, and each fails without its fix.
+ */
+describe('Prisma key handling — M79 review regressions', () => {
+  /** Records the `where` argument each delegate method receives. */
+  function recordingClient(): { client: never; seen: Record<string, unknown>[] } {
+    const seen: Record<string, unknown>[] = [];
+    const delegate = {
+      findUnique: (a: Record<string, unknown>) => {
+        seen.push(a);
+        return Promise.resolve(null);
+      },
+      update: (a: Record<string, unknown>) => {
+        seen.push(a);
+        return Promise.resolve({});
+      },
+      delete: (a: Record<string, unknown>) => {
+        seen.push(a);
+        return Promise.resolve({});
+      },
+      findMany: () => Promise.resolve([]),
+      create: () => Promise.resolve({}),
+      count: () => Promise.resolve(0),
+    };
+    return { client: { membership: delegate } as never, seen };
+  }
+
+  /**
+   * A malformed composite key must REJECT, never throw synchronously. A
+   * synchronous throw out of a `Promise`-typed method bypasses a caller using
+   * `.catch()` — the M52b/M52c/M70j defect class. Before the fix `findById`
+   * and `update` threw synchronously while `delete` rejected, so one adapter
+   * disagreed with itself about how the same fault surfaces.
+   */
+  for (const method of ['findById', 'update', 'delete'] as const) {
+    it(`rejects rather than throwing synchronously when the composite key is incomplete (${method})`, async () => {
+      const { client } = recordingClient();
+      const source = createSource(client);
+      let threwSynchronously = false;
+      let rejected = false;
+      try {
+        const call = method === 'update'
+          ? source.update({ tenantId: 't1' }, { role: 'x' })
+          : method === 'delete'
+          ? source.delete({ tenantId: 't1' })
+          : source.findById({ tenantId: 't1' });
+        await call.catch(() => {
+          rejected = true;
+        });
+      } catch {
+        threwSynchronously = true;
+      }
+      expect(threwSynchronously).toBe(false);
+      expect(rejected).toBe(true);
+    });
+  }
+
+  /**
+   * The refusal must name the method the caller invoked. `buildCompoundWhere`
+   * hardcoded `findById` into every diagnostic, so an `update` failure sent
+   * the reader to the wrong call site.
+   */
+  it('names the operation that actually failed, not always findById', async () => {
+    const { client } = recordingClient();
+    const source = createSource(client);
+    await expect(source.update({ tenantId: 't1' }, { role: 'x' })).rejects.toThrow(/update on/);
+    await expect(source.delete({ tenantId: 't1' })).rejects.toThrow(/delete on/);
+    await expect(source.findById({ tenantId: 't1' })).rejects.toThrow(/findById on/);
+  });
+
+  /**
+   * A single-column entity configured with a non-`id` key column must address
+   * THAT column. The scalar path emitted a hardcoded `{ id }`, so a scalar
+   * lookup silently queried the wrong column — a wrong row where the model
+   * also has an `id`, and an unknown-field error where it does not.
+   */
+  it('addresses the configured key column on the scalar path, not a hardcoded id', async () => {
+    const { client, seen } = recordingClient();
+    const source = createPrismaDataSource(client, 'Membership', undefined, ['user_id'], undefined);
+    await source.findById('u1');
+    expect(seen[0]).toEqual({ where: { user_id: 'u1' } });
+  });
+
+  /** The default `['id']` keeps the pre-M79 shape byte-identical. */
+  it('keeps the default single-column shape byte-identical to the pre-M79 path', async () => {
+    const { client, seen } = recordingClient();
+    const source = createPrismaDataSource(client, 'Membership');
+    await source.findById('u1');
+    expect(seen[0]).toEqual({ where: { id: 'u1' } });
+  });
+
+  /** Composite key wired end to end through the compound-key field. */
+  function createSource(client: never): DataSource {
+    return createPrismaDataSource(
+      client,
+      'Membership',
+      undefined,
+      ['tenantId', 'userId'],
+      'tenantId_userId',
+    );
+  }
 });

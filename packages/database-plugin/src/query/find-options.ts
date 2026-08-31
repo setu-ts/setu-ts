@@ -69,7 +69,7 @@ export type PageOptions = FindOptions;
  * than `Record<string, unknown>[]`.
  *
  * @typeParam Entity - The entity shape the repository manages
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface Page<Entity = Record<string, unknown>> {
   /** The rows in this page, already filtered, sorted, paginated and projected. */

@@ -242,13 +242,18 @@ export function toDriverDocument(
     // _id in the mapping's declared column order (P5). Every named column is
     // extracted from the row and assembled into the subdocument; the driver
     // does not accept the raw fields alongside `_id` for a compound _id.
+    // EVERY key column must be present, not merely one of them. A compound
+    // `_id` subdocument is matched by exact equality (P4), so a PARTIAL
+    // subdocument writes a document that no `findById` can ever retrieve —
+    // the read path already requires every column. Partial keys therefore
+    // fall through to the flat path rather than writing an unreachable row.
     const compound: Record<string, unknown> = {};
     for (const col of target.primaryKey) {
       if (Object.prototype.hasOwnProperty.call(row, col)) {
         compound[col] = row[col];
       }
     }
-    if (Object.keys(compound).length > 0) {
+    if (Object.keys(compound).length === target.primaryKey.length) {
       for (const col of target.primaryKey) {
         delete document[col];
       }
@@ -354,9 +359,10 @@ export function toDriverId(
  * (measured on `mongodb@6.21.0` — `isValid(5)`, `isValid(0)` and
  * `isValid(1234567890)` are all `true`), while `new ObjectId('5')` throws
  * `BSONError: input must be a 24 character hex string, 12 byte Uint8Array, or
- * an integer`. `IDataSource.findById`/`update`/`delete` accept `string |
- * number`, so a collection keyed by application-assigned numbers reached that
- * throw on every entry point under the default `'auto'` mapping.
+ * an integer`. `IDataSource.findById`/`update`/`delete` accept an `EntityKey`,
+ * whose scalar arms are `string` and `number`, so a collection keyed by
+ * application-assigned numbers reached that throw on every entry point under
+ * the default `'auto'` mapping.
  *
  * @param value - The repository id value
  * @param objectIdCtor - The driver `ObjectId` constructor

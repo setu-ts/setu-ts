@@ -613,3 +613,45 @@ belongs in the manifest and stays endpoint-scoped.
   every adapter to reshape returned rows rather than pass a projection through. The milestone that
   first needs one of them owns all three.
 - **A shared refusal error class in `common`** — declined in §3.11 with cause, not deferred.
+
+## 10. Reconciliation with what shipped (written at merge, not at plan time)
+
+The plan is the design record, so where the implementation diverged the divergence is recorded here
+rather than left as a stale claim.
+
+| Plan said                                              | Shipped                                                                                         | Why                                                                                                                                                                                                                               |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §4 lists six `common` exports                          | Nine: `CursorValue`, `sortFingerprint` and `mintNextCursor` were added                          | The cursor payload needed a named scalar type, and minting/fingerprinting are used by all five adapters — factoring them out is what keeps the five from drifting. Each has a consumer beyond its own test, so the §4 rule holds. |
+| §3.8 cursor payload is `{ k, o }`                      | `{ orderedValues, keyValues, sortFingerprint }`                                                 | The plan's shape is **wrong** for an `orderBy` over non-key fields: indexing one array by both `orderBy` position and key-column position conflates two different orders. Splitting them is a correction, not an embellishment.   |
+| §3.3/§4.1 name the Prisma option `primaryKey`          | `keyColumns`, plus `compositeKeyName`                                                           | `PrismaCompositeKeyOptions` carries both; `keyColumns` is the clearer name beside the compound-key field it pairs with.                                                                                                           |
+| §3.4 calls `compositeKeyName` "overridable"            | **Mandatory** for a model with a named `@@id`                                                   | Probe P2: Prisma rejects the derived name on such a model. The plan's own §1A already recorded this; §3.4 is corrected to match.                                                                                                  |
+| §3.3 says a composite Mongo key maps to flat fields    | Flat by default, plus an `idType: 'compound'` arm                                               | Probes P4/P5 made a subdocument `_id` safe to support once the mapping imposes column order. Mongo's own composite-key idiom would otherwise be the one case this milestone did not serve.                                        |
+| §3.11 says refusals use `UnsupportedQueryFeatureError` | Key-shape mismatches use a plain `Error` from `keyValues`; feature refusals use the named class | A malformed key is a caller mistake, not an unsupported backend feature. The named class is reserved for the latter, which is what a consumer branches on.                                                                        |
+
+### 10.1 Review findings fixed on this branch
+
+Five defects passed all four gates, both publish gates and the per-file coverage bar, and were found
+by reading the diff and probing the real adapters:
+
+1. **Prisma `findById`/`update` threw synchronously** on a malformed composite key while `delete`
+   rejected — the M52b/M52c/M70j class, with the correct pattern already present in the Mongo
+   adapter. All three now reject. Negative control: making `findById` non-`async` again fails the
+   guard.
+2. **Prisma's scalar path addressed a hardcoded `id`**, ignoring a configured single-column
+   `keyColumns`. Measured `{ where: { id: 'u1' } }` where `{ where: { user_id: 'u1' } }` was
+   configured. The default `['id']` keeps the pre-M79 shape byte-identical.
+3. **Every composite refusal named `findById`**, whichever method failed. `operation` is threaded
+   through; the control fails type-check on the now-unused parameter, which is a stronger guard than
+   a test.
+4. **Mongo could write a partial compound `_id`** when a key column was absent, storing a row no
+   `findById` could retrieve. The write path now requires every column, matching the read path.
+5. **`encodeCursor` carried a type-unreachable branch** emitting a Date-lossy token that
+   `decodeCursor` accepted as plain strings. It existed only to let `decodeCursor` robustness tests
+   build malformed payloads; those now build their tokens directly, so the scaffolding and the
+   corruption path were deleted together.
+
+Also: ~500 lines of duplicated codec tests were trimmed to the one thing the second copy uniquely
+proves — evaluating the predicate against real rows via `matchesFilter`, since asserting the tree's
+shape proves only that it was built; a JSDoc block orphaned above `buildCompoundWhere` was removed
+(the M70m stacked-docblock defect); and `@since` was aligned to `0.2.0` on this milestone's new
+symbols, matching the M52c/M68 additions in the same files.

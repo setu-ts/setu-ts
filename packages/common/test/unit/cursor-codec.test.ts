@@ -10,6 +10,26 @@ import type { CursorPayload } from '../../src/services/cursor.ts';
 import type { FilterExpression } from '../../src/services/database.ts';
 
 /**
+ * Build a deliberately malformed cursor token directly, without going through
+ * {@linkcode encodeCursor}.
+ *
+ * These cases exercise {@linkcode decodeCursor}, which takes UNTRUSTED input
+ * and must answer `null` rather than throw. Routing them through
+ * `encodeCursor` would require that function to accept payloads its own type
+ * forbids — the guard that used to exist for exactly this reason emitted a
+ * Date-lossy token `decodeCursor` then accepted as plain strings, so the
+ * scaffolding was itself a silent-corruption path. Encoding the JSON here
+ * keeps the untrusted-input coverage and lets `encodeCursor` trust its type.
+ */
+function malformedToken(payload: unknown): string {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
  * Minimal evaluator so the keyset tree is asserted by BEHAVIOR — which rows a
  * walk would keep — and not only by shape. `keysetPredicate` emits only
  * eq/gt/lt comparisons over string-named fields, so this covers its whole
@@ -221,27 +241,30 @@ describe('encodeCursor / decodeCursor round-trip', () => {
   });
 
   it('returns null for a JSON object missing orderedValues', () => {
-    const bad = encodeCursor({ sortFingerprint: 'x:asc' } as unknown as CursorPayload);
-    expect(decodeCursor(bad)).toBeNull();
+    expect(decodeCursor(malformedToken({ keyValues: [1], sortFingerprint: 'x:asc' }))).toBeNull();
+  });
+
+  it('returns null for a JSON object missing keyValues', () => {
+    expect(decodeCursor(malformedToken({ orderedValues: [1], sortFingerprint: 'x:asc' })))
+      .toBeNull();
   });
 
   it('returns null for a JSON object missing sortFingerprint', () => {
-    const bad = encodeCursor({ orderedValues: [1] } as unknown as CursorPayload);
-    expect(decodeCursor(bad)).toBeNull();
+    expect(decodeCursor(malformedToken({ orderedValues: [1], keyValues: [1] }))).toBeNull();
   });
 
   it('returns null for a JSON object with wrong orderedValues type', () => {
-    const bad = encodeCursor(
-      { orderedValues: 'not-an-array', sortFingerprint: 'x:asc' } as unknown as CursorPayload,
-    );
-    expect(decodeCursor(bad)).toBeNull();
+    expect(
+      decodeCursor(
+        malformedToken({ orderedValues: 'not-an-array', keyValues: [1], sortFingerprint: 'x:asc' }),
+      ),
+    ).toBeNull();
   });
 
   it('returns null for a JSON object with wrong sortFingerprint type', () => {
-    const bad = encodeCursor(
-      { orderedValues: [1], sortFingerprint: 42 } as unknown as CursorPayload,
-    );
-    expect(decodeCursor(bad)).toBeNull();
+    expect(
+      decodeCursor(malformedToken({ orderedValues: [1], keyValues: [1], sortFingerprint: 42 })),
+    ).toBeNull();
   });
 });
 

@@ -63,7 +63,7 @@ interface EncodedCursorPayload {
  * absent from `orderBy` — using `orderedValues[0]` there would be wrong
  * because the first ordered-value may belong to a non-key field.
  *
- * @since 0.1.0
+ * @since 0.2.0
  */
 export interface CursorPayload {
   /**
@@ -95,12 +95,9 @@ export interface CursorPayload {
  *
  * @param payload - The values and sort fingerprint to encode
  * @returns A base64url-encoded JSON string
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function encodeCursor(payload: CursorPayload): string {
-  if (!Array.isArray(payload.orderedValues) || !Array.isArray(payload.keyValues)) {
-    return base64Url(JSON.stringify(payload));
-  }
   const encoded: EncodedCursorPayload = {
     orderedValues: payload.orderedValues.map(encodeCursorValue),
     keyValues: payload.keyValues.map(encodeCursorValue),
@@ -119,7 +116,7 @@ export function encodeCursor(payload: CursorPayload): string {
  *
  * @param token - A token previously returned by {@linkcode encodeCursor}
  * @returns The decoded payload, or `null` when the token is not well-formed JSON
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function decodeCursor(token: string): CursorPayload | null {
   let parsed: unknown;
@@ -177,7 +174,7 @@ export function decodeCursor(token: string): CursorPayload | null {
  * @param keyColumns - The primary-key columns, appended as ascending
  *   tiebreakers when `orderBy` does not already carry them
  * @returns The keyset comparison, conjoinable with the caller's own filter
- * @since 0.1.0
+ * @since 0.2.0
  */
 export function keysetPredicate(
   orderedValues: ReadonlyArray<CursorValue>,
@@ -334,7 +331,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *
  * @param input - The UTF-8 string to encode
  * @returns The base64url representation
- * @since 0.1.0
+ * @since 0.2.0
  */
 function base64Url(input: string): string {
   return base64FromBytes(utf8(input))
@@ -348,7 +345,7 @@ function base64Url(input: string): string {
  *
  * @param input - A base64url string
  * @returns The decoded UTF-8 string
- * @since 0.1.0
+ * @since 0.2.0
  */
 function base64UrlDecode(input: string): string {
   return utf8FromBytes(base64ToBytes(input.replace(/-/g, '+').replace(/_/g, '/')));
@@ -359,7 +356,7 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 /**
  * @param bytes - The raw bytes to encode
  * @returns The standard base64 string (with `+`/`/` and padding)
- * @since 0.1.0
+ * @since 0.2.0
  */
 function base64FromBytes(bytes: number[]): string {
   let result = '';
@@ -378,7 +375,7 @@ function base64FromBytes(bytes: number[]): string {
 /**
  * @param input - The standard base64 string to decode
  * @returns The raw bytes
- * @since 0.1.0
+ * @since 0.2.0
  */
 function base64ToBytes(input: string): number[] {
   const table = new Map<string, number>();
@@ -405,7 +402,7 @@ function base64ToBytes(input: string): number[] {
 /**
  * @param input - A binary string (each char code 0–255)
  * @returns The UTF-8 bytes
- * @since 0.1.0
+ * @since 0.2.0
  */
 function utf8(input: string): number[] {
   const bytes: number[] = [];
@@ -437,7 +434,7 @@ function utf8(input: string): number[] {
 /**
  * @param bytes - The raw bytes to decode
  * @returns The UTF-8 string
- * @since 0.1.0
+ * @since 0.2.0
  */
 function utf8FromBytes(bytes: number[]): string {
   let result = '';

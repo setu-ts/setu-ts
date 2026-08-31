@@ -3683,7 +3683,48 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 78** — native MongoDB backend for `database-plugin`, including the `'mongodb'`
   configuration arm, native query translation, ObjectId mapping, injected-client seam, and real
   driver CI coverage — complete (PR #208).
-- **Next milestone** — **M79** (portable data-access contract).
+- **Milestone 79** (`common` + `database-plugin` + `cloudflare-plugin` — portable data-access
+  contract: composite keys, nested field paths and keyset cursor pagination, implemented across all
+  **five** shipped adapters. The ROADMAP scoped four; `MongoAdapter` shipped in M78, so the in-scope
+  bullet was corrected rather than inherited. **Four contract members, not three** — the
+  ordered-comparison arm also accepts `Date`, because the cursor cannot page by `createdAt` without
+  it and the headline member would otherwise ship green and be unusable in its commonest case.
+  **Three breaking changes, all source-compatible for callers and breaking for implementors**
+  (`IDataSource`'s three key parameters widen to `EntityKey`, `FilterComparison.field` accepts a
+  path array, and `IRepository`'s key parameter is constrained), each with CHANGELOG migration text.
+  The keyset predicate is built once in `common` as a portable `FilterExpression`, so every adapter
+  that already translates one gets paging with no new translation code and the five cannot drift
+  about what "the next page" means; it lives there because `cloudflare-plugin` needs the identical
+  encoding and §2.2 forbids the import (the M47 frame-codec precedent). **Eleven design facts were
+  established by live probe rather than reasoned**, against Prisma 7.10.0 on PostgreSQL 16 and
+  MongoDB 8, and four changed the design: Prisma **rejects** the derived compound-key name on a
+  model with a named `@@id`, so `compositeKeyName` is mandatory rather than optional; a Mongo
+  subdocument `_id` is **field-order sensitive** while Prisma's compound key is not, so the
+  subdocument is built in the mapping's declared order and never the caller's — which is what makes
+  the new `idType: 'compound'` arm safe; and composite `update`/`delete` return the row natively,
+  ruling out the non-atomic `updateMany` + `findFirst` fallback. **The decisive measurement is the
+  tiebreaker**: over six rows carrying only two distinct sort values, a keyset walk omitting the key
+  columns returned **four of six** and reported success, identically on both backends — so the
+  tiebreaker is a correctness requirement and the negative control is committed as a test in three
+  files. An early probe of that walk was **vacuous** (every sort value distinct, so the tiebreaker
+  branch never executed), which is why every committed cursor fixture seeds deliberate ties. Both
+  live suites run guarded via `ignore` rather than an early return — the M70c trap, where a suite
+  reports _passed_ while asserting nothing. Code review then found five defects every gate, both
+  publish gates and the per-file bar had passed: Prisma's `findById` and `update` **threw
+  synchronously** on a malformed composite key, bypassing a caller using `.catch()`, while `delete`
+  on the same object rejected correctly (the M52b/M52c/M70j class, with the correct pattern already
+  present in the Mongo adapter two files over); the scalar key path addressed a **hardcoded `id`**,
+  ignoring a configured single-column `keyColumns`, so a lookup silently queried the wrong column;
+  every composite refusal named `findById` regardless of the method that failed; Mongo could write a
+  **partial compound `_id`** that no `findById` could ever retrieve, since the read path requires
+  every column; and `encodeCursor` carried a type-unreachable branch that emitted a Date-lossy token
+  `decodeCursor` then accepted as plain strings — it existed only to service `decodeCursor`
+  robustness tests that should have built their malformed tokens directly, so removing it deleted
+  the scaffolding and the corruption path together. Review also found ~500 lines of duplicated codec
+  tests across two packages (§11.1), trimmed to the one thing the second copy uniquely proves —
+  evaluating the predicate against real rows through `matchesFilter`, since asserting the tree's
+  SHAPE proves only that it was built) — complete (PR pending)
+- **Next milestone** — **M80** (DynamoDB backend), gated on this milestone.
 
 ## Verification (run before declaring any work done)
 
