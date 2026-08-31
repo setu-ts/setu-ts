@@ -9,7 +9,15 @@
  * @module
  */
 
-import type { EntityKey, FilterExpression, IDataSource, NormalizedQuery } from '@setu-ts/common';
+import type {
+  CursorPayload,
+  EntityKey,
+  FilterExpression,
+  IDataSource,
+  NormalizedQuery,
+  PageResult,
+} from '@setu-ts/common';
+import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
 import type { ID1Database, ID1PreparedStatement } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import type { D1Statement, D1Target } from './d1-sql.ts';
@@ -47,6 +55,132 @@ export function prepareStatement(db: ID1Database, statement: D1Statement): ID1Pr
 function readCount(row: Record<string, unknown> | null): number {
   const value = row?.[D1_COUNT_ALIAS];
   return typeof value === 'number' ? value : Number(value ?? 0);
+}
+
+/**
+ * The one keyset-paging pipeline every D1 data source shares.
+ *
+ * The pipeline is §3.8 — decode the incoming cursor (rejecting a malformed
+ * token or a sort-fingerprint mismatch by name, never a synchronous throw),
+ * build the portable keyset predicate with the shared {@linkcode keysetPredicate}
+ * from `common`, conjoin it with the caller's own `filter`, fetch `limit + 1`
+ * rows (the one-extra-row probe), and mint the next cursor from the LAST
+ * returned row with the shared {@linkcode mintNextCursor}. `nextCursor` is
+ * `null` precisely when the probe returned no more than `limit` rows, so the
+ * last page is indistinguishable from a full one only by the probe count.
+ *
+ * The cursor payload, predicate, fingerprint and minting all come from
+ * `@setu-ts/common`, so D1's walk is byte-identical to the four
+ * database-plugin adapters' — a cursor minted by one and presented to the
+ * other cannot drift, because there is exactly one implementation.
+ *
+ * When a projection is active the key columns and the ordered fields the minting
+ * reads are added to the internal `SELECT` so they participate in the probe and
+ * are available to the minting; they are stripped from the returned rows so the
+ * caller's projection is what comes back (§8 risk).
+ *
+ * @param db - The D1 binding
+ * @param target - The table and primary key this source addresses
+ * @param query - The normalized page query, carrying an incoming `cursor`
+ * @returns A {@linkcode PageResult} carrying `rows` and the `nextCursor`
+ */
+async function findD1Page(
+  db: ID1Database,
+  target: D1Target,
+  query: NormalizedQuery,
+): Promise<PageResult> {
+  // §3.10 — offset and cursor are contradictory; refuse before any call.
+  if (query.offset !== 0 && query.cursor !== undefined) {
+    return Promise.reject(
+      new CloudflareUnsupportedError(
+        `D1: offset=${query.offset} conflicts with cursor; use one or the other`,
+      ),
+    );
+  }
+
+  // 1. Decode cursor. A missing cursor means start of the walk; a malformed
+  //    token is refused by name.
+  let decoded: CursorPayload | null = null;
+  if (query.cursor !== undefined) {
+    decoded = decodeCursor(query.cursor);
+    if (decoded === null) {
+      return Promise.reject(
+        new CloudflareUnsupportedError(
+          `D1: entity '${target.table}': malformed cursor token`,
+        ),
+      );
+    }
+  }
+
+  // 2. Sort-fingerprint guard — a cross-sort cursor would return a silently
+  //    wrong page.
+  const fingerprint = sortFingerprint(query.orderBy);
+  if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
+    return Promise.reject(
+      new CloudflareUnsupportedError(
+        `D1: entity '${target.table}': cursor fingerprint mismatch — expected ` +
+          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
+      ),
+    );
+  }
+
+  // 3. Keyset predicate through the shared builder; conjoin it with the
+  //    caller's own filter. buildWhere already joins query.filter with
+  //    query.where, so injecting the keyset predicate into query.filter
+  //    yields the full WHERE with one AND leg per source.
+  const keyset = decoded === null
+    ? undefined
+    : keysetPredicate(decoded.orderedValues, decoded.keyValues, query.orderBy, target.primaryKey);
+  const filter: FilterExpression | undefined = keyset !== undefined && query.filter !== undefined
+    ? { type: 'and', filters: [query.filter, keyset] }
+    : keyset ?? query.filter;
+
+  // 4. The caller's projection is augmented with the key columns and the
+  //    ordered fields the minting reads, so they participate in the probe and
+  //    are available to mintNextCursor; they are stripped from the returned
+  //    rows. An empty select keeps today's `*` path.
+  const effectiveSelect = query.select.length === 0
+    ? []
+    : [...new Set([...query.select, ...target.primaryKey, ...Object.keys(query.orderBy)])];
+  const probeQuery: NormalizedQuery = {
+    ...query,
+    select: effectiveSelect,
+    limit: query.limit > 0 ? query.limit + 1 : query.limit,
+    ...(filter === undefined ? {} : { filter }),
+  };
+  const result = await prepareStatement(db, buildSelect(target, probeQuery)).all();
+  const allRows = [...result.results];
+
+  // 5. Probe outcome: more than `limit` rows means a next page exists and the
+  //    LAST returned row mints the cursor; otherwise the page is terminal.
+  const hasMore = query.limit > 0 && allRows.length > query.limit;
+  const pageRows = hasMore ? allRows.slice(0, query.limit) : allRows;
+  const nextCursor = mintNextCursor(
+    pageRows,
+    query.orderBy,
+    target.primaryKey,
+    fingerprint,
+    hasMore,
+  );
+
+  // 6. Strip the augmented columns so the caller's projection is what comes
+  //    back.
+  const rows = effectiveSelect.length === 0
+    ? pageRows
+    : pageRows.map((row) => projectD1Fields(row, query.select));
+  return Promise.resolve({ rows, nextCursor });
+}
+
+/** Project a full D1 row onto the caller's selected fields. */
+function projectD1Fields(
+  row: Record<string, unknown>,
+  select: readonly string[],
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  for (const field of select) {
+    if (field in row) projected[field] = row[field];
+  }
+  return projected;
 }
 
 /**
@@ -98,6 +232,10 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
     async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {
       const row = await prepareStatement(db, buildCount(target, where, filter)).first();
       return readCount(row);
+    },
+
+    async findPage(query: NormalizedQuery): Promise<PageResult> {
+      return await findD1Page(db, target, query);
     },
   };
 }
@@ -253,6 +391,14 @@ export function createD1TransactionDataSource(
     async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {
       buffer.assertOpen();
       return await committed.count(where, filter);
+    },
+
+    async findPage(query: NormalizedQuery): Promise<PageResult> {
+      // Reads observe committed state inside the transaction — the cursor walk
+      // must honour it, so the shared pipeline runs against the committed
+      // data source, not the deferred buffer.
+      buffer.assertOpen();
+      return await committed.findPage!(query);
     },
   };
 }

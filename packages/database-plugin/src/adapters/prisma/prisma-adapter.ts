@@ -24,12 +24,11 @@ import type {
   OrderDirection,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, keysetPredicate } from '@setu-ts/common';
+import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../errors.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
 import { keyValues } from '../../query/key-target.ts';
-import { mintNextCursor, sortFingerprint } from '../../query/cursor-page.ts';
 import {
   normalizePageQuery,
   PageNormalizationError,

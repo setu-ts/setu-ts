@@ -9,6 +9,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { NormalizedQuery } from '@setu-ts/common';
+import { encodeCursor } from '@setu-ts/common';
 
 import {
   createD1DataSource,
@@ -339,5 +340,209 @@ describe('createD1TransactionDataSource — composite keys on the deferred-write
 
     // Both operations were buffered but rolled back — nothing persisted.
     expect(db.dump('orders')[0]).toMatchObject({ status: 'open' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findPage — the §3.8 keyset walk over real SQLite (P11 ties, §3.12 refusal).
+//
+// D1 cannot import database-plugin (§2.2), so the cursor payload, the keyset
+// predicate, the sort fingerprint and the minting all come from the shared
+// `@setu-ts/common` helpers — this suite proves D1's walk is byte-identical to
+// the four database-plugin adapters' and cannot drift from it.
+// ---------------------------------------------------------------------------
+
+const PAGE_SCHEMA = 'CREATE TABLE widgets (id TEXT PRIMARY KEY, score INTEGER, name TEXT)';
+const PAGE_TARGET = { table: 'widgets', primaryKey: ['id'] } as const;
+
+/**
+ * Seed six rows carrying only three distinct `score` values — two rows per
+ * value — so a cursor walk that omits the key tiebreaker silently loses rows
+ * (the P11 defect). Every adapter's walk must return all six exactly once.
+ */
+async function seedTiedFixture(): Promise<SqliteD1> {
+  const db = new SqliteD1(PAGE_SCHEMA);
+  const source = createD1DataSource(db, PAGE_TARGET);
+  await source.create({ id: 'a', score: 10, name: 'alpha' });
+  await source.create({ id: 'b', score: 10, name: 'bravo' });
+  await source.create({ id: 'c', score: 20, name: 'charlie' });
+  await source.create({ id: 'd', score: 20, name: 'delta' });
+  await source.create({ id: 'e', score: 30, name: 'echo' });
+  await source.create({ id: 'f', score: 30, name: 'foxtrot' });
+  return db;
+}
+
+describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
+  it('walks a tied fixture across three pages, every row exactly once, last page null', async () => {
+    const db = await seedTiedFixture();
+    const source = createD1DataSource(db, PAGE_TARGET);
+
+    const p1 = await source.findPage!(query({ orderBy: { score: 'asc' }, limit: 2 }));
+    const p2 = await source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      cursor: p1.nextCursor as string,
+    }));
+    const p3 = await source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      cursor: p2.nextCursor as string,
+    }));
+
+    expect(p1.rows.map((r) => r.id)).toEqual(['a', 'b']);
+    expect(p2.rows.map((r) => r.id)).toEqual(['c', 'd']);
+    // Six rows over three pages of two: the last page is a full page of two,
+    // and the probe fetched exactly two (no extra), so nextCursor is null.
+    expect(p3.rows.map((r) => r.id)).toEqual(['e', 'f']);
+    expect(p3.nextCursor).toBeNull();
+
+    const walked = [p1, p2, p3].flatMap((p) => p.rows.map((r) => r.id as string));
+    expect(walked.sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(walked.length).toBe(6);
+    expect(new Set(walked).size).toBe(6);
+  });
+
+  it('reports nextCursor: null on the last page even when it is a full page', async () => {
+    const db = await seedTiedFixture();
+    const source = createD1DataSource(db, PAGE_TARGET);
+
+    const p1 = await source.findPage!(query({ orderBy: { score: 'asc' }, limit: 3 }));
+    const p2 = await source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 3,
+      cursor: p1.nextCursor as string,
+    }));
+
+    expect(p1.rows).toHaveLength(3);
+    expect(p1.nextCursor).not.toBeNull();
+    expect(p2.rows).toHaveLength(3);
+    expect(p2.nextCursor).toBeNull();
+  });
+
+  it('records the conjoined keyset filter, the limit+1 probe and the minted next cursor', async () => {
+    const db = await seedTiedFixture();
+    const source = createD1DataSource(db, PAGE_TARGET);
+
+    // First page: mint a cursor from the returned last row.
+    const p1 = await source.findPage!(query({ orderBy: { score: 'asc' }, limit: 2 }));
+    expect(p1.rows).toHaveLength(2);
+    expect(p1.nextCursor).not.toBeNull();
+
+    // Second page: assert on the statement the source actually sent.
+    const p2 = await source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      cursor: p1.nextCursor as string,
+    }));
+    const last = db.executed.at(-1)!;
+    // The conjoined keyset predicate is a FilterExpression rendered as the
+    // lexicographic "row after this one" comparison:
+    // (score > ?1 OR (score = ?2 AND id > ?3)).
+    expect(last.sql).toContain('("score" > ?1 OR ("score" = ?2 AND "id" > ?3))');
+    // The one-extra-row probe: limit + 1 reached the engine.
+    expect(last.sql).toContain('LIMIT ?4');
+    const limitParam = last.params[3];
+    expect(limitParam).toBe(3);
+    // The minted next cursor is encodeCursor's output for the last row's
+    // ordered + key values under the current sort.
+    expect(p2.nextCursor).toBe(
+      encodeCursor({
+        orderedValues: [20],
+        keyValues: ['d'],
+        sortFingerprint: 'score:asc',
+      }),
+    );
+  });
+
+  it('rejects a malformed cursor token by name (never a synchronous throw)', async () => {
+    const db = await seedTiedFixture();
+    const source = createD1DataSource(db, PAGE_TARGET);
+
+    await expect(source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      cursor: '!!!notb64',
+    }))).rejects.toThrow(CloudflareUnsupportedError);
+    await expect(source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      cursor: '!!!notb64',
+    }))).rejects.toThrow(/malformed cursor token/);
+  });
+
+  it('rejects a cursor whose fingerprint does not match the current sort by name', async () => {
+    const db = await seedTiedFixture();
+    const source = createD1DataSource(db, PAGE_TARGET);
+
+    const mismatched = encodeCursor({
+      orderedValues: [10],
+      keyValues: ['a'],
+      sortFingerprint: 'score:desc,id:asc',
+    });
+    await expect(source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      cursor: mismatched,
+    }))).rejects.toThrow(CloudflareUnsupportedError);
+    await expect(source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      cursor: mismatched,
+    }))).rejects.toThrow(/cursor fingerprint mismatch/);
+  });
+
+  it('strips the key columns from the returned rows when a projection is present', async () => {
+    const db = await seedTiedFixture();
+    const source = createD1DataSource(db, PAGE_TARGET);
+
+    const result = await source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      select: ['name'],
+    }));
+
+    // The caller's projection is what comes back — `id` (a key column) and
+    // `score` (the ordered field) are stripped from the returned rows.
+    expect(result.rows[0]).toEqual({ name: 'alpha' });
+    expect(Object.hasOwn(result.rows[0], 'id')).toBe(false);
+    expect(Object.hasOwn(result.rows[0], 'score')).toBe(false);
+    // But the key column AND the ordered field reached the engine so the probe
+    // and cursor minting could read them.
+    const select = db.executed.at(-1)!.sql;
+    expect(select).toContain('"name"');
+    expect(select).toContain('"score"');
+    expect(select).toContain('"id"');
+  });
+
+  it('refuses a query carrying both offset and cursor by name before any call', async () => {
+    const db = await seedTiedFixture();
+    const source = createD1DataSource(db, PAGE_TARGET);
+
+    await expect(source.findPage!(query({
+      orderBy: { score: 'asc' },
+      limit: 2,
+      offset: 1,
+      cursor: encodeCursor({
+        orderedValues: [10],
+        keyValues: ['a'],
+        sortFingerprint: 'score:asc,id:asc',
+      }),
+    }))).rejects.toThrow(/offset=1 conflicts with cursor/);
+  });
+
+  it('finds a page from the transaction data source, honoring committed state', async () => {
+    const db = await seedTiedFixture();
+    const committed = createD1DataSource(db, PAGE_TARGET);
+    // Re-seed through the committed path so the transaction's read-first sees
+    // committed state.
+    await committed.create({ id: 'z', score: 5, name: 'zero' });
+    const buffer = new D1TransactionBuffer();
+    const txSource = createD1TransactionDataSource(db, PAGE_TARGET, buffer);
+
+    const page = await txSource.findPage!(query({ orderBy: { score: 'asc' }, limit: 1 }));
+    expect(page.rows.map((r) => r.id)).toEqual(['z']);
+    expect(page.nextCursor).not.toBeNull();
+    // The read ran against committed state, not the deferred buffer.
+    expect(buffer.drain()).toHaveLength(0);
   });
 });

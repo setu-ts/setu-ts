@@ -20,7 +20,7 @@ import type {
   NormalizedQuery,
   OrderDirection,
 } from '@setu-ts/common';
-import { decodeCursor, keysetPredicate } from '@setu-ts/common';
+import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
 import {
   fromDriverDocument,
   resolveMongoTarget,
@@ -38,7 +38,6 @@ import type {
   IMongoSession,
 } from './mongo-client-types.ts';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
-import { mintNextCursor, sortFingerprint } from '../../query/cursor-page.ts';
 import {
   normalizePageQuery,
   PageNormalizationError,

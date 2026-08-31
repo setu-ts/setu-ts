@@ -20,7 +20,7 @@ import type {
   IDatabaseAdapter,
   PageResult,
 } from '@setu-ts/common';
-import { decodeCursor, keysetPredicate } from '@setu-ts/common';
+import { decodeCursor, keysetPredicate, mintNextCursor, sortFingerprint } from '@setu-ts/common';
 import {
   applyOrderBy,
   applyPagination,
@@ -31,7 +31,6 @@ import {
   unknownColumnError,
 } from '../../query/query-builder.ts';
 import { resolveKeyColumns } from '../../query/key-target.ts';
-import { mintNextCursor, sortFingerprint } from '../../query/cursor-page.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 
