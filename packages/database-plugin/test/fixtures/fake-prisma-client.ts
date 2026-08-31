@@ -108,6 +108,22 @@ function matchesPrismaWhere(
       if (!clausesOf(val).some((clause) => matchesPrismaWhere(row, clause))) return false;
       continue;
     }
+    if (key === 'NOT') {
+      // `!some` rather than `!every`, which is what the ARRAY form means.
+      // Measured against real Prisma 7.10 on live PostgreSQL over four rows
+      // spanning two conditions A and B: `NOT: [A, B]` returned only the row
+      // matching NEITHER, so the array negates each condition and ANDs them
+      // (`NOT A AND NOT B`) rather than negating their conjunction
+      // (`NOT (A AND B)`), which would have returned three rows. `!some` gives
+      // both readings correctly for a singleton and, on an empty array,
+      // constrains nothing — which is also what Prisma answered.
+      //
+      // Without this arm `{ NOT: … }` fell through to the compound-key branch
+      // and MATCHED the rows it was asked to exclude — fully inverted, on
+      // `findMany`, `update`, `delete` and `count` alike.
+      if (clausesOf(val).some((clause) => matchesPrismaWhere(row, clause))) return false;
+      continue;
+    }
     if (val !== null && typeof val === 'object' && !Array.isArray(val)) {
       const cond = val as Record<string, unknown>;
       const keys = Object.keys(cond);

@@ -125,6 +125,15 @@ _implements_ `IDataSource` or declares a custom repository key type does.
 
 ### Fixed
 
+- **The Prisma test fixture evaluated `NOT` as its inverse.** `matchesPrismaWhere` dispatched `AND`
+  and `OR` but not `NOT`, so `{ NOT: { status: 'archived' } }` fell through to the compound-key
+  branch and MATCHED the rows it was asked to exclude — on `findMany`, `update`, `delete` and
+  `count` alike. The array form's semantics were established by measurement against real Prisma 7.10
+  on live PostgreSQL rather than read off the grammar: `NOT: [A, B]` returns only the row matching
+  NEITHER, so the array negates each condition and ANDs them (`NOT A AND NOT B`) rather than
+  negating their conjunction, which would have returned three of four rows. Fixture-only; no `src`
+  behaviour changes.
+
 - **A memory-adapter transaction did not read back its own mutations to rows it had created.**
   `effectiveRecords` applied shadows and tombstones while mapping the COMMITTED rows and then
   appended buffered creates untouched — so a row created and then updated in the same transaction
