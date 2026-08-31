@@ -146,12 +146,11 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'orders', '--runtime', 'deno'])).toBe(0);
     });
 
-    // The template itself is now allowed as a member — what is refused is the
-    // pairing. It composes through a starter factory, so `TemplateHost.plugins`
-    // must stay empty, and a broker transport's contribution would be dropped by
-    // the renderer's factory branch: the member would look connected to the bus
-    // and reach nobody.
-    it('refuses a starter-composed template on a transport that adds a plugin', async () => {
+    // A starter-composed template can accept a DIRECT plugin contribution: the
+    // config renderer registers it after the starter factory returns. A broker
+    // still needs to rewrite starter-owned wiring, which the factory cannot
+    // represent, so its refusal remains the no-silent-miswire guard.
+    it('refuses a starter-composed template on a transport that rewrites a plugin', async () => {
       const h = harness([], 3000, 'redis');
       expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(2);
       expect(h.err.text()).toContain('createFullStackAppFromConfig');
@@ -160,6 +159,17 @@ describe('runAppCommand', () => {
       // since a standalone full-stack project still cannot take --broker.
       expect(h.err.text()).toContain('--template microservice --broker redis');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    it('accepts a starter-composed template on the grpc transport', async () => {
+      const h = harness([], 3000, 'grpc');
+      expect(await h.run(['app', 'web', '--template', 'full-stack'])).toBe(0);
+
+      const config = h.fs.read('/ws/apps/web/setu.config.ts');
+      expect(config).toContain("import { GrpcPlugin } from '@setu-ts/grpc-plugin';");
+      expect(config).toContain('const app = await createFullStackAppFromConfig(');
+      expect(config).toContain('app.register(GrpcPlugin());');
+      expect(h.fs.writes).toContain('/ws/apps/web/setu.config.ts');
     });
 
     // The transport is a workspace-wide choice: members can only talk over a bus

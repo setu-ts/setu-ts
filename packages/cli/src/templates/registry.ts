@@ -293,10 +293,11 @@ export interface TemplateHost {
    * Plugins passed to `createApplication({ plugins: [...] })`, in registration
    * order, starting with the runtime provider.
    *
-   * Must be empty when {@linkcode TemplateHost.appFactory} is set — the
-   * factory owns the whole plugin set, so anything listed here would be
-   * dropped. A unit test enforces it across the registry rather than a runtime
-   * check that no user input could ever reach.
+   * A starter-composed template normally leaves this empty: its factory owns
+   * the curated plugin set. A workspace transport may append a direct plugin;
+   * the renderer registers that addition after the factory returns and before
+   * the application starts. Rewriting a starter-owned plugin's arguments is
+   * not representable here and is refused by the workspace command.
    */
   readonly plugins: readonly Wiring[];
   /**
