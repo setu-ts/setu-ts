@@ -47,9 +47,17 @@ describe('dependency drift gate configuration', () => {
     // `deno fmt` and `deno lint` accept neither --lock nor --frozen, so a step
     // named "… against fresh resolution" running one of them is a false claim
     // and passing the flags would be a hard error.
+    // Pinned positively and with the trailing newline, so ANY rename fails --
+    // not merely a re-add of the one phrasing this PR removed. The false name
+    // is one of the three defects fixed here, so it needs its own pin.
+    expect(text).toContain('- name: Format check\n');
+    expect(text).toContain('- name: Lint\n');
     expect(text).toContain('run: deno task fmt:check\n');
     expect(text).toContain('run: deno task lint\n');
-    expect(text).not.toMatch(/deno task (fmt:check|lint) .*--lock/);
+    // Both flags, not just --lock: `deno fmt --check --frozen` and
+    // `deno lint --frozen` each abort with "unexpected argument '--frozen'
+    // found", so a --frozen-only regression breaks the job just as hard.
+    expect(text).not.toMatch(/deno task (fmt:check|lint) .*--(?:lock|frozen)/);
   });
 
   it('keeps the resolve step gating the four reported gates', async () => {
