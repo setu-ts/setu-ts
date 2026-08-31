@@ -543,18 +543,32 @@ describe('PrismaAdapter', () => {
       ).rejects.toThrow('prisma');
     });
 
-    it('emits the override compound name when compositeKeyName is set', async () => {
-      const entities = {
-        User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
-      };
+    /**
+     * A connected data source over an entity whose compound key is named
+     * explicitly.
+     *
+     * One helper rather than three byte-identical setups: the previous form
+     * also carried a `...(entities !== undefined ? …)` spread over a `const`
+     * object literal, a condition that can never be false — drafting residue
+     * flagged by the code-quality bot on all three copies.
+     */
+    async function compoundNameSource(
+      client: ReturnType<typeof createFakePrismaClient>,
+    ): Promise<ReturnType<PrismaAdapter['createDataSourceForEntity']>> {
       const compAdapter = new PrismaAdapter(
         {
-          prismaClient: fakeClient,
-          ...(entities !== undefined ? { entities } : {}),
+          prismaClient: client,
+          entities: {
+            User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
+          },
         } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
       );
       await compAdapter.connect();
-      const ds = compAdapter.createDataSourceForEntity('User');
+      return compAdapter.createDataSourceForEntity('User');
+    }
+
+    it('emits the override compound name when compositeKeyName is set', async () => {
+      const ds = await compoundNameSource(fakeClient);
       await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
       await ds.findById({ tenantId: 't1', userId: 7 });
       const call = fakeClient.recordedCalls.find((c) => c.action === 'findUnique');
@@ -566,17 +580,7 @@ describe('PrismaAdapter', () => {
     });
 
     it('uses the override compound name in update', async () => {
-      const entities = {
-        User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
-      };
-      const compAdapter = new PrismaAdapter(
-        {
-          prismaClient: fakeClient,
-          ...(entities !== undefined ? { entities } : {}),
-        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
-      );
-      await compAdapter.connect();
-      const ds = compAdapter.createDataSourceForEntity('User');
+      const ds = await compoundNameSource(fakeClient);
       await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
       await ds.update({ tenantId: 't1', userId: 7 }, { name: 'Alice2' });
       const call = fakeClient.recordedCalls.find((c) => c.action === 'update');
@@ -589,17 +593,7 @@ describe('PrismaAdapter', () => {
     });
 
     it('uses the override compound name in delete', async () => {
-      const entities = {
-        User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
-      };
-      const compAdapter = new PrismaAdapter(
-        {
-          prismaClient: fakeClient,
-          ...(entities !== undefined ? { entities } : {}),
-        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
-      );
-      await compAdapter.connect();
-      const ds = compAdapter.createDataSourceForEntity('User');
+      const ds = await compoundNameSource(fakeClient);
       await ds.create({ tenantId: 't1', userId: 7, name: 'Alice' });
       await ds.delete({ tenantId: 't1', userId: 7 });
       const call = fakeClient.recordedCalls.find((c) => c.action === 'delete');
