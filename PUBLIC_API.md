@@ -1475,7 +1475,7 @@ return types are nameable from the package entry, as are the collection-level sh
 | `PageOptions`, `Page`                                                                                                       | types                              |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                   | types                              |
 | `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                       | types                              |
-| `encodeCursor`, `decodeCursor`, `keysetPredicate`, `sortFingerprint`, `mintNextCursor` (re-exported from `common`)          | functions                          |
+| `encodeCursor`, `decodeCursor`, `keysetPredicate` (re-exported from `common`)                                               | functions                          |
 | `MongoTransactionUnavailableError`                                                                                          | class                              |
 | `PrismaSqlProvider`                                                                                                         | type                               |
 | `SqlJsonDialect`                                                                                                            | type                               |
