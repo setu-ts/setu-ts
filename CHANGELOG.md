@@ -78,9 +78,6 @@ All notable changes to this project are documented here. The format follows
 - Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.
-- **`@setu-ts/openapi-plugin` exports `SchemaIo`** and `ZodToOpenApi.transform` takes it as an
-  optional second argument (`transform(schema, io?)`, defaulting to `'output'`), so an existing
-  single-argument call is unchanged.
 
 ### Changed
 
