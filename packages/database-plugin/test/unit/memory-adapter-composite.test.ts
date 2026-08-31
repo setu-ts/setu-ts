@@ -515,3 +515,96 @@ describe('overlay keys are collision-free (outside-diff review, M79)', () => {
     expect((await visible(ds)).map((r) => r.tag)).toEqual(['complete']);
   });
 });
+
+describe('overlay mutations reach rows created in the same transaction (PR #218 review)', () => {
+  /** Every row currently visible through the given source. */
+  async function tags(
+    source: { findAll: (q: never) => Promise<Record<string, unknown>[]> },
+  ): Promise<unknown[]> {
+    const found = await source.findAll(
+      { where: {}, orderBy: {}, limit: -1, offset: 0, select: [] } as never,
+    );
+    return found.map((r) => r.tag);
+  }
+
+  it('reads back an update applied to a row created in the same transaction', async () => {
+    // `effectiveRecords` applied shadows and tombstones while mapping the
+    // COMMITTED rows and then appended buffered creates untouched — so
+    // `update()` returned the new record while the very next read returned the
+    // original. The divergence was confined to reads inside the transaction,
+    // which is where a caller is least likely to be suspicious of it.
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+
+    await tds.create({ id: 'n1', tag: 'created' });
+    const updated = await tds.update('n1', { tag: 'updated' });
+    expect(updated.tag).toBe('updated');
+    // The read-back must agree with what `update()` reported.
+    expect(await tags(tds)).toEqual(['updated']);
+    expect((await tds.findById('n1'))?.tag).toBe('updated');
+
+    await tx.commit();
+    expect(await tags(ds)).toEqual(['updated']);
+  });
+
+  it('hides a row created and then deleted in the same transaction', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+
+    await tds.create({ id: 'n2', tag: 'created' });
+    expect(await tds.delete('n2')).toBe(true);
+    // `delete()` reported true, so the row must be gone from the same read.
+    expect(await tags(tds)).toEqual([]);
+    expect(await tds.findById('n2')).toBeNull();
+
+    await tx.commit();
+    expect(await tags(ds)).toEqual([]);
+  });
+
+  it('discards a created-then-updated row entirely on rollback', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+
+    await tds.create({ id: 'n3', tag: 'created' });
+    await tds.update('n3', { tag: 'updated' });
+    await tx.rollback();
+    expect(await tags(ds)).toEqual([]);
+  });
+
+  it('still applies an update to a COMMITTED row, the pre-existing path', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W');
+    await ds.create({ id: 'c1', tag: 'committed' });
+
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+    await tds.update('c1', { tag: 'updated' });
+    expect(await tags(tds)).toEqual(['updated']);
+    await tx.commit();
+    expect(await tags(ds)).toEqual(['updated']);
+  });
+
+  it('applies a composite-key update to a row created in the same transaction', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+    const ds = adapter.createDataSource('W', ['a', 'b']);
+    const tx = await adapter.beginTransaction();
+    const tds: DataSource = (tx as IAdapterTransaction).createDataSource('W');
+
+    await tds.create({ a: 'p', b: 'q', tag: 'created' });
+    await tds.update({ a: 'p', b: 'q' }, { tag: 'updated' });
+    expect(await tags(tds)).toEqual(['updated']);
+    await tx.commit();
+    expect(await tags(ds)).toEqual(['updated']);
+  });
+});

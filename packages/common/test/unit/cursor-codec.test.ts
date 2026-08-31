@@ -706,6 +706,42 @@ describe('decodeCursor refuses a token carrying junk (outside-diff review, M79)'
     }
   });
 
+  it('inspects the whole token, not just up to the first padding character', () => {
+    // The scan used to STOP at the first `=` and never look at what followed,
+    // so `token + '=$'` decoded to the original payload.
+    for (const junk of ['=$', '=!!', '==@@', '=\n', '===']) {
+      expect(decodeCursor(token + junk), JSON.stringify(junk)).toBeNull();
+    }
+  });
+
+  it('refuses the standard-base64 spelling of the same payload', () => {
+    // Validation runs on the RAW token, before `-`/`_` are normalised — the
+    // only place it can be correct. After normalisation a decoded `+` is
+    // indistinguishable from one the caller supplied, so a post-normalisation
+    // check has to accept both, which admits two spellings of one payload.
+    let withUrlChars: string | null = null;
+    for (let i = 0; i < 400 && withUrlChars === null; i++) {
+      const candidate = encodeCursor({
+        orderedValues: [`v${i}~`],
+        keyValues: [`k${i}?`],
+        sortFingerprint: 's:asc',
+      });
+      if (/[-_]/.test(candidate)) withUrlChars = candidate;
+    }
+    // Vacuity guard: without a `-` or `_` there is nothing to swap and the
+    // assertion below would pass for the wrong reason.
+    expect(withUrlChars, 'a token carrying - or _').not.toBeNull();
+    const token64 = (withUrlChars as string).replace(/-/g, '+').replace(/_/g, '/');
+    expect(token64).not.toBe(withUrlChars);
+    expect(decodeCursor(withUrlChars as string)).not.toBeNull();
+    expect(decodeCursor(token64)).toBeNull();
+  });
+
+  it('refuses a bare + or / appended to a token', () => {
+    expect(decodeCursor(token + '+')).toBeNull();
+    expect(decodeCursor(token + '/')).toBeNull();
+  });
+
   it('still tolerates trailing base64 padding', () => {
     // `=` is padding, not data: `base64UrlEncode` strips it, so a token this
     // module minted never carries any — but accepting it is conventional

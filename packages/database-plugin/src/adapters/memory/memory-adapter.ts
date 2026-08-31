@@ -304,23 +304,32 @@ export class MemoryAdapter implements IDatabaseAdapter {
      */
     const effectiveRecords = (): Record<string, unknown>[] => {
       const store = this.getStore(entity);
+      // The overlay's own key for a row, derived from the row's key columns.
+      const keyOf = (row: Record<string, unknown>): string => {
+        const id = store.primaryKey.length === 1 ? row[store.primaryKey[0]] as EntityKey : (() => {
+          const rec: Record<string, string | number> = {};
+          for (const c of store.primaryKey) rec[c] = row[c] as string | number;
+          return rec;
+        })();
+        return overlayKey(entity, id, store.primaryKey);
+      };
+      // Shadows and tombstones apply to EVERY row a transaction can see, not
+      // only to committed ones. Buffered creates used to be appended raw, so a
+      // row created and then updated in the same transaction read back with its
+      // original values — `update()` returned the new record while the next
+      // read returned the old one — and a created row that was then deleted
+      // stayed visible until commit. Both committed correctly, so the
+      // divergence was confined to reads inside the transaction, which is
+      // where a caller is least likely to be suspicious of them.
+      const applyOverlay = (row: Record<string, unknown>): Record<string, unknown> | null => {
+        const key = keyOf(row);
+        if (overlay.tombstones.has(key)) return null; // deleted
+        return overlay.shadows.get(key)?.record ?? row;
+      };
       return store.records
-        .map((r) => {
-          const idForOverlay = store.primaryKey.length === 1
-            ? r[store.primaryKey[0]] as EntityKey
-            : (() => {
-              const rec: Record<string, string | number> = {};
-              for (const c of store.primaryKey) rec[c] = r[c] as string | number;
-              return rec;
-            })();
-          const key = overlayKey(entity, idForOverlay, store.primaryKey);
-          if (overlay.tombstones.has(key)) return null; // deleted
-          const shadow = overlay.shadows.get(key);
-          if (shadow) return shadow.record;
-          return r;
-        })
-        .filter((r): r is Record<string, unknown> => r !== null)
-        .concat(overlay.creates.filter((c) => c.entity === entity).map((c) => c.record));
+        .concat(overlay.creates.filter((c) => c.entity === entity).map((c) => c.record))
+        .map(applyOverlay)
+        .filter((r): r is Record<string, unknown> => r !== null);
     };
 
     return {

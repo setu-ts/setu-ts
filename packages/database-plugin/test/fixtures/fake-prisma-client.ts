@@ -63,6 +63,26 @@ const OPERATOR_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Normalize an `AND`/`OR` value to a clause list.
+ *
+ * Prisma accepts a SINGLETON `WhereInput` as well as an array, so a bare
+ * `as Record<string, unknown>[]` cast left `.every`/`.some` `undefined` and
+ * threw a `TypeError` on that shape. The adapter only ever emits arrays today,
+ * so this is not reachable from `src` — but this fixture's contract is to
+ * evaluate "the `where` input a real Prisma client would receive", and a double
+ * that refuses input the real client accepts is the class of infidelity this
+ * file exists to avoid.
+ *
+ * @param value - The `AND`/`OR` value from a `where` input
+ * @returns The clauses as a list
+ */
+function clausesOf(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value as Record<string, unknown>[]
+    : [value as Record<string, unknown>];
+}
+
+/**
  * Evaluate a Prisma-style `where` object against a row — the subset of the
  * operator grammar the adapter emits: flat equality, `AND`/`OR` composition,
  * field operator objects (`equals`/`gt`/`gte`/`lt`/`lte`/`contains`/`in`,
@@ -81,13 +101,11 @@ function matchesPrismaWhere(
 ): boolean {
   for (const [key, val] of Object.entries(where)) {
     if (key === 'AND') {
-      const clauses = val as Record<string, unknown>[];
-      if (!clauses.every((clause) => matchesPrismaWhere(row, clause))) return false;
+      if (!clausesOf(val).every((clause) => matchesPrismaWhere(row, clause))) return false;
       continue;
     }
     if (key === 'OR') {
-      const clauses = val as Record<string, unknown>[];
-      if (!clauses.some((clause) => matchesPrismaWhere(row, clause))) return false;
+      if (!clausesOf(val).some((clause) => matchesPrismaWhere(row, clause))) return false;
       continue;
     }
     if (val !== null && typeof val === 'object' && !Array.isArray(val)) {

@@ -442,10 +442,16 @@ function base64Url(input: string): string {
  * @since 0.2.0
  */
 function base64UrlDecode(input: string): string {
-  return utf8FromBytes(base64ToBytes(input.replace(/-/g, '+').replace(/_/g, '/')));
+  return utf8FromBytes(base64UrlToBytes(input));
 }
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * The base64url alphabet: the same 62 leading symbols, with `-`/`_` in place of
+ * base64's `+`/`/`. Derived from {@linkcode ALPHABET} so the two cannot drift.
+ */
+const URL_ALPHABET = `${ALPHABET.slice(0, 62)}-_`;
 
 /**
  * @param bytes - The raw bytes to encode
@@ -467,24 +473,45 @@ function base64FromBytes(bytes: number[]): string {
 }
 
 /**
- * @param input - The standard base64 string to decode
+ * Decode a **base64url** string to raw bytes, refusing anything the alphabet
+ * does not contain.
+ *
+ * The validation happens here, on the RAW token, rather than after normalising
+ * `-`/`_` to `+`/`/` — which is the only place it can be correct. Once
+ * normalised, a legitimately-decoded `+` is indistinguishable from a `+` the
+ * caller supplied, so a post-normalisation check has to accept both and
+ * therefore accepts a standard-base64 token as if it were base64url. Two
+ * spellings of one payload, in a function whose input is untrusted.
+ *
+ * Padding is accepted only as a trailing run of at most two `=`. A previous
+ * build stopped the scan at the first `=` and never inspected what followed, so
+ * `token + '=$'` decoded to the original payload.
+ *
+ * @param input - The base64url string to decode
  * @returns The raw bytes
+ * @throws {Error} When a character is outside the alphabet, or padding is
+ * malformed or not at the end. {@linkcode decodeCursor} catches this and
+ * answers `null`.
  * @since 0.2.0
  */
-function base64ToBytes(input: string): number[] {
+function base64UrlToBytes(input: string): number[] {
   const table = new Map<string, number>();
-  for (let i = 0; i < ALPHABET.length; i++) table.set(ALPHABET[i], i);
+  for (let i = 0; i < URL_ALPHABET.length; i++) table.set(URL_ALPHABET[i], i);
   const values: number[] = [];
+  let padding = 0;
   for (const ch of input) {
-    if (ch === '=') break;
+    if (ch === '=') {
+      padding += 1;
+      if (padding > 2) throw new Error('base64url: more than two padding characters');
+      continue;
+    }
+    if (padding > 0) {
+      // Padding is terminal by definition, so a data character after one means
+      // the token carries junk rather than valid padding.
+      throw new Error(`base64url: character '${ch}' follows padding`);
+    }
     const code = table.get(ch);
     if (code === undefined) {
-      // A character outside the alphabet is REFUSED, not skipped. Skipping made
-      // the decoder lenient in a way a token-validating function must not be:
-      // appending any junk to a valid token still decoded to the original
-      // payload, so `token + '$'` was accepted as if it were `token`. A cursor
-      // is untrusted caller input, so two different strings must not decode to
-      // one payload. `decodeCursor` catches this and answers `null`.
       throw new Error(`base64url: character '${ch}' is outside the alphabet`);
     }
     values.push(code);

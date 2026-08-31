@@ -125,6 +125,19 @@ _implements_ `IDataSource` or declares a custom repository key type does.
 
 ### Fixed
 
+- **A memory-adapter transaction did not read back its own mutations to rows it had created.**
+  `effectiveRecords` applied shadows and tombstones while mapping the COMMITTED rows and then
+  appended buffered creates untouched — so a row created and then updated in the same transaction
+  read back with its original values while `update()` had just returned the new ones, and a created
+  row that was then deleted stayed visible although `delete()` reported `true`. Both committed
+  correctly, so the divergence was confined to reads inside the transaction.
+- **`decodeCursor` accepted two further malformed tokens.** The scan stopped at the first `=` and
+  never inspected what followed, so `token + '=$'` decoded to the original payload; and validation
+  ran after `-`/`_` were normalised to `+`/`/`, where a decoded character is indistinguishable from
+  one the caller supplied, so the standard-base64 spelling of a token was accepted as if it were
+  base64url. Validation now runs once, on the raw token, against the base64url alphabet, with
+  padding accepted only as a trailing run of at most two `=`.
+
 - **`findPage` on the memory adapter ignored the caller's `where`.** It applied the cursor predicate
   and `filter` but not `where`, while `findAll` applied all three — so a page scoped by tenant,
   owner or role returned rows outside the caller's own criteria. Reproduced on the public surface:
