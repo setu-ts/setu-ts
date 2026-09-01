@@ -24,7 +24,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { NormalizedQuery } from '@setu-ts/common';
+import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
+import { matchesFilter } from '../../src/query/query-builder.ts';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import type {
   ICosmosClient,
@@ -275,6 +276,87 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
       await expect(scopedSource.create({ id: 's2', tenantId: 't2' }))
         .rejects.toThrow(/single\s+partition-key value/);
       await scoped.rollback();
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('answers every portable filter case exactly as the Memory reference does', {
+    ignore: skipReal,
+  }, async () => {
+    // The sixth adapter's leg of `filter-conformance.test.ts`. That file
+    // evaluates each backend's translated predicate against a shared row set;
+    // Cosmos emits SQL whose CONTAINS/ARRAY_CONTAINS semantics no local
+    // evaluator reproduces, so the answers come from the real service while the
+    // expectation still comes from the Memory adapter's own evaluator.
+    const container = await provision(`filters_${suffix}`, '/tenantId');
+    const rows: Record<string, unknown>[] = [
+      { id: 'r1', tenantId: 't1', name: '50% off sale', rank: 1 },
+      { id: 'r2', tenantId: 't1', name: 'back\\slash', rank: 2 },
+      { id: 'r3', tenantId: 't1', name: 'a_b underscore', rank: 3 },
+      { id: 'r4', tenantId: 't1', name: 'plain text', rank: 4 },
+      { id: 'r5', tenantId: 't2', name: 'Bolt M6', rank: 5 },
+    ];
+    const adapter = new CosmosAdapter({
+      endpoint: endpoint as string,
+      key,
+      database: databaseId,
+      containers: { Filter: { container, partitionKey: 'tenantId' } },
+    });
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Filter');
+      for (const row of rows) await source.create(row);
+
+      const cases: { label: string; filter: FilterExpression }[] = [
+        {
+          label: 'contains a literal %',
+          filter: { type: 'comparison', field: 'name', operator: 'contains', value: '50%' },
+        },
+        {
+          label: 'contains a literal _',
+          filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'a_b' },
+        },
+        {
+          label: 'contains a backslash',
+          filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'back\\slash' },
+        },
+        {
+          label: 'in over two values',
+          filter: { type: 'comparison', field: 'rank', operator: 'in', value: [1, 3] },
+        },
+        {
+          label: 'an empty in matches nothing',
+          filter: { type: 'comparison', field: 'rank', operator: 'in', value: [] },
+        },
+        {
+          label: 'an ordered comparison',
+          filter: { type: 'comparison', field: 'rank', operator: 'gte', value: 4 },
+        },
+        {
+          label: 'an or group',
+          filter: {
+            type: 'or',
+            filters: [
+              { type: 'comparison', field: 'rank', operator: 'eq', value: 1 },
+              { type: 'comparison', field: 'rank', operator: 'eq', value: 5 },
+            ],
+          },
+        },
+        { label: 'an empty and matches everything', filter: { type: 'and', filters: [] } },
+        { label: 'an empty or matches nothing', filter: { type: 'or', filters: [] } },
+      ];
+
+      for (const { label, filter } of cases) {
+        const expected = rows
+          .filter((row) => matchesFilter(row, filter))
+          .map((row) => row['id'])
+          .sort();
+        const served = (await source.findAll(query({ filter, select: ['id'] })))
+          .map((row) => row['id'])
+          .sort();
+        expect({ label, served }).toEqual({ label, served: expected });
+      }
     } finally {
       await adapter.disconnect();
     }

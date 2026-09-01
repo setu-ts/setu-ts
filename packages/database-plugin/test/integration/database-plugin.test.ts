@@ -33,6 +33,8 @@ import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
+import { createFakeCosmosClient } from '../fixtures/fake-cosmos-client.ts';
+import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 
 /** Minimal fake config. */
 function createFakeConfig(): IConfig {
@@ -666,5 +668,59 @@ describe('DatabasePlugin integration', () => {
 
       await app.stop();
     });
+  });
+});
+
+describe("DatabasePlugin — the 'cosmos' arm", () => {
+  it('constructs a CosmosAdapter and serves repository reads and writes', async () => {
+    // Driven through the plugin rather than the adapter, so `buildAdapterOptions`
+    // is proven to carry `endpoint`/`key`/`database`/`containers` across the
+    // plugin boundary — the M70j `entities` defect, where a silently dropped
+    // key left the adapter on its defaults.
+    const fake = createFakeCosmosClient({
+      containers: { orders: { partitionKeyPaths: ['/tenantId'] } },
+    });
+    const app = createApplication({
+      plugins: [
+        createTestRuntimePlugin([]),
+        DatabasePlugin({
+          type: 'cosmos',
+          options: {
+            client: fake.client,
+            database: 'app',
+            containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
+          },
+        }),
+      ],
+    });
+    await app.start();
+
+    const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    type OrderKey = { id: string; tenantId: string };
+    const repo = db.getRepository<{ id: string; tenantId: string; total: number }, OrderKey>(
+      'Order',
+    );
+
+    await repo.create({ id: 'o1', tenantId: 't1', total: 3 });
+    expect((await repo.findById({ id: 'o1', tenantId: 't1' }))?.total).toBe(3);
+    expect((await repo.update({ id: 'o1', tenantId: 't1' }, { total: 4 })).total).toBe(4);
+    expect(await repo.exists({ id: 'o1', tenantId: 't1' })).toBe(true);
+    expect(await repo.delete({ id: 'o1', tenantId: 't1' })).toBe(true);
+    expect(await repo.findById({ id: 'o1', tenantId: 't1' })).toBeNull();
+
+    // The mapping reached the adapter: the write landed in the MAPPED
+    // container, not in one named after the entity.
+    expect(Object.keys(fake.recorder.definitionReads)).toEqual(['orders']);
+
+    await app.stop();
+  });
+
+  it('reports the adapter unhealthy before connect and healthy after', async () => {
+    const fake = createFakeCosmosClient({ containers: { Order: { partitionKeyPaths: ['/id'] } } });
+    const adapter = new CosmosAdapter({ client: fake.client, database: 'app' });
+    expect(adapter.isReady()).toBe(false);
+    await adapter.connect();
+    expect(adapter.isReady()).toBe(true);
+    await adapter.disconnect();
   });
 });

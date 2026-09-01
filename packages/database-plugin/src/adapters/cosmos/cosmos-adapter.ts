@@ -191,7 +191,13 @@ export class CosmosAdapter implements IDatabaseAdapter {
    * @inheritdoc
    */
   beginTransaction(): Promise<IAdapterTransaction> {
-    this.#assertConnected();
+    // The not-connected refusal REJECTS rather than throwing synchronously:
+    // this method is typed `Promise<…>`, and a synchronous throw bypasses any
+    // caller using `.catch()`. `createDataSource` returns its value
+    // synchronously, so its own throw is correct as it stands.
+    if (!this.#connected) {
+      return Promise.reject(new Error('CosmosAdapter is not connected — call connect() first'));
+    }
     return Promise.resolve(
       new CosmosTransaction(
         this.#database as ICosmosDatabase,

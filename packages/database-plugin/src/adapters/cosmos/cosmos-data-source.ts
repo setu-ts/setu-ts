@@ -209,8 +209,8 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       throw new Error(
         `CosmosAdapter.${operation}: '${scalar}' matches more than one document in ` +
           `'${target.container}'. A Cosmos id is unique only within a partition, so pass the ` +
-          `partition key alongside it — findById({ ${target.primaryKey}: '${scalar}', ` +
-          `${resolved.paths[0]?.join('.') ?? 'partitionKey'}: … }).`,
+          `partition key alongside it: a composite key carrying '${target.primaryKey}' and ` +
+          `${renderPaths(resolved.paths)}.`,
       );
     }
     const document = found.resources[0] as Record<string, unknown>;
@@ -628,8 +628,12 @@ export class CosmosTransaction implements IAdapterTransaction {
       operations,
       partitionKey,
     );
+    // Success is exactly 200. A batch whose operations did not all apply answers
+    // **207** with per-operation statuses (measured: 424 for the operations the
+    // failure aborted, and the real fault's own status beside them), so a
+    // `>= 300` threshold would report a rolled-back batch as committed.
     const code = response.code ?? 200;
-    if (code >= 300) {
+    if (code !== 200) {
       const statuses = (response.result ?? []).map((entry) => entry.statusCode).join(', ');
       throw new Error(
         `CosmosAdapter: the transactional batch on '${containerName}' failed with status ${code} ` +
@@ -643,13 +647,25 @@ export class CosmosTransaction implements IAdapterTransaction {
    * undone.
    */
   rollback(): Promise<void> {
-    this.#settle('rollback');
+    // The refusal REJECTS rather than throwing synchronously: this method is
+    // typed `Promise<void>`, and a synchronous throw bypasses any caller using
+    // `.catch()` (the defect class M52b, M52c and M70j each closed elsewhere).
+    // `commit` needs no such care — it is `async`, so its throw is a rejection.
+    if (this.#settled) {
+      return Promise.reject(
+        new Error('CosmosAdapter: this transaction has already settled; rollback is a no-op'),
+      );
+    }
+    this.#settled = true;
     this.#buffer.clear();
     return Promise.resolve();
   }
 
   /**
    * Refuses a second settlement of the same handle.
+   *
+   * Called from `commit`, which is `async`, so this throw becomes a rejection.
+   * `rollback` performs the same check inline because it is not.
    *
    * @param operation - The member being called
    * @throws {Error} When the transaction has already settled

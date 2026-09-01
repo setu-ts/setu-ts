@@ -2,9 +2,17 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as database from '../../src/index.ts';
 import type {
+  CosmosAdapterOptions,
+  CosmosAdapterOptionsBase,
+  CosmosDatabaseOptions,
+  CosmosEntityMapping,
+  CosmosPartitionKeyValue,
+  CosmosQueryParameter,
+  CosmosQuerySpec,
   CursorValue,
   DrizzleAdapterOptions,
   DrizzleDatabaseOptions,
+  ICosmosClient,
   MemoryDatabaseOptions,
   MongoAdapterOptions,
   MongoDatabaseOptions,
@@ -110,6 +118,53 @@ describe('database-plugin barrel exports', () => {
     ) {
       expect(Object.hasOwn(database, internal)).toBe(false);
     }
+  });
+
+  it('exports the Cosmos adapter and only its application-facing surface', () => {
+    expect(typeof database.CosmosAdapter).toBe('function');
+    expect(typeof database.CosmosTransactionScopeError).toBe('function');
+    expect(typeof database.CosmosConcurrentModificationError).toBe('function');
+    for (
+      const internal of [
+        'createCosmosDataSource',
+        'CosmosTransaction',
+        'PartitionKeyResolver',
+        'BatchBuffer',
+        'buildQuery',
+        'buildCountQuery',
+        'resolveCosmosTarget',
+        'fromDocument',
+        'toDocument',
+      ]
+    ) {
+      expect(Object.hasOwn(database, internal)).toBe(false);
+    }
+  });
+
+  it('exports the Cosmos option arms and injection seam at COMPILE time', () => {
+    // Type-only exports leave no runtime trace, so dropping one would leave
+    // every other assertion in this file green (the M56 defect class).
+    const mapping: CosmosEntityMapping = { container: 'orders', partitionKey: 'tenantId' };
+    const base: CosmosAdapterOptionsBase = { database: 'app', containers: { Order: mapping } };
+    const options: CosmosAdapterOptions = {
+      ...base,
+      endpoint: 'https://acct.documents.azure.com:443/',
+      key: 'k',
+    };
+    const arm: CosmosDatabaseOptions = { type: 'cosmos', options };
+    const injected: CosmosAdapterOptions = { ...base, client: {} as ICosmosClient };
+    const spec: CosmosQuerySpec = {
+      query: 'SELECT * FROM c',
+      parameters: [{ name: '@p0', value: 1 } satisfies CosmosQueryParameter],
+    };
+    const partitionKey: CosmosPartitionKeyValue = ['t1', 'in'];
+    expect([arm.type, mapping.container, spec.query, partitionKey.length]).toEqual([
+      'cosmos',
+      'orders',
+      'SELECT * FROM c',
+      2,
+    ]);
+    expect(injected.database).toBe('app');
   });
 
   it('does not leak the internal raw-statement binder', () => {
