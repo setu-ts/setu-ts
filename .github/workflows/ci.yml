@@ -28,6 +28,10 @@ jobs:
       S3_SECRET_ACCESS_KEY: minioadmin
       SMTP_URL: smtp://localhost:1025
       MONGODB_URI: mongodb://127.0.0.1:27017
+      # M80 §6.2: the real-emulator DynamoDB suite (database-plugin) guards on
+      # this exact endpoint, which is also the host:port the package manifest's
+      # net grant scopes.
+      DYNAMODB_ENDPOINT: http://127.0.0.1:8000
     services:
       mongo:
         image: mongo:8
@@ -105,6 +109,20 @@ jobs:
           - 1025:1025
         options: >-
           --health-cmd "/mailpit readyz"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      # M80 §6.2: the real-emulator DynamoDB suite (database-plugin) needs the
+      # emulator. A bare GET / answers 400, so a naive `curl -f /` could never
+      # pass — but curl IS in the image, and a POST ListTables answers 200 once
+      # the emulator is ready (M80 §1A E3, measured). Like ElasticMQ above,
+      # the probe has to match what readiness actually means here.
+      dynamodb:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
+        options: >-
+          --health-cmd "curl -sf -X POST -H 'X-Amz-Target: DynamoDB_20120810.ListTables' -H 'Content-Type: application/x-amz-json-1.0' -d '{}' http://localhost:8000/"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10

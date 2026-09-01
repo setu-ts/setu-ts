@@ -160,11 +160,35 @@ describe('real-backend CI wiring', () => {
     // M79 §7 added `127.0.0.1:5433` for the live Prisma/PostgreSQL suite
     // (guarded on POSTGRES_URL) — endpoint-scoped in the manifest, because a
     // CLI `--allow-net` would REPLACE this block rather than union with it.
+    // M80 §6.2 added `127.0.0.1:8000` the same way, for the DynamoDB emulator
+    // suite guarded on DYNAMODB_ENDPOINT (pinned in the test below).
     expect(config.test?.permissions?.net).toEqual([
       '127.0.0.1:27017',
       'localhost:27017',
       '127.0.0.1:5433',
+      '127.0.0.1:8000',
     ]);
+  });
+
+  it('declares the DynamoDB Local service, endpoint env, and scoped grant (M80 §6.2)', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(workflow).toContain('image: amazon/dynamodb-local:latest');
+    // The port mapping is load-bearing exactly as for Redis/Mongo above: the
+    // job runs directly on the runner, and both the suite's endpoint and the
+    // manifest's net grant address exactly 127.0.0.1:8000.
+    expect(workflow).toContain('- 8000:8000');
+    expect(workflow).toContain('DYNAMODB_ENDPOINT: http://127.0.0.1:8000');
+    // The POST ListTables probe is load-bearing: a bare GET / answers 400, so
+    // a naive `curl -f /` healthcheck would never turn the service healthy —
+    // the guarded suite would then skip while CI stayed green, which is the
+    // exact failure these pins exist to end. Pinning the target header keeps
+    // the probe from decaying into that GET.
+    expect(workflow).toContain('-X POST');
+    expect(workflow).toContain('DynamoDB_20120810.ListTables');
+    const config = await readJson<{
+      readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
+    }>('packages/database-plugin/deno.json');
+    expect(config.test?.permissions?.net).toContain('127.0.0.1:8000');
   });
 
   it('pins ElasticMQ image and declares SQS local-region/credentials', async () => {
