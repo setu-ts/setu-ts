@@ -3793,8 +3793,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   leg of `filter-conformance.test.ts`: that file cannot evaluate Cosmos SQL without becoming a
   second query engine, and a fake engine agreeing with a fake engine proves nothing. The guarded
   suite is local-only — the emulator image is 2.5 GB, the same reason the Pub/Sub and Service Bus
-  suites are — with the `docker run` and the health line in the package README) — complete (PR
-  pending)
+  suites are — with the `docker run` and the health line in the package README) — complete (PR #220)
 - **Next milestone** — **M80** (DynamoDB backend), gated on M79 and now unblocked; **M82** (Cloud
   Bigtable backend) is the remaining backend, also gated on M79.
 
