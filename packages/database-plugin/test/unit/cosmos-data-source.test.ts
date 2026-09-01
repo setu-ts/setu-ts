@@ -194,6 +194,20 @@ describe('findById', () => {
       .toEqual({ id: 'o1', address: { city: 'pune' }, total: 1 });
   });
 
+  it('accepts a composite key for a MAPPED primary key on an /id-partitioned container', async () => {
+    // The key record carries the repository name (`orderId`) while the
+    // partition-key path names the document field (`/id`). The scalar path
+    // already treated the two as equivalent through `partitionsByPrimaryKey`,
+    // so the same key was accepted as a scalar and refused as a composite.
+    const { source } = makeSource({
+      containers: {
+        Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1', total: 5 } } },
+      },
+    }, { Order: { container: 'Order', primaryKey: 'orderId' } });
+    expect(await source.findById('o1')).toEqual({ orderId: 'o1', total: 5 });
+    expect(await source.findById({ orderId: 'o1' })).toEqual({ orderId: 'o1', total: 5 });
+  });
+
   it('refuses a composite key missing ONE segment of a hierarchical partition key', async () => {
     // A hierarchical key reads as an array, so a missing segment leaves a hole
     // inside it rather than making the whole value undefined — which the

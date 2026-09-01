@@ -272,16 +272,29 @@ describe('update — a field name a patch path cannot express', () => {
     expect(row).toMatchObject({ id: 'o1', keep: 'yes', 'a/b': 'written' });
   });
 
-  it('still patches a payload whose field names carry no slash', async () => {
+  it('routes a tilde-carrying field through replace as well', async () => {
+    // Microsoft documents a patch path as escaping `~` to `~0`, so a strict
+    // service reads a literal `~` as the start of an escape while the emulator
+    // writes it literally. Emitting either form is right on one backend and
+    // wrong or unknown on the other, so the replace path settles it.
     const { source, fake } = makeSource({
       containers: {
         Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1' } } },
       },
     }, byId);
-    // A tilde needs no special handling: written literally by the emulator, and
-    // rejected rather than misplaced by a strict JSON Pointer reader.
     await source.update('o1', { 'c~d': 1 });
-    expect(fake.recorder.patches).toEqual([[{ op: 'set', path: '/c~d', value: 1 }]]);
+    expect(fake.recorder.patches).toEqual([]);
+    expect(fake.recorder.replaces).toHaveLength(1);
+  });
+
+  it('still patches a payload whose field names carry neither', async () => {
+    const { source, fake } = makeSource({
+      containers: {
+        Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1' } } },
+      },
+    }, byId);
+    await source.update('o1', { plain: 1 });
+    expect(fake.recorder.patches).toEqual([[{ op: 'set', path: '/plain', value: 1 }]]);
     expect(fake.recorder.replaces).toEqual([]);
   });
 });

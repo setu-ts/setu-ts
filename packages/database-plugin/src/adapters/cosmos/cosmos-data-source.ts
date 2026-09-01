@@ -86,6 +86,14 @@ export interface CosmosDataSourceContext {
 }
 
 /**
+ * Whether a partition key is being read out of a repository-shaped KEY record
+ * or out of a stored DOCUMENT. The two spell a mapped primary key differently.
+ *
+ * @internal
+ */
+type KeyShape = 'key' | 'document';
+
+/**
  * A partition-key value read out of a row, beside the paths that were absent.
  *
  * @internal
@@ -154,6 +162,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
   const partitionKeyOf = (
     row: Record<string, unknown>,
     resolved: ResolvedPartitionKey,
+    shape: KeyShape,
   ): ReadPartitionKey => {
     const missing: (readonly string[])[] = [];
     const values = resolved.paths.map((path) => {
@@ -161,7 +170,19 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       // addressed by its dotted join ('address.city'); a row is nested, so the
       // segment walk finds it. Both spellings are tried, in that order.
       const flat = row[path.join('.')];
-      const value = flat === undefined ? readPath(row, path) : flat;
+      let value = flat === undefined ? readPath(row, path) : flat;
+      // A KEY record carries REPOSITORY field names, while a partition-key path
+      // names a DOCUMENT field — and the two differ for a mapped primary key,
+      // which is stored as `id`. A container partitioned on `/id` therefore has
+      // to read the caller's own spelling. `partitionsByPrimaryKey` already
+      // treats the two as equivalent on the scalar path, so without this the
+      // same key was accepted as a scalar and refused as a composite.
+      if (
+        value === undefined && shape === 'key' && path.length === 1 &&
+        path[0] === DOCUMENT_ID_FIELD && target.primaryKey !== DOCUMENT_ID_FIELD
+      ) {
+        value = row[target.primaryKey];
+      }
       // `undefined` is ABSENT; `null` is a partition-key value Cosmos stores,
       // so the two are told apart rather than collapsed.
       if (value === undefined) missing.push(path);
@@ -193,8 +214,9 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     resolved: ResolvedPartitionKey,
     operation: string,
     subject: string,
+    shape: KeyShape,
   ): CosmosPartitionKeyValue => {
-    const read = partitionKeyOf(row, resolved);
+    const read = partitionKeyOf(row, resolved, shape);
     if (read.missing.length > 0) {
       throw new Error(
         `CosmosAdapter.${operation}: ${subject} for '${target.container}' must carry the ` +
@@ -241,6 +263,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         resolved,
         operation,
         'the composite key',
+        'key',
       );
       return { id: requireStringId(keyValue, operation), partitionKey };
     }
@@ -266,7 +289,13 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     const document = found.resources[0] as Record<string, unknown>;
     return {
       id: scalar,
-      partitionKey: requirePartitionKey(document, resolved, operation, 'the stored document'),
+      partitionKey: requirePartitionKey(
+        document,
+        resolved,
+        operation,
+        'the stored document',
+        'document',
+      ),
       document,
     };
   };
@@ -321,7 +350,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
           container: target.container,
           // A batch is addressed by ONE partition-key value, so an incomplete
           // one here would send the whole batch to the wrong place.
-          partitionKey: requirePartitionKey(document, resolved, 'create', 'the row'),
+          partitionKey: requirePartitionKey(document, resolved, 'create', 'the row', 'document'),
           operation: { operationType: 'Create', resourceBody: document },
         });
         return fromDocument(document, target);
@@ -590,15 +619,19 @@ export function patchOperations(
  * payload takes the whole-document replace path, which addresses no pointer at
  * all and writes the field correctly on either backend.
  *
- * `~` needs no such handling: it is written literally by the emulator, and a
- * strict JSON Pointer reader rejects a dangling `~` rather than misplacing it.
+ * `~` takes the same route, for the same reason read from the other side.
+ * Microsoft documents a patch path as escaping `~` to `~0`, so a strict service
+ * reads a literal `~` as the start of an escape; the emulator writes it
+ * literally instead. Emitting the literal is therefore right on one backend and
+ * unknown on the other, and escaping is right on one and wrong on the other —
+ * so neither is emitted and the replace path settles it.
  *
  * @param fields - The payload entries to write
  * @returns `true` when every field name is expressible as a pointer segment
  * @since 0.2.0
  */
 export function isPatchable(fields: readonly (readonly [string, unknown])[]): boolean {
-  return fields.every(([field]) => !field.includes('/'));
+  return fields.every(([field]) => !field.includes('/') && !field.includes('~'));
 }
 
 /**

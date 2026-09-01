@@ -113,3 +113,39 @@ describe('PartitionKeyResolver', () => {
     expect((await resolver.resolve(target)).paths).toEqual([['pk']]);
   });
 });
+
+describe('two entity mappings sharing one container', () => {
+  it('refuses a conflicting declaration even when the container is already cached', async () => {
+    // The cache is keyed by container while the refusal is a property of the
+    // TARGET, so validating only inside the cached read checked the first
+    // mapping and silently accepted every later one.
+    const fake = createFakeCosmosClient({
+      containers: { shared: { partitionKeyPaths: ['/tenantId'] } },
+    });
+    const database = fake.client.database('db');
+    const resolver = new PartitionKeyResolver(database);
+    const discovered = resolveCosmosTarget('A', { A: { container: 'shared' } });
+    const conflicting = resolveCosmosTarget('B', {
+      B: { container: 'shared', partitionKey: 'wrongField' },
+    });
+    await resolver.resolve(discovered);
+    await expect(resolver.resolve(conflicting))
+      .rejects.toThrow(/declares \/wrongField but the container declares \/tenantId/);
+    // The container definition is still read only once, so the guard costs no
+    // extra round trip.
+    expect(fake.recorder.definitionReads['shared']).toBe(1);
+  });
+
+  it('still serves a second mapping that agrees with the container', async () => {
+    const fake = createFakeCosmosClient({
+      containers: { shared: { partitionKeyPaths: ['/tenantId'] } },
+    });
+    const database = fake.client.database('db');
+    const resolver = new PartitionKeyResolver(database);
+    await resolver.resolve(resolveCosmosTarget('A', { A: { container: 'shared' } }));
+    const agreeing = resolveCosmosTarget('B', {
+      B: { container: 'shared', partitionKey: 'tenantId' },
+    });
+    expect(await resolver.resolve(agreeing)).toEqual({ paths: [['tenantId']] });
+  });
+});

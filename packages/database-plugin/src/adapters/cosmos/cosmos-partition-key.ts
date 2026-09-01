@@ -70,7 +70,17 @@ export class PartitionKeyResolver {
    */
   resolve(target: CosmosTarget): Promise<ResolvedPartitionKey> {
     const cached = this.#cache.get(target.container);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      // The cache is keyed by CONTAINER, but the mismatch refusal is a property
+      // of the TARGET: two entities may map to one container, and validating
+      // only inside the cached read would check the first mapping and silently
+      // accept every later one — including a conflicting declaration, which is
+      // exactly what the refusal exists to catch.
+      return cached.then((resolved) => {
+        this.#assertConfigured(target, resolved.paths);
+        return resolved;
+      });
+    }
     const attempt = this.#read(target).catch((error: unknown) => {
       // Do not cache a failure: a missing container that is then created, or a
       // transient outage, must be re-readable.
@@ -79,6 +89,25 @@ export class PartitionKeyResolver {
     });
     this.#cache.set(target.container, attempt);
     return attempt;
+  }
+
+  /**
+   * Refuses a mapping whose declared partition key disagrees with the
+   * container's own definition.
+   *
+   * @param target - The resolved entity target
+   * @param actual - The paths the container declares
+   * @throws {Error} When the two disagree
+   */
+  #assertConfigured(target: CosmosTarget, actual: readonly (readonly string[])[]): void {
+    const configured = target.partitionKeyPaths;
+    if (configured === null || samePaths(configured, actual)) return;
+    throw new Error(
+      `CosmosAdapter partition-key mismatch on container '${target.container}': the mapping ` +
+        `declares ${renderPaths(configured)} but the container declares ${renderPaths(actual)}. ` +
+        'A point read carrying the wrong partition key answers 404 rather than an error, so this ' +
+        'is refused rather than served.',
+    );
   }
 
   /**
@@ -109,17 +138,7 @@ export class PartitionKeyResolver {
       );
     }
     const actual = paths.map(parsePartitionKeyPath);
-    const configured = target.partitionKeyPaths;
-    if (configured !== null && !samePaths(configured, actual)) {
-      throw new Error(
-        `CosmosAdapter partition-key mismatch on container '${target.container}': the mapping ` +
-          `declares ${renderPaths(configured)} but the container declares ${
-            renderPaths(actual)
-          }. ` +
-          'A point read carrying the wrong partition key answers 404 rather than an error, so this ' +
-          'is refused rather than served.',
-      );
-    }
+    this.#assertConfigured(target, actual);
     return { paths: actual };
   }
 }
