@@ -207,6 +207,48 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
     }
   });
 
+  it('serves offset/limit pagination natively, including the unlimited sentinel', {
+    ignore: skipReal,
+  }, async () => {
+    // All three branches of the pagination clause, EXECUTED rather than asserted
+    // as text: the contract's `limit: -1` sentinel cannot be passed through
+    // (Cosmos answers 400 to `LIMIT -1`), and an offset cannot be emitted
+    // without a limit (also a 400), so a regression in either translation is a
+    // failed request rather than a wrong string.
+    const container = await provision(`offset_${suffix}`, '/tenantId');
+    const adapter = new CosmosAdapter({
+      endpoint: endpoint as string,
+      key,
+      database: databaseId,
+      containers: { Row: { container, partitionKey: 'tenantId' } },
+    });
+    await adapter.connect();
+    try {
+      const rows = adapter.createDataSource('Row');
+      for (const n of [1, 2, 3, 4, 5]) {
+        await rows.create({ id: `n${n}`, tenantId: 't1', n });
+      }
+      const ids = (found: Record<string, unknown>[]): unknown[] => found.map((row) => row['id']);
+      const ordered = { n: 'asc' } as const;
+
+      // A bounded window.
+      expect(ids(await rows.findAll(query({ orderBy: ordered, offset: 1, limit: 2 }))))
+        .toEqual(['n2', 'n3']);
+      // A limit with no offset.
+      expect(ids(await rows.findAll(query({ orderBy: ordered, limit: 2 })))).toEqual(['n1', 'n2']);
+      // Unlimited with no offset — the clause is omitted entirely.
+      expect(ids(await rows.findAll(query({ orderBy: ordered }))))
+        .toEqual(['n1', 'n2', 'n3', 'n4', 'n5']);
+      // Unlimited FROM an offset — the branch that must supply a limit anyway.
+      expect(ids(await rows.findAll(query({ orderBy: ordered, offset: 3, limit: -1 }))))
+        .toEqual(['n4', 'n5']);
+      // An offset past the end is an empty page, not an error.
+      expect(await rows.findAll(query({ orderBy: ordered, offset: 99, limit: -1 }))).toEqual([]);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
   it('serves a wide update through the replace path and a narrow one through patch', {
     ignore: skipReal,
   }, async () => {
