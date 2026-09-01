@@ -92,15 +92,29 @@ describe('CosmosAdapter lifecycle', () => {
   });
 
   it('names the database when it cannot be reached, and stays reconnectable', async () => {
-    const failing = fakeClient(401);
-    const adapter = new CosmosAdapter({ client: failing.client, database: 'db' });
+    // Retried on the SAME instance, with a client that fails once and then
+    // succeeds. A second adapter would prove nothing: it carries no prior
+    // failure, so it connects whether or not the first cached its rejected
+    // `#connecting` promise — and that cache is the property under test, since
+    // a retained rejection would make one transient outage permanent.
+    const healthy = fakeClient();
+    const inner = healthy.client.database('db');
+    let attempts = 0;
+    const flaky: ICosmosClient = {
+      database: () => ({
+        container: (id: string) => inner.container(id),
+        read: () => {
+          attempts++;
+          return attempts === 1 ? Promise.reject(new Error('Unauthorized')) : inner.read();
+        },
+      }),
+    };
+    const adapter = new CosmosAdapter({ client: flaky, database: 'db' });
     await expect(adapter.connect()).rejects.toThrow(/could not reach database 'db'/);
     expect(adapter.isReady()).toBe(false);
-    // The failure was not cached: a later attempt against a healthy client works.
-    const healthy = fakeClient();
-    const second = new CosmosAdapter({ client: healthy.client, database: 'db' });
-    await second.connect();
-    expect(second.isReady()).toBe(true);
+    await adapter.connect();
+    expect(adapter.isReady()).toBe(true);
+    expect(attempts).toBe(2);
   });
 
   it('renders a non-Error rejection from the database probe', async () => {

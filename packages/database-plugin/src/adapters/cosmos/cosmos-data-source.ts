@@ -380,7 +380,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         const merged = { ...existing, ...payload };
         const fields = Object.entries(payload);
         if (fields.length === 0) return fromDocument(existing, target);
-        if (fields.length <= MAX_PATCH_OPERATIONS) {
+        if (fields.length <= MAX_PATCH_OPERATIONS && isPatchable(fields)) {
           buffer.add({
             container: target.container,
             partitionKey: address.partitionKey,
@@ -412,7 +412,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         if (existing === null) throw missingRow(target, id);
         return fromDocument(existing, target);
       }
-      if (fields.length <= MAX_PATCH_OPERATIONS) {
+      if (fields.length <= MAX_PATCH_OPERATIONS && isPatchable(fields)) {
         const patched = await mapMissing(item.patch(patchOperations(fields)), target, id);
         return fromDocument(patched.resource ?? {}, target);
       }
@@ -511,6 +511,12 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         );
       }
 
+      // `resolveKeysetSort` appends the primary key ASCENDING as the tiebreaker,
+      // preserving the caller's own sort fields and directions ahead of it. On a
+      // real account each paged container therefore needs a composite index
+      // matching that shape: `(sort field ASC, id ASC)` or
+      // `(sort field DESC, id ASC)`, and for several sort fields their declared
+      // order and directions followed by `id ASC`.
       const keyColumns = [target.primaryKey];
       const keysetSort = resolveKeysetSort(normalized.orderBy, keyColumns);
       const keyset = decoded === null ? undefined : keysetPredicate(
@@ -566,6 +572,33 @@ export function patchOperations(
   fields: readonly (readonly [string, unknown])[],
 ): CosmosPatchOperation[] {
   return fields.map(([field, value]) => ({ op: 'set', path: `/${field}`, value }));
+}
+
+/**
+ * Whether every field in a payload can be addressed by a patch path.
+ *
+ * A patch path is a JSON Pointer, in which `/` separates segments — so a field
+ * whose NAME contains one cannot be addressed by `/${field}`: a strict reader
+ * treats it as a nested path (and can silently write to a different location
+ * when that nesting happens to exist), while the emulator refuses it outright
+ * with `Set Operation can only create a child object of an existing node`.
+ *
+ * RFC 6901 escaping (`~1`) is deliberately NOT applied. Measured against the
+ * emulator, it does not decode the escape: patching `/a~1b` created a property
+ * literally named `a~1b` and left `a/b` untouched — turning a loud refusal into
+ * a silent write to the wrong property, which is strictly worse. So such a
+ * payload takes the whole-document replace path, which addresses no pointer at
+ * all and writes the field correctly on either backend.
+ *
+ * `~` needs no such handling: it is written literally by the emulator, and a
+ * strict JSON Pointer reader rejects a dangling `~` rather than misplacing it.
+ *
+ * @param fields - The payload entries to write
+ * @returns `true` when every field name is expressible as a pointer segment
+ * @since 0.2.0
+ */
+export function isPatchable(fields: readonly (readonly [string, unknown])[]): boolean {
+  return fields.every(([field]) => !field.includes('/'));
 }
 
 /**

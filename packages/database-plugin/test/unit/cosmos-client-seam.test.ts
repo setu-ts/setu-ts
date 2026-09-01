@@ -47,7 +47,7 @@ describe('the SDK module shape the lazy loader adapts', () => {
         database(): never {
           throw new Error('unused');
         }
-      } as unknown as CosmosSdkModule['CosmosClient'],
+      },
     };
     const client: ICosmosClient = new module.CosmosClient({ endpoint: 'https://x/', key: 'k' });
     expect(client).toBeDefined();

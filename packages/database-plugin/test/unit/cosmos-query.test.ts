@@ -115,7 +115,7 @@ describe('buildQuery — filters', () => {
   });
 
   it('emits every comparison operator', () => {
-    const cases: [FilterExpression['type'] extends never ? never : FilterExpression, string][] = [
+    const cases: [FilterExpression, string][] = [
       [{ type: 'comparison', field: 'a', operator: 'eq', value: 1 }, 'c["a"] = @p0'],
       [{ type: 'comparison', field: 'a', operator: 'gt', value: 1 }, 'c["a"] > @p0'],
       [{ type: 'comparison', field: 'a', operator: 'gte', value: 1 }, 'c["a"] >= @p0'],

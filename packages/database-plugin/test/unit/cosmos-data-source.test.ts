@@ -170,6 +170,30 @@ describe('findById', () => {
       .toEqual({ id: 'o1', tenantId: 't1', region: 'in' });
   });
 
+  it('creates into a hierarchical container and reads the row back', async () => {
+    // The fixture derived the stored key from `partitionKeyPaths[0]` alone, so
+    // a hierarchical row was written under a scalar while every read addressed
+    // it by array — the row existed and was unreachable. Nothing failed,
+    // because no test created into that shape.
+    const { source } = makeSource({
+      containers: { Order: { partitionKeyPaths: ['/tenantId', '/region'] } },
+    }, { Order: { partitionKey: [['tenantId'], ['region']] } });
+    await source.create({ id: 'o1', tenantId: 't1', region: 'in', total: 3 });
+    expect(await source.findById({ id: 'o1', tenantId: 't1', region: 'in' }))
+      .toEqual({ id: 'o1', tenantId: 't1', region: 'in', total: 3 });
+  });
+
+  it('creates into a container partitioned by a NESTED path and reads the row back', async () => {
+    // The same defect read `body['address/city']`, which is `undefined`, so the
+    // row landed under a null key.
+    const { source } = makeSource({
+      containers: { Order: { partitionKeyPaths: ['/address/city'] } },
+    }, { Order: { partitionKey: ['address', 'city'] } });
+    await source.create({ id: 'o1', address: { city: 'pune' }, total: 1 });
+    expect(await source.findById({ id: 'o1', 'address.city': 'pune' }))
+      .toEqual({ id: 'o1', address: { city: 'pune' }, total: 1 });
+  });
+
   it('refuses a composite key missing ONE segment of a hierarchical partition key', async () => {
     // A hierarchical key reads as an array, so a missing segment leaves a hole
     // inside it rather than making the whole value undefined — which the

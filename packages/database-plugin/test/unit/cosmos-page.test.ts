@@ -6,6 +6,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { PageNormalizationError } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
 import { encodeCursor, sortFingerprint } from '@setu-ts/common';
 import { createCosmosDataSource } from '../../src/adapters/cosmos/cosmos-data-source.ts';
@@ -129,6 +130,6 @@ describe('findPage', () => {
           cursor: page?.nextCursor as string,
         }),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(PageNormalizationError);
   });
 });

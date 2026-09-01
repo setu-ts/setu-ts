@@ -59,7 +59,7 @@ describe('update — patch path', () => {
   it('takes the patch path at exactly the operation limit', async () => {
     const { source, fake } = makeSource(seeded);
     const payload: Record<string, unknown> = {};
-    for (let i = 0; i < 10; i++) payload[`f${i}`] = i;
+    for (let i = 0; i < MAX_PATCH_OPERATIONS; i++) payload[`f${i}`] = i;
     await source.update({ id: 'o1', tenantId: 't1' }, payload);
     expect(fake.recorder.patches).toHaveLength(1);
     expect(fake.recorder.replaces).toEqual([]);
@@ -105,7 +105,7 @@ describe('update — replace path', () => {
   it('reads, merges and replaces conditionally above the patch limit', async () => {
     const { source, fake } = makeSource(seeded);
     const payload: Record<string, unknown> = {};
-    for (let i = 0; i < 11; i++) payload[`f${i}`] = i;
+    for (let i = 0; i <= MAX_PATCH_OPERATIONS; i++) payload[`f${i}`] = i;
     const updated = await source.update({ id: 'o1', tenantId: 't1' }, payload);
     expect(updated['f10']).toBe(10);
     expect(updated['keep']).toBe('yes');
@@ -135,7 +135,7 @@ describe('update — replace path', () => {
       partitionKeys: new PartitionKeyResolver(database),
     });
     const payload: Record<string, unknown> = {};
-    for (let i = 0; i < 11; i++) payload[`f${i}`] = i;
+    for (let i = 0; i <= MAX_PATCH_OPERATIONS; i++) payload[`f${i}`] = i;
     await expect(source.update({ id: 'o1', tenantId: 't1' }, payload))
       .rejects.toThrow(CosmosConcurrentModificationError);
   });
@@ -153,7 +153,7 @@ describe('update — replace path', () => {
       partitionKeys: new PartitionKeyResolver(database),
     });
     const payload: Record<string, unknown> = {};
-    for (let i = 0; i < 11; i++) payload[`f${i}`] = i;
+    for (let i = 0; i <= MAX_PATCH_OPERATIONS; i++) payload[`f${i}`] = i;
     await source.update({ id: 'o1', tenantId: 't1' }, payload);
     expect(fake.recorder.replaces[0]?.ifMatch).toBeUndefined();
   });
@@ -247,5 +247,41 @@ describe('update — the row disappears mid-operation', () => {
     }, byId);
     holder.store = built.fake.documents;
     await expect(built.source.update('o1', wide)).rejects.toThrow(/no Order row with id "o1"/);
+  });
+});
+
+describe('update — a field name a patch path cannot express', () => {
+  // A patch path is a JSON Pointer, so `/` inside a field NAME cannot be
+  // addressed by `/${field}`. Measured on the emulator: the unescaped form is
+  // refused outright, and the RFC 6901 escape is NOT decoded — patching
+  // `/a~1b` created a property literally named `a~1b` and left `a/b` alone. So
+  // escaping would trade a loud refusal for a silent write to the wrong key;
+  // such a payload takes the whole-document replace path instead.
+  it('routes a slash-carrying field through replace rather than patch', async () => {
+    const { source, fake } = makeSource({
+      containers: {
+        Order: {
+          partitionKeyPaths: ['/id'],
+          documents: { 'o1|o1': { id: 'o1', keep: 'yes' } },
+        },
+      },
+    }, byId);
+    const row = await source.update('o1', { 'a/b': 'written' });
+    expect(fake.recorder.patches).toEqual([]);
+    expect(fake.recorder.replaces).toHaveLength(1);
+    expect(row).toMatchObject({ id: 'o1', keep: 'yes', 'a/b': 'written' });
+  });
+
+  it('still patches a payload whose field names carry no slash', async () => {
+    const { source, fake } = makeSource({
+      containers: {
+        Order: { partitionKeyPaths: ['/id'], documents: { 'o1|o1': { id: 'o1' } } },
+      },
+    }, byId);
+    // A tilde needs no special handling: written literally by the emulator, and
+    // rejected rather than misplaced by a strict JSON Pointer reader.
+    await source.update('o1', { 'c~d': 1 });
+    expect(fake.recorder.patches).toEqual([[{ op: 'set', path: '/c~d', value: 1 }]]);
+    expect(fake.recorder.replaces).toEqual([]);
   });
 });

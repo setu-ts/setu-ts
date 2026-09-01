@@ -110,6 +110,32 @@ export interface FakeCosmos {
   readonly documents: Map<string, Record<string, unknown>>;
 }
 
+/**
+ * Derives the partition-key value a document would be stored under, the way the
+ * service does: one value per declared path, each path walked segment by
+ * segment, scalar for a single path and an array for a hierarchical key.
+ *
+ * @param body - The document being written
+ * @param spec - The container it is written to
+ * @returns The partition-key value
+ */
+function partitionKeyFromBody(
+  body: Record<string, unknown>,
+  spec: FakeContainerSpec,
+): CosmosPartitionKeyValue {
+  const paths = spec.partitionKeyPaths ?? ['/id'];
+  const values = paths.map((path) =>
+    path.slice(1).split('/').reduce<unknown>(
+      (node, segment) =>
+        node === null || typeof node !== 'object'
+          ? undefined
+          : (node as Record<string, unknown>)[segment],
+      body,
+    ) as string | number | boolean | null
+  );
+  return values.length === 1 ? (values[0] as CosmosPartitionKeyValue) : values;
+}
+
 /** Renders the store key for one document. */
 function documentKey(
   container: string,
@@ -160,9 +186,22 @@ export function createFakeCosmosClient(options: FakeCosmosOptions): FakeCosmos {
   const makeItems = (container: string): ICosmosItems => ({
     create: (body) => {
       const id = body['id'] as string;
-      const spec = options.containers[container] as FakeContainerSpec;
-      const path = (spec.partitionKeyPaths?.[0] ?? '/id').slice(1);
-      const key = documentKey(container, body[path] as CosmosPartitionKeyValue, id);
+      const spec = options.containers[container];
+      if (spec === undefined) {
+        // The service answers 404 for an unknown container; reading through an
+        // unchecked cast would raise a TypeError the adapter never sees live.
+        return Promise.reject(
+          new FakeCosmosError(404, `Collection '${container}' not found in database`),
+        );
+      }
+      // The service derives the key from the document, ONE VALUE PER DECLARED
+      // PATH and each path walked segment by segment — so a hierarchical key
+      // stores under an array and a nested path (`/address/city`) reads the
+      // nested value. Deriving it from `paths[0]` alone stored a hierarchical
+      // row under a scalar while every read addressed it by array, so the row
+      // was unreachable; and a nested path read `body['address/city']`, which
+      // is `undefined`, landing the row under a null key.
+      const key = documentKey(container, partitionKeyFromBody(body, spec), id);
       if (documents.has(key)) {
         return Promise.reject(
           new FakeCosmosError(409, 'The document already exists in the collection.'),
