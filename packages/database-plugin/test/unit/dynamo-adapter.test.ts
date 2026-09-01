@@ -245,3 +245,34 @@ describe('DynamoAdapter — rawQuery refuses by name', () => {
     await expect(first).rejects.toThrow(/does not support raw SQL/);
   });
 });
+
+describe('DynamoAdapter — disconnect during an in-flight connect (Qodo review)', () => {
+  it('does not let a completing load resurrect a disconnected adapter', async () => {
+    // A controlled interleave is the only way to see this. `connect()` starts
+    // `#establish()`, which awaits its loader; issuing `disconnect()` before
+    // that await settles puts the disconnect strictly between the load
+    // starting and its client being installed. Before the fix `#establish()`
+    // installed unconditionally, so the adapter reported connected AFTER
+    // disconnect — and on the lazy arm the client it had constructed was
+    // owned by nobody and never destroyed.
+    const client = fakeClient();
+    const adapter = new DynamoAdapter({ client });
+
+    const connecting = adapter.connect();
+    await adapter.disconnect();
+    await connecting;
+
+    expect(adapter.isReady()).toBe(false);
+    // Nothing was installed either: the data-source factory still refuses.
+    expect(() => adapter.createDataSource('Item')).toThrow(/not connected/);
+  });
+
+  it('reconnects cleanly after that interleave', async () => {
+    const adapter = new DynamoAdapter({ client: fakeClient() });
+    const connecting = adapter.connect();
+    await adapter.disconnect();
+    await connecting;
+    await adapter.connect();
+    expect(adapter.isReady()).toBe(true);
+  });
+});

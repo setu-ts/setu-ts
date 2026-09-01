@@ -63,6 +63,31 @@ function isPlainRecord(value: object): boolean {
 }
 
 /**
+ * Assigns an attribute as an OWN property, never through a setter.
+ *
+ * A DynamoDB attribute may legitimately be named `__proto__` — the server
+ * accepts and returns one (measured) — and a plain `obj[key] = value`
+ * assignment for that key is **runtime-dependent**: on Node it invokes
+ * `Object.prototype.__proto__`, silently dropping the attribute and replacing
+ * the object's prototype, while on Deno it creates an own property. So the
+ * naive form is a prototype-pollution vector for the Node and Bun consumers
+ * this package publishes to, and no test running on Deno can observe it.
+ * `defineProperty` behaves identically on every runtime.
+ *
+ * @param target - The record being populated
+ * @param key - The attribute name, which is caller/remote data
+ * @param value - The value to store
+ */
+function defineAttribute(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, {
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+}
+
+/**
  * Marshals one JavaScript value to its `AttributeValue` form (the internal
  * recursive half of {@linkcode marshalDynamoValue}).
  *
@@ -138,6 +163,19 @@ function marshalObjectValue(
   path: string,
 ): DynamoAttributeValue {
   if (value instanceof Date) {
+    // An invalid Date must be refused HERE, by name. `toISOString()` throws a
+    // bare `RangeError: Invalid time value` that names no attribute, and
+    // `getTime()` yields `NaN`, which would be written as the DynamoDB number
+    // `{ N: 'NaN' }` and rejected by the server with a message naming neither
+    // the entity nor the attribute (both measured).
+    if (Number.isNaN(value.getTime())) {
+      throw new UnsupportedQueryFeatureError(
+        'attribute-value',
+        ADAPTER,
+        `The Date${at(path)} is invalid (its time value is NaN), so it has no DynamoDB ` +
+          `representation under either declared encoding.`,
+      );
+    }
     if (dateEncoding === 'iso') return { S: value.toISOString() };
     if (dateEncoding === 'epochMs') return { N: String(value.getTime()) };
     // DynamoDB has no date type (§1A F7), so the encoding is a declaration,
@@ -181,10 +219,10 @@ function marshalObjectValue(
     // JSON semantics: an undefined member stores nothing, so the row read
     // back carries no key — never an `undefined` leaking through the wire.
     if (member === undefined) continue;
-    members[key] = marshalValue(
-      member,
-      undefined,
-      path === '' ? key : `${path}.${key}`,
+    defineAttribute(
+      members as Record<string, unknown>,
+      key,
+      marshalValue(member, undefined, path === '' ? key : `${path}.${key}`),
     );
   }
   return { M: members };
@@ -241,7 +279,11 @@ export function marshalDynamoItem(
   const item: Record<string, DynamoAttributeValue> = {};
   for (const [key, value] of Object.entries(row)) {
     if (value === undefined) continue;
-    item[key] = marshalValue(value, dateAttributes?.[key], key);
+    defineAttribute(
+      item as Record<string, unknown>,
+      key,
+      marshalValue(value, dateAttributes?.[key], key),
+    );
   }
   return item;
 }
@@ -303,7 +345,7 @@ export function unmarshalDynamoValue(value: DynamoAttributeValue): unknown {
 export function unmarshalDynamoItem(item: DynamoAttributeMap): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(item)) {
-    row[key] = unmarshalDynamoValue(value);
+    defineAttribute(row, key, unmarshalDynamoValue(value));
   }
   return row;
 }

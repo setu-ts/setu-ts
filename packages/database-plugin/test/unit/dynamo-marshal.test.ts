@@ -430,3 +430,35 @@ describe('round trips (marshal → unmarshal is identity per type)', () => {
       .toStrictEqual({ exact: 42, lossy: LOSSY_N });
   });
 });
+
+describe('DynamoDB marshalling hardening (Qodo review)', () => {
+  it('refuses an invalid Date by name under either declared encoding', () => {
+    // Unguarded, `iso` threw a bare `RangeError: Invalid time value` naming no
+    // attribute and `epochMs` emitted `{ N: 'NaN' }`, which DynamoDB rejects
+    // later with a message naming neither the entity nor the attribute.
+    for (const encoding of ['iso', 'epochMs'] as const) {
+      expect(() => marshalDynamoValue(new Date('nonsense'), encoding)).toThrow(
+        /Date .*is invalid/,
+      );
+    }
+    expect(() => marshalDynamoValue(new Date('2026-01-01T00:00:00.000Z'), 'iso')).not.toThrow();
+  });
+
+  it('keeps a `__proto__` attribute as an own property on both read and write', () => {
+    // DynamoDB accepts and returns an attribute literally named `__proto__`
+    // (measured). A plain `obj[key] = value` for that key is runtime-dependent:
+    // on Node it invokes the prototype setter — dropping the attribute and
+    // replacing the object's prototype — while on Deno it creates an own key,
+    // so no test running here can observe the pollution directly. These
+    // assertions pin the property the fix guarantees on every runtime.
+    const item = JSON.parse('{"pk":{"S":"p"},"__proto__":{"M":{"admin":{"BOOL":true}}}}');
+    const row = unmarshalDynamoItem(item);
+    expect(Object.prototype.hasOwnProperty.call(row, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(row)).toBe(Object.prototype);
+
+    const source = JSON.parse('{"pk":"p","__proto__":{"admin":true}}');
+    const marshalled = marshalDynamoItem(source);
+    expect(Object.prototype.hasOwnProperty.call(marshalled, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(marshalled)).toBe(Object.prototype);
+  });
+});

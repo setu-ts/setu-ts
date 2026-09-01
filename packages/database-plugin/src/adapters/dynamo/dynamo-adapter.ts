@@ -72,6 +72,12 @@ export class DynamoAdapter implements IDatabaseAdapter {
   #connected = false;
   /** Whether the adapter constructed the client (lazy arm) and owns `destroy()`. */
   #owned = false;
+  /**
+   * Bumped by every `disconnect()`. `#establish()` captures it before loading
+   * and installs its client only if it still matches, so a disconnect issued
+   * while a lazy load is in flight is not undone by that load completing.
+   */
+  #generation = 0;
   readonly #options: DynamoAdapterOptions;
 
   /**
@@ -139,10 +145,19 @@ export class DynamoAdapter implements IDatabaseAdapter {
    */
   async #establish(): Promise<void> {
     const injected = this.#options.client !== undefined;
+    const generation = this.#generation;
     const loader = injected
       ? createInjectedDynamoLoader(this.#options.client)
       : createLazyDynamoLoader(this.#lazyConfiguration());
     const client = await loader.load();
+    // A `disconnect()` during the load bumped the generation. Installing the
+    // client now would silently resurrect a disconnected adapter and leak a
+    // client nothing will ever destroy, so the load is discarded instead —
+    // and an owned one is destroyed here, since `disconnect()` could not.
+    if (generation !== this.#generation) {
+      if (!injected) client.destroy();
+      return;
+    }
     this.#client = client;
     this.#owned = !injected;
     this.#connected = true;
@@ -173,6 +188,8 @@ export class DynamoAdapter implements IDatabaseAdapter {
    * @inheritdoc
    */
   disconnect(): Promise<void> {
+    // Invalidate any in-flight `connect()` before releasing state (§#6).
+    this.#generation += 1;
     if (this.#client !== null) {
       if (this.#owned) this.#client.destroy();
       this.#client = null;

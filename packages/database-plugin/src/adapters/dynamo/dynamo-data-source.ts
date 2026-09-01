@@ -3,6 +3,7 @@ import type { EntityKey, IDataSource, NormalizedQuery, PageResult } from '@setu-
 import { decodeCursor, encodeCursor, sortFingerprint } from '@setu-ts/common';
 import type {
   DynamoAttributeMap,
+  DynamoAttributeValue,
   DynamoReadCommandOutput,
   DynamoTransactWriteItem,
   IDynamoClient,
@@ -32,6 +33,74 @@ const DEFAULT_MAX_PAGE_FETCHES = 10;
 export interface IDynamoAccessPathReportingDataSource extends IDataSource {
   /** Returns the label selected by the most recent Query, Scan, or GSI read. */
   readonly getLastAccessPath: () => string | undefined;
+}
+
+/**
+ * Encodes ONE continuation-key attribute for the portable cursor codec.
+ *
+ * A `LastEvaluatedKey` carries native `AttributeValue`s, but
+ * {@linkcode CursorPayload} holds `string | number | Date`, so the key's TYPE
+ * is lost if the value is passed through unmarshalled. Two measured failures
+ * follow from that: a numeric key whose decimal does not round-trip through
+ * `Number` unmarshals to a string (the §3.15 lossy-`N` rule) and would be
+ * rebuilt as `S`, which DynamoDB rejects with `Type mismatch for attribute to
+ * update`; and a binary (`B`) key unmarshals to a `Uint8Array`, which the
+ * cursor's JSON codec cannot represent at all, so the token it minted decoded
+ * as malformed and the walk could never continue.
+ *
+ * The attribute is therefore encoded as `<type>:<payload>` — its own type tag
+ * plus a lossless payload (`B` as base64) — and rebuilt verbatim by
+ * {@linkcode decodeKeyAttribute}. The cursor stays an opaque string, so no
+ * `common` contract changes.
+ *
+ * @param value - One attribute of the server's `LastEvaluatedKey`
+ * @returns The tagged, lossless string form
+ * @throws {UnsupportedQueryFeatureError} When the key attribute is not `S`,
+ *   `N` or `B` — the only types DynamoDB allows in a key
+ */
+function encodeKeyAttribute(value: DynamoAttributeValue, entity: string): string {
+  if (value.S !== undefined) return `S:${value.S}`;
+  if (value.N !== undefined) return `N:${value.N}`;
+  if (value.B !== undefined) {
+    let binary = '';
+    for (const byte of value.B) binary += String.fromCharCode(byte);
+    return `B:${btoa(binary)}`;
+  }
+  throw new UnsupportedQueryFeatureError(
+    'cursor-pagination',
+    ADAPTER,
+    `DynamoDB entity '${entity}' returned a continuation key attribute that is not S, N or B.`,
+  );
+}
+
+/**
+ * Rebuilds one continuation-key attribute encoded by
+ * {@linkcode encodeKeyAttribute}, restoring its native type.
+ *
+ * @param encoded - The tagged string from the decoded cursor
+ * @returns The native attribute value, or `null` when the token is malformed
+ */
+function decodeKeyAttribute(encoded: unknown): DynamoAttributeValue | null {
+  if (typeof encoded !== 'string' || encoded.length < 2) return null;
+  const payload = encoded.slice(2);
+  switch (encoded.slice(0, 2)) {
+    case 'S:':
+      return { S: payload };
+    case 'N:':
+      return { N: payload };
+    case 'B:': {
+      try {
+        const binary = atob(payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        return { B: bytes };
+      } catch {
+        return null;
+      }
+    }
+    default:
+      return null;
+  }
 }
 
 /** Creates a DynamoDB data source bound to one mapped entity. @internal */
@@ -77,6 +146,7 @@ export function createDynamoDataSource(
     query: NormalizedQuery,
     start?: DynamoAttributeMap,
     limit?: number,
+    countOnly = false,
   ): Promise<DynamoReadCommandOutput> => {
     const path = resolveDynamoAccessPath(entity, target, query);
     lastAccessPath = path.logPath;
@@ -84,6 +154,7 @@ export function createDynamoDataSource(
       ...path.command,
       ...(limit === undefined ? {} : { Limit: limit }),
       ...(start === undefined ? {} : { ExclusiveStartKey: start }),
+      ...(countOnly ? { Select: 'COUNT' as const } : {}),
     };
     return path.commandType === 'Query'
       ? await client.query(input as import('./dynamo-client-types.ts').DynamoQueryCommandInput)
@@ -181,7 +252,17 @@ export function createDynamoDataSource(
           throw new Error(`DynamoDB entity '${entity}' update failed: the key does not exist.`);
         }
         transactionBuffer.add(write, identifier);
-        return { ...unmarshalDynamoItem(existing.Item), ...Object.fromEntries(entries) };
+        // Round-trip the merged values through marshalling so the row this
+        // returns is the row that will be COMMITTED. Spreading the caller's
+        // raw `entries` returned a mapped `Date` as a `Date`, while the
+        // non-transactional path returns the encoded persisted form (an ISO
+        // string or epoch number) — the same call answering differently
+        // depending on whether a transaction was open.
+        const merged = Object.fromEntries(entries) as Record<string, unknown>;
+        return {
+          ...unmarshalDynamoItem(existing.Item),
+          ...unmarshalDynamoItem(marshalDynamoItem(merged, target.dateAttributes)),
+        };
       }
       try {
         const output = await client.updateItem({
@@ -225,7 +306,11 @@ export function createDynamoDataSource(
       let total = 0;
       let start: DynamoAttributeMap | undefined;
       do {
-        const output = await read(query, start);
+        // `Select: 'COUNT'` so the server returns the tally without the item
+        // payloads; `Count` already reflects the FilterExpression, and the
+        // loop below still drains every page because a COUNT response is
+        // paginated exactly like an item response.
+        const output = await read(query, start, undefined, true);
         total += output.Count ?? 0;
         start = output.LastEvaluatedKey;
       } while (start !== undefined);
@@ -254,37 +339,72 @@ export function createDynamoDataSource(
             `DynamoDB entity '${entity}' received a malformed cursor.`,
           );
         }
-        start = Object.fromEntries(
-          path.cursorKeyColumns.map((
-            column,
-            index,
-          ) => [column, marshalDynamoValue(decoded.keyValues[index])]),
-        );
+        const rebuilt: Record<string, DynamoAttributeValue> = {};
+        for (const [index, column] of path.cursorKeyColumns.entries()) {
+          const attribute = decodeKeyAttribute(decoded.keyValues[index]);
+          if (attribute === null) {
+            return Promise.reject(
+              new UnsupportedQueryFeatureError(
+                'cursor-pagination',
+                ADAPTER,
+                `DynamoDB entity '${entity}' received a malformed cursor.`,
+              ),
+            );
+          }
+          rebuilt[column] = attribute;
+        }
+        start = rebuilt;
       }
       const rows: Record<string, unknown>[] = [];
       let last: DynamoAttributeMap | undefined;
       let fetches = 0;
+      // A non-positive `limit` is the normalized UNLIMITED value (`-1`), which
+      // the contract and the memory reference both take to mean "every
+      // matching row". Draining it here keeps `findPage` consistent with this
+      // adapter's own `findAll` and with the other built-in paging backend;
+      // stopping after one server page returned a short page whenever the
+      // result crossed DynamoDB's native page boundary. The `maxPageFetches`
+      // bound still applies, and a bounded return always carries a non-`null`
+      // cursor, so it can cost a round trip but never a row.
+      const unlimited = query.limit <= 0;
       do {
-        const remaining = query.limit > 0 ? query.limit - rows.length : undefined;
+        const remaining = unlimited ? undefined : query.limit - rows.length;
         const output = await read(query, start, remaining);
         rows.push(...(output.Items ?? []).map(unmarshalDynamoItem));
         last = output.LastEvaluatedKey;
         start = last;
         fetches += 1;
       } while (
-        last !== undefined && query.limit > 0 && rows.length < query.limit &&
+        last !== undefined && (unlimited || rows.length < query.limit) &&
         fetches < maxPageFetches
       );
       const pageRows = query.limit > 0 ? rows.slice(0, query.limit) : rows;
-      const nextCursor = last === undefined ? null : encodeCursor({
-        orderedValues: path.cursorKeyColumns.map((column) =>
-          unmarshalDynamoItem(last)[column] as string | number
-        ),
-        keyValues: path.cursorKeyColumns.map((column) =>
-          unmarshalDynamoItem(last)[column] as string | number
-        ),
-        sortFingerprint: fingerprint,
-      });
+      // Minted from the RAW `LastEvaluatedKey`, never from the unmarshalled
+      // row: the tagged encoding is what preserves a key attribute's native
+      // type across the round trip (see `encodeKeyAttribute`).
+      let nextCursor: string | null = null;
+      if (last !== undefined) {
+        const terminal = last;
+        const keyValues: string[] = [];
+        for (const column of path.cursorKeyColumns) {
+          const attribute = terminal[column];
+          if (attribute === undefined) {
+            return Promise.reject(
+              new UnsupportedQueryFeatureError(
+                'cursor-pagination',
+                ADAPTER,
+                `DynamoDB entity '${entity}' continuation key is missing '${column}'.`,
+              ),
+            );
+          }
+          keyValues.push(encodeKeyAttribute(attribute, entity));
+        }
+        nextCursor = encodeCursor({
+          orderedValues: keyValues,
+          keyValues,
+          sortFingerprint: fingerprint,
+        });
+      }
       return {
         rows: pageRows.map((row) => projectFields(row, query.select) as Record<string, unknown>),
         nextCursor,

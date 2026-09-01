@@ -230,3 +230,51 @@ describe('DynamoDB data source writes', () => {
     expect(calls).toBe(2);
   });
 });
+
+describe('DynamoDB data source (Qodo review)', () => {
+  it('counts with Select COUNT rather than transferring every item', async () => {
+    const inputs: { Select?: string }[] = [];
+    const client: IDynamoClient = {
+      query: (input) => {
+        inputs.push(input as { Select?: string });
+        return Promise.resolve({ Count: 3 });
+      },
+      scan: () => Promise.resolve({}),
+      getItem: () => Promise.resolve({}),
+      putItem: () => Promise.resolve({}),
+      updateItem: () => Promise.resolve({}),
+      deleteItem: () => Promise.resolve({}),
+      transactWriteItems: () => Promise.resolve({}),
+      destroy() {},
+    };
+    const ds = createDynamoDataSource(client, 'Item', { Item: { partitionKey: 'pk' } });
+    expect(await ds.count({ pk: 'p' })).toBe(3);
+    expect(inputs[0]?.Select).toBe('COUNT');
+  });
+
+  it('returns the persisted encoding from a transactional update, not the raw input', async () => {
+    // The non-transactional path returns the marshalled-then-unmarshalled row,
+    // so spreading the caller's raw values here made one call answer
+    // differently depending on whether a transaction was open.
+    const client: IDynamoClient = {
+      query: () => Promise.resolve({}),
+      scan: () => Promise.resolve({}),
+      getItem: () => Promise.resolve({ Item: { pk: { S: 'p' }, note: { S: 'old' } } }),
+      putItem: () => Promise.resolve({}),
+      updateItem: () => Promise.resolve({}),
+      deleteItem: () => Promise.resolve({}),
+      transactWriteItems: () => Promise.resolve({}),
+      destroy() {},
+    };
+    const buffer = createDynamoTransactionBuffer();
+    const ds = createDynamoDataSource(
+      client,
+      'Item',
+      { Item: { partitionKey: 'pk', dateAttributes: { seenAt: 'iso' } } },
+      undefined,
+      buffer,
+    );
+    const row = await ds.update('p', { seenAt: new Date('2026-01-01T00:00:00.000Z') });
+    expect(row.seenAt).toBe('2026-01-01T00:00:00.000Z');
+  });
+});
