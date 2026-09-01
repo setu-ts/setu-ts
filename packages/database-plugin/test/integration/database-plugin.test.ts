@@ -33,6 +33,8 @@ import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
+import { createFakeCosmosClient } from '../fixtures/fake-cosmos-client.ts';
+import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 
 /** Minimal fake config. */
 function createFakeConfig(): IConfig {
@@ -666,5 +668,71 @@ describe('DatabasePlugin integration', () => {
 
       await app.stop();
     });
+  });
+});
+
+describe("DatabasePlugin — the 'cosmos' arm", () => {
+  it('constructs a CosmosAdapter and serves repository reads and writes', async () => {
+    // Driven through the plugin rather than the adapter, so `buildAdapterOptions`
+    // is proven to carry `endpoint`/`key`/`database`/`containers` across the
+    // plugin boundary — the M70j `entities` defect, where a silently dropped
+    // key left the adapter on its defaults.
+    const fake = createFakeCosmosClient({
+      containers: { orders: { partitionKeyPaths: ['/tenantId'] } },
+    });
+    const app = createApplication({
+      plugins: [
+        createTestRuntimePlugin([]),
+        DatabasePlugin({
+          type: 'cosmos',
+          options: {
+            client: fake.client,
+            database: 'app',
+            containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
+          },
+        }),
+      ],
+    });
+    await app.start();
+
+    const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    type OrderKey = { id: string; tenantId: string };
+    const repo = db.getRepository<{ id: string; tenantId: string; total: number }, OrderKey>(
+      'Order',
+    );
+
+    await repo.create({ id: 'o1', tenantId: 't1', total: 3 });
+    expect((await repo.findById({ id: 'o1', tenantId: 't1' }))?.total).toBe(3);
+    expect((await repo.update({ id: 'o1', tenantId: 't1' }, { total: 4 })).total).toBe(4);
+    expect(await repo.exists({ id: 'o1', tenantId: 't1' })).toBe(true);
+    expect(await repo.delete({ id: 'o1', tenantId: 't1' })).toBe(true);
+    expect(await repo.findById({ id: 'o1', tenantId: 't1' })).toBeNull();
+
+    // The mapping reached the adapter: the write landed in the MAPPED
+    // container, not in one named after the entity.
+    expect(Object.keys(fake.recorder.definitionReads)).toEqual(['orders']);
+
+    await app.stop();
+  });
+
+  it('registers a health indicator that reports up while connected and down after close', async () => {
+    // Driven through the indicator the plugin REGISTERS, not `isReady()` — the
+    // health path is what this asserts, and `cosmos-adapter.test.ts` already
+    // covers the readiness sequence on its own. `register()` connects the
+    // adapter, so the transition worth pinning is up → down, which is how the
+    // memory arm's indicator test above is written too.
+    const fake = createFakeCosmosClient({ containers: { Order: { partitionKeyPaths: ['/id'] } } });
+    const adapter = new CosmosAdapter({ client: fake.client, database: 'app' });
+    const healthChecks: Map<string, () => Promise<unknown>> = new Map();
+    const health: IHealthApi = {
+      register: (name: string, fn: () => Promise<unknown>) => healthChecks.set(name, fn),
+    };
+    const ctx: IPluginContext = { ...createFakeContext(), health };
+    const plugin = DatabasePlugin({ type: 'custom', adapter });
+    await plugin.register!(ctx);
+    const indicator = healthChecks.get('database')!;
+    expect((await indicator() as { status: string }).status).toBe('up');
+    await adapter.disconnect();
+    expect((await indicator() as { status: string }).status).toBe('down');
   });
 });

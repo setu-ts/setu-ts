@@ -14,6 +14,10 @@ export { DatabasePlugin } from './plugin/database-plugin.ts';
 // Public interfaces
 export type {
   BuiltInDatabaseOptions,
+  CosmosAdapterOptions,
+  CosmosAdapterOptionsBase,
+  CosmosDatabaseOptions,
+  CosmosEntityMapping,
   CountOptions,
   CustomDatabaseOptions,
   DatabaseAdapterOptions,
@@ -57,8 +61,37 @@ export type {
   MongoWriteOptions,
 } from './adapters/mongo/mongo-client.ts';
 
+// Cosmos structural types the `'cosmos'` arm carries (injected-client seam).
+// An application injecting a real `CosmosClient` annotates it with these, and
+// the data source calls exactly these members.
+export type {
+  CosmosAccessCondition,
+  CosmosBatchDeleteOperation,
+  CosmosBatchInsertOperation,
+  CosmosBatchOperation,
+  CosmosBatchPatchOperation,
+  CosmosBatchReplaceOperation,
+  CosmosBatchResponse,
+  CosmosContainerDefinition,
+  CosmosFeedResponse,
+  CosmosItemResponse,
+  CosmosPartitionKeyValue,
+  CosmosPatchOperation,
+  CosmosQueryParameter,
+  CosmosQuerySpec,
+  CosmosRequestOptions,
+  ICosmosClient,
+  ICosmosContainer,
+  ICosmosDatabase,
+  ICosmosItem,
+  ICosmosItems,
+  ICosmosQueryIterator,
+} from './adapters/cosmos/cosmos-client.ts';
+
 // Errors
 export {
+  CosmosConcurrentModificationError,
+  CosmosTransactionScopeError,
   MongoTransactionUnavailableError,
   UnsupportedFilterOperatorError,
   UnsupportedQueryFeatureError,
@@ -123,3 +156,6 @@ export { createDrizzleDataSource } from './adapters/drizzle/drizzle-repository.t
 
 // Mongo adapter — document-store backend over the native `mongodb` driver.
 export { MongoAdapter } from './adapters/mongo/mongo-adapter.ts';
+
+// Cosmos adapter — Azure Cosmos DB NoSQL-API backend over `@azure/cosmos`.
+export { CosmosAdapter } from './adapters/cosmos/cosmos-adapter.ts';

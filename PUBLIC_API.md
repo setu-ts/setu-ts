@@ -1462,36 +1462,143 @@ return types are nameable from the package entry, as are the collection-level sh
 `IMongoDatabase.collection()` reaches (`IMongoCollection`, `IMongoCursor`,
 `IMongoCollectionFindOneAndUpdateOptions`, and the `MongoOptions`/`MongoWriteOptions` option bags).
 
+### Cosmos DB backend (`'cosmos'` arm)
+
+`CosmosAdapter` serves Azure Cosmos DB's **NoSQL (SQL) API** over `npm:@azure/cosmos@^4`, registered
+through the same discriminated union as every other backend:
+
+```typescript
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+
+app.register(DatabasePlugin({
+  type: 'cosmos',
+  options: {
+    endpoint: 'https://my-account.documents.azure.com:443/',
+    key: cosmosKey,
+    database: 'app',
+    containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
+  },
+}));
+```
+
+Cosmos DB's **MongoDB API** is a different wire protocol; it is served by the `'mongodb'` arm
+pointed at a Cosmos connection string. That route is documented and **not verified against a live
+account**: the emulator's MongoDB endpoint tops out at API version 4.0 (wire version 7) while the
+`npm:mongodb@^6` driver this package pins requires wire version 8, so it cannot be exercised there.
+
+`CosmosAdapterOptions` is a **union of two arms**: one requires `endpoint` + `key`, the other
+requires `client` (an already-constructed structural `ICosmosClient`, which is how an Entra ID or
+connection-string client reaches the adapter). `database` is required on BOTH arms, because a Cosmos
+endpoint encodes no database name and there is nothing to fall back to. `CosmosAdapterOptionsBase`
+is the half both arms share (`database`, `containers`, `logQueries`). `containers` is a per-entity
+override (`{ container?, primaryKey?, partitionKey? }`); an unmapped entity uses its own name as the
+container and `'id'` as the primary key — the D1-shaped two-layer mapping.
+
+**The adapter provisions nothing.** Cosmos creates no database or container implicitly, and
+throughput, partition-key and indexing choices belong to the application; a missing container is
+refused by name at first use.
+
+**The partition key is discovered from the container definition** and read once per container. A
+declared `partitionKey` is validated against it and refused by name on a mismatch — a point read
+carrying the wrong partition key answers **404 rather than an error**, so an unvalidated mapping
+would report "not found" for every row of a healthy container.
+
+**Identity.** A document is addressed by (partition key, `id`). `findById` point-reads when the key
+carries the partition key, or when the container partitions by the primary-key field; otherwise it
+resolves the row by a cross-partition query, which costs more request units and is refused by name
+when the id matches two documents, since an id is unique only within a partition. A primary key must
+be a **string** — the service refuses any other type, and converting silently would change the type
+a caller gets back from `create()`.
+
+**`update`** merges through a server-side `patch` while the payload fits one request and through a
+read-merge-`replace` guarded by `_etag` beyond it, raising `CosmosConcurrentModificationError` on a
+lost race. A payload that would change a partition-key value is refused by name, because such a
+replace answers 404 rather than moving the item.
+
+`contains` compiles to `CONTAINS`, a literal substring match (no `%`/`_` escaping, case-sensitive);
+`in` compiles to `ARRAY_CONTAINS` with the list bound as one array parameter, so an empty list
+matches nothing natively. `offset`/`limit` are served natively, with the contract's `-1` sentinel
+translated rather than passed through (Cosmos refuses `LIMIT -1`, and refuses `OFFSET` without
+`LIMIT`).
+
+**Pagination uses the portable keyset cursor**, not a Cosmos continuation token — this adapter's
+design choice, matching what the tested backend supports: measured against the emulator, an
+`ORDER BY` query returns no continuation token even with `maxItemCount` passed as a query option.
+The claim is scoped to that measurement rather than asserted of every Cosmos deployment. On a real
+account, keyset paging therefore needs a composite index over `(sort field, id)` for each paged
+container, because the walk always adds the key column as its tiebreaker.
+
+**`rawQuery` is refused by name** with `UnsupportedRawQueryError`: a Cosmos SQL query is scoped to
+one container and the signature names none, so an application reaches the injected client directly.
+
+**Transactions are a deferred batch.** `beginTransaction()` buffers every write and flushes it as
+one transactional batch at commit; `rollback()` discards it and sends nothing. The batch is atomic
+within one container and one partition-key value and caps at 100 operations, and a write crossing
+any of those bounds raises `CosmosTransactionScopeError` at that write. Reads inside a transaction
+observe committed state only — the deferred-write clause `IDataSource` documents. A buffered
+`update` is sent as a **patch**, so it writes only the fields its payload names and two updates of
+one row compose; an update too wide for a single patch request falls back to a whole-document
+replace, which cannot compose, so buffering one for a row the transaction has already written is
+refused rather than silently discarding the earlier write. `rollback()` is idempotent (`commit()` is
+not), because the framework rolls back inside the same `catch` that sees a failed commit — refusing
+there would replace the batch's own per-operation diagnostic with a complaint about rollback.
+
+**What the arm deliberately cannot do**, split by who could close it. Two are platform limits:
+Cosmos rejects a **cross-container join** with a 400 (a query addresses one container; its own
+`JOIN` unwinds an array inside a single item), and returns **no continuation token** for an
+`ORDER BY` query on the tested emulator. Three are contract limits: **grouping** is absent from
+`NormalizedQuery`, which carries no aggregate beyond `count` — the Cosmos dialect does support
+`GROUP BY`, so closing that is a `common` widening every adapter must answer; `rawQuery` is refused
+because the committed signature names no container; and request units, consistency levels, TTL and
+index policy are outside the portable contract by design (the M79 exclusion). An application needing
+any of them reaches the injected client, as it does for a Prisma raw query.
+
+`ICosmosClient` and the shapes it reaches (`ICosmosDatabase`, `ICosmosContainer`, `ICosmosItems`,
+`ICosmosItem`, `ICosmosQueryIterator`, `CosmosQuerySpec`, `CosmosQueryParameter`,
+`CosmosPartitionKeyValue`) are the exported injection seam, together with the response and operation
+shapes those members return and accept (`CosmosItemResponse`, `CosmosFeedResponse`,
+`CosmosRequestOptions`, `CosmosAccessCondition`, `CosmosPatchOperation`, `CosmosBatchOperation` with
+its four arms `CosmosBatchInsertOperation`, `CosmosBatchReplaceOperation`,
+`CosmosBatchPatchOperation` and `CosmosBatchDeleteOperation`, `CosmosBatchResponse`,
+`CosmosContainerDefinition`) — so the seam's own signatures are nameable from the package entry. The
+real SDK implements their structural shapes.
+
 ### Exports
 
-| Export                                                                                                                      | Kind                               |
-| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `DatabasePlugin`                                                                                                            | factory                            |
-| `DatabaseService`                                                                                                           | class                              |
-| `BaseRepository`, `UnitOfWork`                                                                                              | classes                            |
-| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`                                                          | classes                            |
-| `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                            |
-| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                | classes                            |
-| `PageOptions`, `Page`                                                                                                       | types                              |
-| `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                   | types                              |
-| `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                       | types                              |
-| `encodeCursor`, `decodeCursor`, `keysetPredicate` (re-exported from `common`)                                               | functions                          |
-| `MongoTransactionUnavailableError`                                                                                          | class                              |
-| `PrismaSqlProvider`                                                                                                         | type                               |
-| `SqlJsonDialect`                                                                                                            | type                               |
-| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                          |
-| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                              |
-| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                         |
-| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                              |
-| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`                          | interfaces                         |
-| `MongoAdapterOptions` (union of two arms), `MongoAdapterOptionsBase`, `MongoEntityMapping`                                  | types                              |
-| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                         |
-| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                              |
-| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                              |
-| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`           |
-| `DataSource`                                                                                                                | deprecated alias of `IDataSource`  |
-| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                   | interfaces (Mongo injection seam)  |
-| `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`          | interfaces (Mongo collection seam) |
+| Export                                                                                                                                                                                                                                                                                                                  | Kind                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `DatabasePlugin`                                                                                                                                                                                                                                                                                                        | factory                            |
+| `DatabaseService`                                                                                                                                                                                                                                                                                                       | class                              |
+| `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                            |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`                                                                                                                                                                                                                                                      | classes                            |
+| `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                            |
+| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                                                                                            | classes                            |
+| `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                              |
+| `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                              |
+| `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                                                                                                                                                   | types                              |
+| `encodeCursor`, `decodeCursor`, `keysetPredicate` (re-exported from `common`)                                                                                                                                                                                                                                           | functions                          |
+| `MongoTransactionUnavailableError`                                                                                                                                                                                                                                                                                      | class                              |
+| `CosmosAdapter`                                                                                                                                                                                                                                                                                                         | class                              |
+| `CosmosTransactionScopeError`, `CosmosConcurrentModificationError`                                                                                                                                                                                                                                                      | classes                            |
+| `CosmosDatabaseOptions`, `CosmosAdapterOptions`, `CosmosAdapterOptionsBase`, `CosmosEntityMapping`                                                                                                                                                                                                                      | types                              |
+| `ICosmosClient`, `ICosmosDatabase`, `ICosmosContainer`, `ICosmosItems`, `ICosmosItem`, `ICosmosQueryIterator`                                                                                                                                                                                                           | interfaces (Cosmos injection seam) |
+| `CosmosQuerySpec`, `CosmosQueryParameter`, `CosmosPartitionKeyValue`                                                                                                                                                                                                                                                    | types (Cosmos query seam)          |
+| `CosmosItemResponse`, `CosmosFeedResponse`, `CosmosRequestOptions`, `CosmosAccessCondition`, `CosmosPatchOperation`, `CosmosBatchOperation`, `CosmosBatchInsertOperation`, `CosmosBatchReplaceOperation`, `CosmosBatchPatchOperation`, `CosmosBatchDeleteOperation`, `CosmosBatchResponse`, `CosmosContainerDefinition` | interfaces (Cosmos operation seam) |
+| `PrismaSqlProvider`                                                                                                                                                                                                                                                                                                     | type                               |
+| `SqlJsonDialect`                                                                                                                                                                                                                                                                                                        | type                               |
+| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction`                                                                                                                                                                                             | functions                          |
+| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                                                                                                                                                                                                                          | types                              |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                                                                                                                                                                                                                        | interfaces                         |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                                                                                                                                                                                                                 | types                              |
+| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`                                                                                                                                                                                                                      | interfaces                         |
+| `MongoAdapterOptions` (union of two arms), `MongoAdapterOptionsBase`, `MongoEntityMapping`                                                                                                                                                                                                                              | types                              |
+| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                                                                                                                                                                                                                         | interfaces                         |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                                                                                                                                                                                                                         | types                              |
+| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                                                                                                                                                                                                               | types                              |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                                                                                                                                                                                                             | re-exports from `common`           |
+| `DataSource`                                                                                                                                                                                                                                                                                                            | deprecated alias of `IDataSource`  |
+| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                                                                                                                                                                                                               | interfaces (Mongo injection seam)  |
+| `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`                                                                                                                                                                                                      | interfaces (Mongo collection seam) |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.

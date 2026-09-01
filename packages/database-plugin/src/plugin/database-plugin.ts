@@ -10,6 +10,7 @@
 import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
 import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
+  CosmosAdapterOptions,
   CustomDatabaseOptions,
   DatabaseAdapterOptions,
   DatabaseAdapterType,
@@ -22,6 +23,7 @@ import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
 import { MongoAdapter } from '../adapters/mongo/mongo-adapter.ts';
+import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../repositories/base-repository.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -165,6 +167,11 @@ function createAdapter(
       );
     case 'drizzle':
       return Promise.resolve(new DrizzleAdapter(adapterOptions));
+    case 'cosmos':
+      // The Cosmos arm's options ride the same shared bag; `buildAdapterOptions`
+      // carries them through, so the arm is built from `adapterOptions` exactly
+      // as the others are — no cast to a concrete adapter.
+      return Promise.resolve(new CosmosAdapter(adapterOptions as unknown as CosmosAdapterOptions));
     case 'mongodb':
       // Mongo's options share the `DatabaseAdapterOptions` bag the other built-in
       // arms use; `buildAdapterOptions` carries them through, so the arm is built
@@ -213,6 +220,12 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('objectIdCtor');
   carry('database');
   carry('collections');
+  // The `'cosmos'` arm's keys. `client` and `database` are already carried
+  // above and are shared with the `'mongodb'` arm — each adapter reads only
+  // the shape it understands.
+  carry('endpoint');
+  carry('key');
+  carry('containers');
   return result as DatabaseAdapterOptions;
 }
 

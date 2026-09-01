@@ -10,6 +10,17 @@
  * on SQLite). This is the regression gate for §3.5: a future adapter cannot
  * reintroduce the `%`/`_` wildcard divergence without failing here.
  *
+ * The **Cosmos** adapter is the one backend this file does not evaluate, and
+ * that is deliberate rather than an omission: its translation is Cosmos SQL
+ * text, whose `CONTAINS`/`ARRAY_CONTAINS` semantics no evaluator here
+ * reproduces — writing one would be a second query engine, and a fake engine
+ * agreeing with a fake engine proves nothing. An EQUIVALENT but REDUCED case
+ * table is instead run against the REAL service, with the same Memory-adapter
+ * reference answer, in `test/integration/real-cosmos-adapter.test.ts`: it seeds
+ * 5 rows against the 12 here and omits the regex-metacharacter rows, which
+ * exist for the `$regex` backends and have no Cosmos analogue. The remaining
+ * gap is therefore visible rather than implied.
+ *
  * The M70b table grew a second row kind for M79 (§3.8): the findPage
  * cursor-walk conformance at the bottom of this file — one seeded fixture
  * paged through every data source, asserting identical rows and a

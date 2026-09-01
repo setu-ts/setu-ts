@@ -18,6 +18,7 @@
     "npm:@aws-sdk/client-sns@3": "3.1103.0",
     "npm:@aws-sdk/client-sqs@3": "3.1103.0",
     "npm:@aws-sdk/s3-request-presigner@3": "3.1103.0",
+    "npm:@azure/cosmos@4": "4.10.0",
     "npm:@azure/identity@4": "4.13.1",
     "npm:@azure/keyvault-secrets@4": "4.11.2",
     "npm:@azure/service-bus@7": "7.9.5",
@@ -503,6 +504,22 @@
         "tslib"
       ]
     },
+    "@azure/cosmos@4.10.0": {
+      "integrity": "sha512-SP2UpmR5x1wuoo9EAzCP5Nb8x3BCoQEI8ll9+dkC3x//ozE8Mwg6rY1gEmE1u9Yp/1xCD6lq9FXglFqbEzZ38w==",
+      "dependencies": [
+        "@azure/abort-controller@2.2.0",
+        "@azure/core-auth",
+        "@azure/core-rest-pipeline",
+        "@azure/core-tracing",
+        "@azure/core-util",
+        "@azure/keyvault-keys",
+        "@azure/logger",
+        "fast-json-stable-stringify",
+        "priorityqueuejs",
+        "semaphore",
+        "tslib"
+      ]
+    },
     "@azure/identity@4.13.1": {
       "integrity": "sha512-5C/2WD5Vb1lHnZS16dNQRPMjN6oV/Upba+C9nBIs15PmOi6A3ZGs4Lr2u60zw4S04gi+u3cEXiqTVP7M4Pz3kw==",
       "dependencies": [
@@ -528,6 +545,22 @@
         "@azure/core-rest-pipeline",
         "@azure/core-tracing",
         "@azure/core-util",
+        "@azure/logger",
+        "tslib"
+      ]
+    },
+    "@azure/keyvault-keys@4.10.2": {
+      "integrity": "sha512-VmUSLbXRAbSzDD8grXHGPaknYs0SKr3yuf6U+d4XMpX4XuVYskNqbTTwXce0zR1LyxfTZm9rWEBcvs3vdYwCmQ==",
+      "dependencies": [
+        "@azure-rest/core-client",
+        "@azure/abort-controller@2.2.0",
+        "@azure/core-auth",
+        "@azure/core-lro",
+        "@azure/core-paging",
+        "@azure/core-rest-pipeline",
+        "@azure/core-tracing",
+        "@azure/core-util",
+        "@azure/keyvault-common",
         "@azure/logger",
         "tslib"
       ]
@@ -1474,6 +1507,9 @@
     "extend@3.0.2": {
       "integrity": "sha512-fjquC59cD7CyW6urNXK0FBufkZcoiGG80wTuPujX590cB5Ttln20E2UB4S/WARVqhXffZl2LNgS+gQdPIIim/g=="
     },
+    "fast-json-stable-stringify@2.1.0": {
+      "integrity": "sha512-lhd/wF+Lk98HZoTCtlVraHtfh5XYijIjalXck7saUtuanSDyLMxnHhSXEDJqHxD7msR8D0uCmqlkwjCV8xvwHw=="
+    },
     "fast-xml-builder@1.3.0": {
       "integrity": "sha512-F74cZEdCvuw9P41GAC3rod4X04jjWGM1JPEv/GWSqFTWLsdyMSBMBMlm9Hk3GLBgLBbdBNY8yee0pQh2RBVESQ==",
       "dependencies": [
@@ -2164,6 +2200,9 @@
         "xtend"
       ]
     },
+    "priorityqueuejs@2.0.0": {
+      "integrity": "sha512-19BMarhgpq3x4ccvVi8k2QpJZcymo/iFUcrhPd4V96kYGovOdTsWwy7fxChYi4QY+m2EnGBWSX9Buakz+tWNQQ=="
+    },
     "process-warning@5.1.0": {
       "integrity": "sha512-jQSaVHsPgtyw60e1rQ/A+/ArPEj/S8pS/vFnyGa/gYFXrKk/6RuDkoqVDQ5NI5MmS01698ltlAk0NoDBNLujRw=="
     },
@@ -2309,6 +2348,9 @@
     },
     "safe-stable-stringify@2.5.0": {
       "integrity": "sha512-b3rppTKm9T+PsVCBEOUR46GWI7fdOs00VKZ1+9c1EWDaDMvjQc6tUwuFyIprgGgTcWoVHSKrU8H31ZHA2e0RHA=="
+    },
+    "semaphore@1.1.0": {
+      "integrity": "sha512-O4OZEaNtkMd/K0i6js9SL+gqy0ZCBMgUvlSqHKi4IBdjhe7wB8pwztUk1BbZ1fmrvpwFrPbHzqd2w5pTcJH6LA=="
     },
     "semver@7.5.4": {
       "integrity": "sha512-1bCSESV6Pv+i21Hvpxp3Dx+pSD8lIPt8uVjRrxAUt/nbswYc+tK6Y2btiULjd4+fnq15PX+nqQDC7Oft7WkwcA==",
