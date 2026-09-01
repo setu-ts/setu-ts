@@ -10,6 +10,14 @@
  * on SQLite). This is the regression gate for §3.5: a future adapter cannot
  * reintroduce the `%`/`_` wildcard divergence without failing here.
  *
+ * The **Bigtable** leg is the one driven END TO END rather than through a
+ * translation reproduced here: it pushes only a byte-exact `eq` down and
+ * evaluates the rest with the same `matchesFilter` the reference uses, so
+ * running the whole pipeline is the only thing that proves the push-down never
+ * drops a matching row. It joins the case table but NOT the page-walk table
+ * below, because that walk sorts by a non-key `score` column and Bigtable has
+ * no secondary index to serve it — the refusal is asserted instead.
+ *
  * The **Cosmos** adapter is the one backend this file does not evaluate, and
  * that is deliberate rather than an omission: its translation is Cosmos SQL
  * text, whose `CONTAINS`/`ARRAY_CONTAINS` semantics no evaluator here
@@ -52,6 +60,9 @@ import type {
 } from '../../src/adapters/dynamo/dynamo-client-types.ts';
 import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';
 import { unmarshalDynamoValue } from '../../src/adapters/dynamo/dynamo-marshal.ts';
+import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
+import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
+import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
 import { createD1DataSource } from '../../../cloudflare-plugin/src/database/d1-data-source.ts';
 import {
   createFakeDrizzleInstance,
@@ -608,6 +619,48 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
       expect(dynamoRows).toEqual(expected);
     });
   }
+
+  // Every case also agrees with the Bigtable adapter. Unlike every other leg
+  // in this file, Bigtable is driven END TO END rather than through a
+  // translation an evaluator here reproduces: it pushes only what it can
+  // answer exactly (an `eq` as a byte-range condition) and evaluates the rest
+  // with the SAME `matchesFilter` the reference uses. Running the whole
+  // pipeline is what makes the leg meaningful — it proves the PUSH-DOWN never
+  // drops a matching row, which is the one way this adapter could diverge.
+  //
+  // Rows are compared SORTED: Bigtable returns rows in row-key order, and the
+  // fixture's ids (`r1`, `r10`, `r11`, `r2`, …) do not sort into insertion
+  // order. That is a documented property of the backend, not a divergence.
+  for (const { label, filter } of CASES) {
+    it(`Memory/Bigtable agree: ${label}`, async () => {
+      const expected = [...reference(filter)].sort();
+      const store = new FakeBigtableStore();
+      const client = createFakeBigtableClient(store);
+      const target = resolveBigtableTarget('Widget', undefined);
+      const source = createBigtableDataSource(client.instance('i').table(target.table), target);
+      for (const row of ROWS) await source.create(row);
+      const rows = await source.findAll(query({ filter }));
+      expect(ids(rows).sort()).toEqual(expected);
+    });
+  }
+
+  it('Bigtable refuses by name what it cannot express — a non-key sort', async () => {
+    // Bigtable has NO secondary index, so the only order it can serve is the
+    // row key. Answering an unordered result for a caller that asked for one
+    // would be the silent divergence this suite exists to catch.
+    const store = new FakeBigtableStore();
+    const client = createFakeBigtableClient(store);
+    const target = resolveBigtableTarget('Widget', undefined);
+    const source = createBigtableDataSource(client.instance('i').table(target.table), target);
+    await source.create({ id: 'r1', name: 'plain text' });
+    let caught: unknown;
+    try {
+      await source.findAll(query({ orderBy: { name: 'asc' } }));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UnsupportedQueryFeatureError);
+  });
 
   it('DynamoDB refuses by name what it cannot express — a Date filter with no declared encoding', async () => {
     // §3.14: DynamoDB has no date type, so a `Date` comparison on an attribute

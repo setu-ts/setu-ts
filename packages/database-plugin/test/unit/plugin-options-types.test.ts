@@ -26,6 +26,28 @@ import {
   createFakeDrizzleInstance,
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
+import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
+
+/**
+ * A minimal plugin context recording what the plugin registered.
+ *
+ * @param registered - The map each registration lands in
+ * @returns The context
+ */
+function createPluginContext(registered: Map<string, unknown>): IPluginContext {
+  return {
+    services: {
+      has: () => false,
+      get: () => undefined,
+      register: (token: string, service: unknown) => {
+        registered.set(token, service);
+      },
+    },
+    health: { register: () => {} },
+    lifecycle: { onClose: () => {} },
+    runtime: { hrtime: () => 0 },
+  } as unknown as IPluginContext;
+}
 
 /** Never invoked; every assertion here is made by the type-checker. */
 function assertOptionArms(): void {
@@ -181,6 +203,48 @@ function assertOptionArms(): void {
     options: { endpoint: 'https://acct.documents.azure.com:443/', database: 'app' },
   };
   void cosmosKeyOnly;
+
+  // --- the bigtable arm ----------------------------------------------------
+  // Either half of the union satisfies it on its own, and `instance` is
+  // required on both: a table is addressed as project/instance/table, and
+  // neither an injected client nor a project id encodes the instance.
+  const bigtableLazy: DatabasePluginOptions = {
+    type: 'bigtable',
+    options: { projectId: 'p', instance: 'app', apiEndpoint: '127.0.0.1:8086' },
+  };
+  void bigtableLazy;
+  const bigtableInjected: DatabasePluginOptions = {
+    type: 'bigtable',
+    options: {
+      client: {} as never,
+      instance: 'app',
+      tables: {
+        Order: {
+          table: 'orders',
+          rowKey: { fields: ['tenantId', 'orderId'] },
+          columnFamily: 'o',
+          valueEncoding: 'raw',
+        },
+      },
+      maxPageFetches: 3,
+      logQueries: true,
+    },
+  };
+  void bigtableInjected;
+
+  const bigtableNoInstance: DatabasePluginOptions = {
+    type: 'bigtable',
+    // @ts-expect-error -- `instance` is required on both arms.
+    options: { projectId: 'p' },
+  };
+  void bigtableNoInstance;
+
+  const bigtableNoClientForm: DatabasePluginOptions = {
+    type: 'bigtable',
+    // @ts-expect-error -- neither a projectId nor a client: no arm matches.
+    options: { instance: 'app' },
+  };
+  void bigtableNoClientForm;
 }
 void assertOptionArms;
 
@@ -229,18 +293,7 @@ describe('DatabasePlugin option arms', () => {
       destroy() {},
     };
     const registered = new Map<string, unknown>();
-    const ctx = {
-      services: {
-        has: () => false,
-        get: () => undefined,
-        register: (token: string, service: unknown) => {
-          registered.set(token, service);
-        },
-      },
-      health: { register: () => {} },
-      lifecycle: { onClose: () => {} },
-      runtime: { hrtime: () => 0 },
-    } as unknown as IPluginContext;
+    const ctx = createPluginContext(registered);
 
     // Every DynamoDB key `buildAdapterOptions` carries rides this one bag, so
     // the carry-through is exercised in the same drive.
@@ -260,5 +313,29 @@ describe('DatabasePlugin option arms', () => {
     const widgets = db.getRepository<{ id: string; name: string }>('Widget');
     await widgets.create({ id: 'w1', name: 'Bolt' });
     expect(await widgets.findById('w1')).toEqual({ id: 'w1', name: 'Bolt' });
+  });
+
+  it('registers the bigtable arm and serves a repository through it', async () => {
+    const store = new FakeBigtableStore();
+    const registered = new Map<string, unknown>();
+    const ctx = createPluginContext(registered);
+    const plugin = DatabasePlugin({
+      type: 'bigtable',
+      options: {
+        client: createFakeBigtableClient(store),
+        instance: 'app',
+        tables: { Widget: { table: 'widgets', columnFamily: 'w' } },
+        maxPageFetches: 3,
+      },
+    });
+    await plugin.register(ctx);
+
+    const db = registered.get(CAPABILITIES.DATABASE) as IDatabaseService;
+    const widgets = db.getRepository<{ id: string; name: string }>('Widget');
+    await widgets.create({ id: 'w1', name: 'Bolt' });
+    // Read back through the repository AND through the raw store, so the arm
+    // is proven to have reached the mapped table rather than a default one.
+    expect(await widgets.findById('w1')).toEqual({ id: 'w1', name: 'Bolt' });
+    expect(store.snapshot('widgets', 'w1')).toEqual({ w: { id: 's:w1', name: 's:Bolt' } });
   });
 });

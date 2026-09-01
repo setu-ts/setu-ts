@@ -1669,6 +1669,130 @@ its four arms `CosmosBatchInsertOperation`, `CosmosBatchReplaceOperation`,
 `CosmosContainerDefinition`) — so the seam's own signatures are nameable from the package entry. The
 real SDK implements their structural shapes.
 
+### Cloud Bigtable backend (`'bigtable'` arm)
+
+`BigtableAdapter` serves Google Cloud Bigtable over `npm:@google-cloud/bigtable@^6`, registered
+through the same discriminated union as every other backend:
+
+```typescript
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+
+app.register(DatabasePlugin({
+  type: 'bigtable',
+  options: {
+    projectId: 'my-project',
+    instance: 'app-instance',
+    tables: {
+      Order: {
+        table: 'orders',
+        rowKey: { fields: ['tenantId', 'orderId'], separator: '#' },
+        columnFamily: 'o',
+        columns: { total: 'metrics:amount' },
+      },
+    },
+  },
+}));
+```
+
+**Bigtable inverts the DynamoDB problem.** Its row key is a single lexicographically-sorted string,
+so `findById` fits it natively with no key object at all. What it lacks instead is everything around
+the key: there is **no secondary index of any kind**, so a predicate on a non-key column is a scan
+and `orderBy` is row-key order or nothing.
+
+`BigtableAdapterOptions` is a **union of two arms**: one requires `projectId` (with an optional
+`apiEndpoint` for an emulator), the other requires `client` (an already-constructed structural
+`IBigtableClient`, which is how a client built with non-default credentials reaches the adapter).
+`instance` is required on BOTH arms, because a table is addressed as `project/instance/table` and
+neither a client nor a project encodes it. `BigtableAdapterOptionsBase` is the half both arms share
+(`instance`, `tables`, `maxPageFetches`, `logQueries`). `BigtableAdapter`'s constructor also takes
+an optional second parameter, a `BigtableClientLoader`, which overrides the inject-or-lazy choice
+and whose `owned` flag decides whether `disconnect()` closes the client it produced.
+
+**The adapter provisions nothing and `connect()` issues no RPC.** Column families,
+garbage-collection policies and split points belong to the application's provisioning, and a missing
+table or instance is already reported by the service as `5 NOT_FOUND` quoting the full resource path
+— while `instance.getTables()` is a table-ADMIN call a data-plane service account commonly cannot
+make, so probing at connect time would refuse a working configuration. Configuration mistakes are
+refused at construction instead, by name.
+
+**The row key is composed from logical fields.** `BigtableRowKeyMapping` is
+`{ fields, separator?, prefix? }`, defaulting to `{ fields: ['id'], separator: '#' }`. A
+single-field key accepts a scalar `EntityKey`; a multi-field key requires a record naming every
+field and refuses a scalar, which cannot say which field it is. A field value **containing the
+separator is refused**: two different logical keys would otherwise compose to one row key, so a
+write would silently overwrite an unrelated row. Composing a row key from several fields is a
+_mapping_ concern rather than the composite-key _contract_ concern, which is why this arm needs no
+`common` change — Bigtable's key shares no type with DynamoDB's partition/sort pair.
+
+Key fields are written as ordinary cells AND recovered from the row key on read, with the **cells
+winning**. All three parts are load-bearing: a Bigtable row cannot exist with zero cells; the row
+key is bytes and records no type, so overlaying it would turn a numeric key field into a string; and
+a table written outside this framework has no key cells at all, which is what the parse-back serves.
+
+**Values are tagged by default.** `BigtableValueEncoding` is `'tagged' | 'raw'`. Tagged writes
+`<tag>:<payload>`, so a number, boolean, `null`, `Date` or object round-trips as itself; a cell
+carrying no recognised tag decodes as its raw string, which is the interop path. `'raw'` writes
+`String(value)` and reads every cell as a string, removing that residual ambiguity for an
+application whose table is entirely foreign.
+
+**`orderBy` is the row key or nothing.** An empty sort is honoured, and so is one naming exactly the
+mapped key fields, in order, all ascending — that IS the scan order. Everything else raises
+`UnsupportedQueryFeatureError`: a non-key field has no index, and **descending is refused
+deliberately** rather than shipped on `reversed: true`, because the emulator this adapter is tested
+against silently ignores that option (measured: it answered ascending with no error), so the path
+could not be verified. A non-zero `offset` is refused too — Bigtable has no row offset, and
+discarding scanned rows would read and bill them; `findPage` is the route.
+
+**Three narrowings reach the server, and nothing else.** The row set (an `eq` on every key field is
+an exact key; an `eq` pinning a leading prefix is a prefix range with an exclusive successor end; a
+pinned prefix plus an `in` on the final field is an explicit key list), byte-exact value equality
+for each conjunctive non-key `eq`, and the column projection. Everything else is evaluated by the
+same evaluator the memory adapter uses as the portable reference, so the six backends cannot drift
+about what a `FilterExpression` means. The invariant is that **a push-down may only ever match a
+superset** of what the client-side evaluator keeps; every fallback widens. Two details are
+correctness requirements rather than tuning: a value test is an exact byte RANGE and never the SDK's
+string form, which is a regex (measured, `{ value: 'a.*b' }` matched both `a.*b` and `axxb`); and it
+is wrapped in a `condition` filter rather than chained, because a bare chain strips every
+non-matching cell and the row would come back carrying only the cell that matched. An ordered
+comparison on a key field is not pushed down either — the composed key is a string, so a numeric key
+field does not sort numerically inside it. The projection is **interleaved with a one-cell arm**
+rather than emitted bare: a filter that removes every cell of a row removes the row (the service
+answers with no empty row), so a bare projection would silently drop a row carrying none of the
+projected columns — unreachable for a row this adapter wrote, reachable for a table written
+elsewhere. `count` reuses that projection, restricted to the columns its predicate needs.
+
+**Pagination is a start-key cursor** over the portable keyset codec, which is exactly Bigtable's own
+continuation mechanism. `nextCursor` is non-`null` if and only if the page is non-terminal, never
+derived from `rows.length`: a client-side filter can empty a whole raw batch, so a page bounded by
+`maxPageFetches` (default 10) returns zero rows AND a cursor, minted from the last row scanned.
+
+**`rawQuery` is refused by name** with `UnsupportedRawQueryError`: Bigtable has no query language
+behind `query(sql, params)` — its data plane is ReadRows, MutateRow and CheckAndMutateRow.
+
+**Transactions are one row.** Bigtable's only atomicity unit is the single row (a multi-row batch is
+atomic per entry, not as a whole), so `beginTransaction()` buffers writes, refuses a second row key
+at the write that crosses the bound with `BigtableTransactionScopeError`, and commits the buffer as
+ONE CheckAndMutateRow whose mutation list applies atomically and in order — a buffered delete
+followed by writes replaces the row wholesale. `rollback()` discards, sends nothing, and is
+idempotent. Reads inside a transaction observe committed state only. `create` and `update` are
+conditional writes: Bigtable's `insert` is an upsert, so the CheckAndMutateRow match flag is what
+makes `create` refuse an existing row and `update` refuse an absent one — including inside a
+transaction, where a buffered `create` whose row turns out to exist is refused at commit.
+
+**What the arm deliberately cannot do.** Platform limits: no secondary index of any kind, no row
+offset, no multi-row atomicity, and no descending scan this adapter can verify. Contract limits:
+grouping and joins are absent from `NormalizedQuery`, whose only aggregate is `count`; `rawQuery`
+has no Bigtable surface; and cell versioning plus garbage-collection policies are outside the
+portable contract by design — no other backend has a counterpart, so exposing them would invent a
+concept for one adapter. An application needing any of them reaches the injected client.
+
+`IBigtableClient` and the shapes it reaches (`IBigtableInstance`, `IBigtableTable`, `IBigtableRow`,
+`BigtableReadOptions`, `BigtableReadRow`, `BigtableRowData`, `BigtableCell`, `BigtableRowRange`,
+`BigtableRowBoundary`, `BigtableValueRange`, `BigtableFilter`, `BigtableMutation`, `BigtableEntry`)
+are the exported injection seam, so an application implementing its own facade can name every
+signature. `createInjectedBigtableLoader` and `createLazyBigtableLoader` build the two loader arms;
+`BigtableClientConfiguration` is what the lazy one takes.
+
 ### Exports
 
 | Export                                                                                                                                                                                                                                                                                                                  | Kind                               |
@@ -1713,11 +1837,12 @@ real SDK implements their structural shapes.
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.
 
-`DatabaseAdapterType` gained `'custom'`, then `'mongodb'`, then `'dynamodb'`, then `'cosmos'`;
-`DatabasePluginOptions` became a union discriminated on `type`. All are additive for callers — every
-existing registration compiles unchanged. `MongoDatabaseOptions`, `DynamoDatabaseOptions` and
-`CosmosDatabaseOptions` each extend `DatabaseConnectionOptions` and carry their arm's dedicated
-option bag (`MongoAdapterOptions`, `DynamoAdapterOptions`, `CosmosAdapterOptions`), so a
+`DatabaseAdapterType` gained `'custom'`, then `'mongodb'`, then `'dynamodb'`, then `'cosmos'`, then
+`'bigtable'`; `DatabasePluginOptions` became a union discriminated on `type`. All are additive for
+callers — every existing registration compiles unchanged. `MongoDatabaseOptions`,
+`DynamoDatabaseOptions` and `CosmosDatabaseOptions` each extend `DatabaseConnectionOptions` and
+carry their arm's dedicated option bag (`MongoAdapterOptions`, `DynamoAdapterOptions`,
+`CosmosAdapterOptions`), as does `BigtableDatabaseOptions` with `BigtableAdapterOptions`, so a
 registration carrying a memory, Prisma, Drizzle or custom configuration still compiles unchanged.
 
 ### Multiple Databases

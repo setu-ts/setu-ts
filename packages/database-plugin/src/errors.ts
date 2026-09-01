@@ -244,3 +244,40 @@ export class CosmosConcurrentModificationError extends Error {
     super(message);
   }
 }
+
+/**
+ * Thrown when a Bigtable transaction is asked to write a second row.
+ *
+ * Bigtable's only atomicity unit is the **single row**: a multi-row batch is
+ * atomic per entry and not as a whole. A handle that accepted several row keys
+ * would therefore promise an atomicity the platform does not offer, so the
+ * refusal happens at the write that crosses the bound rather than at commit,
+ * naming both rows — the {@linkcode CosmosTransactionScopeError} precedent.
+ *
+ * @example
+ * ```typescript
+ * import { BigtableTransactionScopeError } from '@setu-ts/database-plugin';
+ * try {
+ *   await uow.getRepository('User').create({ id: 'u1' });
+ *   await uow.getRepository('User').create({ id: 'u2' });
+ * } catch (err) {
+ *   if (err instanceof BigtableTransactionScopeError) {
+ *     console.error(err.message);
+ *   }
+ * }
+ * ```
+ * @since 0.2.0
+ */
+export class BigtableTransactionScopeError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'BigtableTransactionScopeError';
+
+  /**
+   * Creates the error.
+   *
+   * @param message - The full diagnostic, safe to log, naming what was crossed
+   */
+  constructor(message: string) {
+    super(message);
+  }
+}

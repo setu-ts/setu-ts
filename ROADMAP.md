@@ -8054,10 +8054,13 @@ ends of the same contract, and an adapter that assumed either shape would mis-se
 `gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators` on `127.0.0.1:8086`, 2026-08-29), so
 each claim above is measured rather than reasoned: a point read of row key `u#002` returned its
 columns across two families; a range scan of `[u#002, u#004)` returned exactly `u#002` and `u#003`,
-which is the start-key cursor model with no row offset anywhere in it; and a filter on `cf2:city`
-returned the two matching rows through a two-part `family:qualifier` address. One emulator trap for
-the plan: **`cbtemulator` implements no instance admin API** — `instance.create()` answers
-`12 UNIMPLEMENTED`, instances are implicit, and tables are created directly.
+which is the start-key cursor model with no row offset anywhere in it — re-measured through the Node
+SDK during M82, `{ start, end }` is the SDK's own **inclusive-at-both-ends** shorthand and returns
+three rows, so the exclusive bound needs the explicit `{ value, inclusive: false }` form; and a
+filter on `cf2:city` returned the two matching rows through a two-part `family:qualifier` address.
+One emulator trap for the plan: **`cbtemulator` implements no instance admin API** —
+`instance.create()` answers `12 UNIMPLEMENTED`, instances are implicit, and tables are created
+directly.
 
 - **In scope:** the adapter; per-entity row-key mapping (including the standard practice of
   composing a row key from several logical fields, which is a _mapping_ concern rather than the
@@ -8067,8 +8070,9 @@ the plan: **`cbtemulator` implements no instance admin API** — `instance.creat
   version history per cell, which no other backend in the portable contract has any counterpart for,
   so exposing it portably would be inventing a concept for one adapter — the `poolSize` rule. An
   application needing it reaches the client directly, as it does for a Prisma raw query.
-- **Packages:** `database-plugin`, and `common` only if the row-key mapping shares a type with
-  M80's.
+- **Packages:** `database-plugin`. The row-key mapping does NOT share a type with M80's — M80's key
+  is a partition/sort ATTRIBUTE PAIR while Bigtable's is one composed string — so the milestone
+  shipped with **no `common` change** and no new capability token.
 
 ---
 
@@ -8534,7 +8538,7 @@ them would still silently select the wrong transport — complete (PR pending).
 | 79        | ✅     | portable data-access contract                       |
 | 80        | ✅     | dynamodb backend                                    |
 | 81        | ✅     | cosmos db backend                                   |
-| 82        | ⬜     | cloud bigtable backend                              |
+| 82        | ✅     | cloud bigtable backend                              |
 | 83        | ✅     | module declarations + functional example            |
 | 84        | ✅     | realtime client consumption (sdk + cli)             |
 | 85        | ✅     | cli (workspace full-stack gRPC, PR pending)         |

@@ -3,6 +3,12 @@ import { expect } from '@std/expect';
 import * as common from '@setu-ts/common';
 import * as database from '../../src/index.ts';
 import type {
+  BigtableAdapterOptions,
+  BigtableAdapterOptionsBase,
+  BigtableDatabaseOptions,
+  BigtableEntityMapping,
+  BigtableRowKeyMapping,
+  BigtableValueEncoding,
   CosmosAccessCondition,
   CosmosAdapterOptions,
   CosmosAdapterOptionsBase,
@@ -56,6 +62,7 @@ import type {
   DynamoTransactWriteItemsCommandOutput,
   DynamoUpdateItemCommandInput,
   DynamoUpdateItemCommandOutput,
+  IBigtableClient,
   ICosmosClient,
   IDynamoClient,
   MemoryDatabaseOptions,
@@ -362,6 +369,78 @@ describe('database-plugin barrel exports', () => {
         'DynamoSdkModule',
         'createInjectedDynamoLoader',
         'createLazyDynamoLoader',
+      ]
+    ) {
+      expect(Object.hasOwn(common, name)).toBe(false);
+    }
+  });
+
+  it('exports the Bigtable adapter and only its application-facing surface', () => {
+    expect(typeof database.BigtableAdapter).toBe('function');
+    expect(typeof database.BigtableTransactionScopeError).toBe('function');
+    expect(typeof database.createInjectedBigtableLoader).toBe('function');
+    expect(typeof database.createLazyBigtableLoader).toBe('function');
+    for (
+      const internal of [
+        'BigtableTransaction',
+        'createBigtableDataSource',
+        'resolveBigtableTarget',
+        'columnAddress',
+        'planBigtableScan',
+        'assertSupportedOrderBy',
+        'assertNoOffset',
+        'composeRowKey',
+        'composeRowKeyFromFields',
+        'parseRowKey',
+        'prefixSuccessor',
+        'renderKeySegment',
+        'encodeCellValue',
+        'decodeCellValue',
+        'adaptBigtableSdkModule',
+      ]
+    ) {
+      expect(Object.hasOwn(database, internal)).toBe(false);
+    }
+  });
+
+  it('exports the Bigtable option arms and injection seam at COMPILE time', () => {
+    // Type-only exports leave no runtime trace, so dropping one would leave
+    // every other assertion in this file green (the M56 defect class).
+    const rowKey: BigtableRowKeyMapping = { fields: ['tenantId', 'orderId'], separator: '#' };
+    const encoding: BigtableValueEncoding = 'tagged';
+    const mapping: BigtableEntityMapping = {
+      table: 'orders',
+      rowKey,
+      columnFamily: 'o',
+      columns: { total: 'metrics:amount' },
+      valueEncoding: encoding,
+    };
+    const base: BigtableAdapterOptionsBase = { instance: 'app', tables: { Order: mapping } };
+    const lazy: BigtableAdapterOptions = { ...base, projectId: 'p', apiEndpoint: '127.0.0.1:8086' };
+    const injected: BigtableAdapterOptions = { ...base, client: {} as IBigtableClient };
+    const arm: BigtableDatabaseOptions = { type: 'bigtable', options: lazy };
+    expect([arm.type, base.instance, mapping.table, injected.instance]).toEqual([
+      'bigtable',
+      'app',
+      'orders',
+      'app',
+    ]);
+  });
+
+  it('keeps every Bigtable symbol OUT of @setu-ts/common', () => {
+    // The M82 plan commits `common` to ZERO new symbols: Bigtable's row key is
+    // one composed string, which shares no type with M80's partition/sort key
+    // pair, so nothing about it belongs in the portable contract.
+    for (
+      const name of [
+        'BigtableAdapter',
+        'BigtableDatabaseOptions',
+        'BigtableAdapterOptions',
+        'BigtableEntityMapping',
+        'IBigtableClient',
+        'BigtableSdkModule',
+        'createInjectedBigtableLoader',
+        'createLazyBigtableLoader',
       ]
     ) {
       expect(Object.hasOwn(common, name)).toBe(false);
