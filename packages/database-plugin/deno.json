@@ -8,8 +8,7 @@
   ],
   "imports": {
     "@prisma/client": "npm:@prisma/client@^7.10.0",
-    "mongodb": "npm:mongodb@^6.21.0",
-    "@azure/cosmos": "npm:@azure/cosmos@^4.5.1"
+    "mongodb": "npm:mongodb@^6.21.0"
   },
   "test": {
     "permissions": {

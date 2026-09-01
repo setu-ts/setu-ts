@@ -2652,7 +2652,6 @@
       },
       "packages/database-plugin": {
         "dependencies": [
-          "npm:@azure/cosmos@^4.5.1",
           "npm:@prisma/client@^7.10.0",
           "npm:mongodb@^6.21.0"
         ]
