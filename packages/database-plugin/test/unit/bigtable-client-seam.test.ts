@@ -31,7 +31,6 @@ interface SdkLog {
   reads: unknown[];
   filters: unknown[];
   branches: unknown[];
-  mutations: unknown[];
   closes: number;
 }
 
@@ -63,10 +62,6 @@ function fakeModule(log: SdkLog, rows: { id: string; data?: unknown }[] = []): B
                   return Promise.resolve([true] as [boolean, ...unknown[]]);
                 },
               }),
-              mutate: (entries: readonly unknown[]) => {
-                log.mutations.push(entries);
-                return Promise.resolve(undefined);
-              },
             };
           },
         };
@@ -87,7 +82,6 @@ function newLog(): SdkLog {
     reads: [],
     filters: [],
     branches: [],
-    mutations: [],
     closes: 0,
   };
 }
@@ -124,9 +118,12 @@ describe('adaptBigtableSdkModule', () => {
       { projectId: 'p' },
     );
     const rows = await client.instance('i').table('t').readRows({ keys: ['u1'] });
+    // The SDK's per-cell timestamp is DROPPED: cell versioning has no
+    // counterpart in the portable contract, so carrying it would be a value
+    // nothing reads.
     expect(rows).toEqual([{
       key: 'u1',
-      data: { cf: { name: [{ value: 'ada', timestamp: '9' }, { value: 'old' }] } },
+      data: { cf: { name: [{ value: 'ada' }, { value: 'old' }] } },
     }]);
   });
 
@@ -149,7 +146,6 @@ describe('adaptBigtableSdkModule', () => {
     const rows = await client.instance('i').table('t').readRows({});
     expect(rows[0].data.cf.raw[0].value).toBe('bytes');
     expect(rows[0].data.cf.odd[0].value).toBe('7');
-    expect(rows[0].data.cf.odd[0].timestamp).toBeUndefined();
     expect(rows[0].data.cf.none[0].value).toBe('');
     expect(rows[0].data.cf.bad[0].value).toBe('');
   });
@@ -223,22 +219,6 @@ describe('adaptBigtableSdkModule', () => {
     const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
     await client.instance('i').table('t').row('u1').conditionalMutate([{ all: true }], {});
     expect(log.branches[0]).toEqual({});
-  });
-
-  it('flattens batch entries and skips an empty batch entirely', async () => {
-    const log = newLog();
-    const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
-    const table = client.instance('i').table('t');
-    await table.mutate([]);
-    expect(log.mutations).toHaveLength(0);
-    await table.mutate([
-      { key: 'a', mutation: { method: 'insert', data: { cf: { x: '1' } } } },
-      { key: 'b', mutation: { method: 'delete' } },
-    ]);
-    expect(log.mutations[0]).toEqual([
-      { key: 'a', method: 'insert', data: { cf: { x: '1' } } },
-      { key: 'b', method: 'delete' },
-    ]);
   });
 
   it('closes the native client', async () => {

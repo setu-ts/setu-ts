@@ -32,12 +32,15 @@ All notable changes to this project are documented here. The format follows
   because a bare chain strips every non-matching cell and the row would come back carrying only the
   cell that matched. The projection is interleaved with a one-cell arm for the same class of reason:
   a filter that removes every cell removes the ROW, so a bare projection would silently drop a row
-  carrying none of the projected columns. `orderBy` is honoured only as the full key ascending, or
-  empty; a non-key sort, a strict key prefix and **descending** are refused by name, the last
-  because the emulator this adapter is tested against silently ignores `reversed: true` (measured:
-  it answered ascending with no error), so the path could not be verified. A non-zero `offset` is
-  refused too — Bigtable has none — and `rawQuery` is refused because Bigtable's data plane is
-  ReadRows, MutateRow and CheckAndMutateRow with no SQL surface behind `query(sql, params)`.
+  carrying none of the projected columns. Row keys are compared as UTF-8 bytes — that is, by CODE
+  POINT — because JavaScript's `<` compares UTF-16 code units and the two disagree for every non-BMP
+  character, which dropped an emoji-keyed row from a cursor walk. `orderBy` is honoured only as the
+  full key ascending, or empty; a non-key sort, a strict key prefix and **descending** are refused
+  by name, the last because the emulator this adapter is tested against silently ignores
+  `reversed: true` (measured: it answered ascending with no error), so the path could not be
+  verified. A non-zero `offset` is refused too — Bigtable has none — and `rawQuery` is refused
+  because Bigtable's data plane is ReadRows, MutateRow and CheckAndMutateRow with no SQL surface
+  behind `query(sql, params)`.
 
   Pagination is a start-key cursor over the portable keyset codec, which is Bigtable's own
   continuation mechanism; `nextCursor` is non-`null` iff the page is non-terminal, so a page bounded

@@ -133,6 +133,30 @@ describe('update', () => {
     expect(await source.update('u1', {})).toEqual({ id: 'u1', name: 'ada' });
   });
 
+  it('ignores a cell whose version list is empty', async () => {
+    // A conformant service never answers with a versionless qualifier, but a
+    // hand-written facade can, and reading `[0]` off it would be `undefined`.
+    const { store, source } = setup();
+    store.seed('User', 'u1', { cf: { id: 's:u1' } });
+    const rows = store.tables.get('User') as Map<string, Map<string, Map<string, unknown[]>>>;
+    (rows.get('u1') as Map<string, Map<string, unknown[]>>).get('cf')?.set('ghost', []);
+    expect(await source.findById('u1')).toEqual({ id: 'u1' });
+  });
+
+  it('accepts a composite key restating its own values, and an undefined key field', async () => {
+    const { source } = setup('Order', {
+      Order: { table: 'orders', rowKey: { fields: ['tenantId', 'orderId'] } },
+    });
+    await source.create({ tenantId: 't1', orderId: 'o1', total: 1 });
+    const key = { tenantId: 't1', orderId: 'o1' };
+    expect(await source.update(key, { tenantId: 't1', total: 2 }))
+      .toEqual({ tenantId: 't1', orderId: 'o1', total: 2 });
+    // An explicitly-undefined key field is not a move; it writes no cell.
+    expect(await source.update(key, { orderId: undefined, total: 3 }))
+      .toEqual({ tenantId: 't1', orderId: 'o1', total: 3 });
+    await expect(source.update(key, { tenantId: 't2' })).rejects.toThrow(/cannot move a row/);
+  });
+
   it('refuses a payload that would move the row to a different key', async () => {
     const { source } = setup();
     await source.create({ id: 'u1', name: 'ada' });
@@ -219,6 +243,22 @@ describe('findAll', () => {
     store.seed('orders', 'o2', { cf: { other: 'x' } });
     const rows = await source.findAll(query({ select: ['name'] }));
     expect(rows).toEqual([{ name: 'ada' }, {}]);
+  });
+
+  it('answers a constraint on a field that cannot be a column, projected or not', async () => {
+    // A `select` or `orderBy` naming an unusable identifier is refused, because
+    // projecting or sorting by a column that cannot exist is meaningless. A
+    // `where` or `filter` on one is an ordinary "no row matches" — and the two
+    // read paths must AGREE, which they did not while the projected path
+    // resolved constraint fields strictly and threw.
+    const { source } = setup();
+    await source.create({ id: 'u1', name: 'ada' });
+    expect(await source.findAll(query({ where: { 'a b': 1 } }))).toEqual([]);
+    expect(await source.findAll(query({ select: ['name'], where: { 'a b': 1 } }))).toEqual([]);
+    expect(await source.count({ 'a b': 1 })).toBe(0);
+    await expect(source.findAll(query({ select: ['a b'] }))).rejects.toThrow(
+      /not a usable column identifier/,
+    );
   });
 
   it('issues no read at all for a self-contradictory query', async () => {

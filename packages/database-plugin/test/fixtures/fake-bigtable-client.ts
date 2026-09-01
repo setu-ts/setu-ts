@@ -20,13 +20,14 @@
  * - CheckAndMutateRow reports whether the test matched, and applies its branch
  *   as an ordered, atomic list;
  * - cell versions come back NEWEST FIRST, and cells come back in lexicographic
- *   family-then-qualifier order rather than write order.
+ *   family-then-qualifier order rather than write order;
+ * - rows are ordered as UTF-8 BYTES, which is code-point order, not the UTF-16
+ *   code-unit order JavaScript's `<` applies.
  *
  * @module
  */
 import type {
   BigtableCell,
-  BigtableEntry,
   BigtableFilter,
   BigtableMutation,
   BigtableReadOptions,
@@ -38,6 +39,7 @@ import type {
   IBigtableRow,
   IBigtableTable,
 } from '../../src/adapters/bigtable/bigtable-client-types.ts';
+import { compareRowKeys } from '../../src/adapters/bigtable/bigtable-row-key.ts';
 
 /** A mutable cell set: family → qualifier → versions, newest first. */
 type MutableRow = Map<string, Map<string, BigtableCell[]>>;
@@ -62,9 +64,6 @@ export class FakeBigtableStore {
   readonly reads: RecordedRead[] = [];
   /** How many times `close()` was called. */
   closes = 0;
-  /** A monotonic cell timestamp, so version ordering is deterministic. */
-  #clock = 1_000;
-
   /**
    * Returns (creating if needed) one table's rows.
    *
@@ -106,10 +105,9 @@ export class FakeBigtableStore {
         row.set(family, stored);
       }
       for (const [qualifier, value] of Object.entries(qualifiers)) {
-        this.#clock += 1;
         const versions = stored.get(qualifier) ?? [];
         // Newest first, exactly as the service returns them.
-        versions.unshift({ value, timestamp: String(this.#clock) });
+        versions.unshift({ value });
         stored.set(qualifier, versions);
       }
     }
@@ -134,17 +132,27 @@ export class FakeBigtableStore {
   }
 }
 
-/** Whether a row key falls within one boundary pair. */
+/**
+ * Whether a row key falls within one boundary pair.
+ *
+ * Ordered with {@linkcode compareRowKeys}, not `<`: the service sorts row keys
+ * as UTF-8 bytes and JavaScript's operators compare UTF-16 code units, which
+ * disagree for every non-BMP character. A double comparing with `<` would place
+ * an emoji-bearing key on the opposite side of a boundary from the real
+ * service.
+ */
 function withinBoundary(
   key: string,
   start: BigtableRowBoundary | undefined,
   end: BigtableRowBoundary | undefined,
 ): boolean {
   if (start !== undefined) {
-    if (start.inclusive ? key < start.value : key <= start.value) return false;
+    const order = compareRowKeys(key, start.value);
+    if (start.inclusive ? order < 0 : order <= 0) return false;
   }
   if (end !== undefined) {
-    if (end.inclusive ? key > end.value : key >= end.value) return false;
+    const order = compareRowKeys(key, end.value);
+    if (end.inclusive ? order > 0 : order >= 0) return false;
   }
   return true;
 }
@@ -325,7 +333,7 @@ export function createFakeBigtableClient(store: FakeBigtableStore): IBigtableCli
     readRows: (options: BigtableReadOptions): Promise<BigtableReadRow[]> => {
       store.reads.push({ table: tableId, options });
       const rows = store.rows(tableId);
-      let candidates = [...rows.keys()].sort();
+      let candidates = [...rows.keys()].sort(compareRowKeys);
       if (options.keys !== undefined && options.keys.length > 0) {
         const wanted = new Set(options.keys);
         candidates = candidates.filter((key) => wanted.has(key));
@@ -361,10 +369,6 @@ export function createFakeBigtableClient(store: FakeBigtableStore): IBigtableCli
         return Promise.resolve(matched);
       },
     }),
-    mutate: (entries: readonly BigtableEntry[]): Promise<void> => {
-      for (const entry of entries) applyMutation(store, tableId, entry.key, entry.mutation);
-      return Promise.resolve();
-    },
   });
 
   const instance: IBigtableInstance = { table: makeTable };

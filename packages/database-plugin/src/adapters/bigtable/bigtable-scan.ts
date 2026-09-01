@@ -39,8 +39,8 @@ import type {
   BigtableRowRange,
 } from './bigtable-client-types.ts';
 import type { BigtableTarget } from './bigtable-mapping.ts';
-import { columnAddress } from './bigtable-mapping.ts';
-import { prefixSuccessor } from './bigtable-row-key.ts';
+import { columnAddress, tryColumnAddress } from './bigtable-mapping.ts';
+import { compareRowKeys, prefixSuccessor } from './bigtable-row-key.ts';
 import { encodeCellValue } from './bigtable-value.ts';
 
 /** The adapter name every refusal carries. */
@@ -73,6 +73,17 @@ export interface BigtableScanPlanOptions {
    * client-side filter.
    */
   readonly stripValues?: boolean;
+  /**
+   * Project even though the caller selected nothing, keeping the constraint
+   * and key fields alone.
+   *
+   * The `count` path: it returns no rows, so it needs only the columns its
+   * predicate reads — and on a wide-column store, shipping every column to
+   * answer a number is the whole cost of the operation. It is a separate
+   * option rather than a synthesised `select` because a `select` field is
+   * refused when it cannot be a column, while a constraint field is not.
+   */
+  readonly projectConstraints?: boolean;
 }
 
 /**
@@ -173,16 +184,11 @@ function conjunctiveComparisons(
  * Every field a query's constraints read, by root name — the set a projected
  * read must keep so the client-side evaluator can still decide.
  *
- * Exported so `count` can project to exactly the columns its predicate needs
- * instead of reading every column of a wide row; not re-exported from the
- * package barrel, because the set is an internal read-planning detail.
- *
  * @param where - The equality map
  * @param filter - The portable expression, when present
  * @returns Every root field name the constraints mention
- * @since 0.2.0
  */
-export function constraintFieldRoots(
+function constraintFieldRoots(
   where: Readonly<Record<string, unknown>>,
   filter: FilterExpression | undefined,
 ): string[] {
@@ -326,7 +332,7 @@ function deriveRowSet(target: BigtableTarget, comparisons: readonly FilterCompar
 function applyCursor(rowSet: RowSet, after: string): RowSet {
   if (rowSet.empty) return rowSet;
   if (rowSet.keys !== undefined) {
-    const keys = rowSet.keys.filter((key) => key > after);
+    const keys = rowSet.keys.filter((key) => compareRowKeys(key, after) > 0);
     return keys.length === 0 ? { empty: true } : { keys, empty: false };
   }
   const start = { value: after, inclusive: false };
@@ -335,7 +341,9 @@ function applyCursor(rowSet: RowSet, after: string): RowSet {
   // The cursor only ever moves the lower bound FORWARD: a cursor behind the
   // derived range would otherwise widen the scan back to rows the key
   // constraints already excluded.
-  const lower = range.start !== undefined && range.start.value > after ? range.start : start;
+  const lower = range.start !== undefined && compareRowKeys(range.start.value, after) > 0
+    ? range.start
+    : start;
   return {
     range: range.end === undefined ? { start: lower } : { start: lower, end: range.end },
     empty: false,
@@ -343,15 +351,27 @@ function applyCursor(rowSet: RowSet, after: string): RowSet {
 }
 
 /**
- * Builds the exact-value test chain for one pushed-down `eq`.
+ * Builds the exact-value test chain for one pushed-down `eq`, or reports that
+ * the field cannot be addressed.
+ *
+ * An unaddressable field yields `null` rather than a throw, for the same reason
+ * {@linkcode projectionQualifiers} skips one: a constraint on a column that
+ * cannot exist is an ordinary "no row matches", and refusing it here made the
+ * SAME query throw or answer `[]` depending only on whether a projection was
+ * also requested.
  *
  * @param target - The resolved entity target
  * @param field - The non-key field being tested
  * @param value - The expected value
- * @returns The test chain
+ * @returns The test chain, or `null` when the field is not a usable qualifier
  */
-function valueTest(target: BigtableTarget, field: string, value: unknown): BigtableFilter[] {
-  const address = columnAddress(target, field);
+function valueTest(
+  target: BigtableTarget,
+  field: string,
+  value: unknown,
+): BigtableFilter[] | null {
+  const address = tryColumnAddress(target, field);
+  if (address === null) return null;
   const encoded = encodeCellValue(value, target.valueEncoding);
   return [
     { family: address.family },
@@ -369,21 +389,39 @@ function valueTest(target: BigtableTarget, field: string, value: unknown): Bigta
  * field's TYPE, and the row-key parse-back that would otherwise fill them
  * yields strings.
  *
+ * **A `select` or `orderBy` field is resolved strictly and an unusable one is
+ * refused; a `where` or `filter` field is resolved tolerantly and an unusable
+ * one is skipped.** That asymmetry is the memory adapter's documented rule
+ * (`unknownColumnError`): projecting or sorting by a column that cannot exist
+ * is meaningless, while constraining on one is an ordinary "no row matches".
+ * Resolving constraints strictly here made the SAME constraint throw on a
+ * projected read and answer `[]` on an unprojected one — two entry points
+ * disagreeing about one query.
+ *
  * @param target - The resolved entity target
  * @param query - The normalized query
+ * @param force - Project even when the caller selected nothing, using the
+ *   constraint and key fields alone (the `count` path)
  * @returns The qualifiers to keep, or `null` when nothing may be projected away
  */
 function projectionQualifiers(
   target: BigtableTarget,
   query: NormalizedQuery,
+  force: boolean,
 ): string[] | null {
-  if (query.select.length === 0) return null;
-  const fields = new Set<string>(target.keyFields);
-  for (const field of query.select) fields.add(field);
-  for (const field of Object.keys(query.orderBy)) fields.add(field);
-  for (const field of Object.keys(query.where)) fields.add(field);
-  if (query.filter !== undefined) collectFilterFields(query.filter, fields);
-  return [...new Set([...fields].map((field) => columnAddress(target, field).qualifier))];
+  if (query.select.length === 0 && !force) return null;
+  const qualifiers = new Set<string>();
+  for (const field of target.keyFields) {
+    qualifiers.add(columnAddress(target, field).qualifier);
+  }
+  for (const field of [...query.select, ...Object.keys(query.orderBy)]) {
+    qualifiers.add(columnAddress(target, field).qualifier);
+  }
+  for (const field of constraintFieldRoots(query.where, query.filter)) {
+    const address = tryColumnAddress(target, field);
+    if (address !== null) qualifiers.add(address.qualifier);
+  }
+  return [...qualifiers];
 }
 
 /**
@@ -445,13 +483,14 @@ export function planBigtableScan(
     // very rows a matching absence would keep — the one narrowing that would
     // break the superset invariant.
     if (comparison.value === undefined) continue;
-    tests.push(valueTest(target, comparison.field, comparison.value));
+    const test = valueTest(target, comparison.field, comparison.value);
+    if (test !== null) tests.push(test);
   }
 
   const innermost: BigtableFilter[] = options.stripValues === true
     ? [{ value: { strip: true } }]
     : (() => {
-      const qualifiers = projectionQualifiers(target, query);
+      const qualifiers = projectionQualifiers(target, query, options.projectConstraints === true);
       if (qualifiers === null) return [];
       // Interleaved with a one-cell arm, NOT emitted bare. A filter that
       // removes every cell of a row removes the ROW — the service does not

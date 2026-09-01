@@ -14,9 +14,12 @@
  *   than answering nothing. A point read is therefore expressed here as a
  *   one-key {@linkcode IBigtableTable.readRows}, which answers `[]` — so the
  *   adapter has exactly one read path and no 404 branch to forget.
- * - **`conditionalMutate` returns the match flag.** The SDK's
- *   `row.filter(test, branches)` is CheckAndMutateRow, whose boolean is what
- *   makes `create` refuse an existing row and `update` refuse an absent one.
+ * - **`conditionalMutate` returns the match flag, and is the ONLY write.** The
+ *   SDK's `row.filter(test, branches)` is CheckAndMutateRow, whose boolean is
+ *   what makes `create` refuse an existing row and `update` refuse an absent
+ *   one. `MutateRows` is deliberately absent: the adapter never batch-writes —
+ *   its transaction is a single row — so a facade member for it would be one
+ *   an application had to implement for nothing.
  *
  * An application may implement this facade itself and pass it as
  * `options.client`, which is the route for a client built with non-default
@@ -26,20 +29,19 @@
  */
 
 /**
- * One stored cell: the raw value bytes as text, plus the server's timestamp.
+ * One stored cell: the raw value bytes, as text.
  *
  * Bigtable keeps a timestamped version history per cell and returns the
  * versions **newest first** (measured). This adapter reads version `[0]` and
- * exposes no version surface — cell versioning has no counterpart in the
- * portable data-access contract.
+ * carries no timestamp: cell versioning has no counterpart in the portable
+ * data-access contract, so a facade that produced one would be producing a
+ * value nothing reads.
  *
  * @since 0.2.0
  */
 export interface BigtableCell {
   /** The cell value, as the text the adapter's value codec wrote. */
   readonly value: string;
-  /** The server-assigned cell timestamp, in microseconds, as the SDK reports it. */
-  readonly timestamp?: string;
 }
 
 /**
@@ -176,18 +178,6 @@ export type BigtableMutation =
   };
 
 /**
- * One entry of a batch write: a row key plus the mutation applied to it.
- *
- * @since 0.2.0
- */
-export interface BigtableEntry {
-  /** The row key the mutation targets. */
-  readonly key: string;
-  /** The mutation to apply. */
-  readonly mutation: BigtableMutation;
-}
-
-/**
  * The row-scoped write surface: one atomic check-and-mutate.
  *
  * @since 0.2.0
@@ -229,13 +219,6 @@ export interface IBigtableTable {
    * @returns The row handle
    */
   row(key: string): IBigtableRow;
-  /**
-   * Applies a batch of per-row mutations. Each entry is atomic on its own row;
-   * the batch as a whole is not.
-   *
-   * @param entries - The mutations to apply
-   */
-  mutate(entries: readonly BigtableEntry[]): Promise<void>;
 }
 
 /**

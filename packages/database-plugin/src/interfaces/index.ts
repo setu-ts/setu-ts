@@ -1115,7 +1115,6 @@ export type CosmosAdapterOptions =
 // stays internal (the `D1Target` / `MongoTarget` / `DynamoTarget` precedent).
 export type {
   BigtableCell,
-  BigtableEntry,
   BigtableFilter,
   BigtableMutation,
   BigtableReadOptions,

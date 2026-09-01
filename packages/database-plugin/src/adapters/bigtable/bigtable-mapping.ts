@@ -255,7 +255,14 @@ export function resolveBigtableTarget(
         `single string composed from at least one field.`,
     );
   }
-  for (const field of keyFields) requireIdentifier(entity, 'rowKey.fields entry', field);
+  for (const field of keyFields) {
+    requireIdentifier(entity, 'rowKey.fields entry', field);
+    // Checked as a COLUMN identifier, not merely as non-blank: a key field is
+    // always written as a cell, so a name the projection filter cannot address
+    // would let the mapping resolve and then fail at the first write — and,
+    // worse, let an unprojected read succeed where a projected one threw.
+    requireColumnIdentifier(entity, `rowKey.fields entry '${field}'`, field);
+  }
 
   const separator = override?.rowKey?.separator ?? DEFAULT_ROW_KEY_SEPARATOR;
   if (keyFields.length > 1 && separator === '') {
@@ -304,8 +311,36 @@ export function resolveBigtableTarget(
 }
 
 /**
+ * Resolves one field's cell address, or reports that the field cannot be one.
+ *
+ * The non-throwing half of the pair, and the one the read planner uses for a
+ * `where` or `filter` field: constraining on a column that cannot exist is an
+ * ordinary "no row matches", so it must not refuse. Answering `null` here
+ * rather than catching {@linkcode columnAddress}'s throw keeps that decision a
+ * branch the tests can reach, instead of a `catch` whose rethrow arm no input
+ * can produce.
+ *
+ * @param target - The resolved entity target
+ * @param field - The logical field
+ * @returns The cell address, or `null` when the field is not a usable qualifier
+ * @since 0.2.0
+ */
+export function tryColumnAddress(
+  target: BigtableTarget,
+  field: string,
+): BigtableColumnAddress | null {
+  const declared = target.columns[field];
+  if (declared !== undefined) return declared;
+  if (!IDENTIFIER.test(field)) return null;
+  return { family: target.defaultFamily, qualifier: field };
+}
+
+/**
  * Resolves one field's cell address, applying the entity's default family to a
  * field the mapping does not name.
+ *
+ * The throwing half, used where an unusable name is a caller mistake rather
+ * than an empty result: a `select`, an `orderBy`, or a cell being written.
  *
  * @param target - The resolved entity target
  * @param field - The logical field
@@ -315,8 +350,11 @@ export function resolveBigtableTarget(
  * @since 0.2.0
  */
 export function columnAddress(target: BigtableTarget, field: string): BigtableColumnAddress {
-  const declared = target.columns[field];
-  if (declared !== undefined) return declared;
+  const address = tryColumnAddress(target, field);
+  if (address !== null) return address;
   requireColumnIdentifier(target.entity, `field '${field}'`, field);
-  return { family: target.defaultFamily, qualifier: field };
+  // Unreachable: `requireColumnIdentifier` throws for exactly the inputs that
+  // made `tryColumnAddress` answer `null`. Present so the function's declared
+  // return type holds without a cast.
+  throw new UnsupportedQueryFeatureError('mapping', ADAPTER, `unreachable: '${field}'`);
 }

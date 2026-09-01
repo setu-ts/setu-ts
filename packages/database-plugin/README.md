@@ -698,7 +698,6 @@ imperative begin/commit.
 | `BigtableClientLoader`                    | interface |
 | `BigtableDatabaseOptions`                 | interface |
 | `BigtableEntityMapping`                   | interface |
-| `BigtableEntry`                           | interface |
 | `BigtableReadOptions`                     | interface |
 | `BigtableReadRow`                         | interface |
 | `BigtableRowBoundary`                     | interface |

@@ -1788,9 +1788,9 @@ concept for one adapter. An application needing any of them reaches the injected
 
 `IBigtableClient` and the shapes it reaches (`IBigtableInstance`, `IBigtableTable`, `IBigtableRow`,
 `BigtableReadOptions`, `BigtableReadRow`, `BigtableRowData`, `BigtableCell`, `BigtableRowRange`,
-`BigtableRowBoundary`, `BigtableValueRange`, `BigtableFilter`, `BigtableMutation`, `BigtableEntry`)
-are the exported injection seam, so an application implementing its own facade can name every
-signature. `createInjectedBigtableLoader` and `createLazyBigtableLoader` build the two loader arms;
+`BigtableRowBoundary`, `BigtableValueRange`, `BigtableFilter`, `BigtableMutation`) are the exported
+injection seam, so an application implementing its own facade can name every signature.
+`createInjectedBigtableLoader` and `createLazyBigtableLoader` build the two loader arms;
 `BigtableClientConfiguration` is what the lazy one takes.
 
 ### Exports

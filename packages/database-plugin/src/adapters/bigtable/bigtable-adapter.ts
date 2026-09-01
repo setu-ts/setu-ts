@@ -93,8 +93,9 @@ export class BigtableAdapter implements IDatabaseAdapter {
    *   {@linkcode createLazyBigtableLoader}'s adaptation; the loader's `owned`
    *   flag decides whether {@linkcode BigtableAdapter.disconnect} closes the
    *   client it produced.
-   * @throws {Error} When neither `client` nor `projectId` is supplied, or when
-   *   `instance` is absent or blank
+   * @throws {Error} When neither `client` nor `projectId` is supplied, when
+   *   `instance` is absent or blank, or when `maxPageFetches` is not a
+   *   positive integer
    */
   constructor(options: BigtableAdapterOptions, loader?: BigtableClientLoader) {
     if (options.client === undefined && (options.projectId ?? '').trim() === '') {
@@ -104,6 +105,21 @@ export class BigtableAdapter implements IDatabaseAdapter {
       throw new Error(
         'BigtableAdapter requires options.instance: a Bigtable table is addressed as ' +
           'project/instance/table, and neither a client nor a project encodes the instance',
+      );
+    }
+    // `NaN` is the input this guard exists for, and it fails silently rather
+    // than loudly: `fetches < maxPageFetches` is `false` for it, so the page
+    // loop would never run a single fetch and EVERY `findPage` would answer an
+    // empty terminal page. `0` and a negative disable it the same way.
+    const pageFetches = options.maxPageFetches;
+    if (
+      pageFetches !== undefined &&
+      (!Number.isInteger(pageFetches) || pageFetches < 1)
+    ) {
+      throw new Error(
+        `BigtableAdapter requires options.maxPageFetches to be a positive integer; ` +
+          `received ${String(pageFetches)}. A non-positive or NaN bound stops the page loop ` +
+          `before its first fetch, so every findPage would answer an empty terminal page.`,
       );
     }
     this.#options = options;

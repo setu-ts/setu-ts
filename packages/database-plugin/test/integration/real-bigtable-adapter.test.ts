@@ -456,6 +456,35 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
+  it('walks a key set whose keys carry non-BMP characters, in the SERVICE order', {
+    ignore: skipReal,
+  }, async () => {
+    // Bigtable orders row keys as UTF-8 BYTES, and `'\u{1F600}y' < '\uFF21x'`
+    // is true in JavaScript while false as UTF-8. A cursor filtered with `>`
+    // therefore dropped the emoji-keyed row: the service placed it after the
+    // cursor and the comparison placed it before.
+    const table = await provision(`utf8_${suffix}`, ['cf']);
+    const adapter = await connect({ Row: { table } });
+    try {
+      const rows = adapter.createDataSource('Row');
+      for (const id of ['\uFF21x', '\u{1F600}y']) await rows.create({ id, n: id });
+      // The service's own order, for the record.
+      expect((await rows.findAll(query())).map((r) => r.id)).toEqual(['\uFF21x', '\u{1F600}y']);
+      const seen = await walkPages(rows, {
+        limit: 1,
+        filter: {
+          type: 'comparison',
+          field: 'id',
+          operator: 'in',
+          value: ['\uFF21x', '\u{1F600}y'],
+        },
+      });
+      expect(seen).toEqual(['\uFF21x', '\u{1F600}y']);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
   it('expands an `in` on the final key field into an explicit key read', {
     ignore: skipReal,
   }, async () => {

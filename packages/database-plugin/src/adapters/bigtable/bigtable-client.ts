@@ -10,7 +10,6 @@
  * @module
  */
 import type {
-  BigtableEntry,
   BigtableFilter,
   BigtableMutation,
   BigtableReadOptions,
@@ -55,8 +54,6 @@ interface BigtableSdkTable {
   getRows(options: unknown): Promise<[readonly BigtableSdkReadRow[], ...unknown[]]>;
   /** Returns the row handle for one key. */
   row(key: string): BigtableSdkRow;
-  /** MutateRows. */
-  mutate(entries: readonly unknown[]): Promise<unknown>;
 }
 
 /** One row as the native SDK returns it. */
@@ -161,34 +158,17 @@ function cellText(cell: unknown): string {
 }
 
 /**
- * Reads one cell's timestamp, when the SDK reported one.
- *
- * @param cell - One version as the SDK returned it
- * @returns The timestamp string, or `undefined`
- */
-function cellTimestamp(cell: unknown): string | undefined {
-  if (typeof cell !== 'object' || cell === null) return undefined;
-  const timestamp = (cell as { timestamp?: unknown }).timestamp;
-  return typeof timestamp === 'string' ? timestamp : undefined;
-}
-
-/**
  * Normalises one SDK row into the facade's read shape.
  *
  * @param row - The SDK row
  * @returns The facade row
  */
 function adaptReadRow(row: BigtableSdkReadRow): BigtableReadRow {
-  const data: Record<string, Record<string, { value: string; timestamp?: string }[]>> = {};
+  const data: Record<string, Record<string, { value: string }[]>> = {};
   for (const [family, qualifiers] of Object.entries(row.data ?? {})) {
-    const adaptedFamily: Record<string, { value: string; timestamp?: string }[]> = {};
+    const adaptedFamily: Record<string, { value: string }[]> = {};
     for (const [qualifier, versions] of Object.entries(qualifiers)) {
-      adaptedFamily[qualifier] = versions.map((cell) => {
-        const timestamp = cellTimestamp(cell);
-        return timestamp === undefined
-          ? { value: cellText(cell) }
-          : { value: cellText(cell), timestamp };
-      });
+      adaptedFamily[qualifier] = versions.map((cell) => ({ value: cellText(cell) }));
     }
     data[family] = adaptedFamily;
   }
@@ -298,15 +278,6 @@ export function adaptBigtableSdkModule(
                   return matched === true;
                 },
               };
-            },
-            mutate: async (entries: readonly BigtableEntry[]): Promise<void> => {
-              if (entries.length === 0) return;
-              await table.mutate(
-                entries.map((entry) => ({
-                  key: entry.key,
-                  ...(adaptMutation(entry.mutation) as Record<string, unknown>),
-                })),
-              );
             },
           };
         },

@@ -33,7 +33,7 @@ import type {
 import type { BigtableTarget } from './bigtable-mapping.ts';
 import { columnAddress } from './bigtable-mapping.ts';
 import { composeRowKey, composeRowKeyFromFields, parseRowKey } from './bigtable-row-key.ts';
-import { constraintFieldRoots, planBigtableScan } from './bigtable-scan.ts';
+import { planBigtableScan } from './bigtable-scan.ts';
 import { decodeCellValue, encodeCellValue } from './bigtable-value.ts';
 import type { BigtableCellBag, IBigtableWriteBuffer } from './bigtable-transaction.ts';
 
@@ -349,14 +349,17 @@ export function createBigtableDataSource(
         orderBy: {},
         limit: -1,
         offset: 0,
-        // Counting reads only what the predicate needs. On a wide-column store
-        // the difference is the whole cost of the operation: without this the
-        // server would ship every column of every candidate row to answer a
-        // number. Safe because the projection interleaves a row-existence arm,
-        // so narrowing the columns cannot drop a row.
-        select: needsValues ? constraintFieldRoots(where, filter) : [],
+        select: [],
       };
-      const plan = planBigtableScan(target, query, { stripValues: !needsValues });
+      // Counting reads only what the predicate needs. On a wide-column store
+      // that is the whole cost of the operation: otherwise the server ships
+      // every column of every candidate row to answer a number. Safe because
+      // the projection interleaves a row-existence arm, so narrowing the
+      // columns cannot drop a row.
+      const plan = planBigtableScan(target, query, {
+        stripValues: !needsValues,
+        projectConstraints: needsValues,
+      });
       if (plan.empty) return 0;
       if (!needsValues) {
         // Nothing needs a cell value, so the read strips every one of them and
@@ -387,7 +390,11 @@ export function createBigtableDataSource(
 
       const matched: Record<string, unknown>[] = [];
       let cursorKey = after;
-      let lastRawKey: string | null = null;
+      // The last row SCANNED, decoded, kept from the loop rather than re-read
+      // at the end: a second round trip would also be a race, because a row
+      // deleted between the scan and the re-read would leave the bounded page
+      // reporting `nextCursor: null` — terminal — while further rows remain.
+      let lastRawRow: Record<string, unknown> | null = null;
       let exhausted = false;
       let fetches = 0;
       const batchSize = query.limit + 1;
@@ -408,10 +415,10 @@ export function createBigtableDataSource(
           exhausted = true;
           break;
         }
-        lastRawKey = rows[rows.length - 1].key;
-        cursorKey = lastRawKey;
+        cursorKey = rows[rows.length - 1].key;
         for (const row of rows) {
           const entity = decodeRow(target, index, row);
+          lastRawRow = entity;
           if (matches(entity, query.where, query.filter)) matched.push(entity);
           if (matched.length > query.limit) break;
         }
@@ -437,26 +444,23 @@ export function createBigtableDataSource(
           nextCursor: mintNextCursor(pageRows, query.orderBy, target.keyFields, fingerprint, true),
         };
       }
-      if (bounded && lastRawKey !== null) {
+      if (bounded && lastRawRow !== null) {
         // `maxPageFetches` bounded the walk before it could fill the page. The
         // page is NOT terminal, and `nextCursor` must say so even when it
         // carries zero rows — the contract's rule that the cursor is never
         // derived from `rows.length`. It is minted from the last row SCANNED
         // rather than the last row matched, because everything between them
         // failed the filter and re-scanning it would only cost a round trip.
-        const lastRaw = await readOne(lastRawKey);
-        if (lastRaw !== null) {
-          return {
-            rows,
-            nextCursor: mintNextCursor(
-              [lastRaw],
-              query.orderBy,
-              target.keyFields,
-              fingerprint,
-              true,
-            ),
-          };
-        }
+        return {
+          rows,
+          nextCursor: mintNextCursor(
+            [lastRawRow],
+            query.orderBy,
+            target.keyFields,
+            fingerprint,
+            true,
+          ),
+        };
       }
       return { rows, nextCursor: null };
     },

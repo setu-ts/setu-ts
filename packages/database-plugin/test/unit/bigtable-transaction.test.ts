@@ -143,6 +143,23 @@ describe('BigtableTransaction', () => {
     expect(store.snapshot('User', 'u1')).toEqual({ cf: { id: 's:u1', name: 's:ada' } });
   });
 
+  it('refuses a buffered write before any row is claimed', () => {
+    // Unreachable through a data source, which claims first; reachable through
+    // the write-buffer seam the transaction publishes to it.
+    const { tx } = setup();
+    expect(() => tx.insert({ cf: { a: '1' } }, false))
+      .toThrow(BigtableTransactionScopeError);
+    expect(() => tx.remove()).toThrow(/before any row was claimed/);
+  });
+
+  it('sends nothing when the only buffered write carries no cell', async () => {
+    const { store, tx } = setup();
+    tx.claim('User', 'u1', 'update');
+    tx.insert({}, false);
+    await tx.commit();
+    expect(store.snapshot('User', 'u1')).toBeUndefined();
+  });
+
   it('satisfies IAdapterTransaction structurally', () => {
     const { tx } = setup();
     const handle: IAdapterTransaction = tx;

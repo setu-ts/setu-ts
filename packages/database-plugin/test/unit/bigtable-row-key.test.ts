@@ -7,6 +7,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import {
+  compareRowKeys,
   composeRowKey,
   composeRowKeyFromFields,
   parseRowKey,
@@ -91,18 +92,48 @@ describe('parseRowKey', () => {
   });
 });
 
+describe('compareRowKeys', () => {
+  it('orders plain ASCII the way JavaScript does', () => {
+    expect(compareRowKeys('a', 'b')).toBeLessThan(0);
+    expect(compareRowKeys('b', 'a')).toBeGreaterThan(0);
+    expect(compareRowKeys('ab', 'ab')).toBe(0);
+    expect(compareRowKeys('ab', 'abc')).toBeLessThan(0);
+  });
+
+  it('orders a non-BMP key the way UTF-8 does, NOT the way `<` does', () => {
+    // `'\u{1F600}' < '\uFF21'` is true in JavaScript — its leading surrogate
+    // \uD83D sorts below \uFF21 — and false as UTF-8, where F0 9F 98 80 sorts
+    // above EF BC A1. Bigtable sorts row keys as bytes, so the operator is
+    // wrong and this comparator is right.
+    expect('\u{1F600}y' < '\uFF21x').toBe(true);
+    expect(compareRowKeys('\u{1F600}y', '\uFF21x')).toBeGreaterThan(0);
+  });
+});
+
 describe('prefixSuccessor', () => {
-  it('increments the final code unit', () => {
+  it('increments the final code point', () => {
     expect(prefixSuccessor('u#')).toBe('u$');
     expect(prefixSuccessor('az')).toBe('a{');
   });
 
-  it('carries when the final code unit is already the maximum', () => {
-    expect(prefixSuccessor(`a￿`)).toBe('b');
+  it('steps from the last BMP code point into the astral plane, not over it', () => {
+    // Incrementing the final code UNIT would carry to `'b'` here, skipping
+    // every non-BMP key that genuinely sorts between `a\uFFFF` and `b`.
+    expect(prefixSuccessor('a\uFFFF')).toBe(`a${String.fromCodePoint(0x10000)}`);
+  });
+
+  it('skips the surrogate range rather than minting an unencodable key', () => {
+    expect(prefixSuccessor('a\uD7FF')).toBe('a\uE000');
+  });
+
+  it('carries past a lone surrogate and past the maximum code point', () => {
+    expect(prefixSuccessor(`a\uD800`)).toBe('b');
+    expect(prefixSuccessor(`a${String.fromCodePoint(0x10ffff)}`)).toBe('b');
   });
 
   it('has no successor for an empty prefix or an all-maximum one', () => {
     expect(prefixSuccessor('')).toBeUndefined();
-    expect(prefixSuccessor('￿￿')).toBeUndefined();
+    const max = String.fromCodePoint(0x10ffff);
+    expect(prefixSuccessor(`${max}${max}`)).toBeUndefined();
   });
 });

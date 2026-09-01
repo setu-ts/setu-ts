@@ -114,6 +114,22 @@ describe('row-set derivation', () => {
     expect(plan.read.ranges?.[0].start?.value).toBe('t1#');
   });
 
+  it('pins a NUMERIC key value, and widens when one carries the separator', () => {
+    expect(planBigtableScan(scalar, query({ where: { id: 7 } })).read.keys).toEqual(['7']);
+    // A composed key renders numbers too, but a rendered value containing the
+    // separator would compose ambiguously, so the push-down widens instead.
+    const numeric = planBigtableScan(
+      composite,
+      query({ where: { tenantId: 1, orderId: 2 } }),
+    );
+    expect(numeric.read.keys).toEqual(['1#2']);
+    const collides = planBigtableScan(composite, query({ where: { tenantId: 'a#b' } }));
+    expect(collides.read.keys).toBeUndefined();
+    expect(collides.read.ranges).toBeUndefined();
+    const nonFinite = planBigtableScan(scalar, query({ where: { id: Number.NaN } }));
+    expect(nonFinite.read.keys).toBeUndefined();
+  });
+
   it('does not push down an ordered comparison on a key field', () => {
     // A composed row key is a STRING, so a numeric key field does not sort
     // numerically inside it — pushing `gt` down would drop matching rows.

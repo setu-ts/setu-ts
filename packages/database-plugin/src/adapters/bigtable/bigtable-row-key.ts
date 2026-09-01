@@ -165,24 +165,68 @@ export function parseRowKey(
 }
 
 /**
+ * Order two row keys the way **Bigtable** orders them, which is not the way
+ * JavaScript's `<` does.
+ *
+ * A Bigtable row key is bytes, sorted lexicographically as UTF-8. JavaScript's
+ * relational operators compare UTF-16 **code units**, and the two disagree for
+ * every non-BMP character: `'\u{1F600}' < '\uFF21'` is `true` in JavaScript
+ * (its leading surrogate `\uD83D` sorts below `\uFF21`) and `false` as UTF-8
+ * (`F0 9F 98 80` sorts above `EF BC A1`). Comparing **code points** reproduces
+ * UTF-8 byte order exactly, because UTF-8 is order-preserving over code points.
+ *
+ * The divergence is not cosmetic: a cursor walk over an explicit key set
+ * filtered with `>` DROPPED a row whose key carried an emoji, because the
+ * comparison placed it before the cursor the server had placed it after.
+ *
+ * @param left - The first row key
+ * @param right - The second row key
+ * @returns Negative when `left` sorts first, positive when `right` does, `0`
+ *   when they are equal
+ * @since 0.2.0
+ */
+export function compareRowKeys(left: string, right: string): number {
+  const a = [...left];
+  const b = [...right];
+  const shared = Math.min(a.length, b.length);
+  for (let index = 0; index < shared; index += 1) {
+    const codeA = a[index].codePointAt(0) as number;
+    const codeB = b[index].codePointAt(0) as number;
+    if (codeA !== codeB) return codeA < codeB ? -1 : 1;
+  }
+  if (a.length === b.length) return 0;
+  return a.length < b.length ? -1 : 1;
+}
+
+/**
  * The exclusive upper bound of the row-key range whose members all start with
  * `prefix`.
  *
- * Incrementing the final byte is the standard prefix-scan successor. A prefix
- * whose final code unit is already the maximum (or an empty prefix) has no
- * finite successor, so the range is left open at the top — which is correct,
- * because every remaining row does start with it.
+ * Incrementing the final **code point** is the prefix-scan successor, and code
+ * points are the right unit for the same reason {@linkcode compareRowKeys}
+ * gives: UTF-8 preserves code-point order, so the next code point is the next
+ * key. Incrementing the final code UNIT would step from `\uFFFF` to a
+ * carry — skipping every non-BMP key that genuinely sorts after it.
+ *
+ * A position that cannot be incremented carries to the one before it. A prefix
+ * that is empty, or entirely made of the maximum code point, has no finite
+ * successor, so the range is left open at the top — which is correct, because
+ * every remaining row does start with it.
  *
  * @param prefix - The row-key prefix
  * @returns The exclusive end key, or `undefined` for an unbounded top
  * @since 0.2.0
  */
 export function prefixSuccessor(prefix: string): string | undefined {
-  for (let index = prefix.length - 1; index >= 0; index -= 1) {
-    const code = prefix.charCodeAt(index);
-    if (code < 0xffff) {
-      return prefix.slice(0, index) + String.fromCharCode(code + 1);
-    }
+  const points = [...prefix];
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const code = points[index].codePointAt(0) as number;
+    // A LONE surrogate is not a code point UTF-8 can carry, so incrementing it
+    // would produce a key the wire cannot express; carry past it instead.
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    const next = code + 1 === 0xd800 ? 0xe000 : code + 1;
+    if (next > 0x10ffff) continue;
+    return points.slice(0, index).join('') + String.fromCodePoint(next);
   }
   return undefined;
 }

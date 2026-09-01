@@ -73,6 +73,9 @@ Every row was measured against `gcr.io/google.com/cloudsdktool/google-cloud-cli:
 | P11 | `{ value: { strip: true } }` returns every row with empty cell values.                                                                                                                              | `count` with no residual filter strips values instead of transferring them.                                                             |
 | P12 | A missing table and a missing instance BOTH answer `5 NOT_FOUND` quoting the full resource path.                                                                                                    | `connect()` performs no admin probe: the failure already names itself, and data-plane credentials commonly exclude table admin (§3.11). |
 | P13 | `row.get()` on an absent row REJECTS with `RowError` `code: 404` rather than answering an empty row.                                                                                                | `findById` catches the 404 and answers `null`; any other error propagates.                                                              |
+| P15 | **TRAP.** A filter that removes every cell of a row removes the **ROW** — a projection naming columns a row happens not to carry answered with no row at all, not an empty one.                     | The projection is interleaved with a `{ row: { cellLimit: 1 } }` arm, so a row is never dropped by a projection.                        |
+| P16 | Bigtable orders row keys as UTF-8 **bytes**, which is code-POINT order; JavaScript's `<` compares UTF-16 code UNITS, and the two disagree for every non-BMP character.                              | Cursor comparison and the prefix successor use code points (`compareRowKeys`), not the operators.                                       |
+| P17 | Cells come back in lexicographic family-then-qualifier order, not write order.                                                                                                                      | The test double sorts, so a `cellLimit` arm keeps the cell production keeps.                                                            |
 | P14 | The emulator image measures **1.75 GB** (`docker images`), against DynamoDB Local's 755 MB and the Cosmos emulator's 2.48 GB. A TCP health probe works inside it (`bash -c 'echo > /dev/tcp/...'`). | The suite runs in CI as a service container (§3.13), unlike the local-only Cosmos one.                                                  |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
@@ -187,6 +190,12 @@ Every row was measured against `gcr.io/google.com/cloudsdktool/google-cloud-cli:
      `select ∪ filter fields ∪ orderBy fields ∪ key fields`. The invariant: **a push-down may only
      ever match a SUPERSET of what the client-side evaluator keeps.** It is what makes an encoding
      mismatch (a `Date` under `===`, a number under `'raw'`) wasted work instead of a wrong answer.
+     The projection is emitted as an **interleave** of the column filter and a one-cell arm (P15),
+     not bare: a filter that removes every cell removes the row, so a bare projection silently drops
+     a row carrying none of the projected columns. A `select` or `orderBy` field is resolved
+     strictly and an unusable identifier is refused, while a `where` or `filter` field is resolved
+     tolerantly and an unusable one is skipped — the memory adapter's `unknownColumnError` rule, and
+     what keeps the projected and unprojected read paths from disagreeing about one query.
 - **Why:** this is the only split that is provably correct without reimplementing comparison
   semantics twice, and it keeps ONE evaluator — the same `matchesFilter` the memory reference uses —
   so the six adapters cannot disagree (§11.1).
@@ -218,7 +227,9 @@ Every row was measured against `gcr.io/google.com/cloudsdktool/google-cloud-cli:
 - **Why:** an exclusive start key IS Bigtable's continuation mechanism, and reusing the committed
   codec keeps the fingerprint refusal and the tiebreaker story identical to the other five adapters.
   The fetch loop is the M80 bound: a residual client-side filter can empty a raw batch, and
-  `nextCursor` must still say "non-terminal".
+  `nextCursor` must still say "non-terminal". A bounded page mints its cursor from the last row the
+  loop already decoded — never a re-read, which would be a second round trip AND a race: a row
+  deleted in between would leave the page reporting `null`, i.e. terminal, while rows remain.
 - **Test home:** `test/unit/bigtable-page.test.ts` and the emulator suite (a walk over deliberately
   TIED non-key values, and a filtered walk whose first raw batch yields nothing).
 
@@ -386,6 +397,13 @@ Each is a named case in `real-bigtable-adapter.test.ts`, run against `cbtemulato
 14. `orderBy` desc refused by name — the P9 trap, refused rather than silently ascending.
 15. A missing table answering `5 NOT_FOUND` quoting the resource path (P12), so no connect-time
     probe is needed.
+
+Review added six more, each with a negative control observed failing against the emulator: a row
+carrying none of the projected columns (P15); the exclusive-end boundary read directly through the
+facade AND contrasted with the SDK shorthand that returns one row too many (P4); a row sitting
+exactly on a prefix range's exclusive end; a numeric key field keeping its type through a projected
+page; a key set whose keys carry non-BMP characters, walked in the service's own order (P16); and
+the portable filter operators agreed with the memory reference.
 
 ## 7. Verification gates
 

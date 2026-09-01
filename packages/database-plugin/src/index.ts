@@ -232,7 +232,6 @@ export type {
 } from './adapters/bigtable/bigtable-client.ts';
 export type {
   BigtableCell,
-  BigtableEntry,
   BigtableFilter,
   BigtableMutation,
   BigtableReadOptions,

@@ -190,6 +190,47 @@ describe('findPage', () => {
     expect(decodeCursor(page?.nextCursor as string)?.keyValues).toEqual([7]);
   });
 
+  it('walks an explicit key set whose keys carry non-BMP characters', async () => {
+    // Bigtable orders row keys as UTF-8 BYTES. `'\u{1F600}y' < '\uFF21x'` is
+    // true in JavaScript and false as UTF-8, so a cursor filtered with `>`
+    // dropped the emoji-keyed row: the server placed it after the cursor and
+    // the comparison placed it before.
+    const { source } = setup();
+    for (const id of ['\uFF21x', '\u{1F600}y']) await source.create({ id, n: id });
+    const ids = await walk(source, {
+      limit: 1,
+      filter: { type: 'comparison', field: 'id', operator: 'in', value: ['\uFF21x', '\u{1F600}y'] },
+    });
+    expect(ids).toEqual(['\uFF21x', '\u{1F600}y']);
+  });
+
+  it("issues no extra read to mint a bounded page's cursor", async () => {
+    // The cursor is minted from the last row already decoded in the loop. A
+    // second round trip to re-read it would also be a race: a row deleted
+    // between the scan and the re-read would leave the bounded page reporting
+    // `nextCursor: null` while further rows remain.
+    const { store, source } = setup(1);
+    for (let i = 1; i <= 6; i += 1) await source.create({ id: `u${i}`, rank: i });
+    store.reads.length = 0;
+    const page = await source.findPage?.(query({
+      limit: 2,
+      filter: { type: 'comparison', field: 'rank', operator: 'gt', value: 5 },
+    }));
+    expect(page?.rows).toEqual([]);
+    expect(page?.nextCursor).not.toBe(null);
+    expect(store.reads).toHaveLength(1);
+  });
+
+  it('answers terminal when the fetch budget allows no fetch at all', async () => {
+    // Unreachable through the adapter, which refuses a non-positive
+    // `maxPageFetches` at construction; reachable through the internal factory,
+    // and the reason the bounded branch checks for a scanned row rather than
+    // assuming one.
+    const { source } = setup(0);
+    await source.create({ id: 'u1' });
+    expect(await source.findPage?.(query({ limit: 1 }))).toEqual({ rows: [], nextCursor: null });
+  });
+
   it('answers an empty terminal page for a contradictory page query', async () => {
     const { source } = setup();
     await source.create({ id: 'u1' });

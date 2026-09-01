@@ -36,6 +36,25 @@ describe('construction guards', () => {
       .toThrow(/requires options.instance/);
   });
 
+  it('refuses a maxPageFetches that would disable the page loop', () => {
+    const store = new FakeBigtableStore();
+    for (const maxPageFetches of [0, -1, Number.NaN, 1.5]) {
+      expect(() =>
+        new BigtableAdapter({
+          client: createFakeBigtableClient(store),
+          instance: 'app',
+          maxPageFetches,
+        }), `maxPageFetches=${String(maxPageFetches)}`).toThrow(/positive integer/);
+    }
+    expect(() =>
+      new BigtableAdapter({
+        client: createFakeBigtableClient(store),
+        instance: 'app',
+        maxPageFetches: 1,
+      })
+    ).not.toThrow();
+  });
+
   it('accepts the lazy arm without ever loading the SDK', () => {
     // Construction resolves nothing: the literal `import()` sits inside the
     // loader's `load()`, which only `connect()` reaches.

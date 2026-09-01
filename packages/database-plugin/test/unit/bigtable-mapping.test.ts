@@ -8,6 +8,7 @@ import { expect } from '@std/expect';
 import {
   columnAddress,
   resolveBigtableTarget,
+  tryColumnAddress,
 } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 
@@ -68,6 +69,13 @@ describe('resolveBigtableTarget', () => {
     ).toThrow(/indistinguishable/);
   });
 
+  it('refuses a row-key field whose name cannot be a column qualifier', () => {
+    // A key field is always written as a cell, so a name the projection filter
+    // cannot address would resolve here and fail at the first write.
+    expect(() => resolveBigtableTarget('User', { User: { rowKey: { fields: ['a b'] } } }))
+      .toThrow(/not a usable column identifier/);
+  });
+
   it('refuses a family or qualifier carrying a regex metacharacter', () => {
     expect(() => resolveBigtableTarget('User', { User: { columnFamily: 'c.*f' } }))
       .toThrow(/not a usable column identifier/);
@@ -86,6 +94,15 @@ describe('resolveBigtableTarget', () => {
         User: { columns: { first: 'a:name', second: 'b:name' } },
       })
     ).toThrow(/cannot be told apart/);
+  });
+});
+
+describe('tryColumnAddress', () => {
+  it('answers null where columnAddress refuses, and agrees with it otherwise', () => {
+    const target = resolveBigtableTarget('User', { User: { columns: { a: 'x:y' } } });
+    expect(tryColumnAddress(target, 'a')).toEqual({ family: 'x', qualifier: 'y' });
+    expect(tryColumnAddress(target, 'email')).toEqual({ family: 'cf', qualifier: 'email' });
+    expect(tryColumnAddress(target, 'not a field')).toBe(null);
   });
 });
 
