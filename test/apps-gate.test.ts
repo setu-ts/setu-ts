@@ -174,7 +174,12 @@ describe('real-backend CI wiring', () => {
 
   it('declares the DynamoDB Local service, endpoint env, and scoped grant (M80 §6.2)', async () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
-    expect(workflow).toContain('image: amazon/dynamodb-local:latest');
+    // Pinned to a VERSION, never `latest`: the guarded suite asserts this
+    // emulator's behaviour, and a floating tag can change it between runs.
+    // Asserted as a pattern rather than a literal so a later upgrade is a
+    // one-line bump, while re-floating the tag still fails.
+    expect(workflow).toMatch(/image: amazon\/dynamodb-local:\d+\.\d+\.\d+\n/);
+    expect(workflow).not.toContain('image: amazon/dynamodb-local:latest');
     // The port mapping is load-bearing exactly as for Redis/Mongo above: the
     // job runs directly on the runner, and both the suite's endpoint and the
     // manifest's net grant address exactly 127.0.0.1:8000.

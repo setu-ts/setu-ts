@@ -14,6 +14,10 @@
  *
  * @module
  */
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
+
+/** The adapter name every mapping refusal carries. */
+const ADAPTER = 'dynamodb';
 
 /**
  * The storage encoding a date-bearing attribute is declared to use.
@@ -154,6 +158,31 @@ interface DynamoTarget {
 const DEFAULT_PARTITION_KEY = 'id';
 
 /**
+ * Refuses an empty or blank mapping identifier by name.
+ *
+ * `undefined` is the "not configured" case and is left to the caller's
+ * defaulting; only a PRESENT but empty/whitespace identifier is refused,
+ * because that is a configuration mistake the server would report without
+ * naming the entity or the option.
+ *
+ * @param entity - The repository entity the mapping belongs to
+ * @param option - The dotted option path, used in the message
+ * @param value - The configured identifier, when present
+ * @throws {UnsupportedQueryFeatureError} When the identifier is blank
+ */
+function requireIdentifier(entity: string, option: string, value: string | undefined): void {
+  if (value === undefined) return;
+  if (value.trim() === '') {
+    throw new UnsupportedQueryFeatureError(
+      'mapping',
+      ADAPTER,
+      `DynamoDB entity '${entity}' has an empty '${option}' in its mapping; ` +
+        `omit the option to take its default, or name a real identifier.`,
+    );
+  }
+}
+
+/**
  * Resolves an entity name to its table, key columns and declared index/date
  * configuration.
  *
@@ -172,6 +201,21 @@ export function resolveDynamoTarget(
   mapping: Readonly<Record<string, DynamoEntityMapping>> | undefined,
 ): DynamoTarget {
   const override = mapping?.[entity];
+  // A mapping is application configuration that reaches the command builders
+  // verbatim, and an empty identifier is refused by the SERVER with a message
+  // naming neither the entity nor the option (an empty attribute name is
+  // `ExpressionAttributeNames contains invalid value`, measured). Refusing
+  // here turns that into a named configuration error at the point the mapping
+  // is resolved — the M52c binding-guard family this adapter already follows.
+  if (override !== undefined) {
+    requireIdentifier(entity, 'table', override.table);
+    requireIdentifier(entity, 'partitionKey', override.partitionKey);
+    requireIdentifier(entity, 'sortKey', override.sortKey);
+    for (const [name, index] of Object.entries(override.indexes ?? {})) {
+      requireIdentifier(entity, `indexes.${name}.partitionKey`, index.partitionKey);
+      requireIdentifier(entity, `indexes.${name}.sortKey`, index.sortKey);
+    }
+  }
   const partitionKey = override?.partitionKey ?? DEFAULT_PARTITION_KEY;
   const sortKey = override?.sortKey;
   return {

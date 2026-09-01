@@ -125,7 +125,12 @@ jobs:
       # The credential is inert (DynamoDB Local never validates it); it is the
       # header's PRESENCE that makes the request well-formed.
       dynamodb:
-        image: amazon/dynamodb-local:latest
+        # Pinned to a version rather than `latest`: every other service in
+        # this workflow pins at least a major (mongo:8, redis:7, rabbitmq:4),
+        # and a floating tag can change the emulator's behaviour between runs.
+        # A sha256 digest is deliberately not used — no other service here is
+        # digest-pinned, and the asymmetry would be the surprising part.
+        image: amazon/dynamodb-local:3.3.1
         ports:
           - 8000:8000
         options: >-

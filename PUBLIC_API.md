@@ -1705,23 +1705,10 @@ real SDK implements their structural shapes.
 | `DataSource`                                                                                                                                                                                                                                                                                                            | deprecated alias of `IDataSource`  |
 | `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                                                                                                                                                                                                               | interfaces (Mongo injection seam)  |
 | `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`                                                                                                                                                                                                      | interfaces (Mongo collection seam) |
-
-`DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
-the promoted `IDataSource` (the same type), and will be removed in the next major version.
-
-`DatabaseAdapterType` gained `'custom'`; `DatabasePluginOptions` became a union discriminated on
-`type`. Both are additive for callers — every existing registration compiles unchanged. The
-`'mongodb'` arm is additive as well: `MongoDatabaseOptions` extends `DatabaseConnectionOptions` and
-carries its dedicated `MongoAdapterOptions` bag, so a registration carrying a memory, Prisma,
-Drizzle or custom configuration still compiles unchanged.
-
-| `DynamoAdapterOptions` (union of two arms), `DynamoAdapterOptionsBase`, `DynamoEntityMapping`,
-`DynamoDateEncoding`, `DynamoIndexMapping` | types | | `IDynamoClient`, `DynamoAttributeValue`,
-`DynamoAttributeMap`, `DynamoExpressionAttributes`, `DynamoConditionExpression`, and the
-`Dynamo*CommandInput`/`Output`/`Transact*` command-shape closure | interfaces (DynamoDB client seam)
-| | `DynamoClientConfiguration`, `DynamoClientLoader`, `DynamoCommandConstructor`,
-`DynamoSdkClient`, `DynamoSdkCommand`, `DynamoSdkModule` | types (DynamoDB SDK seam) | |
-`createInjectedDynamoLoader`, `createLazyDynamoLoader` | functions |
+| `DynamoAdapterOptions` (union of two arms), `DynamoAdapterOptionsBase`, `DynamoEntityMapping`, `DynamoDateEncoding`, `DynamoIndexMapping`                                                                                                                                                                               | types                              |
+| `IDynamoClient`, `DynamoAttributeValue`, `DynamoAttributeMap`, `DynamoExpressionAttributes`, `DynamoConditionExpression`, and the `Dynamo*CommandInput`/`Output`/`Transact*` command-shape closure                                                                                                                      | interfaces (DynamoDB client seam)  |
+| `DynamoClientConfiguration`, `DynamoClientLoader`, `DynamoCommandConstructor`, `DynamoSdkClient`, `DynamoSdkCommand`, `DynamoSdkModule`                                                                                                                                                                                 | types (DynamoDB SDK seam)          |
+| `createInjectedDynamoLoader`, `createLazyDynamoLoader`                                                                                                                                                                                                                                                                  | functions                          |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.
@@ -1732,12 +1719,6 @@ existing registration compiles unchanged. `MongoDatabaseOptions`, `DynamoDatabas
 `CosmosDatabaseOptions` each extend `DatabaseConnectionOptions` and carry their arm's dedicated
 option bag (`MongoAdapterOptions`, `DynamoAdapterOptions`, `CosmosAdapterOptions`), so a
 registration carrying a memory, Prisma, Drizzle or custom configuration still compiles unchanged.
-`DatabaseAdapterType` gained `'custom'`, then `'mongodb'`, then `'dynamodb'`;
-`DatabasePluginOptions` became a union discriminated on `type`. All are additive for callers — every
-existing registration compiles unchanged. `MongoDatabaseOptions` and `DynamoDatabaseOptions` each
-extend `DatabaseConnectionOptions` and carry their arm's dedicated option bag
-(`MongoAdapterOptions`, `DynamoAdapterOptions`), so a registration carrying a memory, Prisma,
-Drizzle or custom configuration still compiles unchanged.
 
 ### Multiple Databases
 

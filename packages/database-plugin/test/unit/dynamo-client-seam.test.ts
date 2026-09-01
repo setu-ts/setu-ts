@@ -245,3 +245,40 @@ describe('DynamoDB client seam', () => {
     client.destroy();
   });
 });
+
+describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
+  const credentials = { accessKeyId: 'a', secretAccessKey: 'b' };
+
+  it('allows a loopback emulator over plaintext HTTP', () => {
+    for (
+      const endpoint of ['http://127.0.0.1:8000', 'http://localhost:8000', 'http://[::1]:8000']
+    ) {
+      expect(() => createLazyDynamoLoader({ region: 'us-east-1', endpoint, credentials }))
+        .not.toThrow();
+    }
+  });
+
+  it('refuses credentials over plaintext HTTP to a remote host', () => {
+    // SigV4 signs a request but does not encrypt it, and the AWS SDK does not
+    // refuse this, so the adapter does.
+    expect(() =>
+      createLazyDynamoLoader({
+        region: 'us-east-1',
+        endpoint: 'http://dynamo.internal.example.com:8000',
+        credentials,
+      })
+    ).toThrow(/plaintext HTTP to remote host/);
+  });
+
+  it('allows https to a remote host, and plaintext with no credentials', () => {
+    expect(() =>
+      createLazyDynamoLoader({
+        region: 'us-east-1',
+        endpoint: 'https://dynamo.example.com',
+        credentials,
+      })
+    ).not.toThrow();
+    expect(() => createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'http://example.com' }))
+      .not.toThrow();
+  });
+});

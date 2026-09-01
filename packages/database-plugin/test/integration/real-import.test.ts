@@ -117,24 +117,31 @@ describe('Real ORM imports (guarded)', () => {
         region: dynamoRegion,
         credentials: dynamoCredentials,
       });
-      await admin.send(
-        new CreateTableCommand({
-          TableName: tableName,
-          BillingMode: 'PAY_PER_REQUEST',
-          AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
-          KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
-        }),
-      );
+      // `admin.destroy()` sits in an OUTER finally so it runs even when the
+      // table could not be created, and the drop is nested so a failing
+      // DeleteTable cannot skip it either — otherwise a failure anywhere in
+      // this test leaks the SDK client's sockets into the rest of the suite.
       try {
-        const loader = createLazyDynamoLoader({
-          endpoint,
-          region: dynamoRegion,
-          credentials: dynamoCredentials,
-        });
-        const client = await loader.load();
-        await expect(client.scan({ TableName: tableName })).resolves.toMatchObject({ Count: 0 });
+        await admin.send(
+          new CreateTableCommand({
+            TableName: tableName,
+            BillingMode: 'PAY_PER_REQUEST',
+            AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+            KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+          }),
+        );
+        try {
+          const loader = createLazyDynamoLoader({
+            endpoint,
+            region: dynamoRegion,
+            credentials: dynamoCredentials,
+          });
+          const client = await loader.load();
+          await expect(client.scan({ TableName: tableName })).resolves.toMatchObject({ Count: 0 });
+        } finally {
+          await admin.send(new DeleteTableCommand({ TableName: tableName }));
+        }
       } finally {
-        await admin.send(new DeleteTableCommand({ TableName: tableName }));
         admin.destroy();
       }
     },

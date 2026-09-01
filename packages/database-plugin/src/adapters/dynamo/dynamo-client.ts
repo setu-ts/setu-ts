@@ -24,6 +24,7 @@ import type {
   DynamoUpdateItemCommandOutput,
   IDynamoClient,
 } from './dynamo-client-types.ts';
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
 
 /**
  * AWS client construction settings consumed by the lazy SDK arm.
@@ -117,6 +118,49 @@ export function createInjectedDynamoLoader(client: IDynamoClient): DynamoClientL
 }
 
 /**
+ * Refuses a credentialed plaintext endpoint pointed at a remote host.
+ *
+ * `endpoint` exists so the adapter can address a local emulator, and the
+ * emulator speaks plain HTTP on loopback. A REMOTE `http://` endpoint carrying
+ * static credentials is different: SigV4 signs the request but does not
+ * encrypt it, so the credentials' scope, the table names, the keys and every
+ * item body cross the network in cleartext. The AWS SDK does not refuse this,
+ * so the adapter does — loopback stays allowed, which is the whole reason the
+ * option exists.
+ *
+ * @param configuration - The client settings the lazy arm was given
+ * @throws {UnsupportedQueryFeatureError} When credentials accompany a remote
+ *   `http://` endpoint
+ */
+function assertTransportSecurity(configuration: DynamoClientConfiguration): void {
+  const endpoint = configuration.endpoint;
+  if (endpoint === undefined || configuration.credentials === undefined) return;
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new UnsupportedQueryFeatureError(
+      'endpoint',
+      'dynamodb',
+      `DynamoAdapter endpoint '${endpoint}' is not a valid URL.`,
+    );
+  }
+  if (url.protocol !== 'http:') return;
+  const host = url.hostname;
+  const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' ||
+    host === '[::1]' || host.endsWith('.localhost');
+  if (loopback) return;
+  throw new UnsupportedQueryFeatureError(
+    'endpoint',
+    'dynamodb',
+    `DynamoAdapter refuses credentials over plaintext HTTP to remote host '${host}'. ` +
+      `SigV4 signs a request but does not encrypt it, so credentials scope, keys and item ` +
+      `bodies would cross the network in cleartext. Use https://, or a loopback endpoint for ` +
+      `a local emulator.`,
+  );
+}
+
+/**
  * Creates the lazy DynamoDB SDK loader.
  *
  * The literal import is deliberately inside `load()`: an application that
@@ -129,6 +173,7 @@ export function createInjectedDynamoLoader(client: IDynamoClient): DynamoClientL
 export function createLazyDynamoLoader(
   configuration: DynamoClientConfiguration,
 ): DynamoClientLoader {
+  assertTransportSecurity(configuration);
   return {
     load: async (): Promise<IDynamoClient> => {
       const module = await import('npm:@aws-sdk/client-dynamodb@^3') as unknown as DynamoSdkModule;
