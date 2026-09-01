@@ -7,6 +7,21 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import {
+  CreateTableCommand,
+  DeleteTableCommand,
+  DynamoDBClient,
+} from 'npm:@aws-sdk/client-dynamodb@^3';
+import { createLazyDynamoLoader } from '../../src/index.ts';
+
+const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
+const skipDynamo = dynamoEndpoint === undefined;
+const endpoint = dynamoEndpoint ?? '';
+const dynamoCredentials = {
+  accessKeyId: 'setum80fake',
+  secretAccessKey: 'setum80secret',
+};
+const dynamoRegion = 'us-east-1';
 
 describe('Real ORM imports (guarded)', () => {
   it('prisma v7 ungenerated package has an explicit generated-client boundary', async () => {
@@ -64,4 +79,37 @@ describe('Real ORM imports (guarded)', () => {
       ).toBe(true);
     }
   });
+
+  it(
+    'DynamoDB lazy SDK import drives a facade command round trip',
+    { ignore: skipDynamo },
+    async () => {
+      const tableName = `m80_import_${crypto.randomUUID().replaceAll('-', '')}`;
+      const admin = new DynamoDBClient({
+        endpoint,
+        region: dynamoRegion,
+        credentials: dynamoCredentials,
+      });
+      await admin.send(
+        new CreateTableCommand({
+          TableName: tableName,
+          BillingMode: 'PAY_PER_REQUEST',
+          AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+          KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+        }),
+      );
+      try {
+        const loader = createLazyDynamoLoader({
+          endpoint,
+          region: dynamoRegion,
+          credentials: dynamoCredentials,
+        });
+        const client = await loader.load();
+        await expect(client.scan({ TableName: tableName })).resolves.toMatchObject({ Count: 0 });
+      } finally {
+        await admin.send(new DeleteTableCommand({ TableName: tableName }));
+        admin.destroy();
+      }
+    },
+  );
 });
