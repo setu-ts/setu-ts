@@ -121,12 +121,17 @@ export function createInjectedDynamoLoader(client: IDynamoClient): DynamoClientL
  * Refuses a credentialed plaintext endpoint pointed at a remote host.
  *
  * `endpoint` exists so the adapter can address a local emulator, and the
- * emulator speaks plain HTTP on loopback. A REMOTE `http://` endpoint carrying
- * static credentials is different: SigV4 signs the request but does not
- * encrypt it, so the credentials' scope, the table names, the keys and every
- * item body cross the network in cleartext. The AWS SDK does not refuse this,
- * so the adapter does — loopback stays allowed, which is the whole reason the
- * option exists.
+ * emulator speaks plain HTTP on loopback. A REMOTE `http://` endpoint is
+ * different: SigV4 signs the request but does not encrypt it, so the
+ * credential scope, the table names, the keys and every item body cross the
+ * network in cleartext. The AWS SDK does not refuse this, so the adapter does
+ * — loopback stays allowed, which is the whole reason the option exists.
+ *
+ * The check does NOT require `credentials` to be configured. AWS SDK v3 has a
+ * credential provider chain (environment, shared config, instance metadata),
+ * so an absent `credentials` usually means the SDK will supply some rather
+ * than that the request is anonymous — gating on it would leave the common
+ * production shape unprotected.
  *
  * @param configuration - The client settings the lazy arm was given
  * @throws {UnsupportedQueryFeatureError} When credentials accompany a remote
@@ -134,7 +139,13 @@ export function createInjectedDynamoLoader(client: IDynamoClient): DynamoClientL
  */
 function assertTransportSecurity(configuration: DynamoClientConfiguration): void {
   const endpoint = configuration.endpoint;
-  if (endpoint === undefined || configuration.credentials === undefined) return;
+  // Deliberately NOT gated on `configuration.credentials`. AWS SDK v3 resolves
+  // credentials from the environment, shared config and instance metadata when
+  // none are passed, so an omitted `credentials` means "the SDK will find some"
+  // far more often than it means "this request is anonymous" — and those
+  // ambient credentials would then be signed over cleartext exactly as
+  // explicit ones would.
+  if (endpoint === undefined) return;
   let url: URL;
   try {
     url = new URL(endpoint);
@@ -153,10 +164,11 @@ function assertTransportSecurity(configuration: DynamoClientConfiguration): void
   throw new UnsupportedQueryFeatureError(
     'endpoint',
     'dynamodb',
-    `DynamoAdapter refuses credentials over plaintext HTTP to remote host '${host}'. ` +
-      `SigV4 signs a request but does not encrypt it, so credentials scope, keys and item ` +
-      `bodies would cross the network in cleartext. Use https://, or a loopback endpoint for ` +
-      `a local emulator.`,
+    `DynamoAdapter refuses a plaintext HTTP endpoint on remote host '${host}'. ` +
+      `SigV4 signs a request but does not encrypt it, and AWS SDK v3 resolves ambient ` +
+      `credentials from the environment or instance metadata even when none are configured, ` +
+      `so credential scope, keys and item bodies would cross the network in cleartext. ` +
+      `Use https://, or a loopback endpoint for a local emulator.`,
   );
 }
 

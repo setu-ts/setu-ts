@@ -134,7 +134,10 @@ export class DynamoAdapter implements IDatabaseAdapter {
     try {
       await attempt;
     } finally {
-      this.#connecting = null;
+      // Only clear the slot if it is still OURS. A `disconnect()` during the
+      // attempt already cleared it, and a later `connect()` may have installed
+      // its own; overwriting either with `null` would strand that attempt.
+      if (this.#connecting === attempt) this.#connecting = null;
     }
   }
 
@@ -188,8 +191,13 @@ export class DynamoAdapter implements IDatabaseAdapter {
    * @inheritdoc
    */
   disconnect(): Promise<void> {
-    // Invalidate any in-flight `connect()` before releasing state (§#6).
+    // Invalidate any in-flight `connect()` before releasing state (§#6), and
+    // release the slot it occupies. Bumping the generation alone left the
+    // stale attempt in `#connecting`, so the NEXT `connect()` awaited a
+    // promise whose own client is discarded — it resolved with the adapter
+    // still disconnected, reporting success while `isReady()` stayed false.
     this.#generation += 1;
+    this.#connecting = null;
     if (this.#client !== null) {
       if (this.#owned) this.#client.destroy();
       this.#client = null;

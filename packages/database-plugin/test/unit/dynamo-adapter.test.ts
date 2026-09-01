@@ -267,6 +267,26 @@ describe('DynamoAdapter — disconnect during an in-flight connect (Qodo review)
     expect(() => adapter.createDataSource('Item')).toThrow(/not connected/);
   });
 
+  it('does not leave a stale attempt that makes the next connect resolve unconnected', async () => {
+    // The generation guard alone fixed the resurrection but left the discarded
+    // attempt sitting in `#connecting`. The NEXT `connect()` then short-circuits
+    // onto that stale promise, which resolves after discarding its own client —
+    // so `connect()` reports success while the adapter is still disconnected.
+    // The second connect() must be issued while the discarded attempt is STILL
+    // PENDING — that is the only window in which `#connecting` holds it. If the
+    // stale attempt is awaited first it clears its own slot in `finally` and the
+    // bug is unreachable, which is what made an earlier version of this test
+    // pass with the fix reverted.
+    const adapter = new DynamoAdapter({ client: fakeClient() });
+    const first = adapter.connect();
+    const disconnecting = adapter.disconnect();
+    const second = adapter.connect();
+    await Promise.all([first, disconnecting, second]);
+
+    expect(adapter.isReady()).toBe(true);
+    expect(() => adapter.createDataSource('Item')).not.toThrow();
+  });
+
   it('reconnects cleanly after that interleave', async () => {
     const adapter = new DynamoAdapter({ client: fakeClient() });
     const connecting = adapter.connect();

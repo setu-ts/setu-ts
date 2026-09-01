@@ -137,7 +137,16 @@ describe('Real ORM imports (guarded)', () => {
             credentials: dynamoCredentials,
           });
           const client = await loader.load();
-          await expect(client.scan({ TableName: tableName })).resolves.toMatchObject({ Count: 0 });
+          // The loader constructs its OWN SDK client, separate from `admin`;
+          // the outer cleanup destroys only `admin`, so this one needs its own
+          // finally or its sockets outlive the test.
+          try {
+            await expect(client.scan({ TableName: tableName })).resolves.toMatchObject({
+              Count: 0,
+            });
+          } finally {
+            client.destroy();
+          }
         } finally {
           await admin.send(new DeleteTableCommand({ TableName: tableName }));
         }

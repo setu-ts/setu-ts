@@ -267,10 +267,10 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
         endpoint: 'http://dynamo.internal.example.com:8000',
         credentials,
       })
-    ).toThrow(/plaintext HTTP to remote host/);
+    ).toThrow(/plaintext HTTP endpoint on remote host/);
   });
 
-  it('allows https to a remote host, and plaintext with no credentials', () => {
+  it('allows https to a remote host', () => {
     expect(() =>
       createLazyDynamoLoader({
         region: 'us-east-1',
@@ -278,7 +278,17 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
         credentials,
       })
     ).not.toThrow();
+  });
+
+  it('refuses remote plaintext even when no credentials are configured', () => {
+    // Not gated on `credentials`: AWS SDK v3 resolves them from the
+    // environment, shared config or instance metadata, so an omitted bag
+    // usually means "the SDK will find some" rather than "anonymous request",
+    // and those ambient credentials would be signed over cleartext too.
     expect(() => createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'http://example.com' }))
+      .toThrow(/plaintext HTTP endpoint on remote host/);
+    // Loopback stays allowed with or without credentials — the emulator case.
+    expect(() => createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'http://127.0.0.1:8000' }))
       .not.toThrow();
   });
 });
