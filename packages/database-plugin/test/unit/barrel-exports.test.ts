@@ -7,9 +7,39 @@ import type {
   DrizzleAdapterOptions,
   DrizzleDatabaseOptions,
   DynamoAdapterOptions,
+  DynamoAdapterOptionsBase,
+  DynamoAttributeMap,
+  DynamoAttributeValue,
+  DynamoClientConfiguration,
+  DynamoClientLoader,
+  DynamoCommandConstructor,
+  DynamoConditionExpression,
   DynamoDatabaseOptions,
+  DynamoDateEncoding,
+  DynamoDeleteItemCommandInput,
+  DynamoDeleteItemCommandOutput,
   DynamoEntityMapping,
+  DynamoExpressionAttributes,
+  DynamoGetItemCommandInput,
+  DynamoGetItemCommandOutput,
+  DynamoIndexMapping,
+  DynamoPutItemCommandInput,
+  DynamoPutItemCommandOutput,
+  DynamoQueryCommandInput,
+  DynamoReadCommandInput,
+  DynamoReadCommandOutput,
+  DynamoScanCommandInput,
+  DynamoSdkClient,
+  DynamoSdkCommand,
   DynamoSdkModule,
+  DynamoTransactDelete,
+  DynamoTransactPut,
+  DynamoTransactUpdate,
+  DynamoTransactWriteItem,
+  DynamoTransactWriteItemsCommandInput,
+  DynamoTransactWriteItemsCommandOutput,
+  DynamoUpdateItemCommandInput,
+  DynamoUpdateItemCommandOutput,
   IDynamoClient,
   MemoryDatabaseOptions,
   MongoAdapterOptions,
@@ -178,6 +208,48 @@ describe('database-plugin barrel exports', () => {
       'id',
     ]);
     expect(typeof client.query).toBe('function');
+  });
+
+  it('exports the DynamoDB structural type closure (compile-time pin)', () => {
+    // The public client and SDK seams refer to every type in this tuple. Keep
+    // them nameable from the package root, like the Mongo structural closure;
+    // otherwise `deno doc --lint` reports private-type references even though
+    // consumers can inject these shapes.
+    type DynamoStructuralClosure = readonly [
+      DynamoAdapterOptionsBase,
+      DynamoAttributeMap,
+      DynamoAttributeValue,
+      DynamoClientConfiguration,
+      DynamoClientLoader,
+      DynamoCommandConstructor<DynamoQueryCommandInput, DynamoReadCommandOutput>,
+      DynamoConditionExpression,
+      DynamoDateEncoding,
+      DynamoDeleteItemCommandInput,
+      DynamoDeleteItemCommandOutput,
+      DynamoExpressionAttributes,
+      DynamoGetItemCommandInput,
+      DynamoGetItemCommandOutput,
+      DynamoIndexMapping,
+      DynamoPutItemCommandInput,
+      DynamoPutItemCommandOutput,
+      DynamoQueryCommandInput,
+      DynamoReadCommandInput,
+      DynamoReadCommandOutput,
+      DynamoScanCommandInput,
+      DynamoSdkClient,
+      DynamoSdkCommand<DynamoQueryCommandInput, DynamoReadCommandOutput>,
+      DynamoTransactDelete,
+      DynamoTransactPut,
+      DynamoTransactUpdate,
+      DynamoTransactWriteItem,
+      DynamoTransactWriteItemsCommandInput,
+      DynamoTransactWriteItemsCommandOutput,
+      DynamoUpdateItemCommandInput,
+      DynamoUpdateItemCommandOutput,
+    ];
+
+    const closure: DynamoStructuralClosure | undefined = undefined;
+    expect(closure).toBeUndefined();
   });
 
   it('leaves the common barrel unchanged — M80 adds nothing there (M80 plan §4)', () => {

@@ -12,15 +12,25 @@
 
 /** A DynamoDB attribute value in the subset the adapter reads and writes. */
 export interface DynamoAttributeValue {
+  /** A UTF-8 string value. */
   readonly S?: string;
+  /** A base-10 number encoded as text. */
   readonly N?: string;
+  /** A binary value. */
   readonly B?: Uint8Array;
+  /** A boolean value. */
   readonly BOOL?: boolean;
+  /** A DynamoDB null marker. */
   readonly NULL?: boolean;
+  /** A nested map value. */
   readonly M?: DynamoAttributeMap;
+  /** An ordered list of attribute values. */
   readonly L?: readonly DynamoAttributeValue[];
+  /** A set of string values. */
   readonly SS?: readonly string[];
+  /** A set of base-10 numbers encoded as text. */
   readonly NS?: readonly string[];
+  /** A set of binary values. */
   readonly BS?: readonly Uint8Array[];
 }
 

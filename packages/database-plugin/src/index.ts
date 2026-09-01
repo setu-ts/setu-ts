@@ -24,6 +24,7 @@ export type {
   DrizzleCompositeKeyOptions,
   DrizzleDatabaseOptions,
   DynamoAdapterOptions,
+  DynamoAdapterOptionsBase,
   DynamoDatabaseOptions,
   FindOptions,
   IDatabaseService,
@@ -127,14 +128,50 @@ export { createDrizzleDataSource } from './adapters/drizzle/drizzle-repository.t
 export { MongoAdapter } from './adapters/mongo/mongo-adapter.ts';
 
 // DynamoDB adapter — key-value backend over the native AWS SDK v3 client.
-// Exactly the eight public symbols the M80 plan §4 lists: the target
-// resolution, the expression builder, the marshaller and the access-path
-// resolver stay internal (the `D1Target` / `MongoTarget` precedent).
+// The structural closure keeps the client and SDK seams nameable from this
+// entrypoint, matching the MongoDB adapter's injected-client precedent. The
+// target resolution, expression builder, marshaller, and access-path resolver
+// remain internal (the `D1Target` / `MongoTarget` precedent).
 export { DynamoAdapter } from './adapters/dynamo/dynamo-adapter.ts';
 export {
   createInjectedDynamoLoader,
   createLazyDynamoLoader,
 } from './adapters/dynamo/dynamo-client.ts';
-export type { DynamoSdkModule } from './adapters/dynamo/dynamo-client.ts';
-export type { IDynamoClient } from './adapters/dynamo/dynamo-client-types.ts';
-export type { DynamoEntityMapping } from './adapters/dynamo/dynamo-mapping.ts';
+export type {
+  DynamoClientConfiguration,
+  DynamoClientLoader,
+  DynamoCommandConstructor,
+  DynamoSdkClient,
+  DynamoSdkCommand,
+  DynamoSdkModule,
+} from './adapters/dynamo/dynamo-client.ts';
+export type {
+  DynamoAttributeMap,
+  DynamoAttributeValue,
+  DynamoConditionExpression,
+  DynamoDeleteItemCommandInput,
+  DynamoDeleteItemCommandOutput,
+  DynamoExpressionAttributes,
+  DynamoGetItemCommandInput,
+  DynamoGetItemCommandOutput,
+  DynamoPutItemCommandInput,
+  DynamoPutItemCommandOutput,
+  DynamoQueryCommandInput,
+  DynamoReadCommandInput,
+  DynamoReadCommandOutput,
+  DynamoScanCommandInput,
+  DynamoTransactDelete,
+  DynamoTransactPut,
+  DynamoTransactUpdate,
+  DynamoTransactWriteItem,
+  DynamoTransactWriteItemsCommandInput,
+  DynamoTransactWriteItemsCommandOutput,
+  DynamoUpdateItemCommandInput,
+  DynamoUpdateItemCommandOutput,
+  IDynamoClient,
+} from './adapters/dynamo/dynamo-client-types.ts';
+export type {
+  DynamoDateEncoding,
+  DynamoEntityMapping,
+  DynamoIndexMapping,
+} from './adapters/dynamo/dynamo-mapping.ts';

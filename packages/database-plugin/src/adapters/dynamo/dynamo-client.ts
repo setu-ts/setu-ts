@@ -44,13 +44,17 @@ export interface DynamoClientConfiguration {
 
 /** A native DynamoDB SDK command accepted by {@linkcode DynamoSdkClient}. */
 export interface DynamoSdkCommand<TInput, TOutput> {
+  /** The command request supplied to the AWS SDK. */
   readonly input: TInput;
+  /** The typed AWS SDK response, when a command carries one. */
   readonly output?: TOutput;
 }
 
 /** The native DynamoDB SDK client operations driven by the facade. */
 export interface DynamoSdkClient {
+  /** Sends one DynamoDB command to the configured AWS endpoint. */
   send<TInput, TOutput>(command: DynamoSdkCommand<TInput, TOutput>): Promise<TOutput>;
+  /** Releases resources owned by the AWS SDK client. */
   destroy(): void;
 }
 
