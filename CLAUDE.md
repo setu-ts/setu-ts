@@ -3792,12 +3792,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   projected. Writing the unit tests then found three more, all in this milestone's own code: a batch
   answering **207** (the status a rolled-back batch actually returns) was read as a success by a
   `>= 300` threshold, and `rollback()` and `beginTransaction()` threw **synchronously** from methods
-  typed `Promise` — the M52b/M52c/M70j class, twice. The nine portable filter cases are run against
-  the real service with the Memory adapter's own evaluator as the reference, which is this backend's
-  leg of `filter-conformance.test.ts`: that file cannot evaluate Cosmos SQL without becoming a
-  second query engine, and a fake engine agreeing with a fake engine proves nothing. The guarded
-  suite is local-only — the emulator image is 2.5 GB, the same reason the Pub/Sub and Service Bus
-  suites are — with the `docker run` and the health line in the package README) — complete (PR #220)
+  typed `Promise` — the M52b/M52c/M70j class, twice. The thirteen portable filter cases are run
+  against the real service with the Memory adapter's own evaluator as the reference, which is this
+  backend's leg of `filter-conformance.test.ts`: that file cannot evaluate Cosmos SQL without
+  becoming a second query engine, and a fake engine agreeing with a fake engine proves nothing. The
+  guarded suite is local-only — the emulator image is 2.5 GB, the same reason the Pub/Sub and
+  Service Bus suites are — with the `docker run` and the health line in the package README) —
+  complete (PR #220)
 - **Next milestone** — **M80** (DynamoDB backend), gated on M79 and now unblocked; **M82** (Cloud
   Bigtable backend) is the remaining backend, also gated on M79.
 
