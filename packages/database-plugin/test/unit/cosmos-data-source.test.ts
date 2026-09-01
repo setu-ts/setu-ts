@@ -208,6 +208,21 @@ describe('findById', () => {
     expect(await source.findById({ orderId: 'o1' })).toEqual({ orderId: 'o1', total: 5 });
   });
 
+  it('reads a nested partition key from a document by WALKING it, not by its dotted name', async () => {
+    // A document may legally carry a literal `"address.city"` property beside a
+    // nested `address.city`. Preferring the flat read picks the decoy, so the
+    // request goes to the wrong partition — `delete` then answered `false` for
+    // a row that exists. The dotted spelling belongs to the flat KEY record.
+    const decoy = { id: 'o1', address: { city: 'pune' }, 'address.city': 'DECOY', n: 1 };
+    const { source } = makeSource({
+      containers: {
+        Order: { partitionKeyPaths: ['/address/city'], documents: { 'pune|o1': decoy } },
+      },
+      queryResults: [[decoy]],
+    }, { Order: { container: 'Order' } });
+    expect(await source.delete('o1')).toBe(true);
+  });
+
   it('refuses a composite key missing ONE segment of a hierarchical partition key', async () => {
     // A hierarchical key reads as an array, so a missing segment leaves a hole
     // inside it rather than making the whole value undefined — which the

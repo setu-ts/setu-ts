@@ -142,7 +142,13 @@ function documentKey(
   partitionKey: CosmosPartitionKeyValue | undefined,
   id: string,
 ): string {
-  return `${container}|${JSON.stringify(partitionKey ?? null)}|${id}`;
+  // An ABSENT partition key and an explicit `null` one are different partitions
+  // to the service, and the non-transactional `create` path forwards a document
+  // to `items.create` without requiring one — so collapsing the two with
+  // `?? null` let a document missing its partition key collide with one that
+  // legitimately carries `null`.
+  const key = partitionKey === undefined ? '<absent>' : JSON.stringify(partitionKey);
+  return `${container}|${key}|${id}`;
 }
 
 /**
@@ -171,9 +177,12 @@ export function createFakeCosmosClient(options: FakeCosmosOptions): FakeCosmos {
       const cut = key.lastIndexOf('|');
       const rawKey = key.slice(0, cut);
       const id = key.slice(cut + 1);
-      // A hierarchical key is written as a JSON array literal and an explicit
-      // null as `null`; anything else is taken as the string it looks like.
-      const partitionKey = rawKey.startsWith('[') || rawKey === 'null'
+      // A hierarchical key is written as a JSON array literal, an explicit null
+      // as `null` and an ABSENT one as `undefined`; anything else is taken as
+      // the string it looks like.
+      const partitionKey = rawKey === 'undefined'
+        ? undefined
+        : rawKey.startsWith('[') || rawKey === 'null'
         ? JSON.parse(rawKey) as CosmosPartitionKeyValue
         : rawKey;
       documents.set(

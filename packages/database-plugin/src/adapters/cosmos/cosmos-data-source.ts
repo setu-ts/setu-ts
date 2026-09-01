@@ -166,10 +166,14 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
   ): ReadPartitionKey => {
     const missing: (readonly string[])[] = [];
     const values = resolved.paths.map((path) => {
-      // A composite EntityKey record is flat, so a nested partition-key path is
-      // addressed by its dotted join ('address.city'); a row is nested, so the
-      // segment walk finds it. Both spellings are tried, in that order.
-      const flat = row[path.join('.')];
+      // A composite EntityKey record is FLAT, so a nested partition-key path is
+      // addressed there by its dotted join ('address.city'). A stored document
+      // is nested and must be walked — and only walked: a document may legally
+      // carry a literal `"address.city"` property alongside a nested
+      // `address.city`, and preferring the flat read there picks the wrong
+      // partition key, which made `delete` answer `false` for a row that
+      // exists. So the dotted spelling is tried for a key record only.
+      const flat = shape === 'key' ? row[path.join('.')] : undefined;
       let value = flat === undefined ? readPath(row, path) : flat;
       // A KEY record carries REPOSITORY field names, while a partition-key path
       // names a DOCUMENT field — and the two differ for a mapped primary key,

@@ -6,6 +6,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { createFakeCosmosClient } from '../fixtures/fake-cosmos-client.ts';
 import {
   documentField,
   fromDocument,
@@ -123,5 +124,20 @@ describe('documentField', () => {
     const target = resolveCosmosTarget('Order', { Order: { primaryKey: 'orderId' } });
     expect(documentField('orderId', target)).toBe('id');
     expect(documentField('total', target)).toBe('total');
+  });
+});
+
+describe('the fake store distinguishes an absent partition key from a null one', () => {
+  it('keeps a document with no partition key apart from one carrying null', async () => {
+    // They are different partitions to the service, and the non-transactional
+    // `create` path forwards a document to `items.create` without requiring a
+    // partition key — so collapsing the two hid a real collision.
+    const fake = createFakeCosmosClient({ containers: { orders: { partitionKeyPaths: ['/pk'] } } });
+    const items = fake.client.database('db').container('orders').items;
+    await items.create({ id: 'a', pk: null });
+    const second = await items.create({ id: 'a' });
+    expect(second.statusCode).toBe(201);
+    expect((await fake.client.database('db').container('orders').item('a', null).read()).resource)
+      .toMatchObject({ id: 'a', pk: null });
   });
 });
