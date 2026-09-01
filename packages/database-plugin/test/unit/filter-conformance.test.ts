@@ -30,10 +30,17 @@ import {
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import { createMongoDataSource } from '../../src/adapters/mongo/mongo-data-source.ts';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
-import { UnsupportedFilterOperatorError } from '../../src/errors.ts';
+import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import type { NormalizedQuery } from '../../src/query/query-builder.ts';
 import { translateFilter } from '../../src/adapters/mongo/mongo-query.ts';
+import type {
+  DynamoAttributeMap,
+  DynamoScanCommandInput,
+  IDynamoClient,
+} from '../../src/adapters/dynamo/dynamo-client-types.ts';
+import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';
+import { unmarshalDynamoValue } from '../../src/adapters/dynamo/dynamo-marshal.ts';
 import { createD1DataSource } from '../../../cloudflare-plugin/src/database/d1-data-source.ts';
 import {
   createFakeDrizzleInstance,
@@ -404,6 +411,142 @@ async function drizzleWhere(filter: FilterExpression): Promise<unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// DynamoDB condition-expression evaluator (the subset the builder emits for
+// the case table): `=`, `IN (...)`, `contains(path, value)`, parenthesized
+// groups joined by `AND`/`OR`, and the attribute-free match-nothing form
+// `:v0 = :v1`. Like the Prisma/Drizzle/Mongo evaluators above it implements
+// exactly the exercised subset and throws loudly on anything else.
+// ---------------------------------------------------------------------------
+
+/** Splits on `separator` at paren depth zero, keeping the operands. */
+function splitTopLevelCondition(text: string, separator: ' AND ' | ' OR '): readonly string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth -= 1;
+    if (depth === 0 && text.startsWith(separator, i)) {
+      parts.push(current);
+      current = '';
+      i += separator.length - 1;
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/** Resolves a `#nN` path token to the row value it addresses. */
+function dynamoPathValue(
+  token: string,
+  row: Row,
+  names: Readonly<Record<string, string>>,
+): unknown {
+  const name = names[token.trim()];
+  if (name === undefined) {
+    throw new Error(`conformance evaluator: unknown name alias '${token.trim()}'`);
+  }
+  return row[name];
+}
+
+/** Resolves a `:vN` placeholder to its unmarshalled constant. */
+function dynamoPlaceholderValue(
+  token: string,
+  values: DynamoAttributeMap,
+): unknown {
+  const value = values[token.trim()];
+  if (value === undefined) {
+    throw new Error(`conformance evaluator: unknown value alias '${token.trim()}'`);
+  }
+  return unmarshalDynamoValue(value);
+}
+
+function evalDynamoAtom(
+  row: Row,
+  atom: string,
+  names: Readonly<Record<string, string>>,
+  values: DynamoAttributeMap,
+): boolean {
+  const contains = /^contains\(\s*(\S+)\s*,\s*(\S+)\s*\)$/.exec(atom);
+  if (contains !== null) {
+    // DynamoDB's `contains` on a string operand is a literal substring test —
+    // no wildcards — which is exactly the reference `matchesFilter` semantics.
+    const actual = dynamoPathValue(contains[1], row, names);
+    const expected = dynamoPlaceholderValue(contains[2], values);
+    return typeof actual === 'string' && typeof expected === 'string' &&
+      actual.includes(expected);
+  }
+  const membership = /^(\S+)\s+IN\s+\((.+)\)$/.exec(atom);
+  if (membership !== null) {
+    const actual = dynamoPathValue(membership[1], row, names);
+    return membership[2].split(',').some((element) =>
+      actual === dynamoPlaceholderValue(element, values)
+    );
+  }
+  const comparison = /^(\S+)\s*(=|<>)\s*(\S+)$/.exec(atom);
+  if (comparison !== null) {
+    const [, left, op, right] = comparison;
+    const resolve = (token: string): unknown =>
+      token.startsWith('#')
+        ? dynamoPathValue(token, row, names)
+        : dynamoPlaceholderValue(token, values);
+    const lhs = resolve(left);
+    const rhs = resolve(right);
+    return op === '=' ? lhs === rhs : lhs !== rhs;
+  }
+  throw new Error(`conformance evaluator: unhandled DynamoDB condition '${atom}'`);
+}
+
+function evalDynamoCondition(
+  row: Row,
+  expression: string,
+  names: Readonly<Record<string, string>>,
+  values: DynamoAttributeMap,
+): boolean {
+  const andParts = splitTopLevelCondition(expression, ' AND ');
+  if (andParts.length > 1) {
+    return andParts.every((part) => evalDynamoCondition(row, part, names, values));
+  }
+  const orParts = splitTopLevelCondition(expression, ' OR ');
+  if (orParts.length > 1) {
+    return orParts.some((part) => evalDynamoCondition(row, part, names, values));
+  }
+  const atom = expression.trim();
+  if (atom.startsWith('(') && atom.endsWith(')')) {
+    return evalDynamoCondition(row, atom.slice(1, -1), names, values);
+  }
+  return evalDynamoAtom(row, atom, names, values);
+}
+
+/** Translate through the DynamoDB data source and return the recorded Scan. */
+async function dynamoScan(filter: FilterExpression): Promise<DynamoScanCommandInput> {
+  const recorded: DynamoScanCommandInput[] = [];
+  const client: IDynamoClient = {
+    query: () => Promise.resolve({}),
+    scan: (input) => {
+      recorded.push(input);
+      return Promise.resolve({});
+    },
+    getItem: () => Promise.resolve({}),
+    putItem: () => Promise.resolve({}),
+    updateItem: () => Promise.resolve({}),
+    deleteItem: () => Promise.resolve({}),
+    transactWriteItems: () => Promise.resolve({}),
+    destroy() {},
+  };
+  const ds = createDynamoDataSource(client, 'User', { User: { partitionKey: 'id' } });
+  await ds.findAll(query({ filter }));
+  const command = recorded.at(-1);
+  if (command === undefined) {
+    throw new Error('conformance driver: the DynamoDB leg recorded no scan command');
+  }
+  return command;
+}
+
+// ---------------------------------------------------------------------------
 // The conformance suite.
 // ---------------------------------------------------------------------------
 
@@ -433,6 +576,47 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
       expect(mongoRows).toEqual(expected);
     });
   }
+
+  // Every case also agrees with the DynamoDB condition translation. `contains`
+  // and `in` are NATIVE operators over an unparsed value in a condition
+  // expression (unlike SQL `LIKE`), so no case in the table is refused — the
+  // refusal-by-name path is reserved for what DynamoDB cannot express at all,
+  // asserted below.
+  for (const { label, filter } of CASES) {
+    it(`Memory/DynamoDB agree: ${label}`, async () => {
+      const expected = reference(filter);
+      const command = await dynamoScan(filter);
+      const expression = command.FilterExpression;
+      const names = command.ExpressionAttributeNames ?? {};
+      const values = command.ExpressionAttributeValues ?? {};
+      const dynamoRows = ids(
+        ROWS.filter((row) =>
+          expression === undefined ? true : evalDynamoCondition(row, expression, names, values)
+        ),
+      );
+      expect(dynamoRows).toEqual(expected);
+    });
+  }
+
+  it('DynamoDB refuses by name what it cannot express — a Date filter with no declared encoding', async () => {
+    // §3.14: DynamoDB has no date type, so a `Date` comparison on an attribute
+    // the mapping's `dateAttributes` does not declare is refused with the
+    // package's own error naming the adapter — never emitted as a guessed
+    // encoding. This is the conformance suite's refusal-by-name half.
+    const filter = {
+      type: 'comparison',
+      field: 'createdAt',
+      operator: 'gt',
+      value: new Date('2026-01-01T00:00:00.000Z'),
+    } as FilterExpression;
+    let caught: unknown;
+    try {
+      await dynamoScan(filter);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UnsupportedQueryFeatureError);
+  });
 
   it('the escaped-dot contains case does not match the metacharacter row', () => {
     // §3.7: an unescaped '3.5' would treat '.' as "any char". The escaped

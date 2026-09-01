@@ -250,7 +250,13 @@ export interface IDatabaseService {
  *
  * @since 0.1.0
  */
-export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'mongodb' | 'custom';
+export type DatabaseAdapterType =
+  | 'prisma'
+  | 'drizzle'
+  | 'memory'
+  | 'mongodb'
+  | 'dynamodb'
+  | 'custom';
 
 // Re-export the Mongo structural types the `'mongodb'` arm carries, so an
 // application annotating its configuration reaches them from the package
@@ -355,9 +361,9 @@ export interface DrizzleDatabaseOptions extends DatabaseConnectionOptions {
 /**
  * The arm selecting one of the adapters this package ships.
  *
- * A union of the three built-in arms: each names the options its adapter
- * cannot run without, so the compiler rejects a configuration the adapter
- * would only reject at startup.
+ * A union of the built-in arms: each names the options its adapter cannot run
+ * without, so the compiler rejects a configuration the adapter would only
+ * reject at startup.
  *
  * @since 0.2.0
  */
@@ -365,7 +371,8 @@ export type BuiltInDatabaseOptions =
   | MemoryDatabaseOptions
   | PrismaDatabaseOptions
   | DrizzleDatabaseOptions
-  | MongoDatabaseOptions;
+  | MongoDatabaseOptions
+  | DynamoDatabaseOptions;
 
 /**
  * The arm supplying an externally-implemented backend.
@@ -921,3 +928,32 @@ export type DynamoAdapterOptions =
     /** AWS credentials; unread once a client is injected. */
     readonly credentials?: unknown;
   });
+
+/**
+ * The arm selecting the DynamoDB adapter over the AWS SDK v3 client.
+ *
+ * `options.region` is required by the union unless `options.client` is
+ * supplied, so a registration that forgets both is a compile error instead of
+ * a `connect()` throw — the same guarantee the `'custom'` arm gives
+ * `adapter`. The client is supplied inject-or-lazy (§12.2 of AI_GUIDELINES):
+ * `client` is an already-constructed structural {@linkcode IDynamoClient},
+ * and absent it the adapter performs a literal
+ * `import('npm:@aws-sdk/client-dynamodb@^3')` at connect time.
+ *
+ * @example
+ * ```typescript
+ * import { DatabasePlugin } from '@setu-ts/database-plugin';
+ *
+ * DatabasePlugin({
+ *   type: 'dynamodb',
+ *   options: { region: 'us-east-1' },
+ * });
+ * ```
+ * @since 0.1.0
+ */
+export interface DynamoDatabaseOptions extends DatabaseConnectionOptions {
+  /** Selects the DynamoDB arm. */
+  readonly type: 'dynamodb';
+  /** DynamoDB adapter configuration; `region` (or `client`) is required. */
+  readonly options: DynamoAdapterOptions;
+}

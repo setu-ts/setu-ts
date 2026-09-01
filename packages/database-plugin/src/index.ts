@@ -23,6 +23,8 @@ export type {
   DrizzleAdapterOptions,
   DrizzleCompositeKeyOptions,
   DrizzleDatabaseOptions,
+  DynamoAdapterOptions,
+  DynamoDatabaseOptions,
   FindOptions,
   IDatabaseService,
   IRepository,
@@ -123,3 +125,16 @@ export { createDrizzleDataSource } from './adapters/drizzle/drizzle-repository.t
 
 // Mongo adapter — document-store backend over the native `mongodb` driver.
 export { MongoAdapter } from './adapters/mongo/mongo-adapter.ts';
+
+// DynamoDB adapter — key-value backend over the native AWS SDK v3 client.
+// Exactly the eight public symbols the M80 plan §4 lists: the target
+// resolution, the expression builder, the marshaller and the access-path
+// resolver stay internal (the `D1Target` / `MongoTarget` precedent).
+export { DynamoAdapter } from './adapters/dynamo/dynamo-adapter.ts';
+export {
+  createInjectedDynamoLoader,
+  createLazyDynamoLoader,
+} from './adapters/dynamo/dynamo-client.ts';
+export type { DynamoSdkModule } from './adapters/dynamo/dynamo-client.ts';
+export type { IDynamoClient } from './adapters/dynamo/dynamo-client-types.ts';
+export type { DynamoEntityMapping } from './adapters/dynamo/dynamo-mapping.ts';

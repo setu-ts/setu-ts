@@ -1,10 +1,16 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import * as common from '@setu-ts/common';
 import * as database from '../../src/index.ts';
 import type {
   CursorValue,
   DrizzleAdapterOptions,
   DrizzleDatabaseOptions,
+  DynamoAdapterOptions,
+  DynamoDatabaseOptions,
+  DynamoEntityMapping,
+  DynamoSdkModule,
+  IDynamoClient,
   MemoryDatabaseOptions,
   MongoAdapterOptions,
   MongoDatabaseOptions,
@@ -118,5 +124,80 @@ describe('database-plugin barrel exports', () => {
     expect(Object.hasOwn(database, 'bindRawStatement')).toBe(false);
     expect(Object.hasOwn(database, 'unknownColumnError')).toBe(false);
     expect(Object.hasOwn(database, 'observedColumns')).toBe(false);
+  });
+
+  it('exports the DynamoDB adapter and only its application-facing surface (M80 plan §4)', () => {
+    expect(typeof database.DynamoAdapter).toBe('function');
+    expect(typeof database.createInjectedDynamoLoader).toBe('function');
+    expect(typeof database.createLazyDynamoLoader).toBe('function');
+    for (
+      const internal of [
+        'DynamoTarget',
+        'resolveDynamoTarget',
+        'createDynamoDataSource',
+        'createDynamoTransactionBuffer',
+        'IDynamoTransactionBuffer',
+        'resolveDynamoAccessPath',
+        'translateDynamoFilter',
+        'createDynamoExpressionBuilder',
+        'marshalDynamoValue',
+        'unmarshalDynamoItem',
+        'adaptDynamoSdkModule',
+      ]
+    ) {
+      expect(Object.hasOwn(database, internal)).toBe(false);
+    }
+  });
+
+  it('exports the DynamoDB option and seam types (compile-time pin)', () => {
+    // Type-only exports leave no runtime trace, so the pin is the annotation:
+    // these fail `deno check` if the barrel stops exporting a name (the M56
+    // defect class). Both `DynamoAdapterOptions` arms type-check on their own.
+    const lazy: DynamoAdapterOptions = { region: 'us-east-1' };
+    const injected: DynamoAdapterOptions = { client: {} as never };
+    const arm: DynamoDatabaseOptions = { type: 'dynamodb', options: lazy };
+    const mapping: DynamoEntityMapping = { partitionKey: 'id', sortKey: 'sk' };
+    const client: IDynamoClient = {
+      query: () => Promise.resolve({}),
+      scan: () => Promise.resolve({}),
+      getItem: () => Promise.resolve({}),
+      putItem: () => Promise.resolve({}),
+      updateItem: () => Promise.resolve({}),
+      deleteItem: () => Promise.resolve({}),
+      transactWriteItems: () => Promise.resolve({}),
+      destroy() {},
+    };
+    // The module shape the lazy loader adapts — the type the guarded
+    // real-import test annotates against.
+    const sdkModule: DynamoSdkModule = {} as never;
+    void sdkModule;
+    expect([arm.type, lazy.region, injected.client !== undefined, mapping.partitionKey]).toEqual([
+      'dynamodb',
+      'us-east-1',
+      true,
+      'id',
+    ]);
+    expect(typeof client.query).toBe('function');
+  });
+
+  it('leaves the common barrel unchanged — M80 adds nothing there (M80 plan §4)', () => {
+    // The M80 plan commits `common` to ZERO new symbols: M79 already shipped
+    // every contract member the DynamoDB backend consumes. Pinning the absence
+    // by name catches a Dynamo export landing in the wrong package — every
+    // other assertion here imports the concrete module and would stay green.
+    for (
+      const name of [
+        'DynamoAdapter',
+        'DynamoDatabaseOptions',
+        'DynamoAdapterOptions',
+        'DynamoEntityMapping',
+        'IDynamoClient',
+        'DynamoSdkModule',
+        'createInjectedDynamoLoader',
+        'createLazyDynamoLoader',
+      ]
+    ) {
+      expect(Object.hasOwn(common, name)).toBe(false);
+    }
   });
 });
