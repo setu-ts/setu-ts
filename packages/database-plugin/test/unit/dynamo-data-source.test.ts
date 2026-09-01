@@ -5,6 +5,34 @@ import type { IDynamoClient } from '../../src/adapters/dynamo/dynamo-client-type
 import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';
 import { createDynamoTransactionBuffer } from '../../src/adapters/dynamo/dynamo-transaction-buffer.ts';
 describe('DynamoDB data source writes', () => {
+  it('reports the selected primary, GSI, and scan access paths', async () => {
+    const client: IDynamoClient = {
+      query: async () => ({}),
+      scan: async () => ({}),
+      getItem: async () => ({}),
+      putItem: async () => ({}),
+      updateItem: async () => ({}),
+      deleteItem: async () => ({}),
+      transactWriteItems: async () => ({}),
+      destroy() {},
+    };
+    const ds = createDynamoDataSource(client, 'Item', {
+      Item: {
+        partitionKey: 'pk',
+        indexes: { byStatus: { partitionKey: 'status' } },
+      },
+    });
+
+    await ds.findAll({ where: { pk: 'p' }, orderBy: {}, limit: -1, offset: 0, select: [] });
+    expect(ds.getLastAccessPath()).toBe('Query');
+
+    await ds.findAll({ where: { status: 'open' }, orderBy: {}, limit: -1, offset: 0, select: [] });
+    expect(ds.getLastAccessPath()).toBe('byStatus');
+
+    await ds.findAll({ where: { value: 1 }, orderBy: {}, limit: -1, offset: 0, select: [] });
+    expect(ds.getLastAccessPath()).toBe('Scan');
+  });
+
   it('findAll follows pages, applies limits/projection, and refuses offset', async () => {
     let calls = 0;
     const client: IDynamoClient = {

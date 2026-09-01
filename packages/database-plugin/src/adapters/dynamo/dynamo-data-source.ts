@@ -19,6 +19,21 @@ import { projectFields } from '../../query/query-builder.ts';
 const ADAPTER = 'dynamodb';
 const DEFAULT_MAX_PAGE_FETCHES = 10;
 
+/**
+ * The Dynamo-specific read-path reporting capability consumed by the service
+ * logging wrapper.
+ *
+ * It stays outside {@linkcode IDataSource}: a resolved DynamoDB access path is
+ * diagnostic metadata, not portable data-source behaviour. Other adapters
+ * therefore retain their existing log entry shape.
+ *
+ * @internal
+ */
+export interface IDynamoAccessPathReportingDataSource extends IDataSource {
+  /** Returns the label selected by the most recent Query, Scan, or GSI read. */
+  readonly getLastAccessPath: () => string | undefined;
+}
+
 /** Creates a DynamoDB data source bound to one mapped entity. @internal */
 export function createDynamoDataSource(
   client: IDynamoClient,
@@ -26,8 +41,9 @@ export function createDynamoDataSource(
   mappings: Readonly<Record<string, DynamoEntityMapping>> | undefined,
   maxPageFetches = DEFAULT_MAX_PAGE_FETCHES,
   transactionBuffer?: IDynamoTransactionBuffer,
-): IDataSource {
+): IDynamoAccessPathReportingDataSource {
   const target = resolveDynamoTarget(entity, mappings);
+  let lastAccessPath: string | undefined;
   const key = (
     id: EntityKey | Partial<Record<string, unknown>>,
     operation: string,
@@ -62,6 +78,7 @@ export function createDynamoDataSource(
     start?: DynamoAttributeMap,
   ): Promise<DynamoReadCommandOutput> => {
     const path = resolveDynamoAccessPath(entity, target, query);
+    lastAccessPath = path.logPath;
     const input = { ...path.command, ...(start === undefined ? {} : { ExclusiveStartKey: start }) };
     return path.commandType === 'Query'
       ? await client.query(input as import('./dynamo-client-types.ts').DynamoQueryCommandInput)
@@ -78,6 +95,7 @@ export function createDynamoDataSource(
     throw error;
   };
   return {
+    getLastAccessPath: (): string | undefined => lastAccessPath,
     async findAll(query): Promise<Record<string, unknown>[]> {
       if (query.offset !== 0) {
         throw new UnsupportedQueryFeatureError(
