@@ -15,7 +15,11 @@ import type {
   OrderDirection,
 } from '@setu-ts/common';
 import type { DynamoQueryCommandInput, DynamoScanCommandInput } from './dynamo-client-types.ts';
-import { createDynamoExpressionBuilder, translateDynamoFilter } from './dynamo-expression.ts';
+import {
+  buildDynamoProjection,
+  createDynamoExpressionBuilder,
+  translateDynamoFilter,
+} from './dynamo-expression.ts';
 import type { DynamoDateEncoding, resolveDynamoTarget } from './dynamo-mapping.ts';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 
@@ -81,6 +85,13 @@ type DynamoKeyComparison = Extract<
  * No eligible equality means `Scan`, whose remaining predicates become a
  * `FilterExpression`.
  *
+ * A non-empty `select` is pushed down as a `ProjectionExpression` so the
+ * server returns only the projected attributes rather than whole items. This
+ * is safe for cursor paging: `LastEvaluatedKey` is computed by the server
+ * independently of the projection, so a projection omitting the key columns
+ * still resumes correctly (measured against DynamoDB Local). The repository
+ * still projects client-side afterwards, so the returned shape is unchanged.
+ *
  * @param entity - Repository entity name, used in refusal diagnostics
  * @param target - Resolved table/index mapping for the entity
  * @param query - Fully normalised repository query
@@ -108,9 +119,11 @@ export function resolveDynamoAccessPath(
     const filterExpression = filter === undefined
       ? undefined
       : translateDynamoFilter(filter, builder, target.dateAttributes);
+    const projection = buildDynamoProjection(query.select, builder);
     const command: DynamoScanCommandInput = {
       TableName: target.table,
       ...(filterExpression === undefined ? {} : { FilterExpression: filterExpression }),
+      ...(projection === undefined ? {} : { ProjectionExpression: projection }),
       ...builder.expressionAttributes(),
     };
     return {
@@ -128,12 +141,14 @@ export function resolveDynamoAccessPath(
   const filterExpression = filter === undefined
     ? undefined
     : translateDynamoFilter(filter, builder, target.dateAttributes);
+  const projection = buildDynamoProjection(query.select, builder);
   const command: DynamoQueryCommandInput = {
     TableName: target.table,
     KeyConditionExpression: keyCondition.join(' AND '),
     ...(path.indexName === undefined ? {} : { IndexName: path.indexName }),
     ...(order === undefined ? {} : { ScanIndexForward: order === 'asc' }),
     ...(filterExpression === undefined ? {} : { FilterExpression: filterExpression }),
+    ...(projection === undefined ? {} : { ProjectionExpression: projection }),
     ...builder.expressionAttributes(),
   };
   return {

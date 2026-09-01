@@ -88,6 +88,13 @@ export class DynamoAdapter implements IDatabaseAdapter {
    *   M52c/M52d binding-guard precedent: a mistyped client must fail at
    *   construction with a name rather than at the first request with a bare
    *   `TypeError`.
+   * @throws {Error} When `maxPageFetches` is not a positive safe integer.
+   *   `Infinity` would silently DISABLE the very bound the option configures
+   *   (measured: a `findPage` whose filter matches nothing scans the whole
+   *   partition to exhaustion instead of stopping), and `NaN` makes every
+   *   `fetches < maxPageFetches` comparison `false`, collapsing the fill loop
+   *   to a single server page. Both fail at construction rather than
+   *   degrading a later page silently.
    */
   constructor(options: DynamoAdapterOptions) {
     if (options.client === undefined && options.region === undefined) {
@@ -96,6 +103,7 @@ export class DynamoAdapter implements IDatabaseAdapter {
     if (options.client !== undefined) {
       assertDrivenSurface(options.client);
     }
+    assertPageFetchBound(options.maxPageFetches);
     this.#options = options;
   }
 
@@ -259,6 +267,29 @@ function assertDrivenSurface(client: IDynamoClient): void {
   if (missing.length > 0) {
     throw new Error(
       `DynamoAdapter client is missing the required DynamoDB operations: ${missing.join(', ')}.`,
+    );
+  }
+}
+
+/**
+ * Validates the `findPage` fill-loop bound.
+ *
+ * The loop condition is `fetches < maxPageFetches`, so the two pathological
+ * numeric values break it in opposite directions and neither raises anything:
+ * `Infinity` can never be reached, removing the bound the option exists to
+ * impose, and `NaN` makes the comparison `false` on the first pass, collapsing
+ * the fill loop to one server page. A non-integer or non-positive value is
+ * equally meaningless as a page count. All are refused at construction, where
+ * the option is supplied, rather than silently changing a later page's cost.
+ *
+ * @param maxPageFetches - The configured bound, or `undefined` for the default
+ * @throws {Error} When the value is not a positive safe integer
+ */
+function assertPageFetchBound(maxPageFetches: number | undefined): void {
+  if (maxPageFetches === undefined) return;
+  if (!Number.isSafeInteger(maxPageFetches) || maxPageFetches < 1) {
+    throw new Error(
+      `DynamoAdapter maxPageFetches must be a positive integer; received ${maxPageFetches}.`,
     );
   }
 }

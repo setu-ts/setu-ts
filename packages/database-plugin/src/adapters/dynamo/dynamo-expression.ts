@@ -402,16 +402,36 @@ export function translateDynamoFilter(
  * omits `ProjectionExpression` and DynamoDB returns every attribute by
  * default.
  *
- * @param select - The projected field names
+ * Repeated field names are collapsed, and that is a correctness requirement
+ * rather than tidiness: DynamoDB rejects a projection naming one path twice
+ * with `Two document paths overlap with each other`, and it does so even when
+ * the two occurrences carry DISTINCT aliases, so de-duplicating the aliases
+ * would not help — the duplicate field must never reach the expression. A
+ * caller's `select` is not de-duplicated anywhere upstream (`normalizeQuery`
+ * passes it through verbatim), so `select: ['status', 'status']` would
+ * otherwise turn a legal query into a server-side `ValidationException`.
+ *
+ * An empty field name is dropped rather than aliased, and that is also a
+ * correctness requirement: DynamoDB refuses an empty attribute name with
+ * `ExpressionAttributeNames contains invalid value: Empty attribute name`, so
+ * pushing one down would turn a query that previously succeeded — the client
+ * side projects the row to `{}`, since no field matches — into a server-side
+ * failure. Dropping it leaves the projection to name only real attributes and
+ * keeps the client-side projection the sole arbiter of the returned shape. If
+ * dropping empties leaves nothing to project, no `ProjectionExpression` is
+ * emitted at all.
+ *
+ * @param select - The projected field names; repeats and empties are dropped
  * @param builder - The command's accumulator
  * @returns The `ProjectionExpression` text, e.g. `#n0, #n1`, or `undefined`
- *   when nothing is projected
+ *   when nothing projectable remains
  * @since 0.1.0
  */
 export function buildDynamoProjection(
   select: readonly string[],
   builder: DynamoExpressionBuilder,
 ): string | undefined {
-  if (select.length === 0) return undefined;
-  return select.map((field) => builder.aliasPath(field)).join(', ');
+  const fields = [...new Set(select)].filter((field) => field !== '');
+  if (fields.length === 0) return undefined;
+  return fields.map((field) => builder.aliasPath(field)).join(', ');
 }

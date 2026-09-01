@@ -11,7 +11,6 @@ import {
   createLazyDynamoLoader,
   type DynamoSdkModule,
 } from '../../src/adapters/dynamo/dynamo-client.ts';
-import { DYNAMO_RETURN_VALUES } from '../../src/adapters/dynamo/dynamo-client-types.ts';
 import type {
   DynamoDeleteItemCommandInput,
   DynamoDeleteItemCommandOutput,
@@ -116,10 +115,6 @@ class FakeTransactWriteItemsCommand {
 }
 
 describe('DynamoDB client seam', () => {
-  it('exposes the supported write response image values', () => {
-    expect(DYNAMO_RETURN_VALUES).toEqual(['ALL_NEW', 'ALL_OLD']);
-  });
-
   it('resolves an injected structural client without importing or constructing the SDK', async () => {
     const injected = new RecordingDynamoClient();
     const loader = createInjectedDynamoLoader(injected);

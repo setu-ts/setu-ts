@@ -170,6 +170,27 @@ describe('DynamoAdapter — construction validation', () => {
     );
   });
 
+  it('rejects a maxPageFetches that would disable the bound it configures', () => {
+    // `findPage`'s fill loop runs while `fetches < maxPageFetches`, so the two
+    // pathological values break it in opposite directions and NEITHER raises
+    // anything on its own. Measured against DynamoDB Local before this guard:
+    // `Infinity` made one `findPage` whose filter matched nothing scan the
+    // whole partition to exhaustion (11 reads, terminal cursor) instead of
+    // stopping at the default 10, and `NaN` made the comparison `false` on the
+    // first pass, collapsing the fill loop to a single server page.
+    for (const bound of [Infinity, NaN, 0, -1, 2.5]) {
+      expect(() => new DynamoAdapter({ region: 'us-east-1', maxPageFetches: bound })).toThrow(
+        /maxPageFetches must be a positive integer/,
+      );
+    }
+  });
+
+  it('accepts a positive integer bound and an omitted one', () => {
+    expect(() => new DynamoAdapter({ region: 'us-east-1', maxPageFetches: 1 })).not.toThrow();
+    expect(() => new DynamoAdapter({ region: 'us-east-1', maxPageFetches: 25 })).not.toThrow();
+    expect(() => new DynamoAdapter({ region: 'us-east-1' })).not.toThrow();
+  });
+
   it('rejects an options bag supplying neither arm at compile time', () => {
     // @ts-expect-error — neither arm of the union is satisfied. The directive
     // is self-validating: if the union ever stops enforcing this, the unused

@@ -1528,12 +1528,18 @@ on a configured index's partition key, selecting that GSI) is a `Query`; everyth
 `Scan`, because a `Query` without a partition-key equality is a server-side `ValidationException` —
 the selection is forced, not an optimisation. Every predicate not folded into the key condition
 becomes a `FilterExpression`, and every attribute name is aliased through a generated placeholder,
-so a reserved word like `status` cannot reach the server raw. `orderBy` is served only when it names
-exactly the resolved access path's sort key (as `ScanIndexForward`); a non-key or multi-field
-`orderBy` is refused by name with `UnsupportedQueryFeatureError`, and a non-zero `offset` is refused
-the same way — both because the SDK **accepts and silently discards** the unrecognised parameter,
-answering `200` with unordered or unskipped rows, so forwarding one returns confidently wrong rows
-with no diagnostic anywhere in the stack.
+so a reserved word like `status` cannot reach the server raw. A non-empty `select` is pushed down as
+a `ProjectionExpression`, so the server returns only the projected attributes rather than whole
+items; repeated and empty field names are dropped first, because DynamoDB refuses a projection
+naming one path twice (`Two document paths overlap with each other`, even under distinct aliases)
+and refuses an empty attribute name outright. Push-down is safe for cursor paging:
+`LastEvaluatedKey` is computed independently of the projection, so a projection omitting the key
+columns still resumes correctly. `orderBy` is served only when it names exactly the resolved access
+path's sort key (as `ScanIndexForward`); a non-key or multi-field `orderBy` is refused by name with
+`UnsupportedQueryFeatureError`, and a non-zero `offset` is refused the same way — both because the
+SDK **accepts and silently discards** the unrecognised parameter, answering `200` with unordered or
+unskipped rows, so forwarding one returns confidently wrong rows with no diagnostic anywhere in the
+stack.
 
 Pagination is the server's own continuation token carried inside the portable cursor codec, and the
 invariant is exact: `nextCursor` is non-`null` **if and only if** the response carried a
@@ -1541,8 +1547,13 @@ invariant is exact: `nextCursor` is non-`null` **if and only if** the response c
 `FilterExpression` and a filtered page can return fewer rows than the limit, or zero, and still not
 be the last. A bounded fill loop (`maxPageFetches`, default `10`) keeps fetching while a page is
 short and a token remains; at the bound it returns what it has with a non-`null` cursor, never a
-terminal page. `count()` loops to exhaustion for the same reason — a paged `COUNT` response
-under-reports past the first page. A `Date` comparison must be declared per attribute
+terminal page. `maxPageFetches` must be a positive integer and is validated at construction: the
+loop runs while `fetches < maxPageFetches`, so `Infinity` would silently remove the very bound the
+option imposes (a `findPage` whose filter matches nothing would scan the whole partition to
+exhaustion) and `NaN` would make the comparison `false` on the first pass, collapsing the loop to a
+single server page — neither raises anything on its own, so both are refused by name up front.
+`count()` loops to exhaustion for the same reason — a paged `COUNT` response under-reports past the
+first page. A `Date` comparison must be declared per attribute
 (`dateAttributes: { createdAt: 'iso' | 'epochMs' }`) or it is refused by name naming the option, and
 an out-of-range decimal `N` is preserved on read as its string rather than degraded through
 `Number()`. Transactions buffer writes and flush them as one `TransactWriteItems` at commit —

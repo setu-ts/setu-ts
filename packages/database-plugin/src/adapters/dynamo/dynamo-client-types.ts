@@ -37,12 +37,6 @@ export interface DynamoAttributeValue {
 /** A DynamoDB item or key map. */
 export type DynamoAttributeMap = Readonly<Record<string, DynamoAttributeValue>>;
 
-/** The write response images supported by DynamoDB's single-item commands. */
-export const DYNAMO_RETURN_VALUES = ['ALL_NEW', 'ALL_OLD'] as const;
-
-/** A write response image accepted by DynamoDB's single-item commands. */
-export type DynamoReturnValue = typeof DYNAMO_RETURN_VALUES[number];
-
 /** Expression aliases shared by all command shapes. */
 export interface DynamoExpressionAttributes {
   /** Generated `#name` aliases mapped to physical attribute names. */
