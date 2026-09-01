@@ -3755,7 +3755,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   attribute is refused by name. Transactions buffer writes and flush one de-duplicated
   `TransactWriteItems` at commit (≤100 items; a duplicate item key and an over-limit batch reject by
   name), while `rollback` sends nothing. CI gained a DynamoDB Local service and a guarded
-  ten-scenario real-emulator suite) — complete (PR pending).
+  ten-scenario real-emulator suite) — complete (PR #221).
 - **Next milestone** — **M81** (Cosmos DB backend), gated on M79 and now unblocked.
 
 ## Verification (run before declaring any work done)
