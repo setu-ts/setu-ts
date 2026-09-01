@@ -3733,7 +3733,70 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tests across two packages (§11.1), trimmed to the one thing the second copy uniquely proves —
   evaluating the predicate against real rows through `matchesFilter`, since asserting the tree's
   SHAPE proves only that it was built) — complete (PR #217)
-- **Next milestone** — **M80** (DynamoDB backend), gated on M79 and now unblocked.
+- **Milestone 81** (`packages/database-plugin` — Azure Cosmos DB backend. **The probe the ROADMAP
+  opens the milestone with was taken, and it decided the shape.** Measured against the real
+  emulator, the `npm:mongodb` driver cannot speak to the NoSQL endpoint at all (the connection is
+  closed during the handshake), so `MongoAdapter` cannot serve it and a native `'cosmos'` arm over
+  `npm:@azure/cosmos@^4` is required; the MongoDB-compatible API needs no new arm, since it speaks
+  the MongoDB wire protocol and the existing `'mongodb'` arm serves it. **That half of the probe is
+  unrunnable and the unrunnability is the finding**: the only emulator image carrying a MongoDB
+  endpoint was built 2024-04-23 and now refuses to start with
+  `Error: The evaluation period has
+  expired.`, and MCR carries no vCore/Mongo emulator repository
+  — so the Mongo route is documented and labelled unverified against a live account (the M30b/M52
+  precedent) rather than claimed as tested. **No `common` change and no new capability token** — M79
+  committed every contract member this consumes.
+
+  **Two ROADMAP claims did not survive measurement.** Pagination is the **portable keyset cursor**,
+  not the continuation token the section named: Cosmos returns **no** continuation token for any
+  `ORDER BY` query, cross-partition or single-partition, and ignores `maxItemCount` there, so a page
+  would have no stable sort. M79's keyset predicate compiles natively
+  (`(rank > @p0) OR (rank = @p0
+  AND id > @p1)`) and returns exactly the rows after the cursor, so
+  the cursor member gets its third consumer through a different mechanism — and the six adapters
+  cannot drift about what "the next page" means. And the package is `database-plugin` alone, not "a
+  new package if the probe says the NoSQL API needs one".
+
+  **The partition key is discovered, not configured, and that is a correctness fix rather than an
+  ergonomic one**: a point read carrying the wrong partition key answers **404 rather than an
+  error** (measured), so a mistyped path would make every read of a healthy container report "not
+  found" for the life of the process — the M52c/M52d binding-guard class. The adapter reads the
+  container definition once per container (which is also what proves the container exists, since
+  Cosmos provisions nothing implicitly) and refuses a declared `partitionKey` that disagrees with
+  it, naming both. `findById` then has three resolved cases: a composite `EntityKey` carrying the
+  partition key point-reads, a scalar key point-reads when the container partitions BY the
+  primary-key field, and otherwise the row is found by a cross-partition query — which is refused by
+  name when it matches two documents, because an `id` is unique only WITHIN a partition (measured:
+  the same id in two partitions is legal). A non-string primary key is refused by name rather than
+  stringified, since the service refuses it and converting would change the type `create()` hands
+  back.
+
+  **Transactions are a deferred batch** (the D1 precedent: the platform offers atomicity, so
+  refusing outright would strand the committed `IDatabaseService.transaction()`), atomic within ONE
+  container and ONE partition-key value and capped at 100 operations — all three measured — with
+  `CosmosTransactionScopeError` raised at the write that crosses a bound rather than at commit, so
+  the caller learns which write broke the scope. `update` merges through a server-side `patch` while
+  the payload fits one request and through a read-merge-`replace` guarded by `_etag` beyond it; a
+  payload that would CHANGE a partition-key value is refused by name, because such a replace answers
+  404 rather than moving the item. `rawQuery` is refused by name: a Cosmos query is scoped to one
+  container and the signature names none.
+
+  **Driving the real emulator caught the defect no fake would have.** An empty projection emitted
+  `SELECT c FROM c`, which is legal Cosmos SQL and answers with each document **wrapped** under a
+  `c` key — so every unprojected row arrived carrying none of the caller's fields, which surfaced as
+  a keyset page failing to read its own sort field. Every other suite passed, because each of them
+  projected. Writing the unit tests then found three more, all in this milestone's own code: a batch
+  answering **207** (the status a rolled-back batch actually returns) was read as a success by a
+  `>= 300` threshold, and `rollback()` and `beginTransaction()` threw **synchronously** from methods
+  typed `Promise` — the M52b/M52c/M70j class, twice. The nine portable filter cases are run against
+  the real service with the Memory adapter's own evaluator as the reference, which is this backend's
+  leg of `filter-conformance.test.ts`: that file cannot evaluate Cosmos SQL without becoming a
+  second query engine, and a fake engine agreeing with a fake engine proves nothing. The guarded
+  suite is local-only — the emulator image is 2.5 GB, the same reason the Pub/Sub and Service Bus
+  suites are — with the `docker run` and the health line in the package README) — complete (PR
+  pending)
+- **Next milestone** — **M80** (DynamoDB backend), gated on M79 and now unblocked; **M82** (Cloud
+  Bigtable backend) is the remaining backend, also gated on M79.
 
 ## Verification (run before declaring any work done)
 

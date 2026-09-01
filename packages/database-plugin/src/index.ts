@@ -65,9 +65,17 @@ export type {
 // An application injecting a real `CosmosClient` annotates it with these, and
 // the data source calls exactly these members.
 export type {
+  CosmosAccessCondition,
+  CosmosBatchOperation,
+  CosmosBatchResponse,
+  CosmosContainerDefinition,
+  CosmosFeedResponse,
+  CosmosItemResponse,
   CosmosPartitionKeyValue,
+  CosmosPatchOperation,
   CosmosQueryParameter,
   CosmosQuerySpec,
+  CosmosRequestOptions,
   ICosmosClient,
   ICosmosContainer,
   ICosmosDatabase,

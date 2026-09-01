@@ -63,21 +63,23 @@ await db.transaction(async (uow) => {
 
 ## Options
 
-| Option    | Type                                                         | Default     | Description                              |
-| --------- | ------------------------------------------------------------ | ----------- | ---------------------------------------- |
-| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'custom'` | `'memory'`  | Backend adapter.                         |
-| `name`    | `string`                                                     | `'default'` | Named connection for multi-database use. |
-| `options` | per-arm (see `type`)                                         | —           | Adapter-specific configuration.          |
+| Option    | Type                                                                     | Default     | Description                              |
+| --------- | ------------------------------------------------------------------------ | ----------- | ---------------------------------------- |
+| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'cosmos' \| 'custom'` | `'memory'`  | Backend adapter.                         |
+| `name`    | `string`                                                                 | `'default'` | Named connection for multi-database use. |
+| `options` | per-arm (see `type`)                                                     | —           | Adapter-specific configuration.          |
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
 
 Each arm narrows `options`: `type: 'prisma'` requires `prismaClient`, `type: 'drizzle'` requires
-both `drizzleInstance` and `drizzleTables`, `type: 'mongodb'` requires either `url` or `client`, and
+both `drizzleInstance` and `drizzleTables`, `type: 'mongodb'` requires either `url` or `client`,
+`type: 'cosmos'` requires `database` plus either an `endpoint`/`key` pair or a `client`, and
 `type: 'custom'` requires `adapter`. Those are required **by the union**, so omitting one is a
 compile error rather than a startup throw. The `'mongodb'` arm carries its own `MongoAdapterOptions`
 bag rather than the shared `DatabaseAdapterOptions` — see
-[the MongoDB backend](#the-mongodb-backend) below.
+[the MongoDB backend](#the-mongodb-backend) below, and
+[the Azure Cosmos DB backend](#the-azure-cosmos-db-backend) for the `'cosmos'` arm's own bag.
 
 | `options` field      | Type                      | Default | Read by                                                                                                                                                              |
 | -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -275,6 +277,111 @@ directly for native commands (`aggregate`, `runCommand`), exactly as it does for
 — `beginTransaction()` throws `MongoTransactionUnavailableError`, never `connect()` — so a
 standalone `mongod` remains a valid deployment for an application that never opens one.
 
+## The Azure Cosmos DB backend
+
+`type: 'cosmos'` serves the `database` capability from Azure Cosmos DB's **NoSQL (SQL) API**, over
+[`@azure/cosmos`](https://www.npmjs.com/package/@azure/cosmos) (`npm:@azure/cosmos@^4`). Every
+`NormalizedQuery` member is translated natively — `where`/`filter` become a bound SQL predicate,
+`orderBy` an `ORDER BY`, `offset`/`limit` an `OFFSET … LIMIT`, and `select` a projection list.
+Nothing is filtered, sorted or paginated in JavaScript.
+
+Cosmos DB's **MongoDB API** is a different wire protocol and is served by the `'mongodb'` arm
+pointed at a Cosmos connection string, not by this one. That route is documented rather than tested:
+the only emulator image carrying a MongoDB endpoint has expired and no longer starts, so it is
+**unverified against a live account**.
+
+```typescript
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+
+app.register(DatabasePlugin({
+  type: 'cosmos',
+  options: {
+    endpoint: 'https://my-account.documents.azure.com:443/',
+    key: cosmosKey,
+    database: 'app',
+    containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
+  },
+}));
+```
+
+| `options` field | Type                                  | Default | Read by                                                                                                                               |
+| --------------- | ------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                           |
+| `key`           | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                           |
+| `client`        | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('npm:@azure/cosmos@^4')` never runs — the route for an Entra ID (managed identity) client. |
+| `database`      | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to.      |
+| `containers`    | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                             |
+| `logQueries`    | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                                 |
+
+**Containers must already exist.** The adapter creates no database and no container: throughput,
+partition-key and indexing choices belong to the application's provisioning. A missing container is
+refused by name at first use, naming the database and the container.
+
+**The partition key is discovered, not guessed.** A point read carrying the wrong partition key
+answers **404 rather than an error**, so a mistyped path would make every read of a healthy
+container report "not found" for the life of the process. The adapter therefore reads the container
+definition once per container and uses the paths it declares. A `partitionKey` in the mapping is
+still honoured — and **validated** against the definition, refused by name when the two disagree.
+
+**Identity.** A Cosmos document is addressed by the pair (partition key, `id`), which is why
+`findById` behaves in three ways:
+
+- a composite `EntityKey` record carrying both the primary key and the partition key is a **point
+  read**;
+- a scalar key is also a point read when the container partitions by the primary-key field itself;
+- otherwise the partition key is unknown, so the row is found by a cross-partition query. That costs
+  more request units than a point read, and an `id` is unique only WITHIN a partition, so a lookup
+  matching two documents is refused by name rather than answered with one of them.
+
+A primary key must be a **string**: the service refuses a non-string `id` outright, and converting
+one silently would return a key of a different type than the caller supplied. A partition-key value
+of any other JSON scalar type is passed through untouched.
+
+**`update`** merges the payload server-side with a `patch` while it fits within one request, and
+falls back to a read-merge-`replace` guarded by the document's `_etag` beyond that — a concurrent
+writer is then reported as `CosmosConcurrentModificationError` rather than silently overwritten. The
+primary key never travels in the payload, and a payload that would CHANGE a partition-key value is
+refused by name, because such a replace answers 404 rather than moving the item.
+
+**`contains`** compiles to `CONTAINS`, a literal substring match in which `%` and `_` carry no
+special meaning, so nothing is escaped — the inverse of the SQL case. The match is
+**case-sensitive**.
+
+**Pagination** uses the framework's portable keyset cursor rather than a Cosmos continuation token,
+because Cosmos returns no continuation token for a query carrying `ORDER BY`. On a real account a
+multi-property `ORDER BY` needs a composite index, and keyset paging always adds the key column as
+its tiebreaker — so define a composite index over `(sort field, id)` for every container you page.
+
+**`rawQuery` is refused by name** with `UnsupportedRawQueryError`. Cosmos has a SQL dialect, but
+every query is scoped to one container and `query(sql, params)` names none; an application reaches
+the injected client directly (`container.items.query`).
+
+**Transactions are a deferred batch.** Cosmos has no interactive transaction, so
+`beginTransaction()` buffers every write and flushes the buffer as one transactional batch at
+commit, and `rollback()` discards it without sending anything. That batch is atomic within **one
+container and one partition-key value**, and caps at 100 operations; a write that leaves those
+bounds is refused with `CosmosTransactionScopeError` at the write itself, naming what it crossed.
+Reads inside a transaction observe committed state only.
+
+### Running the guarded Cosmos suite
+
+`test/integration/real-cosmos-adapter.test.ts` is guarded on `COSMOS_ENDPOINT` and skipped without
+it. Against the local emulator:
+
+```bash
+docker run -d --name cosmos -p 127.0.0.1:8082:8082 \
+  -e PORT=8082 -e PROTOCOL=http \
+  mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+# wait for "PostgreSQL=OK, Gateway=OK" in `docker logs cosmos` (~25 s cold)
+
+COSMOS_ENDPOINT=http://127.0.0.1:8082/ deno test -A \
+  packages/database-plugin/test/integration/real-cosmos-adapter.test.ts
+```
+
+`COSMOS_KEY` defaults to the emulator's well-known key; set it for a real account. The suite is
+**not** run by CI — the image is 2.5 GB, which is the same reason the Pub/Sub and Service Bus
+emulator suites are local-only.
+
 ## Filtering and single-row lookup
 
 `findAll`, `findOne`, and `count` accept an equality `where` map and an optional portable `filter`
@@ -377,6 +484,9 @@ imperative begin/commit.
 | `getDrizzleTransaction`                   | function  |
 | `keysetPredicate`                         | function  |
 | `BaseRepository`                          | class     |
+| `CosmosAdapter`                           | class     |
+| `CosmosConcurrentModificationError`       | class     |
+| `CosmosTransactionScopeError`             | class     |
 | `DatabaseService`                         | class     |
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
@@ -389,6 +499,19 @@ imperative begin/commit.
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
+| `CosmosAccessCondition`                   | interface |
+| `CosmosAdapterOptionsBase`                | interface |
+| `CosmosBatchOperation`                    | interface |
+| `CosmosBatchResponse`                     | interface |
+| `CosmosContainerDefinition`               | interface |
+| `CosmosDatabaseOptions`                   | interface |
+| `CosmosEntityMapping`                     | interface |
+| `CosmosFeedResponse`                      | interface |
+| `CosmosItemResponse`                      | interface |
+| `CosmosPatchOperation`                    | interface |
+| `CosmosQueryParameter`                    | interface |
+| `CosmosQuerySpec`                         | interface |
+| `CosmosRequestOptions`                    | interface |
 | `CountOptions`                            | interface |
 | `CursorPayload`                           | interface |
 | `CustomDatabaseOptions`                   | interface |
@@ -401,6 +524,12 @@ imperative begin/commit.
 | `DrizzleDatabaseOptions`                  | interface |
 | `FindOptions`                             | interface |
 | `IAdapterTransaction`                     | interface |
+| `ICosmosClient`                           | interface |
+| `ICosmosContainer`                        | interface |
+| `ICosmosDatabase`                         | interface |
+| `ICosmosItem`                             | interface |
+| `ICosmosItems`                            | interface |
+| `ICosmosQueryIterator`                    | interface |
 | `IDatabaseAdapter`                        | interface |
 | `IDatabaseService`                        | interface |
 | `IDataSource`                             | interface |
@@ -426,6 +555,8 @@ imperative begin/commit.
 | `PrismaCompositeKeyOptions`               | interface |
 | `PrismaDatabaseOptions`                   | interface |
 | `BuiltInDatabaseOptions`                  | type      |
+| `CosmosAdapterOptions`                    | type      |
+| `CosmosPartitionKeyValue`                 | type      |
 | `CursorValue`                             | type      |
 | `DatabaseAdapterType`                     | type      |
 | `DatabasePluginOptions`                   | type      |

@@ -7966,19 +7966,37 @@ as a published arm of `PrismaSqlProvider`. For a framework that ships a first-cl
 backend (D1, KV, R2, Durable Objects) and four cloud message brokers, having no Azure database story
 is a gap in the same class, not a smaller one.
 
-**The probe this milestone opens with, mirroring M78's.** Cosmos exposes two wire APIs, and which
-one the framework should serve is a measurement rather than a preference. Its **MongoDB-compatible**
-API may be servable by whatever M78 concludes for Mongo at no additional adapter cost, in which case
-this milestone is largely configuration and documentation; its **NoSQL (SQL) API** is the native
-one, needs `npm:@azure/cosmos`, and pages by continuation token — which is M79's cursor again, a
-third consumer for that member and the reason this sits after M79 rather than beside M78.
+**The probe this milestone opens with, mirroring M78's — TAKEN, and it decided the shape.** Cosmos
+exposes two wire APIs, and which one the framework should serve is a measurement rather than a
+preference. Measured against the real emulator (`azure-cosmos-emulator:vnext-preview`, 2026-09-01):
+the `npm:mongodb@6.21.0` driver **cannot speak to the NoSQL endpoint at all** — the connection is
+closed during the handshake — so `MongoAdapter` cannot serve it and a native adapter over
+`npm:@azure/cosmos@^4` is required. The **MongoDB-compatible** API is the other half, and it needs
+no new arm: it speaks the MongoDB wire protocol, so the existing `'mongodb'` arm serves it. That
+half of the probe is **unrunnable**, which is itself a finding: the only emulator image carrying a
+MongoDB endpoint (`azure-cosmos-emulator:mongodb`, built 2024-04-23) now refuses to start with
+`Error: The evaluation period has expired.`, and MCR carries no vCore/Mongo emulator repository. So
+the Mongo route is documented and labelled unverified against a live account (the M30b/M52
+precedent) rather than claimed as tested.
 
-- **In scope:** the probe, then whichever of the two arms it justifies; per-entity partition-key
-  mapping (Cosmos requires the partition key on every point read, so `findById` needs M79's key
-  object for the same structural reason DynamoDB does); continuation-token pagination.
+**Pagination is the portable keyset cursor, not the continuation token.** This section assumed the
+token; measured, Cosmos returns **no continuation token for any `ORDER BY` query** — cross-partition
+or single-partition, with `maxItemCount` ignored there — and a page without a stable sort is not a
+page. M79's keyset predicate compiles natively and returns exactly the rows after the cursor, so the
+cursor member has its third consumer after all, just not through the mechanism this section named.
+
+- **In scope:** the probe (taken), then the native NoSQL adapter it justifies; per-entity
+  partition-key mapping (Cosmos requires the partition key on every point read, so `findById` needs
+  M79's key object for the same structural reason DynamoDB does), DISCOVERED from the container
+  definition rather than merely configured, because a wrong partition key answers 404 rather than an
+  error; keyset-cursor pagination; deferred-batch transactions; documentation of the Mongo-API
+  route.
 - **Not in scope:** request-unit budgeting and consistency levels — the same M79 exclusion, for the
   same reason.
-- **Packages:** `database-plugin`, or a new package if the probe says the NoSQL API needs one.
+- **Packages:** `database-plugin`. A separate package was expressible (M52c promoted
+  `IDatabaseAdapter` into `common` precisely so a backend can live elsewhere) and buys nothing here,
+  splitting one capability's documentation across two READMEs — the recommendation M80 makes, taken
+  here for the same reason.
 
 ---
 
@@ -8485,7 +8503,7 @@ them would still silently select the wrong transport — complete (PR pending).
 | 78        | ✅     | document-database backends (Mongo adapter, PR #208) |
 | 79        | ✅     | portable data-access contract                       |
 | 80        | ⬜     | dynamodb backend                                    |
-| 81        | ⬜     | cosmos db backend                                   |
+| 81        | ✅     | cosmos db backend                                   |
 | 82        | ⬜     | cloud bigtable backend                              |
 | 83        | ✅     | module declarations + functional example            |
 | 84        | ✅     | realtime client consumption (sdk + cli)             |

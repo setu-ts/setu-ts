@@ -270,9 +270,17 @@ export type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 // facade is the only part of the inject-or-lazy seam application configuration
 // needs; the remaining SDK shapes stay internal.
 export type {
+  CosmosAccessCondition,
+  CosmosBatchOperation,
+  CosmosBatchResponse,
+  CosmosContainerDefinition,
+  CosmosFeedResponse,
+  CosmosItemResponse,
   CosmosPartitionKeyValue,
+  CosmosPatchOperation,
   CosmosQueryParameter,
   CosmosQuerySpec,
+  CosmosRequestOptions,
   ICosmosClient,
   ICosmosContainer,
   ICosmosDatabase,

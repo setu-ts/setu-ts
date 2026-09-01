@@ -2,13 +2,17 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as database from '../../src/index.ts';
 import type {
+  CosmosAccessCondition,
   CosmosAdapterOptions,
   CosmosAdapterOptionsBase,
   CosmosDatabaseOptions,
   CosmosEntityMapping,
+  CosmosItemResponse,
   CosmosPartitionKeyValue,
+  CosmosPatchOperation,
   CosmosQueryParameter,
   CosmosQuerySpec,
+  CosmosRequestOptions,
   CursorValue,
   DrizzleAdapterOptions,
   DrizzleDatabaseOptions,
@@ -158,6 +162,17 @@ describe('database-plugin barrel exports', () => {
       parameters: [{ name: '@p0', value: 1 } satisfies CosmosQueryParameter],
     };
     const partitionKey: CosmosPartitionKeyValue = ['t1', 'in'];
+    // The shapes the seam's own members return and accept are exported too, so
+    // an application injecting a client can name every signature it implements.
+    const response: CosmosItemResponse<Record<string, unknown>> = { statusCode: 200 };
+    const patch: CosmosPatchOperation = { op: 'set', path: '/total', value: 1 };
+    const condition: CosmosAccessCondition = { type: 'IfMatch', condition: 'etag' };
+    const request: CosmosRequestOptions = { accessCondition: condition };
+    expect([response.statusCode, patch.path, request.accessCondition?.type]).toEqual([
+      200,
+      '/total',
+      'IfMatch',
+    ]);
     expect([arm.type, mapping.container, spec.query, partitionKey.length]).toEqual([
       'cosmos',
       'orders',

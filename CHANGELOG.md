@@ -8,6 +8,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Azure Cosmos DB backend.** `@setu-ts/database-plugin` gains a `type: 'cosmos'` arm serving
+  Cosmos DB's NoSQL (SQL) API over `npm:@azure/cosmos@^4`, with `CosmosAdapter` exported for the
+  `'custom'` arm. Every `NormalizedQuery` member is translated natively; nothing is filtered, sorted
+  or paginated in JavaScript. The per-entity `containers` mapping names the container, the primary
+  key and the partition key, and an omitted partition key is DISCOVERED from the container
+  definition — a wrong one answers 404 rather than an error, so a declared path is validated against
+  the container and refused by name when the two disagree. Pagination uses the framework's portable
+  keyset cursor rather than a Cosmos continuation token, because Cosmos returns none for a query
+  carrying `ORDER BY`; on a real account each paged container therefore needs a composite index over
+  `(sort field, id)`. Transactions are a deferred batch, atomic within one container and one
+  partition-key value and capped at 100 operations, with `CosmosTransactionScopeError` raised at the
+  write that crosses a bound. `rawQuery` is refused by name, because a Cosmos query is scoped to a
+  container the signature cannot name.
+
+  Cosmos DB's **MongoDB API** needs no new arm: it speaks the MongoDB wire protocol, so the existing
+  `'mongodb'` arm serves it. That route is documented and **unverified against a live account** —
+  the only emulator image carrying a MongoDB endpoint has expired and no longer starts. The NoSQL
+  arm is verified against the real `azure-cosmos-emulator:vnext-preview`, in a suite guarded on
+  `COSMOS_ENDPOINT`; it is not run by CI, whose reason and run instructions are in the package
+  README.
+
 - **`@setu-ts/sdk` realtime clients.** `createSseClient` consumes authenticated SSE streams with
   frame parsing, `Last-Event-ID` resumption, bounded reconnects, and abort teardown;
   `createRealtimeClient` filters and replies to the WebSocket heartbeat protocol, re-joins rooms,
