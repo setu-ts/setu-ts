@@ -52,6 +52,33 @@ describe('Real ORM imports (guarded)', () => {
     }
   });
 
+  it('the Cosmos lazy loader performs the real npm import and constructs a client', async () => {
+    // Drives `createLazyClientLoader` itself rather than a bare `import()`, so
+    // the seam's own construction — not merely the specifier — is exercised.
+    // Constructing a `CosmosClient` opens no connection, so this needs no
+    // emulator and no network beyond resolving the package.
+    const { createLazyClientLoader } = await import(
+      '../../src/adapters/cosmos/cosmos-client.ts'
+    );
+    let loader: Awaited<ReturnType<typeof createLazyClientLoader>> | undefined;
+    let error: Error | null = null;
+    try {
+      loader = await createLazyClientLoader('https://example.documents.azure.com:443/', 'k');
+    } catch (e) {
+      error = e instanceof Error ? e : new Error(String(e));
+    }
+
+    if (loader !== undefined) {
+      const client = await loader.createClient();
+      expect(typeof client.database).toBe('function');
+      expect(typeof client.database('probe').container).toBe('function');
+    } else {
+      expect(error).not.toBeNull();
+      const msg = error!.message.toLowerCase();
+      expect(msg.includes('cosmos') || msg.includes('not found') || msg.includes('npm')).toBe(true);
+    }
+  });
+
   it('drizzle-orm import either succeeds or throws descriptive error', async () => {
     let imported: unknown = undefined;
     let error: Error | null = null;

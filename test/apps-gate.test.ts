@@ -158,15 +158,17 @@ describe('real-backend CI wiring', () => {
       readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
     }>('packages/database-plugin/deno.json');
     // M79 §7 added `127.0.0.1:5433` for the live Prisma/PostgreSQL suite
-    // (guarded on POSTGRES_URL) — endpoint-scoped in the manifest, because a
-    // CLI `--allow-net` would REPLACE this block rather than union with it.
-    // M80 §6.2 added `127.0.0.1:8000` the same way, for the DynamoDB emulator
-    // suite guarded on DYNAMODB_ENDPOINT (pinned in the test below).
+    // (guarded on POSTGRES_URL); M80 added `127.0.0.1:8000` for the DynamoDB
+    // emulator suite guarded on DYNAMODB_ENDPOINT (pinned in the test below),
+    // and M81 added `127.0.0.1:8082` for the guarded Cosmos emulator suite —
+    // all endpoint-scoped in the manifest, because a CLI `--allow-net` would
+    // REPLACE this block rather than union with it.
     expect(config.test?.permissions?.net).toEqual([
       '127.0.0.1:27017',
       'localhost:27017',
       '127.0.0.1:5433',
       '127.0.0.1:8000',
+      '127.0.0.1:8082',
     ]);
   });
 

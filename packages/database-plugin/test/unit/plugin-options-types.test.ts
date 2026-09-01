@@ -142,6 +142,45 @@ function assertOptionArms(): void {
     // @ts-expect-error -- neither `region` nor `client`: no arm of the union matches.
     options: { endpoint: 'http://127.0.0.1:8000' },
   });
+  // --- the cosmos arm -----------------------------------------------------
+  // Either half of the union satisfies it on its own, and `database` is
+  // required on both because a Cosmos endpoint encodes no database name.
+  const cosmosLazy: DatabasePluginOptions = {
+    type: 'cosmos',
+    options: { endpoint: 'https://acct.documents.azure.com:443/', key: 'k', database: 'app' },
+  };
+  void cosmosLazy;
+  const cosmosInjected: DatabasePluginOptions = {
+    type: 'cosmos',
+    options: {
+      client: {} as never,
+      database: 'app',
+      containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
+      logQueries: true,
+    },
+  };
+  void cosmosInjected;
+
+  const cosmosNoDatabase: DatabasePluginOptions = {
+    type: 'cosmos',
+    // @ts-expect-error -- `database` is required on both arms.
+    options: { endpoint: 'https://acct.documents.azure.com:443/', key: 'k' },
+  };
+  void cosmosNoDatabase;
+
+  const cosmosNoCredential: DatabasePluginOptions = {
+    type: 'cosmos',
+    // @ts-expect-error -- neither an endpoint/key pair nor a client: no arm matches.
+    options: { database: 'app' },
+  };
+  void cosmosNoCredential;
+
+  const cosmosKeyOnly: DatabasePluginOptions = {
+    type: 'cosmos',
+    // @ts-expect-error -- an endpoint without its key matches no arm.
+    options: { endpoint: 'https://acct.documents.azure.com:443/', database: 'app' },
+  };
+  void cosmosKeyOnly;
 }
 void assertOptionArms;
 
