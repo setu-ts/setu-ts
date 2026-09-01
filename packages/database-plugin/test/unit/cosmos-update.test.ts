@@ -7,7 +7,10 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createCosmosDataSource } from '../../src/adapters/cosmos/cosmos-data-source.ts';
+import {
+  createCosmosDataSource,
+  MAX_PATCH_OPERATIONS,
+} from '../../src/adapters/cosmos/cosmos-data-source.ts';
 import type { CosmosEntityMapping } from '../../src/adapters/cosmos/cosmos-mapping.ts';
 import { resolveCosmosTarget } from '../../src/adapters/cosmos/cosmos-mapping.ts';
 import { PartitionKeyResolver } from '../../src/adapters/cosmos/cosmos-partition-key.ts';
@@ -195,5 +198,54 @@ describe('update — partition-key refusal', () => {
     expect(fake.recorder.patches[0]).toEqual([
       { op: 'set', path: '/address', value: { city: 'Kolkata', zip: '700001' } },
     ]);
+  });
+});
+
+/** A container that partitions by its own primary key, so no read resolves the address. */
+const byId: Record<string, CosmosEntityMapping> = { Order: { container: 'Order' } };
+
+describe('update — the row disappears mid-operation', () => {
+  // `addressOf` answers without a read when the container partitions BY the
+  // primary key, so these are the paths where the row is gone by the time the
+  // write is built. Each reports the contract's missing-row error rather than
+  // a bare 404 from the driver.
+  it('reports a missing row when the payload carries only the key', async () => {
+    const { source } = makeSource({
+      containers: { Order: { partitionKeyPaths: ['/id'] } },
+    }, byId);
+    await expect(source.update('gone', { id: 'gone' }))
+      .rejects.toThrow(/no Order row with id "gone"/);
+  });
+
+  it('reports a missing row for a payload too wide for one patch', async () => {
+    const wide: Record<string, unknown> = {};
+    for (let i = 0; i <= MAX_PATCH_OPERATIONS; i++) wide[`f${i}`] = i;
+    const { source } = makeSource({
+      containers: { Order: { partitionKeyPaths: ['/id'] } },
+    }, byId);
+    await expect(source.update('gone', wide)).rejects.toThrow(/no Order row with id "gone"/);
+  });
+
+  it('reports a missing row when the conditional replace answers 404', async () => {
+    // Read succeeds, then the row is deleted before the replace lands — the
+    // 404 arm beside the 412 one.
+    const wide: Record<string, unknown> = {};
+    for (let i = 0; i <= MAX_PATCH_OPERATIONS; i++) wide[`f${i}`] = i;
+    // The hook is supplied at construction, so it reads the store through a
+    // holder the constructed fake fills in afterwards.
+    const holder: { store?: Map<string, Record<string, unknown>> } = {};
+    const built = makeSource({
+      containers: {
+        Order: {
+          partitionKeyPaths: ['/id'],
+          documents: { 'o1|o1': { id: 'o1', total: 1 } },
+        },
+      },
+      afterPointRead: () => {
+        holder.store?.clear();
+      },
+    }, byId);
+    holder.store = built.fake.documents;
+    await expect(built.source.update('o1', wide)).rejects.toThrow(/no Order row with id "o1"/);
   });
 });

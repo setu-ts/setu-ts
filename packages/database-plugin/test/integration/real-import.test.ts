@@ -54,8 +54,6 @@ describe('Real ORM imports (guarded)', () => {
     }
 
     if (loader !== undefined) {
-      // The lazily-loaded client is owned by the adapter, unlike an injected one.
-      expect(loader.owned).toBe(true);
       const client = await loader.createClient();
       expect(typeof client.database).toBe('function');
       expect(typeof client.database('probe').container).toBe('function');

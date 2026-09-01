@@ -271,7 +271,11 @@ export type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
 // needs; the remaining SDK shapes stay internal.
 export type {
   CosmosAccessCondition,
+  CosmosBatchDeleteOperation,
+  CosmosBatchInsertOperation,
   CosmosBatchOperation,
+  CosmosBatchPatchOperation,
+  CosmosBatchReplaceOperation,
   CosmosBatchResponse,
   CosmosContainerDefinition,
   CosmosFeedResponse,

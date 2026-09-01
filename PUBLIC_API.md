@@ -1532,7 +1532,13 @@ one container and the signature names none, so an application reaches the inject
 one transactional batch at commit; `rollback()` discards it and sends nothing. The batch is atomic
 within one container and one partition-key value and caps at 100 operations, and a write crossing
 any of those bounds raises `CosmosTransactionScopeError` at that write. Reads inside a transaction
-observe committed state only — the deferred-write clause `IDataSource` documents.
+observe committed state only — the deferred-write clause `IDataSource` documents. A buffered
+`update` is sent as a **patch**, so it writes only the fields its payload names and two updates of
+one row compose; an update too wide for a single patch request falls back to a whole-document
+replace, which cannot compose, so buffering one for a row the transaction has already written is
+refused rather than silently discarding the earlier write. `rollback()` is idempotent (`commit()` is
+not), because the framework rolls back inside the same `catch` that sees a failed commit — refusing
+there would replace the batch's own per-operation diagnostic with a complaint about rollback.
 
 **What the arm deliberately cannot do**, split by who could close it. Two are platform limits:
 Cosmos rejects a **cross-container join** with a 400 (a query addresses one container; its own

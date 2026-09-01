@@ -71,6 +71,27 @@ export class BatchBuffer {
         );
       }
     }
+    // Exactly one pairing is lossy, and this rule is deliberately no wider than
+    // it. A `Replace` carries a WHOLE document assembled from committed state,
+    // so buffering one after any other write to the same item throws that
+    // earlier write away and still answers 200 — measured against the emulator,
+    // two such replaces answer `[200, 200]` with the first one's change gone.
+    // Every other pairing composes and is allowed: two patches compose
+    // (measured, `[set /a, set /b]` leaves both fields set), a patch after a
+    // replace applies on top of it, and a delete after anything is unambiguous.
+    const candidate = write.operation;
+    if (
+      candidate.operationType === 'Replace' &&
+      this.#writes.some((buffered) => itemIdOf(buffered.operation) === candidate.id)
+    ) {
+      throw new CosmosTransactionScopeError(
+        `A Cosmos transaction already writes to '${candidate.id}' in '${write.container}', and ` +
+          'this update is too wide for a patch, so it is sent as a whole-document replace built ' +
+          'from COMMITTED state — it would silently discard the earlier write. Merge the two ' +
+          'updates into one, or use two transactions. (Narrower updates of the same row are sent ' +
+          'as patches, which compose, and are allowed.)',
+      );
+    }
     if (this.#writes.length >= MAX_BATCH_OPERATIONS) {
       throw new CosmosTransactionScopeError(
         `A Cosmos transactional batch accepts at most ${MAX_BATCH_OPERATIONS} operations, and this ` +
@@ -120,6 +141,24 @@ export class BatchBuffer {
   clear(): void {
     this.#writes.length = 0;
   }
+}
+
+/**
+ * The document id one batch operation addresses, when it names one.
+ *
+ * A `Create` mints its id at the service unless the body carries one, so the
+ * body is consulted before the operation's own `id`.
+ *
+ * @param operation - The batch operation
+ * @returns The id, or `undefined` when the operation names none
+ * @since 0.2.0
+ */
+export function itemIdOf(operation: CosmosBatchOperation): string | undefined {
+  if (operation.operationType === 'Delete' || operation.operationType === 'Patch') {
+    return operation.id;
+  }
+  const fromBody = operation.resourceBody['id'];
+  return typeof fromBody === 'string' ? fromBody : operation.id;
 }
 
 /**

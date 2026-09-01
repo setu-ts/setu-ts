@@ -363,6 +363,19 @@ container and one partition-key value**, and caps at 100 operations; a write tha
 bounds is refused with `CosmosTransactionScopeError` at the write itself, naming what it crossed.
 Reads inside a transaction observe committed state only.
 
+A buffered `update` is a **patch**, not a whole-document replace, exactly as the non-transactional
+path is: it writes only the fields the payload names, so it neither clobbers a concurrent writer's
+other fields nor discards an earlier update of the same row — two patches of one row compose. Only
+an update too wide for a single patch request falls back to a replace assembled from the committed
+read, and that replace carries the whole document, so it cannot compose: buffering one for a row the
+same transaction has ALREADY written is refused with `CosmosTransactionScopeError` rather than
+silently discarding the earlier write. Merge the two updates, or use two transactions.
+
+`rollback()` is **idempotent**, unlike `commit()`. That asymmetry is deliberate: the framework rolls
+back inside the same `catch` that sees a failed commit, so a refusal there would replace the batch's
+own diagnostic — its status and per-operation codes, the only thing naming the operation that failed
+— with a complaint about rollback, on every throttled or rejected batch.
+
 ### What this adapter deliberately cannot do
 
 Two of these are **platform** limits and two are **contract** limits, and the distinction decides
@@ -514,7 +527,10 @@ imperative begin/commit.
 | `UnsupportedRawQueryError`                | class     |
 | `CosmosAccessCondition`                   | interface |
 | `CosmosAdapterOptionsBase`                | interface |
-| `CosmosBatchOperation`                    | interface |
+| `CosmosBatchDeleteOperation`              | interface |
+| `CosmosBatchInsertOperation`              | interface |
+| `CosmosBatchPatchOperation`               | interface |
+| `CosmosBatchReplaceOperation`             | interface |
 | `CosmosBatchResponse`                     | interface |
 | `CosmosContainerDefinition`               | interface |
 | `CosmosDatabaseOptions`                   | interface |
@@ -569,6 +585,7 @@ imperative begin/commit.
 | `PrismaDatabaseOptions`                   | interface |
 | `BuiltInDatabaseOptions`                  | type      |
 | `CosmosAdapterOptions`                    | type      |
+| `CosmosBatchOperation`                    | type      |
 | `CosmosPartitionKeyValue`                 | type      |
 | `CursorValue`                             | type      |
 | `DatabaseAdapterType`                     | type      |

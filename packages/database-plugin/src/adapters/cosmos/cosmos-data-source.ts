@@ -53,12 +53,15 @@ import {
 /**
  * The largest number of operations one `patch` request accepts.
  *
+ * Exported for tests only — it is NOT part of the package's public surface, so
+ * `src/index.ts` does not re-export it.
+ *
  * A payload wider than this is served by a read-merge-replace instead. The
  * emulator accepted more, so this is the conservative side of a limit that
  * cannot be measured locally — refusing a legitimate update would be worse
  * than one extra round trip.
  */
-const MAX_PATCH_OPERATIONS = 10;
+export const MAX_PATCH_OPERATIONS = 10;
 
 /** The identity field every Cosmos document carries. */
 const DOCUMENT_ID_FIELD = 'id';
@@ -80,6 +83,18 @@ export interface CosmosDataSourceContext {
    * Absent, every write is applied immediately.
    */
   readonly buffer?: BatchBuffer;
+}
+
+/**
+ * A partition-key value read out of a row, beside the paths that were absent.
+ *
+ * @internal
+ */
+interface ReadPartitionKey {
+  /** The value, scalar for a single path and an array for a hierarchical key. */
+  readonly value: CosmosPartitionKeyValue;
+  /** The partition-key paths the row did not carry. */
+  readonly missing: readonly (readonly string[])[];
 }
 
 /**
@@ -139,19 +154,57 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
   const partitionKeyOf = (
     row: Record<string, unknown>,
     resolved: ResolvedPartitionKey,
-  ): CosmosPartitionKeyValue => {
+  ): ReadPartitionKey => {
+    const missing: (readonly string[])[] = [];
     const values = resolved.paths.map((path) => {
       // A composite EntityKey record is flat, so a nested partition-key path is
       // addressed by its dotted join ('address.city'); a row is nested, so the
       // segment walk finds it. Both spellings are tried, in that order.
       const flat = row[path.join('.')];
-      return (flat === undefined ? readPath(row, path) : flat) as
-        | string
-        | number
-        | boolean
-        | null;
+      const value = flat === undefined ? readPath(row, path) : flat;
+      // `undefined` is ABSENT; `null` is a partition-key value Cosmos stores,
+      // so the two are told apart rather than collapsed.
+      if (value === undefined) missing.push(path);
+      return value as string | number | boolean | null;
     });
-    return values.length === 1 ? (values[0] as CosmosPartitionKeyValue) : values;
+    return {
+      value: values.length === 1 ? (values[0] as CosmosPartitionKeyValue) : values,
+      missing,
+    };
+  };
+
+  /**
+   * Reads the partition key and refuses a value with any segment absent.
+   *
+   * A hierarchical key reads as an ARRAY, so a missing segment leaves a hole
+   * inside it rather than making the whole value `undefined` — which the
+   * service then answers with a 404, reporting "no such row" for a row that
+   * exists. The single-path and hierarchical arms therefore share one refusal.
+   *
+   * @param row - The row or composite key record to read from
+   * @param resolved - The container's partition key
+   * @param operation - The calling member, for the message
+   * @param subject - What the value was read from, for the message
+   * @returns The partition-key value
+   * @throws {Error} When any partition-key path is absent
+   */
+  const requirePartitionKey = (
+    row: Record<string, unknown>,
+    resolved: ResolvedPartitionKey,
+    operation: string,
+    subject: string,
+  ): CosmosPartitionKeyValue => {
+    const read = partitionKeyOf(row, resolved);
+    if (read.missing.length > 0) {
+      throw new Error(
+        `CosmosAdapter.${operation}: ${subject} for '${target.container}' must carry the ` +
+          `partition key ${renderPaths(resolved.paths)}, but ${
+            renderPaths(read.missing)
+          } is absent. A Cosmos request carrying an incomplete partition key answers 404 rather ` +
+          'than an error, so it would report "not found" for a row that exists.',
+      );
+    }
+    return read.value;
   };
 
   /**
@@ -183,15 +236,12 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
             `'${target.primaryKey}', but it carries ${JSON.stringify(Object.keys(record))}`,
         );
       }
-      const partitionKey = partitionKeyOf(record, resolved);
-      if (partitionKey === undefined) {
-        throw new Error(
-          `CosmosAdapter.${operation}: the composite key for '${target.container}' must carry the ` +
-            `partition key ${renderPaths(resolved.paths)}, but it carries ${
-              JSON.stringify(Object.keys(record))
-            }`,
-        );
-      }
+      const partitionKey = requirePartitionKey(
+        record,
+        resolved,
+        operation,
+        'the composite key',
+      );
       return { id: requireStringId(keyValue, operation), partitionKey };
     }
 
@@ -214,7 +264,11 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       );
     }
     const document = found.resources[0] as Record<string, unknown>;
-    return { id: scalar, partitionKey: partitionKeyOf(document, resolved), document };
+    return {
+      id: scalar,
+      partitionKey: requirePartitionKey(document, resolved, operation, 'the stored document'),
+      document,
+    };
   };
 
   /**
@@ -265,7 +319,9 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         const resolved = await partitionKeys.resolve(target);
         buffer.add({
           container: target.container,
-          partitionKey: partitionKeyOf(document, resolved),
+          // A batch is addressed by ONE partition-key value, so an incomplete
+          // one here would send the whole batch to the wrong place.
+          partitionKey: requirePartitionKey(document, resolved, 'create', 'the row'),
           operation: { operationType: 'Create', resourceBody: document },
         });
         return fromDocument(document, target);
@@ -312,14 +368,38 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       }
 
       if (buffer !== undefined) {
+        // The row is read to honour the contract's missing-row throw, NOT to
+        // build the write: a `Replace` assembled from a committed read would
+        // discard both a concurrent writer's other fields and any earlier
+        // buffered update of the same row (measured — two such replaces answer
+        // 200 and the first one's change is gone). A `Patch` writes only the
+        // fields the payload names and two of them COMPOSE, which is why this
+        // is the same operation the non-transactional path already uses.
         const existing = await readDocument(address);
         if (existing === null) throw missingRow(target, id);
         const merged = { ...existing, ...payload };
-        buffer.add({
-          container: target.container,
-          partitionKey: address.partitionKey,
-          operation: { operationType: 'Replace', id: address.id, resourceBody: merged },
-        });
+        const fields = Object.entries(payload);
+        if (fields.length === 0) return fromDocument(existing, target);
+        if (fields.length <= MAX_PATCH_OPERATIONS) {
+          buffer.add({
+            container: target.container,
+            partitionKey: address.partitionKey,
+            operation: {
+              operationType: 'Patch',
+              id: address.id,
+              resourceBody: { operations: patchOperations(fields) },
+            },
+          });
+        } else {
+          // Wider than one patch accepts, so the whole document is written.
+          // That cannot compose, which is why `BatchBuffer` refuses this write
+          // when the transaction has already written the same row.
+          buffer.add({
+            container: target.container,
+            partitionKey: address.partitionKey,
+            operation: { operationType: 'Replace', id: address.id, resourceBody: merged },
+          });
+        }
         return fromDocument(merged, target);
       }
 
@@ -333,12 +413,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         return fromDocument(existing, target);
       }
       if (fields.length <= MAX_PATCH_OPERATIONS) {
-        const operations: CosmosPatchOperation[] = fields.map(([field, value]) => ({
-          op: 'set',
-          path: `/${field}`,
-          value,
-        }));
-        const patched = await mapMissing(item.patch(operations), target, id);
+        const patched = await mapMissing(item.patch(patchOperations(fields)), target, id);
         return fromDocument(patched.resource ?? {}, target);
       }
 
@@ -475,6 +550,22 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       };
     },
   };
+}
+
+/**
+ * Translates a payload's field list into `set` patch operations.
+ *
+ * One owner for both the immediate patch and the buffered one, so the two
+ * cannot drift about how a field name becomes a patch path.
+ *
+ * @param fields - The payload entries to write
+ * @returns The patch operations, in payload order
+ * @since 0.2.0
+ */
+export function patchOperations(
+  fields: readonly (readonly [string, unknown])[],
+): CosmosPatchOperation[] {
+  return fields.map(([field, value]) => ({ op: 'set', path: `/${field}`, value }));
 }
 
 /**
@@ -647,15 +738,15 @@ export class CosmosTransaction implements IAdapterTransaction {
    * undone.
    */
   rollback(): Promise<void> {
-    // The refusal REJECTS rather than throwing synchronously: this method is
-    // typed `Promise<void>`, and a synchronous throw bypasses any caller using
-    // `.catch()` (the defect class M52b, M52c and M70j each closed elsewhere).
-    // `commit` needs no such care — it is `async`, so its throw is a rejection.
-    if (this.#settled) {
-      return Promise.reject(
-        new Error('CosmosAdapter: this transaction has already settled; rollback is a no-op'),
-      );
-    }
+    // Idempotent, unlike `commit`, and that asymmetry is load-bearing rather
+    // than lenient: `DatabaseService.transaction()` rolls back inside a `catch`
+    // that also runs when `commit()` itself failed, and `commit()` marks the
+    // handle settled BEFORE it awaits the batch. A refusal here would therefore
+    // replace the batch's own diagnostic — its status and per-operation codes,
+    // the only thing naming the operation that failed — with a message about
+    // rollback, on every throttled or rejected batch. `D1Adapter` records the
+    // same reasoning for the same call pattern, and `MongoAdapter` returns
+    // early on `#finalized`.
     this.#settled = true;
     this.#buffer.clear();
     return Promise.resolve();
@@ -665,7 +756,7 @@ export class CosmosTransaction implements IAdapterTransaction {
    * Refuses a second settlement of the same handle.
    *
    * Called from `commit`, which is `async`, so this throw becomes a rejection.
-   * `rollback` performs the same check inline because it is not.
+   * `rollback` deliberately does NOT call it — see the note there.
    *
    * @param operation - The member being called
    * @throws {Error} When the transaction has already settled

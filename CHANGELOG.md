@@ -19,8 +19,10 @@ All notable changes to this project are documented here. The format follows
   carrying `ORDER BY`; on a real account each paged container therefore needs a composite index over
   `(sort field, id)`. Transactions are a deferred batch, atomic within one container and one
   partition-key value and capped at 100 operations, with `CosmosTransactionScopeError` raised at the
-  write that crosses a bound. `rawQuery` is refused by name, because a Cosmos query is scoped to a
-  container the signature cannot name.
+  write that crosses a bound; a buffered `update` is sent as a patch so two updates of one row
+  compose, and `rollback()` is idempotent so a failed commit still reports its own per-operation
+  diagnostic. `rawQuery` is refused by name, because a Cosmos query is scoped to a container the
+  signature cannot name.
 
   Cosmos DB's **MongoDB API** needs no new arm: it speaks the MongoDB wire protocol, so the existing
   `'mongodb'` arm serves it. That route is documented and **unverified against a live account** —

@@ -323,6 +323,48 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
     }
   });
 
+  it('lands both updates when a transaction writes one row twice', {
+    ignore: skipReal,
+  }, async () => {
+    // The defect: both updates were whole-document replaces built from the same
+    // committed read, so the batch answered 200 with the first update's field
+    // reverted. Only a real batch can prove the repair — the fake records
+    // operations without applying them.
+    const container = await provision(`compose_${suffix}`, '/tenantId');
+    const adapter = new CosmosAdapter({
+      endpoint: endpoint as string,
+      key,
+      database: databaseId,
+      containers: { Row: { container, partitionKey: 'tenantId' } },
+    });
+    await adapter.connect();
+    try {
+      const outside = adapter.createDataSource('Row');
+      await outside.create({ id: 'r1', tenantId: 't1', a: 'A0', b: 'B0' });
+
+      const txn = await adapter.beginTransaction();
+      const scoped = txn.createDataSource('Row');
+      await scoped.update({ id: 'r1', tenantId: 't1' }, { a: 'A1' });
+      await scoped.update({ id: 'r1', tenantId: 't1' }, { b: 'B1' });
+      await txn.commit();
+
+      expect(await outside.findById({ id: 'r1', tenantId: 't1' }))
+        .toEqual({ id: 'r1', tenantId: 't1', a: 'A1', b: 'B1' });
+
+      // A transaction-scoped update also leaves fields it never named alone,
+      // even when another writer changed them after the transaction opened.
+      const second = await adapter.beginTransaction();
+      const secondSource = second.createDataSource('Row');
+      await secondSource.update({ id: 'r1', tenantId: 't1' }, { a: 'A2' });
+      await outside.update({ id: 'r1', tenantId: 't1' }, { b: 'B2' });
+      await second.commit();
+      expect(await outside.findById({ id: 'r1', tenantId: 't1' }))
+        .toEqual({ id: 'r1', tenantId: 't1', a: 'A2', b: 'B2' });
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
   it('answers every portable filter case exactly as the Memory reference does', {
     ignore: skipReal,
   }, async () => {
@@ -385,10 +427,23 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
             ],
           },
         },
+        {
+          // README and PUBLIC_API both state this match is case-sensitive, and
+          // M68 documents `contains` as collation-dependent on LIKE backends —
+          // so the claim needs a gate. The Memory reference uses
+          // `String.includes`, which is case-sensitive too, so the two agree.
+          label: 'contains is case-sensitive',
+          filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'bolt' },
+        },
+        {
+          label: 'contains matches the same term in its stored casing',
+          filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'Bolt' },
+        },
         { label: 'an empty and matches everything', filter: { type: 'and', filters: [] } },
         { label: 'an empty or matches nothing', filter: { type: 'or', filters: [] } },
       ];
 
+      const answers = new Map<string, unknown[]>();
       for (const { label, filter } of cases) {
         const expected = rows
           .filter((row) => matchesFilter(row, filter))
@@ -398,7 +453,12 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
           .map((row) => row['id'])
           .sort();
         expect({ label, served }).toEqual({ label, served: expected });
+        answers.set(label, served);
       }
+      // The case-sensitivity pair must actually DISCRIMINATE: agreeing on two
+      // empty answers would satisfy the loop above while proving nothing.
+      expect(answers.get('contains matches the same term in its stored casing')).toEqual(['r5']);
+      expect(answers.get('contains is case-sensitive')).toEqual([]);
     } finally {
       await adapter.disconnect();
     }

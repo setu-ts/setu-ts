@@ -149,13 +149,71 @@ export interface CosmosPatchOperation {
  *
  * @since 0.2.0
  */
-export interface CosmosBatchOperation {
+export type CosmosBatchOperation =
+  | CosmosBatchInsertOperation
+  | CosmosBatchReplaceOperation
+  | CosmosBatchPatchOperation
+  | CosmosBatchDeleteOperation;
+
+/**
+ * A batch operation inserting a whole document. The id is optional: the
+ * service mints one when the body carries none.
+ *
+ * @since 0.2.0
+ */
+export interface CosmosBatchInsertOperation {
   /** The operation kind. */
-  readonly operationType: 'Create' | 'Upsert' | 'Replace' | 'Delete';
-  /** The document, for a write operation. */
-  readonly resourceBody?: Record<string, unknown>;
-  /** The document id, for `Replace` and `Delete`. */
+  readonly operationType: 'Create' | 'Upsert';
+  /** The document to write. */
+  readonly resourceBody: Record<string, unknown>;
+  /** The document id, when the caller chose one. */
   readonly id?: string;
+}
+
+/**
+ * A batch operation overwriting a whole document, which therefore names the
+ * document it replaces.
+ *
+ * @since 0.2.0
+ */
+export interface CosmosBatchReplaceOperation {
+  /** The operation kind. */
+  readonly operationType: 'Replace';
+  /** The document id. */
+  readonly id: string;
+  /** The document to write in its place. */
+  readonly resourceBody: Record<string, unknown>;
+}
+
+/**
+ * A batch operation carrying patch operations rather than a whole document.
+ *
+ * Two of these addressing the same item COMPOSE — measured against the
+ * emulator, `[set /a, set /b]` on one id answers `[200, 200]` and leaves both
+ * fields set — which is what lets a Unit of Work update one row twice without
+ * the second write discarding the first.
+ *
+ * @since 0.2.0
+ */
+export interface CosmosBatchPatchOperation {
+  /** The operation kind. */
+  readonly operationType: 'Patch';
+  /** The document id. */
+  readonly id: string;
+  /** The patch operations, in the envelope the SDK expects. */
+  readonly resourceBody: { readonly operations: readonly CosmosPatchOperation[] };
+}
+
+/**
+ * A batch operation removing one document.
+ *
+ * @since 0.2.0
+ */
+export interface CosmosBatchDeleteOperation {
+  /** The operation kind. */
+  readonly operationType: 'Delete';
+  /** The document id. */
+  readonly id: string;
 }
 
 /**

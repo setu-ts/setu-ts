@@ -170,6 +170,50 @@ describe('findById', () => {
       .toEqual({ id: 'o1', tenantId: 't1', region: 'in' });
   });
 
+  it('refuses a composite key missing ONE segment of a hierarchical partition key', async () => {
+    // A hierarchical key reads as an array, so a missing segment leaves a hole
+    // inside it rather than making the whole value undefined — which the
+    // service answers with a 404, reporting "not found" for a row that exists.
+    const { source } = makeSource({
+      containers: {
+        Order: {
+          partitionKeyPaths: ['/tenantId', '/region'],
+          documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+        },
+      },
+    }, { Order: { partitionKey: [['tenantId'], ['region']] } });
+    await expect(source.findById({ id: 'o1', tenantId: 't1' }))
+      .rejects.toThrow(/must carry the partition key \/tenantId, \/region, but \/region is absent/);
+  });
+
+  it('refuses a partial hierarchical key on delete too, rather than answering false', async () => {
+    const { source } = makeSource({
+      containers: {
+        Order: {
+          partitionKeyPaths: ['/tenantId', '/region'],
+          documents: { '["t1","in"]|o1': { id: 'o1', tenantId: 't1', region: 'in' } },
+        },
+      },
+    }, { Order: { partitionKey: [['tenantId'], ['region']] } });
+    await expect(source.delete({ id: 'o1', tenantId: 't1' }))
+      .rejects.toThrow(/\/region is absent/);
+  });
+
+  it('accepts a partition-key value that is explicitly null', async () => {
+    // `undefined` is ABSENT and `null` is a value Cosmos stores, so the
+    // refusal must tell them apart rather than collapsing both.
+    const { source } = makeSource({
+      containers: {
+        Order: {
+          partitionKeyPaths: ['/tenantId'],
+          documents: { 'null|o1': { id: 'o1', tenantId: null } },
+        },
+      },
+    }, withTenant);
+    expect(await source.findById({ id: 'o1', tenantId: null } as never))
+      .toEqual({ id: 'o1', tenantId: null });
+  });
+
   it('reads a nested partition key from a composite key by its dotted join', async () => {
     const { source } = makeSource({
       containers: {

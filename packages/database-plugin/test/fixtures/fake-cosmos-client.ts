@@ -145,7 +145,9 @@ export function createFakeCosmosClient(options: FakeCosmosOptions): FakeCosmos {
       const cut = key.lastIndexOf('|');
       const rawKey = key.slice(0, cut);
       const id = key.slice(cut + 1);
-      const partitionKey = rawKey.startsWith('[')
+      // A hierarchical key is written as a JSON array literal and an explicit
+      // null as `null`; anything else is taken as the string it looks like.
+      const partitionKey = rawKey.startsWith('[') || rawKey === 'null'
         ? JSON.parse(rawKey) as CosmosPartitionKeyValue
         : rawKey;
       documents.set(

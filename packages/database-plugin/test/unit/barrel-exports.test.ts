@@ -5,6 +5,11 @@ import type {
   CosmosAccessCondition,
   CosmosAdapterOptions,
   CosmosAdapterOptionsBase,
+  CosmosBatchDeleteOperation,
+  CosmosBatchInsertOperation,
+  CosmosBatchOperation,
+  CosmosBatchPatchOperation,
+  CosmosBatchReplaceOperation,
   CosmosDatabaseOptions,
   CosmosEntityMapping,
   CosmosItemResponse,
@@ -162,6 +167,26 @@ describe('database-plugin barrel exports', () => {
       parameters: [{ name: '@p0', value: 1 } satisfies CosmosQueryParameter],
     };
     const partitionKey: CosmosPartitionKeyValue = ['t1', 'in'];
+    // The batch union's three arms, so a `Patch` carrying a document body — or
+    // a `Delete` carrying one at all — is a compile error for a caller too.
+    const insert: CosmosBatchInsertOperation = {
+      operationType: 'Create',
+      resourceBody: { id: 'o1' },
+    };
+    const write: CosmosBatchReplaceOperation = {
+      operationType: 'Replace',
+      id: 'o1',
+      resourceBody: { id: 'o1' },
+    };
+    const patchOp: CosmosBatchPatchOperation = {
+      operationType: 'Patch',
+      id: 'o1',
+      resourceBody: { operations: [{ op: 'set', path: '/total', value: 1 }] },
+    };
+    const removal: CosmosBatchDeleteOperation = { operationType: 'Delete', id: 'o1' };
+    const batch: readonly CosmosBatchOperation[] = [insert, write, patchOp, removal];
+    expect(batch.map((operation) => operation.operationType))
+      .toEqual(['Create', 'Replace', 'Patch', 'Delete']);
     // The shapes the seam's own members return and accept are exported too, so
     // an application injecting a client can name every signature it implements.
     const response: CosmosItemResponse<Record<string, unknown>> = { statusCode: 200 };

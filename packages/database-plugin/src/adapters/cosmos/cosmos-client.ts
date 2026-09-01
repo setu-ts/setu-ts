@@ -16,7 +16,11 @@
  */
 import type {
   CosmosAccessCondition,
+  CosmosBatchDeleteOperation,
+  CosmosBatchInsertOperation,
   CosmosBatchOperation,
+  CosmosBatchPatchOperation,
+  CosmosBatchReplaceOperation,
   CosmosBatchResponse,
   CosmosContainerDefinition,
   CosmosFeedResponse,
@@ -141,11 +145,42 @@ export type { CosmosAccessCondition };
 export type { CosmosPatchOperation };
 
 /**
- * One operation in a transactional batch.
+ * One operation in a transactional batch — a discriminated union, so a `Patch`
+ * carrying a document body (or a `Delete` carrying one at all) is a compile
+ * error rather than a request the service refuses.
  *
  * @since 0.2.0
  */
 export type { CosmosBatchOperation };
+
+/**
+ * The batch arm inserting a whole document (`Create`, `Upsert`).
+ *
+ * @since 0.2.0
+ */
+export type { CosmosBatchInsertOperation };
+
+/**
+ * The batch arm overwriting a whole document, which names the id it replaces.
+ *
+ * @since 0.2.0
+ */
+export type { CosmosBatchReplaceOperation };
+
+/**
+ * The batch arm carrying patch operations, which COMPOSE when two of them
+ * address the same item.
+ *
+ * @since 0.2.0
+ */
+export type { CosmosBatchPatchOperation };
+
+/**
+ * The batch arm removing one document.
+ *
+ * @since 0.2.0
+ */
+export type { CosmosBatchDeleteOperation };
 
 /**
  * The response a transactional batch answers with.
@@ -177,9 +212,6 @@ export interface CosmosClientLoader {
    * @returns The client to drive
    */
   createClient(): Promise<ICosmosClient>;
-
-  /** Whether this adapter constructed the client, and so owns its lifetime. */
-  readonly owned: boolean;
 }
 
 /**
@@ -193,7 +225,6 @@ export interface CosmosClientLoader {
 export function createInjectedClientLoader(client: ICosmosClient): CosmosClientLoader {
   return {
     createClient: (): Promise<ICosmosClient> => Promise.resolve(client),
-    owned: false,
   };
 }
 
@@ -217,6 +248,5 @@ export async function createLazyClientLoader(
   return {
     createClient: (): Promise<ICosmosClient> =>
       Promise.resolve(new mod.CosmosClient({ endpoint, key })),
-    owned: true,
   };
 }

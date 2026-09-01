@@ -23,9 +23,13 @@ describe('createInjectedClientLoader', () => {
     expect(await loader.createClient()).toBe(client);
   });
 
-  it('reports the client as NOT owned, so a connect failure never closes it', () => {
+  it('hands back the SAME instance on every call, so nothing is reconstructed', () => {
     const { client } = createFakeCosmosClient({ containers: {} });
-    expect(createInjectedClientLoader(client).owned).toBe(false);
+    const loader = createInjectedClientLoader(client);
+    return Promise.all([loader.createClient(), loader.createClient()]).then(([a, b]) => {
+      expect(a).toBe(b);
+      expect(a).toBe(client);
+    });
   });
 });
 

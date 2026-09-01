@@ -66,7 +66,11 @@ export type {
 // the data source calls exactly these members.
 export type {
   CosmosAccessCondition,
+  CosmosBatchDeleteOperation,
+  CosmosBatchInsertOperation,
   CosmosBatchOperation,
+  CosmosBatchPatchOperation,
+  CosmosBatchReplaceOperation,
   CosmosBatchResponse,
   CosmosContainerDefinition,
   CosmosFeedResponse,
