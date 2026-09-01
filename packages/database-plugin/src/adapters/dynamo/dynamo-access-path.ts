@@ -54,6 +54,8 @@ export type DynamoAccessPath = {
   readonly logPath: string;
   /** Key columns in partition-then-sort order for the selected path. */
   readonly keyColumns: readonly string[];
+  /** Complete key columns needed to resume this path from `LastEvaluatedKey`. */
+  readonly cursorKeyColumns: readonly string[];
 };
 
 /** A comparison selected for folding into the native key condition. */
@@ -116,6 +118,7 @@ export function resolveDynamoAccessPath(
       commandType: 'Scan',
       logPath: 'Scan',
       keyColumns: target.keyColumns,
+      cursorKeyColumns: target.keyColumns,
     };
   }
 
@@ -140,7 +143,29 @@ export function resolveDynamoAccessPath(
     keyColumns: path.sortKey === undefined
       ? [path.partitionKey]
       : [path.partitionKey, path.sortKey],
+    cursorKeyColumns: cursorKeyColumns(path, target.keyColumns),
   };
+}
+
+/**
+ * Returns every attribute DynamoDB requires in a continuation key.
+ *
+ * A table query needs its selected primary-key columns only. A GSI query's
+ * `LastEvaluatedKey` also contains the table primary key, so the cursor must
+ * retain both schemas in this stable order to rebuild `ExclusiveStartKey`.
+ */
+function cursorKeyColumns(
+  path: DynamoQueryPath,
+  tableKeyColumns: readonly string[],
+): readonly string[] {
+  const pathKeyColumns = path.sortKey === undefined
+    ? [path.partitionKey]
+    : [path.partitionKey, path.sortKey];
+  if (path.indexName === undefined) return pathKeyColumns;
+  return [
+    ...pathKeyColumns,
+    ...tableKeyColumns.filter((column) => !pathKeyColumns.includes(column)),
+  ];
 }
 
 /**

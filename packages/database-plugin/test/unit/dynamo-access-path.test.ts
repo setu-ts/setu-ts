@@ -65,6 +65,7 @@ describe('resolveDynamoAccessPath', () => {
       },
     });
     expect(path.keyColumns).toEqual(['tenantId', 'orderId']);
+    expect(path.cursorKeyColumns).toEqual(['tenantId', 'orderId']);
   });
 
   it('selects a configured GSI Query when its partition key is constrained', () => {
@@ -87,6 +88,7 @@ describe('resolveDynamoAccessPath', () => {
       ExpressionAttributeValues: { ':v0': { S: 'customer-1' }, ':v1': { S: '2025-01-01' } },
     });
     expect(path.keyColumns).toEqual(['customerId', 'createdAt']);
+    expect(path.cursorKeyColumns).toEqual(['customerId', 'createdAt', 'tenantId', 'orderId']);
   });
 
   it('selects Scan without a mapped partition equality and leaves the predicate as a filter', () => {
@@ -105,6 +107,7 @@ describe('resolveDynamoAccessPath', () => {
       ExpressionAttributeValues: { ':v0': { S: 'open' } },
     });
     expect('KeyConditionExpression' in path.command).toBe(false);
+    expect(path.cursorKeyColumns).toEqual(['tenantId', 'orderId']);
   });
 
   it('scans without a FilterExpression when the query has no predicates', () => {

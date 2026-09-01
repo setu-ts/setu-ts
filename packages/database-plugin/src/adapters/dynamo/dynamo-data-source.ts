@@ -76,10 +76,15 @@ export function createDynamoDataSource(
   const read = async (
     query: NormalizedQuery,
     start?: DynamoAttributeMap,
+    limit?: number,
   ): Promise<DynamoReadCommandOutput> => {
     const path = resolveDynamoAccessPath(entity, target, query);
     lastAccessPath = path.logPath;
-    const input = { ...path.command, ...(start === undefined ? {} : { ExclusiveStartKey: start }) };
+    const input = {
+      ...path.command,
+      ...(limit === undefined ? {} : { Limit: limit }),
+      ...(start === undefined ? {} : { ExclusiveStartKey: start }),
+    };
     return path.commandType === 'Query'
       ? await client.query(input as import('./dynamo-client-types.ts').DynamoQueryCommandInput)
       : await client.scan(input);
@@ -241,7 +246,7 @@ export function createDynamoDataSource(
         const decoded = decodeCursor(query.cursor);
         if (
           decoded === null || decoded.sortFingerprint !== fingerprint ||
-          decoded.keyValues.length !== path.keyColumns.length
+          decoded.keyValues.length !== path.cursorKeyColumns.length
         ) {
           throw new UnsupportedQueryFeatureError(
             'cursor-pagination',
@@ -250,7 +255,7 @@ export function createDynamoDataSource(
           );
         }
         start = Object.fromEntries(
-          path.keyColumns.map((
+          path.cursorKeyColumns.map((
             column,
             index,
           ) => [column, marshalDynamoValue(decoded.keyValues[index])]),
@@ -260,7 +265,8 @@ export function createDynamoDataSource(
       let last: DynamoAttributeMap | undefined;
       let fetches = 0;
       do {
-        const output = await read(query, start);
+        const remaining = query.limit > 0 ? query.limit - rows.length : undefined;
+        const output = await read(query, start, remaining);
         rows.push(...(output.Items ?? []).map(unmarshalDynamoItem));
         last = output.LastEvaluatedKey;
         start = last;
@@ -271,10 +277,10 @@ export function createDynamoDataSource(
       );
       const pageRows = query.limit > 0 ? rows.slice(0, query.limit) : rows;
       const nextCursor = last === undefined ? null : encodeCursor({
-        orderedValues: path.keyColumns.map((column) =>
+        orderedValues: path.cursorKeyColumns.map((column) =>
           unmarshalDynamoItem(last)[column] as string | number
         ),
-        keyValues: path.keyColumns.map((column) =>
+        keyValues: path.cursorKeyColumns.map((column) =>
           unmarshalDynamoItem(last)[column] as string | number
         ),
         sortFingerprint: fingerprint,
