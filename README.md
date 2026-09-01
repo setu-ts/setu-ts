@@ -13,7 +13,6 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 [![Bun](https://img.shields.io/badge/Bun-supported-green.svg)](https://bun.sh/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare_Workers-supported-green.svg)](https://workers.cloudflare.com/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
-![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/setu-ts/setu-ts?utm_source=oss&utm_medium=github&utm_campaign=setu-ts%2Fsetu-ts&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
 </div>
 
