@@ -28,7 +28,12 @@ jobs:
         id: resolve
         run: |
           sources="$RUNNER_TEMP/dependency-drift-sources.txt"
-          rg --files -g '*.ts' packages test scripts > "$sources"
+          # `git ls-files` and not `rg --files`: ripgrep is NOT installed on the
+          # ubuntu-24.04 runner image, so the original listing exited 127 and
+          # every scheduled run filed a drift issue that had checked nothing
+          # (issue #216). Against a fresh checkout the two listings are
+          # byte-identical -- both are the tracked, non-ignored `.ts` set.
+          git ls-files -- 'packages/*.ts' 'test/*.ts' 'scripts/*.ts' > "$sources"
           if xargs deno cache --reload --frozen=false \
             --lock="$RUNNER_TEMP/dependency-drift.lock" < "$sources"; then
             exit 0
@@ -55,37 +60,37 @@ jobs:
           # recovered, so this is not dependency drift.
           exit 0
 
-      - name: Format check against fresh resolution
+      # `deno fmt` and `deno lint` accept neither `--lock` nor `--frozen` and
+      # never read a lockfile, so neither can run "against fresh resolution".
+      # They stay as ordinary gates -- a fresh graph cannot change their result.
+      - name: Format check
         id: fmt
         if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        env:
-          DENO_FLAGS: --lock=${{ runner.temp }}/dependency-drift.lock --frozen
         run: deno task fmt:check
 
-      - name: Lint against fresh resolution
+      - name: Lint
         id: lint
         if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        env:
-          DENO_FLAGS: --lock=${{ runner.temp }}/dependency-drift.lock --frozen
         run: deno task lint
 
+      # `DENO_FLAGS` is NOT a Deno environment variable -- Deno ignores it
+      # entirely, so these two steps used to run against the COMMITTED
+      # `deno.lock` while claiming to test the fresh graph (issue #216). Deno
+      # appends a task's extra arguments to its command, and both subcommands
+      # accept `--lock`/`--frozen` after their positional paths.
       - name: Type check against fresh resolution
         id: check
         if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        env:
-          DENO_FLAGS: --lock=${{ runner.temp }}/dependency-drift.lock --frozen
-        run: deno task check
+        run: deno task check --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
 
       - name: Test against fresh resolution
         id: test
         if: always() && steps.resolve.outcome == 'success'
         continue-on-error: true
-        env:
-          DENO_FLAGS: --lock=${{ runner.temp }}/dependency-drift.lock --frozen
-        run: deno task test
+        run: deno task test --lock="$RUNNER_TEMP/dependency-drift.lock" --frozen
 
       - name: Attribute drift and summarize gates
         id: report
