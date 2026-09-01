@@ -4,6 +4,7 @@ import { decodeCursor, encodeCursor, sortFingerprint } from '@setu-ts/common';
 import type {
   DynamoAttributeMap,
   DynamoReadCommandOutput,
+  DynamoTransactWriteItem,
   IDynamoClient,
 } from './dynamo-client-types.ts';
 import { resolveDynamoAccessPath } from './dynamo-access-path.ts';
@@ -11,6 +12,7 @@ import type { DynamoEntityMapping } from './dynamo-mapping.ts';
 import { resolveDynamoTarget } from './dynamo-mapping.ts';
 import { marshalDynamoItem, marshalDynamoValue, unmarshalDynamoItem } from './dynamo-marshal.ts';
 import { createDynamoExpressionBuilder } from './dynamo-expression.ts';
+import type { IDynamoTransactionBuffer } from './dynamo-transaction-buffer.ts';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import { projectFields } from '../../query/query-builder.ts';
 
@@ -23,6 +25,7 @@ export function createDynamoDataSource(
   entity: string,
   mappings: Readonly<Record<string, DynamoEntityMapping>> | undefined,
   maxPageFetches = DEFAULT_MAX_PAGE_FETCHES,
+  transactionBuffer?: IDynamoTransactionBuffer,
 ): IDataSource {
   const target = resolveDynamoTarget(entity, mappings);
   const key = (
@@ -99,16 +102,24 @@ export function createDynamoDataSource(
     },
     async create(data): Promise<Record<string, unknown>> {
       const item = marshalDynamoItem(data as Record<string, unknown>, target.dateAttributes);
-      key(data, 'create');
+      const identifier = key(data, 'create');
       const builder = createDynamoExpressionBuilder();
       const alias = builder.aliasPath(target.partitionKey);
+      const put = {
+        TableName: target.table,
+        Item: item,
+        ConditionExpression: `attribute_not_exists(${alias})`,
+        ...builder.expressionAttributes(),
+      };
+      const write: DynamoTransactWriteItem = {
+        Put: put,
+      };
+      if (transactionBuffer !== undefined) {
+        transactionBuffer.add(write, identifier);
+        return unmarshalDynamoItem(item);
+      }
       try {
-        await client.putItem({
-          TableName: target.table,
-          Item: item,
-          ConditionExpression: `attribute_not_exists(${alias})`,
-          ...builder.expressionAttributes(),
-        });
+        await client.putItem(put);
         return unmarshalDynamoItem(item);
       } catch (error) {
         return conditional(error, 'create');
@@ -131,14 +142,28 @@ export function createDynamoDataSource(
         `${builder.aliasPath(name)} = ${builder.addValue(value, target.dateAttributes[name])}`
       );
       const exists = builder.aliasPath(target.partitionKey);
+      const update = {
+        TableName: target.table,
+        Key: identifier,
+        UpdateExpression: `SET ${updates.join(', ')}`,
+        ConditionExpression: `attribute_exists(${exists})`,
+        ...builder.expressionAttributes(),
+      };
+      const write: DynamoTransactWriteItem = {
+        Update: update,
+      };
+      if (transactionBuffer !== undefined) {
+        const existing = await client.getItem({ TableName: target.table, Key: identifier });
+        if (existing.Item === undefined) {
+          throw new Error(`DynamoDB entity '${entity}' update failed: the key does not exist.`);
+        }
+        transactionBuffer.add(write, identifier);
+        return { ...unmarshalDynamoItem(existing.Item), ...Object.fromEntries(entries) };
+      }
       try {
         const output = await client.updateItem({
-          TableName: target.table,
-          Key: identifier,
-          UpdateExpression: `SET ${updates.join(', ')}`,
-          ConditionExpression: `attribute_exists(${exists})`,
+          ...update,
           ReturnValues: 'ALL_NEW',
-          ...builder.expressionAttributes(),
         });
         if (output.Attributes === undefined) {
           throw new Error(`DynamoDB entity '${entity}' update returned no row.`);
@@ -149,9 +174,18 @@ export function createDynamoDataSource(
       }
     },
     async delete(id): Promise<boolean> {
+      const identifier = key(id, 'delete');
+      if (transactionBuffer !== undefined) {
+        const existing = await client.getItem({ TableName: target.table, Key: identifier });
+        if (existing.Item === undefined) return false;
+        transactionBuffer.add({
+          Delete: { TableName: target.table, Key: identifier },
+        }, identifier);
+        return true;
+      }
       const output = await client.deleteItem({
         TableName: target.table,
-        Key: key(id, 'delete'),
+        Key: identifier,
         ReturnValues: 'ALL_OLD',
       });
       return output.Attributes !== undefined;

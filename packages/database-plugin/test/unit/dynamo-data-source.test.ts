@@ -3,6 +3,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IDynamoClient } from '../../src/adapters/dynamo/dynamo-client-types.ts';
 import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';
+import { createDynamoTransactionBuffer } from '../../src/adapters/dynamo/dynamo-transaction-buffer.ts';
 describe('DynamoDB data source writes', () => {
   it('findAll follows pages, applies limits/projection, and refuses offset', async () => {
     let calls = 0;
@@ -78,6 +79,74 @@ describe('DynamoDB data source writes', () => {
       ConditionExpression: 'attribute_exists(#n1)',
       ReturnValues: 'ALL_NEW',
     }, { ReturnValues: 'ALL_OLD' }]);
+  });
+  it('buffers transaction writes without immediate mutation and leaves reads committed', async () => {
+    const calls: string[] = [];
+    let reads = 0;
+    const client: IDynamoClient = {
+      query: async () => ({}),
+      scan: async () => ({}),
+      getItem: async () => {
+        calls.push('get');
+        reads += 1;
+        return reads === 2
+          ? { Item: { pk: { S: 'updated' }, value: { N: '1' }, status: { S: 'open' } } }
+          : { Item: { pk: { S: 'p' }, value: { N: '1' } } };
+      },
+      putItem: async () => {
+        calls.push('put');
+        return {};
+      },
+      updateItem: async () => {
+        calls.push('update');
+        return {};
+      },
+      deleteItem: async () => {
+        calls.push('delete');
+        return {};
+      },
+      transactWriteItems: async () => ({}),
+      destroy() {},
+    };
+    const buffer = createDynamoTransactionBuffer();
+    const ds = createDynamoDataSource(
+      client,
+      'Item',
+      { Item: { partitionKey: 'pk' } },
+      undefined,
+      buffer,
+    );
+
+    expect(await ds.create({ pk: 'created', value: 1 })).toStrictEqual({ pk: 'created', value: 1 });
+    expect(await ds.findById('created')).toStrictEqual({ pk: 'p', value: 1 });
+    expect(await ds.update('updated', { value: 2 })).toStrictEqual({
+      pk: 'updated',
+      value: 2,
+      status: 'open',
+    });
+    expect(await ds.delete('p')).toBe(true);
+    expect(calls).toEqual(['get', 'get', 'get']);
+    expect(buffer.getWrites()).toStrictEqual([
+      {
+        Put: {
+          TableName: 'Item',
+          Item: { pk: { S: 'created' }, value: { N: '1' } },
+          ConditionExpression: 'attribute_not_exists(#n0)',
+          ExpressionAttributeNames: { '#n0': 'pk' },
+        },
+      },
+      {
+        Update: {
+          TableName: 'Item',
+          Key: { pk: { S: 'updated' } },
+          UpdateExpression: 'SET #n0 = :v0',
+          ConditionExpression: 'attribute_exists(#n1)',
+          ExpressionAttributeNames: { '#n0': 'value', '#n1': 'pk' },
+          ExpressionAttributeValues: { ':v0': { N: '2' } },
+        },
+      },
+      { Delete: { TableName: 'Item', Key: { pk: { S: 'p' } } } },
+    ]);
   });
   it('translates conditional write failures', async () => {
     const failure = new Error('no');
