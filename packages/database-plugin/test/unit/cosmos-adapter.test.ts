@@ -211,21 +211,44 @@ describe('disconnect during an in-flight connect', () => {
       containers: { Order: { partitionKeyPaths: ['/id'] } },
     });
     const inner = client.database('db');
+    // Each `read()` is deferred INDEPENDENTLY rather than on a shared timer, so
+    // the settle order is controlled rather than incidental. A shared timer
+    // lets the superseded attempt settle FIRST — which is the harmless order —
+    // so the case that matters, a stale attempt landing after the reconnect has
+    // already succeeded, would never run.
+    const gates: ((value: unknown) => void)[] = [];
     const slow: ICosmosClient = {
       database: () => ({
         container: (id: string) => inner.container(id),
         read: () =>
-          new Promise((resolve) => setTimeout(() => resolve(inner.read()), 30)) as ReturnType<
-            ICosmosDatabase['read']
-          >,
+          new Promise((resolve) => {
+            gates.push(() => resolve(inner.read()));
+          }) as ReturnType<ICosmosDatabase['read']>,
       }),
+    };
+    // `connect()` reaches `read()` only after the loader's own microtasks, so
+    // each attempt is awaited to the point of issuing its read rather than
+    // assumed to have done so synchronously.
+    const untilReads = async (count: number): Promise<void> => {
+      for (let i = 0; i < 100 && gates.length < count; i++) await Promise.resolve();
+      expect(gates).toHaveLength(count);
     };
     const adapter = new CosmosAdapter({ client: slow, database: 'db' });
     const superseded = adapter.connect();
+    await untilReads(1);
     await adapter.disconnect();
-    await adapter.connect();
+    const reconnect = adapter.connect();
+    // Two reads are outstanding: [0] the superseded attempt, [1] the reconnect.
+    await untilReads(2);
+
+    // The reconnect settles FIRST and must leave the adapter connected.
+    gates[1]?.(undefined);
+    await reconnect;
     expect(adapter.isReady()).toBe(true);
-    // The superseded attempt settling afterwards must not undo the reconnect.
+
+    // Only now does the superseded attempt land. It must not undo the
+    // reconnect — the ordering a shared timer could never produce.
+    gates[0]?.(undefined);
     await superseded;
     expect(adapter.isReady()).toBe(true);
     expect(() => adapter.createDataSource('Order')).not.toThrow();
