@@ -363,6 +363,19 @@ container and one partition-key value**, and caps at 100 operations; a write tha
 bounds is refused with `CosmosTransactionScopeError` at the write itself, naming what it crossed.
 Reads inside a transaction observe committed state only.
 
+### What this adapter deliberately cannot do
+
+Two of these are **platform** limits and two are **contract** limits, and the distinction decides
+who could close them:
+
+| Not available                       | Why                                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cross-container joins               | **Impossible on Cosmos.** A query addresses exactly one container; a second source in the `FROM` or a `JOIN` against another container is rejected with a 400 (measured, both spellings). Cosmos's `JOIN` unwinds an array **inside one item**, which the portable contract has no member for — reach the injected client for it.   |
+| Grouping / aggregation              | **Absent from the portable contract**, not from Cosmos. `NormalizedQuery` carries `where`/`filter`/`orderBy`/`limit`/`offset`/`select`/`cursor`, and `count` is its only aggregate; the dialect itself supports `GROUP BY` (measured). Closing this is a `common` widening every adapter would have to answer, not a Cosmos change. |
+| Continuation tokens                 | **Not returned by Cosmos** for any query carrying `ORDER BY` (measured, cross-partition and single-partition alike), which is why paging is the portable keyset cursor.                                                                                                                                                             |
+| `rawQuery` / `query()`              | Refused by name: a Cosmos query is scoped to one container, and the signature names none.                                                                                                                                                                                                                                           |
+| RUs, consistency, TTL, index policy | Outside the portable contract by design — no two candidate backends spell any of them alike. Configure them on the container, or reach the injected client.                                                                                                                                                                         |
+
 ### Running the guarded Cosmos suite
 
 `test/integration/real-cosmos-adapter.test.ts` is guarded on `COSMOS_ENDPOINT` and skipped without

@@ -1534,6 +1534,15 @@ within one container and one partition-key value and caps at 100 operations, and
 any of those bounds raises `CosmosTransactionScopeError` at that write. Reads inside a transaction
 observe committed state only — the deferred-write clause `IDataSource` documents.
 
+**What the arm deliberately cannot do**, split by who could close it. Two are platform limits:
+Cosmos rejects a **cross-container join** with a 400 (a query addresses one container; its own
+`JOIN` unwinds an array inside a single item), and returns **no continuation token** for an
+`ORDER BY` query. Two are contract limits: **grouping** is absent from `NormalizedQuery`, which
+carries no aggregate beyond `count` — the Cosmos dialect does support `GROUP BY`, so closing that is
+a `common` widening every adapter must answer — and request units, consistency levels, TTL and index
+policy are outside the portable contract by design (the M79 exclusion). An application needing any
+of them reaches the injected client, as it does for a Prisma raw query.
+
 `ICosmosClient` and the shapes it reaches (`ICosmosDatabase`, `ICosmosContainer`, `ICosmosItems`,
 `ICosmosItem`, `ICosmosQueryIterator`, `CosmosQuerySpec`, `CosmosQueryParameter`,
 `CosmosPartitionKeyValue`) are the exported injection seam, together with the response and operation
