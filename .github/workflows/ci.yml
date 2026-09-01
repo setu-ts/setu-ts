@@ -117,12 +117,19 @@ jobs:
       # pass — but curl IS in the image, and a POST ListTables answers 200 once
       # the emulator is ready (M80 §1A E3, measured). Like ElasticMQ above,
       # the probe has to match what readiness actually means here.
+      # DynamoDB Local answers a bare `GET /` with 400, so a naive `curl -f /`
+      # healthcheck can never pass (the ElasticMQ situation above). A POST
+      # ListTables does answer 200 — but ONLY with an `Authorization` header:
+      # without one the server replies 400 and `curl -f` exits 22, which is how
+      # this check first shipped and left the container permanently unhealthy.
+      # The credential is inert (DynamoDB Local never validates it); it is the
+      # header's PRESENCE that makes the request well-formed.
       dynamodb:
         image: amazon/dynamodb-local:latest
         ports:
           - 8000:8000
         options: >-
-          --health-cmd "curl -sf -X POST -H 'X-Amz-Target: DynamoDB_20120810.ListTables' -H 'Content-Type: application/x-amz-json-1.0' -d '{}' http://localhost:8000/"
+          --health-cmd "curl -sf -X POST -H 'X-Amz-Target: DynamoDB_20120810.ListTables' -H 'Content-Type: application/x-amz-json-1.0' -H 'Authorization: AWS4-HMAC-SHA256 Credential=ci/20260101/us-east-1/dynamodb/aws4_request' -d '{}' http://localhost:8000/"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
