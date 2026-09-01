@@ -202,6 +202,35 @@ describe('disconnect during an in-flight connect', () => {
     expect(() => adapter.createDataSource('Order')).toThrow(/not connected/);
   });
 
+  it('reconnects while the superseded attempt is STILL IN FLIGHT', async () => {
+    // The generation guard alone is not enough: an untagged in-flight promise is
+    // shared by the reconnecting call too, and that attempt discards its own
+    // result because its generation has moved — so `await connect()` resolved
+    // with the adapter still disconnected, and only a third call would fix it.
+    const { client } = createFakeCosmosClient({
+      containers: { Order: { partitionKeyPaths: ['/id'] } },
+    });
+    const inner = client.database('db');
+    const slow: ICosmosClient = {
+      database: () => ({
+        container: (id: string) => inner.container(id),
+        read: () =>
+          new Promise((resolve) => setTimeout(() => resolve(inner.read()), 30)) as ReturnType<
+            ICosmosDatabase['read']
+          >,
+      }),
+    };
+    const adapter = new CosmosAdapter({ client: slow, database: 'db' });
+    const superseded = adapter.connect();
+    await adapter.disconnect();
+    await adapter.connect();
+    expect(adapter.isReady()).toBe(true);
+    // The superseded attempt settling afterwards must not undo the reconnect.
+    await superseded;
+    expect(adapter.isReady()).toBe(true);
+    expect(() => adapter.createDataSource('Order')).not.toThrow();
+  });
+
   it('reconnects cleanly after that disconnect', async () => {
     const { client } = createFakeCosmosClient({
       containers: { Order: { partitionKeyPaths: ['/id'] } },

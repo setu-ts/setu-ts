@@ -62,8 +62,16 @@ export class CosmosAdapter implements IDatabaseAdapter {
   #client: ICosmosClient | null = null;
   #database: ICosmosDatabase | null = null;
   #partitionKeys: PartitionKeyResolver | null = null;
-  /** The in-flight `connect()`, so concurrent callers share one attempt. */
-  #connecting: Promise<void> | null = null;
+  /**
+   * The in-flight `connect()`, so concurrent callers share one attempt —
+   * TAGGED with the generation it belongs to.
+   *
+   * The tag is what makes sharing safe across a `disconnect()`. An untagged
+   * promise is shared by a later `connect()` too, and that attempt discards its
+   * own result because its generation has moved — so the reconnect RESOLVES
+   * with the adapter still disconnected, and only a third call would fix it.
+   */
+  #connecting: { readonly generation: number; readonly promise: Promise<void> } | null = null;
   #connected = false;
   /**
    * Bumped by `disconnect()`, so an attempt it superseded discards its result.
@@ -117,13 +125,21 @@ export class CosmosAdapter implements IDatabaseAdapter {
    */
   async connect(): Promise<void> {
     if (this.#client !== null) return;
-    if (this.#connecting !== null) return await this.#connecting;
-    const attempt = this.#establish();
-    this.#connecting = attempt;
+    const inFlight = this.#connecting;
+    // Only an attempt from the CURRENT generation may be shared: one started
+    // before a `disconnect()` will discard its own result, so awaiting it would
+    // report a connection that does not exist.
+    if (inFlight !== null && inFlight.generation === this.#generation) {
+      return await inFlight.promise;
+    }
+    const pending = { generation: this.#generation, promise: this.#establish() };
+    this.#connecting = pending;
     try {
-      await attempt;
+      await pending.promise;
     } finally {
-      this.#connecting = null;
+      // Clear only our own attempt: a `disconnect()` and reconnect during this
+      // one will have installed a newer attempt that must survive.
+      if (this.#connecting === pending) this.#connecting = null;
     }
   }
 
