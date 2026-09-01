@@ -12,6 +12,8 @@ import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find
 import type { SqlJsonDialect } from '../query/json-path.ts';
 import type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
 import type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
+import type { IDynamoClient } from '../adapters/dynamo/dynamo-client-types.ts';
+import type { DynamoEntityMapping } from '../adapters/dynamo/dynamo-mapping.ts';
 
 // Re-export query option types so consumers don't need internal paths.
 export type {
@@ -808,4 +810,114 @@ export type MongoAdapterOptions =
     readonly client: IMongoClient;
     /** The connection string; unread once a client is injected. */
     readonly url?: string;
+  });
+
+/**
+ * The options both {@linkcode DynamoAdapterOptions} arms share — everything
+ * that is optional regardless of how the client is supplied.
+ *
+ * It is exported because the arms below reference it, so a caller building a
+ * configuration incrementally can name the shared half.
+ *
+ * @since 0.1.0
+ */
+export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
+  /**
+   * Per-entity table and key mappings, keyed by the entity name passed to
+   * `getRepository()`.
+   *
+   * An entity with no entry uses its own name as the table and `'id'` as the
+   * partition key; a mapped entity states its partition key explicitly,
+   * because DynamoDB has no implicit key to guess — the write guards and
+   * every key builder read this attribute by name.
+   *
+   * @example
+   * ```typescript
+   * new DynamoAdapter({
+   *   region: 'us-east-1',
+   *   entities: { Order: { table: 'orders', partitionKey: 'tenantId', sortKey: 'orderId' } },
+   * });
+   * ```
+   * @since 0.1.0
+   */
+  readonly entities?: Readonly<Record<string, DynamoEntityMapping>>;
+
+  /**
+   * The maximum number of server pages one `findPage` call fetches while
+   * filling the page, defaulting to 10.
+   *
+   * DynamoDB applies `Limit` before `FilterExpression` (M80 plan §1A Q2), so a
+   * sparse filter can return pages of fewer rows — or zero rows — that are
+   * still not the last page. On reaching the bound the page returns with a
+   * non-`null` cursor, never a terminal one, so the bound can only cost an
+   * extra round trip, never a lost row.
+   *
+   * @since 0.1.0
+   */
+  readonly maxPageFetches?: number;
+}
+
+/**
+ * Options for the {@link DynamoAdapter} — the `'dynamodb'` arm.
+ *
+ * A **union of two arms**, so supplying neither `region` nor `client` is a
+ * compile error rather than a `connect()` throw — the guarantee every other
+ * built-in arm gives (`'prisma'` requires `prismaClient`, `'mongodb'`
+ * requires `url` or `client`, `'custom'` requires `adapter`). `region` is
+ * the lazy arm's required member because the AWS SDK cannot resolve a region
+ * from nothing, while `endpoint` stays optional: it names an emulator such as
+ * DynamoDB Local and is absent in production, where the region's own
+ * endpoint applies. Both members stay readable on either arm, so the adapter
+ * reads `options.region` and `options.client` without narrowing first.
+ *
+ * @example
+ * ```typescript
+ * const lazy: DynamoAdapterOptions = { region: 'us-east-1' };
+ * const injected: DynamoAdapterOptions = { client: myDynamoClient };
+ * ```
+ * @since 0.1.0
+ */
+export type DynamoAdapterOptions =
+  | (DynamoAdapterOptionsBase & {
+    /**
+     * The AWS region supplied to the constructed `DynamoDBClient`.
+     *
+     * Required on the lazy arm: the SDK's signer needs a region even against
+     * DynamoDB Local, and M80's suite pins one (`'us-east-1'`) rather than
+     * letting it vary.
+     */
+    readonly region: string;
+    /**
+     * An optional custom endpoint, such as DynamoDB Local. Absent in
+     * production, where the region's own endpoint applies.
+     */
+    readonly endpoint?: string;
+    /**
+     * AWS credentials or an SDK-supported credential provider. Omitted in
+     * production so the SDK's own provider chain applies.
+     */
+    readonly credentials?: unknown;
+    /** An already-constructed client; omit it to load the SDK lazily. */
+    readonly client?: IDynamoClient;
+  })
+  | (DynamoAdapterOptionsBase & {
+    /**
+     * An already-constructed {@linkcode IDynamoClient}.
+     *
+     * When present, the lazy `import('npm:@aws-sdk/client-dynamodb@^3')`
+     * never runs — the seam that keeps the branching unit-testable — and the
+     * client is never destroyed on `disconnect()`, because it belongs to the
+     * application.
+     */
+    readonly client: IDynamoClient;
+    /** The AWS region; unread once a client is injected. */
+    readonly region?: string;
+    /**
+     * The custom endpoint; unread once a client is injected. It stays an
+     * optional member on both arms so the adapter reads `options.endpoint`
+     * without narrowing first — the `MongoAdapterOptions` shape.
+     */
+    readonly endpoint?: string;
+    /** AWS credentials; unread once a client is injected. */
+    readonly credentials?: unknown;
   });
