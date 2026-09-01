@@ -387,7 +387,11 @@ describe('error propagation', () => {
       .rejects.toThrow(/boom 500/);
   });
 
-  it('reports a missing row when a replace update finds it gone at read time', async () => {
+  it('propagates a THROWN read failure rather than translating it to a missing row', async () => {
+    // A real point read RETURNS a 404 envelope, which `readDocument` maps to
+    // `null` and the caller reports as a missing row (asserted below). A read
+    // that THROWS is a transport failure that happens to carry a 404, so it is
+    // propagated verbatim rather than being relabelled as "no such row".
     const source = withFailingMember('read', 404);
     const payload: Record<string, unknown> = {};
     for (let i = 0; i < 11; i++) payload[`f${i}`] = i;

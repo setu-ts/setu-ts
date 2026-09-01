@@ -286,9 +286,14 @@ standalone `mongod` remains a valid deployment for an application that never ope
 Nothing is filtered, sorted or paginated in JavaScript.
 
 Cosmos DB's **MongoDB API** is a different wire protocol and is served by the `'mongodb'` arm
-pointed at a Cosmos connection string, not by this one. That route is documented rather than tested:
-the only emulator image carrying a MongoDB endpoint has expired and no longer starts, so it is
-**unverified against a live account**.
+pointed at a Cosmos connection string, not by this one. That route is documented rather than tested,
+and the reason is a **version floor rather than a dead image**: the emulator's MongoDB endpoint
+(`AZURE_COSMOS_EMULATOR_ENABLE_MONGODB_ENDPOINT`) tops out at API version **4.0**, which reports
+wire version 7, while the `npm:mongodb@^6` driver this package pins requires wire version 8 (MongoDB
+4.2). Measured: the endpoint completes a handshake and then refuses with
+`reports maximum wire version 7, but this version of the Node.js Driver requires at least 8`. A live
+Azure Cosmos for MongoDB account offers server versions above that floor, so the route is
+**unverified against a live account** rather than known to fail.
 
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
@@ -347,10 +352,14 @@ refused by name, because such a replace answers 404 rather than moving the item.
 special meaning, so nothing is escaped — the inverse of the SQL case. The match is
 **case-sensitive**.
 
-**Pagination** uses the framework's portable keyset cursor rather than a Cosmos continuation token,
-because Cosmos returns no continuation token for a query carrying `ORDER BY`. On a real account a
-multi-property `ORDER BY` needs a composite index, and keyset paging always adds the key column as
-its tiebreaker — so define a composite index over `(sort field, id)` for every container you page.
+**Pagination** uses the framework's portable keyset cursor rather than a Cosmos continuation token.
+That is this adapter's design choice, and it is what the tested backend supports: measured against
+the emulator, an `ORDER BY` query returns no continuation token even when `maxItemCount` is supplied
+as a query option — the option is ignored and the whole result set arrives in one page. The claim is
+scoped to what was measured rather than asserted of every Cosmos deployment, and a page without a
+stable sort is not a page in any case. On a real account a multi-property `ORDER BY` needs a
+composite index, and keyset paging always adds the key column as its tiebreaker — so define a
+composite index over `(sort field, id)` for every container you page.
 
 **`rawQuery` is refused by name** with `UnsupportedRawQueryError`. Cosmos has a SQL dialect, but
 every query is scoped to one container and `query(sql, params)` names none; an application reaches
@@ -378,8 +387,9 @@ own diagnostic — its status and per-operation codes, the only thing naming the
 
 ### What this adapter deliberately cannot do
 
-Two of these are **platform** limits and two are **contract** limits, and the distinction decides
-who could close them:
+Two of these are **platform** limits — what Cosmos itself refuses — and three are **contract**
+limits, which the portable data-access contract does not express. The distinction decides who could
+close them:
 
 | Not available                       | Why                                                                                                                                                                                                                                                                                                                                 |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

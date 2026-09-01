@@ -7966,24 +7966,36 @@ as a published arm of `PrismaSqlProvider`. For a framework that ships a first-cl
 backend (D1, KV, R2, Durable Objects) and four cloud message brokers, having no Azure database story
 is a gap in the same class, not a smaller one.
 
-**The probe this milestone opens with, mirroring M78's — TAKEN, and it decided the shape.** Cosmos
-exposes two wire APIs, and which one the framework should serve is a measurement rather than a
-preference. Measured against the real emulator (`azure-cosmos-emulator:vnext-preview`, 2026-09-01):
-the `npm:mongodb@6.21.0` driver **cannot speak to the NoSQL endpoint at all** — the connection is
-closed during the handshake — so `MongoAdapter` cannot serve it and a native adapter over
-`npm:@azure/cosmos@^4` is required. The **MongoDB-compatible** API is the other half, and it needs
-no new arm: it speaks the MongoDB wire protocol, so the existing `'mongodb'` arm serves it. That
-half of the probe is **unrunnable**, which is itself a finding: the only emulator image carrying a
-MongoDB endpoint (`azure-cosmos-emulator:mongodb`, built 2024-04-23) now refuses to start with
-`Error: The evaluation period has expired.`, and MCR carries no vCore/Mongo emulator repository. So
-the Mongo route is documented and labelled unverified against a live account (the M30b/M52
-precedent) rather than claimed as tested.
+**The probe this milestone opens with, mirroring M78's — the NoSQL half was TAKEN and decided the
+shape; the Mongo-compatible half remains unverified.** Cosmos exposes two wire APIs, and which one
+the framework should serve is a measurement rather than a preference. Measured against the real
+emulator (`azure-cosmos-emulator:vnext-preview`, 2026-09-01): the `npm:mongodb@6.21.0` driver
+**cannot speak to the NoSQL endpoint at all** — the connection is closed during the handshake — so
+`MongoAdapter` cannot serve it and a native adapter over `npm:@azure/cosmos@^4` is required. The
+**MongoDB-compatible** API is the other half, and it needs no new arm: it speaks the MongoDB wire
+protocol, so the existing `'mongodb'` arm serves it. That half of the probe is **unrunnable
+locally**, which is itself a finding — though not the one first recorded. The
+`azure-cosmos-emulator:mongodb` tag (built 2024-04-23) does refuse to start with
+`Error: The evaluation period has expired.`, but that tag is superseded: the maintained `:latest`
+image starts cleanly and serves a MongoDB endpoint under
+`AZURE_COSMOS_EMULATOR_ENABLE_MONGODB_ENDPOINT`. The real bar is a **version floor**. That endpoint
+tops out at API version **4.0**, reporting wire version 7, while the `npm:mongodb@^6` driver this
+package pins requires wire version 8 (MongoDB 4.2) — measured, the endpoint handshakes and then
+refuses with `reports maximum wire version 7 … requires at least 8`. A live Azure Cosmos for MongoDB
+account offers server versions above that floor, so the Mongo route is documented and labelled
+unverified against a live account (the M30b/M52 precedent) rather than claimed as tested or known to
+fail.
 
 **Pagination is the portable keyset cursor, not the continuation token.** This section assumed the
-token; measured, Cosmos returns **no continuation token for any `ORDER BY` query** — cross-partition
-or single-partition, with `maxItemCount` ignored there — and a page without a stable sort is not a
-page. M79's keyset predicate compiles natively and returns exactly the rows after the cursor, so the
-cursor member has its third consumer after all, just not through the mechanism this section named.
+token; measured **against the emulator**, an `ORDER BY` query returns **no continuation token** —
+cross-partition or single-partition, and with `maxItemCount` supplied as a query option it is
+ignored and the whole result set comes back in one page. Passing query-control options was tested
+precisely because it is the obvious explanation, and it does not change the answer there. The claim
+is scoped to the tested backend: a live account may well page an `ORDER BY` query, so what this
+adapter relies on is its own design choice — the portable keyset cursor — rather than a universal
+Cosmos limitation. A page without a stable sort is not a page in any case. M79's keyset predicate
+compiles natively and returns exactly the rows after the cursor, so the cursor member has its third
+consumer after all, just not through the mechanism this section named.
 
 - **In scope:** the probe (taken), then the native NoSQL adapter it justifies; per-entity
   partition-key mapping (Cosmos requires the partition key on every point read, so `findById` needs

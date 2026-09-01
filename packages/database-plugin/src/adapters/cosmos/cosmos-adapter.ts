@@ -65,6 +65,15 @@ export class CosmosAdapter implements IDatabaseAdapter {
   /** The in-flight `connect()`, so concurrent callers share one attempt. */
   #connecting: Promise<void> | null = null;
   #connected = false;
+  /**
+   * Bumped by `disconnect()`, so an attempt it superseded discards its result.
+   *
+   * Without it a `disconnect()` that lands while `connect()` is still in flight
+   * is undone: the attempt completes afterwards, re-assigns the client and sets
+   * `#connected = true`, and the adapter then reports ready and holds a client
+   * although shutdown has already run — with no second `disconnect()` coming.
+   */
+  #generation = 0;
 
   /**
    * Creates the adapter.
@@ -124,6 +133,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
    * @throws {Error} When the SDK cannot be loaded or the database is unreachable
    */
   async #establish(): Promise<void> {
+    const generation = this.#generation;
     const loader: CosmosClientLoader = this.#options.client !== undefined
       ? createInjectedClientLoader(this.#options.client)
       : await createLazyClientLoader(this.#options.endpoint as string, this.#options.key as string);
@@ -141,6 +151,9 @@ export class CosmosAdapter implements IDatabaseAdapter {
         }`,
       );
     }
+    // A `disconnect()` during this attempt bumped the generation, so the result
+    // is dropped rather than resurrecting a closed adapter.
+    if (generation !== this.#generation) return;
     this.#client = client;
     this.#database = database;
     this.#partitionKeys = new PartitionKeyResolver(database);
@@ -158,6 +171,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
    * @inheritdoc
    */
   disconnect(): Promise<void> {
+    this.#generation += 1;
     this.#client = null;
     this.#database = null;
     this.#partitionKeys = null;

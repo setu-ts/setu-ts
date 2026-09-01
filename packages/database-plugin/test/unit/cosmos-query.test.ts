@@ -248,3 +248,48 @@ describe('buildIdLookupQuery', () => {
     expect(built.parameters).toEqual([{ name: '@p0', value: 'o1' }]);
   });
 });
+
+describe('field-name refusal', () => {
+  it('refuses a segment carrying a backslash, which escapes the closing quote', () => {
+    // Cosmos SQL reads a backslash as an escape inside a quoted accessor, so a
+    // segment ending in one escapes the `"` that closes it and the service
+    // rejects the statement (measured against the emulator).
+    expect(() => fieldExpression('we\\', target)).toThrow(
+      /may not contain a double quote or a backslash/,
+    );
+    expect(() => fieldExpression(['a', 'b\\c'], target)).toThrow(/backslash/);
+  });
+
+  it('refuses a segment carrying a double quote', () => {
+    expect(() => fieldExpression('we"ird', target)).toThrow(/double quote/);
+  });
+});
+
+describe('equality against null', () => {
+  it('compiles an eq filter with a null comparand to IS_NULL, binding nothing', () => {
+    const spec = buildQuery(
+      query({ filter: { type: 'comparison', field: 'note', operator: 'eq', value: null } }),
+      target,
+    );
+    expect(spec.query).toContain('IS_NULL(c["note"])');
+    expect(spec.query).not.toContain('= @p');
+    expect(spec.parameters).toEqual([]);
+  });
+
+  it('compiles a null in the equality map to IS_NULL too, so both entry points agree', () => {
+    const spec = buildQuery(query({ where: { note: null, pk: 't1' } }), target);
+    expect(spec.query).toContain('IS_NULL(c["note"])');
+    // The non-null member is still bound rather than interpolated.
+    expect(spec.query).toContain('c["pk"] = @p0');
+    expect(spec.parameters).toEqual([{ name: '@p0', value: 't1' }]);
+  });
+
+  it('still binds a non-null comparand', () => {
+    const spec = buildQuery(
+      query({ filter: { type: 'comparison', field: 'note', operator: 'eq', value: 'x' } }),
+      target,
+    );
+    expect(spec.query).toContain('c["note"] = @p0');
+    expect(spec.parameters).toEqual([{ name: '@p0', value: 'x' }]);
+  });
+});

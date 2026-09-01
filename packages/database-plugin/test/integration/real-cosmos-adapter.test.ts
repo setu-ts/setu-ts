@@ -375,8 +375,8 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
     // expectation still comes from the Memory adapter's own evaluator.
     const container = await provision(`filters_${suffix}`, '/tenantId');
     const rows: Record<string, unknown>[] = [
-      { id: 'r1', tenantId: 't1', name: '50% off sale', rank: 1 },
-      { id: 'r2', tenantId: 't1', name: 'back\\slash', rank: 2 },
+      { id: 'r1', tenantId: 't1', name: '50% off sale', rank: 1, note: null },
+      { id: 'r2', tenantId: 't1', name: 'back\\slash', rank: 2, note: 'kept' },
       { id: 'r3', tenantId: 't1', name: 'a_b underscore', rank: 3 },
       { id: 'r4', tenantId: 't1', name: 'plain text', rank: 4 },
       { id: 'r5', tenantId: 't2', name: 'Bolt M6', rank: 5 },
@@ -439,6 +439,18 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
           label: 'contains matches the same term in its stored casing',
           filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'Bolt' },
         },
+        {
+          // `eq` against null compiles to IS_NULL rather than `= @pN`. r1 holds
+          // an explicit JSON null; r3-r5 omit the property entirely, and
+          // neither form matches an absent property — which is what the Memory
+          // reference answers too.
+          label: 'eq against an explicit null',
+          filter: { type: 'comparison', field: 'note', operator: 'eq', value: null },
+        },
+        {
+          label: 'eq against a non-null value is unaffected',
+          filter: { type: 'comparison', field: 'note', operator: 'eq', value: 'kept' },
+        },
         { label: 'an empty and matches everything', filter: { type: 'and', filters: [] } },
         { label: 'an empty or matches nothing', filter: { type: 'or', filters: [] } },
       ];
@@ -459,6 +471,10 @@ describe('CosmosAdapter against a real Cosmos emulator (guarded)', () => {
       // empty answers would satisfy the loop above while proving nothing.
       expect(answers.get('contains matches the same term in its stored casing')).toEqual(['r5']);
       expect(answers.get('contains is case-sensitive')).toEqual([]);
+      // The null pair must discriminate too: exactly the explicitly-null row,
+      // and never a row that simply omits the property.
+      expect(answers.get('eq against an explicit null')).toEqual(['r1']);
+      expect(answers.get('eq against a non-null value is unaffected')).toEqual(['r2']);
     } finally {
       await adapter.disconnect();
     }

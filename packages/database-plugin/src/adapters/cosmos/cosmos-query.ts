@@ -97,9 +97,16 @@ export function fieldExpression(
     (segment, index) => (index === 0 ? documentField(segment, target) : segment),
   );
   return segments.reduce<string>((expression, segment) => {
-    if (segment.includes('"')) {
+    // Cosmos SQL treats a backslash as an ESCAPE character inside a quoted
+    // accessor, so a segment ending in one escapes the closing quote and the
+    // service rejects the statement (measured). A double quote closes the
+    // accessor outright. Both are refused rather than escaped: `c["we\\ird"]`
+    // does work (also measured), but a field name carrying either character is
+    // pathological, and a named refusal is the D1 identifier precedent.
+    if (segment.includes('"') || segment.includes('\\')) {
       throw new Error(
-        `CosmosAdapter cannot address the field '${segment}': a field name may not contain a double quote`,
+        `CosmosAdapter cannot address the field '${segment}': a field name may not contain a ` +
+          'double quote or a backslash, because Cosmos SQL reads both inside a quoted accessor',
       );
     }
     return `${expression}["${segment}"]`;
@@ -140,7 +147,7 @@ export function filterExpression(
   const field = fieldExpression(filter.field, target);
   switch (filter.operator) {
     case 'eq':
-      return `${field} = ${bag.bind(filter.value)}`;
+      return equality(field, filter.value, bag);
     case 'contains':
       return `CONTAINS(${field}, ${bag.bind(filter.value)})`;
     case 'in':
@@ -148,6 +155,30 @@ export function filterExpression(
     default:
       return `${field} ${COMPARISON_OPERATORS[filter.operator]} ${bag.bind(filter.value)}`;
   }
+}
+
+/**
+ * Renders one equality predicate, using `IS_NULL` when the comparand is `null`.
+ *
+ * Microsoft's documentation states that `WHERE c.field = null` does not match a
+ * property whose value is JSON `null`, because the comparison does not evaluate
+ * to `true`. Measured against the emulator the BOUND form does match — a bound
+ * `@pN` carrying `null` and `IS_NULL` return the identical row set — so the two
+ * disagree, and this repository holds no live Cosmos account to settle it. The
+ * form both agree on is therefore emitted: `IS_NULL` is correct on the emulator
+ * and is what the service documents, so it cannot be wrong on either.
+ *
+ * A property that is ABSENT is matched by neither, which is what the Memory
+ * adapter's `===` also answers.
+ *
+ * @param field - The already-rendered field expression
+ * @param value - The comparand
+ * @param bag - The parameter accumulator
+ * @returns The predicate text
+ * @since 0.2.0
+ */
+export function equality(field: string, value: unknown, bag: ParameterBag): string {
+  return value === null ? `IS_NULL(${field})` : `${field} = ${bag.bind(value)}`;
 }
 
 /** The SQL spelling of each ordered-comparison operator. */
@@ -177,7 +208,7 @@ export function whereClause(
 ): string {
   const predicates: string[] = [];
   for (const [field, value] of Object.entries(where)) {
-    predicates.push(`${fieldExpression(field, target)} = ${bag.bind(value)}`);
+    predicates.push(equality(fieldExpression(field, target), value, bag));
   }
   if (filter !== undefined) predicates.push(filterExpression(filter, target, bag));
   return predicates.length === 0 ? '' : ` WHERE ${predicates.join(' AND ')}`;

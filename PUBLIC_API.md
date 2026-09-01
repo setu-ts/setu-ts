@@ -1483,7 +1483,8 @@ app.register(DatabasePlugin({
 
 Cosmos DB's **MongoDB API** is a different wire protocol; it is served by the `'mongodb'` arm
 pointed at a Cosmos connection string. That route is documented and **not verified against a live
-account** — the only emulator image carrying a MongoDB endpoint has expired and no longer starts.
+account**: the emulator's MongoDB endpoint tops out at API version 4.0 (wire version 7) while the
+`npm:mongodb@^6` driver this package pins requires wire version 8, so it cannot be exercised there.
 
 `CosmosAdapterOptions` is a **union of two arms**: one requires `endpoint` + `key`, the other
 requires `client` (an already-constructed structural `ICosmosClient`, which is how an Entra ID or
@@ -1520,10 +1521,12 @@ matches nothing natively. `offset`/`limit` are served natively, with the contrac
 translated rather than passed through (Cosmos refuses `LIMIT -1`, and refuses `OFFSET` without
 `LIMIT`).
 
-**Pagination uses the portable keyset cursor**, not a Cosmos continuation token: Cosmos returns no
-continuation token for a query carrying `ORDER BY`. On a real account, keyset paging therefore needs
-a composite index over `(sort field, id)` for each paged container, because the walk always adds the
-key column as its tiebreaker.
+**Pagination uses the portable keyset cursor**, not a Cosmos continuation token — this adapter's
+design choice, matching what the tested backend supports: measured against the emulator, an
+`ORDER BY` query returns no continuation token even with `maxItemCount` passed as a query option.
+The claim is scoped to that measurement rather than asserted of every Cosmos deployment. On a real
+account, keyset paging therefore needs a composite index over `(sort field, id)` for each paged
+container, because the walk always adds the key column as its tiebreaker.
 
 **`rawQuery` is refused by name** with `UnsupportedRawQueryError`: a Cosmos SQL query is scoped to
 one container and the signature names none, so an application reaches the injected client directly.
@@ -1543,11 +1546,12 @@ there would replace the batch's own per-operation diagnostic with a complaint ab
 **What the arm deliberately cannot do**, split by who could close it. Two are platform limits:
 Cosmos rejects a **cross-container join** with a 400 (a query addresses one container; its own
 `JOIN` unwinds an array inside a single item), and returns **no continuation token** for an
-`ORDER BY` query. Two are contract limits: **grouping** is absent from `NormalizedQuery`, which
-carries no aggregate beyond `count` — the Cosmos dialect does support `GROUP BY`, so closing that is
-a `common` widening every adapter must answer — and request units, consistency levels, TTL and index
-policy are outside the portable contract by design (the M79 exclusion). An application needing any
-of them reaches the injected client, as it does for a Prisma raw query.
+`ORDER BY` query on the tested emulator. Three are contract limits: **grouping** is absent from
+`NormalizedQuery`, which carries no aggregate beyond `count` — the Cosmos dialect does support
+`GROUP BY`, so closing that is a `common` widening every adapter must answer; `rawQuery` is refused
+because the committed signature names no container; and request units, consistency levels, TTL and
+index policy are outside the portable contract by design (the M79 exclusion). An application needing
+any of them reaches the injected client, as it does for a Prisma raw query.
 
 `ICosmosClient` and the shapes it reaches (`ICosmosDatabase`, `ICosmosContainer`, `ICosmosItems`,
 `ICosmosItem`, `ICosmosQueryIterator`, `CosmosQuerySpec`, `CosmosQueryParameter`,

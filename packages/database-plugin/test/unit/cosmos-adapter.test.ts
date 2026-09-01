@@ -7,7 +7,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import { UnsupportedRawQueryError } from '../../src/errors.ts';
-import type { ICosmosClient } from '../../src/adapters/cosmos/cosmos-client-types.ts';
+import type {
+  ICosmosClient,
+  ICosmosDatabase,
+} from '../../src/adapters/cosmos/cosmos-client-types.ts';
 import { createFakeCosmosClient } from '../fixtures/fake-cosmos-client.ts';
 
 function fakeClient(databaseReadStatus?: number) {
@@ -152,5 +155,47 @@ describe('CosmosAdapter.rawQuery', () => {
     await expect(pending).rejects.toThrow(UnsupportedRawQueryError);
     await expect(adapter.rawQuery('SELECT 1'))
       .rejects.toThrow(/scoped to one container and this signature names none/);
+  });
+});
+
+describe('disconnect during an in-flight connect', () => {
+  it('does not let the superseded attempt resurrect a closed adapter', async () => {
+    // `disconnect()` clears the state synchronously, so without a generation
+    // guard the in-flight `#establish()` completes afterwards, re-assigns the
+    // client and reports ready again — with no second `disconnect()` coming.
+    const { client } = createFakeCosmosClient({
+      containers: { Order: { partitionKeyPaths: ['/id'] } },
+    });
+    const slow: ICosmosClient = {
+      database: (id: string) => {
+        const real = client.database(id);
+        return {
+          read: () =>
+            new Promise((resolve) => setTimeout(() => resolve(real.read()), 30)) as ReturnType<
+              ICosmosDatabase['read']
+            >,
+          container: (containerId: string) => real.container(containerId),
+        };
+      },
+    };
+    const adapter = new CosmosAdapter({ client: slow, database: 'db' });
+    const connecting = adapter.connect();
+    await adapter.disconnect();
+    expect(adapter.isReady()).toBe(false);
+    await connecting;
+    expect(adapter.isReady()).toBe(false);
+    // The adapter is genuinely closed, not merely reporting so.
+    expect(() => adapter.createDataSource('Order')).toThrow(/not connected/);
+  });
+
+  it('reconnects cleanly after that disconnect', async () => {
+    const { client } = createFakeCosmosClient({
+      containers: { Order: { partitionKeyPaths: ['/id'] } },
+    });
+    const adapter = new CosmosAdapter({ client, database: 'db' });
+    await adapter.connect();
+    await adapter.disconnect();
+    await adapter.connect();
+    expect(adapter.isReady()).toBe(true);
   });
 });

@@ -3739,18 +3739,22 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   closed during the handshake), so `MongoAdapter` cannot serve it and a native `'cosmos'` arm over
   `npm:@azure/cosmos@^4` is required; the MongoDB-compatible API needs no new arm, since it speaks
   the MongoDB wire protocol and the existing `'mongodb'` arm serves it. **That half of the probe is
-  unrunnable and the unrunnability is the finding**: the only emulator image carrying a MongoDB
-  endpoint was built 2024-04-23 and now refuses to start with
-  `Error: The evaluation period has
-  expired.`, and MCR carries no vCore/Mongo emulator repository
-  — so the Mongo route is documented and labelled unverified against a live account (the M30b/M52
-  precedent) rather than claimed as tested. **No `common` change and no new capability token** — M79
-  committed every contract member this consumes.
+  unrunnable locally, and the reason is not the one first recorded**: the `:mongodb` tag (built
+  2024-04-23) does refuse to start with `Error: The evaluation period has expired.`, but it is
+  superseded — the maintained `:latest` image starts cleanly and serves a MongoDB endpoint. The real
+  bar is a VERSION FLOOR: that endpoint tops out at API version 4.0 (wire 7) while the
+  `npm:mongodb@^6` driver this package pins requires wire 8, so it handshakes and then refuses. A
+  live account offers versions above the floor, so the Mongo route is documented and labelled
+  unverified against a live account (the M30b/M52 precedent) rather than claimed as tested or known
+  to fail. **No `common` change and no new capability token** — M79 committed every contract member
+  this consumes.
 
   **Two ROADMAP claims did not survive measurement.** Pagination is the **portable keyset cursor**,
-  not the continuation token the section named: Cosmos returns **no** continuation token for any
-  `ORDER BY` query, cross-partition or single-partition, and ignores `maxItemCount` there, so a page
-  would have no stable sort. M79's keyset predicate compiles natively
+  not the continuation token the section named: measured **against the emulator**, an `ORDER BY`
+  query returns **no** continuation token, cross-partition or single-partition, and `maxItemCount`
+  supplied as a query option is ignored there — tested because it is the obvious explanation. The
+  claim is scoped to the tested backend rather than asserted of Cosmos generally; a page without a
+  stable sort is not a page in any case. M79's keyset predicate compiles natively
   (`(rank > @p0) OR (rank = @p0
   AND id > @p1)`) and returns exactly the rows after the cursor, so
   the cursor member gets its third consumer through a different mechanism — and the six adapters
