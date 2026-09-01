@@ -897,13 +897,14 @@ app.register(DatabasePlugin({
 `DatabasePluginOptions` is a union discriminated on `type`, and each arm names the options its
 adapter cannot run without: `'prisma'` requires `options.prismaClient`, `'drizzle'` requires both
 `options.drizzleInstance` and `options.drizzleTables`, `'mongodb'` requires `options.url` (or an
-injected `options.client`), and `'custom'` requires `adapter`. Omitting one is a **compile error**
-rather than a startup throw. The exported arms are `MemoryDatabaseOptions`, `PrismaDatabaseOptions`,
-`DrizzleDatabaseOptions`, `MongoDatabaseOptions` and `CustomDatabaseOptions`;
-`BuiltInDatabaseOptions` is the union of the four built-in arms and keeps its published name, so an
-existing annotation carrying a memory configuration still compiles. `PrismaAdapterOptions` and
-`DrizzleAdapterOptions` narrow `DatabaseAdapterOptions` for their arm; `MongoAdapterOptions` is its
-dedicated document-driver option bag.
+injected `options.client`), `'dynamodb'` requires `options.region` (or an injected
+`options.client`), and `'custom'` requires `adapter`. Omitting one is a **compile error** rather
+than a startup throw. The exported arms are `MemoryDatabaseOptions`, `PrismaDatabaseOptions`,
+`DrizzleDatabaseOptions`, `MongoDatabaseOptions`, `DynamoDatabaseOptions` and
+`CustomDatabaseOptions`; `BuiltInDatabaseOptions` is the union of the five built-in arms and keeps
+its published name, so an existing annotation carrying a memory configuration still compiles.
+`PrismaAdapterOptions` and `DrizzleAdapterOptions` narrow `DatabaseAdapterOptions` for their arm;
+`MongoAdapterOptions` and `DynamoAdapterOptions` are their arms' dedicated driver option bags.
 
 Three Prisma 7 prerequisites are the application's to supply and are documented in the package
 README: the driver-adapter package, a `prisma.config.ts` (Prisma 7 rejects `url` in
@@ -1388,6 +1389,15 @@ do {
 **both** a non-zero `offset` and a `cursor` is refused, because the two express contradictory
 positions — "skip this many from the start" and "after this row".
 
+`nextCursor` carries one guarantee: it is non-`null` exactly when a further page exists — including
+a zero-row page that is not the last — and it is never derived from `rows.length`. Backends mint it
+by one of two mechanisms. The row-based adapters fetch `limit + 1` rows and answer `null` precisely
+when the extra row is absent. The DynamoDB adapter instead carries the server's own continuation key
+(`LastEvaluatedKey`) inside the token and answers `null` exactly when the server returned none:
+DynamoDB applies `Limit` before `FilterExpression`, so a filtered page can return fewer rows than
+`limit` — or none — while further matching rows remain, and a row-count probe would report the walk
+terminal and silently drop rows.
+
 The cursor is opaque and carries a fingerprint of the sort it was minted under, so presenting it
 under a different `orderBy` is refused rather than served a silently wrong page. The resolved sort
 always ends in the entity's key columns: over rows sharing a sort value, a walk without that
@@ -1462,44 +1472,134 @@ return types are nameable from the package entry, as are the collection-level sh
 `IMongoDatabase.collection()` reaches (`IMongoCollection`, `IMongoCursor`,
 `IMongoCollectionFindOneAndUpdateOptions`, and the `MongoOptions`/`MongoWriteOptions` option bags).
 
+### DynamoDB backend (`'dynamodb'` arm)
+
+`DynamoAdapter` is a key-value backend over the native AWS SDK v3 client
+(`npm:@aws-sdk/client-dynamodb@^3`), registered through the same discriminated union as every other
+backend:
+
+```typescript
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+
+app.register(DatabasePlugin({
+  type: 'dynamodb',
+  options: {
+    region: 'us-east-1',
+    // `endpoint` addresses the local emulator in development and tests; absent
+    // in production, where the SDK's own endpoint resolution applies.
+    entities: { Order: { partitionKey: 'tenantId', sortKey: 'orderId' } },
+  },
+}));
+```
+
+`DynamoAdapterOptions` is the DynamoDB-specific option bag, and it is a **union of two arms**: one
+requires `region` (with an optional `endpoint` — the emulator address — and `credentials`), the
+other requires `client`, an already-constructed client behind the structural `IDynamoClient` facade.
+Supplying neither is a compile error rather than a `connect()` throw — the guarantee every other
+built-in arm gives. `DynamoAdapterOptionsBase` is the half both arms share (`entities`,
+`maxPageFetches`). When `client` is present the lazy `import('npm:@aws-sdk/client-dynamodb@^3')`
+never runs. The adapter owns marshalling and deliberately does **not** use `lib-dynamodb`'s
+`DocumentClient`: automatic marshalling would hide two facts the adapter must decide — DynamoDB has
+no date type, so the encoding of a `Date` comparison is the mapping's decision, and a DynamoDB `N`
+is an arbitrary-precision decimal that `Number()` degrades.
+
+`entities` is the per-entity mapping
+(`{ table?, partitionKey, sortKey?, indexes?, dateAttributes? }`); an unmapped entity uses its own
+name as the table and `'id'` as the partition key. A scalar key is accepted only for a
+partition-only entity — against a sort-keyed entity it is refused by name, because a `GetItem`
+carrying only the partition key is a server-side `ValidationException`. A composite key record is
+projected down to exactly the resolved key columns (an extra attribute is the same server-side
+refusal), and a record missing a column, or carrying an empty-string value, is refused by name. The
+key map itself is order-insensitive — the opposite of a Mongo compound `_id` subdocument — so no
+canonical ordering is applied.
+
+Both single-row writes are conditional, because the unguarded forms violate the `IDataSource`
+contracts silently — both measured against the real emulator. `create` carries
+`attribute_not_exists(<partitionKey>)`: an unguarded `PutItem` on an existing key silently
+overwrites the item and drops every attribute absent from the new one, answering `200`. `update`
+carries `attribute_exists(<partitionKey>)` with `ReturnValues: 'ALL_NEW'`: an unguarded `UpdateItem`
+on a missing key upserts a ghost item and returns it as though it were an update, so the conditional
+failure (`ConditionalCheckFailedException`) is what produces the documented rejection. `delete`
+reads `ReturnValues: 'ALL_OLD'` for its boolean — no read-before-delete round trip, and no constant
+`true`.
+
+The access path is resolved from the caller's query: an equality on the entity's partition key (or
+on a configured index's partition key, selecting that GSI) is a `Query`; everything else is a
+`Scan`, because a `Query` without a partition-key equality is a server-side `ValidationException` —
+the selection is forced, not an optimisation. Every predicate not folded into the key condition
+becomes a `FilterExpression`, and every attribute name is aliased through a generated placeholder,
+so a reserved word like `status` cannot reach the server raw. `orderBy` is served only when it names
+exactly the resolved access path's sort key (as `ScanIndexForward`); a non-key or multi-field
+`orderBy` is refused by name with `UnsupportedQueryFeatureError`, and a non-zero `offset` is refused
+the same way — both because the SDK **accepts and silently discards** the unrecognised parameter,
+answering `200` with unordered or unskipped rows, so forwarding one returns confidently wrong rows
+with no diagnostic anywhere in the stack.
+
+Pagination is the server's own continuation token carried inside the portable cursor codec, and the
+invariant is exact: `nextCursor` is non-`null` **if and only if** the response carried a
+`LastEvaluatedKey` — never derived from `rows.length`, because `Limit` is applied before
+`FilterExpression` and a filtered page can return fewer rows than the limit, or zero, and still not
+be the last. A bounded fill loop (`maxPageFetches`, default `10`) keeps fetching while a page is
+short and a token remains; at the bound it returns what it has with a non-`null` cursor, never a
+terminal page. `count()` loops to exhaustion for the same reason — a paged `COUNT` response
+under-reports past the first page. A `Date` comparison must be declared per attribute
+(`dateAttributes: { createdAt: 'iso' | 'epochMs' }`) or it is refused by name naming the option, and
+an out-of-range decimal `N` is preserved on read as its string rather than degraded through
+`Number()`. Transactions buffer writes and flush them as one `TransactWriteItems` at commit —
+refused by name past 100 items, or on two operations for one item key — and reads inside a
+transaction see committed state (no read-your-own-writes), documented rather than emulated.
+
+`IDynamoClient` and `DynamoSdkModule` are the exported injection seam, with
+`createInjectedDynamoLoader` and `createLazyDynamoLoader` as its two arms. The command and attribute
+shapes the client's members reference — `DynamoAttributeValue`, `DynamoEntityMapping`,
+`DynamoIndexMapping`, `DynamoDateEncoding`, and the `Dynamo*CommandInput`/`Output`/`Transact*`
+closure — are exported alongside them so the seam's return types stay nameable from the package
+entry. The internal target resolution, expression builder, marshaller and access-path resolver are
+not exported.
+
 ### Exports
 
-| Export                                                                                                                      | Kind                               |
-| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `DatabasePlugin`                                                                                                            | factory                            |
-| `DatabaseService`                                                                                                           | class                              |
-| `BaseRepository`, `UnitOfWork`                                                                                              | classes                            |
-| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`                                                          | classes                            |
-| `PrismaRepository`, `DrizzleRepository`                                                                                     | classes                            |
-| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                | classes                            |
-| `PageOptions`, `Page`                                                                                                       | types                              |
-| `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                   | types                              |
-| `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                       | types                              |
-| `encodeCursor`, `decodeCursor`, `keysetPredicate` (re-exported from `common`)                                               | functions                          |
-| `MongoTransactionUnavailableError`                                                                                          | class                              |
-| `PrismaSqlProvider`                                                                                                         | type                               |
-| `SqlJsonDialect`                                                                                                            | type                               |
-| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction` | functions                          |
-| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                              | types                              |
-| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                            | interfaces                         |
-| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                     | types                              |
-| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`                          | interfaces                         |
-| `MongoAdapterOptions` (union of two arms), `MongoAdapterOptionsBase`, `MongoEntityMapping`                                  | types                              |
-| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                             | interfaces                         |
-| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                             | types                              |
-| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                   | types                              |
-| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                 | re-exports from `common`           |
-| `DataSource`                                                                                                                | deprecated alias of `IDataSource`  |
-| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                   | interfaces (Mongo injection seam)  |
-| `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`          | interfaces (Mongo collection seam) |
+| Export                                                                                                                                                                                             | Kind                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `DatabasePlugin`                                                                                                                                                                                   | factory                            |
+| `DatabaseService`                                                                                                                                                                                  | class                              |
+| `BaseRepository`, `UnitOfWork`                                                                                                                                                                     | classes                            |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                | classes                            |
+| `PrismaRepository`, `DrizzleRepository`                                                                                                                                                            | classes                            |
+| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                       | classes                            |
+| `PageOptions`, `Page`                                                                                                                                                                              | types                              |
+| `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                          | types                              |
+| `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                              | types                              |
+| `encodeCursor`, `decodeCursor`, `keysetPredicate` (re-exported from `common`)                                                                                                                      | functions                          |
+| `MongoTransactionUnavailableError`                                                                                                                                                                 | class                              |
+| `PrismaSqlProvider`                                                                                                                                                                                | type                               |
+| `SqlJsonDialect`                                                                                                                                                                                   | type                               |
+| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction`                                                                        | functions                          |
+| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                                                                                                     | types                              |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                                                                                                   | interfaces                         |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                                                                                            | types                              |
+| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`, `DynamoDatabaseOptions`                                                                        | interfaces                         |
+| `MongoAdapterOptions` (union of two arms), `MongoAdapterOptionsBase`, `MongoEntityMapping`                                                                                                         | types                              |
+| `DynamoAdapterOptions` (union of two arms), `DynamoAdapterOptionsBase`, `DynamoEntityMapping`, `DynamoDateEncoding`, `DynamoIndexMapping`                                                          | types                              |
+| `IDynamoClient`, `DynamoAttributeValue`, `DynamoAttributeMap`, `DynamoExpressionAttributes`, `DynamoConditionExpression`, and the `Dynamo*CommandInput`/`Output`/`Transact*` command-shape closure | interfaces (DynamoDB client seam)  |
+| `DynamoClientConfiguration`, `DynamoClientLoader`, `DynamoCommandConstructor`, `DynamoSdkClient`, `DynamoSdkCommand`, `DynamoSdkModule`                                                            | types (DynamoDB SDK seam)          |
+| `createInjectedDynamoLoader`, `createLazyDynamoLoader`                                                                                                                                             | functions                          |
+| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                                                                                                    | interfaces                         |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                                                                                                    | types                              |
+| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                                                                                          | types                              |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                                                                                        | re-exports from `common`           |
+| `DataSource`                                                                                                                                                                                       | deprecated alias of `IDataSource`  |
+| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                                                                                          | interfaces (Mongo injection seam)  |
+| `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`                                                                                 | interfaces (Mongo collection seam) |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.
 
-`DatabaseAdapterType` gained `'custom'`; `DatabasePluginOptions` became a union discriminated on
-`type`. Both are additive for callers — every existing registration compiles unchanged. The
-`'mongodb'` arm is additive as well: `MongoDatabaseOptions` extends `DatabaseConnectionOptions` and
-carries its dedicated `MongoAdapterOptions` bag, so a registration carrying a memory, Prisma,
+`DatabaseAdapterType` gained `'custom'`, then `'mongodb'`, then `'dynamodb'`;
+`DatabasePluginOptions` became a union discriminated on `type`. All are additive for callers — every
+existing registration compiles unchanged. `MongoDatabaseOptions` and `DynamoDatabaseOptions` each
+extend `DatabaseConnectionOptions` and carry their arm's dedicated option bag
+(`MongoAdapterOptions`, `DynamoAdapterOptions`), so a registration carrying a memory, Prisma,
 Drizzle or custom configuration still compiles unchanged.
 
 ### Multiple Databases

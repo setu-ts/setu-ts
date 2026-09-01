@@ -63,21 +63,23 @@ await db.transaction(async (uow) => {
 
 ## Options
 
-| Option    | Type                                                         | Default     | Description                              |
-| --------- | ------------------------------------------------------------ | ----------- | ---------------------------------------- |
-| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'custom'` | `'memory'`  | Backend adapter.                         |
-| `name`    | `string`                                                     | `'default'` | Named connection for multi-database use. |
-| `options` | per-arm (see `type`)                                         | —           | Adapter-specific configuration.          |
+| Option    | Type                                                                       | Default     | Description                              |
+| --------- | -------------------------------------------------------------------------- | ----------- | ---------------------------------------- |
+| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'dynamodb' \| 'custom'` | `'memory'`  | Backend adapter.                         |
+| `name`    | `string`                                                                   | `'default'` | Named connection for multi-database use. |
+| `options` | per-arm (see `type`)                                                       | —           | Adapter-specific configuration.          |
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
 
 Each arm narrows `options`: `type: 'prisma'` requires `prismaClient`, `type: 'drizzle'` requires
-both `drizzleInstance` and `drizzleTables`, `type: 'mongodb'` requires either `url` or `client`, and
-`type: 'custom'` requires `adapter`. Those are required **by the union**, so omitting one is a
-compile error rather than a startup throw. The `'mongodb'` arm carries its own `MongoAdapterOptions`
-bag rather than the shared `DatabaseAdapterOptions` — see
-[the MongoDB backend](#the-mongodb-backend) below.
+both `drizzleInstance` and `drizzleTables`, `type: 'mongodb'` requires either `url` or `client`,
+`type: 'dynamodb'` requires either `region` or `client`, and `type: 'custom'` requires `adapter`.
+Those are required **by the union**, so omitting one is a compile error rather than a startup throw.
+The `'mongodb'` arm carries its own `MongoAdapterOptions` bag rather than the shared
+`DatabaseAdapterOptions` — see [the MongoDB backend](#the-mongodb-backend) below; the `'dynamodb'`
+arm carries its own `DynamoAdapterOptions` bag the same way (see the `DynamoDB backend` section of
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#dynamodb-backend-dynamodb-arm)).
 
 | `options` field      | Type                      | Default | Read by                                                                                                                                                              |
 | -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
