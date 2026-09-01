@@ -8502,7 +8502,7 @@ them would still silently select the wrong transport — complete (PR pending).
 | 77        | ✅     | executable prose assertions                         |
 | 78        | ✅     | document-database backends (Mongo adapter, PR #208) |
 | 79        | ✅     | portable data-access contract                       |
-| 80        | ⬜     | dynamodb backend                                    |
+| 80        | ✅     | dynamodb backend                                    |
 | 81        | ⬜     | cosmos db backend                                   |
 | 82        | ⬜     | cloud bigtable backend                              |
 | 83        | ✅     | module declarations + functional example            |

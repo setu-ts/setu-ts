@@ -75,6 +75,26 @@ All notable changes to this project are documented here. The format follows
   MongoDB refuses `$and: []`/`$or: []`. `contains` is case-sensitive and cannot be made otherwise —
   MongoDB does not apply collation to `$regex`. The arm accepts the shared `logQueries` option like
   every other built-in adapter.
+- Added a native DynamoDB backend to `@setu-ts/database-plugin`.
+  `DatabasePlugin({ type: 'dynamodb', options })` now provides repositories over AWS SDK v3,
+  including partition-and-sort-key mapping, GSI access-path selection, query translation, and
+  deferred transactions. `DynamoAdapterOptions` is a union of two arms — an injected `client` or a
+  lazy `endpoint`/`region`/`credentials` import (`import('npm:@aws-sdk/client-dynamodb@^3')`) — so a
+  registration supplying neither is a compile error rather than a lazy-import throw. `create`
+  carries `attribute_not_exists(<pk>)` because an unguarded `PutItem` on an existing key silently
+  overwrites the item and drops every attribute absent from the new one; `update` carries
+  `attribute_exists(<pk>)` + `ReturnValues: 'ALL_NEW'` because an unguarded `UpdateItem` on a
+  missing key silently creates a ghost item and returns it as though it were an update; both guard
+  failures surface as rejections naming the entity. Non-key `orderBy` and non-zero `offset` are
+  refused by name with `UnsupportedQueryFeatureError` — the SDK silently accepts and discards both,
+  so the refusal is a correctness requirement. `findPage`'s `nextCursor` is non-`null` iff the page
+  is non-terminal per `LastEvaluatedKey` — including a zero-row non-terminal page — and a GSI cursor
+  carries all four table+index key attributes; the fill loop is bounded by `maxPageFetches` (default
+  10), and a bounded return always carries a cursor so it is never mistaken for the last page.
+  `dateAttributes` declares the per-attribute `Date` encoding (`'iso' | 'epochMs'`); a `Date`
+  comparison against an undeclared attribute is refused by name. Transactions buffer writes and
+  flush one de-duplicated `TransactWriteItems` at commit (≤100 items; a duplicate item key and an
+  over-limit batch are rejected by name); `rollback` sends nothing.
 - Added the `check:docs` executable prose-assertion gate. Marked Markdown tables are evaluated in a
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.
