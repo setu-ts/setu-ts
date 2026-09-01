@@ -180,3 +180,67 @@ export class MongoTransactionUnavailableError extends Error {
     super(message);
   }
 }
+
+/**
+ * Thrown when a Cosmos transaction is asked to do something a transactional
+ * batch cannot express.
+ *
+ * Cosmos offers atomicity only as a batch that is scoped to ONE container and
+ * ONE partition-key value, and capped at 100 operations (measured: a second
+ * partition-key value answers 400, and the 101st operation is refused by the
+ * SDK). A Unit of Work that crosses one of those bounds is refused at the
+ * write that crosses it, rather than at commit, so the caller learns which
+ * write broke the scope instead of merely that the batch did.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await db.transaction(async (uow) => {
+ *     await uow.getRepository('Order').create({ id: 'o1', tenantId: 't1' });
+ *     await uow.getRepository('Order').create({ id: 'o2', tenantId: 't2' });
+ *   });
+ * } catch (err) {
+ *   if (err instanceof CosmosTransactionScopeError) {
+ *     console.error(err.message);
+ *   }
+ * }
+ * ```
+ * @since 0.2.0
+ */
+export class CosmosTransactionScopeError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'CosmosTransactionScopeError';
+
+  /**
+   * Creates the error.
+   *
+   * @param message - The full diagnostic, safe to log
+   */
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Thrown when a Cosmos update loses an optimistic-concurrency race.
+ *
+ * An update whose payload exceeds the per-request patch limit is served by a
+ * read-merge-replace, and that replace is conditional on the `_etag` the read
+ * returned. A concurrent writer between the two answers **412**, which is
+ * surfaced here rather than silently overwriting the other writer's row.
+ *
+ * @since 0.2.0
+ */
+export class CosmosConcurrentModificationError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'CosmosConcurrentModificationError';
+
+  /**
+   * Creates the error.
+   *
+   * @param message - The full diagnostic, safe to log
+   */
+  constructor(message: string) {
+    super(message);
+  }
+}

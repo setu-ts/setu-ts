@@ -12,6 +12,8 @@ import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find
 import type { SqlJsonDialect } from '../query/json-path.ts';
 import type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
 import type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
+import type { ICosmosClient } from '../adapters/cosmos/cosmos-client.ts';
+import type { CosmosEntityMapping } from '../adapters/cosmos/cosmos-mapping.ts';
 
 // Re-export query option types so consumers don't need internal paths.
 export type {
@@ -248,7 +250,13 @@ export interface IDatabaseService {
  *
  * @since 0.1.0
  */
-export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'mongodb' | 'custom';
+export type DatabaseAdapterType =
+  | 'prisma'
+  | 'drizzle'
+  | 'memory'
+  | 'mongodb'
+  | 'cosmos'
+  | 'custom';
 
 // Re-export the Mongo structural types the `'mongodb'` arm carries, so an
 // application annotating its configuration reaches them from the package
@@ -257,6 +265,22 @@ export type DatabaseAdapterType = 'prisma' | 'drizzle' | 'memory' | 'mongodb' | 
 // shapes stay internal.
 export type { IMongoClient, IMongoObjectIdCtor } from '../adapters/mongo/mongo-client.ts';
 export type { MongoEntityMapping } from '../adapters/mongo/mongo-mapping.ts';
+
+// Re-export the Cosmos structural types the `'cosmos'` arm carries. The client
+// facade is the only part of the inject-or-lazy seam application configuration
+// needs; the remaining SDK shapes stay internal.
+export type {
+  CosmosPartitionKeyValue,
+  CosmosQueryParameter,
+  CosmosQuerySpec,
+  ICosmosClient,
+  ICosmosContainer,
+  ICosmosDatabase,
+  ICosmosItem,
+  ICosmosItems,
+  ICosmosQueryIterator,
+} from '../adapters/cosmos/cosmos-client.ts';
+export type { CosmosEntityMapping } from '../adapters/cosmos/cosmos-mapping.ts';
 
 /**
  * The options every {@linkcode DatabasePluginOptions} arm shares.
@@ -363,7 +387,8 @@ export type BuiltInDatabaseOptions =
   | MemoryDatabaseOptions
   | PrismaDatabaseOptions
   | DrizzleDatabaseOptions
-  | MongoDatabaseOptions;
+  | MongoDatabaseOptions
+  | CosmosDatabaseOptions;
 
 /**
  * The arm supplying an externally-implemented backend.
@@ -808,4 +833,119 @@ export type MongoAdapterOptions =
     readonly client: IMongoClient;
     /** The connection string; unread once a client is injected. */
     readonly url?: string;
+  });
+
+/**
+ * The arm selecting the Cosmos adapter over the `@azure/cosmos` SDK — Azure
+ * Cosmos DB's NoSQL (SQL) API.
+ *
+ * `options.database` is required, and `options.endpoint` + `options.key` are
+ * required unless `options.client` is supplied, so a registration that forgets
+ * them is a compile error instead of a `connect()` throw — the guarantee every
+ * other built-in arm gives.
+ *
+ * Cosmos DB's **MongoDB API** is a different wire protocol and is served by the
+ * {@linkcode MongoDatabaseOptions} arm pointed at a Cosmos connection string,
+ * not by this one.
+ *
+ * @example
+ * ```typescript
+ * import { DatabasePlugin } from '@setu-ts/database-plugin';
+ *
+ * DatabasePlugin({
+ *   type: 'cosmos',
+ *   options: {
+ *     endpoint: 'https://my-account.documents.azure.com:443/',
+ *     key: cosmosKey,
+ *     database: 'app',
+ *   },
+ * });
+ * ```
+ * @since 0.2.0
+ */
+export interface CosmosDatabaseOptions extends DatabaseConnectionOptions {
+  /** Selects the Cosmos arm. */
+  readonly type: 'cosmos';
+  /** Cosmos adapter configuration; `database` and one credential form are required. */
+  readonly options: CosmosAdapterOptions;
+}
+
+/**
+ * The options both {@linkcode CosmosAdapterOptions} arms share — everything
+ * that is required or optional regardless of how the client is supplied.
+ *
+ * @since 0.2.0
+ */
+export interface CosmosAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
+  /**
+   * The database the containers live in. Required on both arms: a Cosmos
+   * endpoint encodes no database name, so unlike a MongoDB URI there is
+   * nothing to fall back to.
+   *
+   * @since 0.2.0
+   */
+  readonly database: string;
+
+  /**
+   * Per-entity container, primary-key and partition-key overrides, keyed by
+   * the entity name passed to `getRepository()`.
+   *
+   * An entity with no entry uses its own name as the container and `'id'` as
+   * the primary key, and its partition key is DISCOVERED from the container
+   * definition — which is both less to configure and safer, since a wrong
+   * partition key answers 404 rather than an error. A declared `partitionKey`
+   * is validated against the container and refused by name when it disagrees.
+   *
+   * @example
+   * ```typescript
+   * new CosmosAdapter({
+   *   endpoint,
+   *   key,
+   *   database: 'app',
+   *   containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
+   * });
+   * ```
+   * @since 0.2.0
+   */
+  readonly containers?: Readonly<Record<string, CosmosEntityMapping>>;
+}
+
+/**
+ * Options for the {@link CosmosAdapter} — the `'cosmos'` arm.
+ *
+ * A **union of two arms**, so supplying neither an `endpoint`/`key` pair nor a
+ * `client` is a compile error rather than a `connect()` throw. Both members
+ * stay readable on either arm, so the adapter reads `options.client` and
+ * `options.endpoint` without narrowing first. An application using Entra ID
+ * (managed identity) constructs its own client and injects it, which is why
+ * this carries no credential surface beyond the account key.
+ *
+ * @example
+ * ```typescript
+ * const lazy: CosmosAdapterOptions = { endpoint, key, database: 'app' };
+ * const injected: CosmosAdapterOptions = { client: myCosmosClient, database: 'app' };
+ * ```
+ * @since 0.2.0
+ */
+export type CosmosAdapterOptions =
+  | (CosmosAdapterOptionsBase & {
+    /** The account endpoint, used to construct a client when none is injected. */
+    readonly endpoint: string;
+    /** The account key. */
+    readonly key: string;
+    /** An already-constructed client; omit it to load the SDK lazily. */
+    readonly client?: ICosmosClient;
+  })
+  | (CosmosAdapterOptionsBase & {
+    /**
+     * An already-constructed `ICosmosClient`.
+     *
+     * When present, the lazy `import('npm:@azure/cosmos@^4')` never runs — the
+     * seam that keeps the branching unit-testable.
+     */
+    readonly client: ICosmosClient;
+    /** The account endpoint; unread once a client is injected. */
+    readonly endpoint?: string;
+    /** The account key; unread once a client is injected. */
+    readonly key?: string;
   });
