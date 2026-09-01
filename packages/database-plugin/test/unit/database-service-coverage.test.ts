@@ -15,6 +15,8 @@ import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { createDrizzleDatabase, getDrizzleDatabase } from '../../src/index.ts';
 import { DRIZZLE_QUERY_HANDLE } from '../../src/query/drizzle-query.ts';
 import { createFakeDrizzleInstance } from '../fixtures/fake-drizzle-instance.ts';
+import type { IDynamoClient } from '../../src/adapters/dynamo/dynamo-client-types.ts';
+import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';
 
 describe('DatabaseService — CRUD read-back and logging coverage', () => {
   let adapter: MemoryAdapter;
@@ -124,6 +126,74 @@ describe('DatabaseService — CRUD read-back and logging coverage', () => {
       expect(logStrs.some((s) => s.includes('update'))).toBe(true);
       expect(logStrs.some((s) => s.includes('delete'))).toBe(true);
       expect(logStrs.some((s) => s.includes('count'))).toBe(true);
+    });
+
+    it('adds accessPath only for DynamoDB Query and Scan reads', async () => {
+      const dynamoLogs: Array<{ msg: string; meta?: Record<string, unknown> }> = [];
+      const client: IDynamoClient = {
+        query: () => Promise.resolve({ Items: [{ pk: { S: 'query' } }] }),
+        scan: () => Promise.resolve({ Items: [{ pk: { S: 'scan' } }] }),
+        getItem: () => Promise.resolve({}),
+        putItem: () => Promise.resolve({}),
+        updateItem: () => Promise.resolve({}),
+        deleteItem: () => Promise.resolve({}),
+        transactWriteItems: () => Promise.resolve({}),
+        destroy() {},
+      };
+      const dynamoService = new DatabaseService(
+        adapter as unknown as IDatabaseAdapter,
+        () =>
+          createDynamoDataSource(client, 'Item', {
+            Item: {
+              partitionKey: 'pk',
+              indexes: { byStatus: { partitionKey: 'status' } },
+            },
+          }),
+        'dynamodb',
+        { logQueries: true },
+        {
+          debug: (msg: string, meta?: Record<string, unknown>) => {
+            dynamoLogs.push(meta === undefined ? { msg } : { msg, meta });
+          },
+        },
+        () => 10,
+      );
+
+      const repo = dynamoService.getRepository<Record<string, unknown>>('Item');
+      await repo.findAll({ where: { pk: 'query' } });
+      await repo.findAll({ where: { status: 'open' } });
+      await repo.findAll({ where: { value: 1 } });
+      await repo.count({ where: { pk: 'query' } });
+      await repo.findPage({ where: { pk: 'query' }, limit: 1 });
+
+      expect(dynamoLogs).toEqual([
+        {
+          msg: '[Item] findAll',
+          meta: { operation: 'findAll', durationMs: 0, accessPath: 'Query' },
+        },
+        {
+          msg: '[Item] findAll',
+          meta: { operation: 'findAll', durationMs: 0, accessPath: 'byStatus' },
+        },
+        {
+          msg: '[Item] findAll',
+          meta: { operation: 'findAll', durationMs: 0, accessPath: 'Scan' },
+        },
+        {
+          msg: '[Item] count',
+          meta: { operation: 'count', durationMs: 0, accessPath: 'Query' },
+        },
+        {
+          msg: '[Item] findPage',
+          meta: { operation: 'findPage', durationMs: 0, accessPath: 'Query' },
+        },
+      ]);
+
+      const memoryRepo = service.getRepository<Record<string, unknown>>('MemoryItem');
+      await memoryRepo.findAll();
+      const memoryLog = logs.find((entry) => entry.msg === '[MemoryItem] findAll');
+      expect(memoryLog?.meta).toBeDefined();
+      expect('accessPath' in (memoryLog?.meta ?? {})).toBe(false);
     });
   });
 

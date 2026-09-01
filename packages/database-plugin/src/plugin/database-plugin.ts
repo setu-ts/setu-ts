@@ -15,6 +15,7 @@ import type {
   DatabaseAdapterOptions,
   DatabaseAdapterType,
   DatabasePluginOptions,
+  DynamoAdapterOptions,
   IDatabaseService,
   MongoAdapterOptions,
 } from '../interfaces/index.ts';
@@ -23,6 +24,7 @@ import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
 import { MongoAdapter } from '../adapters/mongo/mongo-adapter.ts';
+import { DynamoAdapter } from '../adapters/dynamo/dynamo-adapter.ts';
 import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../repositories/base-repository.ts';
@@ -177,6 +179,11 @@ function createAdapter(
       // arms use; `buildAdapterOptions` carries them through, so the arm is built
       // from `adapterOptions` just like the others — no cast to a concrete adapter.
       return Promise.resolve(new MongoAdapter(adapterOptions as MongoAdapterOptions));
+    case 'dynamodb':
+      // Dynamo mirrors Mongo: the options ride the same shared bag
+      // `buildAdapterOptions` carries through, so the arm is built from
+      // `adapterOptions` just like the others.
+      return Promise.resolve(new DynamoAdapter(adapterOptions as DynamoAdapterOptions));
     case 'memory':
     default:
       return Promise.resolve(new MemoryAdapter());
@@ -220,9 +227,17 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('objectIdCtor');
   carry('database');
   carry('collections');
+  // The DynamoDB arm's keys ride the same bag: the injected arm reuses
+  // `client`, and the lazy arm's `region`/`credentials` plus the `findPage`
+  // fetch bound are carried so the adapter reads what the application
+  // supplied. `endpoint` is carried once below — DynamoDB reads it as the
+  // emulator address and Cosmos as the account URL, and each adapter reads
+  // only the shape it understands.
+  carry('region');
+  carry('credentials');
+  carry('maxPageFetches');
   // The `'cosmos'` arm's keys. `client` and `database` are already carried
-  // above and are shared with the `'mongodb'` arm — each adapter reads only
-  // the shape it understands.
+  // above and are shared with the `'mongodb'` arm.
   carry('endpoint');
   carry('key');
   carry('containers');

@@ -116,12 +116,12 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ### Data
 
-| Feature       | Status | Package                | Description                                                            |
-| ------------- | ------ | ---------------------- | ---------------------------------------------------------------------- |
-| Database      | ✅     | `database-plugin`      | Prisma, Drizzle, memory — repository pattern and Unit of Work          |
-| Caching       | ✅     | `cache-plugin`         | Memory (LRU), Redis, noop; transparent response caching                |
-| Storage       | ✅     | `storage-plugin`       | S3, B2, GCS, Azure Blob, local, memory; upload middleware              |
-| Multi-tenancy | ✅     | `multi-tenancy-plugin` | Subdomain/header/path/JWT resolution; schema/database/column isolation |
+| Feature       | Status | Package                | Description                                                                      |
+| ------------- | ------ | ---------------------- | -------------------------------------------------------------------------------- |
+| Database      | ✅     | `database-plugin`      | Memory, Prisma, Drizzle, MongoDB, DynamoDB — repository pattern and Unit of Work |
+| Caching       | ✅     | `cache-plugin`         | Memory (LRU), Redis, noop; transparent response caching                          |
+| Storage       | ✅     | `storage-plugin`       | S3, B2, GCS, Azure Blob, local, memory; upload middleware                        |
+| Multi-tenancy | ✅     | `multi-tenancy-plugin` | Subdomain/header/path/JWT resolution; schema/database/column isolation           |
 
 ### Messaging and background work
 

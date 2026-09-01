@@ -24,6 +24,16 @@ import {
   type NativeDrizzleQueryHandle,
   readDrizzleQueryHandle,
 } from '../query/drizzle-query.ts';
+import type { IDynamoAccessPathReportingDataSource } from '../adapters/dynamo/dynamo-data-source.ts';
+
+/**
+ * Reads DynamoDB's optional access-path diagnostic without widening the
+ * portable data-source contract all adapters implement.
+ */
+function accessPathOf(dataSource: DataSource): string | undefined {
+  const reporter = dataSource as DataSource & Partial<IDynamoAccessPathReportingDataSource>;
+  return reporter.getLastAccessPath?.();
+}
 
 // ---------------------------------------------------------------------------
 // Internal generic repository (was `MemoryRepository` — renamed because it
@@ -212,9 +222,11 @@ export class DatabaseService implements IDatabaseService {
         async findPage(query: NormalizedQuery): Promise<PageResult> {
           const start = now();
           const result = await findPageImpl(query);
+          const accessPath = accessPathOf(ds);
           logger.debug(`[${entity}] findPage`, {
             operation: 'findPage',
             durationMs: now() - start,
+            ...(accessPath === undefined ? {} : { accessPath }),
           });
           return result;
         },
@@ -222,7 +234,12 @@ export class DatabaseService implements IDatabaseService {
       async findAll(query) {
         const start = now();
         const result = await ds.findAll(query);
-        logger.debug(`[${entity}] findAll`, { operation: 'findAll', durationMs: now() - start });
+        const accessPath = accessPathOf(ds);
+        logger.debug(`[${entity}] findAll`, {
+          operation: 'findAll',
+          durationMs: now() - start,
+          ...(accessPath === undefined ? {} : { accessPath }),
+        });
         return result;
       },
       async findById(id) {
@@ -255,7 +272,12 @@ export class DatabaseService implements IDatabaseService {
       async count(where, filter) {
         const start = now();
         const result = await ds.count(where, filter);
-        logger.debug(`[${entity}] count`, { operation: 'count', durationMs: now() - start });
+        const accessPath = accessPathOf(ds);
+        logger.debug(`[${entity}] count`, {
+          operation: 'count',
+          durationMs: now() - start,
+          ...(accessPath === undefined ? {} : { accessPath }),
+        });
         return result;
       },
     };

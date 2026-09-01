@@ -3733,6 +3733,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tests across two packages (§11.1), trimmed to the one thing the second copy uniquely proves —
   evaluating the predicate against real rows through `matchesFilter`, since asserting the tree's
   SHAPE proves only that it was built) — complete (PR #217)
+- **Milestone 80** (`database-plugin` — DynamoDB backend: the fifth built-in arm,
+  `DatabasePlugin({ type: 'dynamodb', options })`, served by `DynamoAdapter` over AWS SDK v3 loaded
+  lazily (`import('npm:@aws-sdk/client-dynamodb@^3')`) or injected — never a hard dependency.
+  **`DynamoAdapterOptions` is a union of two arms** (an inject arm carrying `client`, a lazy arm
+  carrying `endpoint`/`region`/`credentials`), so a registration supplying neither is a compile
+  error rather than a runtime throw — the M78 Mongo options precedent. **The two conditional-write
+  guards are measured correctness requirements, not defensive polish**: an unguarded `PutItem` on an
+  existing key silently overwrites the item AND drops every attribute absent from the new item (P9),
+  so `create` carries `attribute_not_exists(<pk>)`; an unguarded `UpdateItem` on a missing key
+  silently fabricates a ghost item and returns it as though it were an update (P6), so `update`
+  carries `attribute_exists(<pk>)` + `ReturnValues: 'ALL_NEW'`; `ConditionalCheckFailedException` is
+  translated into a rejection naming the entity. **Non-key `orderBy` and any non-zero `offset` are
+  refused by name** because the SDK silently accepts and discards both parameters — the refusal is
+  the only honest behaviour available. **The `LastEvaluatedKey` cursor invariant**: `nextCursor` is
+  non-`null` iff the page is non-terminal, including a zero-row non-terminal page (the case that
+  falsified `common`'s old row-count JSDoc mechanism, generalised in M79), a GSI cursor carries all
+  four table+index key attributes, and the `findPage` fill loop is bounded by `maxPageFetches`
+  (default 10) so a bounded return is never marked terminal. `dateAttributes` declares the
+  per-attribute `Date` encoding (`'iso' | 'epochMs'`); a `Date` comparison against an undeclared
+  attribute is refused by name. Transactions buffer writes and flush one de-duplicated
+  `TransactWriteItems` at commit (≤100 items; a duplicate item key and an over-limit batch reject by
+  name), while `rollback` sends nothing. CI gained a DynamoDB Local service and a guarded
+  ten-scenario real-emulator suite) — complete (PR #221).
 - **Milestone 81** (`packages/database-plugin` — Azure Cosmos DB backend. **The probe the ROADMAP
   opens the milestone with was taken, and it decided the shape.** Measured against the real
   emulator, the `npm:mongodb` driver cannot speak to the NoSQL endpoint at all (the connection is
@@ -3799,8 +3822,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   guarded suite is local-only — the emulator image is 2.5 GB, the same reason the Pub/Sub and
   Service Bus suites are — with the `docker run` and the health line in the package README) —
   complete (PR #220)
-- **Next milestone** — **M80** (DynamoDB backend), gated on M79 and now unblocked; **M82** (Cloud
-  Bigtable backend) is the remaining backend, also gated on M79.
+- **Next milestone** — **M82** (Cloud Bigtable backend), gated on M79 and now unblocked: it is the
+  last of the three backends M78 deferred, and the only one still unowned.
 
 ## Verification (run before declaring any work done)
 

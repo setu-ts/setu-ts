@@ -63,23 +63,25 @@ await db.transaction(async (uow) => {
 
 ## Options
 
-| Option    | Type                                                                     | Default     | Description                              |
-| --------- | ------------------------------------------------------------------------ | ----------- | ---------------------------------------- |
-| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'cosmos' \| 'custom'` | `'memory'`  | Backend adapter.                         |
-| `name`    | `string`                                                                 | `'default'` | Named connection for multi-database use. |
-| `options` | per-arm (see `type`)                                                     | —           | Adapter-specific configuration.          |
+| Option    | Type                                                                                   | Default     | Description                              |
+| --------- | -------------------------------------------------------------------------------------- | ----------- | ---------------------------------------- |
+| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'dynamodb' \| 'cosmos' \| 'custom'` | `'memory'`  | Backend adapter.                         |
+| `name`    | `string`                                                                               | `'default'` | Named connection for multi-database use. |
+| `options` | per-arm (see `type`)                                                                   | —           | Adapter-specific configuration.          |
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
 
 Each arm narrows `options`: `type: 'prisma'` requires `prismaClient`, `type: 'drizzle'` requires
 both `drizzleInstance` and `drizzleTables`, `type: 'mongodb'` requires either `url` or `client`,
-`type: 'cosmos'` requires `database` plus either an `endpoint`/`key` pair or a `client`, and
-`type: 'custom'` requires `adapter`. Those are required **by the union**, so omitting one is a
-compile error rather than a startup throw. The `'mongodb'` arm carries its own `MongoAdapterOptions`
-bag rather than the shared `DatabaseAdapterOptions` — see
-[the MongoDB backend](#the-mongodb-backend) below, and
-[the Azure Cosmos DB backend](#the-azure-cosmos-db-backend) for the `'cosmos'` arm's own bag.
+`type: 'dynamodb'` requires either `region` or `client`; `type: 'cosmos'` requires `database` plus
+either an `endpoint`/`key` pair or a `client`; and `type: 'custom'` requires `adapter`. Those are
+required **by the union**, so omitting one is a compile error rather than a startup throw. Three
+arms carry their own option bag rather than the shared `DatabaseAdapterOptions`: the `'mongodb'` arm
+its `MongoAdapterOptions` — see [the MongoDB backend](#the-mongodb-backend) below — the `'cosmos'`
+arm its `CosmosAdapterOptions`, see [the Azure Cosmos DB backend](#the-azure-cosmos-db-backend), and
+the `'dynamodb'` arm its `DynamoAdapterOptions` (see the `DynamoDB backend` section of
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#dynamodb-backend-dynamodb-arm)).
 
 | `options` field      | Type                      | Default | Read by                                                                                                                                                              |
 | -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -512,6 +514,8 @@ imperative begin/commit.
 | ----------------------------------------- | --------- |
 | `createDrizzleDatabase`                   | function  |
 | `createDrizzleDataSource`                 | function  |
+| `createInjectedDynamoLoader`              | function  |
+| `createLazyDynamoLoader`                  | function  |
 | `createPrismaDataSource`                  | function  |
 | `DatabasePlugin`                          | function  |
 | `decodeCursor`                            | function  |
@@ -526,6 +530,7 @@ imperative begin/commit.
 | `DatabaseService`                         | class     |
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
+| `DynamoAdapter`                           | class     |
 | `MemoryAdapter`                           | class     |
 | `MongoAdapter`                            | class     |
 | `MongoTransactionUnavailableError`        | class     |
@@ -561,6 +566,34 @@ imperative begin/commit.
 | `DrizzleDatabase`                         | interface |
 | `DrizzleDatabaseIdentity`                 | interface |
 | `DrizzleDatabaseOptions`                  | interface |
+| `DynamoAdapterOptionsBase`                | interface |
+| `DynamoAttributeValue`                    | interface |
+| `DynamoClientConfiguration`               | interface |
+| `DynamoClientLoader`                      | interface |
+| `DynamoConditionExpression`               | interface |
+| `DynamoDatabaseOptions`                   | interface |
+| `DynamoDeleteItemCommandInput`            | interface |
+| `DynamoDeleteItemCommandOutput`           | interface |
+| `DynamoEntityMapping`                     | interface |
+| `DynamoExpressionAttributes`              | interface |
+| `DynamoGetItemCommandInput`               | interface |
+| `DynamoGetItemCommandOutput`              | interface |
+| `DynamoIndexMapping`                      | interface |
+| `DynamoPutItemCommandInput`               | interface |
+| `DynamoPutItemCommandOutput`              | interface |
+| `DynamoQueryCommandInput`                 | interface |
+| `DynamoReadCommandInput`                  | interface |
+| `DynamoReadCommandOutput`                 | interface |
+| `DynamoSdkClient`                         | interface |
+| `DynamoSdkCommand`                        | interface |
+| `DynamoSdkModule`                         | interface |
+| `DynamoTransactDelete`                    | interface |
+| `DynamoTransactPut`                       | interface |
+| `DynamoTransactUpdate`                    | interface |
+| `DynamoTransactWriteItem`                 | interface |
+| `DynamoTransactWriteItemsCommandInput`    | interface |
+| `DynamoUpdateItemCommandInput`            | interface |
+| `DynamoUpdateItemCommandOutput`           | interface |
 | `FindOptions`                             | interface |
 | `IAdapterTransaction`                     | interface |
 | `ICosmosClient`                           | interface |
@@ -572,6 +605,7 @@ imperative begin/commit.
 | `IDatabaseAdapter`                        | interface |
 | `IDatabaseService`                        | interface |
 | `IDataSource`                             | interface |
+| `IDynamoClient`                           | interface |
 | `IMongoClient`                            | interface |
 | `IMongoCollection`                        | interface |
 | `IMongoCollectionFindOneAndUpdateOptions` | interface |
@@ -603,6 +637,12 @@ imperative begin/commit.
 | `DataSource`                              | type      |
 | `DrizzleTransaction`                      | type      |
 | `DrizzleTransactionBridge`                | type      |
+| `DynamoAdapterOptions`                    | type      |
+| `DynamoAttributeMap`                      | type      |
+| `DynamoCommandConstructor`                | type      |
+| `DynamoDateEncoding`                      | type      |
+| `DynamoScanCommandInput`                  | type      |
+| `DynamoTransactWriteItemsCommandOutput`   | type      |
 | `EntityKey`                               | type      |
 | `FilterComparison`                        | type      |
 | `FilterExpression`                        | type      |

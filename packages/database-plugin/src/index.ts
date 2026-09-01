@@ -27,6 +27,9 @@ export type {
   DrizzleAdapterOptions,
   DrizzleCompositeKeyOptions,
   DrizzleDatabaseOptions,
+  DynamoAdapterOptions,
+  DynamoAdapterOptionsBase,
+  DynamoDatabaseOptions,
   FindOptions,
   IDatabaseService,
   IRepository,
@@ -157,5 +160,53 @@ export { createDrizzleDataSource } from './adapters/drizzle/drizzle-repository.t
 // Mongo adapter — document-store backend over the native `mongodb` driver.
 export { MongoAdapter } from './adapters/mongo/mongo-adapter.ts';
 
+// DynamoDB adapter — key-value backend over the native AWS SDK v3 client.
+// The structural closure keeps the client and SDK seams nameable from this
+// entrypoint, matching the MongoDB adapter's injected-client precedent. The
+// target resolution, expression builder, marshaller, and access-path resolver
+// remain internal (the `D1Target` / `MongoTarget` precedent).
+export { DynamoAdapter } from './adapters/dynamo/dynamo-adapter.ts';
+export {
+  createInjectedDynamoLoader,
+  createLazyDynamoLoader,
+} from './adapters/dynamo/dynamo-client.ts';
+export type {
+  DynamoClientConfiguration,
+  DynamoClientLoader,
+  DynamoCommandConstructor,
+  DynamoSdkClient,
+  DynamoSdkCommand,
+  DynamoSdkModule,
+} from './adapters/dynamo/dynamo-client.ts';
+export type {
+  DynamoAttributeMap,
+  DynamoAttributeValue,
+  DynamoConditionExpression,
+  DynamoDeleteItemCommandInput,
+  DynamoDeleteItemCommandOutput,
+  DynamoExpressionAttributes,
+  DynamoGetItemCommandInput,
+  DynamoGetItemCommandOutput,
+  DynamoPutItemCommandInput,
+  DynamoPutItemCommandOutput,
+  DynamoQueryCommandInput,
+  DynamoReadCommandInput,
+  DynamoReadCommandOutput,
+  DynamoScanCommandInput,
+  DynamoTransactDelete,
+  DynamoTransactPut,
+  DynamoTransactUpdate,
+  DynamoTransactWriteItem,
+  DynamoTransactWriteItemsCommandInput,
+  DynamoTransactWriteItemsCommandOutput,
+  DynamoUpdateItemCommandInput,
+  DynamoUpdateItemCommandOutput,
+  IDynamoClient,
+} from './adapters/dynamo/dynamo-client-types.ts';
+export type {
+  DynamoDateEncoding,
+  DynamoEntityMapping,
+  DynamoIndexMapping,
+} from './adapters/dynamo/dynamo-mapping.ts';
 // Cosmos adapter — Azure Cosmos DB NoSQL-API backend over `@azure/cosmos`.
 export { CosmosAdapter } from './adapters/cosmos/cosmos-adapter.ts';

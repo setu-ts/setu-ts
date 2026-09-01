@@ -7938,10 +7938,28 @@ with a partition-plus-sort key, a `PutItem`, a `GetItem` read-back and a `Delete
 Local run notes, including the volume-ownership trap that makes the emulator hang rather than error,
 belong in the milestone plan.
 
+**The real-emulator suite's guard conditions.** The integration suite runs only when
+`DYNAMODB_ENDPOINT` is set, guarded with the BDD `ignore` option — never an early `return` — so an
+unset variable reports the suite as ignored rather than as a pass that asserted nothing. CI supplies
+that condition itself: a `dynamodb` service container (`amazon/dynamodb-local`, port `8000`) whose
+healthcheck is a POST `DynamoDB_20120810.ListTables` — a bare `GET /` answers `400`, so a naive
+`curl -f /` could never pass — and a job-level `DYNAMODB_ENDPOINT` pointing at the mapped
+`localhost` port. A GH Actions service container accepts no `command` key, so `-sharedDb` cannot be
+added in CI and the suite pins one credential/region pair instead of relying on it.
+
 - **In scope:** the adapter and its key mapping (per-entity partition and sort key, following the
   whole two-layer `D1EntityMapping` → internal-target shape rather than one type of it); native
   cursor pagination; `Query`-versus-`Scan` selection driven by the resolved key condition; non-key
-  `orderBy` and any emulated offset refused by name.
+  `orderBy` and any emulated offset refused by name — a correctness requirement, not a nicety:
+  measured against `dynamodb-local` (2026-09-01), the SDK ACCEPTED and silently DISCARDED an
+  unrecognised `OrderBy` naming a non-key field and an `Offset` alongside a `Limit`, answering `200`
+  with unordered, unskipped rows both times, so forwarding either returns confidently wrong rows
+  with no diagnostic anywhere in the stack. The "all six methods work" count is conditional on the
+  two write-path guards: `create` carries `attribute_not_exists(<partitionKey>)` because an
+  unguarded `PutItem` on an existing key silently overwrites the item and drops every attribute
+  absent from the new one, and `update` carries `attribute_exists(<partitionKey>)` because an
+  unguarded `UpdateItem` on a missing key silently upserts a ghost item and returns it as though it
+  were an update — both measured against the emulator, both silent data defects without the guard.
 - **Recommendation the plan should take or overturn explicitly:** host it as a new discriminated arm
   of `DatabasePluginOptions` in `database-plugin`, beside `prisma`/`drizzle`/`memory`/`custom`, with
   the AWS SDK behind the §12.2 inject-or-lazy seam and a guarded real-import test. A separate
@@ -8514,7 +8532,7 @@ them would still silently select the wrong transport — complete (PR pending).
 | 77        | ✅     | executable prose assertions                         |
 | 78        | ✅     | document-database backends (Mongo adapter, PR #208) |
 | 79        | ✅     | portable data-access contract                       |
-| 80        | ⬜     | dynamodb backend                                    |
+| 80        | ✅     | dynamodb backend                                    |
 | 81        | ✅     | cosmos db backend                                   |
 | 82        | ⬜     | cloud bigtable backend                              |
 | 83        | ✅     | module declarations + functional example            |

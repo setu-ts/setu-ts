@@ -133,12 +133,20 @@ export interface PageResult {
   /** The rows in this page, already filtered, sorted, paginated and projected. */
   readonly rows: Record<string, unknown>[];
   /**
-   * A cursor to fetch the next page, or `null` when no further page exists.
+   * A cursor to fetch the next page, or `null` when the page is the last.
    *
-   * A cursor that returned an empty page would be indistinguishable from a
-   * genuine last page, so the count is one greater than the page size: the
-   * adapter fetches `limit + 1` rows and sets `nextCursor` to `null` precisely
-   * when it fetched no more than `limit`.
+   * The guarantee: `nextCursor` is non-`null` if and only if the page is
+   * non-terminal — including a page that returned zero rows while further
+   * matching rows remain. It is never derived from `rows.length`.
+   *
+   * A backend produces the cursor by one of two mechanisms. A row-based
+   * backend fetches `limit + 1` rows and sets `nextCursor` to `null` precisely
+   * when it fetched no more than `limit` — a cursor that returned an empty
+   * page would otherwise be indistinguishable from a genuine last page. A
+   * token-based backend carries the server's own continuation key inside the
+   * opaque token and sets `nextCursor` to `null` precisely when the server
+   * answered without one; on such a backend a filtered page can return fewer
+   * rows than `limit` — or none — and still not be the last page.
    */
   readonly nextCursor: string | null;
 }

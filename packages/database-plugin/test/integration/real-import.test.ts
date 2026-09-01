@@ -7,6 +7,21 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import {
+  CreateTableCommand,
+  DeleteTableCommand,
+  DynamoDBClient,
+} from 'npm:@aws-sdk/client-dynamodb@^3';
+import { createLazyDynamoLoader } from '../../src/index.ts';
+
+const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
+const skipDynamo = dynamoEndpoint === undefined;
+const endpoint = dynamoEndpoint ?? '';
+const dynamoCredentials = {
+  accessKeyId: 'setum80fake',
+  secretAccessKey: 'setum80secret',
+};
+const dynamoRegion = 'us-east-1';
 
 describe('Real ORM imports (guarded)', () => {
   it('prisma v7 ungenerated package has an explicit generated-client boundary', async () => {
@@ -91,4 +106,53 @@ describe('Real ORM imports (guarded)', () => {
       ).toBe(true);
     }
   });
+
+  it(
+    'DynamoDB lazy SDK import drives a facade command round trip',
+    { ignore: skipDynamo },
+    async () => {
+      const tableName = `m80_import_${crypto.randomUUID().replaceAll('-', '')}`;
+      const admin = new DynamoDBClient({
+        endpoint,
+        region: dynamoRegion,
+        credentials: dynamoCredentials,
+      });
+      // `admin.destroy()` sits in an OUTER finally so it runs even when the
+      // table could not be created, and the drop is nested so a failing
+      // DeleteTable cannot skip it either — otherwise a failure anywhere in
+      // this test leaks the SDK client's sockets into the rest of the suite.
+      try {
+        await admin.send(
+          new CreateTableCommand({
+            TableName: tableName,
+            BillingMode: 'PAY_PER_REQUEST',
+            AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+            KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+          }),
+        );
+        try {
+          const loader = createLazyDynamoLoader({
+            endpoint,
+            region: dynamoRegion,
+            credentials: dynamoCredentials,
+          });
+          const client = await loader.load();
+          // The loader constructs its OWN SDK client, separate from `admin`;
+          // the outer cleanup destroys only `admin`, so this one needs its own
+          // finally or its sockets outlive the test.
+          try {
+            await expect(client.scan({ TableName: tableName })).resolves.toMatchObject({
+              Count: 0,
+            });
+          } finally {
+            client.destroy();
+          }
+        } finally {
+          await admin.send(new DeleteTableCommand({ TableName: tableName }));
+        }
+      } finally {
+        admin.destroy();
+      }
+    },
+  );
 });
