@@ -317,6 +317,13 @@ read the Changed section before upgrading.
 - **`@setu-ts/messaging-plugin`: declarative subscriptions and ingress behaviours.** Adds
   `subscriptions` and `behaviors` on every broker arm. The chain wraps subscribe handlers only;
   `respond()` remains unwrapped because its handler returns a result.
+- Declared instance entries of `subscriptions`, `processors`, and `jobs` register in `onInit` rather
+  than `register()` **when the matching `behaviors` arm carries a factory**, immediately after the
+  chain is resolved. Registering earlier put a live handler in front of an incomplete chain: a
+  broker holding a backlog delivers the moment a consumer attaches, so a message could reach the
+  handler having run only the instance behaviours, silently skipping every behaviour that needed a
+  resolved capability. Queue and scheduler share the shape through the poll loop and the job timer.
+  With no behaviour factory declared, registration timing is unchanged.
 
 ### Changed
 

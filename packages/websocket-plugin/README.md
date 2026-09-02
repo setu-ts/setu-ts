@@ -46,10 +46,50 @@ import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 
 ### In an application (the form a scaffolded project uses)
 
-Declare your routes in a plugin — an `IPlugin` with `dependencies: [CAPABILITIES.WEBSOCKET]` whose
-`register()` receives the live service. This is exactly what `setu generate plugin <name>` emits,
-and it is the only form that works inside a CLI-scaffolded project: its generated `setu.config.ts`
-forbids starting the server, so there is no post-`start()` moment to resolve the capability from.
+Declare routes where the plugin is composed, through the `routes` option. A CLI-scaffolded project's
+generated `setu.config.ts` forbids starting the server, so there is no post-`start()` moment to
+resolve the capability from — and this arm needs none. A route whose handlers need a resolved
+capability declares a `RegistryFactory` entry instead, resolved in `onInit`.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+
+// setu.config.ts
+export default createApplication({
+  plugins: [
+    RuntimePlugin(),
+    WebSocketPlugin({
+      heartbeatMs: 30_000,
+      idleTimeoutMs: 90_000,
+      routes: [{
+        path: '/ws/chat',
+        handlers: {
+          onOpen: (conn, { query }) => {
+            conn.data.set('room', query.room ?? 'lobby');
+          },
+          onMessage: (conn, data) => {
+            const room = conn.data.get('room');
+            if (typeof room === 'string') {
+              // Resolve the service from a factory entry when you need it here.
+              conn.send(data);
+            }
+          },
+        },
+        // Refuse the upgrade before the handshake, for this route only.
+        options: { guards: [({ headers }) => headers.has('authorization') || { status: 401 }] },
+      }],
+    }),
+  ],
+});
+```
+
+#### Through a plugin, when the route needs the live service
+
+An `IPlugin` with `dependencies: [CAPABILITIES.WEBSOCKET]` whose `register()` receives the live
+service also works, and is what `setu generate plugin <name>` emits. Prefer it when a route body
+needs to call `ws.room(...)` and you would rather hold the service than resolve it per entry.
 
 ```typescript
 import type { IPlugin, IPluginContext, IWebSocketService } from '@setu-ts/common';
@@ -74,8 +114,10 @@ export class ChatPlugin implements IPlugin {
         ws.room(room).add(conn);
       },
       onMessage: (conn, data) => {
-        const room = conn.data.get('room') as string;
-        ws.room(room).broadcast(data, { except: conn });
+        const room = conn.data.get('room');
+        if (typeof room === 'string') {
+          ws.room(room).broadcast(data, { except: conn });
+        }
       },
       onClose: () => {
         // Rooms evict the connection automatically — nothing to clean up here.
@@ -125,8 +167,10 @@ ws.route('/ws/chat', {
     ws.room(room).add(conn);
   },
   onMessage: (conn, data) => {
-    const room = conn.data.get('room') as string;
-    ws.room(room).broadcast(data, { except: conn });
+    const room = conn.data.get('room');
+    if (typeof room === 'string') {
+      ws.room(room).broadcast(data, { except: conn });
+    }
   },
   onClose: (conn, { code, reason }) => {
     // Rooms evict the connection automatically — nothing to clean up here.

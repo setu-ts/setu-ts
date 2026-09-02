@@ -307,8 +307,20 @@ export function MessagingPlugin(
       // Declared subscription INSTANCES register now, exactly as an
       // imperative `broker.subscribe()` call made before this arm existed
       // (M86 §3.5) — and they coexist with imperative subscriptions.
-      for (const definition of subscriptionInstances) {
-        await subscribeDefinition(broker, definition);
+      //
+      // UNLESS a behaviour FACTORY is declared. A subscription goes live the
+      // moment it is established against the already-connected broker, and a
+      // broker holding a backlog delivers immediately — so a message arriving
+      // before `onInit` resolved the factory behaviours would reach the
+      // handler through a PARTIAL chain, skipping exactly the behaviours that
+      // needed a resolved capability. Deferring the whole set into the same
+      // `onInit` hook, after the chain is final, is what makes the arm's
+      // guarantee true. With no factory declared the chain is already
+      // complete here and the timing is unchanged.
+      if (behaviorFactories.length === 0) {
+        for (const definition of subscriptionInstances) {
+          await subscribeDefinition(broker, definition);
+        }
       }
 
       // Register health indicator. M70c: reports BOTH signals. `isReady()` is
@@ -349,15 +361,10 @@ export function MessagingPlugin(
       // configuration gains no lifecycle hook at all.
       if (subscriptionFactories.length > 0 || behaviorFactories.length > 0) {
         ctx.lifecycle.onInit(async () => {
-          for (const slot of subscriptionFactories) {
-            const definition = resolveRegistryEntry(
-              slot.entry,
-              ctx.services,
-              `MessagingPlugin({ subscriptions })[${slot.index}]`,
-            );
-            await subscribeDefinition(broker, definition);
-          }
-
+          // The chain is completed FIRST: everything subscribed below — and
+          // the instances deferred out of `register()` when a behaviour
+          // factory is declared — must go live against the final chain, never
+          // a partial one.
           behaviorChain.splice(
             0,
             behaviorChain.length,
@@ -371,6 +378,21 @@ export function MessagingPlugin(
                 : entry
             ),
           );
+
+          if (behaviorFactories.length > 0) {
+            for (const definition of subscriptionInstances) {
+              await subscribeDefinition(broker, definition);
+            }
+          }
+
+          for (const slot of subscriptionFactories) {
+            const definition = resolveRegistryEntry(
+              slot.entry,
+              ctx.services,
+              `MessagingPlugin({ subscriptions })[${slot.index}]`,
+            );
+            await subscribeDefinition(broker, definition);
+          }
         });
       }
     },

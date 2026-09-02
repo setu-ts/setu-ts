@@ -209,7 +209,13 @@ export interface MessagingCommonOptions {
    * instead of after the application has started.
    *
    * Instance entries register during the plugin's `register()` phase,
-   * identical to the imperative timing. Factory entries are resolved in the
+   * identical to the imperative timing.
+   * The one exception is a
+   * {@linkcode MessagingCommonOptions.behaviors} arm carrying a factory: instance
+   * entries then register in `onInit` too, immediately after the chain is
+   * resolved, because a subscription established before the chain was final would run a backlog
+   * message through a PARTIAL chain, skipping exactly the
+   * behaviours that needed a resolved capability. Factory entries are resolved in the
    * `onInit` phase — the first at which the registry holds every capability —
    * and the plugin AWAITS each `subscribe()` there, so the subscription is
    * established before the application serves. A factory that throws rejects

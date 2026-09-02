@@ -145,8 +145,19 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
 
       // Declared job INSTANCES register now, exactly as an imperative
       // `cron()`/`every()`/`delay()` call made before this arm existed.
-      for (const definition of jobInstances) {
-        await scheduleDefinition(service, definition);
+      //
+      // UNLESS a behaviour FACTORY is declared. Scheduling arms a timer, so a
+      // short `delay` or a due `cron` can fire before `onInit` resolved the
+      // factory behaviours — reaching the handler through a PARTIAL chain,
+      // skipping exactly the behaviours that needed a resolved capability.
+      // Deferring the whole set into the same `onInit` hook, after the chain
+      // is final, is what makes the arm's guarantee true. With no factory
+      // declared the chain is already complete here and the timing is
+      // unchanged.
+      if (behaviorFactories.length === 0) {
+        for (const definition of jobInstances) {
+          await scheduleDefinition(service, definition);
+        }
       }
 
       // Register health indicator
@@ -172,15 +183,9 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       // zero-factory configuration gains no lifecycle hook at all.
       if (jobFactories.length > 0 || behaviorFactories.length > 0) {
         ctx.lifecycle.onInit(async () => {
-          for (const slot of jobFactories) {
-            const definition = resolveRegistryEntry(
-              slot.entry,
-              ctx.services,
-              `SchedulerPlugin({ jobs })[${slot.index}]`,
-            );
-            await scheduleDefinition(service, definition);
-          }
-
+          // The chain is completed FIRST: everything scheduled below — and the
+          // instances deferred out of `register()` when a behaviour factory is
+          // declared — must arm against the final chain, never a partial one.
           behaviorChain.splice(
             0,
             behaviorChain.length,
@@ -194,6 +199,21 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
                 : entry
             ),
           );
+
+          if (behaviorFactories.length > 0) {
+            for (const definition of jobInstances) {
+              await scheduleDefinition(service, definition);
+            }
+          }
+
+          for (const slot of jobFactories) {
+            const definition = resolveRegistryEntry(
+              slot.entry,
+              ctx.services,
+              `SchedulerPlugin({ jobs })[${slot.index}]`,
+            );
+            await scheduleDefinition(service, definition);
+          }
         });
       }
     },

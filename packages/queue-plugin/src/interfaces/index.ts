@@ -231,7 +231,13 @@ export interface QueuePluginOptions {
    * of after the application has started.
    *
    * Instance entries register during the plugin's `register()` phase,
-   * identical to the imperative timing. Factory entries are resolved in the
+   * identical to the imperative timing.
+   * The one exception is a
+   * {@linkcode QueuePluginOptions.behaviors} arm carrying a factory: instance
+   * entries then register in `onInit` too, immediately after the chain is
+   * resolved, because a processor registered before the chain was final would arm the poll loop
+   * and run a queued job through a PARTIAL chain, skipping exactly the
+   * behaviours that needed a resolved capability. Factory entries are resolved in the
    * `onInit` phase — the first at which the registry holds every capability —
    * so a factory can build its processor from a resolved capability. A
    * factory that throws rejects `start()` with an error naming

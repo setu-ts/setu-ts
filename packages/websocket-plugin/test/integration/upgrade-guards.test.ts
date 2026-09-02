@@ -209,6 +209,34 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
     await app.stop();
   });
 
+  it('a refused upgrade consumes no admission slot', async () => {
+    // The guards run BEFORE the capacity check for exactly this reason, and
+    // the source says so in a comment. Nothing asserted it: with the guard
+    // loop moved below `this.#pending++` every refusal claims a slot it never
+    // releases, so a `maxConnections`-limited server is starved by traffic it
+    // rejected. Verified to fail under that transposition.
+    const app = createApplication({
+      plugins: [RuntimePlugin(), WebSocketPlugin({ maxConnections: 1 })],
+    });
+    await app.start();
+
+    const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
+    ws.route('/ws/refused', { onMessage: () => {} }, { guards: [() => ({ status: 401 })] });
+    ws.route('/ws/admitted', { onMessage: () => {} });
+
+    for (let i = 0; i < 5; i++) {
+      const refused = await app.fetch(wireUpgradeRequest('http://localhost/ws/refused'));
+      expect(refused.status).toBe(401);
+    }
+
+    // The single slot is still free: 101, not the 503 an at-capacity server
+    // answers with.
+    const admitted = await app.fetch(wireUpgradeRequest('http://localhost/ws/admitted'));
+    expect(admitted.status).toBe(101);
+
+    await app.stop();
+  });
+
   it('a throwing guard is contained by the router and refuses with 500', async () => {
     const app = createApplication({ plugins: [RuntimePlugin(), WebSocketPlugin()] });
     await app.start();

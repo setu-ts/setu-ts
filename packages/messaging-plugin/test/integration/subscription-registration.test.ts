@@ -22,6 +22,8 @@ import type {
   IngressContext,
   IPluginContext,
   IServiceRegistry,
+  ISubscription,
+  MessageHandler,
   RegistryFactory,
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -312,6 +314,70 @@ describe('MessagingPlugin({ behaviors }) registration arms', () => {
 
     await expect(runInitHooks(harness)).rejects.toThrow('MessagingPlugin({ behaviors })[1]');
     await expect(runInitHooks(harness)).rejects.toThrow('behavior exploded');
+  });
+
+  it('a backlog message cannot reach the handler through a PARTIAL chain', async () => {
+    // A subscription goes live the instant it is established against the
+    // already-connected broker, and a broker holding a backlog delivers
+    // immediately — so with the instance subscriptions registered in
+    // `register()` and the factory behaviours resolved later in `onInit`, a
+    // backlog message reached the handler having run only the INSTANCE
+    // behaviours. Probed before the fix: the handler ran and the factory
+    // behaviour never did. Reverting the deferral reproduces exactly that.
+    const seenBy: string[] = [];
+    const handled: string[] = [];
+
+    /** A broker with queued work: replays one message the moment a consumer attaches. */
+    class BacklogBroker implements IMessageBroker {
+      connect(): Promise<void> {
+        return Promise.resolve();
+      }
+      disconnect(): Promise<void> {
+        return Promise.resolve();
+      }
+      publish<T>(_topic: string, _message: T): Promise<void> {
+        return Promise.resolve();
+      }
+      subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<ISubscription> {
+        void handler(
+          { id: 'backlog-1' } as T,
+          { topic, timestamp: new Date(0), headers: {} },
+        );
+        return Promise.resolve({ unsubscribe: (): Promise<void> => Promise.resolve() });
+      }
+      request<TRes>(): Promise<TRes> {
+        return Promise.reject(new Error('no rpc'));
+      }
+      respond(): Promise<ISubscription> {
+        return Promise.resolve({ unsubscribe: (): Promise<void> => Promise.resolve() });
+      }
+    }
+
+    const { harness } = await boot({
+      broker: 'custom',
+      instance: new BacklogBroker(),
+      behaviors: [
+        recorder(seenBy, 'instance'),
+        (): IIngressBehavior => recorder(seenBy, 'factory'),
+      ],
+      subscriptions: [
+        {
+          topic: 'orders',
+          handler: (): void => {
+            handled.push('handler');
+          },
+        },
+      ],
+    });
+
+    // Nothing may have been delivered yet: the subscription must not go live
+    // until the chain is final.
+    expect(handled).toEqual([]);
+
+    await runInitHooks(harness);
+
+    expect(handled).toEqual(['handler']);
+    expect(seenBy).toEqual(['instance', 'factory']);
   });
 
   it('wraps arm-registered subscriptions in the chain, in declared order', async () => {

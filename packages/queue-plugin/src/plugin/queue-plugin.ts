@@ -199,8 +199,19 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
 
       // Declared processor INSTANCES register now, exactly as an imperative
       // `process()` call made before this arm existed.
-      for (const definition of processorInstances) {
-        service.process(definition.name, definition.processor, definition.options);
+      //
+      // UNLESS a behaviour FACTORY is declared. Registering a processor arms
+      // the poll loop, so a job already sitting in a durable queue can be
+      // reserved and dispatched before `onInit` resolved the factory
+      // behaviours — reaching the processor through a PARTIAL chain, skipping
+      // exactly the behaviours that needed a resolved capability. Deferring
+      // the whole set into the same `onInit` hook, after the chain is final,
+      // is what makes the arm's guarantee true. With no factory declared the
+      // chain is already complete here and the timing is unchanged.
+      if (behaviorFactories.length === 0) {
+        for (const definition of processorInstances) {
+          service.process(definition.name, definition.processor, definition.options);
+        }
       }
 
       // Register health indicator using the same token
@@ -220,15 +231,10 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // zero-factory configuration gains no lifecycle hook at all.
       if (processorFactories.length > 0 || behaviorFactories.length > 0) {
         ctx.lifecycle.onInit(() => {
-          for (const slot of processorFactories) {
-            const definition = resolveRegistryEntry(
-              slot.entry,
-              ctx.services,
-              `QueuePlugin({ processors })[${slot.index}]`,
-            );
-            service.process(definition.name, definition.processor, definition.options);
-          }
-
+          // The chain is completed FIRST: everything registered below — and
+          // the instances deferred out of `register()` when a behaviour
+          // factory is declared — must arm against the final chain, never a
+          // partial one.
           behaviorChain.splice(
             0,
             behaviorChain.length,
@@ -242,6 +248,21 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
                 : entry
             ),
           );
+
+          if (behaviorFactories.length > 0) {
+            for (const definition of processorInstances) {
+              service.process(definition.name, definition.processor, definition.options);
+            }
+          }
+
+          for (const slot of processorFactories) {
+            const definition = resolveRegistryEntry(
+              slot.entry,
+              ctx.services,
+              `QueuePlugin({ processors })[${slot.index}]`,
+            );
+            service.process(definition.name, definition.processor, definition.options);
+          }
         });
       }
     },

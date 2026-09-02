@@ -69,7 +69,13 @@ export interface SchedulerPluginOptions {
    * plugin is composed instead of after the application has started.
    *
    * Instance entries register during the plugin's `register()` phase,
-   * identical to the imperative timing. Factory entries are resolved in the
+   * identical to the imperative timing.
+   * The one exception is a
+   * {@linkcode SchedulerPluginOptions.behaviors} arm carrying a factory: instance
+   * entries then register in `onInit` too, immediately after the chain is
+   * resolved, because a job scheduled before the chain was final would arm a timer that could
+   * fire into a PARTIAL chain, skipping exactly the
+   * behaviours that needed a resolved capability. Factory entries are resolved in the
    * `onInit` phase — the first at which the registry holds every capability —
    * so a factory can build its definition from a resolved capability. A
    * factory that throws rejects `start()` with an error naming

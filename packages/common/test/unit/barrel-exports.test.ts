@@ -163,7 +163,11 @@ describe('@setu-ts/common barrel — M86 ingress contracts', () => {
     const decision: WebSocketGuardDecision = { status: 401 };
     const guard: WebSocketUpgradeGuard = (context) => context.user === undefined ? decision : true;
 
-    expect(guard).toBeDefined();
+    // Driven, not merely named: a guard the barrel's types cannot express
+    // would fail to compile, and one that never runs proves only that.
+    expect(
+      guard({ url: 'http://localhost/ws', path: '/ws', query: {}, headers: new Headers() }),
+    ).toEqual(decision);
   });
 });
 

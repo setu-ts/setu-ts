@@ -52,11 +52,12 @@ describe('WebSocket upgrade-guard contracts', () => {
   });
 
   it('rejects a bare number as an upgrade decision', () => {
+    // The `@ts-expect-error` is the assertion: an UNUSED directive is itself a
+    // compile error, so this fails if the union ever widens to admit a number.
     // @ts-expect-error — a guard must return true or a refusal object, never a bare status.
     const invalidDecision: WebSocketGuardDecision = 401;
-    void invalidDecision;
 
-    expect(true).toBe(true);
+    expect(invalidDecision).toBe(401);
   });
 
   it('keeps guards optional for existing route options', () => {

@@ -4031,7 +4031,34 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `messaging-plugin` — non-HTTP ingress registration and behaviours: the shared
   `IngressContext`/`IIngressBehavior` composer; declarative route, processor, job, and subscription
   arms; WebSocket route guards and frame behaviours; queue, scheduler, and messaging behaviour
-  chains; CQRS composer delegation) — complete (PR pending)
+  chains; CQRS composer delegation.
+
+  **Code review then found a defect every gate had passed, and it was the milestone's own guarantee
+  being false in the case the arms exist for.** Declared subscription/processor/job INSTANCES
+  registered in `register()` while behaviour FACTORIES resolved in `onInit` — so a handler went live
+  in front of an INCOMPLETE chain. A broker delivers a backlog the moment a consumer attaches, so a
+  message reached the handler having run only the instance behaviours, silently skipping exactly the
+  behaviours that needed a resolved capability — a tenant guard, an auth check, an audit sink.
+  Probed and reproduced deterministically with a broker that replays on subscribe: the handler ran
+  and the factory behaviour did not. Queue and scheduler share the shape through the poll loop and
+  the job timer. Fixed by deferring instance registration into the same `onInit` hook, after the
+  chain is resolved, and ONLY when a behaviour factory is declared — so the common case keeps its
+  `register()` timing. Reverting the deferral fails the committed regression test.
+
+  Also closed: the router runs a route's guards BEFORE the capacity check so a refusal consumes no
+  admission slot, and nothing asserted it — a transposition below `this.#pending++` lets refused
+  traffic starve `maxConnections`, verified to fail. The `websocket-plugin` README's primary usage
+  section still taught the `IPlugin` wrapper as "the only form that works inside a CLI-scaffolded
+  project", which this milestone's own e2e exists to falsify, and carried the
+  `conn.data.get(...) as
+  string` cast the milestone had corrected in the `common` JSDoc.
+  `WebSocketUpgradeGuard` and `WebSocketGuardDecision` were absent from `PUBLIC_API.md`'s WebSocket
+  export row, and two assertions were vacuous. Verified beyond the gates by a driver application
+  composed only from plugin options and bound to a real socket: a raw RFC 6455 handshake reads `401`
+  without the guard's header and `101` with it, a real frame round-trips through the chain, a
+  messaging short-circuit is observed preventing its handler, and all four envelope shapes are read
+  off the wire — `websocket` carrying neither `attempt` nor `headers`, `messaging` carrying
+  `headers: {}` and no `attempt`, `queue`/`scheduler` carrying `attempt: 1`) — complete (PR pending)
 - **Next milestone** — **M88** (the request-path work M87 deferred: the response path, where
   `ResponseBuilder` → `snapshot()` → `Response` builds four objects, and `sealRequestIdentity`,
   whose fix changes `Object.keys(request)` against M71's shipped behaviour).
