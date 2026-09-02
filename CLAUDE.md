@@ -4058,7 +4058,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   without the guard's header and `101` with it, a real frame round-trips through the chain, a
   messaging short-circuit is observed preventing its handler, and all four envelope shapes are read
   off the wire — `websocket` carrying neither `attempt` nor `headers`, `messaging` carrying
-  `headers: {}` and no `attempt`, `queue`/`scheduler` carrying `attempt: 1`) — complete (PR pending)
+  `headers: {}` and no `attempt`, `queue`/`scheduler` carrying `attempt: 1`) — complete (PR #228)
 - **Next milestone** — **M88** (the request-path work M87 deferred: the response path, where
   `ResponseBuilder` → `snapshot()` → `Response` builds four objects, and `sealRequestIdentity`,
   whose fix changes `Object.keys(request)` against M71's shipped behaviour).
