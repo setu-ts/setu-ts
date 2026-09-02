@@ -177,6 +177,47 @@ describe('bun-http-adapter | serve callback (post-M70a)', () => {
     expect(await response!.text()).toBe('framework');
   });
 
+  it('serve callback returns a Response DIRECTLY when the handler is synchronous', () => {
+    // `Bun.serve`'s `fetch` accepts a plain `Response`, so an `async` callback
+    // would add a promise and a microtask hop per request even for a handler
+    // that answered synchronously — losing on the socket path what M87 won on
+    // the fetch path. Both pre-existing serve-callback tests `await` the
+    // result, so they pass either way; this is the one that discriminates.
+    const handle = new BunHttpServerHandle();
+    handle.setHandler((_request: any) => {
+      return {
+        snapshot: () => ({
+          streaming: false,
+          status: 200,
+          headers: new Headers(),
+          body: 'sync',
+        }),
+      } as any;
+    });
+
+    const result = handle.createServeCallback()(
+      new Request('http://localhost/'),
+      fakeServer,
+    );
+
+    expect(result).toBeInstanceOf(Response);
+    expect((result as Response).status).toBe(200);
+  });
+
+  it('serve callback still returns a promise when the handler is async', async () => {
+    const handle = createHandle();
+
+    const result = handle.createServeCallback()(
+      new Request('http://localhost/'),
+      fakeServer,
+    );
+
+    expect(result).not.toBeInstanceOf(Response);
+    const response = await result;
+    expect(response?.status).toBe(200);
+    expect(await response!.text()).toBe('framework');
+  });
+
   it('serve callback lets the framework handler read the body', async () => {
     const handle = createHandle();
 

@@ -463,7 +463,7 @@ export interface IHttpAdapter {
    *
    * @param handler - Handles a normalized request, produces a response
    */
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void;
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void;
   /**
    * The universal web-standard entry point. Accepts a web `Request` and
    * returns a web `Response`. May be called without `listen` (e.g. Cloudflare
@@ -472,7 +472,7 @@ export interface IHttpAdapter {
    * @param request - A web-standard `Request`
    * @returns A web-standard `Response`
    */
-  fetch(request: Request): Promise<Response>;
+  fetch(request: Request): Response | Promise<Response>;
   /**
    * Binds the adapter's `fetch` to a real TCP socket.
    *

@@ -8391,6 +8391,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `sealRequestIdentity(request)`         | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                        |
 | `replacePrincipal(request, principal)` | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `replaceTenant(request, tenant)`       | function | Deliberately replaces `request.tenant` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `isPromiseLike(value)`                 | function | Duck-typed thenable test (M87) — see the note below the Types table                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Types
 
@@ -8438,24 +8439,13 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
-### Ingress behaviours
-
-`IngressKind` is `'queue' | 'scheduler' | 'messaging' | 'websocket'`. `IngressContext<TPayload>` is
-the immutable work envelope supplied to an ingress behaviour:
-`{ kind, name, payload, attempt?, headers? }`. Queue and scheduler populate the 1-based `attempt`;
-messaging supplies transport headers when available and WebSocket frames supply neither optional
-field.
-
-`IIngressBehavior.handle(context, next)` is the void-result contract for non-HTTP work.
-`BehaviorLike<TWork, TResult>` is the structural shape shared with CQRS, and `composeBehaviorChain`
-runs behaviours in declared order. A behaviour that does not call `next()` short-circuits the
-terminal handler; a thrown error follows that ingress's existing error path. The common composer is
-also consumed internally by CQRS; it adds no CQRS surface.
-
-`WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
-either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
-is an optional readonly array of those guards; the matched route runs them in declared order before
-its handshake and the first refusal wins.
+**`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
+(`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
+`@setu-ts/runtime` both use it on the request path to decide whether a handler result needed
+awaiting. `instanceof` answers `false` for a promise from another realm and for userland promise
+libraries — all of which satisfy `RouteHandler`'s declared `Promise<HandlerResult>` structurally —
+and treating one as already-settled sends the response while the handler is still running. Pair it
+with `Promise.resolve`, which returns a native promise unchanged and adopts a foreign thenable.
 
 Contract notes:
 
@@ -8590,6 +8580,25 @@ Contract notes:
   distinct from `OPENAPI` so an OpenAPI plugin registering under `OPENAPI` does not populate
   `ctx.metadata`.
 
+### Ingress behaviours
+
+`IngressKind` is `'queue' | 'scheduler' | 'messaging' | 'websocket'`. `IngressContext<TPayload>` is
+the immutable work envelope supplied to an ingress behaviour:
+`{ kind, name, payload, attempt?, headers? }`. Queue and scheduler populate the 1-based `attempt`;
+messaging supplies transport headers when available and WebSocket frames supply neither optional
+field.
+
+`IIngressBehavior.handle(context, next)` is the void-result contract for non-HTTP work.
+`BehaviorLike<TWork, TResult>` is the structural shape shared with CQRS, and `composeBehaviorChain`
+runs behaviours in declared order. A behaviour that does not call `next()` short-circuits the
+terminal handler; a thrown error follows that ingress's existing error path. The common composer is
+also consumed internally by CQRS; it adds no CQRS surface.
+
+`WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
+either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
+is an optional readonly array of those guards; the matched route runs them in declared order before
+its handshake and the first refusal wins.
+
 ---
 
 ## API Reference: @setu-ts/kernel
@@ -8656,6 +8665,25 @@ Cloudflare Workers.
 
 > **M23 replaced the old HTTP server adapters with the new `IHttpAdapter` contract
 > (`setHandler`/`fetch`/`listen`/`close`)** and added the Cloudflare Workers adapter.
+
+> **M87 widened two of those members to accept and return sync-or-async** — `setHandler` now takes
+> `(request: IRequest) => IResponse | Promise<IResponse>` and `fetch` returns
+> `Response | Promise<Response>`. This is **breaking for an out-of-repo adapter**: the handler's
+> return type sits in a contravariant position, so an implementation declaring the narrower
+> `Promise`-only shape is no longer a faithful implementor (TypeScript's bivariant method parameters
+> mean it still compiles — the break surfaces when a handler that answers synchronously reaches it).
+> Callers are unaffected, since `await` works on both.
+>
+> The widening exists because a request the kernel can answer without awaiting must not be wrapped
+> back into a promise: `@hono/node-server` serves a response through its synchronous fast path only
+> when the handler returns a non-promise, so a single eagerly-async link foreclosed that path for
+> every request. An adapter implementing this contract should branch on promise-ness rather than
+> awaiting:
+>
+> ```typescript
+> const result = this.handler(frameworkRequest);
+> return isPromiseLike(result) ? Promise.resolve(result).then(finish) : finish(result);
+> ```
 
 ### Values (runtime exports)
 

@@ -166,3 +166,28 @@ describe('@setu-ts/common barrel — M86 ingress contracts', () => {
     expect(guard).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// M87 — isPromiseLike
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M87 request-path predicate', () => {
+  it('exports isPromiseLike, which two packages read on the request path', () => {
+    // Pinned against the BARREL, not the concrete module: dropping the
+    // re-export leaves every other test in the repo green, because kernel and
+    // runtime import it by name from here (the M56 defect class).
+    expect(typeof common.isPromiseLike).toBe('function');
+  });
+
+  it('answers by duck-typing rather than instanceof', () => {
+    const foreign = { then: () => {} } as unknown as Promise<never>;
+    expect(common.isPromiseLike(foreign)).toBe(true);
+    expect(foreign instanceof Promise).toBe(false);
+
+    expect(common.isPromiseLike(Promise.resolve(1))).toBe(true);
+    expect(common.isPromiseLike(undefined)).toBe(false);
+    expect(common.isPromiseLike(null)).toBe(false);
+    expect(common.isPromiseLike(42)).toBe(false);
+    expect(common.isPromiseLike({ then: 'not callable' })).toBe(false);
+  });
+});

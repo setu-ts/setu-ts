@@ -98,6 +98,7 @@ export type {
   WebSocketUpgradeIntent,
 } from './http.ts';
 export {
+  isPromiseLike,
   isWebSocketUpgradeRequest,
   SECURITY_METADATA,
   securityMetadataOf,

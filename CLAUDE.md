@@ -3964,12 +3964,77 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (the `CosmosTransaction` precedent; it reaches an application only as `IAdapterTransaction`) and
   `BigtableSdkModule` — because `deno doc --lint` showed both leaking a private type, and neither
   had a public consumer) — complete (PR #222)
+- **Milestone 87** (`packages/common` + `packages/kernel` + `packages/runtime` — request-path
+  performance. The framework retained **~34%** of the throughput of the router it is built on:
+  41,437 rps on `/json` against bare Hono's ~124k, benchmarked with bombardier against NestJS on
+  both adapters, Hono, Fastify and Express. The loss was fixed per-request cost, not anything
+  algorithmic, and **intuition was wrong three times running**, so every change here is priced from
+  an interleaved A/B rather than from a profile reading or an argument.
+
+  **Three findings drove it, and none came from reading the framework's own comments.** (1) The
+  mapping called `arrayBuffer()` on EVERY request including bodyless GETs; under `@hono/node-server`
+  that forces `getRequestCache()`, materializing the full undici `Request` the lightweight facade
+  exists to avoid. (2) Every framework-owned layer was eagerly `async`, and node-server answers a
+  request without entering the microtask queue only when the handler returns a non-promise
+  (`index.mjs:1027`) — so one eagerly-async link foreclosed that path for every request ever served.
+  (3) `overrideGlobalObjects: false`, set in `976ab2cd` (a "resolve type-check, lint and test
+  failures" commit) on the stated grounds that overriding "would corrupt the shared mapping" — which
+  does not survive reading the source, since `newRequest()` is called UNCONDITIONALLY and the
+  mapping receives the same facade regardless. What the flag actually decided was the class backing
+  `new Response(...)`, and the fast path is gated on that class's internal cache symbol, so the
+  framework had been on node-server's slow path for every response since M23. Worth **+26.5%**
+  alone. (2) and (3) only pay off TOGETHER — the gate is a conjunction — which is why the sync
+  dispatch measured a marginal +5.6% in isolation and nearly got dismissed.
+
+  Per-change, each interleaved against the build before it: lazy body + sync mapping **+11%**; path
+  reuse, synchronous capability guard on the protocol helpers, empty-chain bypass **+17.8%** (4/4);
+  sync `#handleRequest` + four adapters **+5.6%** (3/4); `overrideGlobalObjects` **+26.5%** (4/4);
+  `extractPath` **+5.4%** (4/4); `Router.match` single-candidate fast path **+10.4%** (4/4).
+
+  **Results: bare `/json` 41,437 → ~100,000 rps, ~34% → ~90% of bare Hono. NestJS-Express is beaten
+  decisively (130–160%). NestJS-Fastify is NOT beaten (86–93%, winning 4 of 18 paired runs)** and
+  that gap is deliberately left — clearing it means matching a raw router with a plugin kernel,
+  capability registry and lifecycle hooks in the path. **The headline number was measuring the
+  configuration most favourable to Hono**: a zero-middleware route is the one shape where its
+  two-tier dispatch skips `compose()` entirely and our fixed setup cost amortizes over nothing. With
+  three middleware Hono loses **40.6%** and this pipeline loses **17.9%**, so Setu-TS runs at **132%
+  of Hono** and **113% of raw Express** — and any real application has middleware.
+
+  Two flagged breaking changes: `IHttpAdapter.setHandler`/`fetch` widened to sync-or-async (the
+  handler's return type is contravariant, so it breaks out-of-repo adapter implementors; in-repo it
+  broke exactly two test doubles, the M47 blast radius), and node-server now installs its own
+  `Request`/`Response` globals on Node. `extractPath` replaces a per-request `new URL()` with a
+  string slice that falls back to `URL` on the only inputs it rewrites — dot-segments and
+  backslashes — so it is **provably identical for every input**, unlike Hono's `getPath`, which
+  stops normalizing `..` and would change routing.
+
+  **The measurement instrument mattered as much as the changes.** Per-pass spread on this machine is
+  10–23%, so a sweep measuring each server once per pass reported NestJS-Fastify parity at both
+  **103%** and **91%** from the same build; every ratio recorded is from runs alternating the two
+  servers run-by-run. A cross-server runner also printed `setu=404,600 rps` once — the servers had
+  not started and bombardier was measuring connection refusals — so the runner now hard-fails on a
+  non-200 readiness probe and refuses to print a number if any response was non-2xx. Two committed
+  comments were corrected as named deliverables because neither survived checking: the request
+  `Headers` copy was documented as providing "immutability" when `new Headers()` is mutable (it
+  normalizes **writability** — a server-received `Request` throws on `headers.set` on Deno while
+  Node and Bun permit it), and the upgrade-body refusal claimed the mapping "has already disturbed
+  it via `arrayBuffer()`", which the lazy body makes false — an ordinary upgrade now reaches the
+  handshake with its raw `Request` undisturbed, removing the M46 hazard rather than working around
+  it. Coverage caught a regression the gates passed: `cf-http-adapter.ts` fell to **85.7% branch**
+  because the new sync arm had no test, and `await` passes either way, so asserting the ABSENCE of a
+  promise is the only assertion that sees it. Deferred to **M88**: the response path
+  (`ResponseBuilder` → `snapshot()` → `Response` is four objects where Fastify builds one) and
+  `sealRequestIdentity` at **0.545 µs/req**, whose fix moves accessors to a prototype and so changes
+  `Object.keys(request)` against M71's shipped behaviour — a semantics decision, not a perf one) —
+  complete (PR #227)
 - **Milestone 86** (`common`, `cqrs-plugin`, `websocket-plugin`, `queue-plugin`, `scheduler-plugin`,
   `messaging-plugin` — non-HTTP ingress registration and behaviours: the shared
   `IngressContext`/`IIngressBehavior` composer; declarative route, processor, job, and subscription
   arms; WebSocket route guards and frame behaviours; queue, scheduler, and messaging behaviour
   chains; CQRS composer delegation) — complete (PR pending)
-- **Next milestone** — M86 is the latest completed milestone; the next milestone is unassigned.
+- **Next milestone** — **M88** (the request-path work M87 deferred: the response path, where
+  `ResponseBuilder` → `snapshot()` → `Response` builds four objects, and `sealRequestIdentity`,
+  whose fix changes `Object.keys(request)` against M71's shipped behaviour).
 
 ## Verification (run before declaring any work done)
 

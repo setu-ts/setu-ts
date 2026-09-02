@@ -53,6 +53,11 @@ describe('node-http-adapter integration', () => {
             fetch: options.fetch,
             port: options.port,
             ...(options.hostname !== undefined && { hostname: options.hostname }),
+            // Deliberately false HERE and nowhere else: this calls the real
+            // `serve()` inside the Deno test process, where letting
+            // node-server replace `globalThis.Request`/`Response` would leak
+            // into every other test sharing the process. Production omits the
+            // option so node-server's default applies (M87).
             overrideGlobalObjects: false,
           } as Parameters<typeof serve>[0],
         ) as unknown as { close(): void };

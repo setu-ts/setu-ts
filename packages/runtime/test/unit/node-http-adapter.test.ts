@@ -25,14 +25,18 @@ function createFakeHost(): {
     fetch?: (r: Request) => Response | Promise<Response>;
     port?: number;
     hostname?: string;
-    overrideGlobalObjects?: boolean;
+    // `| undefined` explicitly, so an ABSENT option is recordable and can be
+    // asserted apart from an explicit `false` (M87).
+    overrideGlobalObjects?: boolean | undefined;
   };
 } {
   const recorded: {
     fetch?: (r: Request) => Response | Promise<Response>;
     port?: number;
     hostname?: string;
-    overrideGlobalObjects?: boolean;
+    // `| undefined` explicitly, so an ABSENT option is recordable and can be
+    // asserted apart from an explicit `false` (M87).
+    overrideGlobalObjects?: boolean | undefined;
   } = {};
 
   const host: NodeServeHost = {
@@ -44,7 +48,14 @@ function createFakeHost(): {
       if (options.hostname !== undefined) {
         recorded.hostname = options.hostname;
       }
-      recorded.overrideGlobalObjects = options.overrideGlobalObjects ?? false;
+      // Record the RAW value, and only when it was actually passed — the
+      // distinction that matters is "explicitly false" versus "not passed, so
+      // node-server applies its own default" (M87). Assigning `undefined`
+      // unconditionally materializes the key, so an omitted option would
+      // still satisfy an `in` test. Guarded, exactly as `hostname` above is.
+      if (options.overrideGlobalObjects !== undefined) {
+        recorded.overrideGlobalObjects = options.overrideGlobalObjects;
+      }
 
       return {
         close() {},
@@ -96,7 +107,7 @@ describe('node-http-adapter | setHandler/fetch', () => {
 // ---------------------------------------------------------------------------
 
 describe('node-http-adapter | listen', () => {
-  it('calls host.serve with fetch/port/hostname and overrideGlobalObjects:false', async () => {
+  it('calls host.serve with fetch/port/hostname and does NOT pass overrideGlobalObjects', async () => {
     const { host, recorded } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
@@ -112,7 +123,15 @@ describe('node-http-adapter | listen', () => {
     expect(recorded.fetch).toBeDefined();
     expect(recorded.port).toBe(8080);
     expect(recorded.hostname).toBe('localhost');
-    expect(recorded.overrideGlobalObjects).toBe(false);
+    // NOT passed, so node-server installs its own `Request`/`Response` as
+    // globals. That is load-bearing rather than incidental: its synchronous
+    // response path is gated on the response carrying that class's internal
+    // cache symbol, so passing `false` here — as this adapter did until M87 —
+    // puts every response on the slow path. Asserting `undefined` rather than
+    // a value is the point: the previous form of this test recorded
+    // `options.overrideGlobalObjects ?? false` and so could not tell an
+    // explicit `false` from an absent option, and passed either way.
+    expect(recorded.overrideGlobalObjects).toBeUndefined();
     expect(isNodeHttpServerHandle(handle)).toBe(true);
   });
 

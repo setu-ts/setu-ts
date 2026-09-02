@@ -334,6 +334,40 @@ export interface IMiddleware {
 export type RouteHandler = (ctx: IRequestContext) => HandlerResult | Promise<HandlerResult>;
 
 /**
+ * Reports whether a value is thenable, by the same duck-typed test the
+ * platform serve layers use rather than `instanceof Promise`.
+ *
+ * The distinction is load-bearing on the request path (M87). `instanceof`
+ * asks whether a value was built by *this realm's* `Promise` constructor, and
+ * answers `false` for a promise from another realm (a `vm` context, a worker)
+ * and for every userland promise library. Those values satisfy
+ * {@linkcode RouteHandler}'s declared `Promise<HandlerResult>` structurally,
+ * so TypeScript accepts them and only the runtime check can tell them apart —
+ * and a request path that treats one as "already finished" sends the response
+ * while the handler is still running, with no error anywhere.
+ *
+ * Both `@setu-ts/kernel` and `@setu-ts/runtime` decide "did this need
+ * awaiting?" on the hot path, so the rule lives here and neither can drift
+ * from the other about what counts as asynchronous.
+ *
+ * @typeParam T - The value the thenable resolves to, preserved by the guard so
+ * the narrowed branch keeps its type rather than widening to `unknown`
+ * @param value - Any value a handler or framework layer produced
+ * @returns `true` when the value exposes a callable `then`
+ * @example
+ * ```typescript
+ * const result = handler(ctx);
+ * // `Promise.resolve` returns a native promise unchanged, and adopts a
+ * // foreign thenable, so the fast path allocates nothing.
+ * return isPromiseLike(result) ? Promise.resolve(result) : undefined;
+ * ```
+ * @since 0.3.0
+ */
+export function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return typeof (value as { then?: unknown } | null | undefined)?.then === 'function';
+}
+
+/**
  * Validation/documentation schemas attached to a route. Schema values are
  * intentionally `unknown` here — the validation plugin narrows them (Zod
  * schemas by default) so `common` stays dependency-free.

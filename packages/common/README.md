@@ -110,6 +110,7 @@ package fits the plugin architecture.
 | `isLexicallyContained`       | function  |
 | `isNone`                     | function  |
 | `isOk`                       | function  |
+| `isPromiseLike`              | function  |
 | `isSome`                     | function  |
 | `isWebSocketUpgradeRequest`  | function  |
 | `isWorkerReadySignal`        | function  |
