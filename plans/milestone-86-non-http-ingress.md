@@ -59,6 +59,11 @@ upgrade, which is the phase that currently forces an application-wide middleware
 | `ILifecycleApi.onInit`               | `packages/common/src/plugin.ts:334`                                                                    | `onInit(fn: () => void \| Promise<void>): void` — async is permitted, which lets the messaging arm await `subscribe` before the app serves.                                         |
 | `common` barrel-exports test         | `packages/common/test/unit/barrel-exports.test.ts`                                                     | Already exists, so §6's row EXTENDS a committed gate rather than adding a new file.                                                                                                 |
 | M71 state-key gate scope             | `test/state-key-convention.test.ts`                                                                    | Covers `ctx.state` only. `conn.data` is NOT covered — which is why C3 defers typed connection data to that gate's successor rather than solving it here.                            |
+| `RequestHandler` / `respond`         | `packages/common/src/services/messaging.ts:74,168`                                                     | A FIFTH developer-supplied handler on non-HTTP ingress, returning `TRes` where the other four are void — the reason §3.12 defers it rather than folding it in.                      |
+| no broker delivery count             | `packages/messaging-plugin/src/brokers/` (`kafka-broker.ts:423`)                                       | Brokers redeliver and none tracks an attempt number, so `attempt` is ABSENT on the messaging arm rather than a fabricated `1` (§3.3).                                               |
+| dispatch sites hold no registry      | `job-processor.ts`, `job-executor.ts`, `websocket-service.ts`, `traced-broker.ts`                      | `grep -c IServiceRegistry` returns **0** in all four; `job-executor.ts:38` already takes six positional parameters. This is why `IngressContext.services` is cut (§3.3).            |
+| executor runs inside the lock        | `packages/scheduler-plugin/src/services/scheduler-service.ts:450-470`                                  | `#runWithLock` acquires, returns early on a null token, and reaches the executor only afterwards — so wrapping at `job-executor.ts:63` is inside the lock by construction (§3.10).  |
+| `ProcessOptions.concurrency`         | `packages/common/src/services/queue.ts:53`                                                             | Several jobs of one name run at once, which is why the envelope is per-item and immutable (§3.3a).                                                                                  |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -69,6 +74,36 @@ upgrade, which is the phase that currently forces an application-wide middleware
 | C3 | The ROADMAP In-scope bullet lists typed connection data. Verified: `conn.data` is documented as the analogue of `ctx.state`, and M71's key-convention gate covers `ctx.state` **only**.             | **Deferred out of M86.** The honest fix is to extend M71's `<owner-package>:<kebab-key>` convention and its gate to `conn.data`, which is that milestone's successor. Shipping a typed accessor here would pre-empt that decision. | Correct the ROADMAP In-scope bullet; record the deferral in §9 of this plan and in the ROADMAP "Not in scope". |
 | C4 | `common/src/services/websocket.ts:371` — the `IWebSocketService` `@example` resolves connection data with `as string`, a cast AI_GUIDELINES §11.8 forbids in `src`.                                 | The example is rewritten to narrow with `typeof` rather than cast, matching what X13 actually had to write. This is a JSDoc fix and changes no behaviour; the typed-accessor answer to it is C3's deferral.                        | Edit the `@example` in `common/src/services/websocket.ts`; no `PUBLIC_API.md` row changes.                     |
 | C5 | `ARCHITECTURE.md` §10 documents the middleware pipeline as the framework's cross-cutting mechanism and describes HTTP only, so a reader concludes non-HTTP work has none.                           | ARCHITECTURE gains a subsection naming the second chain, its four consumers, and the explicit statement that the two are separate mechanisms that do not share middleware instances.                                               | New `ARCHITECTURE.md` subsection under §10.                                                                    |
+
+### 2.1 Per-package documentation deliverables
+
+The first draft of this plan named C1-C5 and stopped, so the routine per-package documentation a
+surface change owes was unlisted — README did not appear in it once. Six packages change surface, so
+each owes three artifacts and they ship in the SAME PR (§10.2, §10.5, §9.4):
+
+| Package            | `PUBLIC_API.md`                                                      | Package README                          | `CHANGELOG.md`                                                              |
+| ------------------ | -------------------------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------- |
+| `common`           | New Ingress section (§4 symbols); `WebSocketRouteOptions.guards` row | Exports table rows                      | Added: ingress contract, composer, guard types                              |
+| `websocket-plugin` | `routes`, `behaviors`, `guards` option rows                          | Options table + the §3.11 dispatch note | Added: three options; Note: dispatch becomes promise-mediated under a chain |
+| `queue-plugin`     | `processors`, `behaviors` option rows                                | Options table                           | Added: two options                                                          |
+| `scheduler-plugin` | `jobs`, `behaviors` option rows                                      | Options table + the §3.10 lock note     | Added: two options                                                          |
+| `messaging-plugin` | `subscriptions`, `behaviors` rows on `MessagingCommonOptions`        | Options table + the §3.12 `respond` gap | Added: two options                                                          |
+| `cqrs-plugin`      | No surface change (the deleted composer was internal)                | No change                               | Changed: internal composer promoted to `common`, no observable effect       |
+
+**Three of the six READMEs are fence-compiled, and adding a fence to one FAILS the gate until a
+constant moves.** `test/package-readme-fence-compiler.test.ts:55-78` holds a
+`Record<path, expectedFenceCount>` and covers `common` (2), `websocket-plugin` (9) and
+`queue-plugin` (8) among this milestone's packages; `scheduler-plugin`, `messaging-plugin` and
+`cqrs-plugin` are absent. So:
+
+- A new compilable example in the three covered READMEs must bump its count in that record, in the
+  same commit. This is the kind of one-line omission that reads as an unrelated CI failure.
+- **`scheduler-plugin` and `messaging-plugin` are deliberately NOT added to the gate here.** M70k
+  recorded the reason at `test/package-readme-fence-compiler.test.ts:16` — pulling in the remaining
+  40-odd READMEs surfaces a large pre-existing surface — and adopting two of them is a documentation
+  workstream, not this milestone. Instead their new README examples are **copied verbatim from the
+  integration tests in §6**, which do compile under `deno task check`, so the example is
+  compiler-checked at its source rather than trusted.
 
 ## 3. Design decisions
 
@@ -102,22 +137,53 @@ upgrade, which is the phase that currently forces an application-wide middleware
   `packages/cqrs-plugin/test/unit/pipeline-delegation.test.ts` asserting the CQRS ordering and
   short-circuit behaviour is unchanged after delegation.
 
-### 3.3 The work envelope is `IngressContext`, discriminated on `kind`
+### 3.3 The work envelope is `IngressContext` — four fields, all readonly
 
-- **Decision:** `IngressContext<TPayload = unknown>` carries
-  `{ kind: IngressKind; name: string; payload: TPayload; attempt: number; state: Map<string, unknown>; services: IServiceRegistry; headers?: Readonly<Record<string, string>> }`,
+- **Decision:** `IngressContext<TPayload = unknown>` carries exactly
+  `{ readonly kind: IngressKind; readonly name: string; readonly payload: TPayload; readonly attempt?: number; readonly headers?: Readonly<Record<string, string>> }`,
   where `IngressKind = 'queue' | 'scheduler' | 'messaging' | 'websocket'`. The handler keeps its
-  native signature; only the behaviour chain sees the envelope.
-- **Why:** the four handlers take different shapes and two of them take two arguments
-  (`MessageHandler` at `messaging.ts:36`, `onMessage` at `websocket.ts:308`), so a chain that wraps
-  all four needs one normalized object. `services` is present so a behaviour can resolve a
-  capability without closing over a plugin context; `state` is the attach point a tenant or trace
-  behaviour writes to, mirroring `IRequestContext.state`; `headers` is populated for the messaging
-  arm only, from the `MessageMetadata.headers` M75 made a populated contract. `attempt` is `1` for
-  ingresses that do not retry, matching the 1-based convention `IJob.attempts` (`queue.ts:22`) and
-  `ScheduledJob.attempts` (`scheduler.ts:27`) already use.
-- **Test home:** `packages/common/test/unit/ingress-contract.test.ts` for the shape; each plugin's
-  behaviour test asserts the envelope its dispatch site builds.
+  native signature; only the behaviour chain sees the envelope. There is **no `state` slot and no
+  `services` member** — both were in the first draft of this plan and both are cut; see below.
+- **Why the four that stay:** the handlers take different shapes and two of them take two arguments
+  (`MessageHandler` at `messaging.ts:36`, `onMessage` at `websocket.ts:308`), so a chain wrapping
+  all four needs one normalized object. `headers` is populated for the messaging arm only, from the
+  `MessageMetadata.headers` M75 made a populated contract.
+- **Why `state` is cut:** it had no reader. Its only stated purpose was as the attach point for a
+  tenant or trace behaviour, and §0 puts that work in a successor — so by §4's own dead-surface rule
+  it gets cut before implementing, not stored. It is also structurally write-only: the handler
+  receives its NATIVE argument (`IJob`, `ScheduledJob`, `(message, metadata)`, `(conn, data)`) and
+  never the envelope, so nothing a behaviour wrote to `state` could ever be read by the handler it
+  wraps. The successor that wires tenancy decides how a behaviour reaches a handler, and that is a
+  contract question, not a field this milestone can guess.
+- **Why `services` is cut:** it is unreachable AND redundant. Unreachable —
+  `grep -c IServiceRegistry` returns **0** at all four dispatch sites (`job-processor.ts`,
+  `job-executor.ts`, `websocket-service.ts`, `traced-broker.ts`), and `job-executor.ts:38` is a free
+  function already taking six positional parameters, so supplying it means threading a registry
+  through four packages. Redundant — every `behaviors` arm accepts a `RegistryFactory`, which is
+  handed the registry at `onInit`, so a behaviour needing a capability closes over it:
+  `(services) => new TenantBehavior(services.get(CAPABILITIES.MULTI_TENANCY))`. Putting the registry
+  on every work item as well would be a second way to do what the factory arm exists for.
+- **Why `attempt` is optional:** it is present for queue (from `IJob.attempts`, `queue.ts:22`) and
+  scheduler (from `ScheduledJob.attempts`, `scheduler.ts:27`), both 1-based, and **absent** for
+  messaging and websocket. The first draft said `1` for ingresses that do not retry; that is false
+  for messaging, where brokers redeliver — `kafka-broker.ts:423` describes exactly that — while no
+  broker tracks a delivery count, so a fabricated `1` would tell a behaviour "first attempt" on a
+  fifth redelivery. Absent means "this ingress cannot tell you", never "first try".
+- **Test home:** `packages/common/test/unit/ingress-contract.test.ts` for the shape and the
+  `attempt` presence rule; each plugin behaviour test asserts the envelope its dispatch site builds.
+
+### 3.3a The envelope is built per work item and is immutable
+
+- **Decision:** each dispatch site constructs a fresh `IngressContext` for every job, tick, message
+  or frame, and every field is `readonly`. No envelope is reused across invocations.
+- **Why:** `ProcessOptions.concurrency` (`queue.ts:53`) runs several jobs of one name at once, so an
+  envelope built once per registration would be shared by concurrent work. With a mutable `state`
+  slot that is a cross-tenant leak in the exact milestone whose stated security half is tenant
+  propagation; cutting `state` (§3.3) removes the sharp edge, and constructing per item plus
+  `readonly` removes the class. Building an object per work item is not a cost worth optimizing
+  against a job that is already doing I/O.
+- **Test home:** `queue-plugin/test/integration/queue-behaviors.test.ts` runs two jobs concurrently
+  under `concurrency: 2` and asserts each behaviour invocation saw a distinct envelope instance.
 
 ### 3.4 Behaviour ordering, short-circuit and error semantics match CQRS exactly
 
@@ -201,25 +267,70 @@ upgrade, which is the phase that currently forces an application-wide middleware
 - **Test home:** one `no-options-unchanged.test.ts` per plugin asserting the handler is invoked with
   the identical argument and that no chain is built.
 
+### 3.10 Scheduler behaviours run INSIDE the distributed lock
+
+- **Decision:** the chain wraps the handler call at `jobs/job-executor.ts:63`, which
+  `scheduler-service.ts#runWithLock` reaches only after `this.#lock.acquire(...)` returns a non-null
+  token (`:453`, then the executor in the following `try`). A replica that loses the lock runs no
+  behaviour for that fire.
+- **Why:** a behaviour is a cross-cutting concern around WORK, and on a losing replica no work
+  happens. Running the chain outside the lock would make every metric, log line and span fire once
+  per replica per tick while the job ran once — which is M70l's duplicate-execution defect
+  reappearing in the observability layer, and it would be measured as real load. Wrapping at `:63`
+  needs no code movement; this decision records that the position is deliberate rather than
+  incidental.
+- **Test home:** `scheduler-plugin/test/integration/scheduler-behaviors.test.ts` — with a lock that
+  refuses, the handler does not run and neither does the behaviour.
+
+### 3.11 Configuring behaviours makes frame dispatch promise-mediated, and that is documented
+
+- **Decision:** with at least one behaviour configured, a synchronous `onMessage` is invoked through
+  the chain and therefore after a microtask rather than synchronously. `invoke` stays the outer
+  call, so the rejection path to `onError` is unchanged. This is stated in the websocket README, in
+  `PUBLIC_API.md`, and in the CHANGELOG entry for the option.
+- **Why:** the chain returns a promise by construction, and pretending otherwise would mean a
+  synchronous fast path that behaves differently from the async one — two code paths for one
+  capability. Documenting the consequence is honest; hiding it is how an ordering change becomes a
+  bug report. With no behaviours configured, §3.9 keeps dispatch byte-identical, so an application
+  that adds none never sees this.
+- **Test home:** `websocket-plugin/test/integration/frame-behaviors.test.ts` asserts a synchronous
+  handler still observes frames in arrival order under a chain.
+
+### 3.12 RPC responders are named and deferred, not silently omitted
+
+- **Decision:** `IMessageBroker.respond` (`messaging.ts:168`) and its `RequestHandler`
+  (`messaging.ts:74`) get **no** arm and **no** chain in this milestone. The deferral is recorded in
+  §9 with its owning successor.
+- **Why:** it is a fifth developer-supplied handler on non-HTTP ingress, so leaving it unmentioned
+  would be the omission this milestone exists to correct — but it does not fit the contract being
+  built here. `RequestHandler` RETURNS `TRes`, where all four ingress handlers are void-returning
+  (`queue.ts:32`, `scheduler.ts:36`, `messaging.ts:36`, `websocket.ts:308`); that is the CQRS shape,
+  and `IIngressBehavior`'s `next: () => Promise<void>` cannot express it. Forcing it in would mean
+  widening the ingress contract to carry a result nobody else has, or forking it — both of which
+  trade this milestone's one-contract property for one more consumer.
+- **Test home:** none — this is a scope decision. `§9` carries it, and
+  `messaging-plugin/test/unit/pipelined-broker.test.ts` asserts `respond` is forwarded UNWRAPPED, so
+  the deferral is pinned rather than assumed.
+
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol            | Kind      | Consumer / real code path that READS it                                                                                                                     |
-| -------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IngressKind`              | type      | `IngressContext.kind`; a behaviour branches on it — asserted in the messaging and queue behaviour tests.                                                    |
-| `IngressContext<T>`        | interface | Built by all four dispatch sites; the parameter type of `IIngressBehavior.handle`.                                                                          |
-| `IIngressBehavior`         | interface | The element type of all four `behaviors` arms.                                                                                                              |
-| `BehaviorLike<TWork,TRes>` | interface | Parameter type of `composeBehaviorChain`; satisfied structurally by `IPipelineBehavior` and `IIngressBehavior`, which is what lets one composer serve both. |
-| `composeBehaviorChain`     | function  | Called by all four plugin dispatch sites AND by `cqrs-plugin/src/bus/request-bus.ts:86` after the private copy is deleted.                                  |
-| `WebSocketUpgradeGuard`    | type      | The element type of `WebSocketRouteOptions.guards`; read by the router in `websocket-service.ts`.                                                           |
-| `WebSocketGuardDecision`   | type      | Return type of `WebSocketUpgradeGuard`; the router branches on `true` versus the refusal object.                                                            |
-| `WebSocketRouteEntry`      | type      | Element type of `WebSocketPluginOptions.routes` (`WebSocketRouteDefinition \| RegistryFactory<…>`), read by the plugin's `onInit`.                          |
-| `WebSocketRouteDefinition` | interface | `{ path, handlers, options? }` — the declarative form of a `route()` call; read by the plugin's `onInit`.                                                   |
-| `QueueProcessorEntry`      | type      | Element type of `QueuePluginOptions.processors`, read by the plugin's `onInit`.                                                                             |
-| `QueueProcessorDefinition` | interface | `{ name, processor, options? }`; read by the plugin's `onInit`.                                                                                             |
-| `SchedulerJobEntry`        | type      | Element type of `SchedulerPluginOptions.jobs`, read by the plugin's `onInit`.                                                                               |
-| `SchedulerJobDefinition`   | type      | A union discriminated on `trigger` (`'cron' \| 'every' \| 'delay'`), so a cron entry without an expression is a compile error (the M30 precedent).          |
-| `SubscriptionEntry`        | type      | Element type of `MessagingPluginOptions.subscriptions`, read by the plugin's `onInit`.                                                                      |
-| `SubscriptionDefinition`   | interface | `{ topic, handler, options? }`; read by the plugin's `onInit`.                                                                                              |
+| Exported symbol            | Kind      | Consumer / real code path that READS it                                                                                                                                                 |
+| -------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IngressKind`              | type      | `IngressContext.kind`; a behaviour branches on it — asserted in the messaging and queue behaviour tests.                                                                                |
+| `IngressContext<T>`        | interface | Built by all four dispatch sites; the parameter type of `IIngressBehavior.handle`. Four fields only — `state` and `services` were cut in §3.3 under this table's own dead-surface rule. |
+| `IIngressBehavior`         | interface | The element type of all four `behaviors` arms.                                                                                                                                          |
+| `BehaviorLike<TWork,TRes>` | interface | Parameter type of `composeBehaviorChain`; satisfied structurally by `IPipelineBehavior` and `IIngressBehavior`, which is what lets one composer serve both.                             |
+| `composeBehaviorChain`     | function  | Called by all four plugin dispatch sites AND by `cqrs-plugin/src/bus/request-bus.ts:86` after the private copy is deleted.                                                              |
+| `WebSocketUpgradeGuard`    | type      | The element type of `WebSocketRouteOptions.guards`; read by the router in `websocket-service.ts`.                                                                                       |
+| `WebSocketGuardDecision`   | type      | Return type of `WebSocketUpgradeGuard`; the router branches on `true` versus the refusal object.                                                                                        |
+| `WebSocketRouteEntry`      | type      | Element type of `WebSocketPluginOptions.routes` (`WebSocketRouteDefinition \| RegistryFactory<…>`), read by the plugin's `onInit`.                                                      |
+| `WebSocketRouteDefinition` | interface | `{ path, handlers, options? }` — the declarative form of a `route()` call; read by the plugin's `onInit`.                                                                               |
+| `QueueProcessorEntry`      | type      | Element type of `QueuePluginOptions.processors`, read by the plugin's `onInit`.                                                                                                         |
+| `QueueProcessorDefinition` | interface | `{ name, processor, options? }`; read by the plugin's `onInit`.                                                                                                                         |
+| `SchedulerJobEntry`        | type      | Element type of `SchedulerPluginOptions.jobs`, read by the plugin's `onInit`.                                                                                                           |
+| `SchedulerJobDefinition`   | type      | A union discriminated on `trigger` (`'cron' \| 'every' \| 'delay'`), so a cron entry without an expression is a compile error (the M30 precedent).                                      |
+| `SubscriptionEntry`        | type      | Element type of `MessagingPluginOptions.subscriptions`, read by the plugin's `onInit`.                                                                                                  |
+| `SubscriptionDefinition`   | interface | `{ topic, handler, options? }`; read by the plugin's `onInit`.                                                                                                                          |
 
 `PipelinedBroker` is deliberately NOT exported: it reaches an application only as a
 `MessageBrokerAdapter`, and `deno doc --lint` rejects an export leaking that internal type — the
@@ -263,26 +374,26 @@ upgrade, which is the phase that currently forces an application-wide middleware
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                             | src covered                         | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                |
-| --------------------------------------------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `common/test/unit/compose-behavior-chain.test.ts`                     | `services/ingress.ts` (composer)    | Declared order equals execution order; a behaviour returning without `next()` skips the terminal; a throw propagates; empty array calls the terminal once. Calls type-check against `BehaviorLike<IngressContext, void>` AND `BehaviorLike<CqrsRequest, unknown>`, which is the proof one composer serves both. |
-| `common/test/unit/ingress-contract.test.ts`                           | `services/ingress.ts` (types)       | Compile-time assertions that `IPipelineBehavior` and `IIngressBehavior` are both assignable to `BehaviorLike`; `IngressKind` exhaustiveness over a `switch`.                                                                                                                                                    |
-| `common/test/unit/websocket-guard-types.test.ts`                      | `services/websocket.ts` (additions) | `WebSocketGuardDecision` accepts `true` and the refusal object and rejects a bare number; `guards` is optional so an existing `WebSocketRouteOptions` literal still type-checks.                                                                                                                                |
-| `common/test/unit/barrel-exports.test.ts` (EXTEND)                    | `src/index.ts`                      | Every §4 symbol is exported from the barrel. Compile-time, declared against the barrel — the M56/M70m defect class, where dropping an export left every runtime assertion green.                                                                                                                                |
-| `cqrs-plugin/test/unit/pipeline-delegation.test.ts`                   | `bus/request-bus.ts`                | Ordering, short-circuit and result propagation are unchanged after delegation; captured against the pre-change behaviour so the promotion is proven byte-equivalent, not merely compiling.                                                                                                                      |
-| `websocket-plugin/test/unit/route-registration.test.ts`               | `plugin/websocket-plugin.ts`        | Instance and factory arms both register; a throwing factory rejects `start()` naming `WebSocketPlugin({ routes })[N]` with the DECLARED index in a mixed array.                                                                                                                                                 |
-| `websocket-plugin/test/integration/upgrade-guards.test.ts`            | `services/websocket-service.ts`     | A guard refusing with `{ status: 401 }` prevents the handshake; **negative control: a guard on `/ws/a` does not run for `/ws/b`** — the property the current application-wide workaround cannot express.                                                                                                        |
-| `websocket-plugin/test/integration/frame-behaviors.test.ts`           | `services/websocket-service.ts`     | A behaviour observes `kind: 'websocket'`, `name` equal to the route path, and the frame as `payload`; a short-circuit prevents `onMessage`; a throw reaches `onError` rather than becoming unhandled.                                                                                                           |
-| `websocket-plugin/test/integration/no-options-unchanged.test.ts`      | `services/websocket-service.ts`     | With no `behaviors`, `onMessage` receives the identical `(conn, data)` arguments and no chain is allocated.                                                                                                                                                                                                     |
-| `queue-plugin/test/unit/processor-registration.test.ts`               | `plugin/queue-plugin.ts`            | Both arms register; declared-index error attribution; an imperative `process()` call and an arm entry coexist.                                                                                                                                                                                                  |
-| `queue-plugin/test/integration/queue-behaviors.test.ts`               | `processors/job-processor.ts`       | Envelope carries `kind: 'queue'`, the job name, and `attempt` equal to `IJob.attempts`; short-circuit skips the processor; a behaviour throw reaches the retry path and fires `ProcessOptions.onFailed` on the final attempt.                                                                                   |
-| `queue-plugin/test/integration/no-options-unchanged.test.ts`          | `processors/job-processor.ts`       | With no `behaviors`, `processor(job)` is called with the identical job object.                                                                                                                                                                                                                                  |
-| `scheduler-plugin/test/unit/job-registration.test.ts`                 | `plugin/scheduler-plugin.ts`        | The `trigger` union dispatches to `cron`/`every`/`delay`; a cron entry missing `expression` is a compile error (`@ts-expect-error`, self-validating); the Workers refusal precedes any entry read.                                                                                                              |
-| `scheduler-plugin/test/integration/scheduler-behaviors.test.ts`       | `jobs/job-executor.ts`              | Envelope carries `kind: 'scheduler'` and the 1-based `attempt`; a behaviour throw is retried per `RetryOptions` rather than swallowed.                                                                                                                                                                          |
-| `scheduler-plugin/test/integration/no-options-unchanged.test.ts`      | `jobs/job-executor.ts`              | With no `behaviors`, `handler(job)` is called with the identical job object.                                                                                                                                                                                                                                    |
-| `messaging-plugin/test/unit/pipelined-broker.test.ts`                 | `pipeline/pipelined-broker.ts`      | The decorator forwards every `MessageBrokerAdapter` member; the chain wraps only the subscribe handler; `headers` from `MessageMetadata` reach `IngressContext.headers`.                                                                                                                                        |
-| `messaging-plugin/test/integration/subscription-registration.test.ts` | `plugin/messaging-plugin.ts`        | Both arms subscribe through a real `InMemoryBroker` (§6.7 in-memory, no real backend); a message published after `start()` reaches an arm-registered handler.                                                                                                                                                   |
-| `messaging-plugin/test/integration/no-options-unchanged.test.ts`      | `plugin/messaging-plugin.ts`        | With no `behaviors`, no `PipelinedBroker` is applied — asserted through the broker chain, not by reading a private field.                                                                                                                                                                                       |
+| Test file                                                             | src covered                         | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                         |
+| --------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `common/test/unit/compose-behavior-chain.test.ts`                     | `services/ingress.ts` (composer)    | Declared order equals execution order; a behaviour returning without `next()` skips the terminal; a throw propagates; empty array calls the terminal once. Calls type-check against `BehaviorLike<IngressContext, void>` AND `BehaviorLike<CqrsRequest, unknown>`, which is the proof one composer serves both.          |
+| `common/test/unit/ingress-contract.test.ts`                           | `services/ingress.ts` (types)       | Compile-time assertions that `IPipelineBehavior` and `IIngressBehavior` are both assignable to `BehaviorLike`; `IngressKind` exhaustiveness over a `switch`.                                                                                                                                                             |
+| `common/test/unit/websocket-guard-types.test.ts`                      | `services/websocket.ts` (additions) | `WebSocketGuardDecision` accepts `true` and the refusal object and rejects a bare number; `guards` is optional so an existing `WebSocketRouteOptions` literal still type-checks.                                                                                                                                         |
+| `common/test/unit/barrel-exports.test.ts` (EXTEND)                    | `src/index.ts`                      | Every §4 symbol is exported from the barrel. Compile-time, declared against the barrel — the M56/M70m defect class, where dropping an export left every runtime assertion green.                                                                                                                                         |
+| `cqrs-plugin/test/unit/pipeline-delegation.test.ts`                   | `bus/request-bus.ts`                | Ordering, short-circuit and result propagation are unchanged after delegation; captured against the pre-change behaviour so the promotion is proven byte-equivalent, not merely compiling.                                                                                                                               |
+| `websocket-plugin/test/unit/route-registration.test.ts`               | `plugin/websocket-plugin.ts`        | Instance and factory arms both register; a throwing factory rejects `start()` naming `WebSocketPlugin({ routes })[N]` with the DECLARED index in a mixed array.                                                                                                                                                          |
+| `websocket-plugin/test/integration/upgrade-guards.test.ts`            | `services/websocket-service.ts`     | A guard refusing with `{ status: 401 }` prevents the handshake; **negative control: a guard on `/ws/a` does not run for `/ws/b`** — the property the current application-wide workaround cannot express.                                                                                                                 |
+| `websocket-plugin/test/integration/frame-behaviors.test.ts`           | `services/websocket-service.ts`     | A behaviour observes `kind: 'websocket'`, `name` equal to the route path, and the frame as `payload`; a short-circuit prevents `onMessage`; a throw reaches `onError` rather than becoming unhandled; a synchronous handler still observes frames in arrival order under a chain (§3.11).                                |
+| `websocket-plugin/test/integration/no-options-unchanged.test.ts`      | `services/websocket-service.ts`     | With no `behaviors`, `onMessage` receives the identical `(conn, data)` arguments and is invoked **synchronously** — asserted by observing the handler ran before the next statement, which is the observable form of "no chain". Reading a private field would prove nothing a refactor could not break.                 |
+| `queue-plugin/test/unit/processor-registration.test.ts`               | `plugin/queue-plugin.ts`            | Both arms register; declared-index error attribution; an imperative `process()` call and an arm entry coexist.                                                                                                                                                                                                           |
+| `queue-plugin/test/integration/queue-behaviors.test.ts`               | `processors/job-processor.ts`       | Envelope carries `kind: 'queue'`, the job name, and `attempt` equal to `IJob.attempts`; **under `concurrency: 2` two in-flight jobs see two distinct envelope instances** (§3.3a); short-circuit skips the processor; a behaviour throw reaches the retry path and fires `ProcessOptions.onFailed` on the final attempt. |
+| `queue-plugin/test/integration/no-options-unchanged.test.ts`          | `processors/job-processor.ts`       | With no `behaviors`, `processor(job)` is called with the identical job object and no extra microtask is interposed (observable, not a private read).                                                                                                                                                                     |
+| `scheduler-plugin/test/unit/job-registration.test.ts`                 | `plugin/scheduler-plugin.ts`        | The `trigger` union dispatches to `cron`/`every`/`delay`; a cron entry missing `expression` is a compile error (`@ts-expect-error`, self-validating); the Workers refusal precedes any entry read.                                                                                                                       |
+| `scheduler-plugin/test/integration/scheduler-behaviors.test.ts`       | `jobs/job-executor.ts`              | Envelope carries `kind: 'scheduler'` and the 1-based `attempt`; a behaviour throw is retried per `RetryOptions` rather than swallowed; **a lock that refuses runs neither handler nor behaviour** (§3.10).                                                                                                               |
+| `scheduler-plugin/test/integration/no-options-unchanged.test.ts`      | `jobs/job-executor.ts`              | With no `behaviors`, `handler(job)` is called with the identical job object and no extra microtask is interposed (observable, not a private read).                                                                                                                                                                       |
+| `messaging-plugin/test/unit/pipelined-broker.test.ts`                 | `pipeline/pipelined-broker.ts`      | The decorator forwards every `MessageBrokerAdapter` member; the chain wraps only the subscribe handler; **`respond` is forwarded UNWRAPPED**, pinning the §3.12 deferral; `headers` from `MessageMetadata` reach `IngressContext.headers`; the envelope carries no `attempt` on this arm (§3.3).                         |
+| `messaging-plugin/test/integration/subscription-registration.test.ts` | `plugin/messaging-plugin.ts`        | Both arms subscribe through a real `InMemoryBroker` (§6.7 in-memory, no real backend); a message published after `start()` reaches an arm-registered handler.                                                                                                                                                            |
+| `messaging-plugin/test/integration/no-options-unchanged.test.ts`      | `plugin/messaging-plugin.ts`        | With no `behaviors`, no `PipelinedBroker` is applied — asserted through the broker chain, not by reading a private field.                                                                                                                                                                                                |
 
 Every `src/` file in §5 appears in this table. No file in this milestone loads an external package,
 so no guarded real-import test is required; the messaging integration tests use `InMemoryBroker` per
@@ -299,12 +410,18 @@ deno task check
 deno task test
 deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/function/line every src file
 deno task publish:check     # committed tree; six packages change surface
-deno task release:verify 0.2.0
+deno task release:verify <next-version>   # the RELEASE's version, not the milestone's; 0.2.0 is already published
 ```
 
-Beyond the gates, the milestone is not done until X13's `collaboration.plugin.ts` is rewritten
-against the new surface as a committed example and demonstrably loses the `IPlugin` wrapper, the
-duplicated path string, and the application-wide guard.
+Beyond the gates, the milestone is not done until the X13 collaboration route is expressible with
+none of what X13 had to write. That proof lives at
+`packages/websocket-plugin/test/e2e/declarative-route.test.ts`, NOT in `apps/`: it registers the
+room route entirely through `WebSocketPluginOptions.routes` with a route-scoped guard, and asserts
+the result has no `IPlugin` wrapper, no second copy of the path string, and no application-wide
+middleware. A `test/e2e` file is committed, readable and gate-run, where a new `apps/` example would
+need its own `deno.json`, a `smoke` task and `check:apps` wiring for a demonstration the suite
+already has to make. (`apps/realtime-clients/src/app.ts` is the natural host should a runnable
+example be wanted later; that is a documentation milestone's call, not this one's.)
 
 ## 8. Risks & mitigations
 
@@ -339,6 +456,11 @@ duplicated path string, and the application-wide guard.
 - **Typed connection data** (§2 C3). Owned by the M71 successor that extends the
   `<owner-package>:<kebab-key>` convention and `test/state-key-convention.test.ts` to cover
   `conn.data`.
+- **RPC responders** — `IMessageBroker.respond` and its `RequestHandler` (§3.12). A fifth
+  developer-supplied handler on non-HTTP ingress, deferred because it returns a value where all four
+  ingress handlers are void, which is the CQRS shape rather than this contract's. Owned by whichever
+  milestone next touches brokered request-reply; `pipelined-broker.test.ts` pins that `respond` is
+  forwarded unwrapped so the gap stays visible.
 - **CLI schematics for the new arms.** A `setu generate processor` belongs with the decorator
   milestone, since M60's seam registry keys on the artifact shape the schematic emits.
 - **Widening `IPipelineBehavior`** (§3.1). Considered and rejected on naming and result-type
