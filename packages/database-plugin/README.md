@@ -478,6 +478,13 @@ scalar cannot say which field it is. A field value **containing the separator is
 two different logical keys would otherwise compose to one row key: a write would silently overwrite
 an unrelated row and a read would return it.
 
+**A key field's type is not part of the row key.** A numeric field renders as its decimal text, so
+`1` and `'1'` are one physical row: creating one refuses the other as existing, and `findById('1')`
+answers the row stored under `1` — whose `id` cell still decodes as the number. Tagging the key
+would make it unreadable in `cbt` and break every table this adapter did not write, so the mapping
+does not; choose one type per key field. If lexicographic order matters for a numeric field,
+zero-pad it, exactly as you would writing row keys by hand.
+
 Key fields are written as ordinary cells AND recovered from the row key on read, with the **cells
 winning**. All three parts matter: a Bigtable row cannot exist with zero cells, so writing the key
 guarantees the row exists; the row key is bytes and records no type, so overlaying it over a cell

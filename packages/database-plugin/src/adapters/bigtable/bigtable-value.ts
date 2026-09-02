@@ -53,7 +53,7 @@ export function encodeCellValue(value: unknown, encoding: BigtableValueEncoding)
   if (encoding === 'raw') return value === null ? '' : String(value);
   if (value === null) return TAG_NULL;
   if (typeof value === 'string') return `${TAG_STRING}${value}`;
-  if (typeof value === 'number') return `${TAG_NUMBER}${String(value)}`;
+  if (typeof value === 'number') return `${TAG_NUMBER}${encodeNumber(value)}`;
   if (typeof value === 'boolean') return `${TAG_BOOLEAN}${value ? 'true' : 'false'}`;
   if (value instanceof Date) return `${TAG_DATE}${value.toISOString()}`;
   return `${TAG_JSON}${JSON.stringify(value)}`;
@@ -81,13 +81,8 @@ export function decodeCellValue(text: string, encoding: BigtableValueEncoding): 
   switch (text.slice(0, 2)) {
     case TAG_STRING:
       return payload;
-    case TAG_NUMBER: {
-      // `Number('')` is 0 and `Number(' 1 ')` is 1, so the round-trip is
-      // checked rather than assumed: only text `String(n)` would itself have
-      // produced is read as a number.
-      const parsed = Number(payload);
-      return Number.isFinite(parsed) && String(parsed) === payload ? parsed : text;
-    }
+    case TAG_NUMBER:
+      return decodeNumber(payload) ?? text;
     case TAG_BOOLEAN:
       if (payload === 'true') return true;
       if (payload === 'false') return false;
@@ -105,4 +100,45 @@ export function decodeCellValue(text: string, encoding: BigtableValueEncoding): 
     default:
       return text;
   }
+}
+
+/**
+ * Encodes one number, including the values `String()` cannot round-trip.
+ *
+ * `NaN` and the infinities are written under reserved spellings and read back
+ * as themselves. Encoding them as `String(value)` and letting the decoder
+ * reject the result — which is what this used to do — turned a stored `NaN`
+ * into the STRING `'n:NaN'` on the way out: a silent type change rather than a
+ * refusal. `-0` gets its own spelling too, because `String(-0)` is `'0'`.
+ *
+ * @param value - The number to encode
+ * @returns The payload text
+ */
+function encodeNumber(value: number): string {
+  if (Number.isNaN(value)) return 'NaN';
+  if (value === Number.POSITIVE_INFINITY) return 'Infinity';
+  if (value === Number.NEGATIVE_INFINITY) return '-Infinity';
+  if (Object.is(value, -0)) return '-0';
+  return String(value);
+}
+
+/**
+ * Decodes one number payload, or reports that the text is not one this codec
+ * wrote.
+ *
+ * The round-trip is CHECKED rather than assumed: `Number('')` is `0` and
+ * `Number(' 1 ')` is `1`, so only text that `encodeNumber` would itself have
+ * produced is read as a number. Anything else is a foreign cell whose text
+ * merely begins `n:`, and belongs to the interop fallback.
+ *
+ * @param payload - The text after the tag
+ * @returns The number, or `null` when the text is not a number this codec wrote
+ */
+function decodeNumber(payload: string): number | null {
+  if (payload === 'NaN') return Number.NaN;
+  if (payload === 'Infinity') return Number.POSITIVE_INFINITY;
+  if (payload === '-Infinity') return Number.NEGATIVE_INFINITY;
+  if (payload === '-0') return -0;
+  const parsed = Number(payload);
+  return Number.isFinite(parsed) && String(parsed) === payload ? parsed : null;
 }

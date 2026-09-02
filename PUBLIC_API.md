@@ -1704,9 +1704,13 @@ and `orderBy` is row-key order or nothing.
 `IBigtableClient`, which is how a client built with non-default credentials reaches the adapter).
 `instance` is required on BOTH arms, because a table is addressed as `project/instance/table` and
 neither a client nor a project encodes it. `BigtableAdapterOptionsBase` is the half both arms share
-(`instance`, `tables`, `maxPageFetches`, `logQueries`). `BigtableAdapter`'s constructor also takes
-an optional second parameter, a `BigtableClientLoader`, which overrides the inject-or-lazy choice
-and whose `owned` flag decides whether `disconnect()` closes the client it produced.
+(`instance`, `tables`, `maxPageFetches`, `logQueries`). `tables` maps each entity name to a
+`BigtableEntityMapping` — `{ table?, rowKey?, columnFamily?, columns?, valueEncoding? }`, whose
+`rowKey` is a `BigtableRowKeyMapping` and whose `valueEncoding` is a `BigtableValueEncoding`; an
+unmapped entity uses its own name as the table, `['id']` as the row-key fields, `'cf'` as the column
+family and tagged values. `BigtableAdapter`'s constructor also takes an optional second parameter, a
+`BigtableClientLoader`, which overrides the inject-or-lazy choice and whose `owned` flag decides
+whether `disconnect()` closes the client it produced.
 
 **The adapter provisions nothing and `connect()` issues no RPC.** Column families,
 garbage-collection policies and split points belong to the application's provisioning, and a missing
@@ -1718,11 +1722,14 @@ refused at construction instead, by name.
 **The row key is composed from logical fields.** `BigtableRowKeyMapping` is
 `{ fields, separator?, prefix? }`, defaulting to `{ fields: ['id'], separator: '#' }`. A
 single-field key accepts a scalar `EntityKey`; a multi-field key requires a record naming every
-field and refuses a scalar, which cannot say which field it is. A field value **containing the
-separator is refused**: two different logical keys would otherwise compose to one row key, so a
-write would silently overwrite an unrelated row. Composing a row key from several fields is a
-_mapping_ concern rather than the composite-key _contract_ concern, which is why this arm needs no
-`common` change — Bigtable's key shares no type with DynamoDB's partition/sort pair.
+field and refuses a scalar, which cannot say which field it is. A key field's **type is not part of
+the row key** — a numeric field renders as its decimal text, so `1` and `'1'` are one physical row
+and `findById('1')` answers the row stored under `1`, whose `id` cell still decodes as the number.
+Choose one type per key field, and zero-pad a numeric one whose lexicographic order matters. A field
+value **containing the separator is refused**: two different logical keys would otherwise compose to
+one row key, so a write would silently overwrite an unrelated row. Composing a row key from several
+fields is a _mapping_ concern rather than the composite-key _contract_ concern, which is why this
+arm needs no `common` change — Bigtable's key shares no type with DynamoDB's partition/sort pair.
 
 Key fields are written as ordinary cells AND recovered from the row key on read, with the **cells
 winning**. All three parts are load-bearing: a Bigtable row cannot exist with zero cells; the row

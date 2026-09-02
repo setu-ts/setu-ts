@@ -81,6 +81,19 @@ function renderKeySegment(
  * carrying every field, and refuses a scalar by name — a scalar cannot say
  * which of several fields it is.
  *
+ * **A key field's TYPE is not part of the row key.** A Bigtable row key is
+ * bytes, and a numeric field renders as its decimal text, so `1` and `'1'`
+ * compose the same physical row: creating one then refuses the other as
+ * existing, and `findById('1')` answers the row stored under `1` — whose `id`
+ * cell still decodes as the NUMBER, so the caller sees the stored type rather
+ * than the one it asked with. That is a property of mapping two JavaScript
+ * types onto one byte string, not a defect: tagging the key would make it
+ * unreadable in `cbt` and break every table this adapter did not write, and
+ * refusing numeric key fields outright (the Cosmos precedent, where the
+ * SERVICE refuses them) would remove a shape Bigtable users rely on — they
+ * routinely zero-pad numbers precisely because the key is text. Choose one
+ * type per key field.
+ *
  * @param target - The resolved entity target
  * @param id - The primary key, scalar or composite
  * @param operation - The calling operation, quoted in a refusal

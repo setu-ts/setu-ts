@@ -51,13 +51,28 @@ export interface IBigtableWriteBuffer {
    * Buffers a cell write, merging it over anything already buffered.
    *
    * @param cells - The cells to write
-   * @param requiresAbsent - `true` for a `create`, whose commit must refuse an
+   * @param creating - `true` for a `create`, whose commit must refuse an
    *   existing row
+   * @throws {BigtableTransactionScopeError} When a `create` follows an
+   *   operation that already required the row to be present
    */
-  insert(cells: BigtableCellBag, requiresAbsent: boolean): void;
+  insert(cells: BigtableCellBag, creating: boolean): void;
   /** Buffers a whole-row delete, discarding any cells buffered before it. */
   remove(): void;
 }
+
+/**
+ * What must be true of the COMMITTED row for the buffer to apply.
+ *
+ * A single boolean cannot express this. `'absent'` is a `create` — the commit
+ * must refuse an existing row; `'present'` is an `update` — it must refuse an
+ * absent one, which is the guarantee the non-transactional path already gives;
+ * and `'any'` is a `delete`, whose own boolean was already reported, so its
+ * commit is unconditional and refuses nothing.
+ *
+ * @internal
+ */
+type RowPrecondition = 'absent' | 'present' | 'any';
 
 /**
  * The buffered state of one transaction.
@@ -73,8 +88,8 @@ interface BufferState {
   deleted: boolean;
   /** The cells buffered since the last delete. */
   cells: Record<string, Record<string, string>>;
-  /** Whether the FIRST buffered operation was a `create`. */
-  requiresAbsent: boolean;
+  /** What the committed row must be for this buffer to apply. */
+  expects: RowPrecondition;
   /** Whether any operation has been buffered at all. */
   touched: boolean;
 }
@@ -141,7 +156,7 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
         rowKey,
         deleted: false,
         cells: {},
-        requiresAbsent: false,
+        expects: 'any',
         touched: false,
       };
       return;
@@ -156,9 +171,20 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
   }
 
   /** @inheritdoc */
-  insert(cells: BigtableCellBag, requiresAbsent: boolean): void {
+  insert(cells: BigtableCellBag, creating: boolean): void {
     const state = this.#requireState();
-    if (!state.touched) state.requiresAbsent = requiresAbsent;
+    // A `create` buffered after an `update` is contradictory: one requires the
+    // row absent and the other requires it present. Refused by name rather
+    // than resolved, because carrying only the FIRST operation's condition
+    // silently turned the create into an upsert.
+    if (creating && state.expects === 'present' && !state.deleted) {
+      throw new BigtableTransactionScopeError(
+        `Bigtable transaction already requires row '${state.table}'/'${state.rowKey}' to exist, ` +
+          `so a create() of the same row cannot also require it absent. Delete it first, or use ` +
+          `two transactions.`,
+      );
+    }
+    if (!state.touched) state.expects = creating ? 'absent' : 'present';
     state.touched = true;
     for (const [family, qualifiers] of Object.entries(cells)) {
       const existing = state.cells[family] ?? {};
@@ -169,6 +195,11 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
   /** @inheritdoc */
   remove(): void {
     const state = this.#requireState();
+    // A delete reported its own boolean from committed state, so it imposes no
+    // precondition on the commit — and it CLEARS one an earlier write set,
+    // because after a whole-row delete the row's prior state no longer decides
+    // whether the buffered cells are valid.
+    state.expects = 'any';
     state.touched = true;
     state.deleted = true;
     // A delete supersedes every cell buffered before it: the commit's mutation
@@ -197,21 +228,35 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
     if (mutations.length === 0) return;
 
     const row = this.#instance.table(state.table).row(state.rowKey);
-    // The predicate is not decoration: it is what makes a buffered `create`
-    // refuse an existing row atomically, rather than the non-transactional
-    // path's guarantee quietly degrading to an upsert inside a transaction.
-    const matched = state.requiresAbsent
-      ? await row.conditionalMutate([{ all: true }], { onNoMatch: mutations })
-      : await row.conditionalMutate([{ all: true }], {
-        onMatch: mutations,
-        onNoMatch: mutations,
-      });
-    if (state.requiresAbsent && matched) {
-      throw new Error(
-        `Bigtable row '${state.table}'/'${state.rowKey}' already exists; the transaction's ` +
-          `create was not applied.`,
-      );
+    // The predicate is not decoration: it is what carries each operation's own
+    // precondition to the moment the write lands. Applying the mutations on
+    // BOTH branches — which is what this used to do outside the create case —
+    // meant a buffered `update` whose row was deleted after the pre-read got
+    // INSERTED through `onNoMatch`, so a transaction-scoped update degraded to
+    // an upsert exactly where the non-transactional path refuses.
+    if (state.expects === 'absent') {
+      const matched = await row.conditionalMutate([{ all: true }], { onNoMatch: mutations });
+      if (matched) {
+        throw new Error(
+          `Bigtable row '${state.table}'/'${state.rowKey}' already exists; the transaction's ` +
+            `create was not applied.`,
+        );
+      }
+      return;
     }
+    if (state.expects === 'present') {
+      const matched = await row.conditionalMutate([{ all: true }], { onMatch: mutations });
+      if (!matched) {
+        throw new Error(
+          `Bigtable row '${state.table}'/'${state.rowKey}' no longer exists; the transaction's ` +
+            `update was not applied.`,
+        );
+      }
+      return;
+    }
+    // A delete-first buffer: its own boolean was already reported, so the
+    // mutations apply whatever the row's state now is and nothing is refused.
+    await row.conditionalMutate([{ all: true }], { onMatch: mutations, onNoMatch: mutations });
   }
 
   /**

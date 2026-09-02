@@ -24,6 +24,18 @@ describe('tagged cell values', () => {
     expect(roundTrip(null)).toBe(null);
   });
 
+  it('round-trips the numbers String() cannot, rather than turning them into text', () => {
+    // Encoding these as `String(value)` and letting the decoder reject the
+    // result turned a stored `NaN` into the STRING `'n:NaN'` on the way out —
+    // a silent type change rather than a refusal.
+    expect(roundTrip(Number.NaN)).toBeNaN();
+    expect(roundTrip(Number.POSITIVE_INFINITY)).toBe(Number.POSITIVE_INFINITY);
+    expect(roundTrip(Number.NEGATIVE_INFINITY)).toBe(Number.NEGATIVE_INFINITY);
+    // `String(-0)` is '0', so negative zero needs its own spelling to survive.
+    expect(Object.is(roundTrip(-0), -0)).toBe(true);
+    expect(Object.is(roundTrip(0), 0)).toBe(true);
+  });
+
   it('round-trips a Date as a Date, not as its ISO string', () => {
     const when = new Date('2026-08-31T10:11:12.000Z');
     const decoded = roundTrip(when);
@@ -51,6 +63,8 @@ describe('tagged cell values', () => {
   it('falls back to the raw string for a malformed payload rather than throwing', () => {
     expect(decodeCellValue('n:abc', 'tagged')).toBe('n:abc');
     expect(decodeCellValue('n: 1 ', 'tagged')).toBe('n: 1 ');
+    expect(decodeCellValue('n:nan', 'tagged')).toBe('n:nan');
+    expect(decodeCellValue('n:+Infinity', 'tagged')).toBe('n:+Infinity');
     expect(decodeCellValue('b:yes', 'tagged')).toBe('b:yes');
     expect(decodeCellValue('d:nope', 'tagged')).toBe('d:nope');
     expect(decodeCellValue('j:{', 'tagged')).toBe('j:{');

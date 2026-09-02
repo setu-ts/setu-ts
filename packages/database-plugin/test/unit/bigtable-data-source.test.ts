@@ -86,14 +86,41 @@ describe('create', () => {
     expect((await source.findById('u1'))?.blank).toBe(null);
   });
 
-  it('refuses two fields that would share one qualifier', async () => {
-    const { source } = setup('User', { User: { columns: { alias: 'cf:name' } } });
-    await expect(source.create({ id: 'u1', name: 'ada', alias: 'a' }))
+  it("refuses an UNMAPPED field that lands on a declared field's address", async () => {
+    // `{ foo: 'cf:bar' }` reserves `cf:bar`, and an unmapped field named `bar`
+    // resolves there too. Writing only `bar` used to succeed and read back as
+    // `foo` — the entity silently changed shape. The same-payload check above
+    // could not see it, because `foo` is never written.
+    const { source } = setup('User', { User: { columns: { foo: 'cf:bar' } } });
+    await expect(source.create({ id: 'u1', bar: 'written-as-bar' }))
+      .rejects.toThrow(/reserves for 'foo'/);
+    // The same check covers a payload carrying BOTH — the declared field and
+    // the unmapped one that lands on its address — so no separate
+    // same-payload check is needed.
+    await expect(source.create({ id: 'u2', foo: 'a', bar: 'b' }))
       .rejects.toThrow(UnsupportedQueryFeatureError);
+    await expect(source.update('u1', { bar: 'x' })).rejects.toThrow(/in update/);
+    // A remapped qualifier no field name reaches stays perfectly usable, which
+    // is why this is a write-time check and not a mapping-time refusal.
+    const ok = setup('User', { User: { columns: { createdAt: 'cf:created_at' } } });
+    await ok.source.create({ id: 'u1', createdAt: 'today' });
+    expect(await ok.source.findById('u1')).toEqual({ id: 'u1', createdAt: 'today' });
   });
 });
 
 describe('findById', () => {
+  it('treats a numeric and a string key of the same text as ONE row', async () => {
+    // A Bigtable row key is bytes, so `1` and `'1'` compose the same physical
+    // row. Pinned deliberately rather than left to discovery: the create is
+    // refused as existing, and the read answers the stored value — whose `id`
+    // is the NUMBER, not the string the caller asked with.
+    const { source } = setup();
+    await source.create({ id: 1, name: 'numeric' });
+    expect(await source.findById('1')).toEqual({ id: 1, name: 'numeric' });
+    await expect(source.create({ id: '1', name: 'string' }))
+      .rejects.toThrow(/does not overwrite/);
+  });
+
   it('answers null for an absent row', async () => {
     const { source } = setup();
     expect(await source.findById('nope')).toBe(null);

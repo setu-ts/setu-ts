@@ -549,6 +549,50 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     }
   });
 
+  it('refuses a buffered update whose row is deleted before commit', {
+    ignore: skipReal,
+  }, async () => {
+    // The commit used to apply its mutations on BOTH CheckAndMutateRow
+    // branches, so a row deleted after the pre-read was RECREATED through
+    // `onNoMatch` — a transaction-scoped update degrading to an upsert exactly
+    // where the non-transactional path refuses.
+    const table = await provision(`txupsert_${suffix}`, ['cf']);
+    const adapter = await connect({ User: { table } });
+    try {
+      const users = adapter.createDataSource('User');
+      await users.create({ id: 'u1', name: 'ada' });
+      const tx = await adapter.beginTransaction();
+      await tx.createDataSource('User').update('u1', { name: 'bob' });
+      // The concurrent delete, through the committed data source.
+      expect(await users.delete('u1')).toBe(true);
+      await expect(tx.commit()).rejects.toThrow(/no longer exists/);
+      expect(await users.findById('u1')).toBe(null);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('round-trips a non-finite number and refuses a relabelling write', {
+    ignore: skipReal,
+  }, async () => {
+    const table = await provision(`shapes_${suffix}`, ['cf']);
+    const adapter = await connect({ Row: { table, columns: { foo: 'cf:bar' } } });
+    try {
+      const rows = adapter.createDataSource('Row');
+      // `String(NaN)` is `'NaN'`, which the decoder refused — so a stored NaN
+      // came back as the STRING 'n:NaN'.
+      await rows.create({ id: 'r1', ratio: Number.NaN, cap: Number.POSITIVE_INFINITY });
+      const read = await rows.findById('r1');
+      expect(read?.ratio).toBeNaN();
+      expect(read?.cap).toBe(Number.POSITIVE_INFINITY);
+      // An unmapped `bar` lands on the address the mapping reserves for `foo`,
+      // so it would have been read back under the wrong field name.
+      await expect(rows.create({ id: 'r2', bar: 'x' })).rejects.toThrow(/reserves for 'foo'/);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
   it('counts with and without a residual predicate', { ignore: skipReal }, async () => {
     const table = await provision(`count_${suffix}`, ['cf']);
     const adapter = await connect({ Row: { table } });

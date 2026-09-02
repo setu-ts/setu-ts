@@ -59,6 +59,12 @@ All notable changes to this project are documented here. The format follows
   change and no new capability token: a composed row key shares no type with DynamoDB's
   partition/sort key pair.
 
+  A key field's **type is not part of the row key** — the key is bytes and a numeric field renders
+  as its decimal text, so `1` and `'1'` are one physical row and `findById('1')` answers the row
+  stored under `1`, whose `id` cell still decodes as the number. Tagging the key would make it
+  unreadable in `cbt` and break every table this adapter did not write, so the mapping does not:
+  choose one type per key field, and zero-pad a numeric one whose lexicographic order matters.
+
 - **Azure Cosmos DB backend.** `@setu-ts/database-plugin` gains a `type: 'cosmos'` arm serving
   Cosmos DB's NoSQL (SQL) API over `npm:@azure/cosmos@^4`, with `CosmosAdapter` exported for the
   `'custom'` arm. Every `NormalizedQuery` member is translated natively; nothing is filtered, sorted

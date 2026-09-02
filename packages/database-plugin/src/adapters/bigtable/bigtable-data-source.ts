@@ -108,11 +108,11 @@ function decodeRow(
  */
 function buildCells(
   target: BigtableTarget,
+  index: ReadonlyMap<string, string>,
   data: Readonly<Record<string, unknown>>,
   operation: string,
 ): BigtableCellBag {
   const cells: Record<string, Record<string, string>> = {};
-  const owner = new Map<string, string>();
   for (const [field, value] of Object.entries(data)) {
     // An absent field is an absent CELL, which is what makes a sparse row cheap
     // on a wide-column store — so `undefined` writes nothing rather than a
@@ -120,22 +120,58 @@ function buildCells(
     if (value === undefined) continue;
     const address = columnAddress(target, field);
     const slot = `${address.family}:${address.qualifier}`;
-    const claimed = owner.get(slot);
-    if (claimed !== undefined && claimed !== field) {
+    // A DECLARED field can own the address an UNMAPPED one resolves to by
+    // default — `{ foo: 'cf:bar' }` reserves `cf:bar`, and a field literally
+    // named `bar` lands there too. Writing `bar` then succeeded and the
+    // decoder, which reads that address back through the declared index,
+    // returned it as `foo`: the entity silently changed shape. Checked HERE
+    // rather than at mapping time, because the mapping cannot know which
+    // fields exist and refusing every remapped qualifier would reject an
+    // ordinary `{ createdAt: 'cf:created_at' }`.
+    //
+    // This is the ONLY collision check the write path needs. A same-payload
+    // one used to sit beside it and is now unreachable: two collide only if
+    // they share a `family:qualifier`, an unmapped field's qualifier IS its
+    // own name so two unmapped fields cannot, two DECLARED fields sharing one
+    // are refused at mapping resolution, and a declared/unmapped pair is
+    // exactly the case below.
+    const declaredOwner = index.get(slot);
+    if (declaredOwner !== undefined && declaredOwner !== field) {
       throw new UnsupportedQueryFeatureError(
         'mapping',
         ADAPTER,
-        `Bigtable entity '${target.entity}' writes both '${claimed}' and '${field}' to ` +
-          `'${slot}' in ${operation}. The decoder reads a cell back by its qualifier, so two ` +
-          `fields sharing one would be indistinguishable.`,
+        `Bigtable entity '${target.entity}' writes '${field}' to '${slot}' in ${operation}, ` +
+          `which the mapping ` +
+          `reserves for '${declaredOwner}'. The decoder reads that address back as ` +
+          `'${declaredOwner}', so the value would change field on the way out. Map '${field}' ` +
+          `explicitly, or give '${declaredOwner}' a qualifier no field name reaches.`,
       );
     }
-    owner.set(slot, field);
     const family = cells[address.family] ?? {};
     family[address.qualifier] = encodeCellValue(value, target.valueEncoding);
     cells[address.family] = family;
   }
   return cells;
+}
+
+/**
+ * The subset of an update payload that actually produces a cell.
+ *
+ * Mirrors {@linkcode buildCells}' own rule, so the row an update REPORTS and
+ * the row it WRITES cannot disagree about a field the caller passed as
+ * `undefined`.
+ *
+ * @param data - The update payload
+ * @returns The fields carrying a value
+ */
+function writtenFields(
+  data: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const written: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(data)) {
+    if (value !== undefined) written[field] = value;
+  }
+  return written;
 }
 
 /**
@@ -262,7 +298,7 @@ export function createBigtableDataSource(
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
       const rowKey = composeRowKeyFromFields(target, data, 'create');
-      const cells = buildCells(target, data, 'create');
+      const cells = buildCells(target, index, data, 'create');
       const persisted = { ...data } as Record<string, unknown>;
       if (buffer !== undefined) {
         buffer.claim(target.table, rowKey, 'create');
@@ -287,7 +323,7 @@ export function createBigtableDataSource(
     ): Promise<Record<string, unknown>> {
       const rowKey = composeRowKey(target, id, 'update');
       assertKeyUnchanged(target, id, data);
-      const cells = buildCells(target, data, 'update');
+      const cells = buildCells(target, index, data, 'update');
       const hasCells = Object.keys(cells).length > 0;
 
       if (buffer !== undefined) {
@@ -301,7 +337,12 @@ export function createBigtableDataSource(
           );
         }
         if (hasCells) buffer.insert(cells, false);
-        return { ...committed, ...data } as Record<string, unknown>;
+        // Only the fields that produced a CELL are merged. An `undefined`
+        // payload field writes nothing, so spreading `data` wholesale made the
+        // buffered path answer `undefined` where the direct path — which
+        // re-reads the row — answers the stored value: two entry points
+        // disagreeing about one call.
+        return { ...committed, ...writtenFields(data) } as Record<string, unknown>;
       }
 
       if (!hasCells) {
@@ -322,7 +363,8 @@ export function createBigtableDataSource(
         );
       }
       const updated = await readOne(rowKey);
-      return updated ?? ({ ...keyFieldsOf(target, id), ...data } as Record<string, unknown>);
+      return updated ??
+        ({ ...keyFieldsOf(target, id), ...writtenFields(data) } as Record<string, unknown>);
     },
 
     async delete(id: EntityKey): Promise<boolean> {
