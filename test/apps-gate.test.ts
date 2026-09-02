@@ -386,8 +386,15 @@ describe('real-backend CI wiring', () => {
 
     // Two servers are awaited, so a fixed message blames the wrong one — CI
     // reported the Deno host as not started while it was already serving.
-    expect(smoke).toMatch(/waitForServer\(baseUrl, 'Realtime client server'\)/);
-    expect(smoke).toMatch(/'workerd client host'/);
+    //
+    // Each label is matched TOGETHER with the call it labels. Searching for the
+    // label alone passes while it sits in a comment and the call has gone back
+    // to taking one argument, which is the state the fix replaced. `\s*` so a
+    // later `deno fmt` rewrap across lines does not read as a regression.
+    expect(smoke).toMatch(/waitForServer\(\s*baseUrl,\s*'Realtime client server'/);
+    expect(smoke).toMatch(
+      /waitForServer\(\s*`http:\/\/127\.0\.0\.1:\$\{workerdPort\}`,\s*'workerd client host'/,
+    );
   });
 
   it('has REDIS_URL available whenever CI provides the container', () => {
