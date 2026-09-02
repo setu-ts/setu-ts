@@ -7,6 +7,13 @@
  * @module
  */
 
+import type {
+  IIngressBehavior,
+  RegistryFactory,
+  RetryOptions,
+  SchedulerJobHandler,
+} from '@setu-ts/common';
+
 /**
  * Distributed lock interface.
  *
@@ -53,7 +60,125 @@ export interface SchedulerPluginOptions {
    * When `storage: 'redis'` a `RedisLock` is used for multi-instance safety.
    */
   distributedLock?: DistributedLockOptions;
+
+  /**
+   * Jobs registered declaratively, as an alternative to calling
+   * `scheduler.cron()`/`every()`/`delay()` imperatively after `start()`.
+   * Each entry — instance or `RegistryFactory` — produces one registration
+   * call, dispatched on its `trigger`, so a job can be declared where the
+   * plugin is composed instead of after the application has started.
+   *
+   * Instance entries register during the plugin's `register()` phase,
+   * identical to the imperative timing. Factory entries are resolved in the
+   * `onInit` phase — the first at which the registry holds every capability —
+   * so a factory can build its definition from a resolved capability. A
+   * factory that throws rejects `start()` with an error naming
+   * `SchedulerPlugin({ jobs })` and the entry's index in THIS declared array,
+   * not its position among the factories.
+   *
+   * On Cloudflare Workers the plugin refuses registration outright
+   * (`SchedulerUnavailableError`) before any entry is read — the refusal
+   * fires before an instance registers and before `onInit` can resolve a
+   * factory.
+   *
+   * @since 0.3.0
+   */
+  readonly jobs?: readonly SchedulerJobEntry[];
+
+  /**
+   * Ingress behaviours wrapped around every job handler — the scheduler arm
+   * of the transport-neutral behaviour chain shared with the websocket,
+   * queue, and messaging plugins (`IIngressBehavior` in `@setu-ts/common`).
+   *
+   * Each behaviour observes an `IngressContext` carrying `kind: 'scheduler'`,
+   * the job name as `name`, the delivered `ScheduledJob` as `payload`, and
+   * the 1-based `attempt`, and runs in declared order ahead of the handler —
+   * INSIDE the distributed lock, so a replica that loses the lock runs no
+   * behaviour for that fire. A behaviour that returns without calling
+   * `next()` short-circuits: the handler never sees the fire. A behaviour
+   * that throws follows the handler's own failure path — retried per the
+   * job's `RetryOptions` exactly as a handler throw is. Every registration
+   * is wrapped — imperative `cron()`/`every()`/`delay()` calls included — so
+   * a mixed application cannot leave a handler unchained.
+   *
+   * With no behaviours configured, dispatch is byte-identical to the
+   * pre-chain behaviour: the handler is handed the job directly, with no
+   * chain allocated.
+   *
+   * Instance entries are handed to the service at `register()`; factory
+   * entries are resolved in the `onInit` phase and a throwing factory rejects
+   * `start()` naming `SchedulerPlugin({ behaviors })` and the entry's index
+   * in THIS declared array.
+   *
+   * @since 0.3.0
+   */
+  readonly behaviors?: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[];
 }
+
+/**
+ * The declarative form of one scheduler job registration — the entry an
+ * application writes instead of calling `cron()`/`every()`/`delay()`
+ * imperatively after `start()`.
+ *
+ * A union discriminated on `trigger`: each arm carries exactly the field its
+ * scheduling strategy needs (`expression` for `cron`, `intervalMs` for
+ * `every`, `delayMs` for `delay`), so a cron entry without an `expression` —
+ * the one mistake that would otherwise produce a job that silently never
+ * fires — is a COMPILE error rather than a runtime one.
+ *
+ * @since 0.3.0
+ */
+export type SchedulerJobDefinition = {
+  /** Discriminator: this job fires on a 5-field cron expression (UTC). */
+  readonly trigger: 'cron';
+  /** Unique job name (the `cron()` name argument). */
+  readonly name: string;
+  /** 5-field cron expression (UTC). Required on the `cron` arm. */
+  readonly expression: string;
+  /** Invoked on each fire, exactly as the imperative `cron()` accepts. */
+  readonly handler: SchedulerJobHandler;
+  /** Optional payload handed to the handler. */
+  readonly data?: unknown;
+  /** Optional retry configuration, exactly as the imperative `cron()` accepts. */
+  readonly retry?: RetryOptions;
+} | {
+  /** Discriminator: this job fires on a fixed interval. */
+  readonly trigger: 'every';
+  /** Unique job name (the `every()` name argument). */
+  readonly name: string;
+  /** Interval in milliseconds. Required on the `every` arm. */
+  readonly intervalMs: number;
+  /** Invoked on each fire, exactly as the imperative `every()` accepts. */
+  readonly handler: SchedulerJobHandler;
+  /** Optional payload handed to the handler. */
+  readonly data?: unknown;
+  /** Optional retry configuration, exactly as the imperative `every()` accepts. */
+  readonly retry?: RetryOptions;
+} | {
+  /** Discriminator: this job fires once, after a delay. */
+  readonly trigger: 'delay';
+  /** Unique job name (the `delay()` name argument). */
+  readonly name: string;
+  /** Delay in milliseconds. Required on the `delay` arm. */
+  readonly delayMs: number;
+  /** Invoked when the delay expires, exactly as the imperative `delay()` accepts. */
+  readonly handler: SchedulerJobHandler;
+  /** Optional payload handed to the handler. */
+  readonly data?: unknown;
+  /** Optional retry configuration, exactly as the imperative `delay()` accepts. */
+  readonly retry?: RetryOptions;
+};
+
+/**
+ * One entry of {@linkcode SchedulerPluginOptions.jobs}: a job definition, or
+ * a {@linkcode RegistryFactory} producing one when the definition needs a
+ * resolved capability.
+ *
+ * @since 0.3.0
+ */
+export type SchedulerJobEntry =
+  | SchedulerJobDefinition
+  | RegistryFactory<SchedulerJobDefinition>;
 
 /**
  * Options for distributed locking.

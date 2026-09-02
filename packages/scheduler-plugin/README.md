@@ -70,6 +70,8 @@ Without `distributedLock`, a process-local `MemoryLock` is used — fine for a s
 | `ScheduleOptions`           | interface |
 | `SchedulerPluginOptions`    | interface |
 | `SchedulerBackoff`          | type      |
+| `SchedulerJobDefinition`    | type      |
+| `SchedulerJobEntry`         | type      |
 | `SchedulerJobHandler`       | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
