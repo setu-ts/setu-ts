@@ -347,10 +347,12 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 | `WebSocketHandlers`          | interface |
 | `WebSocketPluginOptions`     | interface |
 | `WebSocketRoom`              | interface |
+| `WebSocketRouteDefinition`   | interface |
 | `WebSocketRouteOptions`      | interface |
 | `WsRoute`                    | interface |
 | `RoomPublisher`              | type      |
 | `WebSocketReadyState`        | type      |
+| `WebSocketRouteEntry`        | type      |
 | `WebSocketUpgradeDecision`   | type      |
 | `WebSocketUpgradeRouter`     | type      |
 | `WsRouteMatch`               | type      |

@@ -13,7 +13,9 @@
  */
 
 import type {
+  IIngressBehavior,
   ILogger,
+  IngressContext,
   IPrincipal,
   IRealtimeBackplane,
   IRuntimeServices,
@@ -27,8 +29,14 @@ import type {
   WebSocketRoom,
   WebSocketRouteOptions,
   WebSocketUpgradeDecision,
+  WebSocketUpgradeGuard,
 } from '@setu-ts/common';
-import { decodeFrameData, encodeFrameData, isWebSocketUpgradeRequest } from '@setu-ts/common';
+import {
+  composeBehaviorChain,
+  decodeFrameData,
+  encodeFrameData,
+  isWebSocketUpgradeRequest,
+} from '@setu-ts/common';
 import { WebSocketConnection } from '../connection/websocket-connection.ts';
 import { RoomRegistry } from '../rooms/room-registry.ts';
 import type { WsRoute } from '../routing/ws-route-table.ts';
@@ -136,6 +144,20 @@ export class WebSocketService implements IWebSocketService {
    * permanently deaf — see {@linkcode WebSocketService.#openBackplane}.
    */
   #backplaneOpening = false;
+  /**
+   * Route-scoped upgrade guards, keyed by the exact route path. Kept beside
+   * the route table — whose stored `WsRoute` shape predates guards — and safe
+   * to key on path because `WsRouteTable.add` refuses a duplicate path.
+   */
+  readonly #routeGuards = new Map<string, readonly WebSocketUpgradeGuard[]>();
+  /**
+   * The plugin-level ingress behaviour chain around `onMessage`. Instances
+   * arrive at construction; `RegistryFactory` entries are appended by the
+   * plugin's `onInit` hook, still before the application serves. Empty means
+   * no chain: dispatch stays the direct, synchronous invoke it has always
+   * been.
+   */
+  readonly #behaviors: IIngressBehavior[];
 
   /**
    * Creates the service.
@@ -148,6 +170,9 @@ export class WebSocketService implements IWebSocketService {
    * @param backplane - Optional cross-replica transport. When present, every
    *   room broadcast is also published to it; when absent, rooms stay purely
    *   in-process, which is the behavior before the backplane existed.
+   * @param behaviors - The plugin-level ingress behaviours around `onMessage`,
+   *   in declared order. Defaults to none: frame dispatch is then
+   *   byte-identical to the pre-chain behaviour.
    */
   constructor(
     runtime: IRuntimeServices,
@@ -155,12 +180,14 @@ export class WebSocketService implements IWebSocketService {
     available: boolean,
     logger?: ILogger,
     backplane?: IRealtimeBackplane,
+    behaviors?: readonly IIngressBehavior[],
   ) {
     this.#runtime = runtime;
     this.#options = options;
     this.#available = available;
     this.#logger = logger;
     this.#backplane = backplane;
+    this.#behaviors = [...(behaviors ?? [])];
     this.#rooms = new RoomRegistry(
       backplane === undefined ? undefined : (name, data, exceptId): void => {
         const payload = encodeFrameData(data);
@@ -220,8 +247,30 @@ export class WebSocketService implements IWebSocketService {
       throw new WebSocketUnavailableError();
     }
     this.#routes.add(path, handlers, options);
+    // Guards ride beside the route table — see `#routeGuards`.
+    if (options?.guards !== undefined) {
+      this.#routeGuards.set(path, options.guards);
+    }
     // The first route is what makes the heartbeat worth running.
     this.#heartbeat.start();
+  }
+
+  /**
+   * Appends resolved behaviours to the plugin-level ingress chain around
+   * `onMessage`.
+   *
+   * Called once by the plugin's `onInit` hook, after every `RegistryFactory`
+   * entry of `WebSocketPlugin({ behaviors })` has been resolved — the first
+   * phase at which the registry holds every capability, and still before the
+   * application serves, so no frame is ever dispatched without the final
+   * chain. With no factory behaviours configured it is never called with a
+   * non-empty list, and frame dispatch keeps the direct, synchronous form.
+   *
+   * @param behaviors - The resolved behaviours, in declared order
+   * @since 0.3.0
+   */
+  registerIngressBehaviors(behaviors: readonly IIngressBehavior[]): void {
+    this.#behaviors.push(...behaviors);
   }
 
   /**
@@ -343,13 +392,12 @@ export class WebSocketService implements IWebSocketService {
    *   upgrade; absent for an anonymous upgrade
    * @returns The decision, or `null` when this is not a WebSocket route
    */
-  // deno-lint-ignore require-await
   async #routeReported(
     request: Request,
     principal?: IPrincipal,
   ): Promise<WebSocketUpgradeDecision | null> {
     try {
-      return this.#route(request, principal);
+      return await this.#route(request, principal);
     } catch (error) {
       this.#logger?.error('WebSocket upgrade routing failed', {
         error,
@@ -363,13 +411,21 @@ export class WebSocketService implements IWebSocketService {
    * The routing decision itself, separated from the reporting wrapper so the
    * happy path stays readable.
    *
+   * Async because a route's upgrade guards may be async: the decision is
+   * awaited before any admission slot is claimed, so a guard refusal never
+   * consumes capacity. With no guards configured the body runs to completion
+   * without awaiting, so routing semantics for existing routes are unchanged.
+   *
    * @param request - The native upgrade request
    * @param principal - The authenticated principal, when one authenticated the
    *   upgrade; handed to `buildContext` so `onOpen` can read it as
    *   `context.user`
    * @returns The decision, or `null` when this is not a WebSocket route
    */
-  #route(request: Request, principal?: IPrincipal): WebSocketUpgradeDecision | null {
+  async #route(
+    request: Request,
+    principal?: IPrincipal,
+  ): Promise<WebSocketUpgradeDecision | null> {
     // Upgrade detection lives here rather than in the caller. Before M70a the
     // adapter's `UpgradeRouterStore` filtered non-upgrade requests out before
     // consulting, and `WsRouteTable.match` keys on PATH ALONE — so without this
@@ -388,6 +444,31 @@ export class WebSocketService implements IWebSocketService {
     if (!match.matched) {
       return { accept: false, status: match.status };
     }
+
+    // Snapshotted here, while the request is still live (the M46 fix), and
+    // BEFORE any admission slot is claimed, so a guard refusal or a context
+    // failure never consumes capacity. The sink's onOpen fires only after the
+    // adapter has answered the handshake, at which point the runtime has
+    // already closed the native request and reading its headers throws.
+    const context = buildContext(request, match.protocol, principal);
+
+    // Route-scoped upgrade guards, in declared order, before the handshake is
+    // accepted. Only the MATCHED route's guards run — a guard registered on
+    // one path is invisible to every other path — and the first non-`true`
+    // decision refuses with its status. `routeUpgrade` answers through the
+    // kernel's refusal shape, which carries a status but no body, so a
+    // guard decision's optional `body` cannot reach the wire here; the
+    // status is what the client sees.
+    const guards = this.#routeGuards.get(match.route.path);
+    if (guards !== undefined) {
+      for (const guard of guards) {
+        const decision = await guard(context);
+        if (decision !== true) {
+          return { accept: false, status: decision.status };
+        }
+      }
+    }
+
     // A slot is claimed the moment the upgrade is accepted, not when onOpen
     // fires — see the #pending field.
     if (
@@ -399,12 +480,6 @@ export class WebSocketService implements IWebSocketService {
     this.#pending++;
 
     try {
-      // Snapshotted here, while the request is still live. The sink's onOpen
-      // fires only after the adapter has answered the handshake, at which
-      // point the runtime has already closed the native request and reading
-      // its headers throws.
-      const context = buildContext(request, match.protocol, principal);
-
       const sink = this.#createSink(context, match.route);
       return match.protocol === undefined
         ? { accept: true, sink }
@@ -558,7 +633,32 @@ export class WebSocketService implements IWebSocketService {
           return;
         }
 
-        invoke(handlers.onMessage, target, data);
+        if (this.#behaviors.length === 0) {
+          // Zero-configuration dispatch — byte-identical to the pre-chain
+          // behaviour: a direct, synchronous invoke with no chain allocated.
+          invoke(handlers.onMessage, target, data);
+          return;
+        }
+
+        // The plugin-level behaviour chain. `invoke` stays the outer call, so
+        // a rejection — from a behaviour or from the handler — reaches
+        // `onError` through the same `report` path as before; what changes is
+        // the mediation: the chain returns a promise, so a synchronous handler
+        // now completes after a microtask rather than synchronously (M86 plan
+        // §3.11). The envelope is built per frame, and the handler keeps its
+        // native `(conn, data)` arguments — only the chain sees the envelope.
+        const routePath = route.path;
+        const behaviors = this.#behaviors;
+        invoke(
+          (messageConn, frame): Promise<void> =>
+            composeBehaviorChain<IngressContext<string | Uint8Array>, void>(
+              { kind: 'websocket', name: routePath, payload: frame },
+              behaviors,
+              () => Promise.resolve(handlers.onMessage?.(messageConn, frame)),
+            ),
+          target,
+          data,
+        );
       },
 
       onClose: (event): void => {

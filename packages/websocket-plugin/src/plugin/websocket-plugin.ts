@@ -9,13 +9,19 @@
 import type {
   HealthCheckResult,
   IHttpAdapter,
+  IIngressBehavior,
   IPlugin,
   IPluginContext,
   IRealtimeBackplane,
   IWebSocketService,
+  RegistryFactory,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
-import type { WebSocketPluginOptions } from '../interfaces/index.ts';
+import { CAPABILITIES, PLUGIN_PRIORITY, resolveRegistryEntry } from '@setu-ts/common';
+import type {
+  WebSocketPluginOptions,
+  WebSocketRouteDefinition,
+  WebSocketRouteEntry,
+} from '../interfaces/index.ts';
 import { resolveOptions, WebSocketService } from '../services/websocket-service.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -57,6 +63,35 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
   // not at the first upgrade.
   const resolved = resolveOptions(options);
 
+  // The registration arms are split ONCE, here at plugin construction, so
+  // `register` and the `onInit` hook each read a single list (the M70d arm
+  // pattern). Instance entries keep their pre-arm `register()` timing;
+  // factories are resolved in `onInit`, the first phase at which the registry
+  // holds every capability. Each factory carries the index it holds in the
+  // DECLARED array, not its position among the factories: the index is the
+  // only thing the error label has to point a developer at the failing entry,
+  // and filtering first made it name a different — working — entry whenever
+  // the two arms were mixed.
+  const routes: readonly WebSocketRouteEntry[] = options?.routes ?? [];
+  const behaviors: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[] =
+    options?.behaviors ?? [];
+  const routeInstances = routes.filter((entry): entry is WebSocketRouteDefinition =>
+    typeof entry !== 'function'
+  );
+  const routeFactories = routes
+    .map((entry, index) => ({ entry, index }))
+    .filter((slot): slot is { entry: RegistryFactory<WebSocketRouteDefinition>; index: number } =>
+      typeof slot.entry === 'function'
+    );
+  const behaviorInstances = behaviors.filter((entry): entry is IIngressBehavior =>
+    typeof entry !== 'function'
+  );
+  const behaviorFactories = behaviors
+    .map((entry, index) => ({ entry, index }))
+    .filter((slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
+      typeof slot.entry === 'function'
+    );
+
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
@@ -91,15 +126,24 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
 
       // `ctx.logger` is undefined when no logger capability is registered;
       // `optionalDependencies` above is what orders the logger plugin ahead of
-      // this one so it is resolvable here.
+      // this one so it is resolvable here. Behavior INSTANCES are handed over
+      // here — their `register()` timing — while factories are appended in
+      // `onInit` below, before the application serves.
       const service = new WebSocketService(
         ctx.runtime,
         resolved,
         canUpgrade,
         ctx.logger,
         backplane,
+        behaviorInstances,
       );
       ctx.services.register<IWebSocketService>(CAPABILITIES.WEBSOCKET, service);
+
+      // Declared route INSTANCES register now, exactly as an imperative
+      // `route()` call made before this arm existed.
+      for (const definition of routeInstances) {
+        service.route(definition.path, definition.handlers, definition.options);
+      }
 
       if (canUpgrade) {
         // Installed once at registration; the router itself reads the live
@@ -134,6 +178,35 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
         unsubscribe?.();
         service.closeAll();
       });
+
+      // Factory entries resolve at `onInit` — the first phase at which the
+      // registry holds every capability, and still before the application
+      // serves. A throwing factory rejects `start()` naming the option and the
+      // entry's DECLARED index. The hook is registered only when a factory is
+      // configured: with instances alone there is nothing to resolve, so a
+      // zero-factory configuration gains no lifecycle hook at all.
+      if (routeFactories.length > 0 || behaviorFactories.length > 0) {
+        ctx.lifecycle.onInit(() => {
+          for (const slot of routeFactories) {
+            const definition = resolveRegistryEntry(
+              slot.entry,
+              ctx.services,
+              `WebSocketPlugin({ routes })[${slot.index}]`,
+            );
+            service.route(definition.path, definition.handlers, definition.options);
+          }
+
+          service.registerIngressBehaviors(
+            behaviorFactories.map((slot) =>
+              resolveRegistryEntry(
+                slot.entry,
+                ctx.services,
+                `WebSocketPlugin({ behaviors })[${slot.index}]`,
+              )
+            ),
+          );
+        });
+      }
     },
   };
 }
