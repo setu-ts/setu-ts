@@ -4026,7 +4026,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (`ResponseBuilder` → `snapshot()` → `Response` is four objects where Fastify builds one) and
   `sealRequestIdentity` at **0.545 µs/req**, whose fix moves accessors to a prototype and so changes
   `Object.keys(request)` against M71's shipped behaviour — a semantics decision, not a perf one) —
-  complete (PR pending)
+  complete (PR #227)
 - **Next milestone** — **M86** (non-HTTP ingress: registration sites and a pipeline for WebSocket
   routes, queue processors, scheduler jobs and broker subscriptions). The three backends M78
   deferred (M80 DynamoDB, M81 Cosmos DB, M82 Cloud Bigtable) are all complete. **M88** owns the
