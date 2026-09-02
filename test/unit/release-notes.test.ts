@@ -87,6 +87,28 @@ describe('the real CHANGELOG', () => {
   });
 });
 
+/**
+ * Returns one job's block from a workflow, by indentation.
+ *
+ * A workflow-wide substring says nothing about WHERE a command runs, and the
+ * distinction is the whole point of the assertion using this: a step in a
+ * tag-only job is not a step on the pull-request path. Slicing beats parsing
+ * here only because it needs no YAML dependency for a two-level lookup; it is
+ * anchored to `\n  <name>:\n` and ends at the next key of the same depth, so a
+ * job whose name is a prefix of another cannot be confused for it.
+ *
+ * @param workflow - The workflow file's contents
+ * @param name - The job key to extract
+ * @returns That job's block, including its own key line
+ */
+function jobBlock(workflow: string, name: string): string {
+  const start = workflow.indexOf(`\n  ${name}:\n`);
+  if (start === -1) throw new Error(`No job '${name}' in the workflow.`);
+  const rest = workflow.slice(start + 1);
+  const next = rest.search(/\n {2}[A-Za-z0-9_-]+:\n/);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
 describe('release workflow wiring', () => {
   it('builds its notes with this script rather than inlined shell', async () => {
     // The Publish step's own comment records what a workflow copy of logic
@@ -114,12 +136,23 @@ describe('release workflow wiring', () => {
     // v0.2.0 — after a release PR had already been merged — so a release
     // branch could be accepted with none of them checked. `publish:check`
     // sees none of it.
+    //
+    // Asserted INSIDE the job and against the trigger, not as a substring of
+    // the file: a bare `toContain` passes just as well when the command sits
+    // in a comment, or is moved to a tag-only job, which is precisely the
+    // arrangement this pins against.
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
-    expect(workflow).toContain('deno task release:verify');
-    // Read from the workspace, never written into the workflow: a literal
-    // would have to be edited every release and would silently verify the
-    // wrong version if it were not.
-    expect(workflow).toContain('jq -r .version packages/kernel/deno.json');
+    expect(workflow).toMatch(/^on:\n(?:.*\n)*? {2}pull_request:/m);
+
+    // One assertion, pinning the whole command as a real `run:` step: a
+    // `toContain` is satisfied by a commented-out line, and the version source
+    // is read from the workspace rather than written here, because a literal
+    // would need editing every release and would silently verify the wrong
+    // version if it were missed.
+    const job = jobBlock(workflow, 'publish-dry-run');
+    expect(job).toMatch(
+      /^ +run: deno task release:verify "\$\(jq -r \.version packages\/kernel\/deno\.json\)"$/m,
+    );
   });
 
   it('flags a 0.x release as a prerelease, not only a -suffix version', async () => {

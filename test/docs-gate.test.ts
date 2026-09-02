@@ -1298,6 +1298,21 @@ describe('documentation gate — install-snippet versions', () => {
     ).toEqual([]);
   });
 
+  // SemVer permits a hyphen inside a prerelease identifier and a `+` build
+  // suffix, and JSR accepts both — so a narrower class truncates a legal
+  // version and reports a correct reference as stale, the same defect one
+  // shape further out.
+  it('matches a hyphenated prerelease identifier and build metadata whole', () => {
+    for (const version of ['0.2.1-rc-1', '0.2.1+build.7', '0.2.1-rc-1+build.7']) {
+      expect(
+        checkInstallVersions(
+          doc('README.md', `deno add jsr:@setu-ts/kernel@^${version}\n`),
+          version,
+        ),
+      ).toEqual([]);
+    }
+  });
+
   // A future `-rc`/`-beta` release stays a supported path. Capturing only the
   // `0.2.1` prefix of `0.2.1-rc.1` compares a truncated value against the
   // shipping one, so every CORRECT reference in the tree reports as stale.
@@ -1418,6 +1433,15 @@ describe('documentation gate — bare version claims', () => {
   it('matches a prerelease whole, so a correct reference is not reported stale', () => {
     expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.1')).toEqual([]);
     expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.2'))
+      .toHaveLength(1);
+  });
+
+  it('matches a hyphenated prerelease identifier and build metadata in a claim', () => {
+    for (const version of ['0.2.1-rc-1', '0.2.1+build.7', '0.2.1-rc-1+build.7']) {
+      expect(checkVersionClaims(doc('README.md', `ships \`v${version}\`\n`), version)).toEqual([]);
+    }
+    // Still discriminates: a DIFFERENT hyphenated prerelease is stale.
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc-1`\n'), '0.2.1-rc-2'))
       .toHaveLength(1);
   });
 

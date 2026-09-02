@@ -1458,13 +1458,20 @@ const VERSION_HISTORY_DOCS: readonly string[] = [
  */
 const SHIPPED_VERSION_LINES = [
   String.raw`0\.1\.0-alpha\.\d+`, // v0.1.0-alpha.1 … v0.1.0-alpha.10
-  // v0.2.0 onward — the post-alpha 0.x line. The optional suffix keeps a
-  // FUTURE prerelease readable (`0.2.1-rc.1`): without it the pattern captures
-  // the `0.2.1` prefix, which never equals the shipping version, so every
-  // correct reference in the tree would be reported stale. It is dot-separated
-  // identifiers rather than `[\w.]+` so a trailing sentence period is not
+  // v0.2.0 onward — the post-alpha 0.x line. The optional suffixes keep a
+  // FUTURE prerelease readable (`0.2.1-rc.1`): without them the pattern
+  // captures the `0.2.1` prefix, which never equals the shipping version, so
+  // every correct reference in the tree would be reported stale.
+  //
+  // Both follow SemVer exactly — dot-separated identifiers of alphanumerics
+  // AND hyphens, then optional `+` build metadata — because anything narrower
+  // truncates a version JSR accepts: `0.2.1-rc-1` would capture `0.2.1-rc`
+  // and `0.2.1+build.7` would capture `0.2.1`. Identifiers require at least
+  // one character after each dot, so a trailing sentence period is not
   // swallowed into the version.
-  String.raw`0\.2\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?`,
+  String.raw`0\.2\.\d+` +
+  String.raw`(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
+  String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`,
 ].join('|');
 
 /**
