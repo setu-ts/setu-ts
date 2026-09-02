@@ -37,7 +37,7 @@ class FrameworkRequest implements IRequest {
   readonly path: string;
 
   readonly #raw: Request;
-  #body: Uint8Array | undefined;
+  #body: Promise<Uint8Array> | undefined;
   #headers: Headers | undefined;
 
   constructor(raw: Request, method: HttpMethod, url: string, path: string) {
@@ -87,11 +87,22 @@ class FrameworkRequest implements IRequest {
   }
 
   /**
-   * Reads the body as raw bytes, once. Subsequent calls return the cached copy.
+   * Reads the body as raw bytes, once.
+   *
+   * The cache holds the in-flight PROMISE, not the resolved bytes, and is
+   * assigned synchronously before any caller can interleave. Caching the
+   * resolved value instead leaves a race: two concurrent readers both see an
+   * empty cache, both call `Request.arrayBuffer()`, and because a non-empty
+   * fetch body is one-shot the second rejects with `Body already consumed` —
+   * so `Promise.all([request.text(), request.bytes()])` threw. Sequential
+   * reads never showed it, which is why it shipped.
+   *
+   * A rejection stays cached deliberately: the body is one-shot, so a retry
+   * cannot succeed, and re-reading would report a different failure than the
+   * first caller saw.
    */
-  async bytes(): Promise<Uint8Array> {
-    this.#body ??= await this.#readBody();
-    return this.#body;
+  bytes(): Promise<Uint8Array> {
+    return this.#body ??= this.#readBody();
   }
 
   /** Reads the body as UTF-8 text. Idempotent. */
@@ -128,18 +139,6 @@ class FrameworkRequest implements IRequest {
 }
 
 /**
- * Maps a web-standard `Request` to the framework's `IRequest`.
- *
- * Body access is memoized-lazy — see {@linkcode FrameworkRequest}, so the
- * mapping itself awaits nothing and is SYNCHRONOUS. That matters beyond the
- * saved microtask: `@hono/node-server` reaches its `responseViaCache` fast
- * path only when the fetch callback returns a `Response` rather than a
- * promise, so every eagerly-async link in this chain forecloses it.
- *
- * @param request - A web-standard `Request`
- * @returns The framework request
- */
-/**
  * Extracts the path from an absolute request URL without constructing a
  * `URL`, falling back to one on the only inputs where the two could differ.
  *
@@ -150,9 +149,17 @@ class FrameworkRequest implements IRequest {
  * into forward slashes. It does NOT percent-decode and it does NOT collapse
  * empty segments — `/a%2Fb` and `//a` both survive verbatim.
  *
- * The slice is therefore returned as-is unless it contains `/.` or a
- * backslash, where `URL` decides instead. That makes this equal to
- * `new URL(url).pathname` for EVERY input rather than merely for common ones,
+ * The slice is therefore returned as-is unless it contains `/.`, a backslash,
+ * or a percent-encoded dot (`%2e`/`%2E`), where `URL` decides instead. The
+ * encoded forms are load-bearing rather than defensive: WHATWG resolves
+ * `%2e%2e` as a dot-segment, so `/%2e%2e/admin` normalizes to `/admin`, and a
+ * guard testing only literal dots answered `/%2e%2e/admin` — a routing
+ * divergence, found by probing this function against `URL` over a corpus
+ * rather than by reading it. The authority scan stops at the first `/`, `?`
+ * or `#` for the same reason: scanning for `/` alone let a slash inside a
+ * query pose as the path.
+ *
+ * With those guards this equals `new URL(url).pathname` for every input,
  * which is what separates it from the string-slicing `getPath` Hono uses:
  * that one stops normalizing dot-segments, so `/foo/../admin` would cease to
  * resolve to `/admin` and would route somewhere else. Nothing here changes
@@ -170,7 +177,21 @@ export function extractPath(url: string): string {
   if (schemeEnd === -1) {
     return new URL(url).pathname;
   }
-  const start = url.indexOf('/', schemeEnd + 3);
+  // The authority ends at the first '/', '?' or '#'. Scanning for '/' alone
+  // would let a slash inside a query or fragment pose as the path, so
+  // `http://host?next=/admin` answered '/admin' where `URL` answers '/'.
+  let start = -1;
+  for (let i = schemeEnd + 3; i < url.length; i++) {
+    const code = url.charCodeAt(i);
+    if (code === 47) {
+      start = i;
+      break;
+    }
+    // '?' (63) or '#' (35) before any '/' means there is no path at all.
+    if (code === 63 || code === 35) {
+      return '/';
+    }
+  }
   if (start === -1) {
     return '/';
   }
@@ -184,12 +205,27 @@ export function extractPath(url: string): string {
     }
   }
   const path = url.slice(start, end);
-  if (path.includes('/.') || path.includes('\\')) {
+  if (
+    path.includes('/.') || path.includes('\\') ||
+    path.includes('%2e') || path.includes('%2E')
+  ) {
     return new URL(url).pathname;
   }
   return path;
 }
 
+/**
+ * Maps a web-standard `Request` to the framework's `IRequest`.
+ *
+ * Body access is memoized-lazy — see {@linkcode FrameworkRequest}, so the
+ * mapping itself awaits nothing and is SYNCHRONOUS. That matters beyond the
+ * saved microtask: `@hono/node-server` reaches its `responseViaCache` fast
+ * path only when the fetch callback returns a `Response` rather than a
+ * promise, so every eagerly-async link in this chain forecloses it.
+ *
+ * @param request - A web-standard `Request`
+ * @returns The framework request
+ */
 export function mapWebRequestToFrameworkRequest(request: Request): IRequest {
   return new FrameworkRequest(
     request,

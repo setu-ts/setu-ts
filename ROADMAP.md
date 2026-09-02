@@ -8619,8 +8619,19 @@ and **M88** owns it.
 - `IHttpAdapter.setHandler` and `fetch` widened to accept/return sync-or-async (**breaking for
   out-of-repo adapter implementors**).
 - `extractPath` replaces a per-request `new URL()` with a string slice that falls back to `URL` on
-  the only inputs it rewrites (dot-segments, backslashes), so it is **provably identical** for every
-  input — unlike Hono's `getPath`, which stops normalizing `..` and would change routing.
+  the inputs it rewrites, so it is identical to `new URL(url).pathname` for every input — unlike
+  Hono's `getPath`, which stops normalizing `..` and would change routing. **The first version was
+  not identical, and the claim was asserted before it was measured**: probing the function against
+  `URL` over a corpus found **7 divergent inputs**, in two families the guard did not cover. WHATWG
+  resolves a percent-encoded dot segment, so `/%2e%2e/admin` normalizes to `/admin` while a guard
+  testing literal `/.` returned the raw path; and scanning for the first `/` anywhere in the URL let
+  a slash inside a query pose as the path, so `http://host?next=/admin` answered `/admin` against
+  `URL`'s `/`. Both are fixed (the authority scan stops at `/`, `?` or `#`, and `%2e`/`%2E` join the
+  fallback guard) and the corpus is a committed test. Neither was reachable through an adapter — a
+  native `Request` normalizes its `url`, and node-server's `buildUrl` forces `new URL().href` for
+  any URL containing `%` or a literal dot-segment while refusing a request target that does not
+  start with `/` — so this was latent rather than live, which is exactly why only the corpus found
+  it.
 - Redundant second URL parse in route dispatch removed; the protocol helpers gated by a synchronous
   capability check.
 - `Router.match` answers a single candidate without allocating: the `RouteEntry` rides on the stub

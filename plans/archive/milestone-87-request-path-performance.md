@@ -1,7 +1,8 @@
 # Milestone 87 — Request-path performance (`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime`)
 
-> **Status:** Planning. Branch: `feat/m87-request-path-performance`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #227). Archived on completion. Branch:
+> `feat/m87-request-path-performance`. `main` is protected — all work (implementation + fixes) stays
+> on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 

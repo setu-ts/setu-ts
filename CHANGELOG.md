@@ -19,11 +19,18 @@ All notable changes to this project are documented here. The format follows
   _Migration:_ widen the signatures and branch on promise-ness rather than awaiting:
 
   ```typescript
+  import { isPromiseLike } from '@setu-ts/common';
+
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void { … }
 
   const result = this.handler(frameworkRequest);
-  return result instanceof Promise ? result.then(finish) : finish(result);
+  return isPromiseLike(result) ? Promise.resolve(result).then(finish) : finish(result);
   ```
+
+  Use `isPromiseLike`, not `instanceof Promise`: the handler's declared `Promise<IResponse>` is
+  satisfied structurally, so a cross-realm or userland promise answers `false` to `instanceof` and
+  would be treated as an already-settled `IResponse`. `Promise.resolve` returns a native promise
+  unchanged and adopts a foreign thenable.
 
 - **BREAKING (behaviour, Node only) — `@hono/node-server` now installs its own `Request`/`Response`
   as globals.** The Node adapter previously passed `overrideGlobalObjects: false`. That flag decided
@@ -79,8 +86,10 @@ bypass and no lightweight class to install.
   materialize on first access; `RequestContext` is a class, so every request shares one hidden
   class.
 - **The framework's own layers no longer force `async`.** `Application.#handleRequest` and all four
-  adapters' fetch handlers return synchronously when nothing needed awaiting. Lifecycle hooks and
-  global middleware still take the unchanged async path.
+  adapters' fetch handlers return synchronously when nothing needed awaiting, as does Bun's
+  `Bun.serve` callback — that one is a separate entry point from the fetch handler, and leaving it
+  `async` would have lost on the socket path exactly what this won on the fetch path. Lifecycle
+  hooks and global middleware still take the unchanged async path.
 - **Route matching answers a single candidate without allocating.** The `RouteEntry` rides on the
   handler the router already returns, replacing a `${method} ${path}` key and a `Map` lookup;
   `decodeURIComponent` is skipped for values containing no `%`, where it is an identity function.

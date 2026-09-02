@@ -48,10 +48,14 @@ function createFakeHost(): {
       if (options.hostname !== undefined) {
         recorded.hostname = options.hostname;
       }
-      // Record the RAW value. Defaulting it here would erase the only
-      // distinction that matters — "explicitly false" versus "not passed, so
-      // node-server applies its own default" (M87).
-      recorded.overrideGlobalObjects = options.overrideGlobalObjects;
+      // Record the RAW value, and only when it was actually passed — the
+      // distinction that matters is "explicitly false" versus "not passed, so
+      // node-server applies its own default" (M87). Assigning `undefined`
+      // unconditionally materializes the key, so an omitted option would
+      // still satisfy an `in` test. Guarded, exactly as `hostname` above is.
+      if (options.overrideGlobalObjects !== undefined) {
+        recorded.overrideGlobalObjects = options.overrideGlobalObjects;
+      }
 
       return {
         close() {},

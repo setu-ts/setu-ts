@@ -191,24 +191,37 @@ export class BunHttpServerHandle {
   createServeCallback(): (
     request: Request,
     server: BunServer,
-  ) => Promise<Response | undefined> {
-    return async (request: Request, server: BunServer): Promise<Response | undefined> => {
+  ) => Response | undefined | Promise<Response | undefined> {
+    return (
+      request: Request,
+      server: BunServer,
+    ): Response | undefined | Promise<Response | undefined> => {
       const frameworkRequest = mapWebRequestToFrameworkRequest(request);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
 
-      // Run the framework handler FIRST — middleware pipeline applies uniformly.
-      const frameworkResponse = await this.#handler(frameworkRequest);
-
       // Check for upgrade intent written by the kernel terminal handler.
-      const intent = upgradeIntentOf(frameworkRequest);
-      if (intent !== undefined) {
-        return this.#performBunUpgrade(request, server, intent);
-      }
+      const finish = (frameworkResponse: IResponse): Response | undefined => {
+        const intent = upgradeIntentOf(frameworkRequest);
+        if (intent !== undefined) {
+          return this.#performBunUpgrade(request, server, intent);
+        }
+        return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      };
 
-      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      // Run the framework handler FIRST — middleware pipeline applies
+      // uniformly. Deliberately NOT awaited, for the same reason as
+      // `createFetchHandler`: `Bun.serve`'s `fetch` accepts a plain
+      // `Response`, so an `async` callback here would add a promise and a
+      // microtask hop per request even when the handler answered
+      // synchronously — losing on the socket path exactly what M87 won on
+      // the fetch path.
+      const frameworkResponse = this.#handler(frameworkRequest);
+      return isPromiseLike(frameworkResponse)
+        ? Promise.resolve(frameworkResponse).then(finish)
+        : finish(frameworkResponse);
     };
   }
 

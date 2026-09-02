@@ -361,7 +361,7 @@ export type RouteHandler = (ctx: IRequestContext) => HandlerResult | Promise<Han
  * // foreign thenable, so the fast path allocates nothing.
  * return isPromiseLike(result) ? Promise.resolve(result) : undefined;
  * ```
- * @since 0.2.0
+ * @since 0.3.0
  */
 export function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
   return typeof (value as { then?: unknown } | null | undefined)?.then === 'function';
