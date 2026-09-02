@@ -5,8 +5,8 @@
  *
  * @module
  */
+import { composeBehaviorChain } from '@setu-ts/common';
 import type { CqrsRequest, IPipelineBehavior } from '@setu-ts/common';
-import { composePipeline } from '../behaviors/pipeline-behavior.ts';
 import { HandlerNotFoundError } from '../errors/handler-not-found.ts';
 
 /**
@@ -83,7 +83,7 @@ export class RequestBus {
       throw new HandlerNotFoundError(request.type);
     }
 
-    return await (composePipeline(
+    return await (composeBehaviorChain(
       request,
       this.behaviors,
       () => handler(request),
