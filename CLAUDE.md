@@ -123,41 +123,40 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 4** (`packages/logger-plugin` — structured logging) — complete (PR #5)
 - **Milestone 5** (`packages/config-plugin` — configuration with env loading, variable expansion,
   and Zod-compatible validation) — complete (PR #7)
-- **Milestone 6** (`packages/validation-plugin` — Zod-based validation) — complete (PR pending)
+- **Milestone 6** (`packages/validation-plugin` — Zod-based validation) — complete (PR #8)
 - **Milestone 7** (`packages/exceptions` — exception hierarchy, error handler middleware, RFC 7807
-  support) — complete (PR pending)
+  support) — complete (PR #15)
 - **Milestone 8** (`packages/di-plugin` — optional dependency injection container with
   singleton/scoped/transient lifecycles, constructor injection, circular dependency detection,
-  hierarchical scopes, and auto-registration fallback to the ServiceRegistry) — complete (PR
-  pending)
+  hierarchical scopes, and auto-registration fallback to the ServiceRegistry) — complete (PR #16)
 - **Milestone 9** (`packages/decorator-plugin` — optional decorators and reflection: `@Controller`,
   `@Get`/`@Post`/…, `@Body`/`@Query`/`@Param`/…, `@Injectable`/`@Inject`, `@Roles`/`@Permissions`/
   `@Public`/`@CurrentUser`, `@UseGuards`/`@UseInterceptors`/`@UseFilters`, `@ValidateBody`/
   `@ValidateQuery`/`@ValidateParams`, `@ApiTags`/`@ApiOperation`/`@ApiResponse`,
   `createDecorator`/`createParameterDecorator`, `MetadataStore` under `CAPABILITIES.METADATA_STORE`,
-  `discoverControllers` auto-discovery, and a parameter resolver) — complete (PR pending)
+  `discoverControllers` auto-discovery, and a parameter resolver) — complete (PR #20)
 - **Milestone 10** (`packages/database-plugin` — DatabasePlugin with repository pattern, Unit of
-  Work, ORM adapters for Prisma/Drizzle/Memory) — complete (PR pending)
+  Work, ORM adapters for Prisma/Drizzle/Memory) — complete (PR #21)
 - **Milestone 11** (`packages/cache-plugin` — CachePlugin with Memory, Redis, Noop stores;
-  CacheService; cacheMiddleware for transparent response caching) — complete (PR pending)
+  CacheService; cacheMiddleware for transparent response caching) — complete (PR #22)
 - **Milestone 12** (`packages/events-plugin` — EventsPlugin, InMemoryEventBus, DomainEvent,
   IntegrationEvent, defineDomainEvent, IEventHandler, subscribeHandler; in-memory event bus with
   publish/publishBatch/subscribe; `publishBatch` addition to `IEventBus` in `common`) — complete (PR
-  pending)
+  #24)
 - **Milestone 13** (`packages/cqrs-plugin` — CqrsPlugin, CommandBus/QueryBus, ICqrsFacade under
   `CAPABILITIES.CQRS`, internal RequestBus + composePipeline behavior pipeline,
   HandlerNotFoundError; CQRS contracts in `common/services/cqrs.ts`:
   CqrsRequest/CqrsCommand/CqrsQuery, ICommandHandler/IQueryHandler/IPipelineBehavior,
-  ICommandBus/IQueryBus/ICqrsFacade) — complete (PR pending)
+  ICommandBus/IQueryBus/ICqrsFacade) — complete (PR #25)
 - **Milestone 14** (`packages/messaging-plugin` — MessagingPlugin, InMemoryBroker,
   RedisStreamsBroker, JsonSerializer/ISerializer, EventsMessagingBridge; broker contracts in
   `common/services/messaging.ts`: IMessageBroker, ISubscription, MessageHandler, MessageMetadata,
   SubscribeOptions; in-memory + Redis Streams brokers implemented; RabbitMQ/NATS/Kafka deferred to
-  M14b) — complete (PR pending)
+  M14b) — complete (PR #26)
 - **Milestone 14b** (`packages/messaging-plugin` — RabbitMqBroker, NatsBroker, and KafkaBroker added
   to the existing MessagingPlugin via the internal MessageBrokerAdapter seam; no `common` change, no
   new capability token; each broker follows the inject-or-lazy `npm:` client pattern with a guarded
-  real-import test) — complete (PR pending)
+  real-import test) — complete (PR #27)
 - **Milestone 14c** (`packages/messaging-plugin` — brokered request-reply (RPC) added to the
   existing MessagingPlugin: `request<TReq,TRes>()`/`respond<TReq,TRes>()` on the committed
   `IMessageBroker` (flagged `common` widening — `RequestOptions`/`RequestHandler` types + the two
@@ -196,7 +195,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   QueueService for job processing with retries/backoff, recurring job scheduling via cron, job
   processor registration with concurrency control; queue contracts in `common/services/queue.ts`:
   IQueue, IJob, JobProcessor, AddJobOptions, ProcessOptions, RecurringOptions; memory + redis
-  adapters implemented) — complete (PR pending)
+  adapters implemented) — complete (PR #28)
 - **Milestone 15b** (`packages/queue-plugin` — `RabbitMqQueue` adapter added to the existing
   QueuePlugin via the internal `QueueAdapter` seam; `basicGet` polling for `reserve`, per-message
   TTL with a dead-letter-exchange for delayed enqueue/requeue, per-name ready/delay/dead queues,
@@ -207,7 +206,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `CAPABILITIES.HTTP_ADAPTER` via the `RuntimePlugin` `httpAdapters` map; `app.start({ port })`
   binds a real socket and throws when no adapter is registered; Bun is unit-tested via an injectable
   `BunServeHost` seam; `IResponse.snapshot()` (M11) is the response read seam — no `common` change)
-  — complete (PR pending)
+  — complete (PR #34)
 - **Milestone 16** (`packages/auth-plugin` — AuthPlugin registering `IJwtService` under `jwt`,
   `IAuthService` under `authentication`, and `IAuthorizationService` under `authorization`; JWT
   HS256/RS256 via Web Crypto (`runtime.subtle`, zero npm deps), passive JwtStrategy/ApiKeyStrategy
@@ -223,7 +222,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `MemoryRefreshTokenStore`; standalone `rateLimitMiddleware` fixed-window limiter (429
   short-circuit, `Retry-After` + `RateLimit-*` delta-seconds headers) over `RateLimitStore` with
   `MemoryRateLimitStore` + `RedisRateLimitStore` (inject-or-lazy `npm:ioredis@5.x`, guarded
-  real-import test)) — complete (PR pending)
+  real-import test)) — complete (PR #36)
 - **Milestone 17** (`packages/http-security-plugin` — CORS, security headers, CSRF, request-size,
   ip-security) — complete (PR #38)
 - **Milestone 18** (`packages/scheduler-plugin` — SchedulerPlugin registering an `IScheduler` under
@@ -1272,7 +1271,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   at all. It does now, and the gate was proven to discriminate by breaking the string (`servicez`)
   and watching it fail, then restoring it. Also corrected the e2e comment claiming `nest` was "the
   only" template carrying an `args` string, and a stale ROADMAP line recording the alpha.4
-  `release:create-packages`/`release:link-repos` step as still pending) — complete (PR pending)
+  `release:create-packages`/`release:link-repos` step as still pending) — complete (PR #120)
 - **Milestone 37** (`apps/*` — runnable example applications and the `check:apps` gate that keeps
   them working. Every capability the framework ships was proven by tests inside `packages/` and by
   nothing a reader could run; the ROADMAP's example list predated 22 milestones and named no
@@ -1309,7 +1308,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   sentence amended to say which part is now gated. Verification also found three holes in the gate
   itself, all closed in M37b on this same branch rather than deferred: the example's own test was
   run by nothing, `test/apps-gate.test.ts` never ran in CI, and `check:apps` left an untracked
-  `apps/cloudflare/.wrangler/` that made a following `publish:check` abort) — complete (PR pending)
+  `apps/cloudflare/.wrangler/` that made a following `publish:check` abort) — complete (PR #122)
 - **Milestone 37b** (`apps/*` — DI/decorators and memory-database examples, plus a microservices
   correction). `apps/di-decorators` proves a decorated controller's parameter-level `@Inject` and
   makes manual `container.createScope()` explicit: singleton instances span scopes while scoped
@@ -1333,7 +1332,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   itself, so the file still runs on a runner without the suite executing twice), and
   `apps/cloudflare/.wrangler/` is gitignored so `check:apps` no longer dirties the tree ahead of
   `publish:check`. `apps/compiled-binary` moved off its hardcoded port 4317 to `unusedPort()`) —
-  complete (PR pending)
+  complete (PR #122)
 - **Milestone 53** (`.github/workflows/ci.yml` + `scripts/check-apps.ts` + guarded Redis tests —
   real-backend CI: making the proofs that matter actually run on every pull request. `apps/realtime`
   and `apps/microservices` both exited **77** unless `REDIS_URL` was set and no CI job set it, so
@@ -3656,7 +3655,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   pins the twelve `NaN` and infinity claims that previously drifted through four corrections. The
   gate scans `.roo` explicitly without widening the existing structural checker, is covered by the
   script-coverage target set, and the ROADMAP now records why old `(measured)` parentheticals are
-  provenance rather than executable assertions — complete (PR pending).
+  provenance rather than executable assertions — complete (PR #205).
 - **Alpha release `v0.1.0-alpha.10`** — on `release/v0.1.0-alpha.10`, published 2026-08-28 (PR #202,
   tag at the merge commit `3fcb05e6`; CI published it, one green `Publish to JSR` job — the fourth
   first-try success in a row). **47 packages** — the list is unchanged from alpha.8, so no package
@@ -3759,7 +3758,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `GrpcPlugin()` transport contribution as `app.register(...)` after
   `createFullStackAppFromConfig()` returns, while retaining the broker-transport refusal because its
   starter-owned messaging/queue option rewrites cannot be represented as appended plugins) —
-  complete (PR pending).
+  complete (PR #215).
 - **Milestone 79** (`common` + `database-plugin` + `cloudflare-plugin` — portable data-access
   contract: composite keys, nested field paths and keyset cursor pagination, implemented across all
   **five** shipped adapters. The ROADMAP scoped four; `MongoAdapter` shipped in M78, so the in-scope

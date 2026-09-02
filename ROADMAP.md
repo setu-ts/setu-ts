@@ -8415,7 +8415,7 @@ exclusion for that RPC prefix only. Its browser form routes remain protected. Th
 `CsrfFormOptions.exclude` supports the same explicit exact-path/regular-expression boundary for
 another separately-mounted non-browser protocol surface. Broker transports remain refused: they
 rewrite starter-owned messaging and queue options rather than append a direct plugin, so accepting
-them would still silently select the wrong transport — complete (PR pending).
+them would still silently select the wrong transport — complete (PR #215).
 
 ---
 
@@ -8541,4 +8541,4 @@ them would still silently select the wrong transport — complete (PR pending).
 | 82        | ✅     | cloud bigtable backend (PR #222)                    |
 | 83        | ✅     | module declarations + functional example            |
 | 84        | ✅     | realtime client consumption (sdk + cli)             |
-| 85        | ✅     | cli (workspace full-stack gRPC, PR pending)         |
+| 85        | ✅     | cli (workspace full-stack gRPC, PR #215)            |
