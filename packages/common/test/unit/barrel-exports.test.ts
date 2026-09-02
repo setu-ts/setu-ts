@@ -17,6 +17,12 @@ import type {
   RouteValidationMetadata,
   SessionView,
 } from '../../src/index.ts';
+import type {
+  BehaviorLike,
+  IIngressBehavior,
+  IngressContext,
+  IngressKind,
+} from '../../src/index.ts';
 
 describe('@setu-ts/common barrel — registry factory arm', () => {
   it('exports resolveRegistryEntry as a function', () => {
@@ -113,5 +119,40 @@ describe('@setu-ts/common barrel — M79 portable data-access contract', () => {
     expect(_pageResult.rows).toEqual([]);
     expect(_cursorPayload.orderedValues).toEqual([1]);
     expect(_cursorValue).toBeInstanceOf(Date);
+  });
+});
+
+describe('@setu-ts/common barrel — M86 ingress contracts', () => {
+  it('exports composeBehaviorChain as a function callable through the barrel', async () => {
+    expect(typeof common.composeBehaviorChain).toBe('function');
+
+    let terminalCalls = 0;
+    const result = await common.composeBehaviorChain(
+      { kind: 'scheduler', name: 'nightly', payload: null },
+      [],
+      () => {
+        terminalCalls += 1;
+        return Promise.resolve('ok');
+      },
+    );
+
+    expect(terminalCalls).toBe(1);
+    expect(result).toBe('ok');
+  });
+
+  it('exports the ingress contract types (declared against the barrel)', () => {
+    // Type-level: these names resolve ONLY if the barrel re-exports them (the
+    // M56 defect class — a type-only export is invisible to runtime assertions).
+    const kind: IngressKind = 'messaging';
+    const envelope: IngressContext = { kind, name: 'orders.created', payload: null };
+    const behavior: IIngressBehavior = {
+      handle: (_ctx, next) => next(),
+    };
+    const like: BehaviorLike<IngressContext, void> = behavior;
+
+    expect(kind).toBe('messaging');
+    expect(envelope.name).toBe('orders.created');
+    expect(envelope.attempt).toBeUndefined();
+    expect(like).toBe(behavior);
   });
 });

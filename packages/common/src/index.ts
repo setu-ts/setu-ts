@@ -270,6 +270,16 @@ export type {
   IQueryBus,
   IQueryHandler,
 } from './services/cqrs.ts';
+// Ingress behaviour contracts + shared composer (M86) — the sibling of the
+// CQRS contracts above, not a widening of them; the composer is shared by the
+// CQRS pipeline and the four non-HTTP ingress chains.
+export { composeBehaviorChain } from './services/ingress.ts';
+export type {
+  BehaviorLike,
+  IIngressBehavior,
+  IngressContext,
+  IngressKind,
+} from './services/ingress.ts';
 export type {
   IScheduler,
   RetryOptions,
