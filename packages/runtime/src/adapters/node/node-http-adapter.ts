@@ -5,7 +5,9 @@
  * Uses an injectable {@linkcode NodeServeHost} interface that exposes
  * `serve({ fetch, port, hostname })` defaulting to a lazy `npm:` import of
  * `@hono/node-server@^2.0.0`. This allows unit testing without a real Node
- * server and prevents global mutation via `overrideGlobalObjects: false`.
+ * server. `serve()` is called with node-server's own defaults, which install
+ * its lightweight `Request`/`Response` as globals — see the note on
+ * `defaultNodeServeHost`.
  *
  * @module
  */

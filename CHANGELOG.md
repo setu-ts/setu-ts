@@ -51,6 +51,14 @@ has — Setu-TS runs at **132% of Hono** and **113% of raw Express**, because Ho
 awaits every stage and loses 40.6% of its throughput to three middleware where this pipeline loses
 17.9%.
 
+Every change below except the global-objects one is runtime-agnostic, so Deno and Bun benefit too.
+Measured the same way, Deno goes from **62,637 to 160,130 rps** — **2.56x**, and from 33% to **~85%
+of Hono on Deno**. Bun runs at ~77% of Hono on Bun. Neither needs the global-objects change and
+neither receives it: `@hono/node-server` exists to translate between Node's `IncomingMessage`/
+`ServerResponse` and web `Request`/`Response`, and its fast path is a shortcut through that
+translation. `Deno.serve` and `Bun.serve` take a real `Response` natively, so there is no shim to
+bypass and no lightweight class to install.
+
 - **Request bodies are read lazily and memoized.** The mapping called `arrayBuffer()` on every
   request, including bodyless GETs; under node-server that forces the full undici `Request` the
   lightweight facade exists to avoid. A `GET`/`HEAD` carrying neither `content-length` nor
