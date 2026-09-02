@@ -382,8 +382,10 @@ package fits the plugin architecture.
 | `TimerHandle`                | type      |
 | `Unsubscribe`                | type      |
 | `ValidationTarget`           | type      |
+| `WebSocketGuardDecision`     | type      |
 | `WebSocketReadyState`        | type      |
 | `WebSocketUpgradeDecision`   | type      |
+| `WebSocketUpgradeGuard`      | type      |
 | `WebSocketUpgradeRouter`     | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

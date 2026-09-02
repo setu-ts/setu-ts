@@ -23,6 +23,7 @@ import type {
   IngressContext,
   IngressKind,
 } from '../../src/index.ts';
+import type { WebSocketGuardDecision, WebSocketUpgradeGuard } from '../../src/index.ts';
 
 describe('@setu-ts/common barrel — registry factory arm', () => {
   it('exports resolveRegistryEntry as a function', () => {
@@ -154,5 +155,14 @@ describe('@setu-ts/common barrel — M86 ingress contracts', () => {
     expect(envelope.name).toBe('orders.created');
     expect(envelope.attempt).toBeUndefined();
     expect(like).toBe(behavior);
+  });
+
+  it('exports WebSocket upgrade-guard types (declared against the barrel)', () => {
+    // Type-level: both names resolve only from the public barrel. A dropped
+    // type-only export is invisible to runtime assertions.
+    const decision: WebSocketGuardDecision = { status: 401, body: 'Unauthorized' };
+    const guard: WebSocketUpgradeGuard = (context) => context.user === undefined ? decision : true;
+
+    expect(guard).toBeDefined();
   });
 });

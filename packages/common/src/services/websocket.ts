@@ -283,6 +283,36 @@ export interface WebSocketConnectionContext {
 }
 
 /**
+ * The result of a route-scoped WebSocket upgrade guard.
+ *
+ * Return `true` to accept the upgrade. Return the refusal object to reject it
+ * before the handshake with the supplied HTTP status and, optionally, body.
+ *
+ * @since 0.3.0
+ */
+export type WebSocketGuardDecision =
+  | true
+  | {
+    /** The HTTP status to answer with when refusing the upgrade. */
+    readonly status: number;
+    /** An optional response body explaining why the upgrade was refused. */
+    readonly body?: string;
+  };
+
+/**
+ * A route-scoped predicate evaluated before a WebSocket handshake is accepted.
+ *
+ * Guards receive the complete upgrade context, including the principal when
+ * middleware authenticated it. A route evaluates its guards in declared order;
+ * the first refusal prevents the handshake.
+ *
+ * @since 0.3.0
+ */
+export type WebSocketUpgradeGuard = (
+  context: WebSocketConnectionContext,
+) => WebSocketGuardDecision | Promise<WebSocketGuardDecision>;
+
+/**
  * The lifecycle callbacks an application supplies per WebSocket route.
  *
  * Every callback may be async; a rejected promise is routed to
@@ -338,6 +368,17 @@ export interface WebSocketRouteOptions {
   readonly protocols?: readonly string[];
 
   /**
+   * Guards evaluated before this route's WebSocket handshake is accepted.
+   *
+   * They run in declared order. The first guard that returns a refusal object
+   * rejects the upgrade; when omitted, the matching route accepts upgrades as
+   * it did before route-scoped guards existed.
+   *
+   * @since 0.3.0
+   */
+  readonly guards?: readonly WebSocketUpgradeGuard[];
+
+  /**
    * Whether this route participates in the shared heartbeat sweep.
    *
    * When `false`, the {@linkcode HeartbeatSweeper} skips this route's connections
@@ -368,8 +409,10 @@ export interface WebSocketRouteOptions {
  *     ws.room(query.room ?? 'lobby').add(conn);
  *   },
  *   onMessage: (conn, data) => {
- *     const room = conn.data.get('room') as string;
- *     ws.room(room).broadcast(data, { except: conn });
+ *     const room = conn.data.get('room');
+ *     if (typeof room === 'string') {
+ *       ws.room(room).broadcast(data, { except: conn });
+ *     }
  *   },
  * });
  * ```

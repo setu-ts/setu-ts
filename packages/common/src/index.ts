@@ -324,11 +324,13 @@ export type {
   WebSocketCloseEvent,
   WebSocketConnectionContext,
   WebSocketEventSink,
+  WebSocketGuardDecision,
   WebSocketHandlers,
   WebSocketReadyState,
   WebSocketRoom,
   WebSocketRouteOptions,
   WebSocketUpgradeDecision,
+  WebSocketUpgradeGuard,
   WebSocketUpgradeRouter,
 } from './services/websocket.ts';
 
