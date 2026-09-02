@@ -13,7 +13,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import type { IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 
-import { DrizzleAdapter, MemoryAdapter, PrismaAdapter } from '../../src/index.ts';
+import { BigtableAdapter, DrizzleAdapter, MemoryAdapter, PrismaAdapter } from '../../src/index.ts';
 
 describe('the promoted IDatabaseAdapter port', () => {
   it('is satisfied by MemoryAdapter with no cast', () => {
@@ -30,6 +30,12 @@ describe('the promoted IDatabaseAdapter port', () => {
   it('is satisfied by DrizzleAdapter with no cast', () => {
     const adapter: IDatabaseAdapter = new DrizzleAdapter();
     expect(typeof adapter.createDataSource).toBe('function');
+  });
+
+  it('is satisfied by BigtableAdapter with no cast', () => {
+    const adapter: IDatabaseAdapter = new BigtableAdapter({ projectId: 'p', instance: 'i' });
+    expect(typeof adapter.createDataSource).toBe('function');
+    expect(typeof adapter.rawQuery).toBe('function');
   });
 
   it('returns a data source honoring IDataSource from the memory adapter', async () => {

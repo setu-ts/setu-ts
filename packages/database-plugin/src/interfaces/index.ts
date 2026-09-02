@@ -16,6 +16,8 @@ import type { IDynamoClient } from '../adapters/dynamo/dynamo-client-types.ts';
 import type { DynamoEntityMapping } from '../adapters/dynamo/dynamo-mapping.ts';
 import type { ICosmosClient } from '../adapters/cosmos/cosmos-client.ts';
 import type { CosmosEntityMapping } from '../adapters/cosmos/cosmos-mapping.ts';
+import type { IBigtableClient } from '../adapters/bigtable/bigtable-client-types.ts';
+import type { BigtableEntityMapping } from '../adapters/bigtable/bigtable-mapping.ts';
 
 // Re-export query option types so consumers don't need internal paths.
 export type {
@@ -259,6 +261,7 @@ export type DatabaseAdapterType =
   | 'mongodb'
   | 'dynamodb'
   | 'cosmos'
+  | 'bigtable'
   | 'custom';
 
 // Re-export the Mongo structural types the `'mongodb'` arm carries, so an
@@ -404,7 +407,8 @@ export type BuiltInDatabaseOptions =
   | DrizzleDatabaseOptions
   | MongoDatabaseOptions
   | DynamoDatabaseOptions
-  | CosmosDatabaseOptions;
+  | CosmosDatabaseOptions
+  | BigtableDatabaseOptions;
 
 /**
  * The arm supplying an externally-implemented backend.
@@ -1103,4 +1107,140 @@ export type CosmosAdapterOptions =
     readonly endpoint?: string;
     /** The account key; unread once a client is injected. */
     readonly key?: string;
+  });
+
+// Re-export the Bigtable structural types the `'bigtable'` arm carries. The
+// client facade is what an application implements to inject its own client;
+// the read/write shapes are what such a facade must speak. The resolved target
+// stays internal (the `D1Target` / `MongoTarget` / `DynamoTarget` precedent).
+export type {
+  BigtableCell,
+  BigtableFilter,
+  BigtableMutation,
+  BigtableReadOptions,
+  BigtableReadRow,
+  BigtableRowBoundary,
+  BigtableRowData,
+  BigtableRowRange,
+  BigtableValueRange,
+  IBigtableClient,
+  IBigtableInstance,
+  IBigtableRow,
+  IBigtableTable,
+} from '../adapters/bigtable/bigtable-client-types.ts';
+export type {
+  BigtableEntityMapping,
+  BigtableRowKeyMapping,
+  BigtableValueEncoding,
+} from '../adapters/bigtable/bigtable-mapping.ts';
+
+/**
+ * The `'bigtable'` arm — a Google Cloud Bigtable wide-column backend.
+ *
+ * @example
+ * ```typescript
+ * const options: BigtableDatabaseOptions = {
+ *   type: 'bigtable',
+ *   options: { projectId: 'my-project', instance: 'app-instance' },
+ * };
+ * ```
+ * @since 0.2.0
+ */
+export interface BigtableDatabaseOptions extends DatabaseConnectionOptions {
+  /** Selects the Bigtable arm. */
+  readonly type: 'bigtable';
+  /** Bigtable adapter configuration; `instance` and one client form are required. */
+  readonly options: BigtableAdapterOptions;
+}
+
+/**
+ * The options both {@linkcode BigtableAdapterOptions} arms share.
+ *
+ * @since 0.2.0
+ */
+export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
+  /**
+   * The Bigtable instance the tables live in. Required on both arms: a table
+   * is addressed as `project/instance/table`, and neither an injected client
+   * nor a project id encodes the instance.
+   *
+   * @since 0.2.0
+   */
+  readonly instance: string;
+
+  /**
+   * Per-entity table, row-key, column and value-encoding overrides, keyed by
+   * the entity name passed to `getRepository()`.
+   *
+   * An entity with no entry uses its own name as the table, composes its row
+   * key from `['id']`, writes to column family `'cf'` and stores tagged values.
+   *
+   * @example
+   * ```typescript
+   * const tables = {
+   *   Order: {
+   *     table: 'orders',
+   *     rowKey: { fields: ['tenantId', 'orderId'], separator: '#' },
+   *     columnFamily: 'o',
+   *     columns: { total: 'metrics:total' },
+   *   },
+   * };
+   * ```
+   * @since 0.2.0
+   */
+  readonly tables?: Readonly<Record<string, BigtableEntityMapping>>;
+
+  /**
+   * How many server round trips one `findPage` may take before it returns a
+   * bounded — but explicitly non-terminal — page. Defaults to `10`.
+   *
+   * The bound exists because a client-side filter can empty a whole raw batch:
+   * without it, a highly selective predicate over a large key range would scan
+   * indefinitely inside one request.
+   *
+   * @since 0.2.0
+   */
+  readonly maxPageFetches?: number;
+}
+
+/**
+ * Options for the {@link BigtableAdapter} — the `'bigtable'` arm.
+ *
+ * A **union of two arms**, so supplying neither a `projectId` nor a `client`
+ * is a compile error rather than a `connect()` throw. Both members stay
+ * readable on either arm, so the adapter reads `options.client` and
+ * `options.projectId` without narrowing first.
+ *
+ * @example
+ * ```typescript
+ * const lazy: BigtableAdapterOptions = { projectId: 'p', instance: 'i' };
+ * const injected: BigtableAdapterOptions = { client: myBigtableClient, instance: 'i' };
+ * ```
+ * @since 0.2.0
+ */
+export type BigtableAdapterOptions =
+  | (BigtableAdapterOptionsBase & {
+    /** The GCP project, used to construct a client when none is injected. */
+    readonly projectId: string;
+    /**
+     * An explicit API endpoint, such as `127.0.0.1:8086` for `cbtemulator`.
+     * Measured: an endpoint alone reaches the emulator with no
+     * `BIGTABLE_EMULATOR_HOST` and no credentials.
+     */
+    readonly apiEndpoint?: string;
+    /** An already-constructed client; omit it to load the SDK lazily. */
+    readonly client?: IBigtableClient;
+  })
+  | (BigtableAdapterOptionsBase & {
+    /**
+     * An already-constructed `IBigtableClient`.
+     *
+     * When present, the lazy `import('npm:@google-cloud/bigtable@^6')` never
+     * runs — the seam that keeps the branching unit-testable.
+     */
+    readonly client: IBigtableClient;
+    /** The GCP project; unread once a client is injected. */
+    readonly projectId?: string;
+    /** The API endpoint; unread once a client is injected. */
+    readonly apiEndpoint?: string;
   });

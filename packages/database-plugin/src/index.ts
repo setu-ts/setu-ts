@@ -13,6 +13,9 @@ export { DatabasePlugin } from './plugin/database-plugin.ts';
 
 // Public interfaces
 export type {
+  BigtableAdapterOptions,
+  BigtableAdapterOptionsBase,
+  BigtableDatabaseOptions,
   BuiltInDatabaseOptions,
   CosmosAdapterOptions,
   CosmosAdapterOptionsBase,
@@ -93,6 +96,7 @@ export type {
 
 // Errors
 export {
+  BigtableTransactionScopeError,
   CosmosConcurrentModificationError,
   CosmosTransactionScopeError,
   MongoTransactionUnavailableError,
@@ -210,3 +214,39 @@ export type {
 } from './adapters/dynamo/dynamo-mapping.ts';
 // Cosmos adapter — Azure Cosmos DB NoSQL-API backend over `@azure/cosmos`.
 export { CosmosAdapter } from './adapters/cosmos/cosmos-adapter.ts';
+
+// Bigtable adapter — Google Cloud Bigtable wide-column backend over
+// `@google-cloud/bigtable`. The client facade and the loaders are exported so
+// an application can inject its own client or supply its own loader; the
+// mapping resolution, scan planner, value codec, row-key composer, transaction
+// handle and SDK-module shape stay internal (the `CosmosTransaction`
+// precedent — the handle reaches an application only as `IAdapterTransaction`).
+export { BigtableAdapter } from './adapters/bigtable/bigtable-adapter.ts';
+export {
+  createInjectedBigtableLoader,
+  createLazyBigtableLoader,
+} from './adapters/bigtable/bigtable-client.ts';
+export type {
+  BigtableClientConfiguration,
+  BigtableClientLoader,
+} from './adapters/bigtable/bigtable-client.ts';
+export type {
+  BigtableCell,
+  BigtableFilter,
+  BigtableMutation,
+  BigtableReadOptions,
+  BigtableReadRow,
+  BigtableRowBoundary,
+  BigtableRowData,
+  BigtableRowRange,
+  BigtableValueRange,
+  IBigtableClient,
+  IBigtableInstance,
+  IBigtableRow,
+  IBigtableTable,
+} from './adapters/bigtable/bigtable-client-types.ts';
+export type {
+  BigtableEntityMapping,
+  BigtableRowKeyMapping,
+  BigtableValueEncoding,
+} from './adapters/bigtable/bigtable-mapping.ts';

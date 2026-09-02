@@ -10,6 +10,7 @@
 import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
 import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
+  BigtableAdapterOptions,
   CosmosAdapterOptions,
   CustomDatabaseOptions,
   DatabaseAdapterOptions,
@@ -26,6 +27,7 @@ import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
 import { MongoAdapter } from '../adapters/mongo/mongo-adapter.ts';
 import { DynamoAdapter } from '../adapters/dynamo/dynamo-adapter.ts';
 import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
+import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
 import type { DataSource } from '../repositories/base-repository.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -174,6 +176,13 @@ function createAdapter(
       // carries them through, so the arm is built from `adapterOptions` exactly
       // as the others are — no cast to a concrete adapter.
       return Promise.resolve(new CosmosAdapter(adapterOptions as unknown as CosmosAdapterOptions));
+    case 'bigtable':
+      // Bigtable's options ride the same shared bag `buildAdapterOptions`
+      // carries through, so the arm is built from `adapterOptions` exactly as
+      // the others are — no cast to a concrete adapter.
+      return Promise.resolve(
+        new BigtableAdapter(adapterOptions as unknown as BigtableAdapterOptions),
+      );
     case 'mongodb':
       // Mongo's options share the `DatabaseAdapterOptions` bag the other built-in
       // arms use; `buildAdapterOptions` carries them through, so the arm is built
@@ -241,6 +250,12 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('endpoint');
   carry('key');
   carry('containers');
+  // The `'bigtable'` arm's keys. `client`, `maxPageFetches` and `logQueries`
+  // are already carried above and are shared with other arms.
+  carry('projectId');
+  carry('instance');
+  carry('apiEndpoint');
+  carry('tables');
   return result as DatabaseAdapterOptions;
 }
 

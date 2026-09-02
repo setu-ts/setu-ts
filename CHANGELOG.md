@@ -8,6 +8,63 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Cloud Bigtable backend.** `@setu-ts/database-plugin` gains a `type: 'bigtable'` arm serving
+  Google Cloud Bigtable over `npm:@google-cloud/bigtable@^6`, with `BigtableAdapter` exported for
+  the `'custom'` arm — the wide-column half of the gap the document-store backends only half closed.
+  Bigtable inverts the DynamoDB problem: its row key is one lexicographically-sorted string, so
+  `findById` needs no key object, while there is **no secondary index of any kind**. The per-entity
+  `tables` mapping composes that row key from several logical fields
+  (`rowKey: { fields, separator?,
+  prefix? }`), names each field's `family:qualifier`, and chooses
+  a value encoding — `'tagged'` by default, so a number, boolean, `null`, `Date` or object
+  round-trips as itself, with an untagged cell decoding as its raw string so a table written outside
+  the framework stays readable, and `'raw'` for one that is entirely foreign. Key fields are written
+  as cells AND recovered from the row key, with the cells winning: a Bigtable row cannot exist with
+  zero cells, and the row key records no type.
+
+  Exactly three narrowings reach the server — the row set (an `eq` on the whole key is an exact key,
+  an `eq` pinning a prefix is a prefix range, a pinned prefix plus an `in` on the final field is a
+  key list), byte-exact value equality for each conjunctive non-key `eq`, and the column projection.
+  Everything else is evaluated by the same evaluator the memory adapter uses as the portable
+  reference, and a push-down may only ever match a **superset** of what that evaluator keeps. A
+  value test is an exact byte RANGE and never the SDK's string form, which is a regex — measured,
+  `{ value: 'a.*b' }` matched both `a.*b` and `axxb` — and it is wrapped in a `condition` filter,
+  because a bare chain strips every non-matching cell and the row would come back carrying only the
+  cell that matched. The projection is interleaved with a one-cell arm for the same class of reason:
+  a filter that removes every cell removes the ROW, so a bare projection would silently drop a row
+  carrying none of the projected columns. Row keys are compared as UTF-8 bytes — that is, by CODE
+  POINT — because JavaScript's `<` compares UTF-16 code units and the two disagree for every non-BMP
+  character, which dropped an emoji-keyed row from a cursor walk. `orderBy` is honoured only as the
+  full key ascending, or empty; a non-key sort, a strict key prefix and **descending** are refused
+  by name, the last because the emulator this adapter is tested against silently ignores
+  `reversed: true` (measured: it answered ascending with no error), so the path could not be
+  verified. A non-zero `offset` is refused too — Bigtable has none — and `rawQuery` is refused
+  because Bigtable's data plane is ReadRows, MutateRow and CheckAndMutateRow with no SQL surface
+  behind `query(sql, params)`.
+
+  Pagination is a start-key cursor over the portable keyset codec, which is Bigtable's own
+  continuation mechanism; `nextCursor` is non-`null` iff the page is non-terminal, so a page bounded
+  by `maxPageFetches` returns zero rows AND a cursor. Transactions are **one row**, because that is
+  Bigtable's only atomicity unit: writes are buffered, a second row key is refused at that write
+  with the new `BigtableTransactionScopeError`, and commit sends one CheckAndMutateRow whose
+  mutation list applies atomically and in order. `create` and `update` are conditional writes rather
+  than blind ones — Bigtable's `insert` is an upsert — so the match flag is what makes `create`
+  refuse an existing row and `update` refuse an absent one, inside a transaction as well.
+
+  `connect()` issues **no RPC**: a missing table already answers `5 NOT_FOUND` quoting the resource
+  path, while `getTables()` is a table-admin call a data-plane account commonly cannot make, so
+  probing would refuse a working configuration; configuration is validated at construction instead.
+  The arm is verified against the real `cbtemulator` in a suite guarded on
+  `BIGTABLE_EMULATOR_ENDPOINT`, and unlike the Cosmos one that suite **is** run by CI. No `common`
+  change and no new capability token: a composed row key shares no type with DynamoDB's
+  partition/sort key pair.
+
+  A key field's **type is not part of the row key** — the key is bytes and a numeric field renders
+  as its decimal text, so `1` and `'1'` are one physical row and `findById('1')` answers the row
+  stored under `1`, whose `id` cell still decodes as the number. Tagging the key would make it
+  unreadable in `cbt` and break every table this adapter did not write, so the mapping does not:
+  choose one type per key field, and zero-pad a numeric one whose lexicographic order matters.
+
 - **Azure Cosmos DB backend.** `@setu-ts/database-plugin` gains a `type: 'cosmos'` arm serving
   Cosmos DB's NoSQL (SQL) API over `npm:@azure/cosmos@^4`, with `CosmosAdapter` exported for the
   `'custom'` arm. Every `NormalizedQuery` member is translated natively; nothing is filtered, sorted

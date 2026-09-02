@@ -32,6 +32,13 @@ jobs:
       # this exact endpoint, which is also the host:port the package manifest's
       # net grant scopes.
       DYNAMODB_ENDPOINT: http://127.0.0.1:8000
+      # M82 §3.13: the real-emulator Bigtable suite (database-plugin) guards on
+      # this exact endpoint, which is also the host:port the package manifest's
+      # net grant scopes. `127.0.0.1` rather than `localhost` deliberately: the
+      # SDK speaks gRPC, and a `host:port` grant does not authorize a DNS
+      # lookup, so an IP literal is what keeps the grant endpoint-scoped (the
+      # M70g Pub/Sub lesson).
+      BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086
     services:
       mongo:
         image: mongo:8
@@ -160,6 +167,38 @@ jobs:
       # resolution rather than silently absorbing a new range result.
       - name: Frozen dependency install
         run: deno ci
+
+      # The Cloud Bigtable emulator cannot be a `services:` container. The
+      # Google Cloud CLI image's default command is a shell — the emulator is
+      # started by `gcloud beta emulators bigtable start` — and a service block
+      # has no way to set one, because `options` reaches `docker create` BEFORE
+      # the image while the command comes after it. So it is started here, early
+      # enough that the 1.75 GB pull overlaps with the format, lint and type
+      # gates below rather than adding to the critical path.
+      #
+      # It earns that pull because M53's thesis holds: a real-backend proof CI
+      # never runs is not a proof, and every push-down this adapter makes is
+      # only correct if the service agrees. The emulator implements NO instance
+      # admin API — `instance.create()` answers `12 UNIMPLEMENTED` — so
+      # instances are implicit and the guarded suite creates tables directly.
+      #
+      # Readiness is a raw TCP connect: the emulator speaks gRPC, so there is no
+      # HTTP endpoint to curl and the image carries no gRPC client of its own.
+      - name: Start the Cloud Bigtable emulator
+        run: |
+          docker run -d --name bigtable-emulator -p 127.0.0.1:8086:8086 \
+            gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+            gcloud beta emulators bigtable start --host-port=0.0.0.0:8086
+          for _ in $(seq 1 60); do
+            if docker exec bigtable-emulator bash -c 'echo > /dev/tcp/127.0.0.1/8086' 2>/dev/null; then
+              echo 'bigtable emulator ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'bigtable emulator did not become ready'
+          docker logs bigtable-emulator
+          exit 1
 
       - name: Format check
         run: deno task fmt:check

@@ -1270,11 +1270,11 @@ graph TB
 | Aspect               | Detail                                                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Database access with repository pattern                                                                                               |
-| **Responsibilities** | Provide `IDatabaseService`; repository pattern including portable expression filters and `findOne`; unit of work (transactions); ORM adapters (Prisma, Drizzle, Memory)                   |
+| **Responsibilities** | Provide `IDatabaseService`; repository pattern including portable expression filters and `findOne`; unit of work (transactions); backend adapters (Memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Cloud Bigtable)                   |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                         |
 | **Public API**       | `DatabasePlugin()`; `IDatabaseService`; `IRepository`; `IUnitOfWork`; Drizzle-specific `createDrizzleDatabase()`, `getDrizzleDatabase()`, and `getDrizzleTransaction()` |
 | **Extension Points** | Custom ORM adapter; custom repository; custom transaction strategy                                                                    |
-| **Rules**            | Applications inject Prisma clients and opaque configured Drizzle identities with explicit Promise-aware transaction bridges; only Drizzle operators are lazy-loaded from `npm:`. Portable repository operations stay backend-neutral, while released raw `query()` and distinct typed outer/transaction Drizzle accessors are explicit backend-specific escape hatches. Memory remains the zero-dependency default. |
+| **Rules**            | Applications inject Prisma clients and opaque configured Drizzle identities with explicit Promise-aware transaction bridges; only Drizzle operators are lazy-loaded from `npm:`. Portable repository operations stay backend-neutral, while released raw `query()` and distinct typed outer/transaction Drizzle accessors are explicit backend-specific escape hatches. Memory remains the zero-dependency default. Cloud Bigtable is the wide-column arm: it has no secondary index, so its row key — one lexicographically-sorted string composed from logical fields by the per-entity mapping — is the only ordering, and every non-key predicate is evaluated by the same portable evaluator the memory reference uses. |
 
 #### @setu-ts/cache-plugin
 

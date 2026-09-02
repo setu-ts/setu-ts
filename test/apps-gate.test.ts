@@ -161,7 +161,8 @@ describe('real-backend CI wiring', () => {
     // (guarded on POSTGRES_URL); M80 added `127.0.0.1:8000` for the DynamoDB
     // emulator suite guarded on DYNAMODB_ENDPOINT (pinned in the test below),
     // and M81 added `127.0.0.1:8082` for the guarded Cosmos emulator suite —
-    // all endpoint-scoped in the manifest, because a CLI `--allow-net` would
+    // M82 added `127.0.0.1:8086` for the Bigtable emulator suite — all
+    // endpoint-scoped in the manifest, because a CLI `--allow-net` would
     // REPLACE this block rather than union with it.
     expect(config.test?.permissions?.net).toEqual([
       '127.0.0.1:27017',
@@ -169,7 +170,36 @@ describe('real-backend CI wiring', () => {
       '127.0.0.1:5433',
       '127.0.0.1:8000',
       '127.0.0.1:8082',
+      '127.0.0.1:8086',
     ]);
+  });
+
+  it('starts the Bigtable emulator and declares its endpoint and grant (M82 §3.13)', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    // Started as a STEP rather than a `services:` container, because the
+    // Google Cloud CLI image's default command is a shell and a service block
+    // has no way to set one — `options` reaches `docker create` before the
+    // image, while the command comes after it. Pinning the step keeps a later
+    // edit from quietly dropping the emulator and turning the guarded suite
+    // into a permanent skip while CI stays green.
+    expect(workflow).toContain('gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators');
+    expect(workflow).toContain('gcloud beta emulators bigtable start --host-port=0.0.0.0:8086');
+    // The container must publish on loopback at the exact host:port both the
+    // suite's endpoint and the manifest's net grant address.
+    expect(workflow).toContain('-p 127.0.0.1:8086:8086');
+    // `127.0.0.1` rather than `localhost`: the SDK speaks gRPC, and a
+    // `host:port` grant does not authorize the DNS lookup a hostname needs, so
+    // an IP literal is what keeps the grant endpoint-scoped (the M70g lesson).
+    expect(workflow).toContain('BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086');
+    // The readiness wait is load-bearing: the emulator speaks gRPC, so there
+    // is no HTTP endpoint to poll, and without the wait the suite would race
+    // a container that has not bound its port — which surfaces as a failure,
+    // not a skip, but a confusing one.
+    expect(workflow).toContain('/dev/tcp/127.0.0.1/8086');
+    const config = await readJson<{
+      readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
+    }>('packages/database-plugin/deno.json');
+    expect(config.test?.permissions?.net).toContain('127.0.0.1:8086');
   });
 
   it('declares the DynamoDB Local service, endpoint env, and scoped grant (M80 §6.2)', async () => {

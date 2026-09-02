@@ -63,11 +63,11 @@ await db.transaction(async (uow) => {
 
 ## Options
 
-| Option    | Type                                                                                   | Default     | Description                              |
-| --------- | -------------------------------------------------------------------------------------- | ----------- | ---------------------------------------- |
-| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'dynamodb' \| 'cosmos' \| 'custom'` | `'memory'`  | Backend adapter.                         |
-| `name`    | `string`                                                                               | `'default'` | Named connection for multi-database use. |
-| `options` | per-arm (see `type`)                                                                   | —           | Adapter-specific configuration.          |
+| Option    | Type                                                                                                 | Default     | Description                              |
+| --------- | ---------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------- |
+| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'dynamodb' \| 'cosmos' \| 'bigtable' \| 'custom'` | `'memory'`  | Backend adapter.                         |
+| `name`    | `string`                                                                                             | `'default'` | Named connection for multi-database use. |
+| `options` | per-arm (see `type`)                                                                                 | —           | Adapter-specific configuration.          |
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
@@ -75,13 +75,16 @@ the **dot**, not a colon — `createCapabilityToken` rejects colons.
 Each arm narrows `options`: `type: 'prisma'` requires `prismaClient`, `type: 'drizzle'` requires
 both `drizzleInstance` and `drizzleTables`, `type: 'mongodb'` requires either `url` or `client`,
 `type: 'dynamodb'` requires either `region` or `client`; `type: 'cosmos'` requires `database` plus
-either an `endpoint`/`key` pair or a `client`; and `type: 'custom'` requires `adapter`. Those are
-required **by the union**, so omitting one is a compile error rather than a startup throw. Three
-arms carry their own option bag rather than the shared `DatabaseAdapterOptions`: the `'mongodb'` arm
-its `MongoAdapterOptions` — see [the MongoDB backend](#the-mongodb-backend) below — the `'cosmos'`
-arm its `CosmosAdapterOptions`, see [the Azure Cosmos DB backend](#the-azure-cosmos-db-backend), and
-the `'dynamodb'` arm its `DynamoAdapterOptions` (see the `DynamoDB backend` section of
-[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#dynamodb-backend-dynamodb-arm)).
+either an `endpoint`/`key` pair or a `client`; `type: 'bigtable'` requires `instance` plus either a
+`projectId` or a `client`; and `type: 'custom'` requires `adapter`. Those are required **by the
+union**, so omitting one is a compile error rather than a startup throw. Three arms carry their own
+option bag rather than the shared `DatabaseAdapterOptions`: the `'mongodb'` arm its
+`MongoAdapterOptions` — see [the MongoDB backend](#the-mongodb-backend) below — the `'cosmos'` arm
+its `CosmosAdapterOptions`, see [the Azure Cosmos DB backend](#the-azure-cosmos-db-backend), and the
+`'dynamodb'` arm its `DynamoAdapterOptions` (see the `DynamoDB backend` section of
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#dynamodb-backend-dynamodb-arm)),
+and the `'bigtable'` arm its `BigtableAdapterOptions` — see
+[the Cloud Bigtable backend](#the-cloud-bigtable-backend).
 
 | `options` field      | Type                      | Default | Read by                                                                                                                                                              |
 | -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -420,6 +423,158 @@ COSMOS_ENDPOINT=http://127.0.0.1:8082/ deno test -A \
 **not** run by CI — the image is 2.5 GB, which is the same reason the Pub/Sub and Service Bus
 emulator suites are local-only.
 
+## The Cloud Bigtable backend
+
+`type: 'bigtable'` serves the `database` capability from Google Cloud Bigtable, over
+[`@google-cloud/bigtable`](https://www.npmjs.com/package/@google-cloud/bigtable)
+(`npm:@google-cloud/bigtable@^6`).
+
+**Bigtable inverts the DynamoDB problem.** Its row key is a single lexicographically-sorted string,
+so `findById` fits it natively with no key object at all. What it lacks instead is everything
+_around_ the key: there is **no secondary index of any kind**, so a predicate on a non-key column is
+a scan, and `orderBy` is row-key order or nothing.
+
+```typescript
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+
+app.register(DatabasePlugin({
+  type: 'bigtable',
+  options: {
+    projectId: 'my-project',
+    instance: 'app-instance',
+    tables: {
+      Order: {
+        table: 'orders',
+        rowKey: { fields: ['tenantId', 'orderId'], separator: '#' },
+        columnFamily: 'o',
+        columns: { total: 'metrics:amount' },
+      },
+    },
+  },
+}));
+```
+
+| `options` field  | Type                                    | Default | Read by                                                                                                                             |
+| ---------------- | --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `projectId`      | `string`                                | —       | The lazy client path. Required unless `client` is supplied.                                                                         |
+| `instance`       | `string`                                | —       | **Required on both arms.** A table is addressed as `project/instance/table`, and neither a client nor a project encodes it.         |
+| `apiEndpoint`    | `string`                                | —       | The lazy client path. The emulator address; an endpoint alone reaches `cbtemulator` with no credentials.                            |
+| `client`         | `IBigtableClient`                       | —       | `connect()`. When present the lazy `import('npm:@google-cloud/bigtable@^6')` never runs.                                            |
+| `tables`         | `Record<string, BigtableEntityMapping>` | `{}`    | Per-entity `{ table?, rowKey?, columnFamily?, columns?, valueEncoding? }`. An unmapped entity uses its own name, `['id']` and `cf`. |
+| `maxPageFetches` | `number`                                | `10`    | `findPage`'s fill loop, bounding the re-fetch when a client-side filter empties a raw batch.                                        |
+| `logQueries`     | `boolean`                               | `false` | The database service, exactly as for every other arm.                                                                               |
+
+**Tables must already exist.** The adapter creates no instance and no table: column families,
+garbage-collection policies and split points belong to the application's provisioning. A missing
+table is reported by the service as `5 NOT_FOUND` quoting the full resource path, which is also why
+`connect()` issues **no RPC at all** — an `instance.getTables()` probe is a table-ADMIN call a
+data-plane service account commonly cannot make, so probing would refuse a working configuration.
+Configuration mistakes are caught at construction instead, by name.
+
+**The row key is composed from logical fields.** `rowKey: { fields, separator?, prefix? }` maps the
+repository's `EntityKey` onto the single string Bigtable addresses a row by. A single-field key
+accepts a scalar; a multi-field key requires a record naming every field, and refuses a scalar — a
+scalar cannot say which field it is. A field value **containing the separator is refused**, because
+two different logical keys would otherwise compose to one row key: a write would silently overwrite
+an unrelated row and a read would return it.
+
+**A key field's type is not part of the row key.** A numeric field renders as its decimal text, so
+`1` and `'1'` are one physical row: creating one refuses the other as existing, and `findById('1')`
+answers the row stored under `1` — whose `id` cell still decodes as the number. Tagging the key
+would make it unreadable in `cbt` and break every table this adapter did not write, so the mapping
+does not; choose one type per key field. If lexicographic order matters for a numeric field,
+zero-pad it, exactly as you would writing row keys by hand.
+
+Key fields are written as ordinary cells AND recovered from the row key on read, with the **cells
+winning**. All three parts matter: a Bigtable row cannot exist with zero cells, so writing the key
+guarantees the row exists; the row key is bytes and records no type, so overlaying it over a cell
+would turn a numeric key field into a string; and a table written outside this framework has no key
+cells at all, which is what the parse-back is for.
+
+**Values are tagged by default.** `valueEncoding: 'tagged'` writes `<tag>:<payload>`, so a number,
+boolean, `null`, `Date` or object round-trips as itself. A cell carrying no recognised tag decodes
+as its raw string — the interop path, without which this adapter could not read a table it did not
+write. `valueEncoding: 'raw'` writes `String(value)` and reads every cell as a string, which removes
+the residual ambiguity for an application whose table is entirely foreign.
+
+**`orderBy` is the row key or nothing.** An empty sort is honoured, and so is one naming exactly the
+mapped key fields, in order, all ascending — that IS the scan order. Everything else is refused by
+name: a non-key field has no index to sort by, and **descending is refused deliberately** rather
+than shipped on `reversed: true`, because the emulator this adapter is tested against **silently
+ignores** that option (measured: it answered ascending, with no error), so a descending path could
+not be verified. A non-zero `offset` is refused too — Bigtable has no row offset, and discarding
+scanned rows would read and bill them.
+
+**Three things reach the server, and nothing else.** The row set (an `eq` on every key field is an
+exact key; an `eq` pinning a leading prefix is a prefix range; a pinned prefix plus an `in` on the
+final field is an explicit key list), byte-exact value equality for each conjunctive non-key `eq`,
+and the column projection. Everything else — `contains`, the ordered comparisons, `in` on a non-key
+field, any disjunction — is evaluated by the same `matchesFilter` the memory adapter uses as the
+portable reference, so the six backends cannot drift about what a `FilterExpression` means. The
+invariant is that **a push-down may only ever match a superset** of what the client-side evaluator
+keeps; every fallback widens rather than narrows.
+
+Two details of that push-down are correctness requirements rather than tuning. A value test is an
+exact BYTE RANGE and never the SDK's string form, which is a **regex** — measured,
+`{ value: 'a.*b' }` matched both `a.*b` and `axxb`. And it is wrapped in a `condition` filter rather
+than chained directly, because a bare chain STRIPS every non-matching cell, so the row would come
+back carrying only the cell that matched. An ordered comparison on a key field is **not** pushed
+down either: the composed key is a string, so a numeric key field does not sort numerically inside
+it — zero-pad a numeric key field if you need its lexicographic order to match.
+
+**Pagination is a start-key cursor** over the framework's portable keyset codec, which is exactly
+what Bigtable's continuation mechanism is. `nextCursor` is non-`null` if and only if the page is
+non-terminal, never derived from `rows.length`: a client-side filter can empty a whole raw batch, so
+a page bounded by `maxPageFetches` returns zero rows AND a cursor, minted from the last row scanned.
+
+**`rawQuery` is refused by name** with `UnsupportedRawQueryError`. Bigtable has no query language
+behind `query(sql, params)` — its data plane is ReadRows, MutateRow and CheckAndMutateRow — so
+`IDatabaseService.query()` is unavailable on this arm and an application reaches the injected client
+directly.
+
+**Transactions are one row.** Bigtable's only atomicity unit is the single row: a multi-row batch is
+atomic per entry and not as a whole. So `beginTransaction()` buffers writes, refuses a second row
+key **at the write that crosses the bound** with `BigtableTransactionScopeError`, and commits the
+buffer as ONE CheckAndMutateRow whose mutation list applies atomically and in order — a buffered
+delete followed by writes replaces the row wholesale. `rollback()` discards and sends nothing, and
+is idempotent. Reads inside a transaction observe committed state only.
+
+`create` and `update` are **conditional** writes, not blind ones: Bigtable's `insert` is an upsert,
+so `create` would otherwise overwrite an existing row and `update` would fabricate an absent one.
+The CheckAndMutateRow match flag is what makes both refusals real, and it holds inside a transaction
+too — a buffered `create` whose row turns out to exist is refused at commit.
+
+### What this adapter deliberately cannot do
+
+| Not available                    | Why                                                                                                                                                                                                                 |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Any non-key sort or index        | **Absent from Bigtable.** There are no secondary indexes; the row key is the only ordering. Design the row key for the access pattern, as the platform intends.                                                     |
+| Descending scans                 | Refused rather than shipped: the emulator this adapter is tested against silently ignores `reversed: true`, so the path could not be verified. Re-openable by a milestone that can test a live instance.            |
+| `offset`                         | **Absent from Bigtable.** Emulating one would read and bill the skipped rows; `findPage` is the route.                                                                                                              |
+| `rawQuery` / `query()`           | Refused by name: Bigtable's data plane is ReadRows/MutateRow/CheckAndMutateRow, and GoogleSQL `executeQuery` has no portable member in this contract.                                                               |
+| Cell versioning and GC policies  | **Outside the portable contract by design** — no other backend has a counterpart, so exposing it would invent a concept for one adapter. Configure GC on the column family; reach the injected client for versions. |
+| Multi-row transactions           | **Absent from Bigtable.** A batch is atomic per entry, not as a whole; a second row key is refused by name rather than promised.                                                                                    |
+| Grouping / aggregation and joins | **Absent from the portable contract**, exactly as for Cosmos and DynamoDB. `count` is its only aggregate.                                                                                                           |
+
+### Running the guarded Bigtable suite
+
+`test/integration/real-bigtable-adapter.test.ts` is guarded on `BIGTABLE_EMULATOR_ENDPOINT` and
+skipped without it. Against the local emulator:
+
+```bash
+docker run -d --name he-bigtable -p 127.0.0.1:8086:8086 \
+  gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+  gcloud beta emulators bigtable start --host-port=0.0.0.0:8086
+
+BIGTABLE_EMULATOR_ENDPOINT=127.0.0.1:8086 deno test -A \
+  packages/database-plugin/test/integration/real-bigtable-adapter.test.ts
+```
+
+The emulator implements **no instance admin API** — `instance.create()` answers `12 UNIMPLEMENTED` —
+so instances are implicit and the suite creates tables directly. Unlike the Cosmos one, this suite
+**is** run by CI: the image is 1.75 GB against the Cosmos emulator's 2.48 GB, and every push-down
+above is only correct if the service agrees.
+
 ## Filtering and single-row lookup
 
 `findAll`, `findOne`, and `count` accept an equality `where` map and an optional portable `filter`
@@ -514,7 +669,9 @@ imperative begin/commit.
 | ----------------------------------------- | --------- |
 | `createDrizzleDatabase`                   | function  |
 | `createDrizzleDataSource`                 | function  |
+| `createInjectedBigtableLoader`            | function  |
 | `createInjectedDynamoLoader`              | function  |
+| `createLazyBigtableLoader`                | function  |
 | `createLazyDynamoLoader`                  | function  |
 | `createPrismaDataSource`                  | function  |
 | `DatabasePlugin`                          | function  |
@@ -524,6 +681,8 @@ imperative begin/commit.
 | `getDrizzleTransaction`                   | function  |
 | `keysetPredicate`                         | function  |
 | `BaseRepository`                          | class     |
+| `BigtableAdapter`                         | class     |
+| `BigtableTransactionScopeError`           | class     |
 | `CosmosAdapter`                           | class     |
 | `CosmosConcurrentModificationError`       | class     |
 | `CosmosTransactionScopeError`             | class     |
@@ -540,6 +699,18 @@ imperative begin/commit.
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
+| `BigtableAdapterOptionsBase`              | interface |
+| `BigtableCell`                            | interface |
+| `BigtableClientConfiguration`             | interface |
+| `BigtableClientLoader`                    | interface |
+| `BigtableDatabaseOptions`                 | interface |
+| `BigtableEntityMapping`                   | interface |
+| `BigtableReadOptions`                     | interface |
+| `BigtableReadRow`                         | interface |
+| `BigtableRowBoundary`                     | interface |
+| `BigtableRowKeyMapping`                   | interface |
+| `BigtableRowRange`                        | interface |
+| `BigtableValueRange`                      | interface |
 | `CosmosAccessCondition`                   | interface |
 | `CosmosAdapterOptionsBase`                | interface |
 | `CosmosBatchDeleteOperation`              | interface |
@@ -596,6 +767,10 @@ imperative begin/commit.
 | `DynamoUpdateItemCommandOutput`           | interface |
 | `FindOptions`                             | interface |
 | `IAdapterTransaction`                     | interface |
+| `IBigtableClient`                         | interface |
+| `IBigtableInstance`                       | interface |
+| `IBigtableRow`                            | interface |
+| `IBigtableTable`                          | interface |
 | `ICosmosClient`                           | interface |
 | `ICosmosContainer`                        | interface |
 | `ICosmosDatabase`                         | interface |
@@ -627,6 +802,11 @@ imperative begin/commit.
 | `PrismaAdapterOptions`                    | interface |
 | `PrismaCompositeKeyOptions`               | interface |
 | `PrismaDatabaseOptions`                   | interface |
+| `BigtableAdapterOptions`                  | type      |
+| `BigtableFilter`                          | type      |
+| `BigtableMutation`                        | type      |
+| `BigtableRowData`                         | type      |
+| `BigtableValueEncoding`                   | type      |
 | `BuiltInDatabaseOptions`                  | type      |
 | `CosmosAdapterOptions`                    | type      |
 | `CosmosBatchOperation`                    | type      |

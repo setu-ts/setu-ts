@@ -3822,8 +3822,83 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   guarded suite is local-only — the emulator image is 2.5 GB, the same reason the Pub/Sub and
   Service Bus suites are — with the `docker run` and the health line in the package README) —
   complete (PR #220)
-- **Next milestone** — **M82** (Cloud Bigtable backend), gated on M79 and now unblocked: it is the
-  last of the three backends M78 deferred, and the only one still unowned.
+- **Milestone 82** (`packages/database-plugin` — Cloud Bigtable backend, the wide-column half of the
+  gap M78 named and only half closed. **Bigtable inverts the DynamoDB problem**, which is why it is
+  a milestone rather than a footnote to M80: its row key is a single lexicographically-sorted
+  string, so `findById` fits natively with no key object at all — the member M79 had to add for
+  DynamoDB and Cosmos — while there is **no secondary index of any kind**, so a predicate on a
+  non-key column is a scan and `orderBy` is row-key order or nothing. **No `common` change and no
+  new capability token**: the ROADMAP left the package list conditional on the row-key mapping
+  sharing a type with M80's, and it does not — M80's key is a partition/sort ATTRIBUTE PAIR while
+  Bigtable's is one composed string — so the conditional is resolved in the ROADMAP rather than
+  inherited.
+
+  **Fourteen platform facts were established by probing the real emulator before a line was written,
+  and four of them are traps that would have shipped green.** (1) `getRows({ start, end })` is the
+  SDK's **inclusive-at-both-ends** shorthand — `[u#002, u#004]` returned `u#004` — so every range
+  this adapter builds uses the explicit `{ value, inclusive: false }` form; the ROADMAP's own
+  measurement described the wire protocol's `endKeyOpen`, and the two are recorded as different
+  surfaces rather than one being wrong. (2) `{ value: 'a.*b' }` is a **regex** and matched both
+  `a.*b` and `axxb`, while `{ value: { start: v, end: v } }` is an exact byte match — so the value
+  push-down uses the byte-range form exclusively and has no escaping to get wrong. (3) A bare value
+  chain **strips every non-matching cell**, so a predicate pushed down that way returns a row
+  carrying only the cell that matched; a `condition` filter whose `pass` runs against the original
+  row returns it whole. (4) `getRows({ reversed: true })` is **silently ignored** by `cbtemulator` —
+  it answered ascending with no error — so descending `orderBy` is REFUSED by name rather than
+  shipped on a path no available backend can verify (the M70k `reportsExit` reasoning).
+
+  **Exactly three narrowings reach the server and the rest is one evaluator.** The row set (an `eq`
+  on every key field is an exact key; an `eq` pinning a leading prefix is a prefix range with an
+  exclusive successor end; a pinned prefix plus an `in` on the final field is an explicit key list),
+  byte-exact value equality for each conjunctive non-key `eq`, and the column projection. Everything
+  else — `contains`, the ordered comparisons, any disjunction — is evaluated by the SAME
+  `matchesFilter` the memory adapter uses as the portable reference, so the six backends cannot
+  drift about what a `FilterExpression` means. The stated invariant is that **a push-down may only
+  ever match a SUPERSET** of what the client-side evaluator keeps; every fallback widens rather than
+  narrows, which is what makes an encoding mismatch wasted work instead of a wrong answer. An
+  ordered comparison on a KEY field is deliberately not pushed down either: the composed key is a
+  string, so a numeric key field does not sort numerically inside it.
+
+  **The row key is composed from logical fields**, which the ROADMAP names as a mapping concern
+  rather than the composite-key contract concern M79 added. A value containing the separator is
+  REFUSED, because two different logical keys would otherwise compose to one row key — a write would
+  silently overwrite an unrelated row. Key fields are written as cells AND recovered from the row
+  key with the **cells winning**, and all three parts are load-bearing: a Bigtable row cannot exist
+  with zero cells, the row key is bytes and records no type (so overlaying it would turn a numeric
+  key field into a string), and a table written OUTSIDE the framework has no key cells at all.
+  Values are tagged by default so a `Date` is a `Date` again, with an untagged cell decoding as its
+  raw string — the interop path, without which the adapter could read nothing it had not written
+  itself — and a `'raw'` arm for a table that is entirely foreign.
+
+  **Transactions are one row**, because that is Bigtable's only atomicity unit: a multi-row batch is
+  atomic per entry and not as a whole, so a handle accepting several row keys would promise what the
+  platform does not offer while refusing outright would strand `IDatabaseService.transaction()`. A
+  second row key is refused at the write that crosses the bound with `BigtableTransactionScopeError`
+  (the `CosmosTransactionScopeError` precedent), and commit sends ONE CheckAndMutateRow whose
+  mutation list applies atomically and in order — measured, `[delete, insert]` replaced a row
+  wholesale, dropping a qualifier the insert did not name. `create` and `update` are **conditional**
+  writes rather than blind ones, since `insert` is an upsert; the match flag is what makes both
+  refusals real, inside a transaction too, where a buffered `create` whose row turns out to exist is
+  refused at commit. `connect()` issues **no RPC**: a missing table already answers `5 NOT_FOUND`
+  quoting the resource path, while `getTables()` is a table-ADMIN call a data-plane account commonly
+  cannot make, so probing would refuse a working configuration — configuration is validated at
+  construction instead, the M52c/M52d binding-guard family.
+
+  **17 scenarios run against the real emulator** and, unlike the Cosmos suite, that suite **is** run
+  by CI — the image is 1.75 GB against Cosmos's 2.48 GB, and every push-down above is only correct
+  if the service agrees (M53's thesis). It cannot be a `services:` container: the Google Cloud CLI
+  image's default command is a shell and a service block has no way to set one, because `options`
+  reaches `docker create` BEFORE the image while the command comes after it — so it is a step, and
+  `test/apps-gate.test.ts` pins the image, the command, the port mapping, the endpoint variable and
+  the scoped `net` grant so a later edit cannot turn the proof into a silent skip. The filter
+  conformance table gained a Bigtable leg driven END TO END rather than through a translation
+  reproduced in the test, which is the only thing that proves the push-down never drops a matching
+  row. Two barrel exports were CUT during verification rather than shipped — `BigtableTransaction`
+  (the `CosmosTransaction` precedent; it reaches an application only as `IAdapterTransaction`) and
+  `BigtableSdkModule` — because `deno doc --lint` showed both leaking a private type, and neither
+  had a public consumer) — complete (PR #222)
+- **Next milestone** — none assigned; the three backends M78 deferred (M80 DynamoDB, M81 Cosmos DB,
+  M82 Cloud Bigtable) are all complete.
 
 ## Verification (run before declaring any work done)
 

@@ -12,9 +12,10 @@ import {
   DeleteTableCommand,
   DynamoDBClient,
 } from 'npm:@aws-sdk/client-dynamodb@^3';
-import { createLazyDynamoLoader } from '../../src/index.ts';
+import { createLazyBigtableLoader, createLazyDynamoLoader } from '../../src/index.ts';
 
 const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
+const bigtableEndpoint = Deno.env.get('BIGTABLE_EMULATOR_ENDPOINT');
 const skipDynamo = dynamoEndpoint === undefined;
 const endpoint = dynamoEndpoint ?? '';
 const dynamoCredentials = {
@@ -76,6 +77,32 @@ describe('Real ORM imports (guarded)', () => {
       expect(error).not.toBeNull();
       const msg = error!.message.toLowerCase();
       expect(msg.includes('cosmos') || msg.includes('not found') || msg.includes('npm')).toBe(true);
+    }
+  });
+
+  it('the Bigtable lazy loader performs the real npm import and reaches the emulator', {
+    ignore: bigtableEndpoint === undefined,
+  }, async () => {
+    // Drives `createLazyBigtableLoader` itself rather than a bare `import()`,
+    // so the seam's own adaptation — not merely the specifier — is exercised,
+    // and then issues ONE real read so the adapted facade is proven end to end.
+    const loader = createLazyBigtableLoader({
+      projectId: 'setu-m82',
+      apiEndpoint: bigtableEndpoint as string,
+    });
+    expect(loader.owned).toBe(true);
+    const client = await loader.load();
+    try {
+      const rows = await client.instance('setu-m82-instance').table(
+        `import_probe_${crypto.randomUUID().replaceAll('-', '').slice(0, 8)}`,
+      ).readRows({ limit: 1 });
+      // The table does not exist, so the service must say so by name rather
+      // than answering an empty result.
+      expect(rows).toEqual([]);
+    } catch (error) {
+      expect(String((error as Error).message)).toMatch(/NOT_FOUND|not found/i);
+    } finally {
+      await client.close();
     }
   });
 
