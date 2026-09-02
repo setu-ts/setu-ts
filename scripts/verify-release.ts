@@ -5,7 +5,7 @@
  * Run with the expected version (the git tag without its leading `v`):
  *
  * ```
- * deno run --allow-read scripts/verify-release.ts 0.1.0-alpha.1
+ * deno run --allow-read scripts/verify-release.ts 0.2.0
  * ```
  *
  * Verifies eight things a green test suite cannot:
@@ -47,7 +47,7 @@ import { extractReleaseNotes } from './release-notes.ts';
 
 const expected = Deno.args[0];
 if (!expected) {
-  console.error('usage: verify-release.ts <version>   (e.g. 0.1.0-alpha.1)');
+  console.error('usage: verify-release.ts <version>   (e.g. 0.2.0)');
   Deno.exit(2);
 }
 

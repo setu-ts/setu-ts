@@ -15,7 +15,7 @@ const MODULES = [
  * Every `import ... from '<specifier>'`, capturing whether it is type-only.
  *
  * The specifier is matched by SUBSTRING rather than exact text: this package
- * spells the dependency `jsr:@setu-ts/common@^0.1.0-alpha.10`, so a pattern
+ * spells the dependency `jsr:@setu-ts/common@^0.2.0`, so a pattern
  * anchored on the bare `@setu-ts/common` would miss every import the SDK
  * actually writes and the guard would pass whatever was added.
  */
@@ -49,11 +49,11 @@ describe('SDK realtime module imports', () => {
     // a working one.
     expect(
       valueImportsOfCommon(
-        "import { CAPABILITIES } from 'jsr:@setu-ts/common@^0.1.0-alpha.10';",
+        "import { CAPABILITIES } from 'jsr:@setu-ts/common@^0.2.0';",
       ),
-    ).toEqual(['jsr:@setu-ts/common@^0.1.0-alpha.10']);
+    ).toEqual(['jsr:@setu-ts/common@^0.2.0']);
     expect(
-      valueImportsOfCommon("import type { IRequest } from 'jsr:@setu-ts/common@^0.1.0-alpha.10';"),
+      valueImportsOfCommon("import type { IRequest } from 'jsr:@setu-ts/common@^0.2.0';"),
     ).toEqual([]);
   });
 });

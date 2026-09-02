@@ -81,7 +81,7 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 ### 1. Prepare, on a `release/…` branch
 
 - Bump `version` in every workspace member's `deno.json`.
-- **Bump the cross-package specifiers to match.** 15 packages pin
+- **Bump the cross-package specifiers to match.** 16 packages pin
   `jsr:@setu-ts/{common,kernel,runtime}@^<version>` explicitly. Under semver a `^0.1.0` range does
   **not** match a `0.1.0-alpha.1` prerelease, so a version bump that misses these publishes packages
   whose dependencies cannot resolve — and `deno publish` does not warn.
@@ -90,13 +90,17 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   specifier string to a pinned version — so the range in the source and both sides of the mapping
   must move together. A missed source specifier resolves against the previous release instead of the
   one being cut. `grep -rn '<old-version>' packages/*/src` must come back empty.
+- **A release starting a new version LINE must widen `SHIPPED_VERSION_LINES`** in
+  `scripts/check-docs.ts`. Both document version gates match against that alternation, so a new line
+  it does not name makes them match nothing — every stale claim goes invisible while `check:docs`
+  reports a clean pass. The failure mode is a silent green run, not a red one.
 - Add the release's `CHANGELOG.md` entry.
 
 ### 2. Verify
 
 ```fish
 deno task fmt:check; and deno task lint; and deno task check; and deno task test:coverage
-deno task release:verify 0.1.0-alpha.1
+deno task release:verify 0.2.0
 deno task release:publish --dry-run
 ```
 
@@ -125,7 +129,7 @@ Open a PR, let CI pass, merge to `main`. Then from `main`:
 
 ```fish
 git pull
-deno task release:verify 0.1.0-alpha.1
+deno task release:verify 0.2.0
 env JSR_TOKEN=jsrp_… deno task release:publish
 ```
 
@@ -139,8 +143,8 @@ not want a tag claiming otherwise. Once it succeeds:
 > those are M70i's decision (register rows X7-2 / X7-4).
 
 ```fish
-git tag v0.1.0-alpha.1
-git push origin v0.1.0-alpha.1
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 ### Publishing from CI instead
@@ -305,7 +309,14 @@ reason will not collide with an object created this way.
 
 ## Prerelease gotchas
 
-Both of these bite on any `-alpha`/`-beta`/`-rc` release and neither is a defect.
+**These stopped applying at `v0.2.0`**, which dropped the prerelease suffix — see the CHANGELOG
+entry for why. They are kept because they bite on any future `-alpha`/`-beta`/`-rc` release, and
+because every tag from `v0.1.0-alpha.1` to `v0.1.0-alpha.10` shipped under them. Neither is a
+defect.
+
+The first no longer applies to a `0.x` release: JSR points `latest` at `0.2.0`, so a bare
+`deno add jsr:@setu-ts/kernel` resolves. The second still applies to **every** release, prerelease
+or not — Deno's dependency-age policy is about publication time, not version shape.
 
 ### `latest` is not set, so bare installs fail
 

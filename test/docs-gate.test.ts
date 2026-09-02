@@ -1282,6 +1282,53 @@ describe('documentation gate — install-snippet versions', () => {
     const findings = checkInstallVersions(doc('docs/cli.md', source), '0.1.0-alpha.6');
     expect(findings.map((finding) => finding.line)).toEqual([1, 3]);
   });
+
+  // This checker reads its own regex, so the 0.2.x line has to be proven HERE
+  // and not only through the bare-claim checker beside it. Both were silently
+  // matching nothing before the alternation was widened.
+  it('reads the post-alpha 0.2.x line in a package specifier', () => {
+    const stale = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.2.0\n'),
+      '0.2.1',
+    );
+    expect(stale).toHaveLength(1);
+    expect(stale[0]?.message).toContain('0.2.0');
+    expect(
+      checkInstallVersions(doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.2.0\n'), '0.2.0'),
+    ).toEqual([]);
+  });
+
+  // SemVer permits a hyphen inside a prerelease identifier and a `+` build
+  // suffix, and JSR accepts both — so a narrower class truncates a legal
+  // version and reports a correct reference as stale, the same defect one
+  // shape further out.
+  it('matches a hyphenated prerelease identifier and build metadata whole', () => {
+    for (const version of ['0.2.1-rc-1', '0.2.1+build.7', '0.2.1-rc-1+build.7']) {
+      expect(
+        checkInstallVersions(
+          doc('README.md', `deno add jsr:@setu-ts/kernel@^${version}\n`),
+          version,
+        ),
+      ).toEqual([]);
+    }
+  });
+
+  // A future `-rc`/`-beta` release stays a supported path. Capturing only the
+  // `0.2.1` prefix of `0.2.1-rc.1` compares a truncated value against the
+  // shipping one, so every CORRECT reference in the tree reports as stale.
+  it('matches a 0.2.x prerelease whole rather than its stable prefix', () => {
+    expect(
+      checkInstallVersions(
+        doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.2.1-rc.1\n'),
+        '0.2.1-rc.1',
+      ),
+    ).toEqual([]);
+    const stale = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.2.1-rc.1\n'),
+      '0.2.1-rc.2',
+    );
+    expect(stale).toHaveLength(1);
+  });
 });
 
 describe('documentation gate — bare version claims', () => {
@@ -1362,6 +1409,70 @@ describe('documentation gate — bare version claims', () => {
     const findings = checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7');
     expect(findings).toHaveLength(1);
     expect(findings[0]?.line).toBe(3);
+  });
+
+  // The 0.1.0-alpha line and the 0.2.x line are both this project's, so both
+  // must be readable. Moving to 0.2.0 without widening SHIPPED_VERSION_LINES
+  // would leave every gate green while matching nothing at all.
+  it('reads the post-alpha 0.2.x line as well as the alpha line', () => {
+    const stale = checkVersionClaims(doc('README.md', 'ships `v0.2.0`\n'), '0.2.1');
+    expect(stale).toHaveLength(1);
+    expect(stale[0]?.message).toContain('0.2.0');
+
+    const legacy = checkVersionClaims(doc('README.md', 'ships `v0.1.0-alpha.10`\n'), '0.2.0');
+    expect(legacy).toHaveLength(1);
+    expect(legacy[0]?.message).toContain('0.1.0-alpha.10');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.0`\n'), '0.2.0')).toEqual([]);
+  });
+
+  // Measured against the real corpus, not guessed. A general `\d+.\d+.\d+`
+  // pattern matches every one of these, and each is a false positive on a
+  // string that is not a Setu-TS version — which is why the alternation names
+  // this project's lines explicitly instead.
+  it('matches a prerelease whole, so a correct reference is not reported stale', () => {
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.1')).toEqual([]);
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.2'))
+      .toHaveLength(1);
+  });
+
+  it('matches a hyphenated prerelease identifier and build metadata in a claim', () => {
+    for (const version of ['0.2.1-rc-1', '0.2.1+build.7', '0.2.1-rc-1+build.7']) {
+      expect(checkVersionClaims(doc('README.md', `ships \`v${version}\`\n`), version)).toEqual([]);
+    }
+    // Still discriminates: a DIFFERENT hyphenated prerelease is stale.
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc-1`\n'), '0.2.1-rc-2'))
+      .toHaveLength(1);
+  });
+
+  // Without a left boundary the `0.2.1` inside an unrelated `10.2.1` reads as a
+  // Setu-TS claim, which fails the gate for a version that is not ours at all.
+  // A right boundary keeps `0.2.10` from being read as `0.2.1`.
+  it('does not match a version that continues past the pattern on either side', () => {
+    const noise = 'requires foo 10.2.1, bound to 127.0.2.1\n';
+    expect(checkVersionClaims(doc('docs/guide.md', noise), '0.2.0')).toEqual([]);
+
+    const tenth = checkVersionClaims(doc('README.md', 'ships `v0.2.10`\n'), '0.2.1');
+    expect(tenth).toHaveLength(1);
+    expect(tenth[0]?.message).toContain('0.2.10');
+  });
+
+  // A version ending a sentence must still be read, which is why the right
+  // boundary is two narrow lookaheads rather than a blanket `(?![\w.])`.
+  it('reads a version that ends a sentence', () => {
+    expect(checkVersionClaims(doc('README.md', 'We ship v0.2.0.\n'), '0.2.0')).toEqual([]);
+    expect(checkVersionClaims(doc('README.md', 'We ship v0.2.0.\n'), '0.2.1')).toHaveLength(1);
+  });
+
+  it('does not mistake bind addresses or third-party versions for a claim', () => {
+    const noise = [
+      "await app.start({ hostname: '0.0.0.0' });",
+      "host: '127.0.0.1', port: 3001",
+      'pinned at `npm:drizzle-orm@0.45.2`',
+      'Content-Type: text/plain; version=0.0.4',
+      'requires Deno 2.9.5 or newer',
+    ].join('\n');
+    expect(checkVersionClaims(doc('docs/guide.md', noise), '0.2.0')).toEqual([]);
   });
 
   it('accepts the marker in yaml and in line-comment syntax', () => {

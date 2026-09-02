@@ -1443,6 +1443,50 @@ const VERSION_HISTORY_DOCS: readonly string[] = [
 ];
 
 /**
+ * Versions this project has shipped, as a regex alternation.
+ *
+ * Deliberately NOT a general semver pattern, and the reason is measured rather
+ * than cautious: across the scanned corpus `\d+\.\d+\.\d+` also matches the
+ * bind address `0.0.0.0`, the loopback `127.0.0.1`, Drizzle's `0.45.2`, and the
+ * Prometheus text format's `0.0.4` — every one a false positive on a string that
+ * is not a Setu-TS version at all.
+ *
+ * **A release that starts a new version LINE must add it here.** Miss that and
+ * both gates below match nothing, so every stale claim naming the old line goes
+ * invisible while `check:docs` stays green — the failure mode is a silent pass,
+ * not a red run. `docs/releasing.md` carries this as a release step.
+ */
+const SHIPPED_VERSION_LINES = [
+  String.raw`0\.1\.0-alpha\.\d+`, // v0.1.0-alpha.1 … v0.1.0-alpha.10
+  // v0.2.0 onward — the post-alpha 0.x line. The optional suffixes keep a
+  // FUTURE prerelease readable (`0.2.1-rc.1`): without them the pattern
+  // captures the `0.2.1` prefix, which never equals the shipping version, so
+  // every correct reference in the tree would be reported stale.
+  //
+  // Both follow SemVer exactly — dot-separated identifiers of alphanumerics
+  // AND hyphens, then optional `+` build metadata — because anything narrower
+  // truncates a version JSR accepts: `0.2.1-rc-1` would capture `0.2.1-rc`
+  // and `0.2.1+build.7` would capture `0.2.1`. Identifiers require at least
+  // one character after each dot, so a trailing sentence period is not
+  // swallowed into the version.
+  String.raw`0\.2\.\d+` +
+  String.raw`(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
+  String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`,
+].join('|');
+
+/**
+ * Token boundaries for a version match.
+ *
+ * `NOT_AFTER` rejects a match that continues a longer number to its left —
+ * without it the `0.2.1` inside an unrelated `10.2.1` or `127.0.2.1` is read as
+ * a Setu-TS claim and reported stale. `NOT_BEFORE` rejects one that continues
+ * to its right, while still allowing a version that ends a sentence, which is
+ * why it is two narrow lookaheads rather than `(?![\w.])`.
+ */
+const NOT_AFTER = String.raw`(?<![\d.])`;
+const NOT_BEFORE = String.raw`(?!\d)(?!\.\d)`;
+
+/**
  * Reports install snippets pinning a version older than the one being shipped.
  *
  * These drift silently and in the worst possible place: a package README's
@@ -1464,7 +1508,10 @@ export function checkInstallVersions(
   current: string,
 ): Finding[] {
   const findings: Finding[] = [];
-  const reference = /@setu-ts\/[a-z0-9-]+@\^?(0\.1\.0-alpha\.\d+)/g;
+  const reference = new RegExp(
+    String.raw`@setu-ts/[a-z0-9-]+@\^?(${SHIPPED_VERSION_LINES})${NOT_BEFORE}`,
+    'g',
+  );
 
   for (const [file, source] of contents) {
     const relative = file.startsWith('./') ? file.slice(2) : file;
@@ -1605,7 +1652,10 @@ export function checkVersionClaims(
   current: string,
 ): Finding[] {
   const findings: Finding[] = [];
-  const reference = /v?(0\.1\.0-alpha\.\d+)/g;
+  const reference = new RegExp(
+    `${NOT_AFTER}v?(${SHIPPED_VERSION_LINES})${NOT_BEFORE}`,
+    'g',
+  );
 
   for (const [file, source] of contents) {
     const relative = file.startsWith('./') ? file.slice(2) : file;

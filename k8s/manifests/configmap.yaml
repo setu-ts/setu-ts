@@ -9,7 +9,7 @@ metadata:
     helm.sh/chart: setu-ts-0.1.0
     app.kubernetes.io/name: setu-ts
     app.kubernetes.io/instance: setu
-    app.kubernetes.io/version: "0.1.0-alpha.10"
+    app.kubernetes.io/version: "0.2.0"
     app.kubernetes.io/managed-by: Helm
 data:
   LOG_LEVEL: "info"

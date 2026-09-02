@@ -108,9 +108,9 @@ app.router.get('/events', async (ctx) => {
 npm init -y
 
 # Add Setu-TS packages via JSR
-npm install jsr:@setu-ts/kernel@^0.1.0-alpha.10
-npm install jsr:@setu-ts/runtime@^0.1.0-alpha.10
-npm install jsr:@setu-ts/common@^0.1.0-alpha.10
+npm install jsr:@setu-ts/kernel@^0.2.0
+npm install jsr:@setu-ts/runtime@^0.2.0
+npm install jsr:@setu-ts/common@^0.2.0
 ```
 
 ### Application
@@ -147,9 +147,9 @@ console.log('Server running on http://localhost:3000');
     "tsx": "^4.20.0"
   },
   "imports": {
-    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.10",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.1.0-alpha.10",
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.10"
+    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.2.0",
+    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.2.0",
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.2.0"
   }
 }
 ```
@@ -248,9 +248,9 @@ console.log('Server running on http://localhost:3000');
     "dev": "deno run --watch --allow-net --allow-env main.ts"
   },
   "imports": {
-    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.1.0-alpha.10",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.1.0-alpha.10",
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.1.0-alpha.10"
+    "@setu-ts/kernel": "jsr:@setu-ts/kernel@^0.2.0",
+    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.2.0",
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.2.0"
   }
 }
 ```
@@ -332,9 +332,9 @@ curl -fsSL https://bun.sh/install | bash
 bun init
 
 # Add Setu-TS packages
-bun add jsr:@setu-ts/kernel@^0.1.0-alpha.10
-bun add jsr:@setu-ts/runtime@^0.1.0-alpha.10
-bun add jsr:@setu-ts/common@^0.1.0-alpha.10
+bun add jsr:@setu-ts/kernel@^0.2.0
+bun add jsr:@setu-ts/runtime@^0.2.0
+bun add jsr:@setu-ts/common@^0.2.0
 ```
 
 ### Application
@@ -420,9 +420,9 @@ wrangler login
 wrangler init my-app --type=typescript
 
 # Add Setu-TS packages
-npm add jsr:@setu-ts/kernel@^0.1.0-alpha.10
-npm add jsr:@setu-ts/runtime@^0.1.0-alpha.10
-npm add jsr:@setu-ts/common@^0.1.0-alpha.10
+npm add jsr:@setu-ts/kernel@^0.2.0
+npm add jsr:@setu-ts/runtime@^0.2.0
+npm add jsr:@setu-ts/common@^0.2.0
 ```
 
 ### Application

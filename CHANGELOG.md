@@ -4,7 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] — 2026-09-02
+
+**The version scheme drops the `alpha` label, and four NoSQL backends land.** Every release up to
+`v0.1.0-alpha.10` carried a prerelease suffix. That suffix cost real ergonomics — JSR never tags a
+prerelease as `latest`, so every install line in every document had to be pinned by hand — while
+communicating nothing that `0.x` does not already communicate on its own. Under semver, major
+version zero _is_ the "anything may change" signal, and it is the one consumers' tooling already
+understands.
+
+So the label is gone and the promise is unchanged. The public API is still not stable, breaking
+changes still ship in minor bumps, and 1.0 remains gated on Milestone 40 — benchmarks, a security
+audit, and the Node/Bun compatibility suites as release gates. What changes is that a caret range
+now works the way readers expect: `^0.2.0` resolves, absorbs patches, and stops before the next
+breaking release. See [Versioning](README.md#versioning).
+
+**This release is not a no-op.** It carries every change listed below, including breaking ones —
+read the Changed section before upgrading.
 
 ### Added
 
@@ -185,6 +201,12 @@ All notable changes to this project are documented here. The format follows
   CI instead of remaining unchecked prose.
 
 ### Changed
+
+- **The version scheme drops the prerelease suffix: `0.1.0-alpha.10` → `0.2.0`.** No code changes
+  with it. Two consequences for consumers: a bare `deno add jsr:@setu-ts/kernel` now resolves,
+  because JSR points `latest` at a normal release; and a `^0.2.0` range behaves conventionally,
+  where `^0.1.0` never matched any `0.1.0-alpha.N` at all. An application pinning an exact alpha
+  version keeps working and is unaffected until it chooses to move.
 
 - **Breaking (generated class-based modules):** `setu generate module` now emits `<name>.module.ts`;
   the managed aggregate barrel exports `MODULES` and config passes it through
@@ -3785,6 +3807,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.2.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.2.0
 [0.1.0-alpha.10]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.10
 [0.1.0-alpha.9]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.9
 [0.1.0-alpha.8]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.8

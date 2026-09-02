@@ -320,6 +320,17 @@ jobs:
       - name: Publish dry-run
         run: deno task publish:check
 
+      # `publish:check` cannot see the four things `release:verify` exists for:
+      # version agreement across all 47 manifests, cross-package specifier
+      # resolvability, that both release lists cover the whole workspace, and
+      # `@module`-first entrypoints. Until now it ran ONLY on a tag — that is,
+      # after a release PR had already been merged — so a release branch could
+      # be accepted with none of them checked. The version is read from the
+      # workspace rather than written here, so this step needs no per-release
+      # edit and cannot drift from what is being shipped.
+      - name: Release consistency
+        run: deno task release:verify "$(jq -r .version packages/kernel/deno.json)"
+
   # These two jobs consume the packages through JSR's npm compatibility layer
   # and run `compat/compat.test.mjs` (AI_GUIDELINES.md §4.5). They cannot run
   # against the working tree: cross-package specifiers are
