@@ -93,7 +93,15 @@ const EMPTY_PARAMS: Record<string, string> = Object.freeze({});
  */
 function decodeParams(raw: Record<string, string>): Record<string, string> | null {
   let params: Record<string, string> | undefined;
-  for (const key in raw) {
+  // `Object.keys`, not `for...in`: own enumerable properties only. Hono
+  // currently builds its params with a null prototype, so `for...in` happens
+  // to be equivalent — verified, not assumed — but that is an undocumented
+  // internal of a dependency, and if it ever became a `{}` literal a polluted
+  // `Object.prototype` would start injecting route params on every match. The
+  // `Object.entries` form this replaced was immune by construction; keeping
+  // that property costs nothing, since `keys` allocates one array where
+  // `entries` allocated one array plus a pair per key.
+  for (const key of Object.keys(raw)) {
     const value = raw[key]!;
     let decoded: string;
     if (value.includes('%')) {
@@ -290,25 +298,15 @@ export class Router implements IRouterApi {
       const routePath = routeInfo.path as string;
       const routeMethod = routeInfo.method as string;
       const entry = this.#entryMap.get(`${routeMethod} ${routePath}`)!;
-      // Hono's low-level `router.match()` returns raw (still percent-encoded)
-      // param values — decoding normally happens in Hono's Context layer,
-      // which this code bypasses. Decode each value to preserve pre-M22
-      // parity (the from-scratch matcher decoded params per segment). A
-      // malformed escape means this route does not match (mirroring the old
-      // matcher's `null` return); the application already rejects such paths
-      // with a 400 via `isPathDecodable` before routing, so this branch only
-      // guards direct callers of `match()`.
-      const params: Record<string, string> = {};
-      let decodable = true;
-      for (const [key, value] of Object.entries(rawParams as Record<string, string>)) {
-        try {
-          params[key] = decodeURIComponent(value);
-        } catch {
-          decodable = false;
-          break;
-        }
-      }
-      if (!decodable) {
+      // Same decoder as the single-candidate path above (M87 review). Keeping
+      // a second inline copy here let the two disagree on identity as well as
+      // duplicating the rule: this one built a fresh `{}` for a param-less
+      // route while the fast path returns the shared frozen object, so
+      // whether `params` was mutable depended on how many routes happened to
+      // match. A malformed escape means this candidate does not match,
+      // mirroring the old matcher's `null` return.
+      const params = decodeParams(rawParams as Record<string, string>);
+      if (params === null) {
         continue;
       }
       candidates.push({ routePath, params, entry });

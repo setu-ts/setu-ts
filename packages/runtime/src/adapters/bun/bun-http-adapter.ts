@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { upgradeIntentOf } from '@setu-ts/common';
+import { isPromiseLike, upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -173,8 +173,8 @@ export class BunHttpServerHandle {
       // middleware-free route is answered without yielding, and awaiting
       // would add a microtask hop per request to unwrap a value already held.
       const frameworkResponse = this.#handler(frameworkRequest);
-      return frameworkResponse instanceof Promise
-        ? frameworkResponse.then(finish)
+      return isPromiseLike(frameworkResponse)
+        ? Promise.resolve(frameworkResponse).then(finish)
         : finish(frameworkResponse);
     };
   }

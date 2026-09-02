@@ -21,7 +21,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { upgradeIntentOf } from '@setu-ts/common';
+import { isPromiseLike, upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -277,8 +277,8 @@ export class NodeHttpServerHandle {
       // callback `async` foreclosed that path on EVERY request, including the
       // ones the kernel can now answer without ever yielding.
       const frameworkResponse = this.#handler(frameworkRequest);
-      if (frameworkResponse instanceof Promise) {
-        return frameworkResponse.then((resolved) =>
+      if (isPromiseLike(frameworkResponse)) {
+        return Promise.resolve(frameworkResponse).then((resolved) =>
           this.#finishFetch(request, frameworkRequest, resolved)
         );
       }

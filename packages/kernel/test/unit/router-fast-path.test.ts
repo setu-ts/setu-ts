@@ -61,6 +61,23 @@ describe('Router | single-candidate fast path (M87)', () => {
     expect(router.match('GET', '/b')!.params).toEqual({});
   });
 
+  it('ignores inherited properties, so a polluted prototype cannot inject params', () => {
+    const router = new Router();
+    router.get('/static', { handler: () => ({ __handlerResult: true } as never) });
+
+    // Hono currently builds its params with a null prototype, so this passes
+    // either way today; it pins the property against a change in that
+    // dependency's internals, which is what the replaced `Object.entries`
+    // form guaranteed by construction.
+    const polluted = Object.prototype as unknown as Record<string, string>;
+    polluted.injectedByPollution = 'attacker';
+    try {
+      expect(router.match('GET', '/static')!.params).toEqual({});
+    } finally {
+      delete polluted.injectedByPollution;
+    }
+  });
+
   it('still tie-breaks when more than one route matches', () => {
     const router = new Router();
     router.get('/:wild', { handler: () => ({ __handlerResult: true } as never) });

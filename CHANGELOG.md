@@ -40,6 +40,16 @@ All notable changes to this project are documented here. The format follows
   `IRequestContext.params` is `Readonly` — now throws in strict mode instead of silently succeeding
   on a throwaway object.
 
+### Added
+
+- **`isPromiseLike(value)` in `@setu-ts/common`.** Reports whether a value is thenable by the
+  duck-typed test rather than `instanceof Promise`, which answers `false` for a promise from another
+  realm and for userland promise libraries — values that satisfy `RouteHandler`'s declared
+  `Promise<HandlerResult>` structurally, so TypeScript accepts them. The kernel and all four HTTP
+  adapters use it to decide whether a handler result needed awaiting; without it the synchronous
+  request path treats such a value as already-settled and sends the response while the handler is
+  still running.
+
 ### Performance
 
 The request path was rebuilt around two principles: allocate nothing a route did not ask for, and

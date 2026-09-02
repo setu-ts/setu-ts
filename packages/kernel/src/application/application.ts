@@ -9,6 +9,7 @@ import {
   CAPABILITIES,
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
+  isPromiseLike,
   respondWithError,
   serializeError,
   setUpgradeIntent,
@@ -849,7 +850,13 @@ class Application implements IKernelApplication {
       return undefined;
     }
     const result = definition.handler(ctx);
-    return result instanceof Promise ? result : undefined;
+    // Duck-typed, not `instanceof Promise`: a cross-realm or userland promise
+    // satisfies `RouteHandler`'s declared return type structurally but fails
+    // `instanceof`, and treating one as "already finished" would send the
+    // response while the handler was still running (M87 review).
+    // `Promise.resolve` returns a native promise unchanged, so the ordinary
+    // async path allocates nothing extra.
+    return isPromiseLike(result) ? Promise.resolve(result) : undefined;
   }
 
   /**

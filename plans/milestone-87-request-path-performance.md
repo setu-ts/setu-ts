@@ -168,22 +168,42 @@ later gets rationalized. The spike is reproducible from `~/setu-benchmarks/`.
 
 ## 4. Exported surface — every symbol names its consumer
 
-**No package's `src/index.ts` gains or loses a symbol.** This milestone changes the shape of two
-existing `IHttpAdapter` members and adds no public API. `extractPath` is exported from
+**One symbol is added to `@setu-ts/common`'s barrel — `isPromiseLike` — and nothing else changes.**
+An earlier revision of this plan claimed no barrel changed at all; code review falsified that (see
+§3.10) and the claim is corrected rather than left standing. This milestone otherwise changes the
+shape of two existing `IHttpAdapter` members and adds no public API. `extractPath` is exported from
 `fetch-mapping.ts` — an internal module NOT re-exported by `packages/runtime/src/index.ts` — solely
 so its branches can be unit-tested directly, per the internal-seam rule.
 
-| Exported symbol                      | Kind             | Consumer / real code path that READS it                                           |
-| ------------------------------------ | ---------------- | --------------------------------------------------------------------------------- |
-| `IHttpAdapter.setHandler` (widened)  | interface method | `Application.#runStartup` installs a handler that may now return synchronously    |
-| `IHttpAdapter.fetch` (widened)       | interface method | `Application.fetch`; the four adapters return a plain `Response` on the fast path |
-| `extractPath` (internal, non-barrel) | function         | `mapWebRequestToFrameworkRequest`; `extract-path.test.ts` asserts its branches    |
+| Exported symbol                      | Kind             | Consumer / real code path that READS it                                                             |
+| ------------------------------------ | ---------------- | --------------------------------------------------------------------------------------------------- |
+| `IHttpAdapter.setHandler` (widened)  | interface method | `Application.#runStartup` installs a handler that may now return synchronously                      |
+| `IHttpAdapter.fetch` (widened)       | interface method | `Application.fetch`; the four adapters return a plain `Response` on the fast path                   |
+| `isPromiseLike`                      | function         | `Application.#dispatchRoute` and all four HTTP adapters, to decide whether a result needed awaiting |
+| `extractPath` (internal, non-barrel) | function         | `mapWebRequestToFrameworkRequest`; `extract-path.test.ts` asserts its branches                      |
 
 ### 4.1 Options — every option names its consumer
 
 None added (checked). The milestone introduces no plugin option and no configuration flag;
 `overrideGlobalObjects` is a node-server argument, decided once in `defaultNodeServeHost`, not
 surfaced.
+
+### 3.10 "Did this need awaiting?" is duck-typed, never `instanceof`
+
+- **Decision:** `isPromiseLike` in `common` is the single test, used by the kernel's route dispatch
+  and by all four adapters. The thenable branch is normalized with `Promise.resolve`, which returns
+  a native promise unchanged.
+- **Why:** found by code review, having shipped in the first commit. `instanceof Promise` asks
+  whether a value came from THIS realm's constructor, and answers `false` for a cross-realm promise
+  and for every userland promise library — all of which satisfy `RouteHandler`'s declared
+  `Promise<HandlerResult>` structurally, so TypeScript accepts them. The synchronous path then read
+  one as "already finished" and returned the response while the handler was still running: measured,
+  a handler returning a deferred thenable answered `200` with a `null` body and no error anywhere.
+  It is a regression the milestone introduced, since `await` accepted any thenable. It lives in
+  `common` because kernel and runtime both decide this on the hot path and must not drift, and
+  because `RouteHandler`'s return type is declared there (the M47 frame-codec precedent).
+- **Test home:** `thenable-handler.test.ts` (both the truncation and the rejection path) and
+  `barrel-exports.test.ts`.
 
 ## 5. Implementation files
 
