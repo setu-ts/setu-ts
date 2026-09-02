@@ -5,6 +5,12 @@
  */
 
 import type { Buffer } from 'node:buffer';
+import type {
+  IIngressBehavior,
+  JobProcessor,
+  ProcessOptions,
+  RegistryFactory,
+} from '@setu-ts/common';
 
 /**
  * Structural client type for Redis operations used by RedisQueue.
@@ -217,7 +223,84 @@ export interface QueuePluginOptions {
   deadLetterTtlMs?: number;
   /** SQS-specific options (required when adapter is 'sqs'). */
   sqs?: import('../adapters/sqs-queue.ts').SqsQueueOptions;
+  /**
+   * Processors registered declaratively, as an alternative to calling
+   * `queue.process(name, processor, options)` imperatively after `start()`.
+   * Each entry — instance or `RegistryFactory` — produces one `process()`
+   * call, so a processor can be declared where the plugin is composed instead
+   * of after the application has started.
+   *
+   * Instance entries register during the plugin's `register()` phase,
+   * identical to the imperative timing. Factory entries are resolved in the
+   * `onInit` phase — the first at which the registry holds every capability —
+   * so a factory can build its processor from a resolved capability. A
+   * factory that throws rejects `start()` with an error naming
+   * `QueuePlugin({ processors })` and the entry's index in THIS declared
+   * array, not its position among the factories.
+   *
+   * Registering two entries under one job name keeps the service's existing
+   * last-wins behaviour: exactly what two imperative `process()` calls with
+   * the same name do.
+   *
+   * @since 0.3.0
+   */
+  readonly processors?: readonly QueueProcessorEntry[];
+  /**
+   * Ingress behaviours wrapped around every processor — the queue arm of the
+   * transport-neutral behaviour chain shared with the websocket, scheduler,
+   * and messaging plugins (`IIngressBehavior` in `@setu-ts/common`).
+   *
+   * Each behaviour observes an `IngressContext` carrying `kind: 'queue'`, the
+   * job name as `name`, the delivered `IJob` as `payload`, and `attempt`
+   * equal to `IJob.attempts`, and runs in declared order ahead of the
+   * processor. A behaviour that returns without calling `next()`
+   * short-circuits: the processor never sees the job and the job is
+   * acknowledged. A behaviour that throws follows the processor's own failure
+   * path — requeue with backoff, and `ProcessOptions.onFailed` plus the
+   * dead-letter on the final attempt. Every processor registration is
+   * wrapped, imperative `process()` calls included, so a mixed application
+   * cannot leave a handler unchained.
+   *
+   * With no behaviours configured, dispatch is byte-identical to the
+   * pre-chain behaviour: the processor is handed the job directly, with no
+   * chain allocated.
+   *
+   * Instance entries are handed to the service at `register()`; factory
+   * entries are resolved in the `onInit` phase and a throwing factory rejects
+   * `start()` naming `QueuePlugin({ behaviors })` and the entry's index in
+   * THIS declared array.
+   *
+   * @since 0.3.0
+   */
+  readonly behaviors?: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[];
 }
+
+/**
+ * The declarative form of one `IQueue.process()` call — the entry an
+ * application writes instead of calling `process()` imperatively after
+ * `start()`.
+ *
+ * @since 0.3.0
+ */
+export interface QueueProcessorDefinition {
+  /** The job name this processor handles (the `process()` name argument). */
+  readonly name: string;
+  /** Invoked per delivered job, exactly as the imperative `process()` accepts. */
+  readonly processor: JobProcessor;
+  /** Per-name configuration, exactly as the imperative `process()` accepts. */
+  readonly options?: ProcessOptions;
+}
+
+/**
+ * One entry of {@linkcode QueuePluginOptions.processors}: a processor
+ * definition, or a {@linkcode RegistryFactory} producing one when the
+ * processor needs a resolved capability.
+ *
+ * @since 0.3.0
+ */
+export type QueueProcessorEntry =
+  | QueueProcessorDefinition
+  | RegistryFactory<QueueProcessorDefinition>;
 
 /**
  * Options for configuring RedisQueue.

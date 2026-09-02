@@ -22,6 +22,8 @@ export { QueuePlugin } from './plugin/queue-plugin.ts';
 export type { QueuePluginOptions } from './interfaces/index.ts';
 export type {
   QueueAdapterType,
+  QueueProcessorDefinition,
+  QueueProcessorEntry,
   RabbitMqQueueOptions,
   RedisQueueOptions,
 } from './interfaces/index.ts';

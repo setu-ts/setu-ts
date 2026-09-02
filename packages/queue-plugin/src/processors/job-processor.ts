@@ -6,7 +6,8 @@
  * @module
  */
 
-import type { IJob } from '@setu-ts/common';
+import type { IIngressBehavior, IJob, IngressContext } from '@setu-ts/common';
+import { composeBehaviorChain } from '@setu-ts/common';
 import type { StoredJob } from '../interfaces/index.ts';
 import { computeBackoffMs } from '../retry/retry-strategy.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
@@ -145,6 +146,51 @@ export async function runJob<T>(
   // Success: acknowledge (outside the try/catch so ack errors don't trigger requeue)
   notifyOutcome(hooks, storedJob.name, 'completed', report);
   await adapter.ack(storedJob.name, storedJob.id, claimToken);
+}
+
+/**
+ * Wraps one processor in the queue arm of the transport-neutral ingress
+ * behaviour chain.
+ *
+ * The returned processor is what the worker dispatches, so the chain sits
+ * exactly around the `await processor(job)` dispatch in {@linkcode runJob}:
+ * the existing retry/dead-letter machinery needs no knowledge of it. The
+ * envelope is built PER JOB and is immutable — under `concurrency` above 1
+ * every in-flight job sees its own `IngressContext` instance — carrying
+ * `kind: 'queue'`, the job name, the delivered `IJob` as `payload`, and
+ * `attempt` equal to `IJob.attempts`.
+ *
+ * With an EMPTY behaviour list the original processor is invoked directly
+ * with no chain allocated: a synchronous throw propagates synchronously and a
+ * returned promise is handed back as-is, so the zero-configuration dispatch
+ * is byte-identical to the unwrapped call.
+ *
+ * @typeParam T - The job payload type
+ * @param processor - The processor to wrap
+ * @param behaviors - The behaviours to run ahead of the processor, in
+ * declared order. Read LIVE on every delivery: entries resolved after the
+ * processor was registered (the plugin's `onInit` factory arm) are picked up
+ * without re-registering.
+ * @returns A processor with the same signature running the chain first
+ * @since 0.3.0
+ */
+export function withIngressBehaviors<T>(
+  processor: (job: IJob<T>) => void | Promise<void>,
+  behaviors: readonly IIngressBehavior[],
+): (job: IJob<T>) => void | Promise<void> {
+  return (job: IJob<T>): void | Promise<void> => {
+    if (behaviors.length === 0) {
+      // Zero-configuration dispatch — byte-identical to the pre-chain
+      // behaviour: a direct invocation, no envelope, no promise mediation.
+      return processor(job);
+    }
+
+    return composeBehaviorChain<IngressContext<IJob<T>>, void>(
+      { kind: 'queue', name: job.name, payload: job, attempt: job.attempts },
+      behaviors,
+      () => Promise.resolve(processor(job)),
+    );
+  };
 }
 
 /**

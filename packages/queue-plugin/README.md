@@ -276,6 +276,7 @@ the adapter has no liveness check.
 | `QueueDepths`                  | interface |
 | `QueueLogger`                  | interface |
 | `QueuePluginOptions`           | interface |
+| `QueueProcessorDefinition`     | interface |
 | `RabbitMqQueueOptions`         | interface |
 | `RecurringOptions`             | interface |
 | `RedisQueueOptions`            | interface |
@@ -286,6 +287,7 @@ the adapter has no liveness check.
 | `SqsSdkModule`                 | interface |
 | `JobProcessor`                 | type      |
 | `QueueAdapterType`             | type      |
+| `QueueProcessorEntry`          | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

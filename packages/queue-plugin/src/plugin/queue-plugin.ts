@@ -8,14 +8,25 @@
 
 import type {
   HealthIndicatorFn,
+  IIngressBehavior,
   ILogger,
   IMetricsService,
   IPlugin,
   IPluginContext,
   IQueue,
+  IRuntimeServices,
+  JobProcessor,
+  ProcessOptions,
+  RegistryFactory,
 } from '@setu-ts/common';
-import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
-import type { QueueAdapterType, QueuePluginOptions } from '../interfaces/index.ts';
+import { CAPABILITIES, createCapabilityToken, resolveRegistryEntry } from '@setu-ts/common';
+import type {
+  QueueAdapterType,
+  QueuePluginOptions,
+  QueueProcessorDefinition,
+  QueueProcessorEntry,
+} from '../interfaces/index.ts';
+import type { QueueAdapter } from '../adapters/queue-adapter.ts';
 import { MemoryQueue } from '../adapters/memory-queue.ts';
 import { RedisQueue, validateClient as isRedisQueueClient } from '../adapters/redis-queue.ts';
 import {
@@ -24,6 +35,7 @@ import {
 } from '../adapters/rabbitmq-queue.ts';
 import { SqsQueue } from '../adapters/sqs-queue.ts';
 import { QueueService } from '../services/queue-service.ts';
+import { withIngressBehaviors } from '../processors/job-processor.ts';
 import { QueueCollector } from '../metrics/queue-collector.ts';
 import type { QueueLogger } from '../services/queue-service.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -51,6 +63,39 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
   const name = options?.name;
   const defaultMaxAttempts = options?.defaultMaxAttempts ?? 3;
   const pollIntervalMs = options?.pollIntervalMs ?? 1000;
+
+  // The registration arms are split ONCE, here at plugin construction, so
+  // `register` and the `onInit` hook each read a single list (the M70d arm
+  // pattern). Instance entries keep their pre-arm `register()` timing;
+  // factories are resolved in `onInit`, the first phase at which the registry
+  // holds every capability. Each factory carries the index it holds in the
+  // DECLARED array, not its position among the factories: the index is the
+  // only thing the error label has to point a developer at the failing entry,
+  // and filtering first made it name a different — working — entry whenever
+  // the two arms were mixed.
+  const processors: readonly QueueProcessorEntry[] = options?.processors ?? [];
+  const behaviors: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[] =
+    options?.behaviors ?? [];
+  const processorInstances = processors.filter((entry): entry is QueueProcessorDefinition =>
+    typeof entry !== 'function'
+  );
+  const processorFactories = processors
+    .map((entry, index) => ({ entry, index }))
+    .filter((slot): slot is { entry: RegistryFactory<QueueProcessorDefinition>; index: number } =>
+      typeof slot.entry === 'function'
+    );
+  const behaviorInstances = behaviors.filter((entry): entry is IIngressBehavior =>
+    typeof entry !== 'function'
+  );
+  const behaviorFactories = behaviors
+    .map((entry, index) => ({ entry, index }))
+    .filter((slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
+      typeof slot.entry === 'function'
+    );
+  // The LIVE behaviour list the chain reads on every delivery: instances now,
+  // factory-resolved entries appended in `onInit`, before the app serves.
+  const behaviorChain: IIngressBehavior[] = [...behaviorInstances];
+  const declaredBehaviors = behaviors.length > 0;
 
   // Derive plugin name and token using capability token grammar
   const pluginName = name ? `queue-plugin.${name}` : 'queue-plugin';
@@ -130,18 +175,32 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
           },
         )
         : undefined;
-      const service = new QueueService(adapter, runtime, {
+      const serviceOptions = {
         defaultMaxAttempts,
         pollIntervalMs,
         ...(logger !== undefined && { logger }),
         ...(collector === undefined ? {} : { collector }),
-      });
+      };
+      // With no behaviours declared the service is constructed exactly as
+      // before the arms existed — no chain sits in front of any processor
+      // (M86 §3.9). With behaviours declared, the subclass routes every
+      // registration — declarative arm entries AND imperative `process()`
+      // calls — through the ingress behaviour chain.
+      const service = declaredBehaviors
+        ? new BehaviorChainQueueService(adapter, runtime, serviceOptions, behaviorChain)
+        : new QueueService(adapter, runtime, serviceOptions);
 
       // Connect the service
       await service.connect();
 
       // Register the service
       ctx.services.register<IQueue>(token, service);
+
+      // Declared processor INSTANCES register now, exactly as an imperative
+      // `process()` call made before this arm existed.
+      for (const definition of processorInstances) {
+        service.process(definition.name, definition.processor, definition.options);
+      }
 
       // Register health indicator using the same token
       const healthIndicator: HealthIndicatorFn = service.createHealthIndicator();
@@ -151,8 +210,81 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       ctx.lifecycle.onClose(async () => {
         await service.disconnect();
       });
+
+      // Factory entries resolve at `onInit` — the first phase at which the
+      // registry holds every capability, and still before the application
+      // serves. A throwing factory rejects `start()` naming the option and the
+      // entry's DECLARED index. The hook is registered only when a factory is
+      // configured: with instances alone there is nothing to resolve, so a
+      // zero-factory configuration gains no lifecycle hook at all.
+      if (processorFactories.length > 0 || behaviorFactories.length > 0) {
+        ctx.lifecycle.onInit(() => {
+          for (const slot of processorFactories) {
+            const definition = resolveRegistryEntry(
+              slot.entry,
+              ctx.services,
+              `QueuePlugin({ processors })[${slot.index}]`,
+            );
+            service.process(definition.name, definition.processor, definition.options);
+          }
+
+          behaviorChain.push(
+            ...behaviorFactories.map((slot) =>
+              resolveRegistryEntry(
+                slot.entry,
+                ctx.services,
+                `QueuePlugin({ behaviors })[${slot.index}]`,
+              )
+            ),
+          );
+        });
+      }
     },
   };
+}
+
+/**
+ * Internal {@linkcode QueueService} variant used when the plugin is
+ * configured with ingress behaviours: it routes EVERY processor registration
+ * — declarative arm entries and imperative `process()` calls alike — through
+ * the queue behaviour chain, so a mixed application cannot leave a handler
+ * unchained. The wrapper reads the live behaviour list at dispatch, so
+ * factory-resolved behaviours appended in `onInit` also wrap registrations
+ * made earlier in `register()`. Not barrel-exported.
+ *
+ * With no behaviours declared the plugin constructs the plain
+ * {@linkcode QueueService}, keeping the zero-configuration dispatch
+ * byte-identical.
+ */
+class BehaviorChainQueueService extends QueueService {
+  readonly #behaviors: readonly IIngressBehavior[];
+
+  constructor(
+    adapter: QueueAdapter,
+    runtime: IRuntimeServices,
+    options: {
+      defaultMaxAttempts?: number;
+      pollIntervalMs?: number;
+      logger?: QueueLogger | undefined;
+      collector?: QueueCollector | undefined;
+    },
+    behaviors: readonly IIngressBehavior[],
+  ) {
+    super(adapter, runtime, options);
+    this.#behaviors = behaviors;
+  }
+
+  /**
+   * Registers the processor wrapped in the ingress behaviour chain.
+   *
+   * @typeParam T - The job payload type
+   * @param name - Job name
+   * @param processor - The processor being registered
+   * @param options - Concurrency and failure callback, passed through
+   */
+  override process<T>(name: string, processor: JobProcessor<T>, options?: ProcessOptions): void {
+    super.process(name, withIngressBehaviors(processor, this.#behaviors), options);
+  }
 }
 
 /**
