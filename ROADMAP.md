@@ -8415,7 +8415,136 @@ exclusion for that RPC prefix only. Its browser form routes remain protected. Th
 `CsrfFormOptions.exclude` supports the same explicit exact-path/regular-expression boundary for
 another separately-mounted non-browser protocol surface. Broker transports remain refused: they
 rewrite starter-owned messaging and queue options rather than append a direct plugin, so accepting
-them would still silently select the wrong transport — complete (PR pending).
+them would still silently select the wrong transport — complete (PR #215).
+
+---
+
+## Milestone 86: Non-HTTP Ingress — Registration Sites and a Pipeline
+
+**Objective:** Give the four ingress paths that do not ride HTTP — WebSocket routes, queue
+processors, scheduler jobs and broker subscriptions — the two things HTTP ingress has had since M2:
+a declarative registration site, and a per-item pipeline that cross-cutting concerns attach to.
+Until both exist, a developer adding one unit of non-HTTP work has to write an `IPlugin`, and the
+framework's own tenant, auth and tracing middleware have nowhere to run.
+
+**This is one line, not four defects, and the sweep is what shows it.** Every `*-plugin` package's
+options interface was read, alongside the service surface each exposes for supplying a handler:
+
+| Ingress    | Registration site                   | Per-item pipeline                      | Typed context          |
+| ---------- | ----------------------------------- | -------------------------------------- | ---------------------- |
+| HTTP route | router + `@Controller`              | route middleware, guards               | `IRequestContext`      |
+| SSE        | rides an HTTP route — `open(ctx)`   | inherited                              | inherited              |
+| GraphQL    | `resolvers`                         | global only                            | context object         |
+| gRPC       | `services`                          | `interceptors` (global)                | typed                  |
+| CQRS       | `commandHandlers` / `queryHandlers` | **`behaviors`**                        | typed request          |
+| Events     | `handlers`                          | none — global `errorHandler`           | typed event            |
+| Health     | `indicators`                        | n/a                                    | n/a                    |
+| WebSocket  | **none**                            | upgrade: global only; frames: **none** | `Map<string, unknown>` |
+| Queue      | **none**                            | none — `onFailed` callback             | partial                |
+| Scheduler  | **none**                            | **none**                               | n/a                    |
+| Messaging  | **none**                            | **none**                               | `MessageMetadata`      |
+
+`SchedulerPluginOptions` is `timezone` + `distributedLock`
+(`scheduler-plugin/src/interfaces/index.ts:41`). The shared arm of `MessagingPluginOptions` is
+`name`/`serializer`/`tracing` plus broker configuration
+(`messaging-plugin/src/interfaces/index.ts:182`). `QueuePluginOptions` is adapter configuration
+throughout. `WebSocketRouteOptions` is `protocols` + `heartbeat` and nothing else
+(`common/src/services/websocket.ts:331`). None of the four has anywhere to put a handler.
+
+**The X13 smoke exercise is what this costs today.** Its `collaboration.plugin.ts` adds one
+WebSocket route and is forced into four things, none of which is about coding style. It declares an
+`IPlugin` — name, version, dependencies, `register` — which is framework-authoring shape for
+application code. It writes `'/ws/board'` twice: once in a hand-rolled `===` path match and once in
+the actual `sockets.route(...)` call. It installs that match as a **global** middleware, running on
+every request in the application, because `route()` accepts no middleware and there is no other way
+to guard one socket. And it re-narrows the room out of `connection.data` on every frame, dropping
+the message silently when the narrowing fails — a data-loss path the API pushed it into, since
+`connection.data` is `Map<string, unknown>` (`websocket.ts:174`) and the contract's own example
+resolves it with `as string` (`websocket.ts:371`), the cast AI_GUIDELINES bans in `src`.
+
+**SSE is the control, and it proves the framework's answer already exists.** `ISseService.open(ctx)`
+takes an `IRequestContext` (`common/src/services/sse.ts:152`), so an SSE stream is an ordinary `GET`
+that inherits routing, route middleware, guards and `@Controller` for free — which is why M84 could
+move SSE routes into `src/controllers/` and could not move WebSocket routes anywhere.
+
+**WebSocket has two phases and they are not equally served — conflating them is the mistake to
+avoid.** Since M70a the upgrade REQUEST does traverse the global middleware pipeline: `#tryUpgrade`
+runs "after the middleware pipeline and before route matching"
+(`kernel/src/application/application.ts:726`), which is the only reason X13's global guard works at
+all. What the upgrade never reaches is ROUTE-level middleware, because `ws.route()` registers no
+kernel route entry and `WebSocketRouteOptions` accepts none — so the only guard available is
+application-wide, and X13 hand-matched the path to narrow it back down. Individual FRAMES reach
+nothing whatsoever: `onMessage` is invoked directly by the service with no pipeline of any kind. The
+other three ingresses have neither phase. This milestone therefore owes WebSocket **two** answers —
+route-scoped middleware for the upgrade, and a frame-level behaviour chain — and must not conflate
+them into one "pipeline".
+
+**It is not only ergonomics: none of the four carries a tenant.**
+`grep -rl tenant packages/{queue,scheduler,messaging,websocket,events}-plugin/src` returns **zero
+files**. M70b closed tenant isolation for cache, session, database and feature flags by resolving
+the tenant in `tenantMiddleware` at priority 40 — on the HTTP path. A queue job, a cron tick, a
+broker message and a socket frame all arrive with no tenant context at all; the developer threads it
+through the payload by hand and nothing checks it. That is the same class of hole M70b treated as
+security work, on four ingresses that have no pipeline to hang the middleware on. The security half
+of this milestone is making that middleware expressible; actually wiring tenancy through it is
+M70b's successor, not this.
+
+**The registration arm is a solved problem here.** M70d shipped `RegistryFactory<T>`
+(`common/src/registry.ts:65`) and one `resolveRegistryEntry` (`:189`), and three plugins already
+resolve instance-or-factory lists at `onInit` — the first phase at which the registry holds every
+capability. This adds four more consumers of that mechanism and invents nothing.
+
+**The pipeline is also a solved problem, and reusing it is the decision this milestone turns on.**
+`IPipelineBehavior` (`common/src/services/cqrs.ts:86`) is `handle(request, next)` — exactly "a unit
+of work arrives, cross-cutting concerns wrap the handler" — and it is shipped, tested and consumed
+by `CqrsPluginOptions.behaviors`. Four bespoke middleware types would mean four ordering rules, four
+error semantics and four places for a tenant or a trace to be forgotten, which is how the ingress
+paths diverged in the first place. **The open question the plan must answer, not assume:**
+`IPipelineBehavior` is constrained to `CqrsRequest` today, so it is either widened or promoted to a
+transport-neutral sibling in `common`. Both are `common` changes; the plan picks one explicitly and
+records the blast radius, per the committed-doc-conflict rule.
+
+**Decorators are out of scope, and the ordering is the whole point.** A `@Gateway`/`@Processor`/
+`@Cron`/`@Subscribe` surface is the natural follow-on and is deliberately deferred until the arms
+and the pipeline exist. Shipping `@UseGuards` on a gateway before `route()` accepts middleware gives
+the guard nothing to attach to, so it would silently do nothing — which is M70n's `@ValidateBody`
+(decorated routes, validated nothing, for several releases) and M58's `g controller` (answered 500
+on every request for five releases). Both shipped green because a test asserted the decorator was
+_present_. The decorator is sugar over a seam; this milestone builds the seam.
+
+Raised while answering whether the plugins need a class-based alternative to their functional
+surface. They do not: the HTTP-only decorator surface is a symptom of this gap rather than a
+paradigm choice, because there is nothing off the HTTP path to attach a decorator to.
+
+- **In scope:** a registration arm on each of the four — `WebSocketPluginOptions.routes`,
+  `QueuePluginOptions.processors`, `SchedulerPluginOptions.jobs`,
+  `MessagingPluginOptions.subscriptions` — each accepting `T | RegistryFactory<T>` and resolved at
+  `onInit`, following M70d exactly. One pipeline contract shared by all four, either by widening
+  `IPipelineBehavior` or by promoting a transport-neutral sibling beside it. `WebSocketRouteOptions`
+  gains route-scoped middleware for the UPGRADE, which is what removes X13's duplicated path and its
+  application-wide guard, and the frame phase gets the behaviour chain — two seams, per the phase
+  distinction above. Typed connection data on `IWebSocketConnection`, which is **additive**:
+  `IWebSocketConnection.data` is released API carrying `Map<string, unknown>`, so §9.4 forbids
+  changing its shape under existing callers — the plan adds a typed accessor beside it (a `TData`
+  type parameter defaulting to today's shape is the candidate) and deprecates the untyped read per
+  §9.2 rather than replacing it. Every registration arm is additive and optional, so existing
+  imperative call sites keep working unchanged; that promise covers the whole milestone, including
+  the connection-data work.
+- **Not in scope:** decorators of any kind, for the reason above. Threading tenancy, auth or tracing
+  through the new pipeline — this milestone makes them expressible and a successor wires them, so
+  that the seam is not designed and consumed in one pass. Any change to a wire protocol. Any change
+  to worker-pool, which addresses handlers by module specifier rather than closure by design.
+- **Verification bar:** X13's `collaboration.plugin.ts` is the benchmark and must be rewritten
+  against the new surface as a committed example, losing the `IPlugin` wrapper, the duplicated path
+  string, the global middleware and the per-frame narrowing. A guard registered on ONE WebSocket
+  route must be proven not to run for a second route in the same application — the negative control
+  the current global-middleware workaround cannot satisfy. Each of the four ingresses must
+  demonstrate one behavior running for a handler registered through the arm and refused before it by
+  a pipeline entry, driven through a real kernel application rather than a hand-built plugin
+  context.
+- **Packages:** `common`, `websocket-plugin`, `queue-plugin`, `scheduler-plugin`,
+  `messaging-plugin`. The plan may split into sub-milestones, but the pipeline contract lands first
+  and once — four plugins each inventing their own is the failure this milestone exists to prevent.
 
 ---
 
@@ -8541,4 +8670,5 @@ them would still silently select the wrong transport — complete (PR pending).
 | 82        | ✅     | cloud bigtable backend (PR #222)                    |
 | 83        | ✅     | module declarations + functional example            |
 | 84        | ✅     | realtime client consumption (sdk + cli)             |
-| 85        | ✅     | cli (workspace full-stack gRPC, PR pending)         |
+| 85        | ✅     | cli (workspace full-stack gRPC, PR #215)            |
+| 86        | ⬜     | non-http ingress registration + pipeline            |
