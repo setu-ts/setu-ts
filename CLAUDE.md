@@ -3964,8 +3964,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (the `CosmosTransaction` precedent; it reaches an application only as `IAdapterTransaction`) and
   `BigtableSdkModule` — because `deno doc --lint` showed both leaking a private type, and neither
   had a public consumer) — complete (PR #222)
-- **Next milestone** — none assigned; the three backends M78 deferred (M80 DynamoDB, M81 Cosmos DB,
-  M82 Cloud Bigtable) are all complete.
+- **Next milestone** — **M86** (non-HTTP ingress: registration sites and a pipeline for WebSocket
+  routes, queue processors, scheduler jobs and broker subscriptions). The three backends M78
+  deferred (M80 DynamoDB, M81 Cosmos DB, M82 Cloud Bigtable) are all complete.
 
 ## Verification (run before declaring any work done)
 
