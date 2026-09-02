@@ -238,20 +238,21 @@ describe('WebSocketPlugin({ behaviors }) registration arms', () => {
     }
     decision.sink.onOpen(createFakeTransport());
     decision.sink.onMessage('frame');
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(envelopes).toEqual([{ kind: 'websocket', name: '/ws/echo', payload: 'frame' }]);
   });
 
-  it('appends factory-resolved behaviors to the chain in onInit', async () => {
-    const instances: string[] = [];
-    const factories: string[] = [];
+  it('preserves declared behavior order when a factory precedes an instance', async () => {
+    const order: string[] = [];
     const { harness, service, router } = await boot({
       behaviors: [
-        recorder(instances, 'instance'),
         (services): IIngressBehavior => {
           void services;
-          return recorder(factories, 'factory');
+          return recorder(order, 'factory');
         },
+        recorder(order, 'instance'),
       ],
     });
     service.route('/ws/echo', { onMessage: () => {} });
@@ -263,9 +264,10 @@ describe('WebSocketPlugin({ behaviors }) registration arms', () => {
     }
     decision.sink.onOpen(createFakeTransport());
     decision.sink.onMessage('frame');
+    await Promise.resolve();
+    await Promise.resolve();
 
-    expect(instances).toEqual(['instance']);
-    expect(factories).toEqual(['factory']);
+    expect(order).toEqual(['factory', 'instance']);
   });
 
   it('registers routes from factories and behaviors from factories in one onInit pass', async () => {
@@ -287,6 +289,8 @@ describe('WebSocketPlugin({ behaviors }) registration arms', () => {
     }
     decision.sink.onOpen(createFakeTransport());
     decision.sink.onMessage('frame');
+    await Promise.resolve();
+    await Promise.resolve();
     expect(log).toEqual(['factory-behavior']);
   });
 

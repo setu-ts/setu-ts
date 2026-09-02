@@ -126,9 +126,9 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
 
       // `ctx.logger` is undefined when no logger capability is registered;
       // `optionalDependencies` above is what orders the logger plugin ahead of
-      // this one so it is resolvable here. Behavior INSTANCES are handed over
-      // here — their `register()` timing — while factories are appended in
-      // `onInit` below, before the application serves.
+      // this one so it is resolvable here. Behavior instances are handed over
+      // here; when factories exist, `onInit` replaces this list with the full
+      // declared sequence before the application serves.
       const service = new WebSocketService(
         ctx.runtime,
         resolved,
@@ -196,13 +196,15 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
             service.route(definition.path, definition.handlers, definition.options);
           }
 
-          service.registerIngressBehaviors(
-            behaviorFactories.map((slot) =>
-              resolveRegistryEntry(
-                slot.entry,
-                ctx.services,
-                `WebSocketPlugin({ behaviors })[${slot.index}]`,
-              )
+          service.replaceIngressBehaviors(
+            behaviors.map((entry, index) =>
+              typeof entry === 'function'
+                ? resolveRegistryEntry(
+                  entry,
+                  ctx.services,
+                  `WebSocketPlugin({ behaviors })[${index}]`,
+                )
+                : entry
             ),
           );
         });

@@ -30,10 +30,10 @@ import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
  * Wraps a broker so every subscription handler runs the messaging arm of the
  * transport-neutral ingress behaviour chain. @internal
  *
- * The behaviour list is read LIVE on every delivery — the plugin's
- * `onInit` hook appends factory-resolved behaviours to the SAME array after
- * subscriptions were registered, so those wrap handlers registered earlier
- * without re-subscribing.
+ * The behaviour list is read LIVE on every delivery — when factories are
+ * configured, the plugin's `onInit` hook replaces the SAME array with the
+ * full resolved sequence after subscriptions were registered, so those wrap
+ * handlers registered earlier without re-subscribing.
  *
  * `respond` (brokered request-reply) is forwarded UNWRAPPED: the RPC
  * responder is a fifth developer-supplied handler that RETURNS a value where

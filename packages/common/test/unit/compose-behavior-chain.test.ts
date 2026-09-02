@@ -104,6 +104,16 @@ describe('composeBehaviorChain (M86 §3.4)', () => {
     expect(result).toBe('handled');
   });
 
+  it('propagates a synchronous terminal throw as a rejection with no behaviours', async () => {
+    const failure = new Error('terminal failed synchronously');
+
+    await expect(
+      composeBehaviorChain<IngressContext, void>(queueEnvelope, [], () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+  });
+
   it('propagates a behaviour rejection to the caller', async () => {
     const failure = new Error('tenant guard failed');
     const behaviors: BehaviorLike<IngressContext, void>[] = [
@@ -151,6 +161,26 @@ describe('composeBehaviorChain (M86 §3.4)', () => {
 
     expect(caught).toBe(failure);
     expect(terminalCalls).toBe(0);
+  });
+
+  it('lets an outer behaviour recover a synchronous downstream throw through next().catch()', async () => {
+    const failure = new Error('downstream synchronous failure');
+    const result = await composeBehaviorChain<IngressContext, string>(
+      queueEnvelope,
+      [
+        {
+          handle: (_ctx, next) => next().catch(() => 'recovered'),
+        },
+        {
+          handle: () => {
+            throw failure;
+          },
+        },
+      ],
+      () => Promise.resolve('terminal'),
+    );
+
+    expect(result).toBe('recovered');
   });
 
   it('type-checks against BehaviorLike<IngressContext, void> (the ingress shape)', async () => {

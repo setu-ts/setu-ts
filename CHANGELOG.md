@@ -270,6 +270,12 @@ _implements_ `IDataSource` or declares a custom repository key type does.
 
 ### Fixed
 
+- **Ingress behaviour promise and ordering guarantees.** `next()` now always returns a promise,
+  including when a downstream behaviour throws synchronously, so an outer behaviour can recover with
+  `next().catch(...)`. Queue, scheduler, messaging, and WebSocket plugins also now run mixed
+  instance and factory entries in the exact configured order. A failed factory resolution closes
+  resources registered before startup failed.
+
 - **The Prisma test fixture evaluated `NOT` as its inverse.** `matchesPrismaWhere` dispatched `AND`
   and `OR` but not `NOT`, so `{ NOT: { status: 'archived' } }` fell through to the compound-key
   branch and MATCHED the rows it was asked to exclude — on `findMany`, `update`, `delete` and

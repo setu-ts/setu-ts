@@ -107,10 +107,11 @@ export interface WebSocketPluginOptions {
    * handler is. Behaviours are plugin-level by design; there is no
    * route-level `behaviors` arm (guards are the per-route mechanism).
    *
-   * Configuring at least one behaviour makes frame dispatch promise-mediated
-   * — the wrapped handler completes after a microtask rather than
-   * synchronously. With no behaviours configured, dispatch is byte-identical
-   * to the pre-chain behaviour: a direct, synchronous invoke.
+   * Configuring a behaviour makes the dispatch result promise-mediated while
+   * preserving immediate execution for entirely synchronous behaviours. A
+   * behaviour that defers `next()` delays the wrapped handler. With no
+   * behaviours configured, dispatch is byte-identical to the pre-chain
+   * behaviour: a direct, synchronous invoke.
    *
    * Instance entries are handed to the service at `register()`; factory
    * entries are resolved in the `onInit` phase and a throwing factory rejects

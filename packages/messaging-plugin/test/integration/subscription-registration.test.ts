@@ -335,13 +335,13 @@ describe('MessagingPlugin({ behaviors }) registration arms', () => {
     expect(log).toEqual(['first', 'second', 'handler']);
   });
 
-  it('appends factory-resolved behaviors to the chain in onInit, after the instances', async () => {
+  it('preserves declared behavior order when a factory precedes an instance', async () => {
     const log: string[] = [];
     const { harness, broker } = await boot({
       broker: 'memory',
       behaviors: [
-        recorder(log, 'instance'),
         (_services): IIngressBehavior => recorder(log, 'factory'),
+        recorder(log, 'instance'),
       ],
       subscriptions: [
         {
@@ -356,7 +356,7 @@ describe('MessagingPlugin({ behaviors }) registration arms', () => {
 
     await broker.publish('orders', { n: 1 });
 
-    expect(log).toEqual(['instance', 'factory', 'handler']);
+    expect(log).toEqual(['factory', 'instance', 'handler']);
   });
 
   it('a behaviour short-circuit prevents the arm-registered handler from running', async () => {

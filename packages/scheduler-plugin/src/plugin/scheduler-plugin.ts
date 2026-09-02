@@ -83,8 +83,9 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
     .filter((slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
       typeof slot.entry === 'function'
     );
-  // The LIVE behaviour list the chain reads on every fire: instances now,
-  // factory-resolved entries appended in `onInit`, before the app serves.
+  // The LIVE behaviour list the chain reads on every fire. Instances are
+  // available at registration; when factories exist, `onInit` replaces it
+  // with the complete declared sequence before the app serves.
   const behaviorChain: IIngressBehavior[] = [...behaviorInstances];
   const declaredBehaviors = behaviors.length > 0;
 
@@ -180,13 +181,17 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
             await scheduleDefinition(service, definition);
           }
 
-          behaviorChain.push(
-            ...behaviorFactories.map((slot) =>
-              resolveRegistryEntry(
-                slot.entry,
-                ctx.services,
-                `SchedulerPlugin({ behaviors })[${slot.index}]`,
-              )
+          behaviorChain.splice(
+            0,
+            behaviorChain.length,
+            ...behaviors.map((entry, index) =>
+              typeof entry === 'function'
+                ? resolveRegistryEntry(
+                  entry,
+                  ctx.services,
+                  `SchedulerPlugin({ behaviors })[${index}]`,
+                )
+                : entry
             ),
           );
         });
@@ -201,8 +206,8 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
  * declarative arm entries and imperative `cron()`/`every()`/`delay()` calls
  * alike — through the scheduler behaviour chain, so a mixed application
  * cannot leave a handler unchained. The wrapper reads the live behaviour list
- * at FIRE time, so factory-resolved behaviours appended in `onInit` also wrap
- * registrations made earlier in `register()`. Not barrel-exported.
+ * at FIRE time, so the full factory-resolved sequence installed in `onInit`
+ * also wraps registrations made earlier in `register()`. Not barrel-exported.
  *
  * The chain the wrapper composes runs INSIDE the distributed lock: the
  * registry stores the wrapped handler, and the executor reaches it only after

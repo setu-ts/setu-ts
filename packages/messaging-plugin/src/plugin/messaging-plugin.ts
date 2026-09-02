@@ -142,8 +142,9 @@ export function MessagingPlugin(
       (slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
         typeof slot.entry === 'function',
     );
-  // The LIVE behaviour list the chain reads on every delivery: instances now,
-  // factory-resolved entries appended in `onInit`, before the app serves.
+  // The LIVE behaviour list the chain reads on every delivery. Instances are
+  // available at registration; when factories exist, `onInit` replaces it
+  // with the complete declared sequence before the app serves.
   const behaviorChain: IIngressBehavior[] = [...behaviorInstances];
   const declaredBehaviors = behaviors.length > 0;
 
@@ -357,13 +358,17 @@ export function MessagingPlugin(
             await subscribeDefinition(broker, definition);
           }
 
-          behaviorChain.push(
-            ...behaviorFactories.map((slot) =>
-              resolveRegistryEntry(
-                slot.entry,
-                ctx.services,
-                `MessagingPlugin({ behaviors })[${slot.index}]`,
-              )
+          behaviorChain.splice(
+            0,
+            behaviorChain.length,
+            ...behaviors.map((entry, index) =>
+              typeof entry === 'function'
+                ? resolveRegistryEntry(
+                  entry,
+                  ctx.services,
+                  `MessagingPlugin({ behaviors })[${index}]`,
+                )
+                : entry
             ),
           );
         });

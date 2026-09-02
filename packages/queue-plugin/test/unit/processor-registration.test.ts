@@ -246,12 +246,12 @@ describe('QueuePlugin({ behaviors }) registration arms', () => {
     expect(envelopes[0]?.name).toBe('echo');
   });
 
-  it('appends factory-resolved behaviors to the chain in onInit, after the instances', async () => {
+  it('preserves declared behavior order when a factory precedes an instance', async () => {
     const order: string[] = [];
     const { harness, queue, runtime } = await boot({
       behaviors: [
-        recorder(order, 'instance'),
         (_services): IIngressBehavior => recorder(order, 'factory'),
+        recorder(order, 'instance'),
       ],
     });
     queue.process('echo', () => {});
@@ -260,6 +260,6 @@ describe('QueuePlugin({ behaviors }) registration arms', () => {
     await queue.add('echo', {});
     await runtime.advanceMs(POLL_MS * 2);
 
-    expect(order).toEqual(['instance', 'factory']);
+    expect(order).toEqual(['factory', 'instance']);
   });
 });

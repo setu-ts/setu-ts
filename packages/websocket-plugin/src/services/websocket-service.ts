@@ -152,10 +152,10 @@ export class WebSocketService implements IWebSocketService {
   readonly #routeGuards = new Map<string, readonly WebSocketUpgradeGuard[]>();
   /**
    * The plugin-level ingress behaviour chain around `onMessage`. Instances
-   * arrive at construction; `RegistryFactory` entries are appended by the
-   * plugin's `onInit` hook, still before the application serves. Empty means
-   * no chain: dispatch stays the direct, synchronous invoke it has always
-   * been.
+   * arrive at construction; when factories are configured, the plugin's
+   * `onInit` hook replaces this list with the full resolved declared sequence
+   * before the application serves. Empty means no chain: dispatch stays the
+   * direct, synchronous invoke it has always been.
    */
   readonly #behaviors: IIngressBehavior[];
 
@@ -256,8 +256,8 @@ export class WebSocketService implements IWebSocketService {
   }
 
   /**
-   * Appends resolved behaviours to the plugin-level ingress chain around
-   * `onMessage`.
+   * Replaces the plugin-level ingress chain around `onMessage` with the
+   * resolved declared sequence.
    *
    * Called once by the plugin's `onInit` hook, after every `RegistryFactory`
    * entry of `WebSocketPlugin({ behaviors })` has been resolved — the first
@@ -269,8 +269,8 @@ export class WebSocketService implements IWebSocketService {
    * @param behaviors - The resolved behaviours, in declared order
    * @since 0.3.0
    */
-  registerIngressBehaviors(behaviors: readonly IIngressBehavior[]): void {
-    this.#behaviors.push(...behaviors);
+  replaceIngressBehaviors(behaviors: readonly IIngressBehavior[]): void {
+    this.#behaviors.splice(0, this.#behaviors.length, ...behaviors);
   }
 
   /**
@@ -641,11 +641,11 @@ export class WebSocketService implements IWebSocketService {
 
         // The plugin-level behaviour chain. `invoke` stays the outer call, so
         // a rejection — from a behaviour or from the handler — reaches
-        // `onError` through the same `report` path as before; what changes is
-        // the mediation: the chain returns a promise, so a synchronous handler
-        // now completes after a microtask rather than synchronously (M86 plan
-        // §3.11). The envelope is built per frame, and the handler keeps its
-        // native `(conn, data)` arguments — only the chain sees the envelope.
+        // `onError` through the same `report` path as before. The chain
+        // returns a promise, while entirely synchronous behaviours and handler
+        // preserve their immediate execution; a behaviour that defers `next()`
+        // delays the handler. The envelope is built per frame, and the handler
+        // keeps its native `(conn, data)` arguments — only the chain sees it.
         const routePath = route.path;
         const behaviors = this.#behaviors;
         invoke(

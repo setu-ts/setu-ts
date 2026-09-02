@@ -1574,6 +1574,34 @@ describe('Application review fixes', () => {
     await app.stop();
   });
 
+  it('runs close hooks when startup fails after plugins have registered resources', async () => {
+    let closed = 0;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'resource-owning-plugin',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onClose(() => {
+              closed++;
+            });
+            ctx.lifecycle.onInit(() => {
+              throw new Error('init failed');
+            });
+          },
+        },
+      ],
+    });
+
+    await expect(app.start()).rejects.toThrow('init failed');
+    expect(closed).toBe(1);
+
+    // A failed start remains stoppable as a no-op, so cleanup cannot run twice.
+    await app.stop();
+    expect(closed).toBe(1);
+  });
+
   it('start() called twice throws instead of re-running startup', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
     await app.start();

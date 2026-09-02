@@ -309,12 +309,12 @@ describe('SchedulerPlugin({ behaviors }) registration arms', () => {
     expect(envelopes[0]?.name).toBe('echo');
   });
 
-  it('appends factory-resolved behaviors to the chain in onInit, after the instances', async () => {
+  it('preserves declared behavior order when a factory precedes an instance', async () => {
     const order: string[] = [];
     const { harness, scheduler, runtime } = await boot({
       behaviors: [
-        recorder(order, 'instance'),
         (_services): IIngressBehavior => recorder(order, 'factory'),
+        recorder(order, 'instance'),
       ],
     });
     await scheduler.every('echo', TICK_MS, () => {});
@@ -322,7 +322,7 @@ describe('SchedulerPlugin({ behaviors }) registration arms', () => {
 
     await runtime.advance(ONE_FIRE_MS);
 
-    expect(order).toEqual(['instance', 'factory']);
+    expect(order).toEqual(['factory', 'instance']);
   });
 });
 

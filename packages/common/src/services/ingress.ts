@@ -133,10 +133,10 @@ export interface IIngressBehavior {
  * returned promise, propagating to that ingress's existing failure path. An
  * empty array invokes the terminal exactly once.
  *
- * Declared `async` so a synchronous throw inside a behaviour rejects instead
- * of escaping the promise chain: the declared return type is a promise, and a
- * caller writing `.catch(...)` — or `Promise.allSettled` over a batch — must
- * see every failure.
+ * The implementation converts every synchronous throw into a rejected
+ * promise: the declared return type is a promise, and a caller writing
+ * `.catch(...)` — or `Promise.allSettled` over a batch — must see every
+ * failure.
  *
  * @typeParam TWork - The work item being handled
  * @typeParam TResult - The chain result type
@@ -164,7 +164,7 @@ export interface IIngressBehavior {
  * ```
  * @since 0.3.0
  */
-export async function composeBehaviorChain<TWork, TResult>(
+export function composeBehaviorChain<TWork, TResult>(
   work: TWork,
   behaviors: readonly BehaviorLike<TWork, TResult>[],
   terminal: () => Promise<TResult>,
@@ -173,10 +173,23 @@ export async function composeBehaviorChain<TWork, TResult>(
   for (let i = behaviors.length - 1; i >= 0; i--) {
     const behavior = behaviors[i];
     const prev = next;
-    // `Promise.resolve` admits both arms of `handle`'s return union (a direct
-    // value or a promise); a synchronous throw inside `handle` rejects here
-    // rather than escaping the promise chain.
-    next = () => Promise.resolve(behavior.handle(work, prev));
+    // Invoke the downstream behaviour immediately so synchronous ingress
+    // dispatch retains its ordering, while turning its synchronous throw into
+    // the rejected promise promised by `next()`. Calling
+    // `Promise.resolve(behavior.handle(...))` directly would evaluate
+    // `handle` first, letting that throw escape `next()` before its promised
+    // result existed.
+    next = () => {
+      try {
+        return Promise.resolve(behavior.handle(work, prev));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    };
   }
-  return await next();
+  try {
+    return next();
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
