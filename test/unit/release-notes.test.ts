@@ -107,6 +107,29 @@ describe('release workflow wiring', () => {
     expect(release).toBeGreaterThan(publish);
   });
 
+  it('verifies release consistency on the PR path, not only on a tag', async () => {
+    // `release:verify` is the only gate for version agreement across all 47
+    // manifests, cross-package specifier resolvability, whole-workspace
+    // coverage and `@module`-first entrypoints. It ran ONLY on a tag until
+    // v0.2.0 — after a release PR had already been merged — so a release
+    // branch could be accepted with none of them checked. `publish:check`
+    // sees none of it.
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(workflow).toContain('deno task release:verify');
+    // Read from the workspace, never written into the workflow: a literal
+    // would have to be edited every release and would silently verify the
+    // wrong version if it were not.
+    expect(workflow).toContain('jq -r .version packages/kernel/deno.json');
+  });
+
+  it('flags a 0.x release as a prerelease, not only a -suffix version', async () => {
+    // v0.2.0 dropped the `alpha` label without freezing the API, so matching
+    // only `*-*` would publish a Release object presented as stable. The
+    // `0.*` arm is dropped at 1.0 and not before.
+    const workflow = await Deno.readTextFile('.github/workflows/release.yml');
+    expect(workflow).toContain('case "$version" in 0.*|*-*) prerelease=\'--prerelease\' ;; esac');
+  });
+
   it('grants the contents:write the release step needs', async () => {
     // Tokenless OIDC covers the JSR publish; creating a Release object does
     // not ride on it, and the job token is read-only by default.

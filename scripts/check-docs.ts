@@ -1458,8 +1458,26 @@ const VERSION_HISTORY_DOCS: readonly string[] = [
  */
 const SHIPPED_VERSION_LINES = [
   String.raw`0\.1\.0-alpha\.\d+`, // v0.1.0-alpha.1 … v0.1.0-alpha.10
-  String.raw`0\.2\.\d+`, // v0.2.0 onward — the post-alpha 0.x line
+  // v0.2.0 onward — the post-alpha 0.x line. The optional suffix keeps a
+  // FUTURE prerelease readable (`0.2.1-rc.1`): without it the pattern captures
+  // the `0.2.1` prefix, which never equals the shipping version, so every
+  // correct reference in the tree would be reported stale. It is dot-separated
+  // identifiers rather than `[\w.]+` so a trailing sentence period is not
+  // swallowed into the version.
+  String.raw`0\.2\.\d+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?`,
 ].join('|');
+
+/**
+ * Token boundaries for a version match.
+ *
+ * `NOT_AFTER` rejects a match that continues a longer number to its left —
+ * without it the `0.2.1` inside an unrelated `10.2.1` or `127.0.2.1` is read as
+ * a Setu-TS claim and reported stale. `NOT_BEFORE` rejects one that continues
+ * to its right, while still allowing a version that ends a sentence, which is
+ * why it is two narrow lookaheads rather than `(?![\w.])`.
+ */
+const NOT_AFTER = String.raw`(?<![\d.])`;
+const NOT_BEFORE = String.raw`(?!\d)(?!\.\d)`;
 
 /**
  * Reports install snippets pinning a version older than the one being shipped.
@@ -1484,7 +1502,7 @@ export function checkInstallVersions(
 ): Finding[] {
   const findings: Finding[] = [];
   const reference = new RegExp(
-    String.raw`@setu-ts/[a-z0-9-]+@\^?(${SHIPPED_VERSION_LINES})`,
+    String.raw`@setu-ts/[a-z0-9-]+@\^?(${SHIPPED_VERSION_LINES})${NOT_BEFORE}`,
     'g',
   );
 
@@ -1627,7 +1645,10 @@ export function checkVersionClaims(
   current: string,
 ): Finding[] {
   const findings: Finding[] = [];
-  const reference = new RegExp(`v?(${SHIPPED_VERSION_LINES})`, 'g');
+  const reference = new RegExp(
+    `${NOT_AFTER}v?(${SHIPPED_VERSION_LINES})${NOT_BEFORE}`,
+    'g',
+  );
 
   for (const [file, source] of contents) {
     const relative = file.startsWith('./') ? file.slice(2) : file;
