@@ -367,6 +367,29 @@ describe('real-backend CI wiring', () => {
     expect(workflow).toContain('SQS_ENDPOINT_URL: http://localhost:9324');
   });
 
+  it('resolves wrangler before it starts timing the workerd host', async () => {
+    // The behavioural proof is the smoke itself, which `check:apps` runs on
+    // every CI run — but only the RACE is behavioural, and its trigger is the
+    // runner's npm cache state, which a test cannot control. Verified manually
+    // instead by pointing npm at an empty cache: exit 1 before the fix with
+    // `will be installed: wrangler@4.128.0` then the timeout, exit 0 after.
+    //
+    // What IS pinnable is the ordering the fix consists of, and it is the whole
+    // fix: `npx wrangler` installs on first use, so spawning `wrangler dev` and
+    // only then starting a ten-second readiness budget loses that budget to the
+    // download. Resolving it first pays the install outside the window.
+    const smoke = await Deno.readTextFile('apps/realtime-clients/smoke.ts');
+    const preflight = smoke.indexOf("await run('npx', ['--yes', 'wrangler', '--version']);");
+    const spawn = smoke.indexOf("new Deno.Command('npx'");
+    expect(preflight).toBeGreaterThan(-1);
+    expect(spawn).toBeGreaterThan(preflight);
+
+    // Two servers are awaited, so a fixed message blames the wrong one — CI
+    // reported the Deno host as not started while it was already serving.
+    expect(smoke).toMatch(/waitForServer\(baseUrl, 'Realtime client server'\)/);
+    expect(smoke).toMatch(/'workerd client host'/);
+  });
+
   it('has REDIS_URL available whenever CI provides the container', () => {
     // Vacuous locally by design; in CI it fails if the job env stops reaching
     // the test step, which the static checks above cannot observe. Every
