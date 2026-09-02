@@ -8669,4 +8669,4 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
 | 83        | ✅     | module declarations + functional example            |
 | 84        | ✅     | realtime client consumption (sdk + cli)             |
 | 85        | ✅     | cli (workspace full-stack gRPC, PR #215)            |
-| 86        | ⬜     | non-http ingress registration + pipeline            |
+| 86        | ✅     | non-http ingress registration + pipeline            |

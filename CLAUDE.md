@@ -3964,9 +3964,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (the `CosmosTransaction` precedent; it reaches an application only as `IAdapterTransaction`) and
   `BigtableSdkModule` — because `deno doc --lint` showed both leaking a private type, and neither
   had a public consumer) — complete (PR #222)
-- **Next milestone** — **M86** (non-HTTP ingress: registration sites and a pipeline for WebSocket
-  routes, queue processors, scheduler jobs and broker subscriptions). The three backends M78
-  deferred (M80 DynamoDB, M81 Cosmos DB, M82 Cloud Bigtable) are all complete.
+- **Milestone 86** (`common`, `cqrs-plugin`, `websocket-plugin`, `queue-plugin`, `scheduler-plugin`,
+  `messaging-plugin` — non-HTTP ingress registration and behaviours: the shared
+  `IngressContext`/`IIngressBehavior` composer; declarative route, processor, job, and subscription
+  arms; WebSocket route guards and frame behaviours; queue, scheduler, and messaging behaviour
+  chains; CQRS composer delegation) — complete (PR pending)
+- **Next milestone** — M86 is the latest completed milestone; the next milestone is unassigned.
 
 ## Verification (run before declaring any work done)
 
