@@ -8548,6 +8548,91 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
 
 ---
 
+## Milestone 87: Request-Path Performance
+
+**Package(s):** `packages/common`, `packages/kernel`, `packages/runtime`
+
+The framework retained roughly **34%** of the throughput of the router it is built on. Benchmarked
+against NestJS on both its adapters, Hono, Fastify and Express (bombardier, CPU-pinned, medians of
+interleaved runs), Setu-TS served ~41k rps on `/json` where bare Hono served ~124k.
+
+Profiling located the loss in fixed per-request cost rather than anything algorithmic. Three
+findings drove the milestone, and each was established by reading source or measuring rather than by
+intuition — which was wrong three times in a row here:
+
+1. **The mapping read the body of every request**, including bodyless GETs. Under
+   `@hono/node-server` that call forces `getRequestCache()`, materializing the full undici `Request`
+   the lightweight facade exists to avoid.
+2. **Every framework-owned layer was eagerly `async`.** node-server answers a request without
+   entering the microtask queue only when the handler returns a non-promise (`index.mjs:1027`), so
+   one eagerly-async link foreclosed that path for every request ever served.
+3. **`overrideGlobalObjects: false`** — set in `976ab2cd`, a "resolve type-check, lint and test
+   failures" commit, on the stated grounds that overriding "would corrupt the shared mapping".
+   Source says `newRequest()` is called unconditionally, so the mapping is unaffected. What the flag
+   actually decided was the class backing `new Response(...)`, and node-server's fast path is gated
+   on that class's internal cache symbol. The framework had been on the slow path on Node since M23.
+
+Two committed comments were corrected as named deliverables because neither survived checking: the
+request `Headers` copy was documented as providing "immutability" when `new Headers()` is mutable
+(it normalizes **writability**, since a server-received `Request` on Deno throws `TypeError` on
+`headers.set` while Node and Bun permit it), and the upgrade-body refusal claimed the mapping "has
+already disturbed it via `arrayBuffer()`", which the lazy body made false — an ordinary upgrade now
+reaches the handshake with its raw `Request` undisturbed, removing the M46 hazard rather than
+working around it.
+
+**The headline number was measuring the configuration most favourable to Hono.** A zero-middleware
+route is the one shape where Hono's two-tier dispatch skips `compose()` entirely and where our fixed
+setup cost amortizes over nothing. Measured with three equivalent middleware, Hono loses **40.6%**
+of its throughput and Setu-TS loses **17.9%** — so with middleware present Setu-TS runs at **132% of
+Hono** and **113% of raw Express**. Any real application has middleware.
+
+**Results.** bombardier, `-c 64`, on Node. Every ratio below comes from runs that **alternate the
+two servers run-by-run**, because the per-pass spread on this machine is 10–23% and a sweep that
+measures each server once per pass cannot resolve a 5–10% difference — an early 3-pass sweep
+reported both 103% and 91% of NestJS-Fastify from the same build.
+
+| measurement                       | before | after        |
+| --------------------------------- | ------ | ------------ |
+| `/json`, bare                     | 41,437 | ~100,000     |
+| share of bare Hono                | ~34%   | ~90%         |
+| vs NestJS-Express                 | ~65%   | **130–160%** |
+| vs NestJS-Fastify                 | ~40%   | 86–93%       |
+| with 3 middleware, vs Hono        | —      | **132%**     |
+| with 3 middleware, vs raw Express | —      | **113%**     |
+
+**Beating NestJS-Express was the target and is met decisively. Beating NestJS-Fastify is NOT met**
+(86.2% / 93.0% / 90.4% on `/json` / `/plaintext` / `/users/:id`, winning 4 of 18 paired runs). That
+gap is deliberately left: NestJS adds little on top of Fastify, so clearing it means matching a raw
+router with a plugin kernel, capability registry and lifecycle hooks in the path. The profile says
+where the remaining 1.83 µs/req of framework-owned CPU sits (2.62 µs/req against Fastify's 0.79),
+and **M88** owns it.
+
+**Deliverables:**
+
+- `IRequest` body reads are memoized-lazy, with a framing-header discriminator so a bodyless GET
+  never touches the native request; `Headers` copied lazily; `RequestContext` is a class whose cold
+  members (`id`, `services`, `state`, `query`, `signal`) are lazy prototype getters.
+- `Application.#handleRequest` is no longer `async`; it splits into `#runRequest`/`#dispatch`/
+  `#dispatchRoute`, each returning synchronously when it can. Lifecycle hooks and global middleware
+  route to an unchanged async path, so only the hook-free, middleware-free shape changes.
+- All four HTTP adapters' fetch handlers branch on promise-ness instead of being `async`.
+- `IHttpAdapter.setHandler` and `fetch` widened to accept/return sync-or-async (**breaking for
+  out-of-repo adapter implementors**).
+- `extractPath` replaces a per-request `new URL()` with a string slice that falls back to `URL` on
+  the only inputs it rewrites (dot-segments, backslashes), so it is **provably identical** for every
+  input — unlike Hono's `getPath`, which stops normalizing `..` and would change routing.
+- Redundant second URL parse in route dispatch removed; the protocol helpers gated by a synchronous
+  capability check.
+- `Router.match` answers a single candidate without allocating: the `RouteEntry` rides on the stub
+  handler Hono already returns (a property read replacing a `${method} ${path}` key plus a `Map`
+  lookup), `decodeURIComponent` is skipped for a value with no `%`, and a param-less route gets a
+  shared frozen object. Profiling had put `match` at 0.549 µs/req against find-my-way's 0.10.
+
+**Not this milestone:** the response path (`ResponseBuilder` → `snapshot()` → `Response` is four
+allocations where Hono builds one) and a synchronous `executeChain` (needs `NextFunction` widened,
+which breaks middleware calling `next().then(...)`) — both **M88**. Benchmarks as a release gate —
+**M40**.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                             |
@@ -8672,3 +8757,4 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
 | 84        | ✅     | realtime client consumption (sdk + cli)             |
 | 85        | ✅     | cli (workspace full-stack gRPC, PR #215)            |
 | 86        | ⬜     | non-http ingress registration + pipeline            |
+| 87        | ✅     | request-path performance (kernel/runtime/common)    |

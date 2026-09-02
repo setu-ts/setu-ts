@@ -65,6 +65,51 @@ import type { Context as HonoContext, Next as HonoNext } from '@hono/hono';
  *
  * @since 0.1.0
  */
+/**
+ * Key under which a route's {@linkcode RouteEntry} is carried on the stub
+ * handler Hono holds, so a match resolves the entry with a property read
+ * rather than a string key and a `Map` lookup on every request (M87).
+ */
+const ROUTE_ENTRY = Symbol('setu.router.entry');
+
+/** Shared empty params. Frozen, so a caller cannot mutate it into a shared surprise. */
+const EMPTY_PARAMS: Record<string, string> = Object.freeze({});
+
+/**
+ * Decodes Hono's raw (still percent-encoded) param values.
+ *
+ * Hono's low-level `router.match()` returns raw values — decoding normally
+ * happens in Hono's Context layer, which the kernel bypasses — so this
+ * preserves pre-M22 parity with the from-scratch matcher, which decoded per
+ * segment.
+ *
+ * Two allocations are avoided relative to the straightforward form (M87): a
+ * route with no params returns the shared frozen object rather than a fresh
+ * `{}`, and `decodeURIComponent` is skipped for a value containing no `%`,
+ * where it is an identity function (it does not decode `+`).
+ *
+ * @param raw - Hono's raw param record
+ * @returns The decoded params, or `null` when a value carries a malformed escape
+ */
+function decodeParams(raw: Record<string, string>): Record<string, string> | null {
+  let params: Record<string, string> | undefined;
+  for (const key in raw) {
+    const value = raw[key]!;
+    let decoded: string;
+    if (value.includes('%')) {
+      try {
+        decoded = decodeURIComponent(value);
+      } catch {
+        return null;
+      }
+    } else {
+      decoded = value;
+    }
+    (params ??= {})[key] = decoded;
+  }
+  return params ?? EMPTY_PARAMS;
+}
+
 export class Router implements IRouterApi {
   readonly #routes: RouteEntry[] = [];
   #index = 0;
@@ -115,6 +160,13 @@ export class Router implements IRouterApi {
       // Stub — never called during matching.
       return new Response();
     };
+    // Carry the entry on the stub itself. Hono hands the handler back in the
+    // match tuple, so `match()` reads the entry with one property access
+    // instead of building a `${method} ${path}` key and consulting
+    // `#entryMap` on every request (M87). `#entryMap` remains the duplicate
+    // registration guard; this is a second, per-request-free route to the
+    // same object, not a second source of truth.
+    (stubHandler as unknown as { [ROUTE_ENTRY]: RouteEntry })[ROUTE_ENTRY] = entry;
     // Hono's `on()` method is not typed in the public API; cast through unknown
     // to avoid a direct `as any` while keeping the call site minimal.
     type HonoOnHandler = (c: HonoContext, next: HonoNext) => Response | Promise<Response> | void;
@@ -207,6 +259,20 @@ export class Router implements IRouterApi {
     // covers the case where no routes are registered or nothing matches.
     if (candidatesRaw.length === 0) {
       return null;
+    }
+
+    // Fast path: exactly one candidate, which is every request in an
+    // application without overlapping patterns (M87). The candidates array,
+    // the per-candidate object literal and the sort below cannot change the
+    // outcome when there is nothing to tie-break against, so none of them is
+    // built. This mirrors Hono's own single-match bypass.
+    if (candidatesRaw.length === 1) {
+      const [handlerRouteTuple, rawParams] = candidatesRaw[0]!;
+      const entry = (handlerRouteTuple[0] as unknown as { [ROUTE_ENTRY]: RouteEntry })[ROUTE_ENTRY];
+      const params = decodeParams(rawParams);
+      // A malformed escape means this route does not match, mirroring the
+      // multi-candidate path's `continue` when every candidate is dropped.
+      return params === null ? null : { definition: entry.definition, params };
     }
 
     // Build candidates array: map each Hono candidate to the kernel RouteEntry.

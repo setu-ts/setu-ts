@@ -22,7 +22,7 @@ class FakeHttpAdapter implements IHttpAdapter {
   listenCallCount = 0;
   closeCallCount = 0;
 
-  setHandler(handler: (request: any) => Promise<any>): void {
+  setHandler(handler: (request: any) => any): void {
     this.setHandlerCalledWith = handler;
   }
 

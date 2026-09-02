@@ -81,9 +81,21 @@ const defaultNodeServeHost: NodeServeHost = {
   serve: async (options) => {
     // Lazy import — only loads when listen() is actually called
     const mod = await import('npm:@hono/node-server@^2.0.0');
-    // overrideGlobalObjects: false prevents @hono/node-server from mutating
-    // the global Request/Response which would corrupt the shared mapping.
-    return mod.serve({ ...options, overrideGlobalObjects: false });
+    // node-server's own `Request`/`Response` are installed as globals, which
+    // is its default and what every Hono-on-Node deployment already runs.
+    //
+    // This was previously opted out of with `overrideGlobalObjects: false`,
+    // on the stated grounds that overriding "would corrupt the shared
+    // mapping". That does not survive checking (M87): node-server builds the
+    // inbound request with its own `newRequest()` UNCONDITIONALLY, so the
+    // mapping receives the same lightweight facade either way. What the flag
+    // actually decided was the class backing `new Response(...)` inside
+    // `mapSnapshotToWebResponse` — and node-server serves a response through
+    // its synchronous fast path only when the object carries that class's
+    // internal cache symbol. Opting out therefore forced EVERY response onto
+    // the slow path, and made the kernel's synchronous request path
+    // unrewarded, since the fast path is gated on both conditions at once.
+    return mod.serve({ ...options });
   },
 };
 
@@ -97,7 +109,7 @@ const defaultNodeServeHost: NodeServeHost = {
  * @internal - Not exported from package index
  */
 export class NodeHttpServerHandle {
-  #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
+  #handler: ((request: IRequest) => IResponse | Promise<IResponse>) | null = null;
   #server: NodeServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
   readonly #coordinator: NodeUpgradeCoordinator;
@@ -109,7 +121,7 @@ export class NodeHttpServerHandle {
   /**
    * Stores the handler set by `setHandler`.
    */
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handler = handler;
   }
 
@@ -177,7 +189,7 @@ export class NodeHttpServerHandle {
 
   async #handleUpgradePipeline(
     incoming: NodeIncomingMessage,
-    frameworkRequestPromise: Promise<IRequest>,
+    frameworkRequest: IRequest,
     socket: RawUpgradeSocket,
     head: unknown,
   ): Promise<void> {
@@ -186,7 +198,6 @@ export class NodeHttpServerHandle {
       return;
     }
 
-    const frameworkRequest = await frameworkRequestPromise;
     const frameworkResponse = await this.#handler(frameworkRequest);
 
     // Check for UPGRADE_INTENT written by the kernel terminal handler on the
@@ -248,25 +259,52 @@ export class NodeHttpServerHandle {
    * raw `upgrade` event (not the fetch path), but the upgrade listener also
    * runs the framework handler first before handshaking.
    */
-  createFetchHandler(): (request: Request) => Promise<Response> {
-    return async (request: Request): Promise<Response> => {
-      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+  createFetchHandler(): (request: Request) => Response | Promise<Response> {
+    return (request: Request): Response | Promise<Response> => {
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
 
       // Run the framework handler FIRST — middleware pipeline applies uniformly.
-      const frameworkResponse = await this.#handler(frameworkRequest);
-
-      // Check for upgrade intent (for the rare case an upgrade reaches fetch).
-      const intent = upgradeIntentOf(frameworkRequest);
-      if (intent !== undefined) {
-        return this.#performUpgrade(request, intent);
+      //
+      // Deliberately NOT `await`ed (M87). `@hono/node-server` serves a
+      // response through its `responseViaCache` fast path only when this
+      // callback returns something that is not a promise, so making the
+      // callback `async` foreclosed that path on EVERY request, including the
+      // ones the kernel can now answer without ever yielding.
+      const frameworkResponse = this.#handler(frameworkRequest);
+      if (frameworkResponse instanceof Promise) {
+        return frameworkResponse.then((resolved) =>
+          this.#finishFetch(request, frameworkRequest, resolved)
+        );
       }
-
-      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      return this.#finishFetch(request, frameworkRequest, frameworkResponse);
     };
+  }
+
+  /**
+   * Completes a fetch-path response once the framework handler has produced
+   * one, synchronously where possible.
+   *
+   * @param request - The original web request
+   * @param frameworkRequest - The normalized request, carrying any upgrade intent
+   * @param frameworkResponse - The framework response to serialize
+   * @returns The web response, or a promise of it when an upgrade is performed
+   */
+  #finishFetch(
+    request: Request,
+    frameworkRequest: IRequest,
+    frameworkResponse: IResponse,
+  ): Response | Promise<Response> {
+    // Check for upgrade intent (for the rare case an upgrade reaches fetch).
+    const intent = upgradeIntentOf(frameworkRequest);
+    if (intent !== undefined) {
+      return this.#performUpgrade(request, intent);
+    }
+
+    return mapSnapshotToWebResponse(frameworkResponse.snapshot());
   }
 
   /**
@@ -309,7 +347,7 @@ export class NodeHttpAdapter implements IHttpAdapter {
     this.#handle = new NodeHttpServerHandle(wsModule);
   }
 
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handle.setHandler(handler);
   }
 
@@ -336,7 +374,7 @@ export class NodeHttpAdapter implements IHttpAdapter {
     return this.#handle;
   }
 
-  fetch(request: Request): Promise<Response> {
+  fetch(request: Request): Response | Promise<Response> {
     return this.#handle.createFetchHandler()(request);
   }
 

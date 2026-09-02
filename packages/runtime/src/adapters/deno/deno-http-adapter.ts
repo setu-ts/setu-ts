@@ -110,7 +110,7 @@ const defaultDenoServeHost: DenoServeHost = {
  * @internal - Not exported from package index
  */
 export class DenoHttpServerHandle {
-  #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
+  #handler: ((request: IRequest) => IResponse | Promise<IResponse>) | null = null;
   #server: DenoServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
   #host: DenoServeHost;
@@ -122,7 +122,7 @@ export class DenoHttpServerHandle {
   /**
    * Stores the handler set by `setHandler`.
    */
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handler = handler;
   }
 
@@ -165,27 +165,35 @@ export class DenoHttpServerHandle {
    * handshake. This ensures middleware (auth, metrics, security headers)
    * applies to upgrade requests uniformly.
    */
-  createFetchHandler(): (request: Request) => Promise<Response> {
-    return async (request: Request): Promise<Response> => {
-      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+  createFetchHandler(): (request: Request) => Response | Promise<Response> {
+    return (request: Request): Response | Promise<Response> => {
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
 
-      // Run the framework handler FIRST — this executes the full middleware
-      // pipeline, including auth, metrics, security headers, and shutdown drain.
-      const frameworkResponse = await this.#handler(frameworkRequest);
-
       // After the handler returns, check if the kernel requested an upgrade.
       // The kernel writes WebSocketUpgradeIntent on the IRequest keyed by
       // UPGRADE_INTENT so the adapter can read it here.
-      const intent = upgradeIntentOf(frameworkRequest);
-      if (intent !== undefined) {
-        return this.#performUpgrade(request, intent);
-      }
+      const finish = (frameworkResponse: IResponse): Response | Promise<Response> => {
+        const intent = upgradeIntentOf(frameworkRequest);
+        if (intent !== undefined) {
+          return this.#performUpgrade(request, intent);
+        }
+        return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      };
 
-      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      // Run the framework handler FIRST — this executes the full middleware
+      // pipeline, including auth, metrics, security headers, and shutdown
+      // drain. Deliberately NOT awaited (M87): the kernel answers a
+      // hook-free, middleware-free route without ever yielding, and
+      // `Deno.serve` accepts a plain `Response`, so awaiting here would add a
+      // microtask hop to every request purely to unwrap a value we already have.
+      const frameworkResponse = this.#handler(frameworkRequest);
+      return frameworkResponse instanceof Promise
+        ? frameworkResponse.then(finish)
+        : finish(frameworkResponse);
     };
   }
 
@@ -249,7 +257,7 @@ export class DenoHttpAdapter implements IHttpAdapter {
     this.#handle = new DenoHttpServerHandle(this.#host);
   }
 
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handle.setHandler(handler);
   }
 
@@ -261,7 +269,7 @@ export class DenoHttpAdapter implements IHttpAdapter {
     this.#handle.setRpcHandler(handler);
   }
 
-  fetch(request: Request): Promise<Response> {
+  fetch(request: Request): Response | Promise<Response> {
     return this.#handle.createFetchHandler()(request);
   }
 

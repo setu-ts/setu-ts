@@ -3,9 +3,12 @@
  * web-standard `Request`/`Response` and the framework's `IRequest`/`IResponse`
  * snapshot.
  *
- * Every runtime adapter's `fetch` composes these two helpers. The shared
- * mapping pre-reads the body into an `ArrayBuffer` so `json()`/`text()`/`bytes()`
- * are safely callable more than once (idempotent body access).
+ * Every runtime adapter's `fetch` composes these two helpers. Body access is
+ * **memoized-lazy**: nothing is read until a consumer asks, and the first read
+ * is cached so `json()`/`text()`/`bytes()` stay idempotent (several first-party
+ * middlewares read the body and then hand it to a handler that reads it again —
+ * `session-plugin` CSRF, `validation-plugin`, and the kernel's own upgrade guard
+ * followed by its gRPC dispatch).
  *
  * @module
  */
@@ -15,58 +18,185 @@ import type { HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
 // Hoisted TextDecoder — avoids per-call allocation (A1 — no slice needed).
 const decoder = new TextDecoder();
 
+/** Shared empty body — a bodyless request allocates nothing. */
+const EMPTY_BODY = new Uint8Array(0);
+
+/**
+ * The framework request, as a class so that every accessor and body method
+ * lives on ONE shared prototype.
+ *
+ * This shape is load-bearing rather than stylistic. The pre-M87 mapping built a
+ * fresh object literal per request carrying three closures, which gave every
+ * request its own hidden class and made these call sites megamorphic. Defining
+ * the same members once on a prototype is the discipline `@hono/node-server`
+ * and Fastify both use for their own per-request objects.
+ */
+class FrameworkRequest implements IRequest {
+  readonly method: HttpMethod;
+  readonly url: string;
+  readonly path: string;
+
+  readonly #raw: Request;
+  #body: Uint8Array | undefined;
+  #headers: Headers | undefined;
+
+  constructor(raw: Request, method: HttpMethod, url: string, path: string) {
+    this.#raw = raw;
+    this.method = method;
+    this.url = url;
+    this.path = path;
+  }
+
+  /**
+   * Request headers, copied on first read.
+   *
+   * The copy is NOT about immutability — a `new Headers(...)` is mutable, so it
+   * provides the opposite. What it provides is a **writable** headers object on
+   * every runtime: a server-received `Request` on Deno THROWS `TypeError` on
+   * `headers.set()` (probed), while Node's `@hono/node-server` facade and Bun
+   * both allow it. Handing the native object through would make a
+   * header-writing middleware work on two runtimes and throw on a third.
+   *
+   * It is taken lazily because most requests never touch it, and on Node an
+   * eager copy also defeats `@hono/node-server`'s lazy raw-header lookup by
+   * forcing `materializeHeaders()`.
+   */
+  get headers(): Headers {
+    this.#headers ??= new Headers(this.#raw.headers);
+    return this.#headers;
+  }
+
+  /**
+   * The undisturbed raw Request, for WebSocket upgrade and gRPC dispatch after
+   * the middleware pipeline (M70a). Genuinely undisturbed now: the mapping no
+   * longer consumes the body, so `bodyUsed` stays `false` until a consumer asks.
+   */
+  get raw(): Request {
+    return this.#raw;
+  }
+
+  /**
+   * The native abort signal, read lazily.
+   *
+   * On Node, `@hono/node-server`'s lightweight Request creates its
+   * `AbortController` on first `signal` access, so reading it eagerly cost one
+   * controller per request even for the majority of handlers that never abort.
+   */
+  get signal(): AbortSignal {
+    return this.#raw.signal;
+  }
+
+  /**
+   * Reads the body as raw bytes, once. Subsequent calls return the cached copy.
+   */
+  async bytes(): Promise<Uint8Array> {
+    this.#body ??= await this.#readBody();
+    return this.#body;
+  }
+
+  /** Reads the body as UTF-8 text. Idempotent. */
+  async text(): Promise<string> {
+    return decoder.decode(await this.bytes());
+  }
+
+  /** Reads and parses the body as JSON. Idempotent. */
+  async json<T = unknown>(): Promise<T> {
+    return JSON.parse(await this.text()) as T;
+  }
+
+  /**
+   * Resolves the body bytes, skipping the read entirely when the request cannot
+   * carry one.
+   *
+   * The discriminator is the framing headers, NOT `raw.body === null`: reading
+   * `.body` is not a cheap null check, because on Node it materializes the full
+   * undici `Request` that the lightweight facade exists to avoid — measured at
+   * roughly a quarter of the win. It is not the method alone either, because a
+   * GET that does carry a body must still be read, or the kernel's
+   * upgrade-with-body refusal (M70a §3.6) silently stops working.
+   */
+  #readBody(): Promise<Uint8Array> {
+    // Read the framing headers off the NATIVE request, never `this.headers`:
+    // the latter would take the lazy copy on every request and undo it.
+    const native = this.#raw.headers;
+    const bodyless = (this.method === 'GET' || this.method === 'HEAD') &&
+      native.get('content-length') === null &&
+      native.get('transfer-encoding') === null;
+    if (bodyless) return Promise.resolve(EMPTY_BODY);
+    return this.#raw.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+  }
+}
+
 /**
  * Maps a web-standard `Request` to the framework's `IRequest`.
- * Pre-reads the body via `arrayBuffer()` for idempotent access.
- * Forwards the native `Request.signal` so client disconnects can abort producers.
+ *
+ * Body access is memoized-lazy — see {@linkcode FrameworkRequest}, so the
+ * mapping itself awaits nothing and is SYNCHRONOUS. That matters beyond the
+ * saved microtask: `@hono/node-server` reaches its `responseViaCache` fast
+ * path only when the fetch callback returns a `Response` rather than a
+ * promise, so every eagerly-async link in this chain forecloses it.
  *
  * @param request - A web-standard `Request`
  * @returns The framework request
  */
-export async function mapWebRequestToFrameworkRequest(request: Request): Promise<IRequest> {
-  const url = new URL(request.url);
-  const path = url.pathname;
+/**
+ * Extracts the path from an absolute request URL without constructing a
+ * `URL`, falling back to one on the only inputs where the two could differ.
+ *
+ * `new URL(u).pathname` was the last full URL parse left on the request path
+ * (M87), and it is pure overhead for the overwhelming majority of traffic:
+ * the only rewriting `URL` performs on a path is resolving dot-segments
+ * (`/a/../b` becomes `/b`, `/a/./b` becomes `/a/b`) and turning backslashes
+ * into forward slashes. It does NOT percent-decode and it does NOT collapse
+ * empty segments — `/a%2Fb` and `//a` both survive verbatim.
+ *
+ * The slice is therefore returned as-is unless it contains `/.` or a
+ * backslash, where `URL` decides instead. That makes this equal to
+ * `new URL(url).pathname` for EVERY input rather than merely for common ones,
+ * which is what separates it from the string-slicing `getPath` Hono uses:
+ * that one stops normalizing dot-segments, so `/foo/../admin` would cease to
+ * resolve to `/admin` and would route somewhere else. Nothing here changes
+ * routing.
+ *
+ * An encoded dot-segment (`/a/..%2fb`) trips the guard and takes the fallback
+ * although the answer is unchanged — a wasted parse on a rare input, never a
+ * wrong result.
+ *
+ * @param url - An absolute request URL
+ * @returns The path, identical to `new URL(url).pathname`
+ */
+export function extractPath(url: string): string {
+  const schemeEnd = url.indexOf('://');
+  if (schemeEnd === -1) {
+    return new URL(url).pathname;
+  }
+  const start = url.indexOf('/', schemeEnd + 3);
+  if (start === -1) {
+    return '/';
+  }
+  let end = url.length;
+  for (let i = start; i < end; i++) {
+    const code = url.charCodeAt(i);
+    // '?' (63) or '#' (35) ends the path.
+    if (code === 63 || code === 35) {
+      end = i;
+      break;
+    }
+  }
+  const path = url.slice(start, end);
+  if (path.includes('/.') || path.includes('\\')) {
+    return new URL(url).pathname;
+  }
+  return path;
+}
 
-  // Create a copy of headers to ensure immutability
-  const headers = new Headers(request.headers);
-
-  // Cast to HttpMethod - the common package defines the supported methods
-  const method = request.method.toUpperCase() as HttpMethod;
-
-  // Pre-read body for idempotent access (web Request body is one-shot)
-  const bodyBuffer = await request.arrayBuffer();
-  const bodyBytes = new Uint8Array(bodyBuffer);
-
-  const result: IRequest = {
-    method,
-    url: request.url,
-    path,
-    headers,
-    // ip is deliberately NOT populated — a web Request carries no client IP.
-    // Consumers needing the client IP must read X-Forwarded-For in their
-    // own middleware. (Deliberated regression on the Node path.)
-    // Forward the native Request.signal so the producer can stop on client
-    // disconnect (M42 streaming primitive).
-    signal: request.signal,
-    // Preserve the undisturbed raw Request for WebSocket upgrade and gRPC
-    // dispatch after the middleware pipeline (M70a).
-    raw: request,
-    // deno-lint-ignore require-await
-    json: async <T = unknown>(): Promise<T> => {
-      const text = decoder.decode(bodyBytes);
-      return JSON.parse(text) as T;
-    },
-    // deno-lint-ignore require-await
-    text: async (): Promise<string> => {
-      return decoder.decode(bodyBytes);
-    },
-    // deno-lint-ignore require-await
-    bytes: async (): Promise<Uint8Array> => {
-      return bodyBytes;
-    },
-  };
-
-  return result;
+export function mapWebRequestToFrameworkRequest(request: Request): IRequest {
+  return new FrameworkRequest(
+    request,
+    request.method.toUpperCase() as HttpMethod,
+    request.url,
+    extractPath(request.url),
+  );
 }
 
 /**

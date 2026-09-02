@@ -574,7 +574,7 @@ class Application implements IKernelApplication {
   // Private methods
   // ---------------------------------------------------------------------------
 
-  async #handleRequest(request: IRequest): Promise<ResponseBuilder> {
+  #handleRequest(request: IRequest): ResponseBuilder | Promise<ResponseBuilder> {
     if (this.#stopping) {
       const builder = new ResponseBuilder();
       // Pre-pipeline: no request context exists yet, so the responder (if any)
@@ -598,20 +598,26 @@ class Application implements IKernelApplication {
 
     // Build the per-request context and validate the request path BEFORE
     // entering in-flight accounting. Two client errors are caught here:
-    //   1. A malformed request URL makes `new URL()` throw inside
-    //      createRequestContext.
+    //   1. A malformed request URL makes `new URL()` throw. The throw is
+    //      caught wherever it surfaces rather than at one assumed site: the
+    //      context resolves its query lazily (M87), so construction no longer
+    //      parses the URL, and for an `inject()`-built request `path` is itself
+    //      a lazy getter that parses. Reading `path` inside the `try` covers
+    //      both, and the adapter path throws earlier still, in its own mapping.
     //   2. A malformed percent-escape in the path (e.g. `%zz`) would
     //      otherwise surface as a 500 from the router's decodeURIComponent.
     // Both are rejected as a 400. Because #inFlight is incremented only
     // AFTER this succeeds, a rejected request can never leak the counter and
     // stall shutdown drain (the throw would otherwise escape the finally).
     let handle: RequestContextHandle;
+    let path: string;
     try {
       handle = createRequestContext(request, this.#registry, runtime);
+      path = handle.ctx.request.path;
     } catch {
       return this.#badRequest(request);
     }
-    if (!isPathDecodable(handle.ctx.request.path)) {
+    if (!isPathDecodable(path)) {
       return this.#badRequest(request);
     }
     const ctx = handle.ctx;
@@ -630,96 +636,281 @@ class Application implements IKernelApplication {
 
     this.#inFlight++;
     try {
-      // Run onRequest hooks
-      for (const hook of this.#lifecycle.getRequestHooks()) {
-        await hook(ctx);
+      const pending = this.#runRequest(ctx, handle, path, request);
+      if (pending === undefined) {
+        this.#inFlight--;
+        return ctx.response as ResponseBuilder;
       }
-
-      // Execute pipeline with route dispatch as terminal.
-      // Note: Router.match() is backed by Hono's LinearRouter (M22) — it
-      // delegates to Hono for route matching and param extraction, then
-      // applies the kernel's own deterministic tie-break for equal-specificity
-      // routes (§3.6 of the M22 plan).
-      await this.#pipeline.execute(ctx, async () => {
-        // Protocol dispatch runs BEFORE route matching, and after the pipeline.
-        //
-        // "After the pipeline" is the M70a security property: auth, metrics and
-        // the shutdown drain apply to an upgrade and to an RPC exactly as they
-        // do to a `GET /users`.
-        //
-        // "Before route matching" is precedence, and it is not optional. A
-        // WebSocket upgrade is a protocol switch rather than an HTTP route, and
-        // a path inside the gRPC `basePath` belongs to gRPC (M49). Deciding
-        // these only when nothing matched lets ANY catch-all shadow both — and
-        // `react-router-plugin` mounts exactly that, on all seven verbs, for
-        // SSR: a full-stack application would answer a WebSocket client with an
-        // HTML page and a gRPC client with the same. Both helpers decline
-        // cheaply when their capability is absent or does not claim the
-        // request, so ordinary traffic reaches the router unchanged.
-        if (await this.#tryUpgrade(ctx)) {
-          return;
-        }
-
-        if (await this.#tryGrpc(ctx)) {
-          return;
-        }
-
-        const url = new URL(request.url);
-        const routeResult = this.#router.match(request.method, url.pathname);
-
-        if (routeResult === null) {
-          respondWithError(ctx, { status: 404, title: 'Not Found' });
-          return;
-        }
-
-        // Install matched params via the internal setter (no readonly cast)
-        const { definition, params } = routeResult;
-        handle.setParams(params);
-
-        // Route middleware uses the same next()-chaining semantics as the
-        // global pipeline: a stage that responds without calling next()
-        // short-circuits, and the handler does not run. Defense-in-depth
-        // in executeChain also stops stages after the response is ended.
-        await executeChain(
-          definition.middleware ?? [],
-          ctx,
-          async () => {
-            await definition.handler(ctx);
-          },
-        );
-      });
-
-      // Run onResponse hooks
-      for (const hook of this.#lifecycle.getResponseHooks()) {
-        await hook(ctx);
-      }
-
-      return ctx.response as ResponseBuilder;
+      return pending.then(
+        () => {
+          this.#inFlight--;
+          return ctx.response as ResponseBuilder;
+        },
+        (error: unknown) => this.#failRequest(error, ctx),
+      );
     } catch (error) {
-      // Run onError hooks. A hook that throws must not stop the remaining
-      // hooks from running, but its failure must not vanish either: an
-      // audit logger, telemetry collector, or transaction-rollback hook
-      // that fails silently leaves security infrastructure blind. Surface
-      // the suppressed error through the sanctioned logger channel.
-      const err = error instanceof Error ? error : new Error(String(error));
-      for (const hook of this.#lifecycle.getErrorHooks()) {
+      return this.#failRequest(error, ctx);
+    }
+  }
+
+  /**
+   * Runs the request body, returning `undefined` when it completed
+   * SYNCHRONOUSLY and a promise otherwise (M87).
+   *
+   * The framework's own layers are the ones being made sync-capable here:
+   * an application registering no lifecycle hooks and no global middleware
+   * previously still paid the full `async`/`await` machinery of this method,
+   * `MiddlewarePipeline.execute` and `executeChain` — several microtask
+   * boundaries per request before any user code ran. Returning `undefined`
+   * rather than a resolved promise is what lets the caller, and ultimately
+   * the HTTP adapter, hand a plain `Response` back to the server: node's
+   * `responseViaCache` fast path is gated on the handler NOT returning a
+   * promise, so a single eagerly-async link anywhere in the chain forecloses
+   * it for every request.
+   *
+   * @param ctx - The live request context
+   * @param handle - The context handle, for installing matched route params
+   * @param path - The request path, already resolved and validated
+   * @param request - The normalized request
+   * @returns `undefined` when complete, else a promise that settles when it is
+   */
+  #runRequest(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    path: string,
+    request: IRequest,
+  ): undefined | Promise<unknown> {
+    const requestHooks = this.#lifecycle.getRequestHooks();
+    const responseHooks = this.#lifecycle.getResponseHooks();
+    // `compile()` caches, so this is a null check after the first request.
+    const chain = this.#pipeline.compile();
+
+    if (requestHooks.length === 0 && responseHooks.length === 0 && chain.length === 0) {
+      return this.#dispatch(ctx, handle, path, request);
+    }
+    return this.#runRequestFull(ctx, handle, path, request, requestHooks, responseHooks);
+  }
+
+  /**
+   * The general request path: lifecycle hooks and/or global middleware are
+   * registered, so at least one `await` is unavoidable.
+   *
+   * @param ctx - The live request context
+   * @param handle - The context handle, for installing matched route params
+   * @param path - The request path, already resolved and validated
+   * @param request - The normalized request
+   * @param requestHooks - Resolved `onRequest` hooks
+   * @param responseHooks - Resolved `onResponse` hooks
+   */
+  async #runRequestFull(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    path: string,
+    request: IRequest,
+    requestHooks: readonly ((ctx: IRequestContext) => void | Promise<void>)[],
+    responseHooks: readonly ((ctx: IRequestContext) => void | Promise<void>)[],
+  ): Promise<void> {
+    for (const hook of requestHooks) {
+      await hook(ctx);
+    }
+
+    // Execute pipeline with route dispatch as terminal.
+    await this.#pipeline.execute(ctx, async () => {
+      await this.#dispatch(ctx, handle, path, request);
+    });
+
+    for (const hook of responseHooks) {
+      await hook(ctx);
+    }
+  }
+
+  /**
+   * Terminal dispatch: protocol switch first, then HTTP route matching.
+   *
+   * Protocol dispatch runs BEFORE route matching, and after the pipeline.
+   *
+   * "After the pipeline" is the M70a security property: auth, metrics and the
+   * shutdown drain apply to an upgrade and to an RPC exactly as they do to a
+   * `GET /users`.
+   *
+   * "Before route matching" is precedence, and it is not optional. A WebSocket
+   * upgrade is a protocol switch rather than an HTTP route, and a path inside
+   * the gRPC `basePath` belongs to gRPC (M49). Deciding these only when
+   * nothing matched lets ANY catch-all shadow both — and `react-router-plugin`
+   * mounts exactly that, on all seven verbs, for SSR: a full-stack application
+   * would answer a WebSocket client with an HTML page and a gRPC client with
+   * the same.
+   *
+   * Both helpers open with the same two SYNCHRONOUS refusals — no raw
+   * `Request`, or the capability is not registered — but both are `async`, so
+   * an application registering neither still paid a promise allocation and a
+   * microtask apiece on every request (M87). Hoisting those refusals to a
+   * synchronous guard preserves the outcome exactly: absent the token, each
+   * call returned `false` regardless.
+   *
+   * @param ctx - The live request context
+   * @param handle - The context handle, for installing matched route params
+   * @param path - The request path, already resolved and validated
+   * @param request - The normalized request
+   * @returns `undefined` when complete, else a promise that settles when it is
+   */
+  #dispatch(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    path: string,
+    request: IRequest,
+  ): undefined | Promise<unknown> {
+    if (
+      ctx.raw !== undefined &&
+      (this.#registry.has(CAPABILITIES.WEBSOCKET) || this.#registry.has(CAPABILITIES.GRPC))
+    ) {
+      return this.#dispatchProtocol(ctx, handle, path, request);
+    }
+    return this.#dispatchRoute(ctx, handle, path, request);
+  }
+
+  /**
+   * Protocol dispatch for an application that registered WebSocket or gRPC,
+   * falling through to HTTP route matching when neither claims the request.
+   *
+   * @param ctx - The live request context
+   * @param handle - The context handle, for installing matched route params
+   * @param path - The request path, already resolved and validated
+   * @param request - The normalized request
+   */
+  async #dispatchProtocol(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    path: string,
+    request: IRequest,
+  ): Promise<void> {
+    if (this.#registry.has(CAPABILITIES.WEBSOCKET) && await this.#tryUpgrade(ctx)) {
+      return;
+    }
+    if (this.#registry.has(CAPABILITIES.GRPC) && await this.#tryGrpc(ctx)) {
+      return;
+    }
+    await this.#dispatchRoute(ctx, handle, path, request);
+  }
+
+  /**
+   * HTTP route matching and handler invocation.
+   *
+   * Matching reuses the path resolved by the caller rather than parsing the
+   * URL a second time (M87): the adapter's mapping already parsed it, and the
+   * decodability guard already read it, so `path` is `url.pathname` by
+   * construction on the adapter path and on the `inject()` path alike.
+   *
+   * @param ctx - The live request context
+   * @param handle - The context handle, for installing matched route params
+   * @param path - The request path, already resolved and validated
+   * @param request - The normalized request
+   * @returns `undefined` when complete, else a promise that settles when it is
+   */
+  #dispatchRoute(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    path: string,
+    request: IRequest,
+  ): undefined | Promise<unknown> {
+    const routeResult = this.#router.match(request.method, path);
+
+    if (routeResult === null) {
+      respondWithError(ctx, { status: 404, title: 'Not Found' });
+      return undefined;
+    }
+
+    // Install matched params via the internal setter (no readonly cast)
+    const { definition, params } = routeResult;
+    handle.setParams(params);
+
+    // Route middleware uses the same next()-chaining semantics as the global
+    // pipeline: a stage that responds without calling next() short-circuits,
+    // and the handler does not run. Defense-in-depth in executeChain also
+    // stops stages after the response is ended.
+    const routeMiddleware = definition.middleware;
+    if (routeMiddleware !== undefined && routeMiddleware.length > 0) {
+      return executeChain(
+        routeMiddleware,
+        ctx,
+        async () => {
+          await definition.handler(ctx);
+        },
+      );
+    }
+
+    // Empty-chain bypass (M87). On an empty chain `executeChain` does exactly
+    // one thing before the terminal: the defense-in-depth `ended` check, which
+    // matters because a global stage may have ended the response AND called
+    // `next()`. Keeping that check and invoking the handler directly is
+    // behaviourally identical, and it removes the executor's two closures and
+    // three microtask boundaries from every route declaring no middleware.
+    if ((ctx.response as ResponseBuilder).ended) {
+      return undefined;
+    }
+    const result = definition.handler(ctx);
+    return result instanceof Promise ? result : undefined;
+  }
+
+  /**
+   * Failure path: runs `onError` hooks, reports, and writes the opaque 500.
+   *
+   * Stays synchronous when no `onError` hook is registered, so a throwing
+   * handler in a hook-free application does not force the whole request onto
+   * the microtask queue (M87).
+   *
+   * A hook that throws must not stop the remaining hooks from running, but its
+   * failure must not vanish either: an audit logger, telemetry collector, or
+   * transaction-rollback hook that fails silently leaves security
+   * infrastructure blind. Suppressed errors are surfaced through the
+   * sanctioned logger channel.
+   *
+   * @param error - The thrown value
+   * @param ctx - The live request context
+   * @returns The response, directly or once the hooks have run
+   */
+  #failRequest(
+    error: unknown,
+    ctx: IRequestContext,
+  ): ResponseBuilder | Promise<ResponseBuilder> {
+    const err = error instanceof Error ? error : new Error(String(error));
+    const hooks = this.#lifecycle.getErrorHooks();
+    if (hooks.length === 0) {
+      return this.#finishFailure(err, ctx);
+    }
+    return (async () => {
+      for (const hook of hooks) {
         try {
           await hook(err, ctx);
         } catch (hookError) {
           this.#reportSuppressedHookError(hookError);
         }
       }
+      return this.#finishFailure(err, ctx);
+    })();
+  }
 
-      // X11-2: the unhandled error is visible to the operator. The body stays
-      // opaque — the message is not disclosed to the client (M70b's
-      // `maskInternalErrors` decision applied consistently); only the log
-      // carries it.
-      this.#reportUnhandledError(err, ctx);
-      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
-      return ctx.response as ResponseBuilder;
-    } finally {
-      this.#inFlight--;
-    }
+  /**
+   * Reports the unhandled error and writes the opaque 500, closing out the
+   * request's in-flight accounting.
+   *
+   * X11-2: the unhandled error is visible to the operator. The body stays
+   * opaque — the message is not disclosed to the client (M70b's
+   * `maskInternalErrors` decision applied consistently); only the log carries
+   * it.
+   *
+   * @param err - The normalized error
+   * @param ctx - The live request context
+   * @returns The response builder carrying the 500
+   */
+  #finishFailure(err: Error, ctx: IRequestContext): ResponseBuilder {
+    // Decrement FIRST: the original body did this in a `finally`, so a throw
+    // from the reporting or responder call could not leak the counter and
+    // stall the shutdown drain. Ordering it ahead of both preserves that.
+    this.#inFlight--;
+    this.#reportUnhandledError(err, ctx);
+    respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
+    return ctx.response as ResponseBuilder;
   }
 
   /**
@@ -793,12 +984,22 @@ class Application implements IKernelApplication {
       return true;
     }
 
-    // RFC 6455 §4.1 forbids a body on the handshake, and the framework mapping
-    // has already disturbed it via `arrayBuffer()`. Refusing here makes the
+    // RFC 6455 §4.1 forbids a body on the handshake. Refusing here makes the
     // behaviour one thing on all four adapters rather than a runtime-specific
     // failure inside the upgrade call. Read from the MAPPED body rather than
     // `content-length`, which is absent both on an in-process `Request` and on
     // any chunked upload.
+    //
+    // This comment previously also claimed the mapping "has already disturbed
+    // it via `arrayBuffer()`". That is no longer true and the distinction is
+    // load-bearing (M87): the mapping reads the body lazily, and `bytes()`
+    // short-circuits a GET/HEAD carrying neither `content-length` nor
+    // `transfer-encoding` WITHOUT touching the native request. So an ordinary
+    // upgrade now reaches the handshake with its raw `Request` undisturbed —
+    // which is exactly what `Deno.upgradeWebSocket` requires, and the hazard
+    // M46 originally had to intercept the upgrade inside the adapter to avoid.
+    // A handshake that does carry framing headers is disturbed by this read
+    // and then refused below, so no upgrade is ever attempted on it.
     if ((await ctx.request.bytes()).length > 0) {
       // The router already accepted, so it may be holding a reserved
       // connection slot for this socket. RFC 6455 close code 1006 (abnormal

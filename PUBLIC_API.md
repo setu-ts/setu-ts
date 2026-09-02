@@ -8599,6 +8599,25 @@ Cloudflare Workers.
 > **M23 replaced the old HTTP server adapters with the new `IHttpAdapter` contract
 > (`setHandler`/`fetch`/`listen`/`close`)** and added the Cloudflare Workers adapter.
 
+> **M87 widened two of those members to accept and return sync-or-async** — `setHandler` now takes
+> `(request: IRequest) => IResponse | Promise<IResponse>` and `fetch` returns
+> `Response | Promise<Response>`. This is **breaking for an out-of-repo adapter**: the handler's
+> return type sits in a contravariant position, so an implementation declaring the narrower
+> `Promise`-only shape is no longer a faithful implementor (TypeScript's bivariant method parameters
+> mean it still compiles — the break surfaces when a handler that answers synchronously reaches it).
+> Callers are unaffected, since `await` works on both.
+>
+> The widening exists because a request the kernel can answer without awaiting must not be wrapped
+> back into a promise: `@hono/node-server` serves a response through its synchronous fast path only
+> when the handler returns a non-promise, so a single eagerly-async link foreclosed that path for
+> every request. An adapter implementing this contract should branch on promise-ness rather than
+> awaiting:
+>
+> ```typescript
+> const result = this.handler(frameworkRequest);
+> return result instanceof Promise ? result.then(finish) : finish(result);
+> ```
+
 ### Values (runtime exports)
 
 | Export                            | Kind     | Purpose                                                                                    |

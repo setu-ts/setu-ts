@@ -103,14 +103,14 @@ const defaultBunServeHost: BunServeHost = (globalThis as { Bun?: BunServeHost })
  * @internal - Not exported from package index
  */
 export class BunHttpServerHandle {
-  #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
+  #handler: ((request: IRequest) => IResponse | Promise<IResponse>) | null = null;
   #server: BunServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
 
   /**
    * Stores the handler set by `setHandler`.
    */
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handler = handler;
   }
 
@@ -151,24 +151,31 @@ export class BunHttpServerHandle {
    * The framework handler (kernel pipeline) runs FIRST. After it returns,
    * the adapter checks for an upgrade intent.
    */
-  createFetchHandler(): (request: Request) => Promise<Response> {
-    return async (request: Request): Promise<Response> => {
-      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+  createFetchHandler(): (request: Request) => Response | Promise<Response> {
+    return (request: Request): Response | Promise<Response> => {
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
 
-      // Run the framework handler FIRST — middleware pipeline applies uniformly.
-      const frameworkResponse = await this.#handler(frameworkRequest);
-
       // Check for upgrade intent written by the kernel terminal handler.
-      const intent = upgradeIntentOf(frameworkRequest);
-      if (intent !== undefined) {
-        return this.#performUpgrade(request, intent);
-      }
+      const finish = (frameworkResponse: IResponse): Response | Promise<Response> => {
+        const intent = upgradeIntentOf(frameworkRequest);
+        if (intent !== undefined) {
+          return this.#performUpgrade(request, intent);
+        }
+        return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      };
 
-      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      // Run the framework handler FIRST — middleware pipeline applies
+      // uniformly. Deliberately NOT awaited (M87): a hook-free,
+      // middleware-free route is answered without yielding, and awaiting
+      // would add a microtask hop per request to unwrap a value already held.
+      const frameworkResponse = this.#handler(frameworkRequest);
+      return frameworkResponse instanceof Promise
+        ? frameworkResponse.then(finish)
+        : finish(frameworkResponse);
     };
   }
 
@@ -186,7 +193,7 @@ export class BunHttpServerHandle {
     server: BunServer,
   ) => Promise<Response | undefined> {
     return async (request: Request, server: BunServer): Promise<Response | undefined> => {
-      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -269,7 +276,7 @@ export class BunHttpAdapter implements IHttpAdapter {
     this.#handle = new BunHttpServerHandle();
   }
 
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handle.setHandler(handler);
   }
 
@@ -281,7 +288,7 @@ export class BunHttpAdapter implements IHttpAdapter {
     this.#handle.setRpcHandler(handler);
   }
 
-  fetch(request: Request): Promise<Response> {
+  fetch(request: Request): Response | Promise<Response> {
     return this.#handle.createFetchHandler()(request);
   }
 
