@@ -4,6 +4,12 @@
  * @module
  */
 
+import type {
+  IIngressBehavior,
+  MessageHandler,
+  RegistryFactory,
+  SubscribeOptions,
+} from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 
 /**
@@ -195,7 +201,85 @@ export interface MessagingCommonOptions {
   serializer?: ISerializer;
   /** Whether to create producer and consumer spans when telemetry is available. */
   tracing?: boolean;
+  /**
+   * Subscriptions registered declaratively, as an alternative to calling
+   * `broker.subscribe(topic, handler, options)` imperatively after `start()`.
+   * Each entry — instance or `RegistryFactory` — produces one `subscribe()`
+   * call, so a subscription can be declared where the plugin is composed
+   * instead of after the application has started.
+   *
+   * Instance entries register during the plugin's `register()` phase,
+   * identical to the imperative timing. Factory entries are resolved in the
+   * `onInit` phase — the first at which the registry holds every capability —
+   * and the plugin AWAITS each `subscribe()` there, so the subscription is
+   * established before the application serves. A factory that throws rejects
+   * `start()` with an error naming `MessagingPlugin({ subscriptions })` and
+   * the entry's index in THIS declared array, not its position among the
+   * factories.
+   *
+   * Because the arm sits on this shared interface, EVERY
+   * `MessagingPluginOptions` union arm inherits it — the declarative form is
+   * broker-agnostic, exactly like the imperative `subscribe()` it mirrors.
+   *
+   * @since 0.3.0
+   */
+  readonly subscriptions?: readonly SubscriptionEntry[];
+  /**
+   * Ingress behaviours wrapped around every subscription handler — the
+   * messaging arm of the transport-neutral behaviour chain shared with the
+   * websocket, queue, and scheduler plugins (`IIngressBehavior` in
+   * `@setu-ts/common`).
+   *
+   * Each behaviour observes an `IngressContext` carrying `kind: 'messaging'`,
+   * the topic as `name`, the delivered message as `payload`, and the
+   * transport `headers` from `MessageMetadata` (absent when the transport
+   * carried no channel — there is deliberately NO `attempt`: brokers
+   * redeliver and none tracks a delivery count), and runs in declared order
+   * ahead of the handler. A behaviour that returns without calling `next()`
+   * short-circuits: the handler never sees the message. A behaviour that
+   * throws follows the messaging handler's existing rejection path. The chain
+   * wraps SUBSCRIBE handlers only — `respond` (RPC) is deliberately not
+   * chained and not armed in this milestone.
+   *
+   * With no behaviours configured, the broker chain is byte-identical to the
+   * pre-arm behaviour: no `PipelinedBroker` decorator is applied at all.
+   *
+   * Instance entries are read by the chain at `register()`; factory entries
+   * are resolved in the `onInit` phase and a throwing factory rejects
+   * `start()` naming `MessagingPlugin({ behaviors })` and the entry's index
+   * in THIS declared array.
+   *
+   * @since 0.3.0
+   */
+  readonly behaviors?: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[];
 }
+
+/**
+ * The declarative form of one `IMessageBroker.subscribe()` call — the entry
+ * an application writes instead of calling `subscribe()` imperatively after
+ * `start()`.
+ *
+ * @since 0.3.0
+ */
+export interface SubscriptionDefinition {
+  /** The topic to subscribe to (the `subscribe()` topic argument). */
+  readonly topic: string;
+  /** Invoked per delivered message, exactly as the imperative `subscribe()` accepts. */
+  readonly handler: MessageHandler;
+  /** Consumer-group configuration, exactly as the imperative `subscribe()` accepts. */
+  readonly options?: SubscribeOptions;
+}
+
+/**
+ * One entry of {@linkcode MessagingCommonOptions.subscriptions}: a
+ * subscription definition, or a {@linkcode RegistryFactory} producing one
+ * when the handler needs a resolved capability.
+ *
+ * @since 0.3.0
+ */
+export type SubscriptionEntry =
+  | SubscriptionDefinition
+  | RegistryFactory<SubscriptionDefinition>;
 
 // ─── Arms of the discriminated union ───────────────────────────────────────────
 

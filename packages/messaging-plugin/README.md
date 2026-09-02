@@ -183,12 +183,14 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 | `ServiceBusOptions`            | interface |
 | `ServiceBusSdkModule`          | interface |
 | `SubscribeOptions`             | interface |
+| `SubscriptionDefinition`       | interface |
 | `MessageHandler`               | type      |
 | `MessagingBrokerType`          | type      |
 | `MessagingPluginOptions`       | type      |
 | `PubSubMessagingOptions`       | type      |
 | `RequestHandler`               | type      |
 | `ServiceBusMessagingOptions`   | type      |
+| `SubscriptionEntry`            | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.
