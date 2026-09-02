@@ -1443,6 +1443,25 @@ const VERSION_HISTORY_DOCS: readonly string[] = [
 ];
 
 /**
+ * Versions this project has shipped, as a regex alternation.
+ *
+ * Deliberately NOT a general semver pattern, and the reason is measured rather
+ * than cautious: across the scanned corpus `\d+\.\d+\.\d+` also matches the
+ * bind address `0.0.0.0`, the loopback `127.0.0.1`, Drizzle's `0.45.2`, and the
+ * Prometheus text format's `0.0.4` — every one a false positive on a string that
+ * is not a Setu-TS version at all.
+ *
+ * **A release that starts a new version LINE must add it here.** Miss that and
+ * both gates below match nothing, so every stale claim naming the old line goes
+ * invisible while `check:docs` stays green — the failure mode is a silent pass,
+ * not a red run. `docs/releasing.md` carries this as a release step.
+ */
+const SHIPPED_VERSION_LINES = [
+  String.raw`0\.1\.0-alpha\.\d+`, // v0.1.0-alpha.1 … v0.1.0-alpha.10
+  String.raw`0\.2\.\d+`, // v0.2.0 onward — the post-alpha 0.x line
+].join('|');
+
+/**
  * Reports install snippets pinning a version older than the one being shipped.
  *
  * These drift silently and in the worst possible place: a package README's
@@ -1464,7 +1483,10 @@ export function checkInstallVersions(
   current: string,
 ): Finding[] {
   const findings: Finding[] = [];
-  const reference = /@setu-ts\/[a-z0-9-]+@\^?(0\.1\.0-alpha\.\d+)/g;
+  const reference = new RegExp(
+    String.raw`@setu-ts/[a-z0-9-]+@\^?(${SHIPPED_VERSION_LINES})`,
+    'g',
+  );
 
   for (const [file, source] of contents) {
     const relative = file.startsWith('./') ? file.slice(2) : file;
@@ -1605,7 +1627,7 @@ export function checkVersionClaims(
   current: string,
 ): Finding[] {
   const findings: Finding[] = [];
-  const reference = /v?(0\.1\.0-alpha\.\d+)/g;
+  const reference = new RegExp(`v?(${SHIPPED_VERSION_LINES})`, 'g');
 
   for (const [file, source] of contents) {
     const relative = file.startsWith('./') ? file.slice(2) : file;

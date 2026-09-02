@@ -1364,6 +1364,36 @@ describe('documentation gate — bare version claims', () => {
     expect(findings[0]?.line).toBe(3);
   });
 
+  // The 0.1.0-alpha line and the 0.2.x line are both this project's, so both
+  // must be readable. Moving to 0.2.0 without widening SHIPPED_VERSION_LINES
+  // would leave every gate green while matching nothing at all.
+  it('reads the post-alpha 0.2.x line as well as the alpha line', () => {
+    const stale = checkVersionClaims(doc('README.md', 'ships `v0.2.0`\n'), '0.2.1');
+    expect(stale).toHaveLength(1);
+    expect(stale[0]?.message).toContain('0.2.0');
+
+    const legacy = checkVersionClaims(doc('README.md', 'ships `v0.1.0-alpha.10`\n'), '0.2.0');
+    expect(legacy).toHaveLength(1);
+    expect(legacy[0]?.message).toContain('0.1.0-alpha.10');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.0`\n'), '0.2.0')).toEqual([]);
+  });
+
+  // Measured against the real corpus, not guessed. A general `\d+.\d+.\d+`
+  // pattern matches every one of these, and each is a false positive on a
+  // string that is not a Setu-TS version — which is why the alternation names
+  // this project's lines explicitly instead.
+  it('does not mistake bind addresses or third-party versions for a claim', () => {
+    const noise = [
+      "await app.start({ hostname: '0.0.0.0' });",
+      "host: '127.0.0.1', port: 3001",
+      'pinned at `npm:drizzle-orm@0.45.2`',
+      'Content-Type: text/plain; version=0.0.4',
+      'requires Deno 2.9.5 or newer',
+    ].join('\n');
+    expect(checkVersionClaims(doc('docs/guide.md', noise), '0.2.0')).toEqual([]);
+  });
+
   it('accepts the marker in yaml and in line-comment syntax', () => {
     const yaml = '# version:history\n\nappVersion: 0.1.0-alpha.5\n';
     expect(checkVersionClaims(doc('k8s/chart/Chart.yaml', yaml), '0.1.0-alpha.7')).toEqual([]);

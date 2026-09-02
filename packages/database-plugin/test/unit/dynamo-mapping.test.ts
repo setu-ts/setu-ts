@@ -7,6 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as dynamoMapping from '../../src/adapters/dynamo/dynamo-mapping.ts';
+import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 
 const { resolveDynamoTarget } = dynamoMapping;
 
@@ -129,5 +130,47 @@ describe('dynamo-mapping module surface', () => {
     // resolved `DynamoTarget` is deliberately NOT exported, so the namespace
     // object must carry exactly the one value export.
     expect(Object.keys(dynamoMapping).sort()).toEqual(['resolveDynamoTarget']);
+  });
+});
+
+describe('resolveDynamoTarget — blank identifiers', () => {
+  // A PRESENT but empty identifier is a configuration mistake, and DynamoDB
+  // reports it without naming the entity or the option that caused it. Each
+  // of the five mapped identifiers is refused here, because the message names
+  // the option path and a wrong path is as unhelpful as no message at all.
+  const cases: readonly (readonly [string, string, Record<string, unknown>])[] = [
+    ['table', 'table', { table: '  ' }],
+    ['partitionKey', 'partitionKey', { partitionKey: '' }],
+    ['sortKey', 'sortKey', { partitionKey: 'pk', sortKey: ' ' }],
+    ['a index partition key', 'indexes.byOwner.partitionKey', {
+      partitionKey: 'pk',
+      indexes: { byOwner: { partitionKey: '' } },
+    }],
+    ['a index sort key', 'indexes.byOwner.sortKey', {
+      partitionKey: 'pk',
+      indexes: { byOwner: { partitionKey: 'owner', sortKey: '\t' } },
+    }],
+  ];
+
+  for (const [label, option, override] of cases) {
+    it(`refuses ${label} that is present but blank, naming the option`, () => {
+      let refusal: unknown;
+      try {
+        resolveDynamoTarget('Order', { Order: override } as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toBeInstanceOf(UnsupportedQueryFeatureError);
+      expect((refusal as Error).message).toContain(`'${option}'`);
+      expect((refusal as Error).message).toContain("entity 'Order'");
+    });
+  }
+
+  it('leaves an absent identifier to the defaulting path rather than refusing it', () => {
+    // `undefined` is "not configured", which is the zero-config path — only a
+    // blank string is a mistake.
+    const target = resolveDynamoTarget('Order', { Order: { partitionKey: 'pk' } });
+    expect(target.keyColumns).toEqual(['pk']);
+    expect(target.table).toBe('Order');
   });
 });

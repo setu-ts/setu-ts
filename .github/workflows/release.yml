@@ -223,8 +223,12 @@ jobs:
             exit 0
           fi
           deno run --allow-read scripts/release-notes.ts "$version" > "$RUNNER_TEMP/notes.md"
+          # Flagged prerelease for anything below 1.0, not only for a version
+          # carrying a `-suffix`. v0.2.0 dropped the `alpha` label without
+          # freezing the API, so a bare `0.x` is still "do not assume stable" —
+          # see README's Versioning section. Drop the `0.*` arm at 1.0.
           prerelease=''
-          case "$version" in *-*) prerelease='--prerelease' ;; esac
+          case "$version" in 0.*|*-*) prerelease='--prerelease' ;; esac
           # --verify-tag: without it `gh release create` CREATES a missing tag
           # from the default branch, so a deleted or mistyped tag would produce
           # a release pointing at a commit other than the one just published.

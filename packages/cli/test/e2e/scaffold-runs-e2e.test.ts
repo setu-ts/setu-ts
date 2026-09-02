@@ -553,11 +553,19 @@ describe('a scaffolded project can install the versions it was pinned to', () =>
    * which during a release bump is not published yet, so the install fails on
    * `Could not find version … that matches '^<next>'` before any age policy is
    * consulted: the test would then block the very release that would publish
-   * the version it wants. `^0.1.0-alpha.1` resolves to the newest published
-   * release (measured: alpha.7 while alpha.8 was unpublished), so it needs no
-   * maintenance, and it changes nothing either leg proves — the emitted value
-   * is asserted separately above, and every published version is younger than
-   * the ten-year threshold that makes the refusal leg deterministic.
+   * the version it wants. `^0.1.0-alpha.1` resolves to a published release, so
+   * it does not deadlock, and it changes nothing either leg proves — the
+   * emitted value is asserted separately above, and every published version is
+   * younger than the ten-year threshold that makes the refusal leg
+   * deterministic.
+   *
+   * It no longer tracks the NEWEST published release, which it did while every
+   * version was a `0.1.0-alpha.N` prerelease: a caret range caps at the next
+   * minor, so from `v0.2.0` onward this deliberately installs the newest
+   * release of the alpha line. That is still a real registry install under a
+   * real age policy, which is all either leg needs. The self-maintaining
+   * alternative is a BARE specifier — unavailable before `v0.2.0`, because JSR
+   * never pointed `latest` at a prerelease, and available now.
    *
    * @param project - The project directory
    */
