@@ -172,6 +172,15 @@ not on `main`.
 > well, so the pair cannot drift apart again. Nothing local reproduces this — the assertion is
 > deliberately vacuous off CI, so the first evidence is the tag run itself.
 
+> **And it is not enough for them to agree once.** M80 added DynamoDB Local and M82 the Cloud
+> Bigtable emulator to `ci.yml` only, so both guarded suites skipped silently on every tag run while
+> passing on every PR — a weaker gate in front of an immutable publish, and invisible because only
+> `REDIS_URL` carries a reachability assertion. The parity rule is now DERIVED from `ci.yml` in
+> `test/unit/release-notes.test.ts` rather than hand-listed, so a backend added to the PR job is
+> automatically required of the tag job too. Note the Bigtable emulator is a STEP, not a service
+> container — its image's default command is a shell, and a `services` block cannot set one — so it
+> needs its own assertion.
+
 ## Tokenless CI publishing needs each package linked to the repository
 
 JSR accepts a GitHub Actions OIDC identity only for a package it knows belongs to the repository:

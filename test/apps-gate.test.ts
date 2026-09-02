@@ -352,6 +352,13 @@ describe('real-backend CI wiring', () => {
     // so the v0.1.0-alpha.5 release run died on that assertion and the release
     // was published by hand. The two workflows must therefore agree on the
     // backend environment, not merely on which tasks they call.
+    //
+    // These four are the ones whose absence killed a release, kept as an
+    // explicit record of that. The GENERAL rule — release.yml must start every
+    // backend ci.yml starts — is derived from ci.yml rather than hand-listed,
+    // in `test/unit/release-notes.test.ts`, because a hand-list is what let
+    // DynamoDB Local and the Bigtable emulator drift in unnoticed after M80
+    // and M82 added them to the PR job alone.
     const workflow = await Deno.readTextFile('.github/workflows/release.yml');
     expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
     expect(workflow).toContain('image: redis:7');

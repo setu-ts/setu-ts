@@ -155,6 +155,40 @@ describe('release workflow wiring', () => {
     );
   });
 
+  it('starts every backend the PR job starts, so a tag run is no weaker a gate', async () => {
+    // The tag run re-runs the whole suite as the last gate before an immutable
+    // publish, so a backend it does not start is a guarded suite that skips
+    // there while passing on every PR. That is invisible: only `REDIS_URL` has
+    // a CI-reachability assertion, so the rest degrade to a silent skip and the
+    // job stays green. v0.2.0 shipped with DynamoDB Local and the Bigtable
+    // emulator missing here for exactly that reason.
+    //
+    // Derived from ci.yml rather than listed by hand, because a hand-written
+    // list is what drifted: a backend added to the PR job is now automatically
+    // required here too.
+    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
+    const release = await Deno.readTextFile('.github/workflows/release.yml');
+    const prJob = jobBlock(ci, 'deno');
+    const tagJob = jobBlock(release, 'release');
+
+    const images = [...prJob.matchAll(/^ +image: (\S+)$/gm)].map((match) => match[1]);
+    expect(images.length).toBeGreaterThan(5);
+    for (const image of images) {
+      expect(tagJob).toContain(`image: ${image}`);
+    }
+
+    // Endpoints too: a started container the suite cannot address is no gate.
+    const endpoints = [...prJob.matchAll(/^ +([A-Z0-9_]+(?:_URL|_URI|_ENDPOINT)): (\S+)$/gm)];
+    expect(endpoints.length).toBeGreaterThan(5);
+    for (const [, name, value] of endpoints) {
+      expect(tagJob).toContain(`${name}: ${value}`);
+    }
+
+    // The Bigtable emulator cannot be a service container (its image's default
+    // command is a shell), so it is a step and no image/env pin above covers it.
+    expect(tagJob).toContain('gcloud beta emulators bigtable start --host-port=0.0.0.0:8086');
+  });
+
   it('flags a 0.x release as a prerelease, not only a -suffix version', async () => {
     // v0.2.0 dropped the `alpha` label without freezing the API, so matching
     // only `*-*` would publish a Release object presented as stable. The
