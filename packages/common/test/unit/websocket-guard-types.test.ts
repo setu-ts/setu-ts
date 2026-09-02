@@ -46,9 +46,9 @@ describe('WebSocket upgrade-guard contracts', () => {
   });
 
   it('accepts a refusal object as an upgrade decision', () => {
-    const decision: WebSocketGuardDecision = { status: 403, body: 'Forbidden' };
+    const decision: WebSocketGuardDecision = { status: 403 };
 
-    expect(decision).toEqual({ status: 403, body: 'Forbidden' });
+    expect(decision).toEqual({ status: 403 });
   });
 
   it('rejects a bare number as an upgrade decision', () => {

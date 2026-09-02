@@ -456,9 +456,8 @@ export class WebSocketService implements IWebSocketService {
     // accepted. Only the MATCHED route's guards run — a guard registered on
     // one path is invisible to every other path — and the first non-`true`
     // decision refuses with its status. `routeUpgrade` answers through the
-    // kernel's refusal shape, which carries a status but no body, so a
-    // guard decision's optional `body` cannot reach the wire here; the
-    // status is what the client sees.
+    // kernel's refusal shape, which carries a status only; the status is
+    // what the client sees.
     const guards = this.#routeGuards.get(match.route.path);
     if (guards !== undefined) {
       for (const guard of guards) {

@@ -286,7 +286,8 @@ export interface WebSocketConnectionContext {
  * The result of a route-scoped WebSocket upgrade guard.
  *
  * Return `true` to accept the upgrade. Return the refusal object to reject it
- * before the handshake with the supplied HTTP status and, optionally, body.
+ * before the handshake with the supplied HTTP status, which the client sees
+ * as the upgrade response.
  *
  * @since 0.3.0
  */
@@ -295,8 +296,6 @@ export type WebSocketGuardDecision =
   | {
     /** The HTTP status to answer with when refusing the upgrade. */
     readonly status: number;
-    /** An optional response body explaining why the upgrade was refused. */
-    readonly body?: string;
   };
 
 /**

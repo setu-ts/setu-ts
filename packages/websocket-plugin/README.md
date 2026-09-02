@@ -152,8 +152,8 @@ ws.route('/ws/chat', {
 | `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                      |
 
 `WebSocketRouteOptions.guards` is route-scoped: guards run in declared order before the matched
-route's handshake, and the first `{ status, body? }` refusal wins. It is separate from the
-plugin-level frame `behaviors` arm; no route-level behaviour arm exists.
+route's handshake, and the first `{ status }` refusal wins. It is separate from the plugin-level
+frame `behaviors` arm; no route-level behaviour arm exists.
 
 Configuring one or more behaviours makes frame dispatch promise-mediated, so a synchronous
 `onMessage` runs after a microtask. With no behaviours configured, dispatch remains the direct,

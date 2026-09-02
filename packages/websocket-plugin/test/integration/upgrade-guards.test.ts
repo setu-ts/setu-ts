@@ -38,7 +38,7 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     ws.route('/ws/locked', { onMessage: () => {} }, {
-      guards: [() => ({ status: 401, body: 'not authorized' })],
+      guards: [() => ({ status: 401 })],
     });
 
     const response = await app.fetch(wireUpgradeRequest('http://localhost/ws/locked'));

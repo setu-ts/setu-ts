@@ -160,7 +160,7 @@ describe('@setu-ts/common barrel — M86 ingress contracts', () => {
   it('exports WebSocket upgrade-guard types (declared against the barrel)', () => {
     // Type-level: both names resolve only from the public barrel. A dropped
     // type-only export is invisible to runtime assertions.
-    const decision: WebSocketGuardDecision = { status: 401, body: 'Unauthorized' };
+    const decision: WebSocketGuardDecision = { status: 401 };
     const guard: WebSocketUpgradeGuard = (context) => context.user === undefined ? decision : true;
 
     expect(guard).toBeDefined();

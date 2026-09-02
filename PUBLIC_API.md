@@ -8452,9 +8452,9 @@ terminal handler; a thrown error follows that ingress's existing error path. The
 also consumed internally by CQRS; it adds no CQRS surface.
 
 `WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
-either `true` or a `{ status, body? }` refusal (`WebSocketGuardDecision`).
-`WebSocketRouteOptions.guards` is an optional readonly array of those guards; the matched route runs
-them in declared order before its handshake and the first refusal wins.
+either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
+is an optional readonly array of those guards; the matched route runs them in declared order before
+its handshake and the first refusal wins.
 
 Contract notes:
 
