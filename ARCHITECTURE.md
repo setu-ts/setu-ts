@@ -1916,6 +1916,18 @@ const authMiddleware = () => async (ctx, next) => {
 };
 ```
 
+### Non-HTTP ingress behaviour chain
+
+Queue processors, scheduler jobs, messaging subscriptions, and WebSocket frames use a second,
+transport-neutral behaviour chain. Each work item is presented to an `IIngressBehavior` as an
+`IngressContext`; calling `next()` advances to the next declared behaviour and a behaviour that does
+not call it short-circuits the handler.
+
+This ingress chain is separate from both the HTTP middleware pipeline and CQRS's `IPipelineBehavior`
+chain. They do not share middleware or behaviour instances: HTTP middleware wraps requests and
+upgrades, CQRS behaviours wrap commands and queries, and ingress behaviours wrap the four non-HTTP
+handler kinds above.
+
 ### Error Propagation
 
 If a middleware or handler throws an error:

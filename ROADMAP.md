@@ -8523,17 +8523,14 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
   `IPipelineBehavior` or by promoting a transport-neutral sibling beside it. `WebSocketRouteOptions`
   gains route-scoped middleware for the UPGRADE, which is what removes X13's duplicated path and its
   application-wide guard, and the frame phase gets the behaviour chain — two seams, per the phase
-  distinction above. Typed connection data on `IWebSocketConnection`, which is **additive**:
-  `IWebSocketConnection.data` is released API carrying `Map<string, unknown>`, so §9.4 forbids
-  changing its shape under existing callers — the plan adds a typed accessor beside it (a `TData`
-  type parameter defaulting to today's shape is the candidate) and deprecates the untyped read per
-  §9.2 rather than replacing it. Every registration arm is additive and optional, so existing
-  imperative call sites keep working unchanged; that promise covers the whole milestone, including
-  the connection-data work.
+  distinction above. Every registration arm is additive and optional, so existing imperative call
+  sites keep working unchanged.
 - **Not in scope:** decorators of any kind, for the reason above. Threading tenancy, auth or tracing
   through the new pipeline — this milestone makes them expressible and a successor wires them, so
-  that the seam is not designed and consumed in one pass. Any change to a wire protocol. Any change
-  to worker-pool, which addresses handlers by module specifier rather than closure by design.
+  that the seam is not designed and consumed in one pass. Typed connection data: the M71 successor
+  owns extending the `<owner-package>:<kebab-key>` convention and its gate to `conn.data`. Any
+  change to a wire protocol. Any change to worker-pool, which addresses handlers by module specifier
+  rather than closure by design.
 - **Verification bar:** X13's `collaboration.plugin.ts` is the benchmark and must be rewritten
   against the new surface as a committed example, losing the `IPlugin` wrapper, the duplicated path
   string, the global middleware and the per-frame narrowing. A guard registered on ONE WebSocket
@@ -8542,9 +8539,10 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
   demonstrate one behavior running for a handler registered through the arm and refused before it by
   a pipeline entry, driven through a real kernel application rather than a hand-built plugin
   context.
-- **Packages:** `common`, `websocket-plugin`, `queue-plugin`, `scheduler-plugin`,
-  `messaging-plugin`. The plan may split into sub-milestones, but the pipeline contract lands first
-  and once — four plugins each inventing their own is the failure this milestone exists to prevent.
+- **Packages:** `common`, `cqrs-plugin`, `websocket-plugin`, `queue-plugin`, `scheduler-plugin`,
+  `messaging-plugin`. `cqrs-plugin` removes its private duplicate composer and consumes the shared
+  `common` one; this has no CQRS public-surface effect. The pipeline contract lands first and once —
+  four plugins each inventing their own is the failure this milestone exists to prevent.
 
 ---
 

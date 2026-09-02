@@ -44,16 +44,41 @@ await scheduler.resume('poll-inbox');
 
 ## Options
 
-| Option            | Type                     | Default  | Description                                |
-| ----------------- | ------------------------ | -------- | ------------------------------------------ |
-| `timezone`        | `string`                 | `'UTC'`  | Only `'UTC'` is supported in this release. |
-| `distributedLock` | `DistributedLockOptions` | disabled | Multi-instance safety; see below.          |
+| Option            | Type                                                                 | Default  | Description                                                                                                                                        |
+| ----------------- | -------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timezone`        | `string`                                                             | `'UTC'`  | Only `'UTC'` is supported in this release.                                                                                                         |
+| `distributedLock` | `DistributedLockOptions`                                             | disabled | Multi-instance safety; see below.                                                                                                                  |
+| `jobs`            | `readonly SchedulerJobEntry[]`                                       | —        | Declarative `cron()` / `every()` / `delay()` registrations. `SchedulerJobDefinition` is discriminated by `trigger`; factories resolve at `onInit`. |
+| `behaviors`       | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Chain around every handler. It sees `kind: 'scheduler'`, job name, the delivered job, and its 1-based attempt.                                     |
+
+The following declarative `jobs` shape is copied verbatim from the integration test:
+
+```typescript
+const { runtime } = await createHarness({
+  behaviors: [envelopeRecorder(envelopes)],
+  jobs: [
+    {
+      trigger: 'every',
+      name: 'send-email',
+      intervalMs: TICK_MS,
+      handler: (job) => {
+        seen.push(job as ScheduledJob<{ to: string }>);
+      },
+      data: { to: 'ada@example.com' },
+    },
+  ],
+});
+```
 
 ## Distributed locking
 
 Without `distributedLock`, a process-local `MemoryLock` is used — fine for a single instance, but
 **every replica will run every job**. Set `{ enabled: true, storage: 'redis' }` to use `RedisLock`
 (over `npm:ioredis`, lazily imported or injected) so only one replica executes each firing.
+
+Behaviours run inside that lock. A replica that does not acquire it runs neither the behaviour chain
+nor the job handler; a behaviour throw follows the job's existing retry policy. With no behaviours,
+the handler receives its original job directly and no chain is allocated.
 
 ## Exports
 

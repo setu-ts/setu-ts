@@ -35,12 +35,14 @@ await broker.publish('user.created', { userId: '123' });
 
 `MessagingPluginOptions` is a union discriminated on `broker`. Two options are shared by every arm:
 
-| Option       | Type                  | Default          | Description                                                                           |
-| ------------ | --------------------- | ---------------- | ------------------------------------------------------------------------------------- |
-| `broker`     | `MessagingBrokerType` | `'memory'`       | Selects the arm. Optional only on the memory arm, so `MessagingPlugin()` stays valid. |
-| `name`       | `string`              | —                | Instance name for multi-instance setups.                                              |
-| `serializer` | `ISerializer`         | `JsonSerializer` | Payload serializer.                                                                   |
-| `tracing`    | `boolean`             | `true`           | Create broker producer/consumer spans when telemetry is registered.                   |
+| Option          | Type                                                                 | Default          | Description                                                                                                                                     |
+| --------------- | -------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `broker`        | `MessagingBrokerType`                                                | `'memory'`       | Selects the arm. Optional only on the memory arm, so `MessagingPlugin()` stays valid.                                                           |
+| `name`          | `string`                                                             | —                | Instance name for multi-instance setups.                                                                                                        |
+| `serializer`    | `ISerializer`                                                        | `JsonSerializer` | Payload serializer.                                                                                                                             |
+| `tracing`       | `boolean`                                                            | `true`           | Create broker producer/consumer spans when telemetry is registered.                                                                             |
+| `subscriptions` | `readonly SubscriptionEntry[]`                                       | —                | Declarative `subscribe()` registrations. A `SubscriptionDefinition` is `{ topic, handler, options? }`; factories resolve during async `onInit`. |
+| `behaviors`     | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                | Chain around subscribe handlers. It sees `kind: 'messaging'`, topic, message payload, and available headers; no delivery attempt is fabricated. |
 
 Omitting `name` registers under the bare `CAPABILITIES.MESSAGING` token as plugin
 `messaging-plugin`. Supplying one derives both — token `messaging.<name>`, plugin
@@ -49,6 +51,26 @@ Omitting `name` registers under the bare `CAPABILITIES.MESSAGING` token as plugi
 Every other option is arm-specific — `url`/`client` for `'redis-streams'`, credentials for the cloud
 arms, an injected `IMessageBroker` for `'custom'`. A missing per-arm field is a compile error rather
 than a startup throw. See [Brokers](#brokers) for the full arm list.
+
+The following declarative `subscriptions` shape is copied verbatim from the integration test:
+
+```typescript
+const { harness, broker } = await boot({
+  broker: 'memory',
+  subscriptions: [
+    {
+      topic: 'orders',
+      handler: (message) => {
+        received.push(message);
+      },
+    },
+  ],
+});
+```
+
+The behaviour chain wraps `subscribe()` handlers only. `respond()` remains unwrapped and has no
+registration arm: its request handler returns a value, unlike the void-returning subscription
+handler. With no behaviours configured, no `PipelinedBroker` decorator is applied.
 
 ## Brokers
 

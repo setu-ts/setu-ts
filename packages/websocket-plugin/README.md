@@ -140,14 +140,24 @@ ws.route('/ws/chat', {
 
 ## Options
 
-| Option             | Type      | Default  | Description                                                                                    |
-| ------------------ | --------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `maxConnections`   | `number`  | `0`      | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.             |
-| `heartbeatMs`      | `number`  | `0`      | Heartbeat interval; `0` disables it and creates no timer at all.                               |
-| `heartbeatPayload` | `string`  | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                               |
-| `idleTimeoutMs`    | `number`  | `0`      | Inbound silence after which a peer is closed with `1001`; `0` disables.                        |
-| `maxMessageBytes`  | `number`  | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.                    |
-| `scalingNotice`    | `boolean` | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
+| Option             | Type                                                                 | Default  | Description                                                                                                                                            |
+| ------------------ | -------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxConnections`   | `number`                                                             | `0`      | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.                                                                     |
+| `heartbeatMs`      | `number`                                                             | `0`      | Heartbeat interval; `0` disables it and creates no timer at all.                                                                                       |
+| `heartbeatPayload` | `string`                                                             | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                       |
+| `idleTimeoutMs`    | `number`                                                             | `0`      | Inbound silence after which a peer is closed with `1001`; `0` disables.                                                                                |
+| `maxMessageBytes`  | `number`                                                             | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.                                                                            |
+| `scalingNotice`    | `boolean`                                                            | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                         |
+| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —        | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`. |
+| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                      |
+
+`WebSocketRouteOptions.guards` is route-scoped: guards run in declared order before the matched
+route's handshake, and the first `{ status, body? }` refusal wins. It is separate from the
+plugin-level frame `behaviors` arm; no route-level behaviour arm exists.
+
+Configuring one or more behaviours makes frame dispatch promise-mediated, so a synchronous
+`onMessage` runs after a microtask. With no behaviours configured, dispatch remains the direct,
+synchronous invoke.
 
 ### Opting a route out of the sweep
 

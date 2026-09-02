@@ -200,7 +200,25 @@ read the Changed section before upgrading.
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.
 
+- **`@setu-ts/common`: ingress behaviour contract.** Adds `IngressKind`, immutable `IngressContext`,
+  `IIngressBehavior`, structural `BehaviorLike`, and the shared `composeBehaviorChain`; also adds
+  `WebSocketUpgradeGuard` and `WebSocketGuardDecision` for route-scoped upgrade decisions.
+- **`@setu-ts/websocket-plugin`: declarative routes and frame behaviours.** Adds `routes`,
+  `behaviors`, and per-route upgrade guards. When a behaviour chain is configured, frame dispatch is
+  promise-mediated; without behaviours it remains the original direct synchronous invoke.
+- **`@setu-ts/queue-plugin`: declarative processors and ingress behaviours.** Adds `processors` and
+  `behaviors`; behaviour errors preserve existing retry, `onFailed`, and final dead-letter handling.
+- **`@setu-ts/scheduler-plugin`: declarative jobs and ingress behaviours.** Adds `jobs` and
+  `behaviors`; the chain runs inside the distributed lock, so a replica that loses the lock runs
+  neither behaviours nor the handler.
+- **`@setu-ts/messaging-plugin`: declarative subscriptions and ingress behaviours.** Adds
+  `subscriptions` and `behaviors` on every broker arm. The chain wraps subscribe handlers only;
+  `respond()` remains unwrapped because its handler returns a result.
+
 ### Changed
+
+- **`@setu-ts/cqrs-plugin`: internal composer promotion.** Its private composer is removed in favor
+  of `@setu-ts/common`'s shared composer. CQRS behavior and public surface are unchanged.
 
 - **The version scheme drops the prerelease suffix: `0.1.0-alpha.10` → `0.2.0`.** No code changes
   with it. Two consequences for consumers: a bare `deno add jsr:@setu-ts/kernel` now resolves,
