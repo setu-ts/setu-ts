@@ -3680,6 +3680,74 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   alpha.1 states the shipping version in the release commit itself (`32ef2f41` for alpha.9 bumps the
   same line), the window is one CI run, and `checkVersionClaims` would reject a "pending" phrasing
   as neither a current-release claim nor a `version:history` record.
+- **Release `v0.2.0`** — on `release/v0.2.0`, published 2026-09-02 (PR #223, tag at the merge commit
+  `d519e123`; CI published it, one green `Publish to JSR` job — the fifth first-try success in a
+  row). **47 packages**, list unchanged since alpha.8, so no first-time publisher and neither
+  `release:create-packages` nor `release:link-repos` was needed. Scope was M77–M85 plus the
+  version-scheme change itself. **This is the release that retired the `alpha` label**, and the
+  change is one of NAMING, not policy: `0.x` already carries semver's "anything MAY change" licence,
+  so the suffix communicated nothing extra while costing real ergonomics — JSR never tags a
+  prerelease as `latest`, which is why every install line in every document had to be pinned by
+  hand. The payoff was verified live rather than assumed: **all 47 now report
+  `latestVersion: 0.2.0`** where every prerelease reported `null`, and a **bare**
+  `deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime` resolves for the first time in the project's
+  history (it emitted `^0.2.0`, resolved `common` transitively at 0.2.0, and served
+  `200 {"ok":true}`). The Release object carries `resolved-set.json` and is flagged
+  **`prerelease=true`** — `release.yml`'s arm was widened from `*-*` to `0.*|*-*` deliberately, so
+  dropping the label asserts no stability the API has not earned; drop the `0.*` arm at 1.0. 1.0
+  stays gated on M40 (benchmarks, security audit, Node/Bun compat suites as release gates), and
+  README gained a `## Versioning` section stating that a minor bump carries breaking changes.
+
+  **The gate had to be fixed BEFORE the bump, and this is the trap to remember.** Both document
+  version gates in `scripts/check-docs.ts` hardcoded `0\.1\.0-alpha\.\d+`, so on a `0.2.0` tree they
+  matched NOTHING — `check:docs` would have reported a clean pass while checking nothing at all, and
+  every stale claim left in the tree would have gone invisible. The failure mode is a silent green
+  run, not a red one. It is now a `SHIPPED_VERSION_LINES` alternation, and `docs/releasing.md`
+  carries widening it as a release step, because a release that starts a new version LINE and
+  forgets it re-opens the same hole. It is deliberately NOT a general semver pattern: measured
+  against the scanned corpus, `\d+\.\d+\.\d+` also matches the bind address `0.0.0.0`, the loopback
+  `127.0.0.1`, Drizzle's `0.45.2` and the Prometheus text format's `0.0.4`.
+
+  **Code review then found two real defects in that gate fix, and the pattern took three passes to
+  get right** — worth recording because each pass looked correct. (1) The `0.2.x` arm captured only
+  the STABLE PREFIX, so a future `0.2.1-rc.1` release would compare `0.2.1` against the shipping
+  version and report every CORRECT reference as stale; and it had no token boundary, so the `0.2.1`
+  inside an unrelated `10.2.1` or `127.0.2.1` read as a Setu-TS claim. The original false-positive
+  test corpus contained no `X0.2.N` string, which is exactly why it missed that class. (2) The
+  replacement suffix still rejected a hyphen INSIDE a prerelease identifier and had no build-
+  metadata arm, so `0.2.1-rc-1` captured `0.2.1-rc` and `0.2.1+build.7` captured `0.2.1` — both
+  legal on JSR. It now follows semver exactly. The right boundary is two narrow lookaheads
+  (`(?!\d)(?!\.\d)`) rather than `(?![\w.])`, because the latter stops matching a version that ends
+  a sentence. Every arm has a test, and each half was verified to fail independently when reverted —
+  widening a pattern in a gate whose failure mode is a silent pass needs the discrimination cases,
+  not only the equality ones.
+
+  **`release:verify` ran in no PR path at all** — only on a tag, i.e. AFTER a release PR had already
+  been merged — although it is the only gate for version agreement across all 47 manifests,
+  cross-package specifier resolvability, whole-workspace coverage and `@module`-first entrypoints. A
+  release PR is precisely the change whose entire risk surface is those four. `ci.yml`'s
+  `publish-dry-run` job now runs it with the version read from the workspace
+  (`jq -r .version packages/kernel/deno.json`) rather than written into the workflow, and the pin in
+  `test/unit/release-notes.test.ts` asserts the command as a real `run:` line INSIDE that job plus
+  the `pull_request` trigger — three workflow-wide `toContain` substrings passed just as well with
+  the command commented out or moved to a tag-only job, verified by observing both.
+
+  **Two CI failures during the release were infrastructure, not the release**, and both cost a
+  re-run: `apps/realtime-clients`' smoke gives the workerd server started by `npx wrangler dev` a
+  ten-second readiness budget while npm cold-installs `wrangler@4.128.0`, and a `kind` download died
+  with `curl: (35) Recv failure`. The first is a real latent defect — `apps/cloudflare` probes the
+  bare `wrangler` binary and SKIPS when absent (it is in `ALLOW_SKIP`), while
+  `apps/realtime-clients` goes through `npx` and hard-fails, reporting it as "server did not start",
+  which names the wrong thing. **Left for a `fix/…` branch, with the one-line fix identified**:
+  resolve wrangler before the readiness clock starts, so the install is paid outside the window.
+  Also still open: `ci.yml` starts the DynamoDB Local and Bigtable emulator backends and
+  `release.yml` starts neither, so both suites skip silently on a tag run — non-fatal, because only
+  `REDIS_URL` has a CI-reachability assertion, but the release job's gate is weaker than the PR's.
+
+  Two changes rode in on the release PR that by convention belong elsewhere, both recorded rather
+  than silent: a coverage fix for `dynamo-mapping.ts`, which sat at **84.2% line** — below the
+  absolute bar, new since alpha.10, so 0.2.0 would have been its first publish (the blank-identifier
+  refusal was untested; now 100/100/100) — and the `release:verify` CI step above.
 - **Milestone 78** — native MongoDB backend for `database-plugin`, including the `'mongodb'`
   configuration arm, native query translation, ObjectId mapping, injected-client seam, and real
   driver CI coverage — complete (PR #208).
