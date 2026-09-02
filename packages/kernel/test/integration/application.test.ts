@@ -1602,6 +1602,74 @@ describe('Application review fixes', () => {
     expect(closed).toBe(1);
   });
 
+  it('runs EVERY close hook even when an earlier one rejects', async () => {
+    // A close hook releases one plugin's resources. Aborting the loop at the
+    // first failure meant one plugin that could not disconnect kept every
+    // later plugin from releasing anything — the M50 `onStopping` defect in a
+    // second place. Reverting `runClose` to `await fn()` in a bare loop fails
+    // this: only 'a' runs.
+    const ran: string[] = [];
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'a',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onClose(() => {
+              ran.push('a');
+              throw new Error('a failed to disconnect');
+            });
+          },
+        },
+        {
+          name: 'b',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onClose(() => {
+              ran.push('b');
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+
+    // The caller still learns about it, and a lone failure is rethrown as
+    // itself so an existing `instanceof` check still matches.
+    await expect(app.stop()).rejects.toThrow('a failed to disconnect');
+    expect(ran).toEqual(['a', 'b']);
+  });
+
+  it('aggregates when more than one close hook rejects', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'a',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onClose(() => {
+              throw new Error('a failed');
+            });
+          },
+        },
+        {
+          name: 'b',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onClose(() => {
+              throw new Error('b failed');
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+
+    await expect(app.stop()).rejects.toThrow(AggregateError);
+  });
+
   it('start() called twice throws instead of re-running startup', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
     await app.start();

@@ -380,6 +380,66 @@ describe('MessagingPlugin({ behaviors }) registration arms', () => {
     expect(seenBy).toEqual(['instance', 'factory']);
   });
 
+  it('gates delivery for an IMPERATIVE subscription made before the chain is final', async () => {
+    // The deferral of DECLARED entries could not reach this door: a later
+    // plugin resolves the broker in its own `register()` and subscribes there,
+    // which is after this plugin's `register()` and before its `onInit`.
+    // Probed before the gate: the handler ran having seen only the instance
+    // behaviour. Reverting the gate reproduces exactly that.
+    const seenBy: string[] = [];
+    const handled: string[] = [];
+
+    class BacklogBroker implements IMessageBroker {
+      connect(): Promise<void> {
+        return Promise.resolve();
+      }
+      disconnect(): Promise<void> {
+        return Promise.resolve();
+      }
+      publish<T>(_topic: string, _message: T): Promise<void> {
+        return Promise.resolve();
+      }
+      subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<ISubscription> {
+        void handler(
+          { id: 'backlog-1' } as T,
+          { topic, timestamp: new Date(0), headers: {} },
+        );
+        return Promise.resolve({ unsubscribe: (): Promise<void> => Promise.resolve() });
+      }
+      request<TRes>(): Promise<TRes> {
+        return Promise.reject(new Error('no rpc'));
+      }
+      respond(): Promise<ISubscription> {
+        return Promise.resolve({ unsubscribe: (): Promise<void> => Promise.resolve() });
+      }
+    }
+
+    const { harness, broker } = await boot({
+      broker: 'custom',
+      instance: new BacklogBroker(),
+      behaviors: [
+        recorder(seenBy, 'instance'),
+        (): IIngressBehavior => recorder(seenBy, 'factory'),
+      ],
+    });
+
+    // Stands in for a later plugin's own register(): the broker is already
+    // registered and connected, and the chain is not yet final.
+    await broker.subscribe('orders', (): void => {
+      handled.push('handler');
+    });
+
+    expect(handled).toEqual([]);
+
+    await runInitHooks(harness);
+    // Let the gated delivery settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(handled).toEqual(['handler']);
+    expect(seenBy).toEqual(['instance', 'factory']);
+  });
+
   it('wraps arm-registered subscriptions in the chain, in declared order', async () => {
     const log: string[] = [];
     const { harness, broker } = await boot({

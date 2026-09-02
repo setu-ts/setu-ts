@@ -198,7 +198,7 @@ describe('Messaging zero-configuration broker chain is unchanged (M86 §3.9)', (
     expect(seen[0]?.meta).toBe(metadata);
   });
 
-  it('an explicitly empty behaviors arm changes the chain identically', async () => {
+  it('an explicitly empty behaviors arm leaves the chain unchanged', async () => {
     const recording = createRecordingBroker({ topic: 'orders', headers: {} });
     const { service } = await boot({
       broker: 'custom',

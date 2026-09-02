@@ -38,7 +38,8 @@ function createCtx(runtime: FakeRuntime): {
   const registered = new Map<string, unknown>();
   const ctx = {
     runtime,
-    logger: undefined,
+    // `logger` is OMITTED, not set to `undefined`: it is an optional property
+    // and the workspace enables `exactOptionalPropertyTypes`.
     services: {
       register: <T>(token: string, service: T): void => {
         registered.set(token, service);

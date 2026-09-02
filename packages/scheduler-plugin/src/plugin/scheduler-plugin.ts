@@ -88,6 +88,26 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
   // with the complete declared sequence before the app serves.
   const behaviorChain: IIngressBehavior[] = [...behaviorInstances];
   const declaredBehaviors = behaviors.length > 0;
+  // Held while behaviour FACTORIES are still unresolved. A fire waits on it so
+  // no job runs through a partial chain; opened at the end of `onInit`, once
+  // `behaviorChain` is final.
+  // `withResolvers` rather than a `new Promise` executor with `() => {}`
+  // placeholders: those placeholders are never called, so they are dead
+  // functions the coverage bar counts.
+  //
+  // `failChainGate` is called when `onInit` fails, so work held on the gate
+  // FAILS into this ingress's own failure path instead of hanging on a promise
+  // that can never settle. Running it through the partial chain remains the
+  // one thing the gate will not do.
+  const {
+    promise: chainReady,
+    resolve: openChainGate,
+    reject: failChainGate,
+  } = Promise.withResolvers<void>();
+  // The gate is awaited per dispatch, so its rejection is always observed
+  // there; this keeps an unobserved rejection from surfacing when nothing is
+  // currently held.
+  chainReady.catch(() => {});
 
   return {
     name: 'scheduler-plugin',
@@ -134,7 +154,13 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
         ttlMs: options?.distributedLock?.ttlMs,
       };
       const service = declaredBehaviors
-        ? new BehaviorChainSchedulerService(ctx.runtime, lock, serviceOptions, behaviorChain)
+        ? new BehaviorChainSchedulerService(
+          ctx.runtime,
+          lock,
+          serviceOptions,
+          behaviorChain,
+          behaviorFactories.length === 0 ? undefined : chainReady,
+        )
         : new SchedulerService(ctx.runtime, lock, serviceOptions);
 
       // Connect the service
@@ -154,10 +180,8 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       // is final, is what makes the arm's guarantee true. With no factory
       // declared the chain is already complete here and the timing is
       // unchanged.
-      if (behaviorFactories.length === 0) {
-        for (const definition of jobInstances) {
-          await scheduleDefinition(service, definition);
-        }
+      for (const definition of jobInstances) {
+        await scheduleDefinition(service, definition);
       }
 
       // Register health indicator
@@ -183,36 +207,42 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       // zero-factory configuration gains no lifecycle hook at all.
       if (jobFactories.length > 0 || behaviorFactories.length > 0) {
         ctx.lifecycle.onInit(async () => {
-          // The chain is completed FIRST: everything scheduled below — and the
-          // instances deferred out of `register()` when a behaviour factory is
-          // declared — must arm against the final chain, never a partial one.
-          behaviorChain.splice(
-            0,
-            behaviorChain.length,
-            ...behaviors.map((entry, index) =>
-              typeof entry === 'function'
-                ? resolveRegistryEntry(
-                  entry,
-                  ctx.services,
-                  `SchedulerPlugin({ behaviors })[${index}]`,
-                )
-                : entry
-            ),
-          );
+          try {
+            // The chain is completed FIRST, before any factory job is scheduled
+            // below.
+            behaviorChain.splice(
+              0,
+              behaviorChain.length,
+              ...behaviors.map((entry, index) =>
+                typeof entry === 'function'
+                  ? resolveRegistryEntry(
+                    entry,
+                    ctx.services,
+                    `SchedulerPlugin({ behaviors })[${index}]`,
+                  )
+                  : entry
+              ),
+            );
 
-          if (behaviorFactories.length > 0) {
-            for (const definition of jobInstances) {
+            for (const slot of jobFactories) {
+              const definition = resolveRegistryEntry(
+                slot.entry,
+                ctx.services,
+                `SchedulerPlugin({ jobs })[${slot.index}]`,
+              );
               await scheduleDefinition(service, definition);
             }
-          }
 
-          for (const slot of jobFactories) {
-            const definition = resolveRegistryEntry(
-              slot.entry,
-              ctx.services,
-              `SchedulerPlugin({ jobs })[${slot.index}]`,
-            );
-            await scheduleDefinition(service, definition);
+            // LAST: the chain is final, so any fire held during startup may run.
+            // A hook that threw above never reaches this, leaving the gate shut
+            // — correct, since `start()` has failed.
+            openChainGate();
+          } catch (error) {
+            // Fail the gate so held work rejects into this ingress's own
+            // failure path rather than waiting on a promise that can never
+            // settle, then surface the startup failure to the caller.
+            failChainGate(error);
+            throw error;
           }
         });
       }
@@ -240,15 +270,18 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
  */
 class BehaviorChainSchedulerService extends SchedulerService {
   readonly #behaviors: readonly IIngressBehavior[];
+  readonly #chainReady: Promise<void> | undefined;
 
   constructor(
     runtime: IRuntimeServices,
     lock: IDistributedLock,
     options: { logger?: ILogger | undefined; ttlMs?: number | undefined },
     behaviors: readonly IIngressBehavior[],
+    chainReady?: Promise<void>,
   ) {
     super(runtime, lock, options);
     this.#behaviors = behaviors;
+    this.#chainReady = chainReady;
   }
 
   /**
@@ -266,7 +299,12 @@ class BehaviorChainSchedulerService extends SchedulerService {
     handler: SchedulerJobHandler<T>,
     options?: ScheduleOptions<T>,
   ): Promise<void> {
-    await super.cron(name, expression, withIngressBehaviors(handler, this.#behaviors), options);
+    await super.cron(
+      name,
+      expression,
+      withIngressBehaviors(handler, this.#behaviors, this.#chainReady),
+      options,
+    );
   }
 
   /**
@@ -284,7 +322,12 @@ class BehaviorChainSchedulerService extends SchedulerService {
     handler: SchedulerJobHandler<T>,
     options?: ScheduleOptions<T>,
   ): Promise<void> {
-    await super.every(name, intervalMs, withIngressBehaviors(handler, this.#behaviors), options);
+    await super.every(
+      name,
+      intervalMs,
+      withIngressBehaviors(handler, this.#behaviors, this.#chainReady),
+      options,
+    );
   }
 
   /**
@@ -302,7 +345,12 @@ class BehaviorChainSchedulerService extends SchedulerService {
     handler: SchedulerJobHandler<T>,
     options?: ScheduleOptions<T>,
   ): Promise<void> {
-    await super.delay(name, delayMs, withIngressBehaviors(handler, this.#behaviors), options);
+    await super.delay(
+      name,
+      delayMs,
+      withIngressBehaviors(handler, this.#behaviors, this.#chainReady),
+      options,
+    );
   }
 }
 

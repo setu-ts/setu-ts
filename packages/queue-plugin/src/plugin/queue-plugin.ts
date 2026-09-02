@@ -97,6 +97,26 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
   // with the complete declared sequence before the app serves.
   const behaviorChain: IIngressBehavior[] = [...behaviorInstances];
   const declaredBehaviors = behaviors.length > 0;
+  // Held while behaviour FACTORIES are still unresolved. Dispatch waits on it
+  // so no job reaches a processor through a partial chain; opened at the end
+  // of `onInit`, once `behaviorChain` is final.
+  // `withResolvers` rather than a `new Promise` executor with `() => {}`
+  // placeholders: those placeholders are never called, so they are dead
+  // functions the coverage bar counts.
+  //
+  // `failChainGate` is called when `onInit` fails, so work held on the gate
+  // FAILS into this ingress's own failure path instead of hanging on a promise
+  // that can never settle. Running it through the partial chain remains the
+  // one thing the gate will not do.
+  const {
+    promise: chainReady,
+    resolve: openChainGate,
+    reject: failChainGate,
+  } = Promise.withResolvers<void>();
+  // The gate is awaited per dispatch, so its rejection is always observed
+  // there; this keeps an unobserved rejection from surfacing when nothing is
+  // currently held.
+  chainReady.catch(() => {});
 
   // Derive plugin name and token using capability token grammar
   const pluginName = name ? `queue-plugin.${name}` : 'queue-plugin';
@@ -188,7 +208,13 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // registration — declarative arm entries AND imperative `process()`
       // calls — through the ingress behaviour chain.
       const service = declaredBehaviors
-        ? new BehaviorChainQueueService(adapter, runtime, serviceOptions, behaviorChain)
+        ? new BehaviorChainQueueService(
+          adapter,
+          runtime,
+          serviceOptions,
+          behaviorChain,
+          behaviorFactories.length === 0 ? undefined : chainReady,
+        )
         : new QueueService(adapter, runtime, serviceOptions);
 
       // Connect the service
@@ -208,7 +234,13 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // the whole set into the same `onInit` hook, after the chain is final,
       // is what makes the arm's guarantee true. With no factory declared the
       // chain is already complete here and the timing is unchanged.
-      if (behaviorFactories.length === 0) {
+      // With no factory in the array, declared order IS registration order and
+      // the instances register here, at their pre-arm timing. With a factory
+      // present the WHOLE array is registered in `onInit` instead, in declared
+      // order — because `process()` is last-wins on a job name, and splitting
+      // the arms made `[factoryA, instanceB]` on one name resolve to factoryA,
+      // contradicting this option's own documented last-wins contract.
+      if (processorFactories.length === 0) {
         for (const definition of processorInstances) {
           service.process(definition.name, definition.processor, definition.options);
         }
@@ -231,37 +263,48 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // zero-factory configuration gains no lifecycle hook at all.
       if (processorFactories.length > 0 || behaviorFactories.length > 0) {
         ctx.lifecycle.onInit(() => {
-          // The chain is completed FIRST: everything registered below — and
-          // the instances deferred out of `register()` when a behaviour
-          // factory is declared — must arm against the final chain, never a
-          // partial one.
-          behaviorChain.splice(
-            0,
-            behaviorChain.length,
-            ...behaviors.map((entry, index) =>
-              typeof entry === 'function'
-                ? resolveRegistryEntry(
-                  entry,
-                  ctx.services,
-                  `QueuePlugin({ behaviors })[${index}]`,
-                )
-                : entry
-            ),
-          );
-
-          if (behaviorFactories.length > 0) {
-            for (const definition of processorInstances) {
-              service.process(definition.name, definition.processor, definition.options);
-            }
-          }
-
-          for (const slot of processorFactories) {
-            const definition = resolveRegistryEntry(
-              slot.entry,
-              ctx.services,
-              `QueuePlugin({ processors })[${slot.index}]`,
+          try {
+            // The chain is completed FIRST, before any factory processor is
+            // registered below.
+            behaviorChain.splice(
+              0,
+              behaviorChain.length,
+              ...behaviors.map((entry, index) =>
+                typeof entry === 'function'
+                  ? resolveRegistryEntry(
+                    entry,
+                    ctx.services,
+                    `QueuePlugin({ behaviors })[${index}]`,
+                  )
+                  : entry
+              ),
             );
-            service.process(definition.name, definition.processor, definition.options);
+
+            // DECLARED order, walking the original array — not instances then
+            // factories — so the last entry for a job name wins, as documented.
+            if (processorFactories.length > 0) {
+              processors.forEach((entry, index) => {
+                const definition = typeof entry === 'function'
+                  ? resolveRegistryEntry(
+                    entry,
+                    ctx.services,
+                    `QueuePlugin({ processors })[${index}]`,
+                  )
+                  : entry;
+                service.process(definition.name, definition.processor, definition.options);
+              });
+            }
+
+            // LAST: the chain is final, so any job held during startup may run.
+            // A hook that threw above never reaches this, leaving the gate shut
+            // — correct, since `start()` has failed.
+            openChainGate();
+          } catch (error) {
+            // Fail the gate so held work rejects into this ingress's own
+            // failure path rather than waiting on a promise that can never
+            // settle, then surface the startup failure to the caller.
+            failChainGate(error);
+            throw error;
           }
         });
       }
@@ -284,6 +327,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
  */
 class BehaviorChainQueueService extends QueueService {
   readonly #behaviors: readonly IIngressBehavior[];
+  readonly #chainReady: Promise<void> | undefined;
 
   constructor(
     adapter: QueueAdapter,
@@ -295,9 +339,11 @@ class BehaviorChainQueueService extends QueueService {
       collector?: QueueCollector | undefined;
     },
     behaviors: readonly IIngressBehavior[],
+    chainReady?: Promise<void>,
   ) {
     super(adapter, runtime, options);
     this.#behaviors = behaviors;
+    this.#chainReady = chainReady;
   }
 
   /**
@@ -309,7 +355,11 @@ class BehaviorChainQueueService extends QueueService {
    * @param options - Concurrency and failure callback, passed through
    */
   override process<T>(name: string, processor: JobProcessor<T>, options?: ProcessOptions): void {
-    super.process(name, withIngressBehaviors(processor, this.#behaviors), options);
+    super.process(
+      name,
+      withIngressBehaviors(processor, this.#behaviors, this.#chainReady),
+      options,
+    );
   }
 }
 

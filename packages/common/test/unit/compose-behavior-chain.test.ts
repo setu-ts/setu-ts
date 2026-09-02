@@ -247,14 +247,44 @@ describe('composeBehaviorChain (M86 §3.4)', () => {
   });
 
   it('a CQRS short-circuit value becomes the chain result without the terminal', async () => {
+    // MULTI-stage on purpose: with a single behaviour there is no wrapping to
+    // get wrong, so it cannot show that a downstream short-circuit's value
+    // survives the upstream behaviour and reaches the caller unchanged.
+    const ran: string[] = [];
+    let terminalCalls = 0;
+
     const result = await composeBehaviorChain<CqrsRequest, string>(
       { type: 'GetCached', data: {} },
-      [{ handle: () => 'from-cache' }],
+      [
+        {
+          handle: (_request, next) => {
+            ran.push('outer');
+            return next();
+          },
+        },
+        {
+          handle: () => {
+            ran.push('short-circuit');
+            return 'from-cache';
+          },
+        },
+        {
+          handle: (_request, next) => {
+            ran.push('downstream');
+            return next();
+          },
+        },
+      ],
       () => {
-        throw new Error('terminal must not run after a short-circuit');
+        terminalCalls += 1;
+        return Promise.resolve('from-terminal');
       },
     );
 
+    // The short-circuit's value is returned unchanged, not overwritten by the
+    // outer stage and not replaced by the terminal's.
     expect(result).toBe('from-cache');
+    expect(ran).toEqual(['outer', 'short-circuit']);
+    expect(terminalCalls).toBe(0);
   });
 });

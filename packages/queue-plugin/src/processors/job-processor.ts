@@ -171,14 +171,28 @@ export async function runJob<T>(
  * declared order. Read LIVE on every delivery: entries resolved after the
  * processor was registered (the plugin's `onInit` factory arm) are picked up
  * without re-registering.
+ * @param chainReady - Held while behaviour FACTORIES are unresolved, so a
+ * durable job reserved during startup cannot run through a PARTIAL chain.
+ * Supplied only when a factory is declared; omitted, dispatch is never
+ * deferred. It gates the plugin's own declared processors AND any a later
+ * plugin registers imperatively through the resolved queue.
  * @returns A processor with the same signature running the chain first
  * @since 0.3.0
  */
 export function withIngressBehaviors<T>(
   processor: (job: IJob<T>) => void | Promise<void>,
   behaviors: readonly IIngressBehavior[],
+  chainReady?: Promise<void>,
 ): (job: IJob<T>) => void | Promise<void> {
-  return (job: IJob<T>): void | Promise<void> => {
+  let gate = chainReady;
+  // Clear the gate once open so the steady state costs nothing. A REJECTED
+  // gate is deliberately left in place: startup failed, the chain is never
+  // completed, and running through a partial chain is what this prevents.
+  void chainReady?.then(() => {
+    gate = undefined;
+  }, () => {});
+
+  const dispatch = (job: IJob<T>): void | Promise<void> => {
     if (behaviors.length === 0) {
       // Zero-configuration dispatch — byte-identical to the pre-chain
       // behaviour: a direct invocation, no envelope, no promise mediation.
@@ -190,6 +204,13 @@ export function withIngressBehaviors<T>(
       behaviors,
       () => Promise.resolve(processor(job)),
     );
+  };
+
+  return (job: IJob<T>): void | Promise<void> => {
+    // The deferred result is RETURNED so a processor failure still reaches
+    // the retry/dead-letter machinery rather than becoming an unhandled
+    // rejection.
+    return gate === undefined ? dispatch(job) : gate.then(() => dispatch(job));
   };
 }
 

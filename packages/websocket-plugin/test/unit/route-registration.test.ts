@@ -38,7 +38,8 @@ import type { WebSocketPluginOptions, WebSocketRouteDefinition } from '../../src
 function createUpgradableAdapter(): IHttpAdapter & { router: WebSocketUpgradeRouter | null } {
   return {
     router: null,
-    setHandler(_handler: (request: IRequest) => Promise<IResponse>): void {},
+    // Matches the M87-widened contract: a handler may answer synchronously.
+    setHandler(_handler: (request: IRequest) => IResponse | Promise<IResponse>): void {},
     setUpgradeRouter(router: WebSocketUpgradeRouter): void {
       this.router = router;
     },

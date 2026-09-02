@@ -4045,6 +4045,30 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   chain is resolved, and ONLY when a behaviour factory is declared — so the common case keeps its
   `register()` timing. Reverting the deferral fails the committed regression test.
 
+  **Automated review then found that fix reached only one of two doors, which is the more
+  instructive half.** A LATER plugin resolves the broker in its own `register()` and subscribes
+  there — after this plugin's `register()`, before its `onInit` — which no deferral inside this
+  plugin can reach; probed and reproduced. So the deferral was REVERTED and replaced by gating
+  DELIVERY: the pipelined broker and the queue/scheduler wrappers hold each dispatch on a
+  `chainReady` promise, supplied only when a behaviour factory is declared and cleared once open.
+  One mechanism closes both doors, no registration's timing changes, and a rejected gate
+  deliberately stays shut because a failed `start()` must not deliver through a partial chain. The
+  WebSocket arm needs none: a frame cannot arrive before its socket is open, which is after
+  `onInit`. Review also found that splitting the arms REVERSED declared order —
+  `[factoryA, instanceB]` on one queue job name ran factoryA, against the option's own documented
+  last-wins contract — so a processors array containing a factory now registers wholly in `onInit`
+  in declared order. And `runClose()` aborted at the first rejecting hook, so one plugin that could
+  not disconnect kept every later plugin from releasing anything: the M50 `onStopping` defect in a
+  second place, which this milestone made reachable from a failed `start()` as well as from
+  `stop()`. Every hook now runs and the failures surface afterwards. Two review findings were
+  REFUTED with evidence rather than accepted — the `IXxx` naming rule (`common` exports 114
+  non-prefixed interfaces; the convention marks ports, not data shapes) and underscore-prefixed
+  positional parameters (77 occurrences in `packages/*/src`, and a leading callback parameter cannot
+  be deleted) — and both were withdrawn. Folding the scheduler and messaging READMEs into the
+  fence-compiler gate, which had never covered them, surfaced four pre-existing uncompilable
+  examples including messaging's headline `## Usage` fence resolving a capability with no `start()`
+  — the M70i defect verbatim; all four fixed.
+
   Also closed: the router runs a route's guards BEFORE the capacity check so a refusal consumes no
   admission slot, and nothing asserted it — a transposition below `this.#pending++` lets refused
   traffic starve `maxConnections`, verified to fail. The `websocket-plugin` README's primary usage

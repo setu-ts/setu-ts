@@ -317,13 +317,27 @@ read the Changed section before upgrading.
 - **`@setu-ts/messaging-plugin`: declarative subscriptions and ingress behaviours.** Adds
   `subscriptions` and `behaviors` on every broker arm. The chain wraps subscribe handlers only;
   `respond()` remains unwrapped because its handler returns a result.
-- Declared instance entries of `subscriptions`, `processors`, and `jobs` register in `onInit` rather
-  than `register()` **when the matching `behaviors` arm carries a factory**, immediately after the
-  chain is resolved. Registering earlier put a live handler in front of an incomplete chain: a
-  broker holding a backlog delivers the moment a consumer attaches, so a message could reach the
-  handler having run only the instance behaviours, silently skipping every behaviour that needed a
-  resolved capability. Queue and scheduler share the shape through the poll loop and the job timer.
-  With no behaviour factory declared, registration timing is unchanged.
+- When a `behaviors` arm carries a **factory**, the queue, scheduler, and messaging plugins now hold
+  dispatch until `onInit` has resolved the whole chain. Without the gate a handler could run against
+  an INCOMPLETE chain: a broker holding a backlog delivers the moment a consumer attaches, so a
+  message reached the handler having run only the instance behaviours, silently skipping every
+  behaviour that needed a resolved capability — an authorization, tenant, or audit behaviour. Queue
+  and scheduler share the shape through the poll loop and the job timer. The gate covers imperative
+  registrations too, including a subscription a LATER plugin makes through the resolved capability
+  in its own `register()`, which no amount of deferral inside these plugins could reach. It is
+  released once and costs nothing thereafter, and no registration's timing changes. The WebSocket
+  arm needs no gate: a frame cannot arrive before its socket is open, which is after `onInit`.
+- `@setu-ts/kernel`: `onClose` hooks now ALL run even when an earlier one rejects, with the failures
+  surfaced afterwards (a lone failure rethrown as itself, several as an `AggregateError`). A close
+  hook releases one plugin's resources, and aborting the loop at the first failure meant one plugin
+  that could not disconnect kept every later plugin from releasing anything — the M50 `onStopping`
+  defect in a second place, reachable from `stop()` and, since this release, from a failed
+  `start()`. `LifecycleManager.runShutdown` has the same shape and is deliberately unchanged here:
+  it has no call site this milestone adds.
+- `QueuePlugin({ processors })` registers in **declared order** when the array contains a factory.
+  `process()` is last-wins on a job name, and registering every instance before every factory made
+  `[factoryA, instanceB]` on one name resolve to `factoryA` — the reverse of the declared array, so
+  a processor the developer had replaced kept running the jobs.
 
 ### Changed
 

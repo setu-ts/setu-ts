@@ -53,7 +53,8 @@ function createHarness(platform: 'deno' | 'cloudflare-workers' = 'deno'): Harnes
 
   const ctx = {
     runtime: platformRuntime,
-    logger: undefined,
+    // `logger` is OMITTED, not `undefined`: optional property under
+    // `exactOptionalPropertyTypes`.
     services: {
       has: (token: string): boolean => registered.has(token),
       get: <T>(token: string): T => {
@@ -361,5 +362,79 @@ describe('SchedulerPlugin Workers refusal precedes any entry read (M86 §4.1)', 
     expect(behaviorsFactoryRan).toBe(false);
     expect(harness.registered.size).toBe(0);
     expect(harness.initHooks).toHaveLength(0);
+  });
+});
+
+describe('SchedulerPlugin behaviour-chain startup gate', () => {
+  it('holds a fire armed before onInit until the factory chain is final', async () => {
+    // Scheduling arms a timer, so a short interval can fire before `onInit`
+    // resolves the factory behaviours. Without the gate it would run through a
+    // PARTIAL chain, skipping exactly the behaviours that needed a resolved
+    // capability.
+    const seen: string[] = [];
+    const delivered: string[] = [];
+    const { harness, runtime } = await boot({
+      behaviors: [
+        {
+          handle: (_ctx, next) => {
+            seen.push('instance');
+            return next();
+          },
+        },
+        (): IIngressBehavior => ({
+          handle: (_ctx, next) => {
+            seen.push('factory');
+            return next();
+          },
+        }),
+      ],
+      jobs: [everyDefinition(delivered, 'gated')],
+    });
+
+    // NOT awaited: the fire is held on the gate, so `advance` cannot complete
+    // until the chain is final — which is the property under test.
+    const firing = runtime.advance(ONE_FIRE_MS);
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+
+    // Held: the chain is not final yet.
+    expect(delivered).toEqual([]);
+    expect(seen).toEqual([]);
+
+    await runInitHooks(harness);
+    await firing;
+
+    expect(delivered).toEqual(['gated']);
+    expect(seen).toEqual(['instance', 'factory']);
+  });
+
+  it('fails held work when onInit fails, rather than running a partial chain', async () => {
+    // The gate is never OPENED when `start()` fails — running through a
+    // partial chain is the outcome it prevents — but it is REJECTED, so held
+    // work fails into the scheduler's own path instead of hanging forever on a
+    // promise that can never settle.
+    const delivered: string[] = [];
+    const { harness, runtime } = await boot({
+      behaviors: [behaviorFactoryThatThrows],
+      jobs: [everyDefinition(delivered, 'gated')],
+    });
+
+    // Arm and fire FIRST, so a dispatch is genuinely held when startup then
+    // fails — the sequence this guards. Not awaited: a held fire blocks
+    // `advance` until the gate settles.
+    const firing = runtime.advance(ONE_FIRE_MS);
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+    expect(delivered).toEqual([]);
+
+    await expect(runInitHooks(harness)).rejects.toThrow('SchedulerPlugin({ behaviors })[0]');
+    // The gate REJECTED, so the held fire settles through the executor's own
+    // failure path rather than hanging forever.
+    await firing;
+
+    // It failed rather than running through the partial chain.
+    expect(delivered).toEqual([]);
   });
 });

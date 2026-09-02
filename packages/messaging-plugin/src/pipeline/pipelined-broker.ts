@@ -19,6 +19,7 @@ import type {
   IngressContext,
   ISubscription,
   MessageHandler,
+  MessageMetadata,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
@@ -44,10 +45,42 @@ import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
 export class PipelinedBroker implements MessageBrokerAdapter {
   readonly #broker: MessageBrokerAdapter;
   readonly #behaviors: readonly IIngressBehavior[];
+  /**
+   * Held until the behaviour chain is FINAL, then cleared so the steady state
+   * costs nothing.
+   *
+   * A subscription goes live the instant it is established against the
+   * already-connected broker, and a broker holding a backlog delivers
+   * immediately — while behaviour FACTORIES cannot resolve until `onInit`,
+   * the first phase at which the registry holds every capability. Without
+   * this gate a message arriving in that window reaches the handler having
+   * run only the INSTANCE behaviours, silently skipping exactly the ones that
+   * needed a resolved capability. Deferring the plugin's own declared
+   * subscriptions is NOT sufficient: a later plugin resolves this broker in
+   * its own `register()` and subscribes there, which no amount of deferral
+   * inside this plugin can reach. Gating DELIVERY closes both doors with one
+   * mechanism, and leaves every registration's timing unchanged.
+   *
+   * `undefined` when no behaviour factory is configured: the chain is already
+   * final at construction and delivery is never deferred.
+   */
+  #chainReady: Promise<void> | undefined;
 
-  constructor(broker: MessageBrokerAdapter, behaviors: readonly IIngressBehavior[]) {
+  constructor(
+    broker: MessageBrokerAdapter,
+    behaviors: readonly IIngressBehavior[],
+    chainReady?: Promise<void>,
+  ) {
     this.#broker = broker;
     this.#behaviors = behaviors;
+    this.#chainReady = chainReady;
+    // Clear the gate once settled so later deliveries take the direct path.
+    // A REJECTED gate is deliberately left in place: startup failed, the
+    // chain is never completed, and delivering through a partial chain is the
+    // outcome this exists to prevent.
+    void chainReady?.then(() => {
+      this.#chainReady = undefined;
+    }, () => {});
   }
 
   connect(): Promise<void> {
@@ -108,24 +141,36 @@ export class PipelinedBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    const dispatch = (message: unknown, metadata: MessageMetadata): void | Promise<void> => {
+      if (this.#behaviors.length === 0) {
+        return handler(message as T, metadata);
+      }
+
+      const envelope: IngressContext = {
+        kind: 'messaging',
+        name: topic,
+        payload: message as T,
+        ...(metadata.headers !== undefined ? { headers: metadata.headers } : {}),
+      };
+      return composeBehaviorChain<IngressContext, void>(
+        envelope,
+        this.#behaviors,
+        () => Promise.resolve(handler(message as T, metadata)),
+      );
+    };
+
     return this.#broker.subscribeWithHeaders(
       topic,
       (message, metadata) => {
-        if (this.#behaviors.length === 0) {
-          return handler(message as T, metadata);
-        }
-
-        const envelope: IngressContext = {
-          kind: 'messaging',
-          name: topic,
-          payload: message as T,
-          ...(metadata.headers !== undefined ? { headers: metadata.headers } : {}),
-        };
-        return composeBehaviorChain<IngressContext, void>(
-          envelope,
-          this.#behaviors,
-          () => Promise.resolve(handler(message as T, metadata)),
-        );
+        // Read the gate PER DELIVERY: it is cleared once the chain is final,
+        // so only messages arriving in the startup window are deferred.
+        const gate = this.#chainReady;
+        // The deferred result is RETURNED, not discarded: a handler rejection
+        // must still reach the broker's own failure path (a nack/redelivery),
+        // never become an unhandled rejection.
+        return gate === undefined
+          ? dispatch(message, metadata)
+          : gate.then(() => dispatch(message, metadata));
       },
       options,
     );

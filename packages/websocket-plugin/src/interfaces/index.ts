@@ -113,6 +113,10 @@ export interface WebSocketPluginOptions {
    * behaviours configured, dispatch is byte-identical to the pre-chain
    * behaviour: a direct, synchronous invoke.
    *
+   * No startup gate is needed here, unlike the queue, scheduler, and
+   * messaging arms: a frame cannot arrive before its socket is open, and the
+   * application does not serve until after `onInit` has resolved the chain.
+   *
    * Instance entries are handed to the service at `register()`; factory
    * entries are resolved in the `onInit` phase and a throwing factory rejects
    * `start()` naming `WebSocketPlugin({ behaviors })` and the entry's index

@@ -232,12 +232,10 @@ export interface QueuePluginOptions {
    *
    * Instance entries register during the plugin's `register()` phase,
    * identical to the imperative timing.
-   * The one exception is a
-   * {@linkcode QueuePluginOptions.behaviors} arm carrying a factory: instance
-   * entries then register in `onInit` too, immediately after the chain is
-   * resolved, because a processor registered before the chain was final would arm the poll loop
-   * and run a queued job through a PARTIAL chain, skipping exactly the
-   * behaviours that needed a resolved capability. Factory entries are resolved in the
+   * The one exception is an array that also carries a FACTORY: the whole
+   * array then registers in `onInit`, in DECLARED order, because
+   * `process()` is last-wins on a job name and registering instances first
+   * would let a leading factory beat a trailing instance. Factory entries are resolved in the
    * `onInit` phase — the first at which the registry holds every capability —
    * so a factory can build its processor from a resolved capability. A
    * factory that throws rejects `start()` with an error naming
@@ -246,7 +244,8 @@ export interface QueuePluginOptions {
    *
    * Registering two entries under one job name keeps the service's existing
    * last-wins behaviour: exactly what two imperative `process()` calls with
-   * the same name do.
+   * the same name do — decided by DECLARED order, so a trailing entry beats a
+   * leading one whichever arm each uses.
    *
    * @since 0.3.0
    */
@@ -270,6 +269,13 @@ export interface QueuePluginOptions {
    * With no behaviours configured, dispatch is byte-identical to the
    * pre-chain behaviour: the processor is handed the job directly, with no
    * chain allocated.
+   *
+   * When an entry is a FACTORY, dispatch is HELD until `onInit` has resolved
+   * the whole chain, so nothing reaches a handler through a partial one. That
+   * gate covers every registration — this plugin's declared entries and any a
+   * later plugin makes imperatively through the resolved capability — which
+   * is why no registration's timing has to change. It is released once and
+   * costs nothing thereafter.
    *
    * Instance entries are handed to the service at `register()`; factory
    * entries are resolved in the `onInit` phase and a throwing factory rejects

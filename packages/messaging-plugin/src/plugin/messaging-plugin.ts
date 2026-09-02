@@ -147,6 +147,26 @@ export function MessagingPlugin(
   // with the complete declared sequence before the app serves.
   const behaviorChain: IIngressBehavior[] = [...behaviorInstances];
   const declaredBehaviors = behaviors.length > 0;
+  // Held while behaviour FACTORIES are still unresolved. Delivery waits on it
+  // so no message reaches a handler through a partial chain; `openChainGate`
+  // is called at the end of `onInit`, once `behaviorChain` is final.
+  // `withResolvers` rather than a `new Promise` executor with `() => {}`
+  // placeholders: those placeholders are never called, so they are dead
+  // functions the coverage bar counts.
+  //
+  // `failChainGate` is called when `onInit` fails, so work held on the gate
+  // FAILS into this ingress's own failure path instead of hanging on a promise
+  // that can never settle. Running it through the partial chain remains the
+  // one thing the gate will not do.
+  const {
+    promise: chainReady,
+    resolve: openChainGate,
+    reject: failChainGate,
+  } = Promise.withResolvers<void>();
+  // The gate is awaited per dispatch, so its rejection is always observed
+  // there; this keeps an unobserved rejection from surfacing when nothing is
+  // currently held.
+  chainReady.catch(() => {});
 
   return {
     name: pluginName,
@@ -298,7 +318,15 @@ export function MessagingPlugin(
       // live list, so `onInit`-resolved factory behaviours also wrap
       // subscriptions registered here.
       if (declaredBehaviors) {
-        broker = new PipelinedBroker(broker, behaviorChain);
+        // The gate exists only when a FACTORY is declared: with instances
+        // alone the chain is already final here and delivery is never
+        // deferred. It closes the startup window for EVERY subscription —
+        // this plugin's own declared entries and any a later plugin makes
+        // imperatively through the registered broker — so no registration's
+        // timing has to change.
+        broker = behaviorFactories.length === 0
+          ? new PipelinedBroker(broker, behaviorChain)
+          : new PipelinedBroker(broker, behaviorChain, chainReady);
       }
 
       // Register the broker as IMessageBroker
@@ -317,10 +345,8 @@ export function MessagingPlugin(
       // `onInit` hook, after the chain is final, is what makes the arm's
       // guarantee true. With no factory declared the chain is already
       // complete here and the timing is unchanged.
-      if (behaviorFactories.length === 0) {
-        for (const definition of subscriptionInstances) {
-          await subscribeDefinition(broker, definition);
-        }
+      for (const definition of subscriptionInstances) {
+        await subscribeDefinition(broker, definition);
       }
 
       // Register health indicator. M70c: reports BOTH signals. `isReady()` is
@@ -361,37 +387,44 @@ export function MessagingPlugin(
       // configuration gains no lifecycle hook at all.
       if (subscriptionFactories.length > 0 || behaviorFactories.length > 0) {
         ctx.lifecycle.onInit(async () => {
-          // The chain is completed FIRST: everything subscribed below — and
-          // the instances deferred out of `register()` when a behaviour
-          // factory is declared — must go live against the final chain, never
-          // a partial one.
-          behaviorChain.splice(
-            0,
-            behaviorChain.length,
-            ...behaviors.map((entry, index) =>
-              typeof entry === 'function'
-                ? resolveRegistryEntry(
-                  entry,
-                  ctx.services,
-                  `MessagingPlugin({ behaviors })[${index}]`,
-                )
-                : entry
-            ),
-          );
+          try {
+            // The chain is completed FIRST, before any factory subscription is
+            // established below, so nothing ever subscribes against a partial
+            // chain.
+            behaviorChain.splice(
+              0,
+              behaviorChain.length,
+              ...behaviors.map((entry, index) =>
+                typeof entry === 'function'
+                  ? resolveRegistryEntry(
+                    entry,
+                    ctx.services,
+                    `MessagingPlugin({ behaviors })[${index}]`,
+                  )
+                  : entry
+              ),
+            );
 
-          if (behaviorFactories.length > 0) {
-            for (const definition of subscriptionInstances) {
+            for (const slot of subscriptionFactories) {
+              const definition = resolveRegistryEntry(
+                slot.entry,
+                ctx.services,
+                `MessagingPlugin({ subscriptions })[${slot.index}]`,
+              );
               await subscribeDefinition(broker, definition);
             }
-          }
 
-          for (const slot of subscriptionFactories) {
-            const definition = resolveRegistryEntry(
-              slot.entry,
-              ctx.services,
-              `MessagingPlugin({ subscriptions })[${slot.index}]`,
-            );
-            await subscribeDefinition(broker, definition);
+            // LAST: the chain is final, so any delivery held during startup may
+            // now proceed. A hook that threw above never reaches this, leaving
+            // the gate closed — which is correct, since `start()` has failed and
+            // delivering through a partial chain is what this prevents.
+            openChainGate();
+          } catch (error) {
+            // Fail the gate so held work rejects into this ingress's own
+            // failure path rather than waiting on a promise that can never
+            // settle, then surface the startup failure to the caller.
+            failChainGate(error);
+            throw error;
           }
         });
       }

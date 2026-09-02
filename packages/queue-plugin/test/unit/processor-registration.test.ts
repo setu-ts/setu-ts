@@ -203,10 +203,13 @@ describe('QueuePlugin({ processors }) registration arms', () => {
       ],
     });
 
-    // Index 0 is an instance and registered before the failure.
+    // An array containing a FACTORY registers wholly in `onInit`, in declared
+    // order, so nothing is registered yet — `process()` is last-wins on a job
+    // name and registering instances first reversed the declared order (M86
+    // review). The job sits in the queue rather than being delivered.
     await queue.add('instance-job', {});
     await runtime.advanceMs(POLL_MS * 2);
-    expect(delivered).toEqual(['instance-job']);
+    expect(delivered).toEqual([]);
 
     // The label names index 1 — the DECLARED position, not the 0th factory.
     await expect(runInitHooks(harness)).rejects.toThrow('QueuePlugin({ processors })[1]');
@@ -261,5 +264,77 @@ describe('QueuePlugin({ behaviors }) registration arms', () => {
     await runtime.advanceMs(POLL_MS * 2);
 
     expect(order).toEqual(['factory', 'instance']);
+  });
+});
+
+describe('QueuePlugin behaviour-chain startup gate', () => {
+  it('holds a job reserved before onInit until the factory chain is final', async () => {
+    // Registering a processor arms the poll loop, so a job already sitting in
+    // a durable queue can be reserved before `onInit` resolves the factory
+    // behaviours. Without the gate it would run through a PARTIAL chain,
+    // skipping exactly the behaviours that needed a resolved capability.
+    const seen: string[] = [];
+    const delivered: string[] = [];
+    const { harness, queue, runtime } = await boot({
+      behaviors: [
+        {
+          handle: (_ctx, next) => {
+            seen.push('instance');
+            return next();
+          },
+        },
+        (): IIngressBehavior => ({
+          handle: (_ctx, next) => {
+            seen.push('factory');
+            return next();
+          },
+        }),
+      ],
+      processors: [
+        {
+          name: 'gated',
+          processor: (job) => {
+            delivered.push(job.name);
+          },
+        },
+      ],
+    });
+
+    await queue.add('gated', {});
+    await runtime.advanceMs(POLL_MS * 2);
+
+    // Held: the chain is not final yet.
+    expect(delivered).toEqual([]);
+    expect(seen).toEqual([]);
+
+    await runInitHooks(harness);
+    await runtime.advanceMs(POLL_MS * 2);
+
+    expect(delivered).toEqual(['gated']);
+    expect(seen).toEqual(['instance', 'factory']);
+  });
+
+  it('fails held work when onInit fails, rather than running a partial chain', async () => {
+    // The gate is never OPENED when `start()` fails — running through a
+    // partial chain is the outcome it prevents — but it is REJECTED, so held
+    // work fails into the queue's own retry path instead of hanging forever.
+    const delivered: string[] = [];
+    const { harness, queue, runtime } = await boot({
+      behaviors: [behaviorFactoryThatThrows],
+      processors: [
+        {
+          name: 'gated',
+          processor: (job) => {
+            delivered.push(job.name);
+          },
+        },
+      ],
+    });
+
+    await queue.add('gated', {});
+    await expect(runInitHooks(harness)).rejects.toThrow('QueuePlugin({ behaviors })[0]');
+    await runtime.advanceMs(POLL_MS * 4);
+
+    expect(delivered).toEqual([]);
   });
 });

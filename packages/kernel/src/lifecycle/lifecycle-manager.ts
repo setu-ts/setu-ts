@@ -125,10 +125,33 @@ export class LifecycleManager implements ILifecycleApi {
     }
   }
 
-  /** Runs close hooks in registration order (after shutdown completes). */
+  /**
+   * Runs close hooks in registration order (after shutdown completes).
+   *
+   * EVERY hook runs, even when an earlier one rejects: a close hook releases
+   * one plugin's resources, and letting the first failure abort the loop meant
+   * one plugin that could not disconnect kept every later plugin from
+   * releasing anything — the M50 `onStopping` defect in a second place. The
+   * caller still learns about the failures, from an `AggregateError` raised
+   * once the whole list has run; a single failure is rethrown as itself, so an
+   * existing `instanceof` check on the hook's own error still matches.
+   *
+   * @throws {AggregateError} When more than one hook rejected
+   */
   async runClose(): Promise<void> {
+    const errors: unknown[] = [];
     for (const fn of this.#close) {
-      await fn();
+      try {
+        await fn();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length === 1) {
+      throw errors[0];
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'One or more close hooks failed.');
     }
   }
 

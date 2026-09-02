@@ -110,14 +110,28 @@ export async function run<T = unknown>(
  * order. Read LIVE on every fire: entries resolved after the handler was
  * registered (the plugin's `onInit` factory arm) are picked up without
  * re-registering.
+ * @param chainReady - Held while behaviour FACTORIES are unresolved, so a
+ * short-delay job armed during startup cannot fire through a PARTIAL chain.
+ * Supplied only when a factory is declared; omitted, a fire is never
+ * deferred. It gates the plugin's own declared jobs AND any a later plugin
+ * schedules imperatively through the resolved scheduler.
  * @returns A handler with the same signature running the chain first
  * @since 0.3.0
  */
 export function withIngressBehaviors<T>(
   handler: SchedulerJobHandler<T>,
   behaviors: readonly IIngressBehavior[],
+  chainReady?: Promise<void>,
 ): SchedulerJobHandler<T> {
-  return (job: ScheduledJob<T>): void | Promise<void> => {
+  let gate = chainReady;
+  // Clear the gate once open so the steady state costs nothing. A REJECTED
+  // gate is deliberately left in place: startup failed, the chain is never
+  // completed, and running through a partial chain is what this prevents.
+  void chainReady?.then(() => {
+    gate = undefined;
+  }, () => {});
+
+  const dispatch = (job: ScheduledJob<T>): void | Promise<void> => {
     if (behaviors.length === 0) {
       // Zero-configuration dispatch — byte-identical to the pre-chain
       // behaviour: a direct invocation, no envelope, no promise mediation.
@@ -129,5 +143,11 @@ export function withIngressBehaviors<T>(
       behaviors,
       () => Promise.resolve(handler(job)),
     );
+  };
+
+  return (job: ScheduledJob<T>): void | Promise<void> => {
+    // The deferred result is RETURNED so a handler failure still reaches the
+    // executor's retry path rather than becoming an unhandled rejection.
+    return gate === undefined ? dispatch(job) : gate.then(() => dispatch(job));
   };
 }

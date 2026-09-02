@@ -42,7 +42,8 @@ async function createHarness(options?: SchedulerPluginOptions): Promise<Harness>
   const registered = new Map<string, unknown>();
   const ctx = {
     runtime,
-    logger: undefined,
+    // `logger` is OMITTED, not `undefined`: optional property under
+    // `exactOptionalPropertyTypes`.
     services: {
       register: <T>(token: string, service: T): void => {
         registered.set(token, service);

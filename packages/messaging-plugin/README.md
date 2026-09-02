@@ -17,14 +17,27 @@ import { MessagingPlugin } from '@setu-ts/messaging-plugin';
 ## Usage
 
 ```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
 import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';
 
-app.register(MessagingPlugin({ broker: 'rabbitmq', url: 'amqp://localhost:5672' }));
+// Your application's own work — a stand-in so this example compiles as written.
+declare function provisionAccount(userId: string): Promise<void>;
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    MessagingPlugin({ broker: 'rabbitmq', url: 'amqp://localhost:5672' }),
+  ],
+});
+
+// Plugins register during `start()`, so the capability is resolvable only after it.
+await app.start({ port: 3000 });
 
 const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
-await broker.subscribe<{ userId: string }>('user.created', async (message, metadata) => {
+await broker.subscribe<{ userId: string }>('user.created', async (message) => {
   await provisionAccount(message.userId);
 });
 
@@ -35,14 +48,14 @@ await broker.publish('user.created', { userId: '123' });
 
 `MessagingPluginOptions` is a union discriminated on `broker`. Two options are shared by every arm:
 
-| Option          | Type                                                                 | Default          | Description                                                                                                                                                                                                                                           |
-| --------------- | -------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `broker`        | `MessagingBrokerType`                                                | `'memory'`       | Selects the arm. Optional only on the memory arm, so `MessagingPlugin()` stays valid.                                                                                                                                                                 |
-| `name`          | `string`                                                             | —                | Instance name for multi-instance setups.                                                                                                                                                                                                              |
-| `serializer`    | `ISerializer`                                                        | `JsonSerializer` | Payload serializer.                                                                                                                                                                                                                                   |
-| `tracing`       | `boolean`                                                            | `true`           | Create broker producer/consumer spans when telemetry is registered.                                                                                                                                                                                   |
-| `subscriptions` | `readonly SubscriptionEntry[]`                                       | —                | Declarative `subscribe()` registrations. A `SubscriptionDefinition` is `{ topic, handler, options? }`; factories resolve during async `onInit`. When a `behaviors` factory is declared, instance entries resolve there too, after the chain is final. |
-| `behaviors`     | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                | Chain around subscribe handlers. It sees `kind: 'messaging'`, topic, message payload, and available headers; no delivery attempt is fabricated.                                                                                                       |
+| Option          | Type                                                                 | Default          | Description                                                                                                                                                                                                                                     |
+| --------------- | -------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `broker`        | `MessagingBrokerType`                                                | `'memory'`       | Selects the arm. Optional only on the memory arm, so `MessagingPlugin()` stays valid.                                                                                                                                                           |
+| `name`          | `string`                                                             | —                | Instance name for multi-instance setups.                                                                                                                                                                                                        |
+| `serializer`    | `ISerializer`                                                        | `JsonSerializer` | Payload serializer.                                                                                                                                                                                                                             |
+| `tracing`       | `boolean`                                                            | `true`           | Create broker producer/consumer spans when telemetry is registered.                                                                                                                                                                             |
+| `subscriptions` | `readonly SubscriptionEntry[]`                                       | —                | Declarative `subscribe()` registrations. A `SubscriptionDefinition` is `{ topic, handler, options? }`; factories resolve during async `onInit`. When a `behaviors` factory is declared, delivery is held until `onInit` has resolved the chain. |
+| `behaviors`     | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                | Chain around subscribe handlers. It sees `kind: 'messaging'`, topic, message payload, and available headers; no delivery attempt is fabricated.                                                                                                 |
 
 Omitting `name` registers under the bare `CAPABILITIES.MESSAGING` token as plugin
 `messaging-plugin`. Supplying one derives both — token `messaging.<name>`, plugin
@@ -52,18 +65,37 @@ Every other option is arm-specific — `url`/`client` for `'redis-streams'`, cre
 arms, an injected `IMessageBroker` for `'custom'`. A missing per-arm field is a compile error rather
 than a startup throw. See [Brokers](#brokers) for the full arm list.
 
-The following declarative `subscriptions` shape is copied verbatim from the integration test:
+Declare subscriptions where the plugin is composed, instead of resolving the broker after `start()`:
 
 ```typescript
-const { harness, broker } = await boot({
-  broker: 'memory',
-  subscriptions: [
-    {
-      topic: 'orders',
-      handler: (message) => {
-        received.push(message);
-      },
-    },
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import type { IIngressBehavior } from '@setu-ts/common';
+
+/** Runs ahead of every subscribe handler; `next()` continues the chain. */
+const auditEveryMessage: IIngressBehavior = {
+  handle: (ctx, next) => {
+    console.log(`${ctx.kind} ${ctx.name}`, ctx.headers ?? {});
+    return next();
+  },
+};
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    MessagingPlugin({
+      broker: 'memory',
+      behaviors: [auditEveryMessage],
+      subscriptions: [
+        {
+          topic: 'orders',
+          handler: (message) => {
+            console.log('order received', message);
+          },
+        },
+      ],
+    }),
   ],
 });
 ```
@@ -105,11 +137,20 @@ it reads a shared `replyTopic` (default `'messaging.replies'`) under a consumer 
 instance:
 
 ```typescript
-app.register(MessagingPlugin({
-  broker: 'kafka',
-  brokers: ['localhost:9092'],
-  replyTopic: 'orders.replies', // must already exist; the broker creates no topics
-}));
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    MessagingPlugin({
+      broker: 'kafka',
+      brokers: ['localhost:9092'],
+      replyTopic: 'orders.replies', // must already exist; the broker creates no topics
+    }),
+  ],
+});
 ```
 
 Every instance reads every reply on that topic and discards the ones it did not originate, so give a
@@ -134,7 +175,19 @@ metadata behavior. An injected NATS client must supply `headersFactory` to const
 the broker:
 
 ```typescript
-app.register(EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'] }));
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { EventsMessagingBridge, MessagingPlugin } from '@setu-ts/messaging-plugin';
+import { EventsPlugin } from '@setu-ts/events-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    EventsPlugin(),
+    MessagingPlugin({ broker: 'memory' }),
+    EventsMessagingBridge({ eventTypes: ['user.created', 'user.updated'] }),
+  ],
+});
 ```
 
 ## Health indicator
