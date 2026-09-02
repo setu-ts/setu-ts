@@ -3896,7 +3896,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   row. Two barrel exports were CUT during verification rather than shipped — `BigtableTransaction`
   (the `CosmosTransaction` precedent; it reaches an application only as `IAdapterTransaction`) and
   `BigtableSdkModule` — because `deno doc --lint` showed both leaking a private type, and neither
-  had a public consumer) — complete (PR pending)
+  had a public consumer) — complete (PR #222)
 - **Next milestone** — none assigned; the three backends M78 deferred (M80 DynamoDB, M81 Cosmos DB,
   M82 Cloud Bigtable) are all complete.
 

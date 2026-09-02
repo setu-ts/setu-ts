@@ -8538,7 +8538,7 @@ them would still silently select the wrong transport — complete (PR pending).
 | 79        | ✅     | portable data-access contract                       |
 | 80        | ✅     | dynamodb backend                                    |
 | 81        | ✅     | cosmos db backend                                   |
-| 82        | ✅     | cloud bigtable backend                              |
+| 82        | ✅     | cloud bigtable backend (PR #222)                    |
 | 83        | ✅     | module declarations + functional example            |
 | 84        | ✅     | realtime client consumption (sdk + cli)             |
 | 85        | ✅     | cli (workspace full-stack gRPC, PR pending)         |
