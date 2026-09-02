@@ -8430,19 +8430,19 @@ framework's own tenant, auth and tracing middleware have nowhere to run.
 **This is one line, not four defects, and the sweep is what shows it.** Every `*-plugin` package's
 options interface was read, alongside the service surface each exposes for supplying a handler:
 
-| Ingress    | Registration site                   | Per-item pipeline            | Typed context          |
-| ---------- | ----------------------------------- | ---------------------------- | ---------------------- |
-| HTTP route | router + `@Controller`              | route middleware, guards     | `IRequestContext`      |
-| SSE        | rides an HTTP route — `open(ctx)`   | inherited                    | inherited              |
-| GraphQL    | `resolvers`                         | global only                  | context object         |
-| gRPC       | `services`                          | `interceptors` (global)      | typed                  |
-| CQRS       | `commandHandlers` / `queryHandlers` | **`behaviors`**              | typed request          |
-| Events     | `handlers`                          | none — global `errorHandler` | typed event            |
-| Health     | `indicators`                        | n/a                          | n/a                    |
-| WebSocket  | **none**                            | **none**                     | `Map<string, unknown>` |
-| Queue      | **none**                            | none — `onFailed` callback   | partial                |
-| Scheduler  | **none**                            | **none**                     | n/a                    |
-| Messaging  | **none**                            | **none**                     | `MessageMetadata`      |
+| Ingress    | Registration site                   | Per-item pipeline                      | Typed context          |
+| ---------- | ----------------------------------- | -------------------------------------- | ---------------------- |
+| HTTP route | router + `@Controller`              | route middleware, guards               | `IRequestContext`      |
+| SSE        | rides an HTTP route — `open(ctx)`   | inherited                              | inherited              |
+| GraphQL    | `resolvers`                         | global only                            | context object         |
+| gRPC       | `services`                          | `interceptors` (global)                | typed                  |
+| CQRS       | `commandHandlers` / `queryHandlers` | **`behaviors`**                        | typed request          |
+| Events     | `handlers`                          | none — global `errorHandler`           | typed event            |
+| Health     | `indicators`                        | n/a                                    | n/a                    |
+| WebSocket  | **none**                            | upgrade: global only; frames: **none** | `Map<string, unknown>` |
+| Queue      | **none**                            | none — `onFailed` callback             | partial                |
+| Scheduler  | **none**                            | **none**                               | n/a                    |
+| Messaging  | **none**                            | **none**                               | `MessageMetadata`      |
 
 `SchedulerPluginOptions` is `timezone` + `distributedLock`
 (`scheduler-plugin/src/interfaces/index.ts:41`). The shared arm of `MessagingPluginOptions` is
@@ -8465,9 +8465,19 @@ resolves it with `as string` (`websocket.ts:371`), the cast AI_GUIDELINES bans i
 **SSE is the control, and it proves the framework's answer already exists.** `ISseService.open(ctx)`
 takes an `IRequestContext` (`common/src/services/sse.ts:152`), so an SSE stream is an ordinary `GET`
 that inherits routing, route middleware, guards and `@Controller` for free — which is why M84 could
-move SSE routes into `src/controllers/` and could not move WebSocket routes anywhere. WebSocket is
-the one realtime path that bypasses HTTP ingress, and it reinvented routing without reinventing the
-pipeline. The other three never had either.
+move SSE routes into `src/controllers/` and could not move WebSocket routes anywhere.
+
+**WebSocket has two phases and they are not equally served — conflating them is the mistake to
+avoid.** Since M70a the upgrade REQUEST does traverse the global middleware pipeline: `#tryUpgrade`
+runs "after the middleware pipeline and before route matching"
+(`kernel/src/application/application.ts:726`), which is the only reason X13's global guard works at
+all. What the upgrade never reaches is ROUTE-level middleware, because `ws.route()` registers no
+kernel route entry and `WebSocketRouteOptions` accepts none — so the only guard available is
+application-wide, and X13 hand-matched the path to narrow it back down. Individual FRAMES reach
+nothing whatsoever: `onMessage` is invoked directly by the service with no pipeline of any kind. The
+other three ingresses have neither phase. This milestone therefore owes WebSocket **two** answers —
+route-scoped middleware for the upgrade, and a frame-level behaviour chain — and must not conflate
+them into one "pipeline".
 
 **It is not only ergonomics: none of the four carries a tenant.**
 `grep -rl tenant packages/{queue,scheduler,messaging,websocket,events}-plugin/src` returns **zero
@@ -8511,10 +8521,15 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
   `MessagingPluginOptions.subscriptions` — each accepting `T | RegistryFactory<T>` and resolved at
   `onInit`, following M70d exactly. One pipeline contract shared by all four, either by widening
   `IPipelineBehavior` or by promoting a transport-neutral sibling beside it. `WebSocketRouteOptions`
-  gains per-route middleware, which is what removes X13's duplicated path and its application-wide
-  guard. Typed connection data on `IWebSocketConnection`, replacing the `Map<string, unknown>` and
-  the `as string` the contract currently teaches. Each arm is **additive and optional**, so every
-  existing imperative call site keeps working unchanged.
+  gains route-scoped middleware for the UPGRADE, which is what removes X13's duplicated path and its
+  application-wide guard, and the frame phase gets the behaviour chain — two seams, per the phase
+  distinction above. Typed connection data on `IWebSocketConnection`, which is **additive**:
+  `IWebSocketConnection.data` is released API carrying `Map<string, unknown>`, so §9.4 forbids
+  changing its shape under existing callers — the plan adds a typed accessor beside it (a `TData`
+  type parameter defaulting to today's shape is the candidate) and deprecates the untyped read per
+  §9.2 rather than replacing it. Every registration arm is additive and optional, so existing
+  imperative call sites keep working unchanged; that promise covers the whole milestone, including
+  the connection-data work.
 - **Not in scope:** decorators of any kind, for the reason above. Threading tenancy, auth or tracing
   through the new pipeline — this milestone makes them expressible and a successor wires them, so
   that the seam is not designed and consumed in one pass. Any change to a wire protocol. Any change
