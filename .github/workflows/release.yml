@@ -53,6 +53,16 @@ jobs:
       S3_SECRET_ACCESS_KEY: minioadmin
       SMTP_URL: smtp://localhost:1025
       MONGODB_URI: mongodb://127.0.0.1:27017
+      # M80 §6.2 / M82 §3.13: the real-emulator DynamoDB and Bigtable suites
+      # (database-plugin) guard on these exact endpoints, which are also the
+      # host:port pairs the package manifest's net grant scopes. `127.0.0.1`
+      # rather than `localhost` for Bigtable deliberately: the SDK speaks gRPC,
+      # and a `host:port` grant does not authorize a DNS lookup, so an IP
+      # literal is what keeps the grant endpoint-scoped (the M70g Pub/Sub
+      # lesson). Absent here until v0.2.0, so both suites skipped silently on
+      # every tag run while passing on every PR.
+      DYNAMODB_ENDPOINT: http://127.0.0.1:8000
+      BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086
     services:
       mongo:
         image: mongo:8
@@ -121,6 +131,32 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
+      # M80 §6.2: the real-emulator DynamoDB suite (database-plugin) needs the
+      # emulator. A bare GET / answers 400, so a naive `curl -f /` could never
+      # pass — but curl IS in the image, and a POST ListTables answers 200 once
+      # the emulator is ready (M80 §1A E3, measured). Like ElasticMQ above,
+      # the probe has to match what readiness actually means here.
+      # DynamoDB Local answers a bare `GET /` with 400, so a naive `curl -f /`
+      # healthcheck can never pass (the ElasticMQ situation above). A POST
+      # ListTables does answer 200 — but ONLY with an `Authorization` header:
+      # without one the server replies 400 and `curl -f` exits 22, which is how
+      # this check first shipped and left the container permanently unhealthy.
+      # The credential is inert (DynamoDB Local never validates it); it is the
+      # header's PRESENCE that makes the request well-formed.
+      dynamodb:
+        # Pinned to a version rather than `latest`: every other service in
+        # this workflow pins at least a major (mongo:8, redis:7, rabbitmq:4),
+        # and a floating tag can change the emulator's behaviour between runs.
+        # A sha256 digest is deliberately not used — no other service here is
+        # digest-pinned, and the asymmetry would be the surprising part.
+        image: amazon/dynamodb-local:3.3.1
+        ports:
+          - 8000:8000
+        options: >-
+          --health-cmd "curl -sf -X POST -H 'X-Amz-Target: DynamoDB_20120810.ListTables' -H 'Content-Type: application/x-amz-json-1.0' -H 'Authorization: AWS4-HMAC-SHA256 Credential=ci/20260101/us-east-1/dynamodb/aws4_request' -d '{}' http://localhost:8000/"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -143,6 +179,38 @@ jobs:
       # ── Gates ────────────────────────────────────────────────────────────
       # Same four gates as CI, re-run here so a tag can never publish a tree
       # that would have failed on a pull request.
+      # The Cloud Bigtable emulator cannot be a `services:` container. The
+      # Google Cloud CLI image's default command is a shell — the emulator is
+      # started by `gcloud beta emulators bigtable start` — and a service block
+      # has no way to set one, because `options` reaches `docker create` BEFORE
+      # the image while the command comes after it. So it is started here, early
+      # enough that the 1.75 GB pull overlaps with the format, lint and type
+      # gates below rather than adding to the critical path.
+      #
+      # It earns that pull because M53's thesis holds: a real-backend proof CI
+      # never runs is not a proof, and every push-down this adapter makes is
+      # only correct if the service agrees. The emulator implements NO instance
+      # admin API — `instance.create()` answers `12 UNIMPLEMENTED` — so
+      # instances are implicit and the guarded suite creates tables directly.
+      #
+      # Readiness is a raw TCP connect: the emulator speaks gRPC, so there is no
+      # HTTP endpoint to curl and the image carries no gRPC client of its own.
+      - name: Start the Cloud Bigtable emulator
+        run: |
+          docker run -d --name bigtable-emulator -p 127.0.0.1:8086:8086 \
+            gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+            gcloud beta emulators bigtable start --host-port=0.0.0.0:8086
+          for _ in $(seq 1 60); do
+            if docker exec bigtable-emulator bash -c 'echo > /dev/tcp/127.0.0.1/8086' 2>/dev/null; then
+              echo 'bigtable emulator ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'bigtable emulator did not become ready'
+          docker logs bigtable-emulator
+          exit 1
+
       - name: Format check
         run: deno task fmt:check
 

@@ -109,6 +109,60 @@ function jobBlock(workflow: string, name: string): string {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
+/**
+ * Escapes a literal for embedding in a `RegExp`.
+ *
+ * @param value - Literal text
+ * @returns The same text, safe as a pattern
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Asserts a workflow declares `text` as an ACTIVE line, not merely somewhere.
+ *
+ * A `toContain` is satisfied by a commented-out declaration — the `#` sits
+ * before the key, so the substring survives commenting out the line that gives
+ * it effect. Anchoring to the start of a line, after indentation only, is what
+ * tells an active mapping entry from a disabled one.
+ *
+ * @param block - The workflow or job text to search
+ * @param text - The `key: value` pair that must be live
+ * @returns A pattern matching only the active form
+ */
+function activeLine(text: string): RegExp {
+  return new RegExp(`^ +${escapeRegExp(text)}$`, 'm');
+}
+
+/**
+ * Extracts one named step's block from a job, by indentation.
+ *
+ * Starts at the step's own `- name:` line, so the comment block above it is
+ * excluded: prose may legitimately differ between two workflows while the step
+ * they run must not. Throws when the step is absent, so a comparison against a
+ * renamed or deleted step fails loudly instead of comparing nothing.
+ *
+ * @param job - A job block from `jobBlock`
+ * @param name - The step's `name` value
+ * @returns That step's lines, `- name:` included
+ */
+function stepBlock(job: string, name: string): string {
+  const lines = job.split('\n');
+  const start = lines.findIndex((line) => line.trim() === `- name: ${name}`);
+  if (start === -1) throw new Error(`No step '${name}' in the job.`);
+  const indent = lines[start]!.length - lines[start]!.trimStart().length;
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end]!;
+    const isSibling = line.trimStart().startsWith('- ') &&
+      line.length - line.trimStart().length === indent;
+    if (isSibling) break;
+    end += 1;
+  }
+  return lines.slice(start, end).join('\n').trimEnd();
+}
+
 describe('release workflow wiring', () => {
   it('builds its notes with this script rather than inlined shell', async () => {
     // The Publish step's own comment records what a workflow copy of logic
@@ -153,6 +207,50 @@ describe('release workflow wiring', () => {
     expect(job).toMatch(
       /^ +run: deno task release:verify "\$\(jq -r \.version packages\/kernel\/deno\.json\)"$/m,
     );
+  });
+
+  it('starts every backend the PR job starts, so a tag run is no weaker a gate', async () => {
+    // The tag run re-runs the whole suite as the last gate before an immutable
+    // publish, so a backend it does not start is a guarded suite that skips
+    // there while passing on every PR. That is invisible: only `REDIS_URL` has
+    // a CI-reachability assertion, so the rest degrade to a silent skip and the
+    // job stays green. v0.2.0 shipped with DynamoDB Local and the Bigtable
+    // emulator missing here for exactly that reason.
+    //
+    // Derived from ci.yml rather than listed by hand, because a hand-written
+    // list is what drifted: a backend added to the PR job is now automatically
+    // required here too.
+    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
+    const release = await Deno.readTextFile('.github/workflows/release.yml');
+    const prJob = jobBlock(ci, 'deno');
+    const tagJob = jobBlock(release, 'release');
+
+    // Matched as ACTIVE lines rather than substrings: commenting a declaration
+    // out leaves the `key: value` text intact, so a `toContain` passes while
+    // the backend is gone — the same weakness this file already pins against
+    // for the release-verify step.
+    const images = [...prJob.matchAll(/^ +image: (\S+)$/gm)].map((match) => match[1]);
+    expect(images.length).toBeGreaterThan(5);
+    for (const image of images) {
+      expect(tagJob).toMatch(activeLine(`image: ${image}`));
+    }
+
+    // Endpoints too: a started container the suite cannot address is no gate.
+    const endpoints = [...prJob.matchAll(/^ +([A-Z0-9_]+(?:_URL|_URI|_ENDPOINT)): (\S+)$/gm)];
+    expect(endpoints.length).toBeGreaterThan(5);
+    for (const [, name, value] of endpoints) {
+      expect(tagJob).toMatch(activeLine(`${name}: ${value}`));
+    }
+
+    // The Bigtable emulator cannot be a service container — its image's default
+    // command is a shell, and `options` reaches `docker create` BEFORE the image
+    // while the command comes after — so it is a step that no image or endpoint
+    // pin above reaches. Compared byte-for-byte against ci.yml's own step rather
+    // than pinned as a literal, so changing the image, the published port, the
+    // emulator command or the readiness probe on the PR side requires the same
+    // change here; a hand-written literal is what let these two drift already.
+    const emulator = 'Start the Cloud Bigtable emulator';
+    expect(stepBlock(tagJob, emulator)).toBe(stepBlock(prJob, emulator));
   });
 
   it('flags a 0.x release as a prerelease, not only a -suffix version', async () => {

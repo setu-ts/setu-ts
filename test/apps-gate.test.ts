@@ -352,12 +352,49 @@ describe('real-backend CI wiring', () => {
     // so the v0.1.0-alpha.5 release run died on that assertion and the release
     // was published by hand. The two workflows must therefore agree on the
     // backend environment, not merely on which tasks they call.
+    //
+    // These four are the ones whose absence killed a release, kept as an
+    // explicit record of that. The GENERAL rule — release.yml must start every
+    // backend ci.yml starts — is derived from ci.yml rather than hand-listed,
+    // in `test/unit/release-notes.test.ts`, because a hand-list is what let
+    // DynamoDB Local and the Bigtable emulator drift in unnoticed after M80
+    // and M82 added them to the PR job alone.
     const workflow = await Deno.readTextFile('.github/workflows/release.yml');
     expect(workflow).toContain('REDIS_URL: redis://localhost:6379');
     expect(workflow).toContain('image: redis:7');
     expect(workflow).toContain('- 6379:6379');
     expect(workflow).toContain('image: softwaremill/elasticmq-native:1.7.1');
     expect(workflow).toContain('SQS_ENDPOINT_URL: http://localhost:9324');
+  });
+
+  it('resolves wrangler before it starts timing the workerd host', async () => {
+    // The behavioural proof is the smoke itself, which `check:apps` runs on
+    // every CI run — but only the RACE is behavioural, and its trigger is the
+    // runner's npm cache state, which a test cannot control. Verified manually
+    // instead by pointing npm at an empty cache: exit 1 before the fix with
+    // `will be installed: wrangler@4.128.0` then the timeout, exit 0 after.
+    //
+    // What IS pinnable is the ordering the fix consists of, and it is the whole
+    // fix: `npx wrangler` installs on first use, so spawning `wrangler dev` and
+    // only then starting a ten-second readiness budget loses that budget to the
+    // download. Resolving it first pays the install outside the window.
+    const smoke = await Deno.readTextFile('apps/realtime-clients/smoke.ts');
+    const preflight = smoke.indexOf("await run('npx', ['--yes', 'wrangler', '--version']);");
+    const spawn = smoke.indexOf("new Deno.Command('npx'");
+    expect(preflight).toBeGreaterThan(-1);
+    expect(spawn).toBeGreaterThan(preflight);
+
+    // Two servers are awaited, so a fixed message blames the wrong one — CI
+    // reported the Deno host as not started while it was already serving.
+    //
+    // Each label is matched TOGETHER with the call it labels. Searching for the
+    // label alone passes while it sits in a comment and the call has gone back
+    // to taking one argument, which is the state the fix replaced. `\s*` so a
+    // later `deno fmt` rewrap across lines does not read as a regression.
+    expect(smoke).toMatch(/waitForServer\(\s*baseUrl,\s*'Realtime client server'/);
+    expect(smoke).toMatch(
+      /waitForServer\(\s*`http:\/\/127\.0\.0\.1:\$\{workerdPort\}`,\s*'workerd client host'/,
+    );
   });
 
   it('has REDIS_URL available whenever CI provides the container', () => {
