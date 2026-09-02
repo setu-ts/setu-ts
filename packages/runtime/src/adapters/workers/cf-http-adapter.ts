@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { upgradeIntentOf } from '@setu-ts/common';
+import { isPromiseLike, upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -38,7 +38,7 @@ import {
  * @internal - Not exported from package index
  */
 export class CloudflareWorkersServerHandle {
-  #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
+  #handler: ((request: IRequest) => IResponse | Promise<IResponse>) | null = null;
   readonly #upgrades = new UpgradeRouterStore();
   #wsHost: CloudflareWebSocketHost | null;
 
@@ -49,7 +49,7 @@ export class CloudflareWorkersServerHandle {
   /**
    * Stores the handler set by `setHandler`.
    */
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handler = handler;
   }
 
@@ -76,24 +76,31 @@ export class CloudflareWorkersServerHandle {
    * After it returns, the adapter checks for an upgrade intent written by
    * the kernel terminal handler and performs the WebSocket handshake.
    */
-  createFetchHandler(): (request: Request) => Promise<Response> {
-    return async (request: Request): Promise<Response> => {
-      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+  createFetchHandler(): (request: Request) => Response | Promise<Response> {
+    return (request: Request): Response | Promise<Response> => {
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
 
-      // Run the framework handler FIRST — middleware pipeline applies uniformly.
-      const frameworkResponse = await this.#handler(frameworkRequest);
-
       // Check for upgrade intent written by the kernel terminal handler.
-      const intent = upgradeIntentOf(frameworkRequest);
-      if (intent !== undefined) {
-        return this.#performUpgrade(request, intent);
-      }
+      const finish = (frameworkResponse: IResponse): Response | Promise<Response> => {
+        const intent = upgradeIntentOf(frameworkRequest);
+        if (intent !== undefined) {
+          return this.#performUpgrade(request, intent);
+        }
+        return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      };
 
-      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      // Run the framework handler FIRST — middleware pipeline applies
+      // uniformly. Deliberately NOT awaited (M87): a hook-free,
+      // middleware-free route is answered without yielding, and awaiting
+      // would add a microtask hop per request to unwrap a value already held.
+      const frameworkResponse = this.#handler(frameworkRequest);
+      return isPromiseLike(frameworkResponse)
+        ? Promise.resolve(frameworkResponse).then(finish)
+        : finish(frameworkResponse);
     };
   }
 
@@ -134,7 +141,7 @@ export class CloudflareWorkersHttpAdapter implements IHttpAdapter {
     this.#handle = new CloudflareWorkersServerHandle(wsHost);
   }
 
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handle.setHandler(handler);
   }
 
@@ -146,7 +153,7 @@ export class CloudflareWorkersHttpAdapter implements IHttpAdapter {
     this.#handle.setRpcHandler(handler);
   }
 
-  fetch(request: Request): Promise<Response> {
+  fetch(request: Request): Response | Promise<Response> {
     return this.#handle.createFetchHandler()(request);
   }
 

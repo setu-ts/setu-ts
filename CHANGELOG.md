@@ -4,6 +4,109 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING — `IHttpAdapter` accepts and returns sync-or-async.** `setHandler` now takes
+  `(request: IRequest) => IResponse | Promise<IResponse>` and `fetch` returns
+  `Response | Promise<Response>`. Callers are unaffected — `await` works on both — but an
+  out-of-repo adapter implementing the narrower `Promise`-only shape must widen it, because the
+  handler's return type sits in a contravariant position. TypeScript's bivariant method parameters
+  mean an existing implementation still compiles; the break is narrow and shows up when a handler
+  that answers synchronously is passed to it.
+
+  _Migration:_ widen the signatures and branch on promise-ness rather than awaiting:
+
+  ```typescript
+  import { isPromiseLike } from '@setu-ts/common';
+
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void { … }
+
+  const result = this.handler(frameworkRequest);
+  return isPromiseLike(result) ? Promise.resolve(result).then(finish) : finish(result);
+  ```
+
+  Use `isPromiseLike`, not `instanceof Promise`: the handler's declared `Promise<IResponse>` is
+  satisfied structurally, so a cross-realm or userland promise answers `false` to `instanceof` and
+  would be treated as an already-settled `IResponse`. `Promise.resolve` returns a native promise
+  unchanged and adopts a foreign thenable.
+
+- **BREAKING (behaviour, Node only) — `@hono/node-server` now installs its own `Request`/`Response`
+  as globals.** The Node adapter previously passed `overrideGlobalObjects: false`. That flag decided
+  which class backs `new Response(...)`, and node-server serves a response through its synchronous
+  fast path only when the object carries that class's internal cache symbol — so opting out put
+  every response on the slow path. It is node-server's own default and what every Hono-on-Node
+  deployment already runs, and its classes are web-standard compatible. Applications that depend on
+  `globalThis.Response` being undici's specific implementation on Node are affected; nothing else
+  is. Deno, Bun and Workers are untouched.
+
+- **Route registration refuses nothing new, but matching got faster and `params` may now be a shared
+  frozen object.** A route with no path parameters receives one shared, frozen `params` record
+  rather than a fresh `{}`. Reading it is unchanged; mutating it — which was never supported, since
+  `IRequestContext.params` is `Readonly` — now throws in strict mode instead of silently succeeding
+  on a throwaway object.
+
+### Added
+
+- **`isPromiseLike(value)` in `@setu-ts/common`.** Reports whether a value is thenable by the
+  duck-typed test rather than `instanceof Promise`, which answers `false` for a promise from another
+  realm and for userland promise libraries — values that satisfy `RouteHandler`'s declared
+  `Promise<HandlerResult>` structurally, so TypeScript accepts them. The kernel and all four HTTP
+  adapters use it to decide whether a handler result needed awaiting; without it the synchronous
+  request path treats such a value as already-settled and sends the response while the handler is
+  still running.
+
+### Performance
+
+The request path was rebuilt around two principles: allocate nothing a route did not ask for, and
+never enter the microtask queue when the answer is already known. Measured with bombardier on Node
+(`-c 64`, medians of interleaved runs), bare `/json` went from **41,437 to ~100,000 rps** — from
+roughly **34% to ~90% of the bare Hono router** the framework is built on, and from ~65% to
+**130–160% of NestJS-Express**. With three middleware registered — the shape any real application
+has — Setu-TS runs at **132% of Hono** and **113% of raw Express**, because Hono's `compose()`
+awaits every stage and loses 40.6% of its throughput to three middleware where this pipeline loses
+17.9%.
+
+Every change below except the global-objects one is runtime-agnostic, so Deno and Bun benefit too.
+Measured the same way, Deno goes from **62,637 to 160,130 rps** — **2.56x**, and from 33% to **~85%
+of Hono on Deno**. Bun runs at ~77% of Hono on Bun. Neither needs the global-objects change and
+neither receives it: `@hono/node-server` exists to translate between Node's `IncomingMessage`/
+`ServerResponse` and web `Request`/`Response`, and its fast path is a shortcut through that
+translation. `Deno.serve` and `Bun.serve` take a real `Response` natively, so there is no shim to
+bypass and no lightweight class to install.
+
+- **Request bodies are read lazily and memoized.** The mapping called `arrayBuffer()` on every
+  request, including bodyless GETs; under node-server that forces the full undici `Request` the
+  lightweight facade exists to avoid. A `GET`/`HEAD` carrying neither `content-length` nor
+  `transfer-encoding` now resolves to a shared empty buffer without touching the native request. A
+  side effect worth naming: an ordinary WebSocket upgrade now reaches the handshake with its raw
+  `Request` undisturbed, which is the hazard M46 had to intercept inside the adapter to avoid.
+- **Cold request-context members are lazy.** `id`, `services`, `state`, `query` and `signal`
+  materialize on first access; `RequestContext` is a class, so every request shares one hidden
+  class.
+- **The framework's own layers no longer force `async`.** `Application.#handleRequest` and all four
+  adapters' fetch handlers return synchronously when nothing needed awaiting, as does Bun's
+  `Bun.serve` callback — that one is a separate entry point from the fetch handler, and leaving it
+  `async` would have lost on the socket path exactly what this won on the fetch path. Lifecycle
+  hooks and global middleware still take the unchanged async path.
+- **Route matching answers a single candidate without allocating.** The `RouteEntry` rides on the
+  handler the router already returns, replacing a `${method} ${path}` key and a `Map` lookup;
+  `decodeURIComponent` is skipped for values containing no `%`, where it is an identity function.
+- **One URL parse per request instead of two, and often zero.** Route dispatch reuses the path the
+  mapping already resolved, and that mapping extracts it by slicing rather than constructing a
+  `URL`, falling back to `URL` on the only inputs it rewrites — dot-segments and backslashes — so
+  the result is identical for every input. Routing semantics are unchanged; `/foo/../admin` still
+  resolves to `/admin`.
+
+### Fixed
+
+- Two committed comments described behaviour the code did not have. The request `Headers` copy was
+  documented as providing "immutability" when `new Headers()` is mutable — it normalizes
+  **writability**, since a server-received `Request` throws on `headers.set` on Deno while Node and
+  Bun permit it. And the upgrade-body refusal claimed the mapping "has already disturbed it via
+  `arrayBuffer()`", which the lazy body makes false.
+
 ## [0.2.0] — 2026-09-02
 
 **The version scheme drops the `alpha` label, and four NoSQL backends land.** Every release up to

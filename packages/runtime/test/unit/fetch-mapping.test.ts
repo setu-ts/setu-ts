@@ -98,6 +98,94 @@ describe('fetch-mapping | idempotent body access', () => {
 });
 
 // ---------------------------------------------------------------------------
+// CONCURRENT body access. Every test above awaits one read before starting
+// the next, which is why the lazy rewrite could break the documented
+// idempotency contract and still ship green: the first implementation cached
+// the RESOLVED bytes, so two concurrent readers both saw an empty cache, both
+// called `Request.arrayBuffer()`, and the second rejected with
+// `Body already consumed` because a non-empty fetch body is one-shot.
+// ---------------------------------------------------------------------------
+
+describe('fetch-mapping | concurrent body access', () => {
+  const payload = JSON.stringify({ v: 1 });
+  const makeRequest = (): Request =>
+    new Request('https://example.com/x', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: payload,
+    });
+
+  it('text() and bytes() started concurrently both resolve', async () => {
+    const frameworkRequest = mapWebRequestToFrameworkRequest(makeRequest());
+
+    const [text, bytes] = await Promise.all([
+      frameworkRequest.text(),
+      frameworkRequest.bytes(),
+    ]);
+
+    expect(text).toBe(payload);
+    expect(bytes).toEqual(new TextEncoder().encode(payload));
+  });
+
+  it('three concurrent readers make exactly ONE native body read', async () => {
+    const raw = makeRequest();
+    let nativeReads = 0;
+    const original = raw.arrayBuffer.bind(raw);
+    Object.defineProperty(raw, 'arrayBuffer', {
+      value: (): Promise<ArrayBuffer> => {
+        nativeReads++;
+        return original();
+      },
+    });
+
+    const frameworkRequest = mapWebRequestToFrameworkRequest(raw);
+    const [a, b, c] = await Promise.all([
+      frameworkRequest.json<{ v: number }>(),
+      frameworkRequest.text(),
+      frameworkRequest.bytes(),
+    ]);
+
+    expect(nativeReads).toBe(1);
+    expect(a).toEqual({ v: 1 });
+    expect(b).toBe(payload);
+    expect(c).toEqual(new TextEncoder().encode(payload));
+  });
+
+  it('concurrent readers share one resolved instance', async () => {
+    const frameworkRequest = mapWebRequestToFrameworkRequest(makeRequest());
+
+    const [first, second] = await Promise.all([
+      frameworkRequest.bytes(),
+      frameworkRequest.bytes(),
+    ]);
+
+    expect(first).toBe(second);
+  });
+
+  it('a concurrent read on a bodyless GET needs no native read at all', async () => {
+    const raw = new Request('https://example.com/x');
+    let nativeReads = 0;
+    const original = raw.arrayBuffer.bind(raw);
+    Object.defineProperty(raw, 'arrayBuffer', {
+      value: (): Promise<ArrayBuffer> => {
+        nativeReads++;
+        return original();
+      },
+    });
+
+    const frameworkRequest = mapWebRequestToFrameworkRequest(raw);
+    const [text, bytes] = await Promise.all([
+      frameworkRequest.text(),
+      frameworkRequest.bytes(),
+    ]);
+
+    expect(nativeReads).toBe(0);
+    expect(text).toBe('');
+    expect(bytes).toEqual(new Uint8Array(0));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // mapSnapshotToWebResponse — status, headers, body variants
 // ---------------------------------------------------------------------------
 

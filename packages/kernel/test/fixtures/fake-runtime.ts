@@ -12,7 +12,7 @@ import type {
   TimerHandle,
 } from '@setu-ts/common';
 
-import type { IRequest } from '@setu-ts/common';
+import type { IRequest, IResponse } from '@setu-ts/common';
 
 /**
  * Wall-clock origin for the fake `now()`. Any fixed epoch works; the point is
@@ -118,11 +118,11 @@ export function createFakeRuntime(options: FakeRuntimeOptions = {}): {
  * Fake HTTP adapter that stores the handler for injection-based testing.
  */
 export class FakeHttpAdapter implements IHttpAdapter {
-  #handler: ((request: IRequest) => Promise<unknown>) | null = null;
+  #handler: ((request: IRequest) => IResponse | Promise<IResponse>) | null = null;
   #listening = false;
   #port = 0;
 
-  setHandler(handler: (request: IRequest) => Promise<unknown>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handler = handler;
   }
 

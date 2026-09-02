@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { upgradeIntentOf } from '@setu-ts/common';
+import { isPromiseLike, upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -103,14 +103,14 @@ const defaultBunServeHost: BunServeHost = (globalThis as { Bun?: BunServeHost })
  * @internal - Not exported from package index
  */
 export class BunHttpServerHandle {
-  #handler: ((request: IRequest) => Promise<IResponse>) | null = null;
+  #handler: ((request: IRequest) => IResponse | Promise<IResponse>) | null = null;
   #server: BunServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
 
   /**
    * Stores the handler set by `setHandler`.
    */
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handler = handler;
   }
 
@@ -151,24 +151,31 @@ export class BunHttpServerHandle {
    * The framework handler (kernel pipeline) runs FIRST. After it returns,
    * the adapter checks for an upgrade intent.
    */
-  createFetchHandler(): (request: Request) => Promise<Response> {
-    return async (request: Request): Promise<Response> => {
-      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+  createFetchHandler(): (request: Request) => Response | Promise<Response> {
+    return (request: Request): Response | Promise<Response> => {
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
 
-      // Run the framework handler FIRST — middleware pipeline applies uniformly.
-      const frameworkResponse = await this.#handler(frameworkRequest);
-
       // Check for upgrade intent written by the kernel terminal handler.
-      const intent = upgradeIntentOf(frameworkRequest);
-      if (intent !== undefined) {
-        return this.#performUpgrade(request, intent);
-      }
+      const finish = (frameworkResponse: IResponse): Response | Promise<Response> => {
+        const intent = upgradeIntentOf(frameworkRequest);
+        if (intent !== undefined) {
+          return this.#performUpgrade(request, intent);
+        }
+        return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      };
 
-      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      // Run the framework handler FIRST — middleware pipeline applies
+      // uniformly. Deliberately NOT awaited (M87): a hook-free,
+      // middleware-free route is answered without yielding, and awaiting
+      // would add a microtask hop per request to unwrap a value already held.
+      const frameworkResponse = this.#handler(frameworkRequest);
+      return isPromiseLike(frameworkResponse)
+        ? Promise.resolve(frameworkResponse).then(finish)
+        : finish(frameworkResponse);
     };
   }
 
@@ -184,24 +191,37 @@ export class BunHttpServerHandle {
   createServeCallback(): (
     request: Request,
     server: BunServer,
-  ) => Promise<Response | undefined> {
-    return async (request: Request, server: BunServer): Promise<Response | undefined> => {
-      const frameworkRequest = await mapWebRequestToFrameworkRequest(request);
+  ) => Response | undefined | Promise<Response | undefined> {
+    return (
+      request: Request,
+      server: BunServer,
+    ): Response | undefined | Promise<Response | undefined> => {
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
       }
 
-      // Run the framework handler FIRST — middleware pipeline applies uniformly.
-      const frameworkResponse = await this.#handler(frameworkRequest);
-
       // Check for upgrade intent written by the kernel terminal handler.
-      const intent = upgradeIntentOf(frameworkRequest);
-      if (intent !== undefined) {
-        return this.#performBunUpgrade(request, server, intent);
-      }
+      const finish = (frameworkResponse: IResponse): Response | undefined => {
+        const intent = upgradeIntentOf(frameworkRequest);
+        if (intent !== undefined) {
+          return this.#performBunUpgrade(request, server, intent);
+        }
+        return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      };
 
-      return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+      // Run the framework handler FIRST — middleware pipeline applies
+      // uniformly. Deliberately NOT awaited, for the same reason as
+      // `createFetchHandler`: `Bun.serve`'s `fetch` accepts a plain
+      // `Response`, so an `async` callback here would add a promise and a
+      // microtask hop per request even when the handler answered
+      // synchronously — losing on the socket path exactly what M87 won on
+      // the fetch path.
+      const frameworkResponse = this.#handler(frameworkRequest);
+      return isPromiseLike(frameworkResponse)
+        ? Promise.resolve(frameworkResponse).then(finish)
+        : finish(frameworkResponse);
     };
   }
 
@@ -269,7 +289,7 @@ export class BunHttpAdapter implements IHttpAdapter {
     this.#handle = new BunHttpServerHandle();
   }
 
-  setHandler(handler: (request: IRequest) => Promise<IResponse>): void {
+  setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
     this.#handle.setHandler(handler);
   }
 
@@ -281,7 +301,7 @@ export class BunHttpAdapter implements IHttpAdapter {
     this.#handle.setRpcHandler(handler);
   }
 
-  fetch(request: Request): Promise<Response> {
+  fetch(request: Request): Response | Promise<Response> {
     return this.#handle.createFetchHandler()(request);
   }
 
