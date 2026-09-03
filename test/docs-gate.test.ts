@@ -1479,6 +1479,22 @@ describe('documentation gate — bare version claims', () => {
     // `\d+.\d+.\d+` claims, re-checked at the new shipping version.
     const noise = 'drizzle-orm@0.45.2, version=0.0.4, bound to 127.0.0.1\n';
     expect(checkVersionClaims(doc('docs/guide.md', noise), '0.3.0')).toEqual([]);
+
+    // And specifically for the digits the new arm added: every one of these
+    // CONTAINS `0.3.N`, so they are the strings the widening could plausibly
+    // have started claiming. The boundary lookarounds are what rejects them —
+    // the noise case above uses 0.2-era digits and so cannot cover this.
+    //
+    // This lives HERE and not on `checkInstallVersions` deliberately. That
+    // checker pins the version's position with a literal `@setu-ts/<pkg>@^`
+    // prefix, so digits cannot precede it, and its `\d+` is greedy, so digits
+    // cannot trail it either. Every false-positive case constructible there
+    // passes with the boundaries deleted — measured, all three attempts — so
+    // adding one would assert nothing while looking like coverage. Dropping
+    // NOT_AFTER fails the case below, which is what makes it real.
+    const threeNoise = 'bound to 127.0.3.1 and 10.0.3.2, requires foo 10.3.1, mask 192.0.3.9\n';
+    expect(checkVersionClaims(doc('docs/guide.md', threeNoise), '0.3.0')).toEqual([]);
+    expect(checkVersionClaims(doc('docs/guide.md', threeNoise), '0.3.1')).toEqual([]);
   });
 
   // Measured against the real corpus, not guessed. A general `\d+.\d+.\d+`
