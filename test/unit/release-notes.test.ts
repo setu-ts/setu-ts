@@ -209,6 +209,30 @@ describe('release workflow wiring', () => {
     );
   });
 
+  it('sweeps for residual version references on both the PR and tag paths', async () => {
+    // The sweep covers what `release:verify` structurally cannot: it reads
+    // manifests, while a stale `@setu-ts` specifier in a `src` tree or a
+    // lockfile still RESOLVES. Measured — reverting one `packages/sdk/src`
+    // specifier leaves `deno check`, the full suite, `publish:check` AND
+    // `release:verify` green, and publishes a package depending on the
+    // previous release.
+    //
+    // Pinned on BOTH paths for the reason the backend-parity test below gives:
+    // a gate present on the PR job and absent on the tag job is a weaker gate
+    // in front of an immutable publish, and nothing else would say so.
+    // Asserted as real `run:` lines inside their jobs, since a bare
+    // `toContain` is satisfied by a commented-out line.
+    const ci = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(jobBlock(ci, 'publish-dry-run')).toMatch(
+      /^ +run: deno task check:versions$/m,
+    );
+
+    const release = await Deno.readTextFile('.github/workflows/release.yml');
+    expect(release).toMatch(
+      /^ +run: deno run --allow-read --allow-run=git scripts\/version-sweep\.ts "\$\{GITHUB_REF_NAME#v\}"$/m,
+    );
+  });
+
   it('starts every backend the PR job starts, so a tag run is no weaker a gate', async () => {
     // The tag run re-runs the whole suite as the last gate before an immutable
     // publish, so a backend it does not start is a guarded suite that skips
