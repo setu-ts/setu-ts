@@ -98,6 +98,10 @@ const app = createApplication({
     }),
   ],
 });
+
+// Declared subscriptions are established during startup, so nothing is
+// subscribed until now.
+await app.start({ port: 3000 });
 ```
 
 The behaviour chain wraps `subscribe()` handlers only. `respond()` remains unwrapped and has no

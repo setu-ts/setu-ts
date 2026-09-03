@@ -332,8 +332,8 @@ read the Changed section before upgrading.
   hook releases one plugin's resources, and aborting the loop at the first failure meant one plugin
   that could not disconnect kept every later plugin from releasing anything — the M50 `onStopping`
   defect in a second place, reachable from `stop()` and, since this release, from a failed
-  `start()`. `LifecycleManager.runShutdown` has the same shape and is deliberately unchanged here:
-  it has no call site this milestone adds.
+  `start()`. `LifecycleManager.runShutdown` still aborts at the first failing hook and is
+  deliberately unchanged here: it has no call site this milestone adds.
 - `QueuePlugin({ processors })` registers in **declared order** when the array contains a factory.
   `process()` is last-wins on a job name, and registering every instance before every factory made
   `[factoryA, instanceB]` on one name resolve to `factoryA` — the reverse of the declared array, so

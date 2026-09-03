@@ -91,6 +91,9 @@ const app = createApplication({
     }),
   ],
 });
+
+// Declared jobs register during startup, so nothing is scheduled until now.
+await app.start({ port: 3000 });
 ```
 
 ## Distributed locking
