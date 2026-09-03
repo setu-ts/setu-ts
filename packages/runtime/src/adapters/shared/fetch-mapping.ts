@@ -252,9 +252,9 @@ export function mapSnapshotToWebResponse(
   const { status, body, streaming } = snapshot;
   // Consult the kernel's typed init protocol before public `headers`: reading
   // that live view materializes a framework Headers object, while the common
-  // terminal-response shapes can hand their immutable init straight to the
-  // native Response constructor. Explicit/multi-value headers fall back to
-  // the existing Headers path unchanged.
+  // terminal-response shapes can hand their snapshot-local init straight to
+  // the native Response constructor. Explicit/multi-value headers fall back
+  // to the existing Headers path unchanged.
   const headers = snapshot.responseInit?.headers ?? snapshot.headers;
 
   if (streaming) {
