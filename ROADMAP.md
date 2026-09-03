@@ -8642,6 +8642,18 @@ allocations where Hono builds one) and a synchronous `executeChain` (needs `Next
 which breaks middleware calling `next().then(...)`) — both **M88**. Benchmarks as a release gate —
 **M40**.
 
+## Milestone 88: Response-Path Performance 🚧
+
+**Package(s):** `packages/common`, `packages/kernel`, `packages/runtime`
+
+M87 removed request-path microtasks and reached roughly 90% of bare Hono's `/json` throughput, but
+left the response conversion path deliberately. `ResponseBuilder` now defers its framework `Headers`
+instance for terminal-only responses and carries a typed `ResponseSnapshot.responseInit` hint to the
+shared runtime mapper. The mapper consumes that hint before reading the documented live
+`snapshot.headers` view, so ordinary JSON/text/HTML/bytes/redirect responses avoid the intermediate
+native header object while explicit headers and repeated `Set-Cookie` values retain the existing
+`Headers` path. Synchronous middleware dispatch and request-identity semantics remain out of scope.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                             |
@@ -8767,3 +8779,4 @@ which breaks middleware calling `next().then(...)`) — both **M88**. Benchmarks
 | 85        | ✅     | cli (workspace full-stack gRPC, PR #215)            |
 | 86        | ✅     | non-http ingress registration + pipeline            |
 | 87        | ✅     | request-path performance (kernel/runtime/common)    |
+| 88        | 🚧     | response-path performance (kernel/runtime/common)   |

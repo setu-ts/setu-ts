@@ -27,6 +27,51 @@ describe('ResponseBuilder', () => {
     expect(res.ended).toBe(true);
   });
 
+  it('keeps common terminal headers lazy until a snapshot consumer reads them', () => {
+    const res = new ResponseBuilder();
+    res.json({ ok: true });
+    const snapshot = res.snapshot();
+
+    expect(snapshot.responseInit?.headers).toEqual({
+      'content-type': 'application/json; charset=utf-8',
+    });
+    expect(Object.isFrozen(snapshot.responseInit)).toBe(true);
+    expect(Object.isFrozen(snapshot.responseInit?.headers)).toBe(true);
+    expect(snapshot.headers.get('content-type')).toBe('application/json; charset=utf-8');
+  });
+
+  it('keeps an earlier snapshot headers view live after a later mutation', () => {
+    const res = new ResponseBuilder();
+    res.json({ ok: true });
+    const snapshot = res.snapshot();
+    res.header('x-after-snapshot', 'yes');
+
+    expect(snapshot.responseInit).toBeUndefined();
+    expect(snapshot.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(snapshot.headers.get('x-after-snapshot')).toBe('yes');
+  });
+
+  it('writes a terminal content type through already materialized headers', () => {
+    const res = new ResponseBuilder();
+    res.header('x-explicit', 'yes').json({ ok: true });
+
+    const snapshot = res.snapshot();
+    expect(snapshot.responseInit).toBeUndefined();
+    expect(snapshot.headers.get('x-explicit')).toBe('yes');
+    expect(snapshot.headers.get('content-type')).toBe('application/json; charset=utf-8');
+  });
+
+  it('materializes headers when terminal methods require different built-in names', () => {
+    const res = new ResponseBuilder();
+    res.json({ ok: true });
+    res.redirect('/next');
+
+    const snapshot = res.snapshot();
+    expect(snapshot.responseInit).toBeUndefined();
+    expect(snapshot.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(snapshot.headers.get('location')).toBe('/next');
+  });
+
   it('should set text body and content-type', () => {
     const res = new ResponseBuilder();
     res.text('hello');
@@ -148,6 +193,18 @@ describe('ResponseBuilder', () => {
       const snap = res.snapshot();
       expect(snap.streaming).toBe(true);
       expect(snap.body).toBe(stream);
+    });
+
+    it('snapshot() omits the fast init for a stream with no built-in headers', () => {
+      const res = new ResponseBuilder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close();
+        },
+      });
+      res.stream(stream);
+
+      expect(res.snapshot().responseInit).toBeUndefined();
     });
 
     it('json/text/send/redirect still set streaming: false (regression)', () => {

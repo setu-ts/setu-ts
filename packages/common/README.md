@@ -373,6 +373,7 @@ package fits the plugin architecture.
 | `RequestHandler`             | type      |
 | `ResilientCall`              | type      |
 | `ResponseSnapshot`           | type      |
+| `ResponseSnapshotInit`       | interface |
 | `Result`                     | type      |
 | `RouteHandler`               | type      |
 | `RpcFetchHandler`            | type      |
