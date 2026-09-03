@@ -171,6 +171,16 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
 
+  // X18-1: the contract is singular, and exceeding it used to be silent —
+  // five requested packages reported `updated deno.json` and exited 0 with one
+  // added. Refused by name, like every other misapplied input to this CLI.
+  if (args.positionals.length > 1) {
+    deps.error(
+      `${PROGRAM_NAME} add takes one package; got ${args.positionals.length}. Run it once per package.`,
+    );
+    return EXIT_USAGE;
+  }
+
   const bare = resolveAddablePackage(requested);
   if (bare === undefined) {
     deps.error(`"${requested}" is not a Setu-TS package this command can add.`);
