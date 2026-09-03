@@ -23,7 +23,7 @@ npx jsr add @setu-ts/common
 | Capability tokens   | `CAPABILITIES`, `createCapabilityToken()`, `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                           |
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, context APIs (`IRouterApi`, `IMiddlewareApi`, `ILifecycleApi`, …)                                                                                                                                                                               |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory`                                                                                                                                                                                                                                      |
-| HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`                                                                                                                                                                           |
+| HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`, `ResponseSnapshot`, `ResponseSnapshotInit`                                                                                                                               |
 | Runtime abstraction | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`                                                                                                                                                                                                                                            |
 | Optional DI         | `IContainer`, `Provider`, `ServiceScope`                                                                                                                                                                                                                                                     |
 | Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver` |
@@ -62,6 +62,14 @@ function parsePort(raw: string): Result<number, RangeError> {
     : err(new RangeError(`Invalid port: ${raw}`));
 }
 ```
+
+### Response snapshots
+
+`IResponse.snapshot().headers` is the documented live `Headers` view for middleware and application
+code. `ResponseSnapshot.responseInit` is an `@internal` kernel-to-runtime optimization hint:
+adapters may use its snapshot-local header input while constructing a native response, including
+adding derived headers such as `Content-Length`. Do not consume it from application or middleware
+code.
 
 ## Rules
 
@@ -373,6 +381,7 @@ package fits the plugin architecture.
 | `RequestHandler`             | type      |
 | `ResilientCall`              | type      |
 | `ResponseSnapshot`           | type      |
+| `ResponseSnapshotInit`       | type      |
 | `Result`                     | type      |
 | `RouteHandler`               | type      |
 | `RpcFetchHandler`            | type      |

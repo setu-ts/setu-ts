@@ -817,10 +817,41 @@ export type ResponseSnapshot =
     readonly status: number;
     readonly headers: Headers;
     readonly body: Uint8Array | string | null;
+    /**
+     * Snapshot-local header input the runtime may pass to a native response
+     * before it reads the lazy {@linkcode headers} view.
+     *
+     * @internal
+     */
+    readonly responseInit?: ResponseSnapshotInit | undefined;
   }
   | {
     readonly streaming: true;
     readonly status: number;
     readonly headers: Headers;
     readonly body: ReadableStream<Uint8Array>;
+    /**
+     * Snapshot-local header input the runtime may pass to a native response
+     * before it reads the lazy {@linkcode headers} view.
+     *
+     * @internal
+     */
+    readonly responseInit?: ResponseSnapshotInit | undefined;
   };
+
+/**
+ * Native-response initialization data attached to a snapshot by the kernel
+ * when its headers have not needed a mutable {@linkcode Headers} instance.
+ *
+ * HTTP adapters consume this private-by-convention protocol before reading
+ * {@linkcode ResponseSnapshot.headers}. The supplied input is snapshot-local
+ * so a native server may safely derive or add headers. Application and
+ * middleware code should continue to use `snapshot.headers`, which remains
+ * the documented live view.
+ *
+ * @since 0.4.0
+ */
+export type ResponseSnapshotInit = {
+  /** Header input accepted directly by the web-standard `Response` constructor. */
+  readonly headers: HeadersInit;
+};

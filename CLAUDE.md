@@ -4027,6 +4027,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `sealRequestIdentity` at **0.545 µs/req**, whose fix moves accessors to a prototype and so changes
   `Object.keys(request)` against M71's shipped behaviour — a semantics decision, not a perf one) —
   complete (PR #227)
+- **Milestone 88** (`packages/common` + `packages/kernel` + `packages/runtime` — response-path
+  performance): terminal JSON/text/HTML/byte/redirect responses defer the framework `Headers` object
+  until an observer needs the documented live `snapshot.headers` view. The shared mapper consumes a
+  snapshot-local initializer directly, while explicit and repeated headers retain the existing path.
+  The initializer is a fresh mutable copy of an immutable internal source: the real Node adapter
+  regression test proves `@hono/node-server` can add derived `Content-Length` without contaminating
+  another response. Focused response conversion measured 35.7% lower median cost; five alternating
+  Node-adapter loopback samples measured a +4.9% median with material local variance, so neither is
+  a production-throughput claim — complete (PR #233)
 - **Milestone 86** (`common`, `cqrs-plugin`, `websocket-plugin`, `queue-plugin`, `scheduler-plugin`,
   `messaging-plugin` — non-HTTP ingress registration and behaviours: the shared
   `IngressContext`/`IIngressBehavior` composer; declarative route, processor, job, and subscription
@@ -4164,9 +4173,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   counter-argument itself, that introducing release tooling immediately before a prepared release is
   risk traded against a manual bump that is auditable and already covered by `release:verify` — so
   if built, build it early in a cycle, never at cut time.
-- **Next milestone** — **M88** (the request-path work M87 deferred: the response path, where
-  `ResponseBuilder` → `snapshot()` → `Response` builds four objects, and `sealRequestIdentity`,
-  whose fix changes `Object.keys(request)` against M71's shipped behaviour).
+- **Next milestone** — **TBD** (M89 is not yet defined in ROADMAP.md).
 
 ## Verification (run before declaring any work done)
 

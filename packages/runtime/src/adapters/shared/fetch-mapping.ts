@@ -249,7 +249,13 @@ export function mapWebRequestToFrameworkRequest(request: Request): IRequest {
 export function mapSnapshotToWebResponse(
   snapshot: ResponseSnapshot,
 ): Response {
-  const { status, headers, body, streaming } = snapshot;
+  const { status, body, streaming } = snapshot;
+  // Consult the kernel's typed init protocol before public `headers`: reading
+  // that live view materializes a framework Headers object, while the common
+  // terminal-response shapes can hand their snapshot-local init straight to
+  // the native Response constructor. Explicit/multi-value headers fall back
+  // to the existing Headers path unchanged.
+  const headers = snapshot.responseInit?.headers ?? snapshot.headers;
 
   if (streaming) {
     // Pass the ReadableStream straight through — the web fetch model pumps it

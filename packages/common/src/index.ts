@@ -89,6 +89,7 @@ export type {
   MiddlewareFunction,
   NextFunction,
   ResponseSnapshot,
+  ResponseSnapshotInit,
   RouteDefinition,
   RouteHandler,
   RouteSchema,

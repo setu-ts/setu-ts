@@ -190,6 +190,50 @@ describe('fetch-mapping | concurrent body access', () => {
 // ---------------------------------------------------------------------------
 
 describe('fetch-mapping | snapshot→Response', () => {
+  it('uses a buffered initializer hint without reading the live Headers view', async () => {
+    const snapshot: ResponseSnapshot = {
+      streaming: false,
+      status: 201,
+      get headers(): Headers {
+        throw new Error('the lazy headers view must not be read on the fast path');
+      },
+      body: 'created',
+      responseInit: {
+        headers: { 'content-type': 'text/plain', 'x-response-path': 'fast' },
+      },
+    };
+
+    const response = mapSnapshotToWebResponse(snapshot);
+
+    expect(response.status).toBe(201);
+    expect(response.headers.get('content-type')).toBe('text/plain');
+    expect(response.headers.get('x-response-path')).toBe('fast');
+    expect(await response.text()).toBe('created');
+  });
+
+  it('uses a streaming initializer hint without draining the stream', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('chunk'));
+        controller.close();
+      },
+    });
+    const snapshot: ResponseSnapshot = {
+      streaming: true,
+      status: 200,
+      get headers(): Headers {
+        throw new Error('the lazy headers view must not be read on the fast path');
+      },
+      body: stream,
+      responseInit: { headers: [['content-type', 'text/plain']] },
+    };
+
+    const response = mapSnapshotToWebResponse(snapshot);
+
+    expect(response.headers.get('content-type')).toBe('text/plain');
+    expect(await response.text()).toBe('chunk');
+  });
+
   it('with string body', () => {
     const headers = new Headers();
     headers.set('content-type', 'text/plain');
