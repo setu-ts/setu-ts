@@ -253,6 +253,7 @@ export class DynamoAdapter implements IDatabaseAdapter {
   // deno-lint-ignore require-await -- the refusal must REJECT, not throw synchronously
   async rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     throw new UnsupportedRawQueryError(
+      'dynamodb',
       'DynamoAdapter does not support raw SQL queries. DynamoDB has no SQL; use the injected client ' +
         "directly for native commands (query / scan / getItem or the AWS SDK's PartiQL runner).",
     );

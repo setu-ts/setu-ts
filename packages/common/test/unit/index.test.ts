@@ -18,8 +18,20 @@ import type {
   SpanOptions,
   SpanStatus,
 } from '../../src/index.ts';
-import type { RouteSchema, RouteSecurityMetadata, SecurityRequirement } from '../../src/index.ts';
-import { SECURITY_METADATA, securityMetadataOf, withSecurityMetadata } from '../../src/index.ts';
+import type {
+  HttpStatusHint,
+  RouteSchema,
+  RouteSecurityMetadata,
+  SecurityRequirement,
+} from '../../src/index.ts';
+import {
+  HTTP_STATUS_HINT,
+  httpStatusHintOf,
+  SECURITY_METADATA,
+  securityMetadataOf,
+  withHttpStatusHint,
+  withSecurityMetadata,
+} from '../../src/index.ts';
 import type {
   BackoffStrategy,
   BulkheadPolicy,
@@ -163,5 +175,21 @@ describe('@setu-ts/common barrel', () => {
 
     expect(typeof SECURITY_METADATA).toBe('symbol');
     expect(securityMetadataOf(branded)).toEqual({ authenticated: true });
+  });
+
+  it('should export the HTTP status hint brand', () => {
+    // Same reason as above: `@setu-ts/database-plugin` and
+    // `@setu-ts/exceptions` reach these through the barrel and nowhere else,
+    // so dropping one here would break the M89b path with every unit test in
+    // both packages still green.
+    const hint: HttpStatusHint = {
+      status: 501,
+      title: 'Not Implemented',
+      detail: 'Raw queries are not supported by this adapter.',
+    };
+    const branded = withHttpStatusHint(new Error('the full diagnostic'), hint);
+
+    expect(typeof HTTP_STATUS_HINT).toBe('symbol');
+    expect(httpStatusHintOf(branded)).toEqual(hint);
   });
 });

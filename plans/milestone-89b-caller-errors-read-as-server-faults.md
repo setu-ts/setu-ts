@@ -1,7 +1,21 @@
 # Milestone 89b — Caller Errors That Read as Server Faults (`@setu-ts/common`, `@setu-ts/exceptions`, `@setu-ts/database-plugin`, `@setu-ts/auth-plugin`)
 
-> **Status:** Planning. Branch: `feat/m89b-caller-errors-read-as-server-faults`. `main` is protected
-> — all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Implemented. Branch: `feat/m89b-caller-errors-read-as-server-faults`. `main` is
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR.
+>
+> **Corrections made during implementation** (§3.2, §3.4 and §5 below carry them inline). Four plan
+> claims did not survive checking against the source, and each is recorded where it was made rather
+> than quietly fixed:
+>
+> 1. The hint's home is `common/src/errors/status-hint.ts`, not `common/src/http.ts`.
+> 2. `HttpStatusHint` REUSES `ErrorResponseInit` rather than redeclaring its members, and
+>    `errorHandler` shares the responder's own error constructor rather than hand-rolling a second
+>    one — the plan had not noticed that M70f already owns exactly this mapping.
+> 3. `UnsupportedRawQueryError` carried NO structured field, contradicting §3.4's "each already
+>    carries" — it gains an `adapter`, which is a breaking constructor change.
+> 4. The response status and the logged status both had to move to the hinted error; the plan named
+>    neither, and reading `error.statusCode` would have answered `500` with a `501` body.
 
 ## 0. Objective & scope
 
@@ -62,10 +76,28 @@ mapping rather than two that drift.
 ### 3.2 The mechanism: a symbol-keyed status hint in `common`
 
 - **Decision:** `common` exports `HTTP_STATUS_HINT` (`Symbol.for('setu.http.status-hint')`), a
-  `HttpStatusHint` type (`{ status: number; title: string; detail: string }`), and the pure
-  `withHttpStatusHint(error, hint)` / `httpStatusHintOf(error)` helpers. `errorHandler` reads the
-  hint at `error-handler.ts:157` and, when present, builds the `HttpError` from
-  **`hint.status`/`hint.title`/`hint.detail`** — it never reads `error.message`.
+  `HttpStatusHint` type, and the pure `withHttpStatusHint(error, hint)` / `httpStatusHintOf(error)`
+  helpers. `errorHandler` reads the hint after normalizing and, when present, builds the response
+  error from **`hint.status`/`hint.title`/`hint.detail`** — it never reads `error.message`.
+- **CORRECTION (implementation).** The plan wrote `HttpStatusHint` as a fresh
+  `{ status; title; detail }` and had `errorHandler` build the `HttpError` itself. Both were wrong,
+  for one reason: **M70f's `createErrorResponder` already owns that exact mapping**, and it is not a
+  one-liner — the `default` formatter reads the disclosure from `details.detail` while the Problem
+  Details formatters read it off a module-private `RESPONDER_DETAIL` symbol
+  (`formatters/problem-details.ts:98`), so a second hand-rolled construction loses the disclosure in
+  exactly one format and passes the other's tests. So `HttpStatusHint extends ErrorResponseInit`
+  with `detail` narrowed to required — it IS an error-response init — and the construction is
+  extracted to `buildErrorFromInit` in `error-responder-impl.ts`, called by both. A test drives both
+  entry points under all three formats and asserts byte-identical bodies.
+- **CORRECTION (implementation).** Two statuses had to follow the hinted error and the plan named
+  neither. The response status was written from `error.statusCode` (the NORMALIZED error), which
+  masking preserves but a hint does not — so a hinted response would have carried a `501` body under
+  a `500` status line. And `logError` reported the same value, so an operator correlating a log line
+  with a response would have been looking for a `500` no client ever saw. Both now read
+  `responseError.statusCode`; the logged MESSAGE and cause chain stay the unmasked diagnostic, which
+  is what §3.6 requires. The stack-attach condition became `responseError === error` rather than
+  `!masked`, which states the shared invariant — attach the stack only when the error being SERVED
+  is the error that was LOGGED — and made the `masked` flag dead, so it is gone.
 - **`detail` is a required member of the hint, and that is the whole point.** The first draft of
   this plan carried `{ status, title }` and served `error.message`, on the assumption that a package
   branding an error had decided its message was caller-safe. **That assumption is false, and the
@@ -169,18 +201,20 @@ changes are internal — pinned by a `barrel-exports.test.ts` in each (the M56 d
 
 ## 5. Implementation files
 
-| File                                                  | Purpose                                                                                                                                               |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/src/http.ts`                         | `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint`, `httpStatusHintOf` (beside M57's `SECURITY_METADATA`, which is the shape being followed). |
-| `packages/common/src/index.ts`                        | Barrel re-exports for the four.                                                                                                                       |
-| `packages/exceptions/src/middleware/error-handler.ts` | Read the hint at the normalize step (`:157`); exempt a hinted error from masking (`:175`).                                                            |
-| `packages/database-plugin/src/errors.ts`              | Brand the three query-shape refusals with `{ status: 501, title: 'Not Implemented' }`.                                                                |
-| `packages/auth-plugin/src/guards/index.ts`            | `has()` + hinted `501` refusal in the four authorization guards; `requireAuth` untouched.                                                             |
-| `packages/auth-plugin/README.md`                      | C2: the capability table states what the guards do with no `rbac`.                                                                                    |
-| `packages/database-plugin/README.md`                  | C3: the refusals answer `501`; the message is log-only.                                                                                               |
-| `PUBLIC_API.md`                                       | The four new `common` exports; C2; C3.                                                                                                                |
-| `ROADMAP.md`, `CLAUDE.md`                             | C1: the `403` → `501` correction.                                                                                                                     |
-| `CHANGELOG.md`                                        | Two behaviour changes (`500` → `501` on both paths) with migration text, plus the `common` addition.                                                  |
+| File                                                                                | Purpose                                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/src/errors/status-hint.ts` (new)                                   | `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint`, `httpStatusHintOf`. **CORRECTION:** the plan said `http.ts`, "beside M57's `SECURITY_METADATA`". The brand MECHANISM follows that shape, but the SUBJECT is an error response, so it lives beside `ErrorResponseInit` in `errors/` — which it now extends. `http.ts` is already 857 lines of request/response/route concerns. |
+| `packages/common/src/index.ts`                                                      | Barrel re-exports for the four.                                                                                                                                                                                                                                                                                                                                                           |
+| `packages/exceptions/src/middleware/error-handler.ts`                               | Read the hint after normalizing; exempt a hinted error from masking; take the response AND logged status from the hinted error.                                                                                                                                                                                                                                                           |
+| `packages/exceptions/src/middleware/error-responder-impl.ts`                        | Extract `buildErrorFromInit` (see §3.2's correction) so the responder and the hint reader share one construction.                                                                                                                                                                                                                                                                         |
+| `packages/database-plugin/src/errors.ts`                                            | Brand the three query-shape refusals; add `UnsupportedRawQueryError.adapter` (§3.4's correction).                                                                                                                                                                                                                                                                                         |
+| `packages/database-plugin/src/adapters/{bigtable,cosmos,dynamo,mongo}/*-adapter.ts` | Pass the adapter name to `UnsupportedRawQueryError`.                                                                                                                                                                                                                                                                                                                                      |
+| `packages/auth-plugin/src/guards/index.ts`                                          | `has()` + hinted `501` refusal in the four authorization guards; `requireAuth` untouched.                                                                                                                                                                                                                                                                                                 |
+| `packages/auth-plugin/README.md`                                                    | C2: the capability table states what the guards do with no `rbac`.                                                                                                                                                                                                                                                                                                                        |
+| `packages/database-plugin/README.md`                                                | C3: the refusals answer `501`; the message is log-only.                                                                                                                                                                                                                                                                                                                                   |
+| `PUBLIC_API.md`                                                                     | The four new `common` exports; C2; C3.                                                                                                                                                                                                                                                                                                                                                    |
+| `ROADMAP.md`, `CLAUDE.md`                                                           | C1: the `403` → `501` correction.                                                                                                                                                                                                                                                                                                                                                         |
+| `CHANGELOG.md`                                                                      | Two behaviour changes (`500` → `501` on both paths) with migration text, plus the `common` addition.                                                                                                                                                                                                                                                                                      |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 

@@ -57,6 +57,11 @@ function makeProbe(user?: IPrincipal, authorized = true): Probe {
     response,
     state: new Map<string, unknown>(),
     services: {
+      // `IServiceRegistry` declares `has`, and the guards consult it before
+      // resolving (M89b). A fake omitting it is a contract-violating double:
+      // it would report the absent-capability path for a registry that does
+      // have the service.
+      has: () => true,
       get: () => ({
         hasRole: () => authorized,
         hasPermission: () => authorized,

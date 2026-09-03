@@ -200,6 +200,7 @@ export class MongoAdapter implements IDatabaseAdapter {
   // deno-lint-ignore require-await -- the refusal must REJECT, not throw synchronously
   async rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     throw new UnsupportedRawQueryError(
+      'mongodb',
       'MongoAdapter does not support raw SQL queries. MongoDB has no SQL; use the injected client ' +
         'directly for native commands (collection.find / aggregate / runCommand).',
     );

@@ -657,6 +657,37 @@ projecting one silently changes the response shape.
 Uniqueness and types are outside what any schema-less store can do. **Use the Memory adapter for
 development and tests, and run integration tests against the backend you deploy on.**
 
+## What a refused query returns to the client
+
+The three query-shape refusals — `UnsupportedQueryFeatureError`, `UnsupportedFilterOperatorError`
+and `UnsupportedRawQueryError` — are answered **`501 Not Implemented`** when `@setu-ts/exceptions`'
+`errorHandler` is registered, with a body naming the feature or operator and the adapter that
+refused it:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Not Implemented",
+  "status": 501,
+  "detail": "Query feature 'orderBy' is not supported by the 'dynamodb' database adapter."
+}
+```
+
+`501` because the condition is permanent and the backend genuinely does not implement what the query
+asked for. This is the shape you meet when **switching backends**, which is what the portable
+contract is for: an application that works on MongoDB will answer `501` on an ordered endpoint under
+DynamoDB rather than the `500 Internal Server Error` it used to (M89b).
+
+**The error's `message` is never served.** It is the full diagnostic — it names entities, columns
+and sort keys — and it reaches the log alone, where `errorHandler` records it unmasked along with
+the cause chain. The served `detail` is composed from the framework's own identifiers, which is what
+lets a refusal be readable without becoming a disclosure channel.
+
+The transaction and concurrency errors (`MongoTransactionUnavailableError`,
+`CosmosTransactionScopeError`, `CosmosConcurrentModificationError`, `BigtableTransactionScopeError`)
+deliberately keep the masked `500`: they may quote backend state, and a concurrency conflict is
+transient rather than permanent. Branch on them with `instanceof` — every one is exported.
+
 ## Transactions
 
 `IUnitOfWork` groups repository work into one transaction. Prisma exposes only callback-style

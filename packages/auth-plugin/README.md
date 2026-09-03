@@ -23,6 +23,9 @@ the optional `rbac` configuration is supplied:
 | Authentication         | `'authentication'` | `IAuthService`                                      |
 | Authorization (RBAC)   | `'authorization'`  | `IAuthorizationService` (when `rbac` is configured) |
 
+Without `rbac`, the four authorization guards answer **`501 Not Implemented`** rather than throwing
+— see [Guards](#guards).
+
 > **Refresh tokens and rate limiting ship in this package.** `IJwtService` itself exposes only
 > `sign` / `verify` / `decode`, but do not hand-roll a refresh token as `sign({ expiresIn: '7d' })`
 > — that has no rotation and no replay rejection. Use `RefreshTokenService` and
@@ -172,6 +175,24 @@ app.router.get('/health', { middleware: [publicRoute()], handler });
 ```
 
 > `publicRoute` is used instead of `public` because `public` is a reserved word.
+
+### Guards without `rbac`
+
+`rbac` is optional, and a JWT-only registration provides no authorization service. In that
+composition the four authorization guards — `requireRole`, `requirePermission`, `requireAnyRole`,
+`requireAllPermissions` — answer:
+
+```json
+{ "error": "Not Implemented", "detail": "Authorization is not configured for this application" }
+```
+
+with status **`501`**, short-circuiting before the handler. `requireAuth()` and `publicRoute()`
+resolve nothing and are unaffected.
+
+`501` rather than `403` because nothing is wrong with the caller: the deployment cannot evaluate the
+policy at all, and the condition is permanent for that deployment. A principal that genuinely fails
+a policy check still gets `403`. The guards fail **closed** either way — supply `rbac` to make them
+evaluate.
 
 ## Password Hashing
 

@@ -25,12 +25,13 @@ import {
   brandErrorResponder,
   CAPABILITIES,
   ERROR_RESPONDER_STATE_KEY,
+  httpStatusHintOf,
   serializeError,
 } from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
 import { internalServerError, statusTitle } from '../errors/exceptions.ts';
-import { createErrorResponder } from './error-responder-impl.ts';
+import { buildErrorFromInit, createErrorResponder } from './error-responder-impl.ts';
 import {
   type ErrorFormat,
   type ErrorHandlerFormatter,
@@ -160,20 +161,34 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
         rawError instanceof Error ? rawError : undefined,
       );
 
-      // Log the UNMASKED error first, so the log keeps the SQL, the bound
-      // parameters, and the cause chain regardless of masking.
-      if (logErrors) {
-        logError(ctx, error);
-      }
+      // A thrower that cannot import this package states the status its own
+      // error means by branding it with an `HttpStatusHint` (M89b) — the seam
+      // `@setu-ts/database-plugin` uses for its query-shape refusals, which
+      // are caller errors and were answered as masked 500s. The hint carries
+      // its own caller-safe `detail`, so the response is built from THAT and
+      // never from the error's message, and `buildErrorFromInit` is the same
+      // constructor `respondWithError` reaches: one mapping, one body shape.
+      //
+      // Read only for a non-`HttpError`. A deliberately thrown `HttpError`
+      // already states its own status, and letting a brand override it would
+      // give one error two answers.
+      const hint = isHttpError ? undefined : httpStatusHintOf(rawError);
 
       // Mask a driver-shaped 500 for the response: the raw message becomes the
       // status title so the body carries neither the statement nor the values.
       // A deliberately thrown HttpError is never masked, and a 4xx is left
       // alone — only a non-HttpError with status >= 500 is rewritten.
+      //
+      // A hinted error is exempt, and the exemption is narrow by construction
+      // rather than by trust: what it serves is the hint's own `detail`, a
+      // fixed sentence the brand site wrote, never the `Error`'s message. So
+      // there is no driver diagnostic in the body for masking to remove. It is
+      // checked FIRST because a hinted 501 satisfies all three masking clauses
+      // and would otherwise be rewritten into the exact symptom this closes.
       let responseError = error;
-      let masked = false;
-      if (maskInternalErrors && !isHttpError && error.statusCode >= 500) {
-        masked = true;
+      if (hint !== undefined) {
+        responseError = buildErrorFromInit(hint);
+      } else if (maskInternalErrors && !isHttpError && error.statusCode >= 500) {
         // Preserve the log's cause chain without leaking the message. `cause`
         // is `unknown` on `Error`; only an `Error` value is a valid
         // `HttpError` cause, so narrow rather than cast.
@@ -186,6 +201,17 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
         );
       }
 
+      // Log the UNMASKED error, so the log keeps the SQL, the bound parameters
+      // and the cause chain regardless of masking — but report the status that
+      // was actually SERVED. Masking preserves the status, so this is the same
+      // number it always was; a hint does not (a `500`-normalized error is
+      // answered `501`), and logging the pre-hint status would leave an
+      // operator correlating a log line with a response looking for a `500`
+      // that no client ever saw.
+      if (logErrors) {
+        logError(ctx, error, responseError.statusCode);
+      }
+
       const body = formatter(responseError, ctx);
       // Masking wins over `includeStackTrace`. A stack's first line is
       // `<name>: <message>`, so attaching the unmasked error's stack would put
@@ -193,7 +219,14 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // was just masked — defeating the mask through the one option documented
       // as unsafe in production. A masked error therefore carries no stack at
       // all; the unmasked one is in the log, where `logErrors` already sent it.
-      if (includeStackTrace && !masked && error.stack !== undefined) {
+      //
+      // The condition is `responseError === error` rather than `!masked`
+      // because a hinted response is the second case with the same property:
+      // its body deliberately carries the brand site's sentence and not the
+      // error's own text, and a stack's first line is `<name>: <message>`. So
+      // the stack is attached exactly when the error being SERVED is the error
+      // that was LOGGED, which is the invariant both exclusions want.
+      if (includeStackTrace && responseError === error && error.stack !== undefined) {
         body.stack = error.stack;
       }
 
@@ -202,7 +235,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // `application/json` default — RFC 9457 requires `application/problem+json`.
       const bytes = new TextEncoder().encode(JSON.stringify(body));
       return ctx.response
-        .status(error.statusCode)
+        .status(responseError.statusCode)
         .header('content-type', contentType)
         .send(bytes);
     }
@@ -222,9 +255,10 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
  * does nothing when no logger capability is registered.
  *
  * @param ctx - The request context
- * @param error - The error to log
+ * @param error - The error to log, carrying the unmasked message and cause
+ * @param statusCode - The status actually served, which a hint may have changed
  */
-function logError(ctx: IRequestContext, error: HttpError): void {
+function logError(ctx: IRequestContext, error: HttpError, statusCode: number): void {
   if (!ctx.services.has(CAPABILITIES.LOGGER)) {
     return;
   }
@@ -232,7 +266,7 @@ function logError(ctx: IRequestContext, error: HttpError): void {
   // Serialize the cause (X2-5): a raw `Error` in log metadata renders as `{}`
   // under `JSON.stringify` because `message`/`stack` are non-enumerable.
   logger.error(error.message, {
-    statusCode: error.statusCode,
+    statusCode,
     requestId: ctx.id,
     ...(error.cause !== undefined && { cause: serializeError(error.cause) }),
   });

@@ -2,8 +2,35 @@
  * Errors the database plugin throws, exported so consumers can branch on them
  * with `instanceof` rather than matching message text.
  *
+ * The three query-shape refusals — {@linkcode UnsupportedFilterOperatorError},
+ * {@linkcode UnsupportedRawQueryError} and
+ * {@linkcode UnsupportedQueryFeatureError} — additionally carry an
+ * `HttpStatusHint` from `@setu-ts/common`, so `errorHandler` answers them
+ * `501 Not Implemented` with a caller-safe sentence instead of a masked `500`
+ * (M89b, X19-1). Each is a condition the CALLER caused: the query asks for
+ * something the active backend does not implement, permanently, and that is
+ * exactly what `501` states. The transaction and concurrency errors below are
+ * deliberately NOT branded — they may legitimately quote backend state, and a
+ * concurrency conflict is transient rather than permanent, so both keep the
+ * masked `500` that stops a driver diagnostic reaching a caller (X12-3).
+ *
+ * The served `detail` is composed from this package's OWN structured fields —
+ * the feature, operator, connector and adapter names the framework chose — and
+ * never from the `message`, which is the operator-facing diagnostic. That is
+ * what makes the masking exemption safe rather than a widening.
+ *
  * @module
  */
+import { withHttpStatusHint } from '@setu-ts/common';
+
+/**
+ * The status every query-shape refusal is answered with.
+ *
+ * One constant rather than three literals: the three describe one condition —
+ * the active backend does not implement what the query asked for — so they
+ * cannot drift apart into different statuses.
+ */
+const NOT_IMPLEMENTED = { status: 501, title: 'Not Implemented' } as const;
 
 /**
  * Thrown at translation time when a filter operator cannot be honoured by the
@@ -58,6 +85,12 @@ export class UnsupportedFilterOperatorError extends Error {
     super(message);
     this.operator = operator;
     this.connector = connector;
+    withHttpStatusHint(this, {
+      ...NOT_IMPLEMENTED,
+      detail: connector === undefined
+        ? `Filter operator '${operator}' is not supported by the active database connector.`
+        : `Filter operator '${operator}' is not supported on the '${connector}' connector.`,
+    });
   }
 }
 
@@ -87,13 +120,23 @@ export class UnsupportedRawQueryError extends Error {
   /** Discriminant for consumers that cannot use `instanceof` across realms. */
   override readonly name = 'UnsupportedRawQueryError';
 
+  /** The adapter name that refused the raw query (e.g. `'mongodb'`). */
+  readonly adapter: string;
+
   /**
-   * Creates the error.
+   * Creates the error. The `message` is the full diagnostic — safe to log,
+   * never to serve — and names the adapter plus the native alternative.
    *
+   * @param adapter - The adapter name that refused the query
    * @param message - The full diagnostic, safe to log
    */
-  constructor(message: string) {
+  constructor(adapter: string, message: string) {
     super(message);
+    this.adapter = adapter;
+    withHttpStatusHint(this, {
+      ...NOT_IMPLEMENTED,
+      detail: `Raw queries are not supported by the '${adapter}' database adapter.`,
+    });
   }
 }
 
@@ -142,6 +185,10 @@ export class UnsupportedQueryFeatureError extends Error {
     super(message);
     this.feature = feature;
     this.adapter = adapter;
+    withHttpStatusHint(this, {
+      ...NOT_IMPLEMENTED,
+      detail: `Query feature '${feature}' is not supported by the '${adapter}' database adapter.`,
+    });
   }
 }
 

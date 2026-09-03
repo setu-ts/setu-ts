@@ -9,7 +9,13 @@ import { beforeAll, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
-import { requireAuth, requireRole } from '../../src/guards/index.ts';
+import {
+  requireAllPermissions,
+  requireAnyRole,
+  requireAuth,
+  requirePermission,
+  requireRole,
+} from '../../src/guards/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import type {
@@ -388,10 +394,24 @@ describe('AuthPlugin without RBAC — real application', () => {
               handler: (reqCtx: IRequestContext): HandlerResult =>
                 reqCtx.response.json({ sub: reqCtx.request.user?.id ?? null }),
             });
-            ctx.router.get('/admin', {
-              middleware: [requireRole('admin')],
-              handler: (reqCtx: IRequestContext): HandlerResult =>
-                reqCtx.response.json({ ok: true }),
+            // All FOUR authorization guards, because X18-2 was a property of
+            // the shared capability resolution rather than of one guard: a
+            // regression reaching only `requireRole` would leave the other
+            // three answering a masked 500 with the suite still green.
+            const ok = (reqCtx: IRequestContext): HandlerResult =>
+              reqCtx.response.json({ ok: true });
+            ctx.router.get('/admin', { middleware: [requireRole('admin')], handler: ok });
+            ctx.router.get('/perm', {
+              middleware: [requirePermission('users:create')],
+              handler: ok,
+            });
+            ctx.router.get('/any-role', {
+              middleware: [requireAnyRole(['admin', 'manager'])],
+              handler: ok,
+            });
+            ctx.router.get('/all-perms', {
+              middleware: [requireAllPermissions(['users:create'])],
+              handler: ok,
             });
           },
         },
@@ -430,7 +450,56 @@ describe('AuthPlugin without RBAC — real application', () => {
     await app.stop();
   });
 
-  it('fails an authorization guard rather than granting access without RBAC', async () => {
+  it('answers 501 from every authorization guard, naming the missing configuration', async () => {
+    // X18-2. Before M89b these four resolved `CAPABILITIES.AUTHORIZATION`
+    // unconditionally; the registry's throw escaped into the pipeline and the
+    // kernel answered a masked `500 Internal Server Error` — to a principal
+    // that HELD the required role — while `/health`, `/ready` and `/live` all
+    // reported `up`. The status is `501` rather than `403` because nothing is
+    // wrong with the caller: the deployment cannot evaluate the policy at all.
+    //
+    // Driven through a REAL `createApplication` on purpose: this package's
+    // unit fixtures use a fake registry whose `get` returns `undefined` where
+    // the kernel's THROWS, so the finding is unreachable against the fake.
+    const app = bootJwtOnlyApp();
+    await app.start();
+    const jwt = app.services.get<IJwtService>(CAPABILITIES.JWT);
+    // The token carries both the role and the permission every guard below
+    // asks for, so a guard resolving a permissive stand-in would answer 200
+    // and a guard refusing on policy would answer 403 — neither is 501.
+    const token = await jwt.sign({
+      sub: 'user123',
+      roles: ['admin'],
+      permissions: ['users:create'],
+    });
+
+    for (const path of ['/admin', '/perm', '/any-role', '/all-perms']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `http://localhost${path}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(501);
+      // This app registers no `errorHandler`, so `respondWithError` writes its
+      // documented no-responder fallback shape, `{ error, detail }`. The
+      // configured formats are asserted in `@setu-ts/exceptions`, which owns
+      // them; what matters here is that the refusal reaches the caller with a
+      // status and a sentence rather than as an escaped registry throw.
+      const body = response.json<{ error: string; detail?: string }>();
+      expect(body.error).toBe('Not Implemented');
+      // The detail names the missing configuration rather than restating the
+      // status, which is the whole difference from the masked 500.
+      expect(body.detail).toBe('Authorization is not configured for this application');
+    }
+
+    await app.stop();
+  });
+
+  it('leaves requireAuth working, which never resolves the authorization capability', async () => {
+    // The companion half of X18-2: `requireAuth()` reads `ctx.request.user`
+    // and resolves nothing, so it was correct before and must stay correct —
+    // a fix that refused every guard would pass the assertion above.
     const app = bootJwtOnlyApp();
     await app.start();
     const jwt = app.services.get<IJwtService>(CAPABILITIES.JWT);
@@ -438,13 +507,11 @@ describe('AuthPlugin without RBAC — real application', () => {
 
     const response = await app.inject({
       method: 'GET',
-      url: 'http://localhost/admin',
+      url: 'http://localhost/me',
       headers: { authorization: `Bearer ${token}` },
     });
 
-    // Not 200: the token carries the 'admin' role, so a guard that resolved a
-    // permissive stand-in would have let this through.
-    expect(response.statusCode).toBe(500);
+    expect(response.statusCode).toBe(200);
 
     await app.stop();
   });

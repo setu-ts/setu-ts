@@ -57,6 +57,60 @@ function isFullRequestContext(target: ErrorResponderTarget): target is IRequestC
 }
 
 /**
+ * Builds the {@linkcode HttpError} that carries one error response's status,
+ * title and disclosure.
+ *
+ * This is the single owner of that mapping, and it has **two** callers: the
+ * responder below, and `errorHandler`'s status-hint path (M89b), which answers
+ * a thrown error branded with an `HttpStatusHint` — a type that IS an
+ * `ErrorResponseInit`. Sharing it is what makes the two agree: a hinted throw
+ * and a `respondWithError` call carrying the same values produce byte-identical
+ * bodies under `default`, `rfc9457`, `rfc7807` and any custom formatter. A
+ * second hand-rolled construction would silently diverge — the `default`
+ * formatter reads `details.detail` while the Problem Details formatters read
+ * the {@linkcode RESPONDER_DETAIL} symbol, so getting either half wrong loses
+ * the disclosure in exactly one format.
+ *
+ * @param init - The status, title, disclosure and optional structured details
+ * @returns An `HttpError` every formatter renders with the disclosure intact
+ */
+export function buildErrorFromInit(init: ErrorResponseInit): HttpError {
+  // The title is the framework-default `error` member — the `message` of the
+  // `default` format and the `detail` fallback of the Problem Details
+  // formatters — so it stays `error.message`. The disclosure (`init.detail`)
+  // is kept verbatim by every format (the `ErrorResponseInit` contract in
+  // `@setu-ts/common`): it is carried in the error's structured `details`
+  // under a `detail` key, so the `default` format emits it as `details.detail`
+  // beside `message`, and `buildProblemDetails` promotes it to the Problem
+  // Details `detail` member (falling back to the title when a site supplies no
+  // disclosure). `init.details` (e.g. a validation `errors` array) is merged
+  // through unchanged. Carrying it this way — rather than in `error.message` —
+  // keeps the title verbatim, which a site's (non-)disclosure decision depends
+  // on.
+  const details = init.detail !== undefined
+    ? { ...init.details, detail: init.detail }
+    : init.details;
+  const error = new HttpError(init.status, init.title, details);
+  // Mark the error as responder-built and carry the disclosure on a
+  // module-private symbol, which is what `buildProblemDetails` promotes to the
+  // Problem Details `detail` member. The `details.detail` key above is what the
+  // `default` formatter emits (it serializes `details` verbatim); the Problem
+  // Details formatters read the symbol instead, so a THROWN error that happens
+  // to carry a `details.detail` key of its own keeps `detail: <message>` (M70f
+  // code review, finding 4). Non-enumerable so it never reaches a serialized
+  // body.
+  if (init.detail !== undefined) {
+    Object.defineProperty(error, RESPONDER_DETAIL, {
+      value: init.detail,
+      enumerable: false,
+      writable: false,
+      configurable: true,
+    });
+  }
+  return error;
+}
+
+/**
  * Builds an {@linkcode IErrorResponder} from the formatter and content type
  * that `errorHandler` has **already** resolved at factory time.
  *
@@ -78,39 +132,7 @@ export function createErrorResponder(
 ): IErrorResponder {
   return {
     respond(target: ErrorResponderTarget, init: ErrorResponseInit): void {
-      // The title is the framework-default `error` member — the `message` of
-      // the `default` format and the `detail` fallback of the Problem Details
-      // formatters — so it stays `error.message`. The disclosure
-      // (`init.detail`) is kept verbatim by every format (the
-      // `ErrorResponseInit` contract in `@setu-ts/common`): it is carried in
-      // the error's structured `details` under a `detail` key, so the
-      // `default` format emits it as `details.detail` beside `message`, and
-      // `buildProblemDetails` promotes it to the Problem Details `detail`
-      // member (falling back to the title when a site supplies no disclosure).
-      // `init.details` (e.g. a validation `errors` array) is merged through
-      // unchanged. Carrying it this way — rather than in `error.message` —
-      // keeps the title verbatim, which a site's (non-)disclosure decision
-      // depends on.
-      const details = init.detail !== undefined
-        ? { ...init.details, detail: init.detail }
-        : init.details;
-      const error = new HttpError(init.status, init.title, details);
-      // Mark the error as responder-built and carry the disclosure on a
-      // module-private symbol, which is what `buildProblemDetails` promotes to
-      // the Problem Details `detail` member. The `details.detail` key above is
-      // what the `default` formatter emits (it serializes `details` verbatim);
-      // the Problem Details formatters read the symbol instead, so a THROWN
-      // error that happens to carry a `details.detail` key of its own keeps
-      // `detail: <message>` (M70f code review, finding 4). Non-enumerable so
-      // it never reaches a serialized body.
-      if (init.detail !== undefined) {
-        Object.defineProperty(error, RESPONDER_DETAIL, {
-          value: init.detail,
-          enumerable: false,
-          writable: false,
-          configurable: true,
-        });
-      }
+      const error = buildErrorFromInit(init);
       // The formatter's `ctx` parameter is a FULL `IRequestContext` by its
       // contract (M70f re-review round 2, finding 2). The target is a full
       // context only at the in-pipeline sites; the kernel's pre-pipeline sites
