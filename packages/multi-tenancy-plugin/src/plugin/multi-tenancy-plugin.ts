@@ -212,6 +212,40 @@ export function MultiTenancyPlugin(
       // Build isolation strategy.
       const strategy = buildStrategy(database);
 
+      // X18-4: the unverified-claim caveat is stated where the choice takes
+      // effect, not only in the resolver's JSDoc — a warning cannot be
+      // missed, a paragraph three files away can. Fires for ANY spelling that
+      // puts a JwtResolver in the resolved chain (`resolver: 'jwt'`, an array
+      // containing one, or a bare instance).
+      if (resolvers.some((resolver) => resolver instanceof JwtResolver)) {
+        ctx.logger?.warn(
+          'Tenant identity is resolved from an UNVERIFIED JWT claim: a client can mint a ' +
+            'token naming any tenant; acceptable only alongside authentication middleware ' +
+            'which separately verifies the token',
+          {
+            hint: 'Pair resolver: "jwt" with AuthPlugin (or equivalent) so the token is ' +
+              'verified before its tenant claim is trusted.',
+          },
+        );
+      }
+
+      // X18-5: a non-`column` strategy NAMES isolation that only a store whose
+      // backend implements it can deliver. The shipped MemoryTenantDataStore
+      // uses the strategy's label as a partition-map key — it creates no
+      // schemas and no databases, and no shipped adapter is told the strategy.
+      // Selecting one without an injected backend therefore warns instead of
+      // leaving the isolation silently logical-only.
+      if (strategy.kind !== 'column' && providedStore === undefined) {
+        ctx.logger?.warn(
+          `Isolation strategy '${strategy.kind}' is selected but no dataStore is injected; the shipped memory store only partitions by the strategy's label and no schema or database is created`,
+          {
+            strategy: strategy.kind,
+            hint: 'Inject a dataStore whose backend implements the strategy, or keep ' +
+              "the default 'column-per-tenant'.",
+          },
+        );
+      }
+
       // Build data store.
       const store = providedStore ?? new MemoryTenantDataStore({
         generateId: () => ctx.runtime.uuid(),
