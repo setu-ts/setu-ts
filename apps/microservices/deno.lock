@@ -269,8 +269,8 @@
     "@opentelemetry/api@1.9.1": {
       "integrity": "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="
     },
-    "@opentelemetry/core@2.10.0_@opentelemetry+api@1.9.1": {
-      "integrity": "sha512-/wNZ8twnEQQA4HoHu22+vcsdru6pWPWxW+7w+FlxT6Id7PE/WIbZmVKkte+PF72e0F2dnImFeHD2syyE1Mw6MQ==",
+    "@opentelemetry/core@2.11.0_@opentelemetry+api@1.9.1": {
+      "integrity": "sha512-7YP44XH0tV6+Mb54x2YGf84i7yi+31MBZlE8JwvozkxyTvXbSp10X7cI7YE49ChJ3shMJoBmCJF3+1QFBJctGA==",
       "dependencies": [
         "@opentelemetry/api",
         "@opentelemetry/semantic-conventions"
@@ -315,8 +315,8 @@
         "@types/node"
       ]
     },
-    "@types/node@26.3.0": {
-      "integrity": "sha512-L3fgrnchriRC2ExBflb8j4uZZURHZfQsmQeyVzhjcHW4kkwVyo8/0h1B2MVzMTrYUJYu6G7EWs14hW/L9putqw==",
+    "@types/node@26.4.0": {
+      "integrity": "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ==",
       "dependencies": [
         "undici-types"
       ]
@@ -502,8 +502,8 @@
         "xml-naming"
       ]
     },
-    "fast-xml-parser@5.11.0": {
-      "integrity": "sha512-9IGxMqvqLOnqP+Egi1nqDHKv5k8aZ7r9n558enxcucmyVGEBNPAU+MOg/8jPIS7rO7sSq4gFm1/nHtiaubMruw==",
+    "fast-xml-parser@5.11.1": {
+      "integrity": "sha512-TBw6K/fxoQGGjCmZDw9w/ZwP3uDcnTM4YH/g+PFRWr8sbe5idXtxNN6vITh4+1ruCZaho6uBFurElsA7F0zzgw==",
       "dependencies": [
         "@nodable/entities",
         "fast-xml-builder",
@@ -591,11 +591,12 @@
         "jws"
       ]
     },
-    "google-gax@6.0.3": {
-      "integrity": "sha512-VD7ce93s2XJD/OmWOmCN+/abDmMv1AoQWLaagogLpVT5PF5YRpsTGsfaV/MHJlD60RIhuhKs/2FTkzNPN6UbPg==",
+    "google-gax@6.1.0": {
+      "integrity": "sha512-PN84pgPw6USmNfy8hlMkifsII+VzCTddRODjPqGZ0JKQuB3WYMEMMepTypmE7ymMXFYiOe3Oi0dHskQ4jkOZfg==",
       "dependencies": [
         "@grpc/grpc-js",
         "@grpc/proto-loader",
+        "@opentelemetry/api",
         "duplexify",
         "google-auth-library",
         "google-logging-utils",
@@ -812,8 +813,8 @@
         "protobufjs"
       ]
     },
-    "protobufjs@7.6.5": {
-      "integrity": "sha512-/FPD0nUc9jH6rfFjji9IBqOz4pcSE3CsT1m7Ep6Mdb0LxSUMj8hgl6GomOvZzpNpAqqGaXA0P3VSrZLFzIhQrw==",
+    "protobufjs@7.6.6": {
+      "integrity": "sha512-dYDWdjSl5RNb7SgPxGQcRU+GtvP7s2fpkrY0r432PcOIaZ0/rBcxEZnQN67iJhFuQiVw754JDoPruPCNdGsbjg==",
       "dependencies": [
         "@protobufjs/aspromise",
         "@protobufjs/base64",
@@ -1030,210 +1031,215 @@
   },
   "workspace": {
     "links": {
-      "jsr:@setu-ts/audit-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/auth-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/cache-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/cli@0.1.0-alpha.9": {
+      "jsr:@setu-ts/audit-plugin@0.3.0": {},
+      "jsr:@setu-ts/auth-plugin@0.3.0": {},
+      "jsr:@setu-ts/cache-plugin@0.3.0": {},
+      "jsr:@setu-ts/cli@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9",
-          "jsr:@setu-ts/runtime@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3",
+          "jsr:@setu-ts/runtime@0.3"
         ]
       },
-      "jsr:@setu-ts/cloudflare-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/common@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/config-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/cloudflare-plugin@0.3.0": {},
+      "jsr:@setu-ts/common@0.3.0": {},
+      "jsr:@setu-ts/config-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3"
         ]
       },
-      "jsr:@setu-ts/cqrs-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/database-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/decorator-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/cqrs-plugin@0.3.0": {},
+      "jsr:@setu-ts/database-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9"
+          "npm:@prisma/client@^7.10.0",
+          "npm:mongodb@^6.21.0"
         ]
       },
-      "jsr:@setu-ts/di-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/decorator-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3"
         ]
       },
-      "jsr:@setu-ts/events-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/exceptions@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/feature-flags-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/full-stack-starter@0.1.0-alpha.9": {
+      "jsr:@setu-ts/di-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/audit-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/auth-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/cache-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/common@~0.1.0-alpha.9",
-          "jsr:@setu-ts/config-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/cqrs-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/database-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/decorator-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/events-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/exceptions@~0.1.0-alpha.9",
-          "jsr:@setu-ts/feature-flags-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/graphql-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/health-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/http-security-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/kernel@~0.1.0-alpha.9",
-          "jsr:@setu-ts/logger-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/mail-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/messaging-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/metrics-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/microservice-starter@~0.1.0-alpha.9",
-          "jsr:@setu-ts/multi-tenancy-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/notification-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/openapi-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/queue-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/react-router-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/resilience-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/runtime@~0.1.0-alpha.9",
-          "jsr:@setu-ts/scheduler-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/secrets-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/session-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/static-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/storage-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/telemetry-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/validation-plugin@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3"
         ]
       },
-      "jsr:@setu-ts/graphql-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/grpc-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/health-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/http-security-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/kernel@0.1.0-alpha.9": {
+      "jsr:@setu-ts/events-plugin@0.3.0": {},
+      "jsr:@setu-ts/exceptions@0.3.0": {},
+      "jsr:@setu-ts/feature-flags-plugin@0.3.0": {},
+      "jsr:@setu-ts/full-stack-starter@0.3.0": {
+        "dependencies": [
+          "jsr:@setu-ts/audit-plugin@0.3",
+          "jsr:@setu-ts/auth-plugin@0.3",
+          "jsr:@setu-ts/cache-plugin@0.3",
+          "jsr:@setu-ts/common@0.3",
+          "jsr:@setu-ts/config-plugin@0.3",
+          "jsr:@setu-ts/cqrs-plugin@0.3",
+          "jsr:@setu-ts/database-plugin@0.3",
+          "jsr:@setu-ts/decorator-plugin@0.3",
+          "jsr:@setu-ts/events-plugin@0.3",
+          "jsr:@setu-ts/exceptions@0.3",
+          "jsr:@setu-ts/feature-flags-plugin@0.3",
+          "jsr:@setu-ts/graphql-plugin@0.3",
+          "jsr:@setu-ts/health-plugin@0.3",
+          "jsr:@setu-ts/http-security-plugin@0.3",
+          "jsr:@setu-ts/kernel@0.3",
+          "jsr:@setu-ts/logger-plugin@0.3",
+          "jsr:@setu-ts/mail-plugin@0.3",
+          "jsr:@setu-ts/messaging-plugin@0.3",
+          "jsr:@setu-ts/metrics-plugin@0.3",
+          "jsr:@setu-ts/microservice-starter@0.3",
+          "jsr:@setu-ts/multi-tenancy-plugin@0.3",
+          "jsr:@setu-ts/notification-plugin@0.3",
+          "jsr:@setu-ts/openapi-plugin@0.3",
+          "jsr:@setu-ts/queue-plugin@0.3",
+          "jsr:@setu-ts/react-router-plugin@0.3",
+          "jsr:@setu-ts/resilience-plugin@0.3",
+          "jsr:@setu-ts/runtime@0.3",
+          "jsr:@setu-ts/scheduler-plugin@0.3",
+          "jsr:@setu-ts/secrets-plugin@0.3",
+          "jsr:@setu-ts/session-plugin@0.3",
+          "jsr:@setu-ts/static-plugin@0.3",
+          "jsr:@setu-ts/storage-plugin@0.3",
+          "jsr:@setu-ts/telemetry-plugin@0.3",
+          "jsr:@setu-ts/validation-plugin@0.3"
+        ]
+      },
+      "jsr:@setu-ts/graphql-plugin@0.3.0": {},
+      "jsr:@setu-ts/grpc-plugin@0.3.0": {},
+      "jsr:@setu-ts/health-plugin@0.3.0": {},
+      "jsr:@setu-ts/http-security-plugin@0.3.0": {},
+      "jsr:@setu-ts/kernel@0.3.0": {
         "dependencies": [
           "jsr:@hono/hono@^4.12.30",
-          "jsr:@setu-ts/common@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3"
         ]
       },
-      "jsr:@setu-ts/logger-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/logger-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3"
         ]
       },
-      "jsr:@setu-ts/mail-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/messaging-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/mail-plugin@0.3.0": {},
+      "jsr:@setu-ts/messaging-plugin@0.3.0": {
         "dependencies": [
           "npm:@azure/service-bus@7",
           "npm:@google-cloud/pubsub@6"
         ]
       },
-      "jsr:@setu-ts/metrics-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/metrics-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3"
         ]
       },
-      "jsr:@setu-ts/microservice-starter@0.1.0-alpha.9": {
+      "jsr:@setu-ts/microservice-starter@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/auth-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/common@~0.1.0-alpha.9",
-          "jsr:@setu-ts/config-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/database-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/decorator-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/exceptions@~0.1.0-alpha.9",
-          "jsr:@setu-ts/graphql-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/health-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/http-security-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/kernel@~0.1.0-alpha.9",
-          "jsr:@setu-ts/logger-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/messaging-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/metrics-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/openapi-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/queue-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/resilience-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/rest-starter@~0.1.0-alpha.9",
-          "jsr:@setu-ts/runtime@~0.1.0-alpha.9",
-          "jsr:@setu-ts/session-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/telemetry-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/validation-plugin@~0.1.0-alpha.9"
+          "jsr:@setu-ts/auth-plugin@0.3",
+          "jsr:@setu-ts/common@0.3",
+          "jsr:@setu-ts/config-plugin@0.3",
+          "jsr:@setu-ts/database-plugin@0.3",
+          "jsr:@setu-ts/decorator-plugin@0.3",
+          "jsr:@setu-ts/exceptions@0.3",
+          "jsr:@setu-ts/graphql-plugin@0.3",
+          "jsr:@setu-ts/health-plugin@0.3",
+          "jsr:@setu-ts/http-security-plugin@0.3",
+          "jsr:@setu-ts/kernel@0.3",
+          "jsr:@setu-ts/logger-plugin@0.3",
+          "jsr:@setu-ts/messaging-plugin@0.3",
+          "jsr:@setu-ts/metrics-plugin@0.3",
+          "jsr:@setu-ts/openapi-plugin@0.3",
+          "jsr:@setu-ts/queue-plugin@0.3",
+          "jsr:@setu-ts/resilience-plugin@0.3",
+          "jsr:@setu-ts/rest-starter@0.3",
+          "jsr:@setu-ts/runtime@0.3",
+          "jsr:@setu-ts/session-plugin@0.3",
+          "jsr:@setu-ts/telemetry-plugin@0.3",
+          "jsr:@setu-ts/validation-plugin@0.3"
         ]
       },
-      "jsr:@setu-ts/multi-tenancy-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/notification-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/openapi-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/multi-tenancy-plugin@0.3.0": {},
+      "jsr:@setu-ts/notification-plugin@0.3.0": {},
+      "jsr:@setu-ts/openapi-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9",
-          "jsr:@setu-ts/kernel@~0.1.0-alpha.9",
+          "jsr:@setu-ts/common@0.3",
+          "jsr:@setu-ts/kernel@0.3",
           "npm:zod@^3.24.0",
           "npm:zod@^4.4.0"
         ]
       },
-      "jsr:@setu-ts/queue-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/queue-plugin@0.3.0": {
         "dependencies": [
           "npm:@aws-sdk/client-sns@3",
           "npm:@aws-sdk/client-sqs@3"
         ]
       },
-      "jsr:@setu-ts/react-router-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/realtime-backplane-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/resilience-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/rest-starter@0.1.0-alpha.9": {
+      "jsr:@setu-ts/react-router-plugin@0.3.0": {},
+      "jsr:@setu-ts/realtime-backplane-plugin@0.3.0": {},
+      "jsr:@setu-ts/resilience-plugin@0.3.0": {},
+      "jsr:@setu-ts/rest-starter@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/auth-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/common@~0.1.0-alpha.9",
-          "jsr:@setu-ts/config-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/database-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/decorator-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/di-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/exceptions@~0.1.0-alpha.9",
-          "jsr:@setu-ts/graphql-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/health-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/http-security-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/kernel@~0.1.0-alpha.9",
-          "jsr:@setu-ts/logger-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/metrics-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/openapi-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/realtime-backplane-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/runtime@~0.1.0-alpha.9",
-          "jsr:@setu-ts/service-discovery-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/session-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/sse-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/validation-plugin@~0.1.0-alpha.9",
-          "jsr:@setu-ts/websocket-plugin@~0.1.0-alpha.9"
+          "jsr:@setu-ts/auth-plugin@0.3",
+          "jsr:@setu-ts/common@0.3",
+          "jsr:@setu-ts/config-plugin@0.3",
+          "jsr:@setu-ts/database-plugin@0.3",
+          "jsr:@setu-ts/decorator-plugin@0.3",
+          "jsr:@setu-ts/di-plugin@0.3",
+          "jsr:@setu-ts/exceptions@0.3",
+          "jsr:@setu-ts/graphql-plugin@0.3",
+          "jsr:@setu-ts/health-plugin@0.3",
+          "jsr:@setu-ts/http-security-plugin@0.3",
+          "jsr:@setu-ts/kernel@0.3",
+          "jsr:@setu-ts/logger-plugin@0.3",
+          "jsr:@setu-ts/metrics-plugin@0.3",
+          "jsr:@setu-ts/openapi-plugin@0.3",
+          "jsr:@setu-ts/realtime-backplane-plugin@0.3",
+          "jsr:@setu-ts/runtime@0.3",
+          "jsr:@setu-ts/service-discovery-plugin@0.3",
+          "jsr:@setu-ts/session-plugin@0.3",
+          "jsr:@setu-ts/sse-plugin@0.3",
+          "jsr:@setu-ts/validation-plugin@0.3",
+          "jsr:@setu-ts/websocket-plugin@0.3"
         ]
       },
-      "jsr:@setu-ts/runtime@0.1.0-alpha.9": {
+      "jsr:@setu-ts/runtime@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9",
-          "jsr:@setu-ts/kernel@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3",
+          "jsr:@setu-ts/kernel@0.3"
         ]
       },
-      "jsr:@setu-ts/scheduler-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/sdk@0.1.0-alpha.9": {
+      "jsr:@setu-ts/scheduler-plugin@0.3.0": {},
+      "jsr:@setu-ts/sdk@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3.0"
         ]
       },
-      "jsr:@setu-ts/secrets-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/service-discovery-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/session-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/sse-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/static-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/secrets-plugin@0.3.0": {},
+      "jsr:@setu-ts/service-discovery-plugin@0.3.0": {},
+      "jsr:@setu-ts/session-plugin@0.3.0": {},
+      "jsr:@setu-ts/sse-plugin@0.3.0": {},
+      "jsr:@setu-ts/static-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9",
-          "jsr:@setu-ts/kernel@~0.1.0-alpha.9",
-          "jsr:@setu-ts/runtime@~0.1.0-alpha.9",
-          "jsr:@setu-ts/testing@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3",
+          "jsr:@setu-ts/kernel@0.3",
+          "jsr:@setu-ts/runtime@0.3",
+          "jsr:@setu-ts/testing@0.3"
         ]
       },
-      "jsr:@setu-ts/storage-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/telemetry-plugin@0.1.0-alpha.9": {
+      "jsr:@setu-ts/storage-plugin@0.3.0": {},
+      "jsr:@setu-ts/telemetry-plugin@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3"
         ]
       },
-      "jsr:@setu-ts/testing@0.1.0-alpha.9": {
+      "jsr:@setu-ts/testing@0.3.0": {
         "dependencies": [
-          "jsr:@setu-ts/common@~0.1.0-alpha.9",
-          "jsr:@setu-ts/kernel@~0.1.0-alpha.9"
+          "jsr:@setu-ts/common@0.3",
+          "jsr:@setu-ts/kernel@0.3"
         ]
       },
-      "jsr:@setu-ts/validation-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/websocket-plugin@0.1.0-alpha.9": {},
-      "jsr:@setu-ts/worker-pool-plugin@0.1.0-alpha.9": {}
+      "jsr:@setu-ts/validation-plugin@0.3.0": {},
+      "jsr:@setu-ts/websocket-plugin@0.3.0": {},
+      "jsr:@setu-ts/worker-pool-plugin@0.3.0": {}
     }
   }
 }
