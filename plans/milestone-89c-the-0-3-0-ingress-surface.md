@@ -260,11 +260,12 @@ complete chain.
   PR. It also makes in-memory faithful to the brokers it stands in for, which is the argument for
   doing it rather than working around it.
 - **A custom broker still deadlocks**, since §3.1 only fixes the bundled one. → That is what §3.2's
+  bounded wait is for, and it is why the bound is not optional even though the measured cycle is
+  gone.
 - **A future refactor drops the retained promise**, reinstating the unhandled rejection §3.1b exists
   to prevent. → The second case in `in-memory-dispatch-timing.test.ts` asserts that the promise the
   subscription callback returns is the one whose rejection is observed, so the drop fails a test
-  rather than production. bounded wait is for, and it is why the bound is not optional even though
-  the measured cycle is gone.
+  rather than production.
 - **The bound fires on a slow but legitimate startup**, refusing work that would have been
   delivered. → 10 000 ms against an `onInit` that does no I/O by contract; `0` disables it; and the
   error names the likely cause rather than asserting it.
