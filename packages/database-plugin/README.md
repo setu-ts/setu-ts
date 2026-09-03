@@ -661,8 +661,8 @@ development and tests, and run integration tests against the backend you deploy 
 
 The three query-shape refusals — `UnsupportedQueryFeatureError`, `UnsupportedFilterOperatorError`
 and `UnsupportedRawQueryError` — are answered **`501 Not Implemented`** when `@setu-ts/exceptions`'
-`errorHandler` is registered, with a body naming the feature or operator and the adapter that
-refused it:
+`errorHandler` is registered. The **status and the detail sentence are the invariant**; the body's
+shape is the format that application configured. Under `format: 'rfc9457'`:
 
 ```json
 {
@@ -672,6 +672,10 @@ refused it:
   "detail": "Query feature 'orderBy' is not supported by the 'dynamodb' database adapter."
 }
 ```
+
+Under the `default` format the same refusal reads
+`{"statusCode":501,"message":"Not Implemented","details":{"detail":"…"}}`, and with no
+`errorHandler` registered, `{"error":"Not Implemented","detail":"…"}`.
 
 `501` because the condition is permanent and the backend genuinely does not implement what the query
 asked for. This is the shape you meet when **switching backends**, which is what the portable
