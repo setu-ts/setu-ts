@@ -4186,9 +4186,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   deadlocks startup (measured to be **in-memory-broker only**; the gate is correct on rabbitmq and
   redis-streams, and awaiting is the entire trigger), and the tenant concern the release notes
   advertise cannot be written because both tenant-bearing members require an `IRequestContext` no
-  ingress path has. Two decisions are outstanding and belong to the maintainer: whether `@Roles`
-  enforcement defaults **on** (recommended, mirroring M70n's `enforceSchemas` escape hatch), and the
-  status for query refusals (`501` recommended).
+  ingress path has. Both open decisions were taken by the maintainer on 2026-09-03 and are recorded
+  in the ROADMAP sections: `@Roles` enforcement defaults **on** with `enforceRoles: false` as the
+  M70n-style escape hatch (a breaking behaviour change needing CHANGELOG migration text), and query
+  refusals answer **`501`** through a status hint carried on the error and read by `errorHandler`,
+  with X18-2's guards taking the same mechanism at `403`.
 
 ## Verification (run before declaring any work done)
 

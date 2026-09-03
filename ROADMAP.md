@@ -8701,11 +8701,14 @@ arm beside it.
 route simply becomes unreachable, `401`), and its one real effect is contributing `security: []` to
 the document. That is a usability wart, not a hole, and it is in scope only as documentation.
 
-**Decision required before implementation:** whether enforcement defaults **on**. Turning it on is a
-breaking behaviour change — routes that serve today will start refusing, which is correct and will
-break someone's tests. M70n answered the identical question with `enforceSchemas: false` as the
-escape hatch plus a startup warning naming every unenforced route; mirroring that as `enforceRoles`,
-default **on**, is the recommendation.
+**Decided (maintainer, 2026-09-03): enforcement defaults ON.** `enforceRoles: false` is the escape
+hatch, mirroring M70n's `enforceSchemas`, and a startup warning names every route whose restrictions
+are unenforced when no authorization capability is registered. This is a **breaking behaviour
+change** and takes CHANGELOG migration text: a route decorated `@Roles`/`@Permissions` that serves
+today will start refusing, which is the point — an unenforced authorization decoration is the defect
+— but it will break tests that were passing for the wrong reason. The default is on because the
+alternative leaves a decorator whose own JSDoc promises enforcement silently inert unless a reader
+opts in, which is the state this milestone exists to end.
 
 **X18-5 — `'schema-per-tenant'` and `'database-per-tenant'` produce no physical isolation (High).**
 `multi-tenancy-plugin/README.md:43-49` states, unqualified, "one schema per tenant" and "one
@@ -8773,12 +8776,16 @@ derives from `HttpError`, so `errorHandler` cannot map one. This is the shape a 
 Mongo answers `500` on every ordered endpoint under Dynamo, and the response says the server is
 broken.
 
-**Two decisions required.** First, the status: `501 Not Implemented` is the honest mapping for the
-query-shape refusals, since the backend genuinely does not implement the feature; `400` is
-defensible. Second, the mechanism — a status hint carried on the error and read by `errorHandler` is
-smaller than routing through M70f's `respondWithError` seam and keeps the mapping in one place. §2.2
-forbids `database-plugin` importing `@setu-ts/exceptions`, so deriving from `HttpError` is not
-available either way.
+**Decided (maintainer, 2026-09-03): `501 Not Implemented`, carried as a status hint on the error and
+read by `errorHandler`.** `501` is the honest mapping — the backend genuinely does not implement the
+feature, and the condition is permanent for that query rather than transient. The hint mechanism is
+chosen over routing through M70f's `respondWithError` seam because it is smaller and keeps the
+mapping in one place: the adapters keep throwing, and one reader decides the status. §2.2 forbids
+`database-plugin` importing `@setu-ts/exceptions`, so deriving from `HttpError` was never available.
+
+X18-2's guards take the same treatment at `403`, since a principal that fails a policy check is
+refused rather than unimplemented — so the two findings share the mechanism and differ only in the
+status each declares.
 
 Masking is **not** to be disabled: X12-3 exists because these same 500s used to disclose the failing
 SQL and every bound parameter, and the three transaction-scope errors in the same file may
