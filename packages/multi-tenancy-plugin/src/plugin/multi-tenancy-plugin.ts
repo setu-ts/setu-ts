@@ -236,8 +236,15 @@ export function MultiTenancyPlugin(
       // Selecting one without an injected backend therefore warns instead of
       // leaving the isolation silently logical-only.
       if (strategy.kind !== 'column' && providedStore === undefined) {
+        // Name the OPTION spelling the developer writes in
+        // MultiTenancyPluginOptions ('schema-per-tenant'/'database-per-tenant'),
+        // not the resolved strategy kind ('schema'/'database'), so the warning
+        // maps back to the `database` option they set.
+        const optionSpelling = strategy.kind === 'schema'
+          ? 'schema-per-tenant'
+          : 'database-per-tenant';
         ctx.logger?.warn(
-          `Isolation strategy '${strategy.kind}' is selected but no dataStore is injected; the shipped memory store only partitions by the strategy's label and no schema or database is created`,
+          `Isolation strategy '${optionSpelling}' is selected but no dataStore is injected; the shipped memory store only partitions by the strategy's label and no schema or database is created`,
           {
             strategy: strategy.kind,
             hint: 'Inject a dataStore whose backend implements the strategy, or keep ' +

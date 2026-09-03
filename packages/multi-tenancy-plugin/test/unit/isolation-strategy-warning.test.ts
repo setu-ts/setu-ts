@@ -46,19 +46,20 @@ function warnsFor(options: Parameters<typeof MultiTenancyPlugin>[0]): string[] {
 }
 
 describe('isolation strategy warning (X18-5)', () => {
-  it("warns for 'schema-per-tenant' with no dataStore, naming the resolved kind", () => {
+  it("warns for 'schema-per-tenant' with no dataStore, naming the option spelling", () => {
     const warns = warnsFor({ resolver: 'header', database: 'schema-per-tenant' });
     expect(warns).toHaveLength(1);
-    // The option string selects the strategy whose `kind` is 'schema'; the
-    // warning names the RESOLVED strategy, so a custom object warns the same way.
-    expect(warns[0]).toContain("'schema'");
+    // The warning names the OPTION spelling written in MultiTenancyPluginOptions
+    // ('schema-per-tenant'), not the resolved strategy kind ('schema'), so it
+    // maps back to the option the developer set.
+    expect(warns[0]).toContain("'schema-per-tenant'");
     expect(warns[0]).toContain('dataStore');
   });
 
   it("warns for 'database-per-tenant' with no dataStore", () => {
     const warns = warnsFor({ resolver: 'header', database: 'database-per-tenant' });
     expect(warns).toHaveLength(1);
-    expect(warns[0]).toContain("'database'");
+    expect(warns[0]).toContain("'database-per-tenant'");
   });
 
   it('warns for a custom non-column strategy object with no dataStore', () => {
