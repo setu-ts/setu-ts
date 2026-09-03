@@ -8642,7 +8642,7 @@ allocations where Hono builds one) and a synchronous `executeChain` (needs `Next
 which breaks middleware calling `next().then(...)`) — both **M88**. Benchmarks as a release gate —
 **M40**.
 
-## Milestone 88: Response-Path Performance ✅ (PR pending)
+## Milestone 88: Response-Path Performance ✅ (PR #233)
 
 **Package(s):** `packages/common`, `packages/kernel`, `packages/runtime`
 

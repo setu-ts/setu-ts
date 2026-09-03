@@ -1,8 +1,7 @@
 # Milestone 88 — Response-Path Performance (`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime`)
 
-> **Status:** Complete (PR pending). Branch: `feat/m88-response-path-performance`. `main` is
-> protected — all work (implementation + fixes) stayed on this one branch and will merge via a
-> single PR.
+> **Status:** Complete (PR #233). Branch: `feat/m88-response-path-performance`. `main` is protected
+> — all work (implementation + fixes) stayed on this one branch and will merge via a single PR.
 
 ## 0. Objective & scope
 

@@ -4035,7 +4035,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   regression test proves `@hono/node-server` can add derived `Content-Length` without contaminating
   another response. Focused response conversion measured 35.7% lower median cost; five alternating
   Node-adapter loopback samples measured a +4.9% median with material local variance, so neither is
-  a production-throughput claim — complete (PR pending)
+  a production-throughput claim — complete (PR #233)
 - **Milestone 86** (`common`, `cqrs-plugin`, `websocket-plugin`, `queue-plugin`, `scheduler-plugin`,
   `messaging-plugin` — non-HTTP ingress registration and behaviours: the shared
   `IngressContext`/`IIngressBehavior` composer; declarative route, processor, job, and subscription
