@@ -22,6 +22,18 @@ function findFreePort(): number {
   return port;
 }
 
+/** Fetches after an asynchronously bound Node server starts listening. */
+async function fetchWhenListening(url: string): Promise<Response> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try {
+      return await fetch(url);
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  throw new Error(`server never became reachable: ${url}`);
+}
+
 describe('runtime-plugin integration', () => {
   it('real HTTP round-trip through app.start({ port })', async () => {
     const port = findFreePort();
@@ -106,6 +118,25 @@ describe('runtime-plugin integration', () => {
       );
       expect(response2.status).toBe(200);
       expect(await response2.text()).toBe('healthy');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('Node serves a terminal JSON response through @hono/node-server', async () => {
+    const port = findFreePort();
+    const app = createApplication({ plugins: [RuntimePlugin({ platform: 'node' })] });
+
+    app.router.get('/json', (ctx) => ctx.response.status(201).json({ ok: true }));
+
+    await app.start({ port });
+
+    try {
+      const response = await fetchWhenListening(`http://127.0.0.1:${port}/json`);
+
+      expect(response.status).toBe(201);
+      expect(response.headers.get('content-type')).toBe('application/json; charset=utf-8');
+      expect(await response.json()).toEqual({ ok: true });
     } finally {
       await app.stop();
     }

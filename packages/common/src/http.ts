@@ -818,8 +818,8 @@ export type ResponseSnapshot =
     readonly headers: Headers;
     readonly body: Uint8Array | string | null;
     /**
-     * Header input the runtime may pass directly to `new Response` before it
-     * reads the lazy {@linkcode headers} view.
+     * Snapshot-local header input the runtime may pass to a native response
+     * before it reads the lazy {@linkcode headers} view.
      *
      * @internal
      */
@@ -831,8 +831,8 @@ export type ResponseSnapshot =
     readonly headers: Headers;
     readonly body: ReadableStream<Uint8Array>;
     /**
-     * Header input the runtime may pass directly to `new Response` before it
-     * reads the lazy {@linkcode headers} view.
+     * Snapshot-local header input the runtime may pass to a native response
+     * before it reads the lazy {@linkcode headers} view.
      *
      * @internal
      */
@@ -844,8 +844,10 @@ export type ResponseSnapshot =
  * when its headers have not needed a mutable {@linkcode Headers} instance.
  *
  * HTTP adapters consume this private-by-convention protocol before reading
- * {@linkcode ResponseSnapshot.headers}. Application and middleware code should
- * continue to use `snapshot.headers`, which remains the documented live view.
+ * {@linkcode ResponseSnapshot.headers}. The supplied input is snapshot-local
+ * so a native server may safely derive or add headers. Application and
+ * middleware code should continue to use `snapshot.headers`, which remains
+ * the documented live view.
  *
  * @since 0.4.0
  */

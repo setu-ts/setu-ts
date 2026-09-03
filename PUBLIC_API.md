@@ -8447,12 +8447,13 @@ libraries — all of which satisfy `RouteHandler`'s declared `Promise<HandlerRes
 and treating one as already-settled sends the response while the handler is still running. Pair it
 with `Promise.resolve`, which returns a native promise unchanged and adopts a foreign thenable.
 
-**`ResponseSnapshot.responseInit`** (M88, `@internal`) — an optional immutable
+**`ResponseSnapshot.responseInit`** (M88, `@internal`) — an optional snapshot-local
 `ResponseSnapshotInit` header input used only by the kernel-to-runtime response conversion. The
 runtime consumes it before it reads `snapshot.headers`, allowing normal terminal responses to avoid
-materializing the framework's native `Headers` object. Middleware and application code must continue
-to use the documented live `snapshot.headers` view; snapshots with explicitly mutated or repeated
-headers use that existing path unchanged.
+materializing the framework's native `Headers` object; native servers may derive headers such as
+`Content-Length` from that input. Middleware and application code must continue to use the
+documented live `snapshot.headers` view; snapshots with explicitly mutated or repeated headers use
+that existing path unchanged.
 
 Contract notes:
 

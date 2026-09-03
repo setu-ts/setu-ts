@@ -1,7 +1,8 @@
 # Milestone 88 — Response-Path Performance (`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime`)
 
-> **Status:** In progress. Branch: `feat/m88-response-path-performance`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Branch: `feat/m88-response-path-performance`. `main` is
+> protected — all work (implementation + fixes) stayed on this one branch and will merge via a
+> single PR.
 
 ## 0. Objective & scope
 
@@ -43,9 +44,10 @@ existing path.
 ### 3.1 Lazy headers preserve the existing snapshot contract
 
 - **Decision:** `ResponseBuilder` stores a web `Headers` object only after `header`, `appendHeader`,
-  or `snapshot().headers` needs its full semantics. Built-in terminal-only headers use immutable
-  `HeadersInit` values. A snapshot retains its captured status/body/streaming values, while its
-  `headers` getter materializes and returns the same live backing `Headers` object described today.
+  or `snapshot().headers` needs its full semantics. Built-in terminal-only headers use a shared,
+  immutable internal source and expose a fresh snapshot-local `HeadersInit` record to the adapter. A
+  snapshot retains its captured status/body/streaming values, while its `headers` getter
+  materializes and returns the same live backing `Headers` object described today.
 - **Why:** ordinary `json`, `text`, `html`, byte-send, and redirect responses need known header
   values but do not need framework header mutation before the adapter constructs the native
   response. Materializing `Headers` only for observers removes the framework copy without weakening
@@ -57,8 +59,8 @@ existing path.
 ### 3.2 A typed snapshot-local hint bridges kernel and runtime
 
 - **Decision:** `common` adds `ResponseSnapshotInit` and an optional `ResponseSnapshot.responseInit`
-  field. `ResponseBuilder` supplies the immutable `ResponseInit`-compatible header source only when
-  its headers are still unmaterialized; the runtime reads that field before `snapshot.headers`.
+  field. `ResponseBuilder` supplies a fresh, mutable `ResponseInit`-compatible header source only
+  when its headers are still unmaterialized; the runtime reads that field before `snapshot.headers`.
 - **Why:** runtime must consume the fast representation but cannot import the kernel's internal
   `ResponseBuilder`; a typed common field preserves package boundaries without adding a per-request
   symbol lookup or callback. The ordinary `IResponse` methods and existing snapshot fields remain
@@ -93,24 +95,26 @@ from a response's actual usage.
 
 ## 5. Implementation files
 
-| File                                                    | Purpose                                                                          |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `packages/common/src/http.ts`                           | Define and document the typed snapshot-local response init hint.                 |
-| `packages/common/src/index.ts`                          | Re-export the documented `ResponseSnapshotInit` type.                            |
-| `packages/kernel/src/context/response.ts`               | Defer framework `Headers`, publish init hints, and retain live snapshot headers. |
-| `packages/runtime/src/adapters/shared/fetch-mapping.ts` | Prefer a snapshot init hint before accessing public headers.                     |
-| `packages/kernel/test/unit/response.test.ts`            | Test lazy response headers and complete response semantics.                      |
-| `packages/runtime/test/unit/fetch-mapping.test.ts`      | Test hinted mapper behavior and ordinary fallback.                               |
-| `PUBLIC_API.md`                                         | Document the common protocol and compatibility behavior.                         |
-| `packages/common/README.md`                             | Add the response snapshot-init type/functions to the export listing.             |
-| `ROADMAP.md`                                            | Add M88 scope and Progress Tracking row.                                         |
+| File                                                       | Purpose                                                                          |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `packages/common/src/http.ts`                              | Define and document the typed snapshot-local response init hint.                 |
+| `packages/common/src/index.ts`                             | Re-export the documented `ResponseSnapshotInit` type.                            |
+| `packages/kernel/src/context/response.ts`                  | Defer framework `Headers`, publish init hints, and retain live snapshot headers. |
+| `packages/runtime/src/adapters/shared/fetch-mapping.ts`    | Prefer a snapshot init hint before accessing public headers.                     |
+| `packages/kernel/test/unit/response.test.ts`               | Test lazy response headers and complete response semantics.                      |
+| `packages/runtime/test/unit/fetch-mapping.test.ts`         | Test hinted mapper behavior and ordinary fallback.                               |
+| `packages/runtime/test/integration/runtime-plugin.test.ts` | Exercise terminal JSON through the real Node adapter and `@hono/node-server`.    |
+| `PUBLIC_API.md`                                            | Document the common protocol and compatibility behavior.                         |
+| `packages/common/README.md`                                | Add the response snapshot-init type/functions to the export listing.             |
+| `ROADMAP.md`                                               | Add M88 scope and Progress Tracking row.                                         |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                          | src covered                                    | Key assertions (and the signature each call type-checks against)                                                                                                                                                  |
-| -------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/kernel/test/unit/response.test.ts`       | `kernel/src/context/response.ts`               | Every terminal method has its existing status/body/header semantics; `snapshot(): ResponseSnapshot` exposes live `Headers` when read and carries `responseInit` only for an unmaterialized common terminal shape. |
-| `packages/runtime/test/unit/fetch-mapping.test.ts` | `runtime/src/adapters/shared/fetch-mapping.ts` | `mapSnapshotToWebResponse(snapshot): Response` preserves status, headers, buffers, streams, and `Set-Cookie` on both hinted and unhinted snapshots.                                                               |
+| Test file                                                  | src covered                                          | Key assertions (and the signature each call type-checks against)                                                                                                                                                  |
+| ---------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/kernel/test/unit/response.test.ts`               | `kernel/src/context/response.ts`                     | Every terminal method has its existing status/body/header semantics; `snapshot(): ResponseSnapshot` exposes live `Headers` when read and carries `responseInit` only for an unmaterialized common terminal shape. |
+| `packages/runtime/test/unit/fetch-mapping.test.ts`         | `runtime/src/adapters/shared/fetch-mapping.ts`       | `mapSnapshotToWebResponse(snapshot): Response` preserves status, headers, buffers, streams, and `Set-Cookie` on both hinted and unhinted snapshots.                                                               |
+| `packages/runtime/test/integration/runtime-plugin.test.ts` | `kernel/src/context/response.ts` + Node adapter seam | A terminal JSON response traverses `RuntimePlugin({ platform: 'node' })`, the real `@hono/node-server`, and a loopback socket.                                                                                    |
 
 ## 7. Verification gates
 
@@ -133,13 +137,16 @@ deno task release:verify <version>
   overwrite, append, and `getSetCookie()`.
 - A snapshot hint could accidentally be used after a consumer mutates headers. → The hint is
   attached only while the builder has no mutable headers; reading `snapshot.headers` clears the fast
-  representation by materializing it before returning it.
+  representation by materializing it before returning it. Each hint access returns a fresh record,
+  so a native server adding `Content-Length` cannot mutate the shared internal source.
 - The measurement could be noise. → Compare the branch to its parent with repeated focused
   response-conversion samples and keep the optimization only when output equivalence and A/B
   measurements agree. The final five-sample in-process builder → snapshot → web-response comparison
   (200,000 JSON responses/sample) had medians of 0.241 µs/op on this branch and 0.375 µs/op on the
-  clean M87 baseline worktree: 35.7% lower response-conversion cost. It is a focused microbenchmark,
-  not a claim of an equivalent whole-server throughput gain.
+  clean M87 baseline worktree: 35.7% lower response-conversion cost. The follow-up Node-adapter
+  loopback driver alternated five 2,000-request JSON samples: its medians were 12,381 requests/sec
+  on this branch and 11,799 requests/sec on M87 (+4.9%), with substantial local-run variance.
+  Neither result is a claim of equivalent production throughput.
 
 ## 9. Out of scope
 

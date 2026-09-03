@@ -2,6 +2,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { ResponseBuilder } from '../../src/context/response.ts';
 
+function isHeaderRecord(headers: HeadersInit): headers is Record<string, string> {
+  return !Array.isArray(headers) && !(headers instanceof Headers);
+}
+
 describe('ResponseBuilder', () => {
   it('should default status to 200', () => {
     const res = new ResponseBuilder();
@@ -27,17 +31,25 @@ describe('ResponseBuilder', () => {
     expect(res.ended).toBe(true);
   });
 
-  it('keeps common terminal headers lazy until a snapshot consumer reads them', () => {
+  it('keeps common terminal headers lazy and isolates native initializer mutation', () => {
     const res = new ResponseBuilder();
     res.json({ ok: true });
     const snapshot = res.snapshot();
 
+    const init = snapshot.responseInit;
+    expect(init?.headers).toEqual({
+      'content-type': 'application/json; charset=utf-8',
+    });
+    if (init === undefined || !isHeaderRecord(init.headers)) {
+      throw new Error('expected a record header initializer');
+    }
+    init.headers['content-length'] = '11';
+
     expect(snapshot.responseInit?.headers).toEqual({
       'content-type': 'application/json; charset=utf-8',
     });
-    expect(Object.isFrozen(snapshot.responseInit)).toBe(true);
-    expect(Object.isFrozen(snapshot.responseInit?.headers)).toBe(true);
     expect(snapshot.headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(snapshot.headers.get('content-length')).toBeNull();
   });
 
   it('keeps an earlier snapshot headers view live after a later mutation', () => {

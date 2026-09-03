@@ -14,7 +14,7 @@ import type {
 /** Opaque brand — only the kernel constructs values of this type. */
 const HANDLER_RESULT: HandlerResult = { __handlerResult: true };
 
-/** Shared native-response initializers for the common terminal response shapes. */
+/** Internal immutable header sources for the common terminal response shapes. */
 const JSON_INIT = responseInit({ 'content-type': 'application/json; charset=utf-8' });
 const TEXT_INIT = responseInit({ 'content-type': 'text/plain; charset=utf-8' });
 const HTML_INIT = responseInit({ 'content-type': 'text/html; charset=utf-8' });
@@ -27,7 +27,7 @@ const BINARY_INIT = responseInit({ 'content-type': 'application/octet-stream' })
 export class ResponseBuilder implements IResponse {
   #status = 200;
   #headers: Headers | undefined;
-  #responseInit: ResponseSnapshotInit | undefined;
+  #responseInit: TerminalResponseInit | undefined;
   #initHeaderName: string | undefined;
   #body: Uint8Array | string | ReadableStream<Uint8Array> | null = null;
   #streaming = false;
@@ -152,11 +152,17 @@ export class ResponseBuilder implements IResponse {
 
   /** Supplies the current fast-path init to an internal snapshot. */
   responseInitForSnapshot(): ResponseSnapshotInit | undefined {
-    return this.#responseInit;
+    const init = this.#responseInit;
+    if (init === undefined) return undefined;
+
+    // Native HTTP servers are allowed to add derived headers (for example,
+    // Content-Length) to their response initializer. Keep the shared internal
+    // source immutable, but give each snapshot consumer a mutable copy.
+    return { headers: { ...init.headers } };
   }
 
   /** Writes one built-in header without materializing native Headers where possible. */
-  #setBuiltInHeader(name: string, value: string, init: ResponseSnapshotInit): void {
+  #setBuiltInHeader(name: string, value: string, init: TerminalResponseInit): void {
     if (this.#headers !== undefined) {
       this.#headers.set(name, value);
       return;
@@ -227,7 +233,12 @@ class StreamingResponseSnapshot implements Extract<ResponseSnapshot, { readonly 
   }
 }
 
-/** Freezes a terminal response's internal header source before sharing it with a snapshot. */
-function responseInit(headers: Record<string, string>): ResponseSnapshotInit {
+/** Internal shared source for a terminal response's fast-path header init. */
+interface TerminalResponseInit {
+  readonly headers: Readonly<Record<string, string>>;
+}
+
+/** Freezes a terminal response's internal header source before it is copied to a snapshot. */
+function responseInit(headers: Record<string, string>): TerminalResponseInit {
   return Object.freeze({ headers: Object.freeze(headers) });
 }

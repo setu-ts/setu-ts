@@ -8642,7 +8642,7 @@ allocations where Hono builds one) and a synchronous `executeChain` (needs `Next
 which breaks middleware calling `next().then(...)`) — both **M88**. Benchmarks as a release gate —
 **M40**.
 
-## Milestone 88: Response-Path Performance 🚧
+## Milestone 88: Response-Path Performance ✅ (PR pending)
 
 **Package(s):** `packages/common`, `packages/kernel`, `packages/runtime`
 
@@ -8779,4 +8779,4 @@ native header object while explicit headers and repeated `Set-Cookie` values ret
 | 85        | ✅     | cli (workspace full-stack gRPC, PR #215)            |
 | 86        | ✅     | non-http ingress registration + pipeline            |
 | 87        | ✅     | request-path performance (kernel/runtime/common)    |
-| 88        | 🚧     | response-path performance (kernel/runtime/common)   |
+| 88        | ✅     | response-path performance (kernel/runtime/common)   |
