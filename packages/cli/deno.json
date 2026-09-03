@@ -1,14 +1,14 @@
 {
   "name": "@setu-ts/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
     "./main": "./src/main.ts"
   },
   "imports": {
-    "@setu-ts/common": "jsr:@setu-ts/common@^0.2.0",
-    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.2.0"
+    "@setu-ts/common": "jsr:@setu-ts/common@^0.3.0",
+    "@setu-ts/runtime": "jsr:@setu-ts/runtime@^0.3.0"
   },
   "lint": {
     "rules": {

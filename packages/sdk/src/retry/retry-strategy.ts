@@ -12,7 +12,7 @@
  */
 
 import type { IClientTiming } from '../http/contracts.ts';
-import type { RetryPolicy } from 'jsr:@setu-ts/common@^0.2.0';
+import type { RetryPolicy } from 'jsr:@setu-ts/common@^0.3.0';
 
 import { HttpClientError } from '../errors.ts';
 
