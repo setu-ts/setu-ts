@@ -1,6 +1,18 @@
-import type { HealthIndicatorFn, IPlugin, IPluginContext } from '@setu-ts/common';
-import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
-import type { IMessageBroker, ITelemetryService } from '@setu-ts/common';
+import type {
+  HealthIndicatorFn,
+  IIngressBehavior,
+  IMessageBroker,
+  IPlugin,
+  IPluginContext,
+  ITelemetryService,
+  RegistryFactory,
+} from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createCapabilityToken,
+  PLUGIN_PRIORITY,
+  resolveRegistryEntry,
+} from '@setu-ts/common';
 import { InMemoryBroker } from '../brokers/in-memory-broker.ts';
 import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
 import { RabbitMqBroker } from '../brokers/rabbitmq-broker.ts';
@@ -11,6 +23,7 @@ import { ServiceBusBroker } from '../brokers/service-bus-broker.ts';
 import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
 import { asBrokerAdapter } from '../brokers/custom-adapter.ts';
 import { TracedBroker } from '../tracing/traced-broker.ts';
+import { PipelinedBroker } from '../pipeline/pipelined-broker.ts';
 import { JsonSerializer } from '../serializers/json-serializer.ts';
 import type {
   IAmqpConnection,
@@ -22,6 +35,8 @@ import type {
   NatsOptions,
   RabbitMqOptions,
   RedisStreamsOptions,
+  SubscriptionDefinition,
+  SubscriptionEntry,
 } from '../interfaces/index.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -96,6 +111,62 @@ export function MessagingPlugin(
   const token = instanceName ? createNamedToken(instanceName) : CAPABILITIES.MESSAGING;
 
   const pluginName = createPluginName(instanceName);
+
+  // The registration arms are split ONCE, here at plugin construction, so
+  // `register` and the `onInit` hook each read a single list (the M70d arm
+  // pattern, M86 §3.5). Instance entries keep their pre-arm `register()`
+  // timing; factories are resolved in `onInit`, the first phase at which the
+  // registry holds every capability. Each factory carries the index it holds
+  // in the DECLARED array, not its position among the factories: the index is
+  // the only thing the error label has to point a developer at the failing
+  // entry, and filtering first made it name a different — working — entry
+  // whenever the two arms were mixed.
+  const subscriptions: readonly SubscriptionEntry[] = options.subscriptions ?? [];
+  const behaviors: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[] =
+    options.behaviors ?? [];
+  const subscriptionInstances = subscriptions.filter(
+    (entry): entry is SubscriptionDefinition => typeof entry !== 'function',
+  );
+  const subscriptionFactories = subscriptions
+    .map((entry, index) => ({ entry, index }))
+    .filter(
+      (slot): slot is { entry: RegistryFactory<SubscriptionDefinition>; index: number } =>
+        typeof slot.entry === 'function',
+    );
+  const behaviorInstances = behaviors.filter(
+    (entry): entry is IIngressBehavior => typeof entry !== 'function',
+  );
+  const behaviorFactories = behaviors
+    .map((entry, index) => ({ entry, index }))
+    .filter(
+      (slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
+        typeof slot.entry === 'function',
+    );
+  // The LIVE behaviour list the chain reads on every delivery. Instances are
+  // available at registration; when factories exist, `onInit` replaces it
+  // with the complete declared sequence before the app serves.
+  const behaviorChain: IIngressBehavior[] = [...behaviorInstances];
+  const declaredBehaviors = behaviors.length > 0;
+  // Held while behaviour FACTORIES are still unresolved. Delivery waits on it
+  // so no message reaches a handler through a partial chain; `openChainGate`
+  // is called at the end of `onInit`, once `behaviorChain` is final.
+  // `withResolvers` rather than a `new Promise` executor with `() => {}`
+  // placeholders: those placeholders are never called, so they are dead
+  // functions the coverage bar counts.
+  //
+  // `failChainGate` is called when `onInit` fails, so work held on the gate
+  // FAILS into this ingress's own failure path instead of hanging on a promise
+  // that can never settle. Running it through the partial chain remains the
+  // one thing the gate will not do.
+  const {
+    promise: chainReady,
+    resolve: openChainGate,
+    reject: failChainGate,
+  } = Promise.withResolvers<void>();
+  // The gate is awaited per dispatch, so its rejection is always observed
+  // there; this keeps an unobserved rejection from surfacing when nothing is
+  // currently held.
+  chainReady.catch(() => {});
 
   return {
     name: pluginName,
@@ -239,8 +310,44 @@ export function MessagingPlugin(
         broker = new TracedBroker(broker, telemetry, brokerType);
       }
 
+      // M86 §3.8: ONE decorator composes the behaviour chain inside
+      // `subscribe`/`subscribeWithHeaders` for every broker arm — the broker
+      // constructors above are untouched. Applied ONLY when at least one
+      // behaviour is configured, so the zero-configuration broker chain is
+      // byte-identical to the pre-arm behaviour (§3.9). The chain reads the
+      // live list, so `onInit`-resolved factory behaviours also wrap
+      // subscriptions registered here.
+      if (declaredBehaviors) {
+        // The gate exists only when a FACTORY is declared: with instances
+        // alone the chain is already final here and delivery is never
+        // deferred. It closes the startup window for EVERY subscription —
+        // this plugin's own declared entries and any a later plugin makes
+        // imperatively through the registered broker — so no registration's
+        // timing has to change.
+        broker = behaviorFactories.length === 0
+          ? new PipelinedBroker(broker, behaviorChain)
+          : new PipelinedBroker(broker, behaviorChain, chainReady);
+      }
+
       // Register the broker as IMessageBroker
       ctx.services.register<IMessageBroker>(token, broker);
+
+      // Declared subscription INSTANCES register now, exactly as an
+      // imperative `broker.subscribe()` call made before this arm existed
+      // (M86 §3.5) — and they coexist with imperative subscriptions.
+      //
+      // UNLESS a behaviour FACTORY is declared. A subscription goes live the
+      // moment it is established against the already-connected broker, and a
+      // broker holding a backlog delivers immediately — so a message arriving
+      // before `onInit` resolved the factory behaviours would reach the
+      // handler through a PARTIAL chain, skipping exactly the behaviours that
+      // needed a resolved capability. Deferring the whole set into the same
+      // `onInit` hook, after the chain is final, is what makes the arm's
+      // guarantee true. With no factory declared the chain is already
+      // complete here and the timing is unchanged.
+      for (const definition of subscriptionInstances) {
+        await subscribeDefinition(broker, definition);
+      }
 
       // Register health indicator. M70c: reports BOTH signals. `isReady()` is
       // lifecycle (never started / shut down → `down`); `reachability()` is
@@ -269,6 +376,74 @@ export function MessagingPlugin(
       ctx.lifecycle.onClose(async () => {
         await broker.disconnect();
       });
+
+      // Factory entries resolve at `onInit` — the first phase at which the
+      // registry holds every capability, and still before the application
+      // serves. Each `subscribe()` is AWAITED there so a declared subscription
+      // is established before the app accepts traffic (M86 §3.5). A throwing
+      // factory rejects `start()` naming the option and the entry's DECLARED
+      // index. The hook is registered only when a factory is configured: with
+      // instances alone there is nothing to resolve, so a zero-factory
+      // configuration gains no lifecycle hook at all.
+      if (subscriptionFactories.length > 0 || behaviorFactories.length > 0) {
+        ctx.lifecycle.onInit(async () => {
+          try {
+            // The chain is completed FIRST, before any factory subscription is
+            // established below, so nothing ever subscribes against a partial
+            // chain.
+            behaviorChain.splice(
+              0,
+              behaviorChain.length,
+              ...behaviors.map((entry, index) =>
+                typeof entry === 'function'
+                  ? resolveRegistryEntry(
+                    entry,
+                    ctx.services,
+                    `MessagingPlugin({ behaviors })[${index}]`,
+                  )
+                  : entry
+              ),
+            );
+
+            for (const slot of subscriptionFactories) {
+              const definition = resolveRegistryEntry(
+                slot.entry,
+                ctx.services,
+                `MessagingPlugin({ subscriptions })[${slot.index}]`,
+              );
+              await subscribeDefinition(broker, definition);
+            }
+
+            // LAST: the chain is final, so any delivery held during startup may
+            // now proceed. A hook that threw above never reaches this, leaving
+            // the gate closed — which is correct, since `start()` has failed and
+            // delivering through a partial chain is what this prevents.
+            openChainGate();
+          } catch (error) {
+            // Fail the gate so held work rejects into this ingress's own
+            // failure path rather than waiting on a promise that can never
+            // settle, then surface the startup failure to the caller.
+            failChainGate(error);
+            throw error;
+          }
+        });
+      }
     },
   };
+}
+
+/**
+ * Registers one declarative subscription — the declarative form of exactly
+ * one imperative `broker.subscribe()` call (M86 §3.5).
+ *
+ * @param broker - The broker the plugin registered (already wrapped with
+ * `TracedBroker`/`PipelinedBroker` when configured)
+ * @param definition - The definition to register
+ * @returns Resolves when the subscription is established
+ */
+async function subscribeDefinition(
+  broker: IMessageBroker,
+  definition: SubscriptionDefinition,
+): Promise<void> {
+  await broker.subscribe(definition.topic, definition.handler, definition.options);
 }

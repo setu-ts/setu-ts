@@ -2728,14 +2728,20 @@ app.register(WebSocketPlugin({
 
 ### Options
 
-| Option             | Type      | Default  | Behavior                                                                                                                                                                                    |
-| ------------------ | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxConnections`   | `number`  | `0`      | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                     |
-| `heartbeatMs`      | `number`  | `0`      | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                   |
-| `heartbeatPayload` | `string`  | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                            |
-| `idleTimeoutMs`    | `number`  | `0`      | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert. |
-| `maxMessageBytes`  | `number`  | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009` and never reaches `onMessage`.                                                                                   |
-| `scalingNotice`    | `boolean` | `true`   | Logs one `info` line at registration when no realtime backplane is registered, stating that rooms broadcast in-process only. `false` silences the message; room delivery is unaffected.     |
+| Option             | Type                                                                 | Default  | Behavior                                                                                                                                                                                                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxConnections`   | `number`                                                             | `0`      | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                                                                                                                                          |
+| `heartbeatMs`      | `number`                                                             | `0`      | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                                                                                                                                        |
+| `heartbeatPayload` | `string`                                                             | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                                                                                                                                                 |
+| `idleTimeoutMs`    | `number`                                                             | `0`      | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert.                                                                                                                      |
+| `maxMessageBytes`  | `number`                                                             | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009` and never reaches `onMessage`.                                                                                                                                                                                                        |
+| `scalingNotice`    | `boolean`                                                            | `true`   | Logs one `info` line at registration when no realtime backplane is registered, stating that rooms broadcast in-process only. `false` silences the message; room delivery is unaffected.                                                                                                                          |
+| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —        | Declarative exact-path `route()` registrations. An entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a `RegistryFactory` resolved at `onInit`.                                                                                                                                           |
+| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It sees `kind: 'websocket'`, the route path, and the frame; a configured chain returns a promise while preserving immediate execution for synchronous behaviours; a deferred `next()` delays the handler. No behaviours keep the direct synchronous invoke. |
+
+`WebSocketRouteOptions.guards` is route-scoped: matching-route guards run before the handshake in
+declared order, and the first non-`true` decision refuses. It is distinct from plugin-level frame
+`behaviors`; no route-level behaviour arm exists.
 
 ### Usage
 
@@ -3969,6 +3975,16 @@ type MessagingPluginOptions =
   | CustomMessagingOptions;
 ```
 
+Every `MessagingPluginOptions` arm also inherits these ingress-registration options:
+
+| Option          | Type                                                                 | Behavior                                                                                                                                                                                                                                                                                                                                                             |
+| --------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subscriptions` | `readonly SubscriptionEntry[]`                                       | Declarative `subscribe()` calls. A `SubscriptionDefinition` is `{ topic, handler, options? }`; factory entries resolve during async `onInit`, so subscriptions are established before the application serves. When a `behaviors` factory is declared, DELIVERY is held until `onInit` has resolved the chain, so no message reaches a handler through a partial one. |
+| `behaviors`     | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | Wraps subscribe handlers in declared order with `kind: 'messaging'`, topic, message payload, and available headers. No delivery attempt is invented. With no behaviours, no decorator is applied.                                                                                                                                                                    |
+
+The chain deliberately does not wrap or add a registration arm for `respond()`: its handler returns
+a value, unlike the void-returning subscribe handlers, and remains forwarded unchanged.
+
 **Cloud brokers require production credentials OR an injected transport:**
 
 ```typescript
@@ -4390,6 +4406,16 @@ app.register(QueuePlugin({
 }));
 ```
 
+### Declarative processors and behaviours
+
+| Option       | Type                                                                 | Behavior                                                                                                                                                                                                                                                                                                                                                |
+| ------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `processors` | `readonly QueueProcessorEntry[]`                                     | Declarative `process()` registrations. A `QueueProcessorDefinition` is `{ name, processor, options? }`; factory entries resolve at `onInit`. An array containing a factory registers wholly in `onInit`, in DECLARED order, because `process()` is last-wins on a job name. A `behaviors` factory additionally holds dispatch until the chain is final. |
+| `behaviors`  | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | Wraps every processor in declared order with `kind: 'queue'`, job name, the delivered `IJob`, and its attempt count. A short circuit acknowledges the job; a throw preserves retry, `onFailed`, and final dead-letter behavior.                                                                                                                         |
+
+Both arms coexist with imperative `queue.process()` calls. With no behaviours, a processor receives
+the original job directly and no chain is allocated.
+
 ### Adding Jobs
 
 ```typescript
@@ -4641,6 +4667,17 @@ fire re-contends. A separate per-handler mutex preserves overlap protection — 
 whose previous fire is still running is skipped locally. `every` jobs arm on an absolute epoch grid
 (`(floor(now / interval) + 1) * interval`), so replicas registered at different instants agree on
 slot keys; the first fire may come sooner than one full interval after registration.
+
+### Declarative jobs and behaviours
+
+| Option      | Type                                                                 | Behavior                                                                                                                                                                                                                                                                                                                      |
+| ----------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jobs`      | `readonly SchedulerJobEntry[]`                                       | Declarative `cron()`/`every()`/`delay()` registrations. `SchedulerJobDefinition` is a union discriminated by `trigger`, so each arm requires its `expression`, `intervalMs`, or `delayMs`; factory entries resolve at `onInit`. When a `behaviors` factory is declared, a fire is held until `onInit` has resolved the chain. |
+| `behaviors` | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | Wraps every job handler in declared order with `kind: 'scheduler'`, job name, delivered `ScheduledJob`, and its 1-based attempt. Throws use the job's normal retry behavior.                                                                                                                                                  |
+
+The chain runs inside the distributed lock: a replica that does not acquire the lock runs neither a
+behaviour nor the handler. With no behaviours configured, the handler receives its job directly and
+no chain is allocated.
 
 ### Scheduling Jobs
 
@@ -6779,8 +6816,9 @@ Notes on the three that are not wired, and one that is conditional:
   not be applied is not a wiring.
 - **`job` is transport-agnostic on purpose.** Registering it as a queue processor would start a
   worker loop polling for a job name nothing enqueues; scheduling it needs a cron expression the
-  artifact does not carry. `QueuePluginOptions` publishes no `processors` list either. The emitted
-  JSDoc shows both calls; pick one.
+  artifact does not carry. `QueuePluginOptions.processors` can express a chosen queue registration,
+  but cannot infer which transport or scheduling details this artifact needs. The emitted JSDoc
+  shows both calls; pick one.
 - **`migration` has no consumer.** No plugin registers a CLI command, so there is no
   `setu db:migrate` and nothing reads migration files. Apply them from your own script or your ORM's
   tooling.
@@ -8378,6 +8416,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                                                                                                                                 |
+| Ingress             | `IngressKind`, `IngressContext<TPayload>`, `BehaviorLike<TWork, TResult>`, `IIngressBehavior`, `composeBehaviorChain`                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Queue               | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Scheduler           | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Secrets             | `ISecretManager`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -8392,7 +8431,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | SSE                 | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Realtime backplane  | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`                                                                                                                                                                                                             |
+| WebSocket           | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`, `WebSocketUpgradeGuard`, `WebSocketGuardDecision`                                                                                                                                                          |
 | Worker pool         | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                                                                                                                           |
 | Session             | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `SessionView`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Service discovery   | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -8540,6 +8579,25 @@ Contract notes:
   `IPluginContext.metadata`; the DecoratorPlugin registers its `IMetadataStore` there. It is
   distinct from `OPENAPI` so an OpenAPI plugin registering under `OPENAPI` does not populate
   `ctx.metadata`.
+
+### Ingress behaviours
+
+`IngressKind` is `'queue' | 'scheduler' | 'messaging' | 'websocket'`. `IngressContext<TPayload>` is
+the immutable work envelope supplied to an ingress behaviour:
+`{ kind, name, payload, attempt?, headers? }`. Queue and scheduler populate the 1-based `attempt`;
+messaging supplies transport headers when available and WebSocket frames supply neither optional
+field.
+
+`IIngressBehavior.handle(context, next)` is the void-result contract for non-HTTP work.
+`BehaviorLike<TWork, TResult>` is the structural shape shared with CQRS, and `composeBehaviorChain`
+runs behaviours in declared order. A behaviour that does not call `next()` short-circuits the
+terminal handler; a thrown error follows that ingress's existing error path. The common composer is
+also consumed internally by CQRS; it adds no CQRS surface.
+
+`WebSocketUpgradeGuard` is a route guard that receives a `WebSocketConnectionContext` and returns
+either `true` or a `{ status }` refusal (`WebSocketGuardDecision`). `WebSocketRouteOptions.guards`
+is an optional readonly array of those guards; the matched route runs them in declared order before
+its handshake and the first refusal wins.
 
 ---
 

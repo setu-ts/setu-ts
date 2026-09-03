@@ -176,6 +176,18 @@ class Application implements IKernelApplication {
     try {
       await this.#runStartup(options);
     } catch (error) {
+      // Plugins may have connected resources and registered their `onClose`
+      // hook before a later registration, environment validation, or `onInit`
+      // step fails. `stop()` deliberately no-ops after a failed start, so this
+      // is the only lifecycle path that can release those partial-start
+      // resources. Preserve the startup failure: it is the actionable error
+      // the caller needs to correct.
+      try {
+        await this.#lifecycle.runClose();
+      } catch {
+        // Best effort. A broken cleanup must not hide the startup failure, and
+        // later hooks cannot be reached once `runClose()` rejects.
+      }
       this.#started = false;
       throw error;
     }

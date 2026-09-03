@@ -19,6 +19,11 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 import { CAPABILITIES, type IScheduler } from '@setu-ts/common';
 
+// Your application's own work — stand-ins so this example compiles as written.
+declare function buildReport(): Promise<void>;
+declare function pollInbox(): Promise<void>;
+declare function warmCaches(): Promise<void>;
+
 const app = createApplication({
   plugins: [
     RuntimePlugin(),
@@ -44,16 +49,62 @@ await scheduler.resume('poll-inbox');
 
 ## Options
 
-| Option            | Type                     | Default  | Description                                |
-| ----------------- | ------------------------ | -------- | ------------------------------------------ |
-| `timezone`        | `string`                 | `'UTC'`  | Only `'UTC'` is supported in this release. |
-| `distributedLock` | `DistributedLockOptions` | disabled | Multi-instance safety; see below.          |
+| Option            | Type                                                                 | Default  | Description                                                                                                                                        |
+| ----------------- | -------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timezone`        | `string`                                                             | `'UTC'`  | Only `'UTC'` is supported in this release.                                                                                                         |
+| `distributedLock` | `DistributedLockOptions`                                             | disabled | Multi-instance safety; see below.                                                                                                                  |
+| `jobs`            | `readonly SchedulerJobEntry[]`                                       | —        | Declarative `cron()` / `every()` / `delay()` registrations. `SchedulerJobDefinition` is discriminated by `trigger`; factories resolve at `onInit`. |
+| `behaviors`       | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Chain around every handler. It sees `kind: 'scheduler'`, job name, the delivered job, and its 1-based attempt.                                     |
+
+Declare jobs where the plugin is composed, instead of resolving the scheduler after `start()`:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import type { IIngressBehavior } from '@setu-ts/common';
+
+/** Runs ahead of every job handler; `next()` continues the chain. */
+const auditEveryRun: IIngressBehavior = {
+  handle: (ctx, next) => {
+    console.log(`${ctx.kind} ${ctx.name} attempt ${ctx.attempt ?? 1}`);
+    return next();
+  },
+};
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SchedulerPlugin({
+      behaviors: [auditEveryRun],
+      jobs: [
+        {
+          trigger: 'every',
+          name: 'send-email',
+          intervalMs: 60_000,
+          data: { to: 'ada@example.com' },
+          handler: (job) => {
+            console.log('sending to', job.data);
+          },
+        },
+      ],
+    }),
+  ],
+});
+
+// Declared jobs register during startup, so nothing is scheduled until now.
+await app.start({ port: 3000 });
+```
 
 ## Distributed locking
 
 Without `distributedLock`, a process-local `MemoryLock` is used — fine for a single instance, but
 **every replica will run every job**. Set `{ enabled: true, storage: 'redis' }` to use `RedisLock`
 (over `npm:ioredis`, lazily imported or injected) so only one replica executes each firing.
+
+Behaviours run inside that lock. A replica that does not acquire it runs neither the behaviour chain
+nor the job handler; a behaviour throw follows the job's existing retry policy. With no behaviours,
+the handler receives its original job directly and no chain is allocated.
 
 ## Exports
 
@@ -70,6 +121,8 @@ Without `distributedLock`, a process-local `MemoryLock` is used — fine for a s
 | `ScheduleOptions`           | interface |
 | `SchedulerPluginOptions`    | interface |
 | `SchedulerBackoff`          | type      |
+| `SchedulerJobDefinition`    | type      |
+| `SchedulerJobEntry`         | type      |
 | `SchedulerJobHandler`       | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

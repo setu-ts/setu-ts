@@ -303,7 +303,46 @@ read the Changed section before upgrading.
   permission-denied Deno subprocess, including `.roo` rules, so false language-semantics claims fail
   CI instead of remaining unchecked prose.
 
+- **`@setu-ts/common`: ingress behaviour contract.** Adds `IngressKind`, immutable `IngressContext`,
+  `IIngressBehavior`, structural `BehaviorLike`, and the shared `composeBehaviorChain`; also adds
+  `WebSocketUpgradeGuard` and `WebSocketGuardDecision` for route-scoped upgrade decisions.
+- **`@setu-ts/websocket-plugin`: declarative routes and frame behaviours.** Adds `routes`,
+  `behaviors`, and per-route upgrade guards. When a behaviour chain is configured, frame dispatch is
+  promise-mediated; without behaviours it remains the original direct synchronous invoke.
+- **`@setu-ts/queue-plugin`: declarative processors and ingress behaviours.** Adds `processors` and
+  `behaviors`; behaviour errors preserve existing retry, `onFailed`, and final dead-letter handling.
+- **`@setu-ts/scheduler-plugin`: declarative jobs and ingress behaviours.** Adds `jobs` and
+  `behaviors`; the chain runs inside the distributed lock, so a replica that loses the lock runs
+  neither behaviours nor the handler.
+- **`@setu-ts/messaging-plugin`: declarative subscriptions and ingress behaviours.** Adds
+  `subscriptions` and `behaviors` on every broker arm. The chain wraps subscribe handlers only;
+  `respond()` remains unwrapped because its handler returns a result.
+- When a `behaviors` arm carries a **factory**, the queue, scheduler, and messaging plugins now hold
+  dispatch until `onInit` has resolved the whole chain. Without the gate a handler could run against
+  an INCOMPLETE chain: a broker holding a backlog delivers the moment a consumer attaches, so a
+  message reached the handler having run only the instance behaviours, silently skipping every
+  behaviour that needed a resolved capability — an authorization, tenant, or audit behaviour. Queue
+  and scheduler share the shape through the poll loop and the job timer. The gate covers imperative
+  registrations too, including a subscription a LATER plugin makes through the resolved capability
+  in its own `register()`, which no amount of deferral inside these plugins could reach. It is
+  released once and costs nothing thereafter, and no registration's timing changes. The WebSocket
+  arm needs no gate: a frame cannot arrive before its socket is open, which is after `onInit`.
+- `@setu-ts/kernel`: `onClose` hooks now ALL run even when an earlier one rejects, with the failures
+  surfaced afterwards (a lone failure rethrown as itself, several as an `AggregateError`). A close
+  hook releases one plugin's resources, and aborting the loop at the first failure meant one plugin
+  that could not disconnect kept every later plugin from releasing anything — the M50 `onStopping`
+  defect in a second place, reachable from `stop()` and, since this release, from a failed
+  `start()`. `LifecycleManager.runShutdown` still aborts at the first failing hook and is
+  deliberately unchanged here: it has no call site this milestone adds.
+- `QueuePlugin({ processors })` registers in **declared order** when the array contains a factory.
+  `process()` is last-wins on a job name, and registering every instance before every factory made
+  `[factoryA, instanceB]` on one name resolve to `factoryA` — the reverse of the declared array, so
+  a processor the developer had replaced kept running the jobs.
+
 ### Changed
+
+- **`@setu-ts/cqrs-plugin`: internal composer promotion.** Its private composer is removed in favor
+  of `@setu-ts/common`'s shared composer. CQRS behavior and public surface are unchanged.
 
 - **The version scheme drops the prerelease suffix: `0.1.0-alpha.10` → `0.2.0`.** No code changes
   with it. Two consequences for consumers: a bare `deno add jsr:@setu-ts/kernel` now resolves,
@@ -354,6 +393,12 @@ _implements_ `IDataSource` or declares a custom repository key type does.
   breaking only for a declaration that was never supported at runtime.
 
 ### Fixed
+
+- **Ingress behaviour promise and ordering guarantees.** `next()` now always returns a promise,
+  including when a downstream behaviour throws synchronously, so an outer behaviour can recover with
+  `next().catch(...)`. Queue, scheduler, messaging, and WebSocket plugins also now run mixed
+  instance and factory entries in the exact configured order. A failed factory resolution closes
+  resources registered before startup failed.
 
 - **The Prisma test fixture evaluated `NOT` as its inverse.** `matchesPrismaWhere` dispatched `AND`
   and `OR` but not `NOT`, so `{ NOT: { status: 'archived' } }` fell through to the compound-key

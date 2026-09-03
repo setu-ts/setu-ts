@@ -86,6 +86,8 @@ export type {
   RedisStreamsMessagingOptions,
   RedisStreamsOptions,
   ServiceBusMessagingOptions,
+  SubscriptionDefinition,
+  SubscriptionEntry,
 } from './interfaces/index.ts';
 
 // Port types

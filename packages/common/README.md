@@ -70,6 +70,17 @@ function parsePort(raw: string): Result<number, RangeError> {
 - Every export is public API: documented in the repository's `PUBLIC_API.md`, JSDoc'd, and covered
   by the backward-compatibility policy.
 
+## Ingress behaviours
+
+`IngressKind`, `IngressContext`, `IIngressBehavior`, `BehaviorLike`, and `composeBehaviorChain`
+provide one transport-neutral, void-result behaviour chain for queue jobs, scheduler fires, broker
+deliveries, and WebSocket frames. An `IngressContext` contains only `kind`, `name`, `payload`, and
+the optional `attempt` and `headers` fields. Behaviours run in declared order; returning without
+`next()` short-circuits the native handler.
+
+`WebSocketUpgradeGuard` and `WebSocketGuardDecision` are the separate, route-scoped handshake guard
+types. They run before an accepted upgrade; they are not frame behaviours.
+
 See the repository's
 [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#api-reference-setu-tscommon)
 for the full API contract and
@@ -82,6 +93,7 @@ package fits the plugin architecture.
 | ---------------------------- | --------- |
 | `assertRealPathContained`    | function  |
 | `brandErrorResponder`        | function  |
+| `composeBehaviorChain`       | function  |
 | `contentTypeFor`             | function  |
 | `contextToTraceparent`       | function  |
 | `createCachedProbe`          | function  |
@@ -142,6 +154,7 @@ package fits the plugin architecture.
 | `VALIDATION_METADATA`        | const     |
 | `AddJobOptions`              | interface |
 | `AuditEntry`                 | interface |
+| `BehaviorLike`               | interface |
 | `BulkheadPolicy`             | interface |
 | `CachedProbeOptions`         | interface |
 | `CircuitBreakerPolicy`       | interface |
@@ -201,6 +214,7 @@ package fits the plugin architecture.
 | `IHealthService`             | interface |
 | `IHistogram`                 | interface |
 | `IHttpAdapter`               | interface |
+| `IIngressBehavior`           | interface |
 | `IJob`                       | interface |
 | `IJwtService`                | interface |
 | `ILifecycleApi`              | interface |
@@ -214,6 +228,7 @@ package fits the plugin architecture.
 | `IMiddleware`                | interface |
 | `IMiddlewareApi`             | interface |
 | `IMultiTenancyService`       | interface |
+| `IngressContext`             | interface |
 | `INotifier`                  | interface |
 | `IOpenApiApi`                | interface |
 | `IOrmAdapter`                | interface |
@@ -337,6 +352,7 @@ package fits the plugin architecture.
 | `HealthIndicatorFn`          | type      |
 | `HealthStatus`               | type      |
 | `HttpMethod`                 | type      |
+| `IngressKind`                | type      |
 | `JobProcessor`               | type      |
 | `JsonValue`                  | type      |
 | `LifecyclePhase`             | type      |
@@ -378,8 +394,10 @@ package fits the plugin architecture.
 | `TimerHandle`                | type      |
 | `Unsubscribe`                | type      |
 | `ValidationTarget`           | type      |
+| `WebSocketGuardDecision`     | type      |
 | `WebSocketReadyState`        | type      |
 | `WebSocketUpgradeDecision`   | type      |
+| `WebSocketUpgradeGuard`      | type      |
 | `WebSocketUpgradeRouter`     | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it

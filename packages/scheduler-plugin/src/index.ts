@@ -11,6 +11,8 @@ export type {
   DistributedLockOptions,
   IDistributedLock,
   IRedisLockClient,
+  SchedulerJobDefinition,
+  SchedulerJobEntry,
   SchedulerPluginOptions,
 } from './interfaces/index.ts';
 

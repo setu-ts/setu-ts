@@ -46,10 +46,50 @@ import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 
 ### In an application (the form a scaffolded project uses)
 
-Declare your routes in a plugin — an `IPlugin` with `dependencies: [CAPABILITIES.WEBSOCKET]` whose
-`register()` receives the live service. This is exactly what `setu generate plugin <name>` emits,
-and it is the only form that works inside a CLI-scaffolded project: its generated `setu.config.ts`
-forbids starting the server, so there is no post-`start()` moment to resolve the capability from.
+Declare routes where the plugin is composed, through the `routes` option. A CLI-scaffolded project's
+generated `setu.config.ts` forbids starting the server, so there is no post-`start()` moment to
+resolve the capability from — and this arm needs none. A route whose handlers need a resolved
+capability declares a `RegistryFactory` entry instead, resolved in `onInit`.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
+
+// setu.config.ts
+export default createApplication({
+  plugins: [
+    RuntimePlugin(),
+    WebSocketPlugin({
+      heartbeatMs: 30_000,
+      idleTimeoutMs: 90_000,
+      routes: [{
+        path: '/ws/chat',
+        handlers: {
+          onOpen: (conn, { query }) => {
+            conn.data.set('room', query.room ?? 'lobby');
+          },
+          onMessage: (conn, data) => {
+            const room = conn.data.get('room');
+            if (typeof room === 'string') {
+              // Resolve the service from a factory entry when you need it here.
+              conn.send(data);
+            }
+          },
+        },
+        // Refuse the upgrade before the handshake, for this route only.
+        options: { guards: [({ headers }) => headers.has('authorization') || { status: 401 }] },
+      }],
+    }),
+  ],
+});
+```
+
+#### Through a plugin, when the route needs the live service
+
+An `IPlugin` with `dependencies: [CAPABILITIES.WEBSOCKET]` whose `register()` receives the live
+service also works, and is what `setu generate plugin <name>` emits. Prefer it when a route body
+needs to call `ws.room(...)` and you would rather hold the service than resolve it per entry.
 
 ```typescript
 import type { IPlugin, IPluginContext, IWebSocketService } from '@setu-ts/common';
@@ -74,8 +114,10 @@ export class ChatPlugin implements IPlugin {
         ws.room(room).add(conn);
       },
       onMessage: (conn, data) => {
-        const room = conn.data.get('room') as string;
-        ws.room(room).broadcast(data, { except: conn });
+        const room = conn.data.get('room');
+        if (typeof room === 'string') {
+          ws.room(room).broadcast(data, { except: conn });
+        }
       },
       onClose: () => {
         // Rooms evict the connection automatically — nothing to clean up here.
@@ -125,8 +167,10 @@ ws.route('/ws/chat', {
     ws.room(room).add(conn);
   },
   onMessage: (conn, data) => {
-    const room = conn.data.get('room') as string;
-    ws.room(room).broadcast(data, { except: conn });
+    const room = conn.data.get('room');
+    if (typeof room === 'string') {
+      ws.room(room).broadcast(data, { except: conn });
+    }
   },
   onClose: (conn, { code, reason }) => {
     // Rooms evict the connection automatically — nothing to clean up here.
@@ -140,14 +184,24 @@ ws.route('/ws/chat', {
 
 ## Options
 
-| Option             | Type      | Default  | Description                                                                                    |
-| ------------------ | --------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `maxConnections`   | `number`  | `0`      | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.             |
-| `heartbeatMs`      | `number`  | `0`      | Heartbeat interval; `0` disables it and creates no timer at all.                               |
-| `heartbeatPayload` | `string`  | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                               |
-| `idleTimeoutMs`    | `number`  | `0`      | Inbound silence after which a peer is closed with `1001`; `0` disables.                        |
-| `maxMessageBytes`  | `number`  | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.                    |
-| `scalingNotice`    | `boolean` | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
+| Option             | Type                                                                 | Default  | Description                                                                                                                                            |
+| ------------------ | -------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxConnections`   | `number`                                                             | `0`      | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.                                                                     |
+| `heartbeatMs`      | `number`                                                             | `0`      | Heartbeat interval; `0` disables it and creates no timer at all.                                                                                       |
+| `heartbeatPayload` | `string`                                                             | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                       |
+| `idleTimeoutMs`    | `number`                                                             | `0`      | Inbound silence after which a peer is closed with `1001`; `0` disables.                                                                                |
+| `maxMessageBytes`  | `number`                                                             | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009`.                                                                            |
+| `scalingNotice`    | `boolean`                                                            | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                         |
+| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —        | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`. |
+| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                      |
+
+`WebSocketRouteOptions.guards` is route-scoped: guards run in declared order before the matched
+route's handshake, and the first `{ status }` refusal wins. It is separate from the plugin-level
+frame `behaviors` arm; no route-level behaviour arm exists.
+
+Configuring one or more behaviours makes frame dispatch promise-mediated, so a synchronous
+`onMessage` runs after a microtask. With no behaviours configured, dispatch remains the direct,
+synchronous invoke.
 
 ### Opting a route out of the sweep
 
@@ -347,10 +401,12 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 | `WebSocketHandlers`          | interface |
 | `WebSocketPluginOptions`     | interface |
 | `WebSocketRoom`              | interface |
+| `WebSocketRouteDefinition`   | interface |
 | `WebSocketRouteOptions`      | interface |
 | `WsRoute`                    | interface |
 | `RoomPublisher`              | type      |
 | `WebSocketReadyState`        | type      |
+| `WebSocketRouteEntry`        | type      |
 | `WebSocketUpgradeDecision`   | type      |
 | `WebSocketUpgradeRouter`     | type      |
 | `WsRouteMatch`               | type      |

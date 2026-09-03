@@ -4027,10 +4027,65 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `sealRequestIdentity` at **0.545 µs/req**, whose fix moves accessors to a prototype and so changes
   `Object.keys(request)` against M71's shipped behaviour — a semantics decision, not a perf one) —
   complete (PR #227)
-- **Next milestone** — **M86** (non-HTTP ingress: registration sites and a pipeline for WebSocket
-  routes, queue processors, scheduler jobs and broker subscriptions). The three backends M78
-  deferred (M80 DynamoDB, M81 Cosmos DB, M82 Cloud Bigtable) are all complete. **M88** owns the
-  request-path work M87 deferred.
+- **Milestone 86** (`common`, `cqrs-plugin`, `websocket-plugin`, `queue-plugin`, `scheduler-plugin`,
+  `messaging-plugin` — non-HTTP ingress registration and behaviours: the shared
+  `IngressContext`/`IIngressBehavior` composer; declarative route, processor, job, and subscription
+  arms; WebSocket route guards and frame behaviours; queue, scheduler, and messaging behaviour
+  chains; CQRS composer delegation.
+
+  **Code review then found a defect every gate had passed, and it was the milestone's own guarantee
+  being false in the case the arms exist for.** Declared subscription/processor/job INSTANCES
+  registered in `register()` while behaviour FACTORIES resolved in `onInit` — so a handler went live
+  in front of an INCOMPLETE chain. A broker delivers a backlog the moment a consumer attaches, so a
+  message reached the handler having run only the instance behaviours, silently skipping exactly the
+  behaviours that needed a resolved capability — a tenant guard, an auth check, an audit sink.
+  Probed and reproduced deterministically with a broker that replays on subscribe: the handler ran
+  and the factory behaviour did not. Queue and scheduler share the shape through the poll loop and
+  the job timer. Fixed by deferring instance registration into the same `onInit` hook, after the
+  chain is resolved, and ONLY when a behaviour factory is declared — so the common case keeps its
+  `register()` timing. Reverting the deferral fails the committed regression test.
+
+  **Automated review then found that fix reached only one of two doors, which is the more
+  instructive half.** A LATER plugin resolves the broker in its own `register()` and subscribes
+  there — after this plugin's `register()`, before its `onInit` — which no deferral inside this
+  plugin can reach; probed and reproduced. So the deferral was REVERTED and replaced by gating
+  DELIVERY: the pipelined broker and the queue/scheduler wrappers hold each dispatch on a
+  `chainReady` promise, supplied only when a behaviour factory is declared and cleared once open.
+  One mechanism closes both doors, no registration's timing changes, and a rejected gate
+  deliberately stays shut because a failed `start()` must not deliver through a partial chain. The
+  WebSocket arm needs none: a frame cannot arrive before its socket is open, which is after
+  `onInit`. Review also found that splitting the arms REVERSED declared order —
+  `[factoryA, instanceB]` on one queue job name ran factoryA, against the option's own documented
+  last-wins contract — so a processors array containing a factory now registers wholly in `onInit`
+  in declared order. And `runClose()` aborted at the first rejecting hook, so one plugin that could
+  not disconnect kept every later plugin from releasing anything: the M50 `onStopping` defect in a
+  second place, which this milestone made reachable from a failed `start()` as well as from
+  `stop()`. Every hook now runs and the failures surface afterwards. Two review findings were
+  REFUTED with evidence rather than accepted — the `IXxx` naming rule (`common` exports 114
+  non-prefixed interfaces; the convention marks ports, not data shapes) and underscore-prefixed
+  positional parameters (77 occurrences in `packages/*/src`, and a leading callback parameter cannot
+  be deleted) — and both were withdrawn. Folding the scheduler and messaging READMEs into the
+  fence-compiler gate, which had never covered them, surfaced four pre-existing uncompilable
+  examples including messaging's headline `## Usage` fence resolving a capability with no `start()`
+  — the M70i defect verbatim; all four fixed.
+
+  Also closed: the router runs a route's guards BEFORE the capacity check so a refusal consumes no
+  admission slot, and nothing asserted it — a transposition below `this.#pending++` lets refused
+  traffic starve `maxConnections`, verified to fail. The `websocket-plugin` README's primary usage
+  section still taught the `IPlugin` wrapper as "the only form that works inside a CLI-scaffolded
+  project", which this milestone's own e2e exists to falsify, and carried the
+  `conn.data.get(...) as
+  string` cast the milestone had corrected in the `common` JSDoc.
+  `WebSocketUpgradeGuard` and `WebSocketGuardDecision` were absent from `PUBLIC_API.md`'s WebSocket
+  export row, and two assertions were vacuous. Verified beyond the gates by a driver application
+  composed only from plugin options and bound to a real socket: a raw RFC 6455 handshake reads `401`
+  without the guard's header and `101` with it, a real frame round-trips through the chain, a
+  messaging short-circuit is observed preventing its handler, and all four envelope shapes are read
+  off the wire — `websocket` carrying neither `attempt` nor `headers`, `messaging` carrying
+  `headers: {}` and no `attempt`, `queue`/`scheduler` carrying `attempt: 1`) — complete (PR #228)
+- **Next milestone** — **M88** (the request-path work M87 deferred: the response path, where
+  `ResponseBuilder` → `snapshot()` → `Response` builds four objects, and `sealRequestIdentity`,
+  whose fix changes `Object.keys(request)` against M71's shipped behaviour).
 
 ## Verification (run before declaring any work done)
 

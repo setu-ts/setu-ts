@@ -6,11 +6,28 @@
  *
  * @module
  */
-import type { HealthIndicatorFn, IPlugin, IScheduler } from '@setu-ts/common';
+import type {
+  HealthIndicatorFn,
+  IIngressBehavior,
+  ILogger,
+  IPlugin,
+  IRuntimeServices,
+  IScheduler,
+  RegistryFactory,
+  ScheduleOptions,
+  SchedulerJobHandler,
+} from '@setu-ts/common';
+import { resolveRegistryEntry } from '@setu-ts/common';
 import { SchedulerUnavailableError } from '../errors.ts';
-import type { SchedulerPluginOptions } from '../interfaces/index.ts';
+import type {
+  IDistributedLock,
+  SchedulerJobDefinition,
+  SchedulerJobEntry,
+  SchedulerPluginOptions,
+} from '../interfaces/index.ts';
 import { resolveLock } from '../lock/distributed-lock.ts';
 import type { ILifecyclableLock } from '../lock/distributed-lock.ts';
+import { withIngressBehaviors } from '../jobs/job-executor.ts';
 import { SchedulerService } from '../services/scheduler-service.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -38,6 +55,60 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
     throw new Error('Non-UTC timezones are not supported in this release');
   }
 
+  // The registration arms are split ONCE, here at plugin construction, so
+  // `register` and the `onInit` hook each read a single list (the M70d arm
+  // pattern). Instance entries keep their pre-arm `register()` timing;
+  // factories are resolved in `onInit`, the first phase at which the registry
+  // holds every capability. Each factory carries the index it holds in the
+  // DECLARED array, not its position among the factories: the index is the
+  // only thing the error label has to point a developer at the failing entry,
+  // and filtering first made it name a different — working — entry whenever
+  // the two arms were mixed.
+  const jobs: readonly SchedulerJobEntry[] = options?.jobs ?? [];
+  const behaviors: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[] =
+    options?.behaviors ?? [];
+  const jobInstances = jobs.filter((entry): entry is SchedulerJobDefinition =>
+    typeof entry !== 'function'
+  );
+  const jobFactories = jobs
+    .map((entry, index) => ({ entry, index }))
+    .filter((slot): slot is { entry: RegistryFactory<SchedulerJobDefinition>; index: number } =>
+      typeof slot.entry === 'function'
+    );
+  const behaviorInstances = behaviors.filter((entry): entry is IIngressBehavior =>
+    typeof entry !== 'function'
+  );
+  const behaviorFactories = behaviors
+    .map((entry, index) => ({ entry, index }))
+    .filter((slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
+      typeof slot.entry === 'function'
+    );
+  // The LIVE behaviour list the chain reads on every fire. Instances are
+  // available at registration; when factories exist, `onInit` replaces it
+  // with the complete declared sequence before the app serves.
+  const behaviorChain: IIngressBehavior[] = [...behaviorInstances];
+  const declaredBehaviors = behaviors.length > 0;
+  // Held while behaviour FACTORIES are still unresolved. A fire waits on it so
+  // no job runs through a partial chain; opened at the end of `onInit`, once
+  // `behaviorChain` is final.
+  // `withResolvers` rather than a `new Promise` executor with `() => {}`
+  // placeholders: those placeholders are never called, so they are dead
+  // functions the coverage bar counts.
+  //
+  // `failChainGate` is called when `onInit` fails, so work held on the gate
+  // FAILS into this ingress's own failure path instead of hanging on a promise
+  // that can never settle. Running it through the partial chain remains the
+  // one thing the gate will not do.
+  const {
+    promise: chainReady,
+    resolve: openChainGate,
+    reject: failChainGate,
+  } = Promise.withResolvers<void>();
+  // The gate is awaited per dispatch, so its rejection is always observed
+  // there; this keeps an unobserved rejection from surfacing when nothing is
+  // currently held.
+  chainReady.catch(() => {});
+
   return {
     name: 'scheduler-plugin',
     version: denoJson.version,
@@ -45,10 +116,13 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
     priority: 100,
 
     async register(ctx) {
-      // X9-2: refuse BEFORE resolving or connecting any lock. The plugin's
-      // entire surface is inert on Workers — `every` and `delay` arm timers on
-      // an isolate that is evicted between invocations — so registering it can
-      // only produce a job that never runs and reports nothing.
+      // X9-2: refuse BEFORE resolving or connecting any lock — and before ANY
+      // declared entry is read (M86 §4.1): no `jobs` instance registers, and
+      // the `onInit` hook that would resolve a factory entry is never reached,
+      // because the plugin's entire surface is inert on Workers — `every` and
+      // `delay` arm timers on an isolate that is evicted between invocations —
+      // so registering it can only produce a job that never runs and reports
+      // nothing.
       if (ctx.runtime.platform() === 'cloudflare-workers') {
         throw new SchedulerUnavailableError(ctx.runtime.platform());
       }
@@ -69,17 +143,46 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
         }
       }
 
-      // Create scheduler service
-      const service = new SchedulerService(ctx.runtime, lock, {
+      // Create scheduler service. With no behaviours declared the plain
+      // service is constructed exactly as before the arms existed — no chain
+      // sits in front of any handler (M86 §3.9). With behaviours declared,
+      // the subclass routes EVERY registration — declarative arm entries AND
+      // imperative `cron()`/`every()`/`delay()` calls — through the ingress
+      // behaviour chain.
+      const serviceOptions = {
         logger: ctx.logger,
         ttlMs: options?.distributedLock?.ttlMs,
-      });
+      };
+      const service = declaredBehaviors
+        ? new BehaviorChainSchedulerService(
+          ctx.runtime,
+          lock,
+          serviceOptions,
+          behaviorChain,
+          behaviorFactories.length === 0 ? undefined : chainReady,
+        )
+        : new SchedulerService(ctx.runtime, lock, serviceOptions);
 
       // Connect the service
       await service.connect();
 
       // Register the service
       ctx.services.register<IScheduler>('scheduler', service);
+
+      // Declared job INSTANCES register now, exactly as an imperative
+      // `cron()`/`every()`/`delay()` call made before this arm existed.
+      //
+      // UNLESS a behaviour FACTORY is declared. Scheduling arms a timer, so a
+      // short `delay` or a due `cron` can fire before `onInit` resolved the
+      // factory behaviours — reaching the handler through a PARTIAL chain,
+      // skipping exactly the behaviours that needed a resolved capability.
+      // Deferring the whole set into the same `onInit` hook, after the chain
+      // is final, is what makes the arm's guarantee true. With no factory
+      // declared the chain is already complete here and the timing is
+      // unchanged.
+      for (const definition of jobInstances) {
+        await scheduleDefinition(service, definition);
+      }
 
       // Register health indicator
       const healthIndicator: HealthIndicatorFn = service.createHealthIndicator();
@@ -95,6 +198,188 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
           await lifecycleLock.disconnect();
         }
       });
+
+      // Factory entries resolve at `onInit` — the first phase at which the
+      // registry holds every capability, and still before the application
+      // serves. A throwing factory rejects `start()` naming the option and the
+      // entry's DECLARED index. The hook is registered only when a factory is
+      // configured: with instances alone there is nothing to resolve, so a
+      // zero-factory configuration gains no lifecycle hook at all.
+      if (jobFactories.length > 0 || behaviorFactories.length > 0) {
+        ctx.lifecycle.onInit(async () => {
+          try {
+            // The chain is completed FIRST, before any factory job is scheduled
+            // below.
+            behaviorChain.splice(
+              0,
+              behaviorChain.length,
+              ...behaviors.map((entry, index) =>
+                typeof entry === 'function'
+                  ? resolveRegistryEntry(
+                    entry,
+                    ctx.services,
+                    `SchedulerPlugin({ behaviors })[${index}]`,
+                  )
+                  : entry
+              ),
+            );
+
+            for (const slot of jobFactories) {
+              const definition = resolveRegistryEntry(
+                slot.entry,
+                ctx.services,
+                `SchedulerPlugin({ jobs })[${slot.index}]`,
+              );
+              await scheduleDefinition(service, definition);
+            }
+
+            // LAST: the chain is final, so any fire held during startup may run.
+            // A hook that threw above never reaches this, leaving the gate shut
+            // — correct, since `start()` has failed.
+            openChainGate();
+          } catch (error) {
+            // Fail the gate so held work rejects into this ingress's own
+            // failure path rather than waiting on a promise that can never
+            // settle, then surface the startup failure to the caller.
+            failChainGate(error);
+            throw error;
+          }
+        });
+      }
     },
   };
+}
+
+/**
+ * Internal {@linkcode SchedulerService} variant used when the plugin is
+ * configured with ingress behaviours: it routes EVERY handler registration —
+ * declarative arm entries and imperative `cron()`/`every()`/`delay()` calls
+ * alike — through the scheduler behaviour chain, so a mixed application
+ * cannot leave a handler unchained. The wrapper reads the live behaviour list
+ * at FIRE time, so the full factory-resolved sequence installed in `onInit`
+ * also wraps registrations made earlier in `register()`. Not barrel-exported.
+ *
+ * The chain the wrapper composes runs INSIDE the distributed lock: the
+ * registry stores the wrapped handler, and the executor reaches it only after
+ * the lock is held — so a replica that loses the lock runs neither the
+ * handler nor any behaviour (M86 §3.10).
+ *
+ * With no behaviours declared the plugin constructs the plain
+ * {@linkcode SchedulerService}, keeping the zero-configuration dispatch
+ * byte-identical.
+ */
+class BehaviorChainSchedulerService extends SchedulerService {
+  readonly #behaviors: readonly IIngressBehavior[];
+  readonly #chainReady: Promise<void> | undefined;
+
+  constructor(
+    runtime: IRuntimeServices,
+    lock: IDistributedLock,
+    options: { logger?: ILogger | undefined; ttlMs?: number | undefined },
+    behaviors: readonly IIngressBehavior[],
+    chainReady?: Promise<void>,
+  ) {
+    super(runtime, lock, options);
+    this.#behaviors = behaviors;
+    this.#chainReady = chainReady;
+  }
+
+  /**
+   * Registers the cron job with its handler wrapped in the behaviour chain.
+   *
+   * @typeParam T - The job payload type
+   * @param name - Unique job name
+   * @param expression - 5-field cron expression (UTC)
+   * @param handler - The handler being registered
+   * @param options - Payload and retry config, passed through
+   */
+  override async cron<T = unknown>(
+    name: string,
+    expression: string,
+    handler: SchedulerJobHandler<T>,
+    options?: ScheduleOptions<T>,
+  ): Promise<void> {
+    await super.cron(
+      name,
+      expression,
+      withIngressBehaviors(handler, this.#behaviors, this.#chainReady),
+      options,
+    );
+  }
+
+  /**
+   * Registers the interval job with its handler wrapped in the behaviour chain.
+   *
+   * @typeParam T - The job payload type
+   * @param name - Unique job name
+   * @param intervalMs - Interval in milliseconds
+   * @param handler - The handler being registered
+   * @param options - Payload and retry config, passed through
+   */
+  override async every<T = unknown>(
+    name: string,
+    intervalMs: number,
+    handler: SchedulerJobHandler<T>,
+    options?: ScheduleOptions<T>,
+  ): Promise<void> {
+    await super.every(
+      name,
+      intervalMs,
+      withIngressBehaviors(handler, this.#behaviors, this.#chainReady),
+      options,
+    );
+  }
+
+  /**
+   * Registers the one-shot job with its handler wrapped in the behaviour chain.
+   *
+   * @typeParam T - The job payload type
+   * @param name - Unique job name
+   * @param delayMs - Delay in milliseconds
+   * @param handler - The handler being registered
+   * @param options - Payload and retry config, passed through
+   */
+  override async delay<T = unknown>(
+    name: string,
+    delayMs: number,
+    handler: SchedulerJobHandler<T>,
+    options?: ScheduleOptions<T>,
+  ): Promise<void> {
+    await super.delay(
+      name,
+      delayMs,
+      withIngressBehaviors(handler, this.#behaviors, this.#chainReady),
+      options,
+    );
+  }
+}
+
+/**
+ * Registers one declarative job definition, dispatching on its `trigger` —
+ * the declarative form of exactly one imperative `cron()`/`every()`/`delay()`
+ * call.
+ *
+ * @param service - The connected scheduler service
+ * @param definition - The definition to register
+ * @returns Resolves when the registration call completes
+ */
+async function scheduleDefinition(
+  service: IScheduler,
+  definition: SchedulerJobDefinition,
+): Promise<void> {
+  const options: ScheduleOptions = {
+    ...(definition.data !== undefined ? { data: definition.data } : {}),
+    ...(definition.retry !== undefined ? { retry: definition.retry } : {}),
+  };
+  switch (definition.trigger) {
+    case 'cron':
+      await service.cron(definition.name, definition.expression, definition.handler, options);
+      return;
+    case 'every':
+      await service.every(definition.name, definition.intervalMs, definition.handler, options);
+      return;
+    case 'delay':
+      await service.delay(definition.name, definition.delayMs, definition.handler, options);
+      return;
+  }
 }
