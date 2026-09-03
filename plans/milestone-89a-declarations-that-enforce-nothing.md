@@ -61,14 +61,24 @@ discarding arguments it cannot honour.
 
 ### 3.1 Where the authorization middleware is appended
 
-- **Decision:** a new
-  `appendAuthorizationMiddleware(ctx, controller, ctrlMeta, route, middleware, authorization)`,
+- **Decision:** a new `appendAuthorizationMiddleware(ctx, controller, ctrlMeta, route, middleware)`,
   called in `registerController` **after** `composeMiddleware` and **before**
-  `appendValidationMiddleware`.
-- **Why:** it reproduces the band the validation append already documents — "LAST … so guard
-  `401`/`403` decisions still precede any `400`" (`decorator-plugin.ts:462-467`). Authorization must
-  run after a route's own guards (so an authentication `401` still wins) and before validation (so a
-  `403` is not preceded by a `400` describing a body the caller was never entitled to submit).
+  `appendValidationMiddleware`. The middleware it appends resolves `CAPABILITIES.AUTHORIZATION` from
+  `ctx.services` **per request** — the capability is never captured at registration.
+- **Why per request:** `requireRole` resolves the capability inside the guard, per request
+  (`auth-plugin/src/guards/index.ts:71`), so capturing it at registration would make the decorated
+  path diverge from the guard path — the one thing M89a exists to prevent. It also removes a
+  contradiction the first draft carried: §3.5 argues against refusing `start()` partly because a
+  provider may be registered later by an imperative call, and a captured capability could never see
+  one, so such a route would answer `501` forever. Per-request resolution makes the refusal dynamic
+  — it applies exactly while no provider exists. This is the M52b lesson in its general form: read a
+  capability at call time, not at wiring time. The registration-time resolution survives **only** to
+  decide whether to emit the startup warning.
+- **Why this position in the chain:** it reproduces the band the validation append already documents
+  — "LAST … so guard `401`/`403` decisions still precede any `400`" (`decorator-plugin.ts:462-467`).
+  Authorization must run after a route's own guards (so an authentication `401` still wins) and
+  before validation (so a `403` is not preceded by a `400` describing a body the caller was never
+  entitled to submit).
 - **Test home:** `test/unit/authorization-enforcement.test.ts` asserts the exact middleware order;
   `test/integration/roles-enforced.test.ts` asserts `401` → `403` → `400` precedence through a real
   kernel app.

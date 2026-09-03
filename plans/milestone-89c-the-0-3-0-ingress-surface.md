@@ -22,23 +22,24 @@ and the contract cannot express — a tenant concern in an ingress behaviour —
 
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference                       | Source (file:line)                                        | Verified surface / fact                                                                                                                                                |
-| ------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| in-memory `publish` contract    | `messaging-plugin/src/brokers/in-memory-broker.ts:131`    | `@returns Resolves when all handlers have been invoked` — the promise this milestone changes, and the only broker whose promise depends on delivery.                   |
-| the gate                        | `messaging-plugin/src/pipeline/pipelined-broker.ts:67-84` | `#chainReady?: Promise<void>`, `undefined` when no behaviour factory is configured; cleared on settle; **a REJECTED gate is deliberately left in place**.              |
-| the gate's own rationale        | `messaging-plugin/src/pipeline/pipelined-broker.ts:58-62` | It exists because a LATER plugin may subscribe in its own `register()`, "which no amount of deferral inside this plugin can reach". Gating delivery closes both doors. |
-| where the gate is armed         | `messaging-plugin/src/plugin/messaging-plugin.ts:329`     | `new PipelinedBroker(broker, behaviorChain, chainReady)` **only** on the factory arm — which is why the measurement's factory/no-factory control discriminates.        |
-| where the gate opens            | `messaging-plugin/src/plugin/messaging-plugin.ts:152`     | `openChainGate` "is called at the end of `onInit`, once `behaviorChain` is final".                                                                                     |
-| the anticipated adjacent hazard | `messaging-plugin/src/plugin/messaging-plugin.ts:157`     | `failChainGate` exists so held work fails "instead of hanging on a promise that can never settle" **when `onInit` fails** — it does not cover `onInit` never running.  |
-| `IngressContext`                | `common/src/services/ingress.ts:43-62`                    | `kind`, `name`, `payload`, `attempt?`. Explicitly **no `state`, no `services`**: "a behaviour needing a capability closes over it via its `RegistryFactory` arm".      |
-| `IIngressBehavior`              | `common/src/services/ingress.ts:112-123`                  | One method: `handle(ctx, next): void                                                                                                                                   |
-| `IMultiTenancyService`          | `common/src/services/tenancy.ts:50-75`                    | `getCurrentTenant(ctx: IRequestContext)`, `getRepository<E,I>(ctx: IRequestContext, entity)`, `prefixCacheKey(tenantId, key)`. **Only the last is ctx-free.**          |
-| the tenant resolvers            | `multi-tenancy-plugin/src/resolvers/*.ts`                 | All four take `IRequest` (`jwt-resolver.ts:40` is representative). Nothing on a non-HTTP path can produce one.                                                         |
-| `IAuditLogger.log`              | `common/src/services/audit.ts:55`                         | `log(entry: AuditEntry): Promise<void>` — takes no context, which is why the audit concern IS expressible and the tenant one is not.                                   |
-| `prefixCacheKey`'s own JSDoc    | `common/src/services/tenancy.ts:66-73`                    | "The separator is deliberately NOT a per-call argument: this method is the single home for separator resolution" — the precedent for a ctx-free, id-taking member.     |
-| the measurement                 | `smoke/X16-FINDINGS.md` (X16-1, measured 2026-09-03)      | memory+awaited hangs; memory+unawaited boots AND delivers complete; memory+`queue.add` boots; rabbitmq and redis-streams both boot AND deliver through the full chain. |
-| §10.2 / §16.1 / §16.2 approval  | `AI_GUIDELINES.md` §10.2, §16.1, §16.2                    | A `common` export change requires approval and a same-PR `PUBLIC_API.md` edit; a plugin-contract change requires approval.                                             |
-| §9 prerelease rule              | `AI_GUIDELINES.md` §9 scope note                          | At `0.x`, a required-member addition to a published interface is a breaking change needing CHANGELOG migration text, not a deprecation cycle.                          |
+| Reference                       | Source (file:line)                                          | Verified surface / fact                                                                                                                                                                                                                                                |
+| ------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| in-memory `publish` contract    | `messaging-plugin/src/brokers/in-memory-broker.ts:131`      | `@returns Resolves when all handlers have been invoked` — the promise this milestone changes, and the only broker whose promise depends on delivery.                                                                                                                   |
+| the gate                        | `messaging-plugin/src/pipeline/pipelined-broker.ts:67-84`   | `#chainReady?: Promise<void>`, `undefined` when no behaviour factory is configured; cleared on settle; **a REJECTED gate is deliberately left in place**.                                                                                                              |
+| **the handler-failure channel** | `messaging-plugin/src/pipeline/pipelined-broker.ts:167-171` | "The deferred result is **RETURNED**, not discarded: a handler rejection must still reach the broker's own failure path (a nack/redelivery), never become an unhandled rejection." The destination already exists; §3.1b keeps observing it rather than inventing one. |
+| the gate's own rationale        | `messaging-plugin/src/pipeline/pipelined-broker.ts:58-62`   | It exists because a LATER plugin may subscribe in its own `register()`, "which no amount of deferral inside this plugin can reach". Gating delivery closes both doors.                                                                                                 |
+| where the gate is armed         | `messaging-plugin/src/plugin/messaging-plugin.ts:329`       | `new PipelinedBroker(broker, behaviorChain, chainReady)` **only** on the factory arm — which is why the measurement's factory/no-factory control discriminates.                                                                                                        |
+| where the gate opens            | `messaging-plugin/src/plugin/messaging-plugin.ts:152`       | `openChainGate` "is called at the end of `onInit`, once `behaviorChain` is final".                                                                                                                                                                                     |
+| the anticipated adjacent hazard | `messaging-plugin/src/plugin/messaging-plugin.ts:157`       | `failChainGate` exists so held work fails "instead of hanging on a promise that can never settle" **when `onInit` fails** — it does not cover `onInit` never running.                                                                                                  |
+| `IngressContext`                | `common/src/services/ingress.ts:43-62`                      | `kind`, `name`, `payload`, `attempt?`. Explicitly **no `state`, no `services`**: "a behaviour needing a capability closes over it via its `RegistryFactory` arm".                                                                                                      |
+| `IIngressBehavior`              | `common/src/services/ingress.ts:112-123`                    | One method: `handle(ctx, next): void                                                                                                                                                                                                                                   |
+| `IMultiTenancyService`          | `common/src/services/tenancy.ts:50-75`                      | `getCurrentTenant(ctx: IRequestContext)`, `getRepository<E,I>(ctx: IRequestContext, entity)`, `prefixCacheKey(tenantId, key)`. **Only the last is ctx-free.**                                                                                                          |
+| the tenant resolvers            | `multi-tenancy-plugin/src/resolvers/*.ts`                   | All four take `IRequest` (`jwt-resolver.ts:40` is representative). Nothing on a non-HTTP path can produce one.                                                                                                                                                         |
+| `IAuditLogger.log`              | `common/src/services/audit.ts:55`                           | `log(entry: AuditEntry): Promise<void>` — takes no context, which is why the audit concern IS expressible and the tenant one is not.                                                                                                                                   |
+| `prefixCacheKey`'s own JSDoc    | `common/src/services/tenancy.ts:66-73`                      | "The separator is deliberately NOT a per-call argument: this method is the single home for separator resolution" — the precedent for a ctx-free, id-taking member.                                                                                                     |
+| the measurement                 | `smoke/X16-FINDINGS.md` (X16-1, measured 2026-09-03)        | memory+awaited hangs; memory+unawaited boots AND delivers complete; memory+`queue.add` boots; rabbitmq and redis-streams both boot AND deliver through the full chain.                                                                                                 |
+| §10.2 / §16.1 / §16.2 approval  | `AI_GUIDELINES.md` §10.2, §16.1, §16.2                      | A `common` export change requires approval and a same-PR `PUBLIC_API.md` edit; a plugin-contract change requires approval.                                                                                                                                             |
+| §9 prerelease rule              | `AI_GUIDELINES.md` §9 scope note                            | At `0.x`, a required-member addition to a published interface is a breaking change needing CHANGELOG migration text, not a deprecation cycle.                                                                                                                          |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -71,27 +72,40 @@ and the contract cannot express — a tenant concern in an ingress behaviour —
 
 ### 3.1b Where a handler failure goes once `publish` no longer carries it
 
-- **Decision:** `InMemoryBroker` takes an injected
-  `onDispatchError?: (error: unknown, meta: MessageMetadata) => void` reporter. `MessagingPlugin`
-  supplies one that logs through `ctx.logger` **read at call time**, and every dispatched handler is
-  wrapped so a rejection reaches the reporter and settles. Nothing is left floating.
-- **Why:** today `publishWithHeaders` does `await sub.handler(deserialized, metadata)` in a bare
-  loop (`in-memory-broker.ts:176-178, 199`), so a handler rejection propagates to the publisher and
-  the publisher owns it. §3.1 takes that ownership away, and without a sink the same rejection
-  becomes an **unhandled rejection** — which on Deno and Node is a process-level event, so the fix
-  would trade a startup deadlock for a crash. Both reviewers found this independently, which is the
-  strongest signal it is not hypothetical. The reporter is injected rather than resolved because
-  `InMemoryBroker` is a broker, not a plugin, and holds no `IPluginContext`; reading `ctx.logger` at
-  **call** time rather than capturing it at `register()` is the M52b lesson, where a captured logger
-  silenced every later report.
+- **Decision:** `publish` resolves once each subscriber's callback has been **invoked**, and
+  `InMemoryBroker` **retains every returned promise** and routes a rejection to its own failure path
+  — it does not drop them. For this broker that path terminates in a report through an injected
+  `onDispatchError?(error, meta)`, which `MessagingPlugin` supplies backed by `ctx.logger` read at
+  **call** time.
+- **This is not a new mechanism, and the first draft of this plan wrongly described it as one.**
+  `pipeline/pipelined-broker.ts:167-171` already names the destination: "The deferred result is
+  **RETURNED**, not discarded: a handler rejection must still reach the broker's own failure path (a
+  nack/redelivery), never become an unhandled rejection." The subscription callback the broker calls
+  **is** `PipelinedBroker`'s wrapper, and the promise it returns is what carries the rejection
+  upward. So the requirement is not "invent a sink" but "keep observing the promise you already
+  receive after you stop awaiting it in line". Describing it as a new sink is what made the first
+  draft look like it duplicated an existing channel (§11.1) and diverged in-memory from every real
+  broker.
+- **The asymmetry between brokers is real and is documented rather than hidden.** On RabbitMQ a
+  rejection reaching the broker's failure path can nack and redeliver. `InMemoryBroker` has no
+  redelivery and no ack model at all, so its failure path is terminal and reporting is the whole of
+  it. That is a property of the double, not a behaviour this milestone chooses, and it belongs in
+  the broker's own JSDoc beside the changed `@returns`.
+- **Why not Qodo's alternative — "retain a completion promise":** that is the current behaviour, and
+  it is what closes the deadlock cycle (`register()` → publish → delivery → gate → `onInit` →
+  `register()`). Retaining it keeps X16-1 open, so it is rejected rather than deferred.
+- **Reading `ctx.logger` at call time** rather than capturing it at `register()` is the M52b lesson,
+  where a captured logger silenced every later report. The reporter is injected rather than resolved
+  because `InMemoryBroker` is a broker, not a plugin, and holds no `IPluginContext`.
 - **Also settled by this:** the first `await`ing subscriber no longer blocks the rest. Today one
   slow or throwing fan-out handler delays or aborts delivery to its siblings, because the loop
-  awaits in sequence; wrapping each dispatch removes that coupling, which is the behaviour a real
-  broker has.
-- **Test home:** `test/unit/in-memory-dispatch-timing.test.ts` — a throwing handler reaches the
-  reporter, `publish` still resolves, siblings still receive the message, and the test asserts **no
-  unhandled rejection** was raised (`addEventListener('unhandledrejection')`, which is the only
-  assertion that catches the failure mode this decision exists for).
+  awaits in sequence — which is not how any real broker behaves.
+- **Test home:** `test/unit/in-memory-dispatch-timing.test.ts` — a throwing handler reaches
+  `onDispatchError`, `publish` still resolves, siblings still receive the message, and the test
+  asserts **no unhandled rejection** was raised (`addEventListener('unhandledrejection')`, the only
+  assertion that catches this failure mode). A second case asserts the promise the subscription
+  callback returns is the one whose rejection is observed, so a future refactor that drops it fails
+  here rather than in production.
 
 ### 3.2 The bounded wait, and what it reports
 
