@@ -14,8 +14,8 @@ and the contract cannot express — a tenant concern in an ingress behaviour —
 
 - **In scope:** X16-1 (the in-memory broker resolves `publish` on invocation while retaining each
   handler's promise; the gate gains a bounded wait with a named failure), X16-2
-  (`getRepositoryFor(tenantId, entity)` and `tenantById(tenantId)` on `IMultiTenancyService`), and
-  the release-note correction C1 below.
+  (`getRepositoryFor(tenantId, entity)` on `IMultiTenancyService`), and the release-note correction
+  C1 below.
 - **NOT this milestone:** X18-*/X19-1 — **M89a** and **M89b**. Changing `IMessageBroker.publish`'s
   contract for any broker other than in-memory, or detecting the registration window — §3.1 records
   why both are rejected. A tenant slot on `IngressContext` — §3.5. Behaviour ordering _across_
@@ -183,12 +183,11 @@ and the contract cannot express — a tenant concern in an ingress behaviour —
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                              | Kind   | Consumer / real code path that READS it                                                                                             |
-| -------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `IMultiTenancyService.tenantById`            | method | An ingress behaviour or any non-HTTP caller; exercised by `messaging-plugin/test/integration/tenant-behaviour.test.ts`.             |
-| `IMultiTenancyService.getRepositoryFor`      | method | Same; the member the tenant-scoped write in that test goes through.                                                                 |
-| `ChainGateTimeoutError`                      | class  | Thrown by `PipelinedBroker`'s bounded wait; caught by `chain-gate-timeout.test.ts` and by an application's own dispatch error path. |
-| `MessagingPluginOptions.chainReadyTimeoutMs` | option | Read by `messaging-plugin.ts` when constructing `PipelinedBroker`; see §4.1.                                                        |
+| Exported symbol                              | Kind   | Consumer / real code path that READS it                                                                                                                       |
+| -------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IMultiTenancyService.getRepositoryFor`      | method | An ingress behaviour or any non-HTTP caller; the member the tenant-scoped write in `messaging-plugin/test/integration/tenant-behaviour.test.ts` goes through. |
+| `ChainGateTimeoutError`                      | class  | Thrown by `PipelinedBroker`'s bounded wait; caught by `chain-gate-timeout.test.ts` and by an application's own dispatch error path.                           |
+| `MessagingPluginOptions.chainReadyTimeoutMs` | option | Read by `messaging-plugin.ts` when constructing `PipelinedBroker`; see §4.1.                                                                                  |
 
 `InMemoryBroker`'s promise change adds **no** symbol. `barrel-exports.test.ts` in `common`,
 `messaging-plugin` and `multi-tenancy-plugin` pins that nothing else moved (the M56 defect class).
