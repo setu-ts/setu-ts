@@ -253,8 +253,16 @@ export async function sweepTrackedFiles(
     let source: string;
     try {
       source = await Deno.readTextFile(path);
-    } catch {
-      continue; // listed by git but absent from the working tree
+    } catch (error) {
+      // A path git lists but the working tree does not have is ordinary — a
+      // deleted-but-staged file, or a `paths` argument naming one. Anything
+      // else is not: an unreadable file is a file this gate did not inspect,
+      // and since a healthy tree keeps the reference count in the thousands,
+      // the vacuity guard would stay green while a stale reference sat in the
+      // file that failed to open. This gate's whole failure mode is a silent
+      // pass, so a read it cannot perform must be loud.
+      if (error instanceof Deno.errors.NotFound) continue;
+      throw error;
     }
     filesScanned += 1;
     const result = findStaleReferences(path, source, current);

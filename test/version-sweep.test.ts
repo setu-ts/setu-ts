@@ -177,8 +177,12 @@ describe('version sweep — isSweptPath', () => {
 });
 
 describe('version sweep — sweepTrackedFiles', () => {
+  // The version comes from the workspace, never a literal: this case reads a
+  // REAL source file, whose specifiers the next release bump rewrites, so a
+  // hard-coded expectation would fail at exactly the moment the gate is most
+  // needed and for a reason that has nothing to do with the gate.
   it('reads the real tree and reports both vacuity guards', async () => {
-    const result = await sweepTrackedFiles('0.3.0', [
+    const result = await sweepTrackedFiles(await workspaceVersion(), [
       'packages/sdk/src/retry/retry-strategy.ts',
       'packages/sdk/deno.json', // filtered out by isSweptPath
     ]);
@@ -192,6 +196,22 @@ describe('version sweep — sweepTrackedFiles', () => {
     expect(result.filesScanned).toBe(0);
     expect(result.referencesSeen).toBe(0);
     expect(result.findings).toEqual([]);
+  });
+
+  // Absence is skippable; unreadability is not. A file this gate could not open
+  // is a file it did not inspect, and the vacuity guard cannot reveal that —
+  // the rest of the tree keeps the count in the thousands either way. A
+  // directory standing where a swept source should be is the cheapest way to
+  // produce a non-NotFound read failure without touching permissions.
+  it('rethrows a read failure that is not a missing path', async () => {
+    const base = await Deno.makeTempDir();
+    const dir = `${base}/src/a.ts`;
+    await Deno.mkdir(dir, { recursive: true });
+    try {
+      await expect(sweepTrackedFiles('0.3.0', [dir])).rejects.toThrow();
+    } finally {
+      await Deno.remove(base, { recursive: true });
+    }
   });
 
   it('reports a stale reference found in a real file', async () => {
