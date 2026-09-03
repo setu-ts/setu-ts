@@ -81,10 +81,21 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 ### 1. Prepare, on a `release/…` branch
 
 - Bump `version` in every workspace member's `deno.json`.
-- **Bump the cross-package specifiers to match.** 16 packages pin
-  `jsr:@setu-ts/{common,kernel,runtime}@^<version>` explicitly. Under semver a `^0.1.0` range does
-  **not** match a `0.1.0-alpha.1` prerelease, so a version bump that misses these publishes packages
-  whose dependencies cannot resolve — and `deno publish` does not warn.
+- **Bump the cross-package specifiers to match, and do not trust the count in this sentence.** Under
+  semver a `^0.1.0` range does **not** match a `0.1.0-alpha.1` prerelease, so a version bump that
+  misses one publishes a package whose dependencies cannot resolve — and `deno publish` does not
+  warn. Two distinct groups exist and it is easy to bump only the first: 16 manifests pin
+  `jsr:@setu-ts/{common,kernel,runtime}@^<version>`, and the **three starters plus `static-plugin`
+  pin the whole plugin set** — 68 more specifiers naming 38 distinct packages, which cutting
+  `v0.3.0` found only because `grep` was re-run after the three-package bump reported success. Match
+  on the package name, not on an enumeration:
+
+  ```fish
+  grep -rn 'jsr:@setu-ts/[a-z0-9-]*@^\?<old-version>' packages/*/deno.json packages/*/*/deno.json
+  ```
+
+  It must come back empty before you go further. `release:verify` checks resolvability afterwards,
+  which is the backstop — but it reports a broken tree rather than preventing one.
 - **Grep the source, not only the manifests.** `packages/sdk` writes its `jsr:` specifier inline in
   four `src/**` files rather than through an import-map alias, and its manifest maps that exact
   specifier string to a pinned version — so the range in the source and both sides of the mapping
@@ -93,14 +104,19 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 - **A release starting a new version LINE must widen `SHIPPED_VERSION_LINES`** in
   `scripts/check-docs.ts`. Both document version gates match against that alternation, so a new line
   it does not name makes them match nothing — every stale claim goes invisible while `check:docs`
-  reports a clean pass. The failure mode is a silent green run, not a red one.
+  reports a clean pass. The failure mode is a silent green run, not a red one. The lines are
+  enumerated one minor at a time on purpose: a general `\d+\.\d+\.\d+` also claims third-party
+  versions in the corpus (Drizzle's `0.45.2`, the Prometheus text format's `0.0.4`). **Add the
+  matching cases to `test/docs-gate.test.ts` in the same change** — both checkers read that regex
+  separately, so each needs its own, and a widening nothing asserts can be narrowed back later
+  without a single test going red.
 - Add the release's `CHANGELOG.md` entry.
 
 ### 2. Verify
 
 ```fish
 deno task fmt:check; and deno task lint; and deno task check; and deno task test:coverage
-deno task release:verify 0.2.0
+deno task release:verify 0.3.0
 deno task release:publish --dry-run
 ```
 
@@ -129,7 +145,7 @@ Open a PR, let CI pass, merge to `main`. Then from `main`:
 
 ```fish
 git pull
-deno task release:verify 0.2.0
+deno task release:verify 0.3.0
 env JSR_TOKEN=jsrp_… deno task release:publish
 ```
 
@@ -143,8 +159,8 @@ not want a tag claiming otherwise. Once it succeeds:
 > those are M70i's decision (register rows X7-2 / X7-4).
 
 ```fish
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 ### Publishing from CI instead
@@ -323,7 +339,7 @@ entry for why. They are kept because they bite on any future `-alpha`/`-beta`/`-
 because every tag from `v0.1.0-alpha.1` to `v0.1.0-alpha.10` shipped under them. Neither is a
 defect.
 
-The first no longer applies to a `0.x` release: JSR points `latest` at `0.2.0`, so a bare
+The first no longer applies to a `0.x` release: JSR points `latest` at the current one, so a bare
 `deno add jsr:@setu-ts/kernel` resolves. The second still applies to **every** release, prerelease
 or not — Deno's dependency-age policy is about publication time, not version shape.
 

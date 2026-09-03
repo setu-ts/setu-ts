@@ -1298,6 +1298,38 @@ describe('documentation gate — install-snippet versions', () => {
     ).toEqual([]);
   });
 
+  // Opening the 0.3 line. Each minor is named explicitly in the alternation, so
+  // a new one is unproven until asserted here — and the failure mode is a
+  // SILENT PASS, not a red run: an unnamed line matches nothing and every stale
+  // reference in the tree goes invisible. The 0.2 case beside this one must keep
+  // passing too, since reading the OUTGOING line is what reports the references
+  // a version bump still has to move.
+  it('reads the post-alpha 0.3.x line, and still reads 0.2.x as stale beside it', () => {
+    // MUST be a stale-WITHIN-0.3 case. Asserting that `^0.3.0` is clean at
+    // 0.3.0 proves nothing: a pattern that matches 0.3 nowhere reports nothing
+    // and passes too. Only a 0.3.x reference the gate has to REPORT can tell
+    // the widened alternation from the narrow one.
+    const withinLine = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.3.0\n'),
+      '0.3.1',
+    );
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.3.0');
+    expect(withinLine[0]?.message).toContain('0.3.1');
+
+    expect(
+      checkInstallVersions(doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.3.0\n'), '0.3.0'),
+    ).toEqual([]);
+
+    const outgoing = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.2.0\n'),
+      '0.3.0',
+    );
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.2.0');
+    expect(outgoing[0]?.message).toContain('0.3.0');
+  });
+
   // SemVer permits a hyphen inside a prerelease identifier and a `+` build
   // suffix, and JSR accepts both — so a narrower class truncates a legal
   // version and reports a correct reference as stale, the same defect one
@@ -1424,6 +1456,45 @@ describe('documentation gate — bare version claims', () => {
     expect(legacy[0]?.message).toContain('0.1.0-alpha.10');
 
     expect(checkVersionClaims(doc('README.md', 'ships `v0.2.0`\n'), '0.2.0')).toEqual([]);
+  });
+
+  // The bare-claim checker reads its own regex, so the 0.3 line has to be proven
+  // here as well as in the specifier checker above — both matched nothing before
+  // the alternation was widened for 0.2, and neither told anyone.
+  it('reads the post-alpha 0.3.x line in a bare claim', () => {
+    // Stale WITHIN the 0.3 line, for the reason given in the specifier test: an
+    // equality-only assertion is satisfied by a gate that reads nothing.
+    const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.3.0`\n'), '0.3.1');
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.3.0');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.3.0`\n'), '0.3.0')).toEqual([]);
+
+    const outgoing = checkVersionClaims(doc('README.md', 'ships `v0.2.0`\n'), '0.3.0');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.2.0');
+
+    // The widening must not have bought the 0.3 line by loosening into
+    // third-party territory: these are the corpus strings a general
+    // `\d+.\d+.\d+` claims, re-checked at the new shipping version.
+    const noise = 'drizzle-orm@0.45.2, version=0.0.4, bound to 127.0.0.1\n';
+    expect(checkVersionClaims(doc('docs/guide.md', noise), '0.3.0')).toEqual([]);
+
+    // And specifically for the digits the new arm added: every one of these
+    // CONTAINS `0.3.N`, so they are the strings the widening could plausibly
+    // have started claiming. The boundary lookarounds are what rejects them —
+    // the noise case above uses 0.2-era digits and so cannot cover this.
+    //
+    // This lives HERE and not on `checkInstallVersions` deliberately. That
+    // checker pins the version's position with a literal `@setu-ts/<pkg>@^`
+    // prefix, so digits cannot precede it, and its `\d+` is greedy, so digits
+    // cannot trail it either. Every false-positive case constructible there
+    // passes with the boundaries deleted — measured, all three attempts — so
+    // adding one would assert nothing while looking like coverage. Dropping
+    // NOT_AFTER fails the case below, which is what makes it real.
+    const threeNoise = 'bound to 127.0.3.1 and 10.0.3.2, requires foo 10.3.1, mask 192.0.3.9\n';
+    expect(checkVersionClaims(doc('docs/guide.md', threeNoise), '0.3.0')).toEqual([]);
+    expect(checkVersionClaims(doc('docs/guide.md', threeNoise), '0.3.1')).toEqual([]);
   });
 
   // Measured against the real corpus, not guessed. A general `\d+.\d+.\d+`

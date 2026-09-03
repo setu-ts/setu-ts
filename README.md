@@ -19,7 +19,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: all 47 packages are published in `v0.2.0` and are live on JSR.**
+> **Status: all 47 packages are published in `v0.3.0` and are live on JSR.**
 >
 > <!-- version:history -->
 >
@@ -32,9 +32,11 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 > The kernel, the runtime layer, 37 plugins, the three starters, the test utilities, the client SDK,
 > and the `setu` CLI are implemented, tested, and documented.
 >
-> **`v0.2.0` is the first release outside the `alpha` line, and it is a normal release rather than a
-> prerelease.** JSR now points `latest` at it, so a bare `deno add jsr:@setu-ts/kernel` resolves
-> where every earlier version had to be pinned by hand.
+> <!-- version:history -->
+>
+> **Every release from `v0.2.0` on is a normal release rather than a prerelease.** JSR points
+> `latest` at the current one, so a bare `deno add jsr:@setu-ts/kernel` resolves, where every
+> `alpha` version had to be pinned by hand.
 >
 > The label changed; the stability promise did not. This is pre-1.0 software — under semver `0.x`
 > the public API is not stable, and a minor bump carries breaking changes. See
@@ -192,21 +194,23 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Deno
-deno add jsr:@setu-ts/kernel@^0.2.0 jsr:@setu-ts/runtime@^0.2.0
+deno add jsr:@setu-ts/kernel@^0.3.0 jsr:@setu-ts/runtime@^0.3.0
 
 # Node
-npx jsr add @setu-ts/kernel@^0.2.0 @setu-ts/runtime@^0.2.0
+npx jsr add @setu-ts/kernel@^0.3.0 @setu-ts/runtime@^0.3.0
 
 # Bun
-bunx jsr add @setu-ts/kernel@^0.2.0 @setu-ts/runtime@^0.2.0
+bunx jsr add @setu-ts/kernel@^0.3.0 @setu-ts/runtime@^0.3.0
 ```
+
+**The `@^0.3.0` is recommended, not required.** `v0.3.0` is a normal release, so a bare
+`deno add jsr:@setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet the
+next breaking release as a deliberate upgrade than as a surprise — see [Versioning](#versioning).
 
 <!-- version:history -->
 
-**The `@^0.2.0` is recommended, not required.** Every release up to `v0.1.0-alpha.10` was a
-prerelease, which JSR never tags as `latest`, so a bare install failed outright. `v0.2.0` is a
-normal release and resolves without a version. Pin anyway if you would rather meet a breaking `0.3`
-release as a deliberate upgrade than as a surprise — see [Versioning](#versioning).
+Every release up to `v0.1.0-alpha.10` was a prerelease, which JSR never tags as `latest`, so a bare
+install failed outright on those.
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
 younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
@@ -214,7 +218,7 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.2.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.3.0/main
 
 setu new my-app
 cd my-app && setu generate service billing
@@ -222,7 +226,7 @@ cd my-app && setu generate service billing
 
 The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 47 workspace members are published on JSR, in `v0.2.0`: the core (`common`, `kernel`, `runtime`,
+All 47 workspace members are published on JSR, in `v0.3.0`: the core (`common`, `kernel`, `runtime`,
 `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, and the
 `cli`.
 
@@ -241,7 +245,7 @@ Setu-TS is pre-1.0, and the version number says exactly what that means:
 | **Minor** — `0.2` → `0.3`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
 | **Patch** — the third number | Fixes and additions only. Safe to take without reading anything.                           |
 
-Under semver a `^0.2.0` range means `>=0.2.0 <0.3.0`, so a caret pin absorbs patches and stops at
+Under semver a `^0.3.0` range means `>=0.3.0 <0.4.0`, so a caret pin absorbs patches and stops at
 the next breaking release. That is the intended way to depend on this project today.
 
 <!-- version:history -->

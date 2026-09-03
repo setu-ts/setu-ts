@@ -1458,7 +1458,17 @@ const VERSION_HISTORY_DOCS: readonly string[] = [
  */
 const SHIPPED_VERSION_LINES = [
   String.raw`0\.1\.0-alpha\.\d+`, // v0.1.0-alpha.1 … v0.1.0-alpha.10
-  // v0.2.0 onward — the post-alpha 0.x line. The optional suffixes keep a
+  // The post-alpha 0.x lines, ENUMERATED one minor at a time (`0.2`, `0.3`, …)
+  // rather than matched generally. A release opening a new minor line must add
+  // it here — `docs/releasing.md` carries that as a release step — because a
+  // line this pattern does not name makes both gates below match nothing and
+  // report a clean pass while checking nothing at all.
+  //
+  // General `0\.\d+\.\d+` is NOT usable: measured against the scanned corpus
+  // it also claims third-party versions that are none of this project's
+  // business — Drizzle's `0.45.2` and the Prometheus text format's `0.0.4`.
+  //
+  // The optional suffixes keep a
   // FUTURE prerelease readable (`0.2.1-rc.1`): without them the pattern
   // captures the `0.2.1` prefix, which never equals the shipping version, so
   // every correct reference in the tree would be reported stale.
@@ -1469,7 +1479,7 @@ const SHIPPED_VERSION_LINES = [
   // and `0.2.1+build.7` would capture `0.2.1`. Identifiers require at least
   // one character after each dot, so a trailing sentence period is not
   // swallowed into the version.
-  String.raw`0\.2\.\d+` +
+  String.raw`0\.[23]\.\d+` +
   String.raw`(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
   String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`,
 ].join('|');

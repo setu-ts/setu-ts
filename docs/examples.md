@@ -441,7 +441,7 @@ app.register(ReactRouterPlugin({
   // = ServerBuild). Derive one with
   // `new URL('./build/server/index.js', import.meta.url).href`.
   serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
-  // Optional seam for lazy loading the RR runtime. Returns SsrRuntime since v0.2.0.
+  // Optional seam for lazy loading the RR runtime; it returns an SsrRuntime.
   loadRequestHandler: async (serverBuildPath, mode) => {
     const build = await import(serverBuildPath);
     const { createRequestHandler, RouterContextProvider } = await import('npm:react-router@8');
