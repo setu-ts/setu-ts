@@ -4190,7 +4190,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   in the ROADMAP sections: `@Roles` enforcement defaults **on** with `enforceRoles: false` as the
   M70n-style escape hatch (a breaking behaviour change needing CHANGELOG migration text), and query
   refusals answer **`501`** through a status hint carried on the error and read by `errorHandler`,
-  with X18-2's guards taking the same mechanism at `403`.
+  and an authorization guard that cannot evaluate its policy because no provider is registered
+  answers `501` too — its existing `403` for a genuine policy refusal is unchanged.
 
 ## Verification (run before declaring any work done)
 

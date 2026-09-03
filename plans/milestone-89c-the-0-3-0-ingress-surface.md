@@ -69,6 +69,30 @@ and the contract cannot express — a tenant concern in an ingress behaviour —
 - **Test home:** `test/integration/register-time-publish.test.ts` (boots) and
   `test/unit/in-memory-dispatch-timing.test.ts` (the contract itself).
 
+### 3.1b Where a handler failure goes once `publish` no longer carries it
+
+- **Decision:** `InMemoryBroker` takes an injected
+  `onDispatchError?: (error: unknown, meta: MessageMetadata) => void` reporter. `MessagingPlugin`
+  supplies one that logs through `ctx.logger` **read at call time**, and every dispatched handler is
+  wrapped so a rejection reaches the reporter and settles. Nothing is left floating.
+- **Why:** today `publishWithHeaders` does `await sub.handler(deserialized, metadata)` in a bare
+  loop (`in-memory-broker.ts:176-178, 199`), so a handler rejection propagates to the publisher and
+  the publisher owns it. §3.1 takes that ownership away, and without a sink the same rejection
+  becomes an **unhandled rejection** — which on Deno and Node is a process-level event, so the fix
+  would trade a startup deadlock for a crash. Both reviewers found this independently, which is the
+  strongest signal it is not hypothetical. The reporter is injected rather than resolved because
+  `InMemoryBroker` is a broker, not a plugin, and holds no `IPluginContext`; reading `ctx.logger` at
+  **call** time rather than capturing it at `register()` is the M52b lesson, where a captured logger
+  silenced every later report.
+- **Also settled by this:** the first `await`ing subscriber no longer blocks the rest. Today one
+  slow or throwing fan-out handler delays or aborts delivery to its siblings, because the loop
+  awaits in sequence; wrapping each dispatch removes that coupling, which is the behaviour a real
+  broker has.
+- **Test home:** `test/unit/in-memory-dispatch-timing.test.ts` — a throwing handler reaches the
+  reporter, `publish` still resolves, siblings still receive the message, and the test asserts **no
+  unhandled rejection** was raised (`addEventListener('unhandledrejection')`, which is the only
+  assertion that catches the failure mode this decision exists for).
+
 ### 3.2 The bounded wait, and what it reports
 
 - **Decision:** a dispatch held on `#chainReady` waits at most `chainReadyTimeoutMs` (default
@@ -95,9 +119,19 @@ and the contract cannot express — a tenant concern in an ingress behaviour —
 
 ### 3.4 X16-2's fix: ctx-free members on `IMultiTenancyService`
 
-- **Decision:** add `tenantById(tenantId: string): ITenant | undefined` and
-  `getRepositoryFor<Entity, Id>(tenantId: string, entity: string): ITenantRepository<Entity, Id>`.
-  Both **required** members.
+- **Decision:** add **one** member —
+  `getRepositoryFor<Entity, Id>(tenantId: string, entity: string): ITenantRepository<Entity, Id>`,
+  required.
+- **`tenantById` was in the first draft of this plan and is CUT, because nothing can implement it.**
+  `MultiTenancyService` holds only `store: ITenantDataStore` and `separator`
+  (`multi-tenancy-service.ts:22-28`); `getCurrentTenant(ctx)` does not look anything up, it forwards
+  `ctx.request.tenant` (`:31-33`); and `ITenantDataStore` is entity-row CRUD keyed by tenant id —
+  `findAll`/`findById`/`find`/`create`/`update`/`delete` (`interfaces/index.ts:147-180`) — with **no
+  tenant catalog and no tenant lookup**. So the behaviour §3.4 originally asserted ("returns the
+  tenant, `undefined` for an unknown id") has no source that could produce it. That is the M10
+  defect class the plan checklist names — assuming a committed surface carries data access it does
+  not — and it is caught here rather than at implementation time. A tenant catalog port is a
+  separate design and is named in §9.
 - **Why:** `prefixCacheKey(tenantId, key)` is already exactly this shape in the same interface, and
   its JSDoc argues for a single home per concern — so the pattern is established rather than
   invented. Required rather than optional because an optional member returning `undefined` cannot
@@ -216,8 +250,8 @@ complete chain.
 - **The bound fires on a slow but legitimate startup**, refusing work that would have been
   delivered. → 10 000 ms against an `onInit` that does no I/O by contract; `0` disables it; and the
   error names the likely cause rather than asserting it.
-- **Two required members break an out-of-repo implementor.** → §3.4 states the cost, CHANGELOG
-  carries the migration, and the ambiguity an optional member would create is the reason the cost is
+- **A required member breaks an out-of-repo implementor.** → §3.4 states the cost, CHANGELOG carries
+  the migration, and the ambiguity an optional member would create is the reason the cost is
   accepted rather than avoided.
 - **`getRepositoryFor` invites use on the HTTP path**, bypassing the resolved tenant and reading an
   id from user input. → Its JSDoc says the id is trusted input and that `getRepository(ctx, …)` is
@@ -230,6 +264,11 @@ complete chain.
   exist and nothing composes them; whether a concern can be expressed once for the _application_
   rather than once per plugin is a design question X16 raised and did not answer. Unowned.
 - **A tenant slot on `IngressContext`** — §3.5.
+- **`tenantById` and a tenant catalog.** Cut from this milestone in §3.4 because no committed
+  surface can implement it: neither `MultiTenancyService` nor `ITenantDataStore` retains a tenant
+  record. Adding one is a new port plus an implementation plus a source of truth for "which tenants
+  exist", which is its own design. Unowned. `getRepositoryFor` alone closes X16-2, whose blocking
+  problem was that a tenant-scoped **repository** is unreachable from background work.
 - **`InMemoryBroker` gaining at-least-once or persistence semantics.** It is a test and
   single-process double; §3.1 changes only when its promise settles.
 - **The `queue`/`scheduler`/`websocket` gates.** Measured: `queue.add` in `register()` boots, and a

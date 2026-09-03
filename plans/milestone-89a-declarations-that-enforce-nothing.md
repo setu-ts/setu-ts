@@ -84,6 +84,25 @@ discarding arguments it cannot honour.
 - **Test home:** `test/unit/authorization-enforcement.test.ts` — a principal holding the second of
   two declared permissions passes; one holding neither is refused.
 
+### 3.2b Composition when a route declares BOTH `@Roles` and `@Permissions`
+
+- **Decision:** **ALL-of across the two kinds, ANY-of within each.** A route carrying
+  `@Roles('admin', 'owner')` and `@Permissions('billing:write', 'billing:admin')` admits a principal
+  holding (any of those roles) **AND** (any of those permissions). Two middleware entries are
+  appended, roles first, so the refusal names the restriction that actually failed.
+- **Why:** `RouteMetadata` can carry both independently (`metadata-store.ts:328-336` merges `roles`
+  and `permissions` as separate fields), so the composition is a real decision and the plan did not
+  make it. Three reasons pick AND. The guard equivalent is unambiguously AND —
+  `@UseGuards(requireRole('admin'), requirePermission('billing:write'))` runs both in sequence and
+  every one must pass — and M89a's whole purpose is making the decorated form agree with the guard
+  form. §13.4 makes the conservative reading the default for a security-related plugin. And an
+  any-of reading across kinds would make **adding** a restriction to a route _weaken_ it, which no
+  reader would predict.
+- **Test home:** `test/unit/authorization-enforcement.test.ts` — a route declaring both admits a
+  principal satisfying both; refuses one satisfying only the roles; refuses one satisfying only the
+  permissions. `test/integration/roles-enforced.test.ts` pins that the guard spelling of the same
+  pair answers identically.
+
 ### 3.3 Class-level versus method-level precedence
 
 - **Decision:** method metadata overrides class metadata; the effective restriction is the route's
@@ -108,15 +127,26 @@ discarding arguments it cannot honour.
 
 ### 3.5 What happens when no authorization capability is registered
 
-- **Decision:** warn once at `register()` per route carrying an unenforced restriction, naming the
-  controller, the handler and the restriction, with a hint naming both remedies (register a
-  provider, or set `enforceRoles: false`). The route is registered **without** the middleware.
-- **Why:** it is the `warnUnenforcedSchemas` precedent (`:445-460`) verbatim, and refusing `start()`
-  would break an application that declares `@Roles` today and has no RBAC — which is the population
-  this milestone most affects. A warning plus M89b's fix to the guards covers the same ground
-  without a startup refusal.
-- **Test home:** `test/unit/enforce-roles-option.test.ts` — a recording logger receives one warning
-  per route and the emitted middleware array is unchanged.
+- **Decision:** **fail closed at request time.** The route is registered WITH a middleware that
+  answers `501 Not Implemented / "Authorization is not configured"`, and `register()` additionally
+  warns once per affected route naming the controller, the handler, the restriction and both
+  remedies (register a provider, or set `enforceRoles: false`). Startup is **not** refused.
+- **Why:** the first draft warned and registered the route **unguarded**, which is an authorization
+  bypass — a route the developer declared as restricted serving every caller, with the only signal a
+  startup log line. That it matches today's behaviour is not a defence: `enforceRoles: true` means
+  "enforce", and "cannot enforce" is not "enforce nothing". Refusing `start()` was the other
+  candidate and is rejected because it converts a misconfiguration into a total outage for an
+  application that boots today, and because the decorator plugin cannot see whether an authorization
+  provider is registered _later_ by an imperative call. Refusing the **request** is the only option
+  that fails closed while causing neither a bypass nor an outage — and it is the same status and
+  detail M89b gives the free-function guards for the identical condition, so the two paths agree by
+  construction rather than by coincidence.
+- **Cost, stated:** a route carrying `@Roles` in an application with no RBAC stops serving. That is
+  the same breaking-change class as enforcement itself, which the maintainer approved defaulting on;
+  `enforceRoles: false` restores the inert behaviour in one line, and the startup warning names it.
+- **Test home:** `test/unit/enforce-roles-option.test.ts` (the warning fires once per route) and
+  `test/integration/rbac-absent-decorated.test.ts` — through a real kernel app with no authorization
+  provider, a decorated route answers `501` and the handler provably does not run.
 
 ### 3.6 The refusal's error shape
 
@@ -264,6 +294,10 @@ route answered 500 for five releases behind tests that asserted decorator presen
 - **Turning enforcement on breaks a passing suite somewhere.** → Intended, and the CHANGELOG says so
   with migration text; `enforceRoles: false` is the one-line restore. The startup warning gives an
   application with no RBAC a signal instead of a surprise.
+- **An application with no RBAC provider finds its decorated routes answering `501` after upgrade.**
+  → §3.5's stated cost. It is the failing-closed direction, the warning names both remedies at
+  startup, and `enforceRoles: false` is the escape hatch. The rejected alternative — registering the
+  route unguarded — is an authorization bypass, which is a worse outcome than a loud refusal.
 - **The decorated refusal and the guard refusal drift**, since §2.2 forbids sharing the guard
   function. → Mitigated by sharing the _capability_ and the `respondWithError` seam, and pinned by
   an integration test that asserts byte-identical bodies under a non-default error format. That test

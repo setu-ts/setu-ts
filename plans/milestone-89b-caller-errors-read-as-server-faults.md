@@ -41,11 +41,11 @@ mapping rather than two that drift.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                                                                                        | Resolution (picked side)                                                                                                                                                                                                                                                                              | Doc deliverable (same PR)                                                                                         |
-| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| C1 | `ROADMAP.md`'s M89b section says "X18-2's guards take the same treatment at **`403`**". Checked against `auth-plugin/src/guards/index.ts:59-84`, the `403` path is already correct — the broken case is the **absent capability**, which is a server misconfiguration and not a policy refusal. | **`501`**, not `403`. A principal that fails a policy check keeps its `403`; a guard that cannot evaluate the policy at all because no provider is registered is "not implemented". That also makes the ROADMAP's own "share the mechanism" claim true, since both findings then use the status hint. | Correct the M89b paragraph in `ROADMAP.md` and the corresponding `CLAUDE.md` "Next milestone" sentence.           |
-| C2 | `PUBLIC_API.md:1899` documents that a JWT-only `AuthPlugin` "deliberately does not register an authorization service" and says nothing about what the guards then do.                                                                                                                           | Not a contradiction — a gap. State the behaviour.                                                                                                                                                                                                                                                     | `PUBLIC_API.md` auth section and the `auth-plugin` README capability table gain the `501` behaviour.              |
-| C3 | `PUBLIC_API.md:1539` and `:1747` document the query refusals themselves and are silent on what the caller sees; a reader planning a backend switch cannot learn the status.                                                                                                                     | Not a contradiction — a gap. State it.                                                                                                                                                                                                                                                                | `PUBLIC_API.md` database section and the `database-plugin` README gain the `501` statement and the log-only note. |
+| #  | Conflict                                                                                                                                                                                                                                                                                        | Resolution (picked side)                                                                                                                                                                                                                                                                              | Doc deliverable (same PR)                                                                                                                                                        |
+| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | `ROADMAP.md`'s M89b section says "X18-2's guards take the same treatment at **`403`**". Checked against `auth-plugin/src/guards/index.ts:59-84`, the `403` path is already correct — the broken case is the **absent capability**, which is a server misconfiguration and not a policy refusal. | **`501`**, not `403`. A principal that fails a policy check keeps its `403`; a guard that cannot evaluate the policy at all because no provider is registered is "not implemented". That also makes the ROADMAP's own "share the mechanism" claim true, since both findings then use the status hint. | **Done in the opening PR (#234)**, not deferred: that PR introduced the `403` line, so leaving two committed docs contradicting each other on `main` would itself be the defect. |
+| C2 | `PUBLIC_API.md:1899` documents that a JWT-only `AuthPlugin` "deliberately does not register an authorization service" and says nothing about what the guards then do.                                                                                                                           | Not a contradiction — a gap. State the behaviour.                                                                                                                                                                                                                                                     | `PUBLIC_API.md` auth section and the `auth-plugin` README capability table gain the `501` behaviour.                                                                             |
+| C3 | `PUBLIC_API.md:1539` and `:1747` document the query refusals themselves and are silent on what the caller sees; a reader planning a backend switch cannot learn the status.                                                                                                                     | Not a contradiction — a gap. State it.                                                                                                                                                                                                                                                                | `PUBLIC_API.md` database section and the `database-plugin` README gain the `501` statement and the log-only note.                                                                |
 
 ## 3. Design decisions
 
@@ -62,10 +62,18 @@ mapping rather than two that drift.
 ### 3.2 The mechanism: a symbol-keyed status hint in `common`
 
 - **Decision:** `common` exports `HTTP_STATUS_HINT` (`Symbol.for('setu.http.status-hint')`), a
-  `HttpStatusHint` type (`{ status: number; title: string }`), and the pure
+  `HttpStatusHint` type (`{ status: number; title: string; detail: string }`), and the pure
   `withHttpStatusHint(error, hint)` / `httpStatusHintOf(error)` helpers. `errorHandler` reads the
-  hint at `error-handler.ts:157` and, when present, builds the `HttpError` from it instead of
-  calling `internalServerError`.
+  hint at `error-handler.ts:157` and, when present, builds the `HttpError` from
+  **`hint.status`/`hint.title`/`hint.detail`** — it never reads `error.message`.
+- **`detail` is a required member of the hint, and that is the whole point.** The first draft of
+  this plan carried `{ status, title }` and served `error.message`, on the assumption that a package
+  branding an error had decided its message was caller-safe. **That assumption is false, and the
+  source says so in as many words**: all three branded constructors document the message as "the
+  full diagnostic — safe to log, **never to serve**" (`database-plugin/src/errors.ts:50-51`,
+  `:135-136`, `:93`). Requiring an explicit `detail` makes caller-safety an act at the brand site
+  rather than an inference about a message, and it keeps those three JSDoc statements literally true
+  — nothing serves the message.
 - **Why:** §2.2 forbids `database-plugin` importing `exceptions`, and `exceptions` importing
   `database-plugin` would invert the dependency direction — so a brand in `common` is the only
   channel, exactly as `SECURITY_METADATA` is for M57 and the realtime frame codec is for M47.
@@ -80,10 +88,11 @@ mapping rather than two that drift.
 - **Decision:** the masking condition at `error-handler.ts:175` gains a hint check: a hinted error
   is treated like an `HttpError` for masking purposes and its detail survives.
 - **Why:** without this the fix is inert — `maskInternalErrors && !isHttpError && statusCode >= 500`
-  is satisfied by a hinted `501` and would replace the message with the status title, which is the
-  exact symptom. It is safe by construction: a hint is only ever attached to an error whose message
-  the owning package has decided is caller-safe, which is why the hint carries a `title` and the
-  brander opts in rather than the reader guessing.
+  is satisfied by a hinted `501` and would replace the detail with the status title, which is the
+  exact symptom. It is safe **because the served text is the hint's own `detail`**, not the error's
+  message: masking exists to stop a driver diagnostic reaching a caller, and a hinted response
+  contains no driver diagnostic to stop. The exemption is therefore narrow by construction — it
+  exempts a fixed sentence the brand site wrote, never the `Error`'s own message.
 - **Test home:** `exceptions/test/unit/status-hint.test.ts` — a hinted 501 keeps its detail with
   masking ON; an unhinted 500 is still masked in the same test file, so the guard cannot be widened
   by accident.
@@ -95,10 +104,14 @@ mapping rather than two that drift.
   errors (`MongoTransactionUnavailableError`, `CosmosTransactionScopeError`,
   `CosmosConcurrentModificationError`, `BigtableTransactionScopeError`) keep their masked 500.
 - **Why:** the three describe the caller's own query against a backend's declared capabilities, and
-  their messages are fixed, safe sentences. The other four may legitimately carry backend detail — a
-  concurrency conflict in particular is transient and its message can quote server state — so
-  branding them would widen disclosure for no gain. `CosmosConcurrentModificationError` is also
-  arguably a `409`, which is a separate decision and is named in §9 rather than guessed here.
+  each already carries **structured, framework-chosen** fields from which a caller-facing `detail`
+  is built: `feature` + `adapter` (`errors.ts:128`, `:143`), `operator` + `connector` (`:39`,
+  `:41`). Those are identifiers this framework chose, not driver output, so a detail composed from
+  them discloses nothing — which is what makes these three brandable and the message irrelevant. The
+  other four may legitimately carry backend detail — a concurrency conflict in particular is
+  transient and its message can quote server state — so branding them would widen disclosure for no
+  gain. `CosmosConcurrentModificationError` is also arguably a `409`, which is a separate decision
+  and is named in §9 rather than guessed here.
 - **Test home:** `database-plugin/test/unit/error-status-hints.test.ts` — the three carry a hint,
   the four do not, asserted as a table so adding an eighth class forces a decision.
 
@@ -206,9 +219,12 @@ a new exported function is a JSR slow type and blocks the `.d.ts` the Node/Bun c
 
 ## 8. Risks & mitigations
 
-- **The hint is attached to an error whose message is not caller-safe**, re-opening X12-3. →
-  Branding is opt-in per class, §3.4 fixes the list, and the table-driven test makes an eighth error
-  class a deliberate decision rather than a default.
+- **A branded error's diagnostic reaches the caller**, re-opening X12-3. → Structurally prevented
+  rather than mitigated: the hint carries its own `detail` and `errorHandler` never reads
+  `error.message` (§3.2). The unit test brands an error with a deliberately alarming message and
+  asserts the body contains no substring of it, so a future reader that falls back to the message
+  fails a test. Branding also stays opt-in per class, and §3.4's table makes an eighth class a
+  decision rather than a default.
 - **`501` is wrong for some future branded error.** → The hint carries the status rather than
   hard-coding it, so a later class can brand `409` (which is what
   `CosmosConcurrentModificationError` may want) without touching the reader.

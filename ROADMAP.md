@@ -8783,9 +8783,11 @@ chosen over routing through M70f's `respondWithError` seam because it is smaller
 mapping in one place: the adapters keep throwing, and one reader decides the status. §2.2 forbids
 `database-plugin` importing `@setu-ts/exceptions`, so deriving from `HttpError` was never available.
 
-X18-2's guards take the same treatment at `403`, since a principal that fails a policy check is
-refused rather than unimplemented — so the two findings share the mechanism and differ only in the
-status each declares.
+X18-2's guards take the same status. A principal that fails a policy check keeps its existing `403`
+— that path is already correct — while a guard that cannot evaluate the policy at all, because no
+provider is registered, answers `501`: the condition is a server misconfiguration rather than a
+policy refusal, and it is permanent for the deployment. So the two findings share both the status
+and the mechanism, and M89a's decorated routes answer identically for the identical condition.
 
 Masking is **not** to be disabled: X12-3 exists because these same 500s used to disclose the failing
 SQL and every bound parameter, and the three transaction-scope errors in the same file may
