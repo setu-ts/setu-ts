@@ -4083,6 +4083,87 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   messaging short-circuit is observed preventing its handler, and all four envelope shapes are read
   off the wire — `websocket` carrying neither `attempt` nor `headers`, `messaging` carrying
   `headers: {}` and no `attempt`, `queue`/`scheduler` carrying `attempt: 1`) — complete (PR #228)
+- **Release `v0.3.0`** — on `release/v0.3.0`, published 2026-09-03 (PR #229, tag at the merge commit
+  `cfcc7077`; CI published it, one green `Publish to JSR` job — the sixth first-try success in a
+  row). **47 packages**, list unchanged since alpha.8, so no first-time publisher and neither
+  `release:create-packages` nor `release:link-repos` was needed. Scope was M87 (request-path
+  performance) and M86 (non-HTTP ingress registration and behaviours); PR #225 (CI gate parity)
+  touched no package source and so correctly carries no CHANGELOG entry. **The first MINOR bump
+  after the label drop** — M87 ships two breaking changes (`IHttpAdapter` widened to sync-or-async,
+  and `@hono/node-server` installing its own `Request`/`Response` globals on Node), and README's
+  Versioning table puts breaking changes in the `0.x` minor. Verified after publishing by querying
+  all 47 on the registry (none yanked, and **every one reports `latest: 0.3.0`**), then a **bare**
+  `deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime` with no pin into a throwaway dir — it emitted
+  `^0.3.0`, resolved `common` transitively at 0.3.0, and served `200 {"ok":true}`. That transitive
+  resolution is the only real evidence the cross-package specifier bump landed INSIDE the published
+  tarballs. Six package pages spot-checked as rendering their READMEs. The Release object was
+  created by the workflow, flagged `prerelease=true` (the `0.*` arm — drop it at 1.0), carrying
+  `resolved-set.json` at exactly the byte size the local pre-flight produced.
+
+  **The gap found while cutting it was a MISFILING, a third distinct failure mode after alpha.9's
+  contradiction and alpha.10's missing entry.** M86's CHANGELOG entries had been written into the
+  already-published `## [0.2.0]` section by `35f780a2`, which landed after the v0.2.0 tag —
+  confirmed against the tag, whose tree contains none of them. Left alone, `release-notes.ts` lifts
+  only the version's own section, so the release would have shipped with M86 entirely absent from
+  its notes while 0.2.0's notes advertised features it does not contain. Moving them also made one
+  claim true that had been false in place: the `onClose` entry's "since this release, from a failed
+  `start()`" describes M86, i.e. 0.3.0. Three fix-shaped entries were recategorised out of `Added`
+  at the same time. So the release-cutting check is now three questions, not two: every merged PR
+  since the last tag is represented, the section does not contradict itself, AND no entry was filed
+  into an already-published section.
+
+  **Two sites a version bump is missed at, both found only by re-grepping after the bump reported
+  success.** (1) The runbook said "16 packages pin `jsr:@setu-ts/{common,kernel,runtime}`" — true
+  and incomplete: the three starters and `static-plugin` pin the **whole plugin set**, 68 more
+  specifiers naming 38 distinct packages. The runbook now says to match on the package NAME rather
+  than an enumeration, and carries the grep that must come back empty. (2) **`apps/*/deno.lock`
+  records `workspace.links` carrying member versions** — a site no runbook step covered.
+  `apps/realtime-clients` was regenerated with `deno check` in the app directory and proved surgical
+  by normalising the version back and diffing byte-for-byte (no third-party drift).
+  `apps/full-stack/deno.lock` is gitignored and needs nothing. **Left open:** the other 14 tracked
+  app locks sit at `0.1.0-alpha.9`, stale since before 0.2.0 — whose release commit `865644d7` also
+  touched no `apps/` file — so it is pre-existing drift, deliberately kept out of the release PR and
+  left for a `fix/…` branch. Severity is low and worth stating: those entries are metadata about
+  locally path-linked packages, each app maps `@setu-ts/*` at `../../packages/<name>/src`, nothing
+  installs from them, and `check:apps` rewrites them unfrozen — a reproducibility gap rather than a
+  functional break, which is exactly why it hid for two releases.
+
+  **The doc version gate had to be widened before the bump, and the first guard for it was itself
+  VACUOUS.** `SHIPPED_VERSION_LINES` was hardcoded `0\.2\.\d+`, so on a `0.3.0` tree both gates
+  match nothing and `check:docs` reports a clean pass while checking nothing — a silent green run,
+  the failure mode the constant exists to prevent. Widened to `0\.[23]`, still enumerated per minor
+  on purpose (a general `\d+\.\d+\.\d+` claims Drizzle's `0.45.2` and the Prometheus format's
+  `0.0.4`). But the tests written for it asserted only that a `0.3.0` reference is CLEAN at 0.3.0,
+  which passes trivially when the pattern matches nothing: reverting the widening left **all 19
+  tests green**. The discriminating assertion is a reference **stale WITHIN the new line** (`0.3.0`
+  while shipping `0.3.1`), and reverting now fails exactly the two new tests, one per checker. A
+  0.3-digit false-positive case (`127.0.3.1`, `10.0.3.2`, `10.3.1`, `192.0.3.9`) belongs ONLY on
+  `checkVersionClaims` — on `checkInstallVersions` it is not constructible, since the literal
+  `@setu-ts/<pkg>@^` prefix pins the version's left side and its `\d+` is greedy, so all three cases
+  tried there passed with the boundaries deleted and were dropped rather than shipped as coverage
+  that asserts nothing.
+
+  **A `version:history` marker can shield LIVE guidance, and the gate then reports zero findings.**
+  README's install paragraph sat under one and recommended `@^0.2.0` directly beneath snippets
+  reading `@^0.3.0`, telling the reader to pin against "a breaking `0.3` release" that WAS this
+  release. The marker had been added at 0.2.0 to cover the genuinely historical prerelease sentence
+  and then covered the live half sharing its block. The fix is to SPLIT rather than edit the number:
+  the live sentence moves ABOVE the marker so the gate reads it every release, history stays below,
+  and the live one is phrased version-agnostically ("the next breaking release") so naming a version
+  cannot relocate the staleness. Verified to discriminate — reintroducing `@^0.2.0` there now fails
+  `check:docs` at that line, where before it passed. Re-audit every `version:history` marker each
+  release for exactly this. Qodo caught the symptom; the marker was the cause.
+
+  **Review found nothing else that shipped.** CodeRabbit reported no actionable comments (5/5
+  pre-merge checks) and did NOT raise the "README claims the release is live before publication"
+  finding it has raised before. Qodo raised three, each answered in its own thread: the README pin
+  (already fixed before the review landed), a genuine 0.3-digit false-positive coverage gap, and the
+  app lockfile above — whose scope it understated in one direction (14 more files) and overstated in
+  another (`apps/full-stack/deno.lock` is gitignored). Its suggestion to automate the bump by
+  discovering every reference by package name is recorded as open work; it also flagged the
+  counter-argument itself, that introducing release tooling immediately before a prepared release is
+  risk traded against a manual bump that is auditable and already covered by `release:verify` — so
+  if built, build it early in a cycle, never at cut time.
 - **Next milestone** — **M88** (the request-path work M87 deferred: the response path, where
   `ResponseBuilder` → `snapshot()` → `Response` builds four objects, and `sealRequestIdentity`,
   whose fix changes `Object.keys(request)` against M71's shipped behaviour).
