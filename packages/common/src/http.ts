@@ -851,7 +851,7 @@ export type ResponseSnapshot =
  *
  * @since 0.4.0
  */
-export interface ResponseSnapshotInit {
+export type ResponseSnapshotInit = {
   /** Header input accepted directly by the web-standard `Response` constructor. */
   readonly headers: HeadersInit;
-}
+};

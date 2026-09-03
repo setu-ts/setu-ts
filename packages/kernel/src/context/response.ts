@@ -234,9 +234,9 @@ class StreamingResponseSnapshot implements Extract<ResponseSnapshot, { readonly 
 }
 
 /** Internal shared source for a terminal response's fast-path header init. */
-interface TerminalResponseInit {
+type TerminalResponseInit = {
   readonly headers: Readonly<Record<string, string>>;
-}
+};
 
 /** Freezes a terminal response's internal header source before it is copied to a snapshot. */
 function responseInit(headers: Record<string, string>): TerminalResponseInit {

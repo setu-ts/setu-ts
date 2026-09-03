@@ -381,7 +381,7 @@ package fits the plugin architecture.
 | `RequestHandler`             | type      |
 | `ResilientCall`              | type      |
 | `ResponseSnapshot`           | type      |
-| `ResponseSnapshotInit`       | interface |
+| `ResponseSnapshotInit`       | type      |
 | `Result`                     | type      |
 | `RouteHandler`               | type      |
 | `RpcFetchHandler`            | type      |
