@@ -8654,6 +8654,188 @@ shared runtime mapper. The mapper consumes that hint before reading the document
 native header object while explicit headers and repeated `Set-Cookie` values retain the existing
 `Headers` path. Synchronous middleware dispatch and request-identity semantics remain out of scope.
 
+## Milestone 89: X-Series Defect Closeout
+
+The `smoke/` programme's X16–X19 exercises, run against published `0.3.0`, produced **8 findings, 4
+High**. They are closed as three lettered milestones rather than one, grouped by defect **shape**
+rather than by package — the M70a–M70n precedent, where each letter stayed independently reviewable.
+
+> **The reproductions are NOT in this repository.** `smoke/` is excluded locally
+> (`.git/info/exclude`), so every `X…-FINDINGS.md` citation below names a file that exists on the
+> machine the exercise ran on and not in a clone. `smoke/DEFECTS.md` is the register and stays the
+> authority for the full row set; the source citations in each letter are the durable half, since
+> they point at `packages/`.
+
+| Letter   | Shape                                       | Findings                   |
+| -------- | ------------------------------------------- | -------------------------- |
+| **M89a** | A declaration that enforces nothing         | X18-3, X18-5, X18-4, X18-1 |
+| **M89b** | A caller error that reads as a server fault | X18-2, X19-1               |
+| **M89c** | The `0.3.0` ingress surface                 | X16-1, X16-2               |
+
+## Milestone 89a: Declarations That Enforce Nothing
+
+**Package(s):** `packages/decorator-plugin`, `packages/multi-tenancy-plugin`, `packages/cli`, docs
+
+**Objective:** Close the two High findings that share one shape — a security-relevant declaration
+whose published documentation asserts an outcome no code produces — by making each one either
+enforce what it says or say what it does. Both were found by attacking a boundary on purpose rather
+than as a by-product of building a feature, and neither is visible to any gate, because in both
+cases the claim lives only in Markdown and JSDoc.
+
+**X18-3 — `@Roles` and `@Permissions` enforce nothing (High).** A principal holding
+`roles: ['viewer']` reaches a handler decorated `@Roles('admin')` and receives `200`, while
+`@UseGuards(requireRole('admin'))` on the same controller, same request and same principal refuses
+it `403`. `composeMiddleware` (`decorator-plugin/src/plugin/decorator-plugin.ts:328`) builds a
+route's chain from `guards`, `interceptors` and `filters` and never reads `roles` or `permissions`;
+grepping every reader of that metadata across `packages/*/src` returns only the metadata store's own
+merge and copy lines (`metadata/metadata-store.ts:328-336`, `:662-663`). It reaches the OpenAPI
+document too: measured, `security` is absent on both decorated routes. The decorator's own JSDoc
+(`decorators/security.ts:57`) reads "Requires the authenticated principal to hold any of the given
+roles", and `README.md:102` files it under "Security".
+
+This is M70n's E1 defect one surface over: that milestone fixed the **validation** arm of exactly
+this function — `@ValidateBody` "validated NOTHING" for the same reason — and left the authorization
+arm beside it.
+
+`@Public()` is inert in the opposite, safe direction: it does not exempt a route from a guard (the
+route simply becomes unreachable, `401`), and its one real effect is contributing `security: []` to
+the document. That is a usability wart, not a hole, and it is in scope only as documentation.
+
+**Decision required before implementation:** whether enforcement defaults **on**. Turning it on is a
+breaking behaviour change — routes that serve today will start refusing, which is correct and will
+break someone's tests. M70n answered the identical question with `enforceSchemas: false` as the
+escape hatch plus a startup warning naming every unenforced route; mirroring that as `enforceRoles`,
+default **on**, is the recommendation.
+
+**X18-5 — `'schema-per-tenant'` and `'database-per-tenant'` produce no physical isolation (High).**
+`multi-tenancy-plugin/README.md:43-49` states, unqualified, "one schema per tenant" and "one
+database per tenant", and the README's **headline usage example** (`:22`) selects the first. The
+only consumer of the strategy's own methods anywhere in `packages/` is the in-memory store
+(`stores/memory-tenant-store.ts:54,56`), which uses the result as a **partition-map key**; and
+`multi-tenancy-plugin` never resolves `CAPABILITIES.DATABASE` at all, so no shipped adapter can
+honour, or is even told about, the selected strategy. All three strategies isolate correctly on the
+default store, which is what makes the table misleading rather than merely aspirational.
+
+The contract is honest one level down — `interfaces/index.ts:149-150` says a store "may ignore
+isolation metadata entirely" — so the gap is between that architecture and what the README promises.
+Scope here is the documentation correction plus a `register()` warning when a non-`column` strategy
+is selected with no `dataStore`; **shipping a `DatabasePlugin`-backed `ITenantDataStore` is out of
+scope** and is named as unowned follow-on work.
+
+**X18-4 — `resolver: 'jwt'` trusts an unsigned claim, and the warning is not where the choice is
+made (Medium).** A forged token with a garbage signature resolves `tenant: 'globex'` while
+authentication correctly rejects it. The behaviour is intended and stated in the resolver's JSDoc
+(`resolvers/jwt-resolver.ts:11-13`) and in `PUBLIC_API.md:5559`, whose bullet names the
+precondition: "acceptable only alongside auth middleware which separately verifies the token".
+Neither statement is near the decision — `README.md:38` lists the four resolvers as equivalent
+choices, the option's own JSDoc says only "Options forwarded to `JwtResolver`", and there is no
+startup warning. Same package and same shape as X18-5, which is why it rides here.
+
+**X18-1 — `setu add` silently ignores every plugin after the first (Medium).** `commands/add.ts:167`
+reads `args.positionals[0]` and never inspects the rest; five requested packages report
+`updated deno.json` and exit 0 with one added. The documented contract is genuinely singular, so the
+defect is that exceeding it is silent — and the same binary refuses `--env-file` on a workspace,
+`--transport` per-member and `--broker` on a template with no matching wiring, all by name. **Folded
+in here as a deliberate deviation from the grouping** (the M58 `g controller` / M59 `detectRuntime`
+precedent): it is a ten-line refusal, this letter ships first, and leaving it unmerged across three
+milestones is worse than the impurity.
+
+## Milestone 89b: Caller Errors That Read as Server Faults
+
+**Package(s):** `packages/auth-plugin`, `packages/database-plugin`, possibly `packages/common`
+
+**Objective:** Two findings, one mechanism applied twice: a condition the **caller** caused,
+carrying an accurate and actionable message, delivered to that caller as a masked
+`500 Internal Server Error`. Fixing them together forces one decision about status mapping rather
+than two that drift apart.
+
+**X18-2 — RBAC guards without `rbac` answer `500` to a role holder, while every probe stays green
+(High).** `AuthPluginOptions.rbac` became optional in M68, and `PUBLIC_API.md:1899` documents the
+composition. What no document says is what the five guards then do. Measured: `requireAuth()`
+correctly still works (it reads `ctx.request.user` and resolves nothing, `guards/index.ts:32-46`),
+and the four authorization guards resolve `CAPABILITIES.AUTHORIZATION` unconditionally at
+`guards/index.ts:71`. The registry throw escapes into `executeChain`, the kernel answers `500`, and
+M70b's `maskInternalErrors` default replaces the detail — so a principal that genuinely **holds**
+the required role is refused, with `/health`, `/ready` and `/live` all reporting `up`. That is the
+X10-3 shape: a real fault with every operational signal green.
+
+**The security property holds and is not in scope to change** — the guards fail **closed**, and the
+cause is in the log (M70f's X11-2 fix works). What is wrong is that a configuration error is
+delivered per request as a server fault rather than at startup, and as a `500` rather than a `403`.
+
+**X19-1 — a documented query refusal reaches the client as a masked `500` (Medium).** Every
+`UnsupportedQueryFeatureError` — Dynamo refusing a non-key `orderBy`, Bigtable refusing an `offset`
+with the alternative named in the message — arrives as
+`{"title":"Internal Server Error","detail":"Internal Server Error"}`. All seven of the package's
+error classes `extends Error` (`database-plugin/src/errors.ts:34,86,123,170,210,234,271`), none
+derives from `HttpError`, so `errorHandler` cannot map one. This is the shape a developer meets when
+**switching backends**, which is the portable contract's whole promise: an application that works on
+Mongo answers `500` on every ordered endpoint under Dynamo, and the response says the server is
+broken.
+
+**Two decisions required.** First, the status: `501 Not Implemented` is the honest mapping for the
+query-shape refusals, since the backend genuinely does not implement the feature; `400` is
+defensible. Second, the mechanism — a status hint carried on the error and read by `errorHandler` is
+smaller than routing through M70f's `respondWithError` seam and keeps the mapping in one place. §2.2
+forbids `database-plugin` importing `@setu-ts/exceptions`, so deriving from `HttpError` is not
+available either way.
+
+Masking is **not** to be disabled: X12-3 exists because these same 500s used to disclose the failing
+SQL and every bound parameter, and the three transaction-scope errors in the same file may
+legitimately carry backend detail.
+
+## Milestone 89c: The 0.3.0 Ingress Surface
+
+**Package(s):** `packages/messaging-plugin`, `packages/common`, `packages/multi-tenancy-plugin`
+
+**Objective:** Close the two findings against M86's ingress surface. One is a startup deadlock whose
+blast radius was **measured** rather than assumed; the other is a capability the release notes
+advertise and the contract cannot express.
+
+**X16-1 — a plugin that publishes during its own `register()` deadlocks startup, silently (High).**
+No socket, no error, no log, no self-timeout. Three source facts compose into a circular wait:
+`IMessageBroker.publish` on the in-memory broker "resolves when all handlers have been invoked"
+(`brokers/in-memory-broker.ts:131`); `PipelinedBroker` holds each dispatch on `#chainReady`
+(`pipeline/pipelined-broker.ts:67-82`), which is M86's own review fix for handlers running in front
+of an incomplete chain; and that gate opens at the **end of `onInit`**
+(`plugin/messaging-plugin.ts:152`), which runs after every `register()` has returned. The design
+anticipated the adjacent hazard and not this one — `messaging-plugin.ts:157` explains that
+`failChainGate` exists so held work fails "instead of hanging on a promise that can never settle"
+when `onInit` **fails**, which does not cover `onInit` never running.
+
+**The scope is settled by measurement, taken 2026-09-03 specifically to size this milestone.** Five
+traced runs:
+
+| run                             | boots  | note                                        |
+| ------------------------------- | ------ | ------------------------------------------- |
+| memory, awaited `publish`       | **NO** | trace stops at the publish call             |
+| memory, **unawaited** `publish` | yes    | and delivers through the **complete** chain |
+| memory, `queue.add`             | yes    | `add` enqueues and returns                  |
+| **rabbitmq**, awaited           | yes    | publish returns **before** delivery         |
+| **redis-streams**, awaited      | yes    | delivers through the complete chain         |
+
+So the blast radius is the **in-memory broker only**, the gate itself is correct on every broker —
+on rabbitmq and redis-streams the register-time message is held and then delivered through the full
+chain including the factory behaviour — and awaiting is the entire trigger. **The minimal correct
+change is a bounded wait plus the in-memory broker resolving on enqueue-for-dispatch**, leaving
+every real-broker path untouched. Changing `publish`'s contract broadly, or detecting the
+registration window, are both larger than the defect and are explicitly rejected.
+
+**X16-2 — of the three concerns the release notes name, the tenant one cannot be written (Medium).**
+`0.3.0`'s notes say the chain lets "an authorization, **tenant** or audit concern [be] expressed
+once per ingress kind". Authorization is proven (short-circuiting works on all four kinds) and audit
+compiles (`IAuditLogger.log` takes no context). The tenant one cannot: `IMultiTenancyService`'s two
+tenant-bearing members both take an `IRequestContext` (`common/src/services/tenancy.ts:52,62`),
+which no ingress path has and the envelope deliberately does not carry — only `prefixCacheKey` is
+ctx-free. Proven with `@ts-expect-error`, which cannot pass vacuously.
+
+The consequence beyond the wording is that a **tenant-scoped repository is unreachable from all
+background work**, which compounds X18-5. A ctx-free entry point —
+`getRepositoryFor(tenantId,
+entity)` alongside the existing `prefixCacheKey(tenantId, key)` shape —
+is the recommended fix and is a flagged `common` widening; whether it lands optional or required is
+the decision, since a required member breaks out-of-repo implementors.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                             |
@@ -8780,3 +8962,6 @@ native header object while explicit headers and repeated `Set-Cookie` values ret
 | 86        | ✅     | non-http ingress registration + pipeline            |
 | 87        | ✅     | request-path performance (kernel/runtime/common)    |
 | 88        | ✅     | response-path performance (kernel/runtime/common)   |
+| 89a       | ⬜     | declarations that enforce nothing (X18-3/5/4/1)     |
+| 89b       | ⬜     | caller errors read as server faults (X18-2, X19-1)  |
+| 89c       | ⬜     | 0.3.0 ingress surface (X16-1, X16-2)                |
