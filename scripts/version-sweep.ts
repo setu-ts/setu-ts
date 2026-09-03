@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
 /**
  * Residual-version gate for the sites the other release gates cannot see.
  *
@@ -10,7 +11,7 @@
  * | -------------------------------------- | ----------------------------- |
  * | Manifest specifiers and `version`      | `scripts/verify-release.ts`   |
  * | Markdown install snippets and claims   | `scripts/check-docs.ts`       |
- * | **TypeScript sources, tests, lockfiles** | **this module**             |
+ * | **TypeScript `src` trees and lockfiles** | **this module**              |
  *
  * The gap was measured, not assumed. Reverting one `packages/sdk/src`
  * specifier to the previous release leaves `deno check`, the full suite,
@@ -24,9 +25,10 @@
  *
  * **Range shorthand is not staleness.** A lockfile writes a caret range as
  * `@setu-ts/common@0.3` while a link key reads `@setu-ts/common@0.3.0`; both
- * name the shipping version. {@linkcode referenceMatches} accepts a reference
- * that is a dot-bounded prefix of it, so `0.3` matches `0.3.0` while `0.30`
- * does not match `0.3.0` and `0.3` does not match `0.30.0`.
+ * name the shipping version. {@linkcode referenceMatches} accepts a NUMERIC
+ * `major.minor` prefix, so `0.3` matches `0.3.0` while `0.30` does not, and
+ * neither a bare major (`0`) nor a prefix reaching into a prerelease
+ * identifier (`0.3.0-alpha` against `0.3.0-alpha.1`) is accepted.
  *
  * **Heuristic limits.** This is a regex over text, not a parser. It reads only
  * `@setu-ts/<pkg>@<version>` references and deliberately never bare version
@@ -80,11 +82,19 @@ const HISTORY_MARKER = 'version:history';
 /**
  * Every `@setu-ts/<pkg>@<version>` reference, with an optional range operator.
  *
- * The version class stops at a quote, whitespace, comma or closing brace so a
- * lockfile's `"jsr:@setu-ts/common@0.3"` and a source file's
- * `'jsr:@setu-ts/common@^0.3.0'` both terminate correctly.
+ * The operator class carries the comparators as well as `^`/`~`: a specifier
+ * written `@setu-ts/common@>=0.2.0` is a real, resolvable, and stale pin, and a
+ * pattern that simply failed to match it would leave it uncounted AND
+ * unreported — invisible, because the repository-wide vacuity guard stays
+ * non-zero on everything else.
+ *
+ * The version class stops at a quote, whitespace, comma, closing brace **or
+ * slash**. The slash is load-bearing: JSR entrypoints are real and in use
+ * (`jsr:@setu-ts/cli@^0.3.0/main`, `jsr:@setu-ts/runtime@^0.3.0/worker`), and
+ * without it the capture reads `0.3.0/worker`, which equals no version and
+ * would report a correct import as stale.
  */
-const REFERENCE = /@setu-ts\/([a-z0-9-]+)@([~^]?)([0-9][^"'`\s,}]*)/g;
+const REFERENCE = /@setu-ts\/([a-z0-9-]+)@(>=|<=|[~^><=]?)([0-9][^"'`\s,}/]*)/g;
 
 /**
  * Reports whether a written reference names the shipping version.
@@ -99,6 +109,16 @@ const REFERENCE = /@setu-ts\/([a-z0-9-]+)@([~^]?)([0-9][^"'`\s,}]*)/g;
  */
 export function referenceMatches(reference: string, current: string): boolean {
   if (reference === current) return true;
+  // Only the shorthand a lockfile actually writes: `major.minor`, all digits
+  // and dots, at least two components. Measured across the swept files, the
+  // only forms present are `0.3`, `0.3.0` and `^0.3.0`.
+  //
+  // The two exclusions are the point. A bare major (`@setu-ts/common@^0`)
+  // resolves against 0.3.0 and so would slip through a plain prefix test while
+  // naming no release. And a prefix that reaches into a prerelease identifier
+  // (`0.3.0-alpha` against `0.3.0-alpha.1`) is a DIFFERENT version, which
+  // matters on any prerelease line — this project shipped ten of them.
+  if (!/^\d+(?:\.\d+)+$/.test(reference)) return false;
   if (!current.startsWith(reference)) return false;
   return current[reference.length] === '.';
 }

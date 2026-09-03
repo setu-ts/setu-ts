@@ -26,9 +26,9 @@ describe('version sweep — referenceMatches', () => {
 
   // A lockfile abbreviates a caret range to `0.3` while a link key spells
   // `0.3.0`; both name the shipping version, so neither is staleness.
-  it('accepts a lockfile range shorthand', () => {
+  it('accepts a lockfile major.minor shorthand', () => {
     expect(referenceMatches('0.3', '0.3.0')).toBe(true);
-    expect(referenceMatches('0', '0.3.0')).toBe(true);
+    expect(referenceMatches('1.2', '1.2.7')).toBe(true);
   });
 
   // The boundary is what keeps the shorthand from over-matching. Without the
@@ -41,6 +41,19 @@ describe('version sweep — referenceMatches', () => {
   it('rejects an outright different version', () => {
     expect(referenceMatches('0.2.0', '0.3.0')).toBe(false);
     expect(referenceMatches('0.1.0-alpha.9', '0.3.0')).toBe(false);
+  });
+
+  // A bare major resolves against 0.3.0, so a plain prefix test accepts it
+  // while it names no release — a stale pin that survives the gate.
+  it('rejects a bare major, which names no release', () => {
+    expect(referenceMatches('0', '0.3.0')).toBe(false);
+  });
+
+  // On a prerelease line these are DIFFERENT versions, and this project has
+  // shipped ten of them. A prefix rule that spans the `-` accepts the wrong one.
+  it('rejects a prefix reaching into a prerelease identifier', () => {
+    expect(referenceMatches('0.3.0-alpha', '0.3.0-alpha.1')).toBe(false);
+    expect(referenceMatches('0.3.0-alpha.1', '0.3.0-alpha.1')).toBe(true);
   });
 });
 
@@ -89,6 +102,39 @@ describe('version sweep — findStaleReferences', () => {
     const source = "'jsr:@setu-ts/common@^0.2.0';\n'jsr:@setu-ts/kernel@^0.1.0-alpha.9';\n";
     const { findings } = findStaleReferences('a/src/b.ts', source, '0.3.0');
     expect(findings.map((f) => f.pkg)).toEqual(['common', 'kernel']);
+  });
+
+  // JSR entrypoints are real and in use. Without the slash boundary the capture
+  // reads `0.3.0/worker`, equal to no version, and a CORRECT import is reported
+  // stale — a false positive that would block a release.
+  it('reads a versioned subpath import as its version alone', () => {
+    const source = "import { defineWorkerTask } from 'jsr:@setu-ts/runtime@^0.3.0/worker';\n";
+    const { findings, seen } = findStaleReferences('a/src/b.ts', source, '0.3.0');
+    expect(seen).toBe(1);
+    expect(findings).toEqual([]);
+  });
+
+  it('reports a STALE versioned subpath import, naming the version only', () => {
+    const source = "import x from 'jsr:@setu-ts/runtime@^0.2.0/worker';\n";
+    const { findings } = findStaleReferences('a/src/b.ts', source, '0.3.0');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.version).toBe('0.2.0');
+  });
+
+  // A comparator pin is resolvable and can be stale. A pattern that fails to
+  // match it leaves it uncounted AND unreported, which the aggregate vacuity
+  // guard cannot reveal because every other reference keeps the count non-zero.
+  it('reads comparator ranges, not only caret and tilde', () => {
+    for (const op of ['>=', '<=', '>', '<', '=']) {
+      const { findings, seen } = findStaleReferences(
+        'a/src/b.ts',
+        `import x from 'jsr:@setu-ts/common@${op}0.2.0';\n`,
+        '0.3.0',
+      );
+      expect(seen).toBe(1);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.version).toBe('0.2.0');
+    }
   });
 
   it('ignores a bare version that names no package', () => {
