@@ -99,7 +99,7 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
   `CurrentUser`, `Ctx`, `Custom`
 - **Modules** — `@Module({ controllers, providers, imports })`
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
-- **Security** — `@Roles`, `@Permissions`, `@Public`
+- **Security** — `@Roles`, `@Permissions` (enforced — see below), `@Public` (OpenAPI marking only)
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
 - **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse`
@@ -116,8 +116,25 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
 | `autoDiscover`    | `boolean`       | `false` | Scan `controllersPath` for decorated classes.                                                                                                                                     |
 | `controllersPath` | `string`        | —       | Glob path used when `autoDiscover` is `true`.                                                                                                                                     |
 | `enforceSchemas`  | `boolean`       | `true`  | Append the validation capability's middleware for each present `@ValidateXxx` target. `false` keeps schemas description-only (OpenAPI) and silences the missing-provider warning. |
+| `enforceRoles`    | `boolean`       | `true`  | Append enforcing authorization middleware for each route carrying `@Roles`/`@Permissions`. `false` keeps the metadata description-only and silences the missing-provider warning. |
 
 Discovery failures are logged as warnings and never crash the application.
+
+## Security
+
+`@Roles` and `@Permissions` are **enforced by default**: each decorated route's chain gets
+middleware that resolves `CAPABILITIES.AUTHORIZATION` per request and answers `401` without a
+principal and `403` when the check fails — the same statuses and bodies the equivalent
+`@UseGuards(requireRole(...))` spelling produces. A route carrying both decorators requires any of
+the roles AND any of the permissions; method-level declarations override class-level ones.
+
+When **no authorization provider is registered**, a decorated route **fails closed**: it answers
+`501` and the handler never runs — it is never served unguarded — and `register()` warns once per
+affected route naming both remedies (register a provider under `CAPABILITIES.AUTHORIZATION`, or set
+`enforceRoles: false`).
+
+`@Public` contributes `security: []` to the OpenAPI document only. It does **not** exempt a route
+from a guard or from `@Roles`/`@Permissions` enforcement.
 
 ## Exports
 
