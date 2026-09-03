@@ -41,8 +41,8 @@ const HEADER =
 const FAILING_COVERAGE = { branchPct: 80.0, functionPct: 70.0, linePct: 60.0 };
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly five canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(5);
+  it('has exactly six canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(6);
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-prose-assertions.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/generate-api-docs.ts');
@@ -51,6 +51,9 @@ describe('script-coverage target-set completeness', () => {
     expect(SCRIPT_TARGETS).toContain('scripts/package-exports.ts');
     // The pure half of the computed-`import()` recurrence gate (M70e).
     expect(SCRIPT_TARGETS).toContain('scripts/npm-specifier-audit.ts');
+    // The residual-version gate. Its `sweepTrackedFiles`/`trackedFiles` walkers
+    // are the I/O seam; the decidable core carries the bar.
+    expect(SCRIPT_TARGETS).toContain('scripts/version-sweep.ts');
   });
 
   it('rejects zero rows (no coverage data)', () => {
@@ -80,6 +83,7 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
       row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
+      row('scripts/version-sweep.ts', 94, 100, 96) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
@@ -94,6 +98,7 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
       row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
+      row('scripts/version-sweep.ts', 94, 100, 96) + '\n' +
       row('scripts/some-other-script.ts', 99, 99, 99);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
@@ -107,11 +112,12 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
       row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
-      row('scripts/npm-specifier-audit.ts', 96, 97, 95);
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
+      row('scripts/version-sweep.ts', 94, 100, 96);
     const parsed = parseCoverageTable(stdout);
     const failures = validateTargetSet(parsed);
     expect(failures).toEqual([]);
-    expect(parsed.byTarget.size).toBe(5);
+    expect(parsed.byTarget.size).toBe(6);
     const below = belowThreshold(parsed);
     expect(below).toEqual([]);
   });
@@ -122,7 +128,8 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
       row('scripts/generate-api-docs.ts', 80, 70, 60) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
-      row('scripts/npm-specifier-audit.ts', 96, 97, 95);
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
+      row('scripts/version-sweep.ts', 94, 100, 96);
     const parsed = parseCoverageTable(stdout);
     // The set is complete — completeness passes.
     const failures = validateTargetSet(parsed);
@@ -140,7 +147,8 @@ describe('script-coverage target-set completeness', () => {
       row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
       row('scripts/generate-api-docs.ts', 80, 70, 60) + '\n' +
       row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
-      row('scripts/npm-specifier-audit.ts', 96, 97, 95);
+      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
+      row('scripts/version-sweep.ts', 94, 100, 96);
     const parsed = parseCoverageTable(stdout);
     expect(validateTargetSet(parsed)).toEqual([]);
     const below = belowThreshold(parsed);

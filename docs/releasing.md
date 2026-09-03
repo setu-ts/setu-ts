@@ -117,8 +117,19 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 ```fish
 deno task fmt:check; and deno task lint; and deno task check; and deno task test:coverage
 deno task release:verify 0.3.0
+deno task check:versions
 deno task release:publish --dry-run
 ```
+
+`check:versions` sweeps the sites the other two gates structurally cannot see. `release:verify`
+reads manifests and `check:docs` reads Markdown, which leaves TypeScript `src` trees and lockfiles
+covered by nothing — and a stale `@setu-ts` specifier there still **resolves**, because the previous
+version really is on JSR. Measured: reverting one `packages/sdk/src` specifier leaves `deno check`,
+the full suite, `publish:check` and `release:verify` **all green**, and publishes a package that
+depends on the release before the one being cut. It runs on both the PR and tag paths, pinned in
+`test/unit/release-notes.test.ts`. Test fixtures are deliberately out of scope: a fixture's version
+is data, not a dependency — `add.test.ts` hard-codes `@^1` precisely to prove `setu add` preserves
+an existing pin.
 
 `release:verify` checks five things the test suite cannot: version agreement across all publishable
 packages, cross-package specifier resolvability, that the published and unpublished lists together

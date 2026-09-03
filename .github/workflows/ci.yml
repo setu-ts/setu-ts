@@ -331,6 +331,15 @@ jobs:
       - name: Release consistency
         run: deno task release:verify "$(jq -r .version packages/kernel/deno.json)"
 
+      # The sites release:verify cannot see. It reads manifests; this reads the
+      # `src` trees and lockfiles, where a stale `@setu-ts` specifier still
+      # RESOLVES — so it survives deno check, the suite, publish:check and
+      # release:verify, and publishes a package depending on the previous
+      # release. Measured, not assumed: reverting one packages/sdk/src
+      # specifier leaves all of those green.
+      - name: Sweep for residual version references
+        run: deno task check:versions
+
   # These two jobs consume the packages through JSR's npm compatibility layer
   # and run `compat/compat.test.mjs` (AI_GUIDELINES.md §4.5). They cannot run
   # against the working tree: cross-package specifiers are

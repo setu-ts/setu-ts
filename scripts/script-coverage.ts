@@ -57,6 +57,11 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // `auditPackageSources` walker is the thin I/O seam; `findComputedImports`
   // is the decidable core that carries the bar.
   'scripts/npm-specifier-audit.ts',
+  // The residual-version gate. `sweepTrackedFiles` is the thin I/O seam;
+  // `findStaleReferences`, `referenceMatches` and `isSweptPath` are the
+  // decidable core. Its failure mode is a SILENT PASS, so the bar matters more
+  // here than the line count suggests.
+  'scripts/version-sweep.ts',
 ];
 
 interface FileCoverage {
