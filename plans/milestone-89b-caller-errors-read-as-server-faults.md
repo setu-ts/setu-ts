@@ -16,6 +16,16 @@
 >    carries" — it gains an `adapter`, which is a breaking constructor change.
 > 4. The response status and the logged status both had to move to the hinted error; the plan named
 >    neither, and reading `error.statusCode` would have answered `500` with a `501` body.
+>
+> **Two §6 test-table deviations, both to avoid duplication.** The planned
+> `auth-plugin/test/integration/rbac-absent.test.ts` is folded into `auth-integration.test.ts`,
+> which already owns `bootJwtOnlyApp` — a separate file would have duplicated that builder (§11.1),
+> and the test it replaces there was **asserting the defect**
+> (`expect(response.statusCode).toBe(500)`), so the fold turns a wrong assertion into the regression
+> guard rather than leaving it beside a new one. And the short-circuit half landed in
+> `guard-format.test.ts`, which already owns "each rejection keeps its status and short-circuits" —
+> the capability-absent refusal is simply the tenth. No pre-existing assertion was removed from
+> those two files; the only deletion in `guard-format.test.ts` is `makeProbe`'s widened signature.
 
 ## 0. Objective & scope
 
