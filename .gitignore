@@ -60,3 +60,7 @@ compat/bun.lockb
 # precedent commits no generated client — regenerate locally with
 # `npx prisma@7.10.0 generate` from packages/database-plugin/test/fixtures.
 packages/database-plugin/test/fixtures/prisma-client-generated/
+
+# VSCode workspace settings. Kept local: the MCP-discovery entry an IDE writes
+# here is a per-developer editor preference, not a project setting.
+.vscode/

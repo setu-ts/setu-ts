@@ -4173,7 +4173,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   counter-argument itself, that introducing release tooling immediately before a prepared release is
   risk traded against a manual bump that is auditable and already covered by `release:verify` — so
   if built, build it early in a cycle, never at cut time.
-- **Next milestone** — **TBD** (M89 is not yet defined in ROADMAP.md).
+- **Next milestone** — **M89a** (X-series defect closeout, first of three letters). The `smoke/`
+  programme's X16–X19 exercises against published `0.3.0` produced **8 findings, 4 High**, closed as
+  M89a/M89b/M89c grouped by defect **shape** rather than by package (the M70a–M70n precedent).
+  **M89a** — declarations that enforce nothing: `@Roles`/`@Permissions` admit a `viewer` to an
+  `@Roles('admin')` handler while `@UseGuards(requireRole('admin'))` refuses the same principal
+  (`composeMiddleware` never reads the metadata, which is M70n's E1 defect one surface over), and
+  `'schema-per-tenant'`/`'database-per-tenant'` are documented as physical isolation while the only
+  consumer of `resolveSchema`/`resolveDatabase` is the in-memory store. **M89b** — caller errors
+  delivered as masked `500`s, twice: RBAC guards with no `rbac` arm, and every
+  `UnsupportedQueryFeatureError`. **M89c** — the `0.3.0` ingress surface: a register-time publish
+  deadlocks startup (measured to be **in-memory-broker only**; the gate is correct on rabbitmq and
+  redis-streams, and awaiting is the entire trigger), and the tenant concern the release notes
+  advertise cannot be written because both tenant-bearing members require an `IRequestContext` no
+  ingress path has. Both open decisions were taken by the maintainer on 2026-09-03 and are recorded
+  in the ROADMAP sections: `@Roles` enforcement defaults **on** with `enforceRoles: false` as the
+  M70n-style escape hatch (a breaking behaviour change needing CHANGELOG migration text), and query
+  refusals answer **`501`** through a status hint carried on the error and read by `errorHandler`,
+  and an authorization guard that cannot evaluate its policy because no provider is registered
+  answers `501` too — its existing `403` for a genuine policy refusal is unchanged.
 
 ## Verification (run before declaring any work done)
 
