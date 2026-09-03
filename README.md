@@ -203,12 +203,14 @@ npx jsr add @setu-ts/kernel@^0.3.0 @setu-ts/runtime@^0.3.0
 bunx jsr add @setu-ts/kernel@^0.3.0 @setu-ts/runtime@^0.3.0
 ```
 
+**The `@^0.3.0` is recommended, not required.** `v0.3.0` is a normal release, so a bare
+`deno add jsr:@setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet the
+next breaking release as a deliberate upgrade than as a surprise — see [Versioning](#versioning).
+
 <!-- version:history -->
 
-**The `@^0.2.0` is recommended, not required.** Every release up to `v0.1.0-alpha.10` was a
-prerelease, which JSR never tags as `latest`, so a bare install failed outright. `v0.2.0` is a
-normal release and resolves without a version. Pin anyway if you would rather meet a breaking `0.3`
-release as a deliberate upgrade than as a surprise — see [Versioning](#versioning).
+Every release up to `v0.1.0-alpha.10` was a prerelease, which JSR never tags as `latest`, so a bare
+install failed outright on those.
 
 If you install within 24 hours of a release, Deno's supply-chain policy also refuses versions
 younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
