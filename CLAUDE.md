@@ -3759,6 +3759,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `createFullStackAppFromConfig()` returns, while retaining the broker-transport refusal because its
   starter-owned messaging/queue option rewrites cannot be represented as appended plugins) —
   complete (PR #215).
+- **Milestone 89a** (`decorator-plugin` + `multi-tenancy-plugin` + `cli` — declarations that enforce
+  nothing. `@Roles`/`@Permissions` are ENFORCED by default: `appendAuthorizationMiddleware` appends
+  one middleware per restriction — roles first, ALL-of across kinds / ANY-of within a kind, method
+  overriding class — between `composeMiddleware` and the validation band; the middleware resolves
+  `CAPABILITIES.AUTHORIZATION` PER REQUEST, and with no provider the route fails closed —
+  `501 Not Implemented / "Authorization is not configured"`, never served unguarded — while
+  `register()` warns once per affected route naming both remedies. `enforceRoles: false` restores
+  the inert behaviour — a BREAKING behaviour change with CHANGELOG migration text. The decorated
+  refusal is pinned byte-identical (modulo the path the responder echoes in `instance`) with a
+  `@UseGuards(requireRole(...))` route in one real kernel app under `'rfc9457'`; ordering proven
+  `401` → `403` → `400`; the appended middleware is M57-branded so `deriveSecurity` documents
+  decorated routes; `@Public` corrected to OpenAPI-marking-only (C5). X18-5: `register()` warns when
+  a non-`column` isolation strategy is selected with no `dataStore`, and the multi-tenancy README
+  stops claiming physical schemas/databases (the strategy NAMES what a store implements; the
+  headline example moves to `'column-per-tenant'`). X18-4: a `register()` warning fires whenever the
+  RESOLVED chain contains a `JwtResolver` (including the bare-instance spelling the plugin's own
+  pre-check missed), with the unverified-claim caveat moved to where the choice is made. X18-1:
+  `setu add` refuses extra positionals (`exit 2`, nothing written) instead of silently discarding
+  them) — complete (PR pending).
 - **Milestone 79** (`common` + `database-plugin` + `cloudflare-plugin` — portable data-access
   contract: composite keys, nested field paths and keyset cursor pagination, implemented across all
   **five** shipped adapters. The ROADMAP scoped four; `MongoAdapter` shipped in M78, so the in-scope
@@ -4173,25 +4192,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   counter-argument itself, that introducing release tooling immediately before a prepared release is
   risk traded against a manual bump that is auditable and already covered by `release:verify` — so
   if built, build it early in a cycle, never at cut time.
-- **Next milestone** — **M89a** (X-series defect closeout, first of three letters). The `smoke/`
-  programme's X16–X19 exercises against published `0.3.0` produced **8 findings, 4 High**, closed as
-  M89a/M89b/M89c grouped by defect **shape** rather than by package (the M70a–M70n precedent).
-  **M89a** — declarations that enforce nothing: `@Roles`/`@Permissions` admit a `viewer` to an
-  `@Roles('admin')` handler while `@UseGuards(requireRole('admin'))` refuses the same principal
-  (`composeMiddleware` never reads the metadata, which is M70n's E1 defect one surface over), and
-  `'schema-per-tenant'`/`'database-per-tenant'` are documented as physical isolation while the only
-  consumer of `resolveSchema`/`resolveDatabase` is the in-memory store. **M89b** — caller errors
-  delivered as masked `500`s, twice: RBAC guards with no `rbac` arm, and every
-  `UnsupportedQueryFeatureError`. **M89c** — the `0.3.0` ingress surface: a register-time publish
-  deadlocks startup (measured to be **in-memory-broker only**; the gate is correct on rabbitmq and
-  redis-streams, and awaiting is the entire trigger), and the tenant concern the release notes
-  advertise cannot be written because both tenant-bearing members require an `IRequestContext` no
-  ingress path has. Both open decisions were taken by the maintainer on 2026-09-03 and are recorded
-  in the ROADMAP sections: `@Roles` enforcement defaults **on** with `enforceRoles: false` as the
-  M70n-style escape hatch (a breaking behaviour change needing CHANGELOG migration text), and query
-  refusals answer **`501`** through a status hint carried on the error and read by `errorHandler`,
-  and an authorization guard that cannot evaluate its policy because no provider is registered
-  answers `501` too — its existing `403` for a genuine policy refusal is unchanged.
+- **Next milestone** — **M89b** (X-series defect closeout, second of three letters; M89a — the
+  declarations that enforced nothing — is complete above). The `smoke/` programme's X16–X19
+  exercises against published `0.3.0` produced **8 findings, 4 High**, closed as M89a/M89b/M89c
+  grouped by defect **shape** rather than by package (the M70a–M70n precedent). **M89b** — caller
+  errors delivered as masked `500`s, twice: RBAC guards with no `rbac` arm (the guards resolve
+  `CAPABILITIES.AUTHORIZATION` unconditionally, so a principal that genuinely holds the required
+  role reads a masked `500`), and every `UnsupportedQueryFeatureError` (a documented refusal that
+  reads as a server fault when an application switches backends). **M89c** — the `0.3.0` ingress
+  surface: a register-time publish deadlocks startup (measured to be **in-memory-broker only**; the
+  gate is correct on rabbitmq and redis-streams, and awaiting is the entire trigger), and the tenant
+  concern the release notes advertise cannot be written because both tenant-bearing members require
+  an `IRequestContext` no ingress path has. The open decisions were taken by the maintainer on
+  2026-09-03 and are recorded in the ROADMAP sections: query refusals answer **`501`** through a
+  status hint carried on the error and read by `errorHandler`, and an authorization guard that
+  cannot evaluate its policy because no provider is registered answers `501` too — its existing
+  `403` for a genuine policy refusal is unchanged, and M89a's decorated routes already answer
+  identically for the identical condition.
 
 ## Verification (run before declaring any work done)
 
