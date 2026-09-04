@@ -4271,8 +4271,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   slot (its member set is pinned by the extended `ingress-contract` test). Both breaking changes
   carry CHANGELOG migration text; the multi-tenancy README ships the tenant-in-a-behaviour recipe
   (now fence-gated) and the messaging README the publish-timing note; the register-time publish is
-  pinned against a REAL RabbitMQ broker via the extended `outage-real` suite ) — complete (PR
-  pending).
+  pinned against a REAL RabbitMQ broker via the extended `outage-real` suite ) — complete (PR #240).
 - **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
   named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
   suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`
