@@ -52,6 +52,11 @@ describe('barrel exports', () => {
 
     expect(messaging.MessagingNotSupportedError).toBeDefined();
     expect(typeof messaging.MessagingNotSupportedError).toBe('function');
+
+    // M89c: the bounded chain-gate error, thrown by the internal
+    // PipelinedBroker and caught by consumer instanceof checks.
+    expect(messaging.ChainGateTimeoutError).toBeDefined();
+    expect(typeof messaging.ChainGateTimeoutError).toBe('function');
   });
 
   it('type exports', () => {
@@ -101,6 +106,19 @@ describe('barrel exports', () => {
     const surface = messaging as unknown as Record<string, unknown>;
     expect(surface.TracedBroker).toBeUndefined();
     expect(surface.MessageBrokerAdapter).toBeUndefined();
+  });
+
+  it('exports InMemoryBrokerOptions, which the memory arm and direct constructors take (M89c)', () => {
+    // Compile-time, declared against the barrel: dropping the export stops
+    // this file compiling. The option carries `onDispatchError`, the terminus
+    // of the in-memory broker's failure path.
+    const options: messaging.InMemoryBrokerOptions = {
+      onDispatchError: (error, metadata) => {
+        expect(metadata.topic).toBe('orders');
+        throw error; // the reporter's own contract is tested elsewhere
+      },
+    };
+    expect(options.onDispatchError).toBeDefined();
   });
 
   it('exports INatsHeaders, which the public headersFactory option names', () => {

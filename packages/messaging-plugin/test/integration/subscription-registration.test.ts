@@ -375,6 +375,9 @@ describe('MessagingPlugin({ behaviors }) registration arms', () => {
     expect(handled).toEqual([]);
 
     await runInitHooks(harness);
+    // A macrotask flushes every microtask hop the gated delivery takes — the
+    // M89c bounded-wait race adds a few beyond runInitHooks' own awaits.
+    await new Promise((r) => setTimeout(r, 1));
 
     expect(handled).toEqual(['handler']);
     expect(seenBy).toEqual(['instance', 'factory']);
@@ -432,9 +435,9 @@ describe('MessagingPlugin({ behaviors }) registration arms', () => {
     expect(handled).toEqual([]);
 
     await runInitHooks(harness);
-    // Let the gated delivery settle.
-    await Promise.resolve();
-    await Promise.resolve();
+    // Let the gated delivery settle: a macrotask flushes every microtask hop
+    // the gate takes (the M89c bounded-wait race added a few).
+    await new Promise((r) => setTimeout(r, 1));
 
     expect(handled).toEqual(['handler']);
     expect(seenBy).toEqual(['instance', 'factory']);

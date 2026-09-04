@@ -189,7 +189,22 @@ export function MessagingPlugin(
       let broker: MessageBrokerAdapter;
 
       if (brokerType === 'memory') {
-        broker = new InMemoryBroker(ctx.runtime, serializer);
+        broker = new InMemoryBroker(ctx.runtime, serializer, {
+          // `publish` resolves on dispatch hand-off (M89c), so a rejected
+          // handler's only observable outcome is this report. The logger is
+          // read at CALL time, not captured here — the M52b lesson, where a
+          // logger captured at register() silenced every later report.
+          onDispatchError: (error, metadata) => {
+            const logger = ctx.services.has('logger')
+              ? ctx.services.get<{ error: (msg: string) => void }>('logger')
+              : undefined;
+            const detail = error instanceof Error ? error.message : String(error);
+            logger?.error(
+              `In-memory broker handler rejected for topic "${metadata.topic}" ` +
+                `(messageId: ${metadata.messageId}): ${detail}`,
+            );
+          },
+        });
       } else if (brokerType === 'redis-streams') {
         const opts = options as {
           url?: string;
@@ -326,7 +341,14 @@ export function MessagingPlugin(
         // timing has to change.
         broker = behaviorFactories.length === 0
           ? new PipelinedBroker(broker, behaviorChain)
-          : new PipelinedBroker(broker, behaviorChain, chainReady);
+          : new PipelinedBroker(broker, behaviorChain, chainReady, {
+            runtime: ctx.runtime,
+            // exactOptionalPropertyTypes: omit the option when unset so the
+            // broker applies its own default bound.
+            ...(options.chainReadyTimeoutMs !== undefined
+              ? { timeoutMs: options.chainReadyTimeoutMs }
+              : {}),
+          });
       }
 
       // Register the broker as IMessageBroker

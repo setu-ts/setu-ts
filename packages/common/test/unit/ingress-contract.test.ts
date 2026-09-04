@@ -46,6 +46,18 @@ type PinnedEnvelope = {
 };
 const envelopeShapePinned: Equals<IngressContext, PinnedEnvelope> = true;
 
+// M89c §3.5: the envelope deliberately carries NO tenant slot — a tenant
+// concern reads the id from `payload` and scopes through the ctx-free
+// `IMultiTenancyService` members (`getRepositoryFor`/`prefixCacheKey`); the
+// dispatch site has no request to resolve a tenant from, so a slot would
+// carry whatever the publisher put in the payload anyway. The full member-SET
+// pin above already fails on any addition; this names the key set so a later
+// addition is a deliberate reversal, not an accident.
+const keySetPinned: Equals<
+  keyof IngressContext,
+  'kind' | 'name' | 'payload' | 'attempt' | 'headers'
+> = true;
+
 // Compile-time: the kind union is pinned to exactly the four ingress paths.
 const kindUnionPinned: Equals<
   IngressKind,
@@ -109,6 +121,12 @@ function acceptsIngressBehavior(
 describe('IngressContext contract (M86 §3.3)', () => {
   it('carries exactly the pinned readonly members (compile-time pinned)', () => {
     expect(envelopeShapePinned).toBe(true);
+  });
+
+  it('carries NO tenant slot (M89c §3.5 — the key set is pinned)', () => {
+    expect(keySetPinned).toBe(true);
+    const envelope: IngressContext = { kind: 'messaging', name: 'orders', payload: 1 };
+    expect(Object.hasOwn(envelope, 'tenant')).toBe(false);
   });
 
   it('omits `attempt` on the arms that cannot know it, and carries it 1-based on queue', () => {

@@ -64,4 +64,32 @@ describe('barrel exports', () => {
     expect(typeof CAPABILITIES.MULTI_TENANCY).toEqual('string');
     expect(CAPABILITIES.MULTI_TENANCY).toEqual('multi-tenancy');
   });
+
+  it('the re-exported IMultiTenancyService carries the M89c ctx-free member (declared against the barrel)', () => {
+    // Type-level: `getRepositoryFor` resolves through the BARREL's re-export
+    // of the common interface with the committed signature. Compile-time only
+    // — a member is invisible to every runtime assertion — plus a runtime
+    // call through a minimal implementation so the file fails loudly too.
+    const service: barrel.IMultiTenancyService = {
+      getCurrentTenant: () => undefined,
+      getRepository: () => {
+        throw new Error('not used here');
+      },
+      getRepositoryFor: <Entity, Id = string>(
+        tenantId: string,
+        _entity: string,
+      ): import('@setu-ts/common').ITenantRepository<Entity, Id> => ({
+        findAll: () => Promise.resolve([] as readonly Entity[]),
+        findById: () => Promise.resolve(null),
+        find: () => Promise.resolve([] as readonly Entity[]),
+        create: (data) =>
+          Promise.resolve({ ...(data as Record<string, unknown>), tenantId } as unknown as Entity),
+        update: () => Promise.resolve(null),
+        delete: () => Promise.resolve(false),
+      }),
+      prefixCacheKey: (tenantId, key) => `${tenantId}:${key}`,
+    };
+    expect(typeof service.getRepositoryFor).toBe('function');
+    expect(service.prefixCacheKey('a', 'k')).toBe('a:k');
+  });
 });

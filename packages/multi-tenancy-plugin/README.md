@@ -13,22 +13,39 @@ import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
 ## Usage
 
 ```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
-import { CAPABILITIES, type IMultiTenancyService } from '@setu-ts/common';
+import { CAPABILITIES, type IMultiTenancyService, type IRequestContext } from '@setu-ts/common';
 
-app.register(MultiTenancyPlugin({
-  resolver: 'subdomain',
-  subdomain: { baseDomain: 'example.com' },
-  database: 'column-per-tenant',
-  required: true,
-}));
+// Your application's own entity — a stand-in so this compiles as written.
+interface Order {
+  id: string;
+  total: number;
+}
 
-app.router.get('/orders', async (ctx) => {
-  const tenancy = app.services.get<IMultiTenancyService>(CAPABILITIES.MULTI_TENANCY);
-  const tenant = tenancy.getCurrentTenant(ctx);
-  const orders = tenancy.getRepository<Order, string>(ctx, 'Order');
-  return ctx.response.json(await orders.findAll());
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    MultiTenancyPlugin({
+      resolver: 'subdomain',
+      subdomain: { baseDomain: 'example.com' },
+      database: 'column-per-tenant',
+      required: true,
+    }),
+  ],
 });
+
+// Plugins register during `start()`, so the capability is resolvable only after it.
+await app.start({ port: 3000 });
+
+const tenancy = app.services.get<IMultiTenancyService>(CAPABILITIES.MULTI_TENANCY);
+
+// In a route handler the middleware has resolved `ctx.request.tenant` first.
+export async function listOrders(ctx: IRequestContext): Promise<readonly Order[]> {
+  const orders = tenancy.getRepository<Order, string>(ctx, 'Order');
+  return orders.findAll();
+}
 ```
 
 The resolved tenant is also available as `ctx.request.tenant`.
@@ -79,6 +96,38 @@ selection is flagged rather than silently logical-only.
 
 An **empty resolver chain** and a **malformed injected `dataStore`** both fail at `register()`, not
 per request.
+
+## Non-HTTP ingress (a tenant concern in a behaviour)
+
+`getRepositoryFor(tenantId, entity)` is the ctx-free entry point: the `IRequestContext`-taking
+members are unreachable from a non-HTTP path, which has no request to resolve a tenant from. An
+ingress behaviour reads the tenant id from the work item's own payload and scopes through it. The id
+is TRUSTED INPUT — nothing resolves it — so on the HTTP path keep using `getRepository(ctx, …)`,
+which reads the middleware-resolved tenant.
+
+```typescript
+import type { IIngressBehavior, IngressContext, RegistryFactory } from '@setu-ts/common';
+import { CAPABILITIES, type IMultiTenancyService } from '@setu-ts/common';
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+// The tenant concern, expressed ONCE for this ingress kind. RegistryFactory
+// entries resolve during `onInit`, so the behaviour holds the resolved service.
+const tenantScopedWrite: RegistryFactory<IIngressBehavior> = (services) => {
+  const tenancy = services.get<IMultiTenancyService>(CAPABILITIES.MULTI_TENANCY);
+  return {
+    handle: (ctx: IngressContext, next: () => Promise<void>) => {
+      const payload = ctx.payload as { tenantId: string; event: { id: string } };
+      const audit = tenancy.getRepositoryFor<{ id: string }>(payload.tenantId, 'Audit');
+      return audit.create({ id: payload.event.id }).then(() => next());
+    },
+  };
+};
+
+export const messaging = MessagingPlugin({
+  broker: 'memory',
+  behaviors: [tenantScopedWrite],
+});
+```
 
 ## Cache isolation
 

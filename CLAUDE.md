@@ -4253,16 +4253,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   rather than of one guard. Two unit fixtures were contract-violating doubles whose fake registry
   omitted `has`, which `IServiceRegistry` requires; they reported the absent-capability path for a
   registry that had the service) — complete (PR #236)
-- **Next milestone** — **M89c** (X-series defect closeout, last of three letters; M89a — the
-  declarations that enforced nothing — and M89b — the caller errors that read as server faults — are
-  both complete above). The `smoke/` programme's X16–X19 exercises against published `0.3.0`
-  produced **8 findings, 4 High**, closed as M89a/M89b/M89c grouped by defect **shape** rather than
-  by package (the M70a–M70n precedent). **M89c** — the `0.3.0` ingress surface: a register-time
-  publish deadlocks startup (measured to be **in-memory-broker only**; the gate is correct on
-  rabbitmq and redis-streams, and awaiting is the entire trigger), and the tenant concern the
-  release notes advertise cannot be written because both tenant-bearing members require an
-  `IRequestContext` no ingress path has. The M89c open decisions are recorded in its ROADMAP
-  section.
+- **Milestone 89c** (`messaging-plugin` + `common` + `multi-tenancy-plugin` — the `0.3.0` ingress
+  surface, closing the last two smoke findings). **X16-1:** `InMemoryBroker.publish` now resolves on
+  dispatch HAND-OFF, not handler completion — the measured deadlock (a plugin awaiting a
+  register-time `publish` against the behaviour-chain gate, which opens at the end of `onInit`) is
+  gone, and the change makes in-memory faithful to the real brokers it stands in for; every invoked
+  handler's promise is RETAINED and its rejection routed to an injected `onDispatchError`
+  (`InMemoryBrokerOptions`, supplied by the plugin backed by `ctx.logger` read at call time — the
+  M52b lesson), never dropped and never an unhandled rejection. The gate gains a bounded wait:
+  `chainReadyTimeoutMs` (default `10_000`, `0` = wait forever, on `MessagingCommonOptions` so every
+  arm inherits it) rejects a NEVER-SETTLED gate with the exported `ChainGateTimeoutError` naming
+  `register()`, while a REJECTED gate still refuses forever (C3 honored). **X16-2:**
+  `IMultiTenancyService.getRepositoryFor(tenantId, entity)` — the required ctx-free member modeled
+  on `prefixCacheKey` — makes the tenant concern the `0.3.0` release notes advertised actually
+  writable from an ingress behaviour through the `RegistryFactory` arm; `tenantById` is CUT because
+  no committed surface can implement it (no tenant catalog), and `IngressContext` gains NO tenant
+  slot (its member set is pinned by the extended `ingress-contract` test). Both breaking changes
+  carry CHANGELOG migration text; the multi-tenancy README ships the tenant-in-a-behaviour recipe
+  (now fence-gated) and the messaging README the publish-timing note; the register-time publish is
+  pinned against a REAL RabbitMQ broker via the extended `outage-real` suite ) — complete (PR
+  pending).
+- **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
+  named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
+  suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`
+  produced **8 findings, 4 High**, all now closed as M89a (declarations that enforce nothing), M89b
+  (caller errors that read as server faults), and M89c (the ingress surface above) — grouped by
+  defect **shape** rather than by package, the M70a–M70n precedent.
 
 ## Verification (run before declaring any work done)
 

@@ -50,6 +50,19 @@ export class MultiTenancyService implements IMultiTenancyService {
   }
 
   /**
+   * Create a tenant-scoped repository scoped to the tenant id GIVEN — the
+   * ctx-free entry point for non-HTTP work (an ingress behaviour, a queue
+   * processor, a scheduled job). The id is trusted input; on the HTTP path
+   * use `getRepository`, which reads the middleware-resolved tenant.
+   */
+  getRepositoryFor<Entity, Id = string>(
+    tenantId: string,
+    entity: string,
+  ): ITenantRepository<Entity, Id> {
+    return new TenantRepository<Entity, Id>(this.store, tenantId, entity);
+  }
+
+  /**
    * Build a cache key that includes the tenant id and separator.
    * Uses the separator configured at construction.
    */

@@ -19,6 +19,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { RabbitMqBroker } from '../../src/brokers/rabbitmq-broker.ts';
 import { RedisStreamsBroker } from '../../src/brokers/redis-streams-broker.ts';
+import { PipelinedBroker } from '../../src/pipeline/pipelined-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 
@@ -197,6 +198,81 @@ describe('REAL Redis Streams outage (§3.7)', () => {
     } finally {
       await broker.disconnect();
       await new Deno.Command('docker', { args: ['start', containerId] }).output();
+    }
+  });
+});
+
+// ── M89c: register-time publish on a REAL broker ────────────────────────────
+
+describe('REAL RabbitMQ register-time publish (M89c §6)', () => {
+  it('a register-time publish still boots and still delivers through the COMPLETE chain', async () => {
+    const url = Deno.env.get('RABBITMQ_URL');
+    if (url === undefined) {
+      console.log('SKIP: RABBITMQ_URL not set');
+      return;
+    }
+
+    let amqplibPresent = false;
+    try {
+      await import('npm:amqplib@0.10.x');
+      amqplibPresent = true;
+    } catch {
+      // npm:amqplib not available
+    }
+    if (!amqplibPresent) {
+      console.log('SKIP: npm:amqplib not available');
+      return;
+    }
+
+    // The production shape: the broker wrapped by the behaviour chain with the
+    // gate armed (the factory arm). The measurement (2026-09-03) showed
+    // rabbitmq boots AND delivers complete through this path; §3.1 changed the
+    // IN-MEMORY promise only, so this pins that the real path cannot regress.
+    const { promise: chainReady, resolve: openChainGate } = Promise.withResolvers<void>();
+    const log: string[] = [];
+    const rabbit = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), { url: toIpv4(url) });
+    const piped = new PipelinedBroker(
+      rabbit,
+      [
+        {
+          handle: (_ctx, next) => {
+            log.push('instance');
+            return next();
+          },
+        },
+        {
+          handle: (_ctx, next) => {
+            log.push('factory');
+            return next();
+          },
+        },
+      ],
+      chainReady,
+      { runtime: makeRuntime(), timeoutMs: 30_000 },
+    );
+
+    const topic = `m89c.register-publish.${crypto.randomUUID()}`;
+    const received: string[] = [];
+
+    try {
+      // "register()" of a later plugin: subscribe, then AWAIT a publish —
+      // before the gate opens. On a real broker publish already returned
+      // before delivery; it must still resolve, not deadlock.
+      await piped.subscribe(topic, (msg: unknown) => {
+        log.push('handler');
+        received.push(JSON.stringify(msg));
+      });
+      await piped.publish(topic, { at: 'register-time' });
+
+      // "onInit" ends: the gate opens and the held message flows through the
+      // complete chain.
+      openChainGate();
+      await waitTrue(() => received.length >= 1, 'register-time delivery', 20_000);
+
+      expect(received.length).toBe(1);
+      expect(log).toEqual(['instance', 'factory', 'handler']);
+    } finally {
+      await piped.disconnect();
     }
   });
 });

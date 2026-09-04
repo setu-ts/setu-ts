@@ -17,15 +17,38 @@
 import type {
   IIngressBehavior,
   IngressContext,
+  IRuntimeServices,
   ISubscription,
   MessageHandler,
   MessageMetadata,
   RequestHandler,
   RequestOptions,
   SubscribeOptions,
+  TimerHandle,
 } from '@setu-ts/common';
 import { composeBehaviorChain } from '@setu-ts/common';
 import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
+import { ChainGateTimeoutError } from '../errors.ts';
+
+/** Default bound for a dispatch held on the chain gate (`chainReadyTimeoutMs`). */
+const DEFAULT_CHAIN_READY_TIMEOUT_MS = 10_000;
+
+/**
+ * Clock and bound for the held-dispatch backstop, supplied by the plugin (the
+ * only production constructor site that arms the gate). Internal — never
+ * barrel-exported.
+ *
+ * @since 0.4.0
+ */
+export interface ChainGateClock {
+  /** Timer source — the plugin's `ctx.runtime` read once at construction. */
+  runtime: IRuntimeServices;
+  /**
+   * Bound for a held dispatch, in milliseconds. Undefined → the 10 000 ms
+   * default; `0` → wait forever (no timer is armed).
+   */
+  timeoutMs?: number;
+}
 
 /**
  * Wraps a broker so every subscription handler runs the messaging arm of the
@@ -63,21 +86,35 @@ export class PipelinedBroker implements MessageBrokerAdapter {
    *
    * `undefined` when no behaviour factory is configured: the chain is already
    * final at construction and delivery is never deferred.
+   *
+   * Two refusing cases are distinct, and both leave the gate IN PLACE:
+   * - **REJECTED** — startup failed (`failChainGate`): the chain is never
+   *   completed and delivering through a partial chain is the outcome this
+   *   exists to prevent, so a rejected gate refuses delivery FOREVER.
+   * - **NEVER SETTLED** — `onInit` never ran at all (most often a plugin
+   *   publishing during its own `register()`): with a clock configured, a
+   *   dispatch held here rejects after `chainReadyTimeoutMs` (default 10 000;
+   *   `0` waits forever) with {@linkcode ChainGateTimeoutError}. The gate
+   *   itself stays, so later dispatches refuse the same way.
    */
   #chainReady: Promise<void> | undefined;
+
+  /** Clock + bound for the never-settled-gate backstop; absent → unbounded. */
+  readonly #clock: ChainGateClock | undefined;
 
   constructor(
     broker: MessageBrokerAdapter,
     behaviors: readonly IIngressBehavior[],
     chainReady?: Promise<void>,
+    clock?: ChainGateClock,
   ) {
     this.#broker = broker;
     this.#behaviors = behaviors;
     this.#chainReady = chainReady;
+    this.#clock = clock;
     // Clear the gate once settled so later deliveries take the direct path.
-    // A REJECTED gate is deliberately left in place: startup failed, the
-    // chain is never completed, and delivering through a partial chain is the
-    // outcome this exists to prevent.
+    // A REJECTED gate is deliberately left in place (see the field JSDoc for
+    // the two refusing cases and why neither clears it).
     void chainReady?.then(() => {
       this.#chainReady = undefined;
     }, () => {});
@@ -170,10 +207,39 @@ export class PipelinedBroker implements MessageBrokerAdapter {
         // never become an unhandled rejection.
         return gate === undefined
           ? dispatch(message, metadata)
-          : gate.then(() => dispatch(message, metadata));
+          : this.#throughGate(gate).then(() => dispatch(message, metadata));
       },
       options,
     );
+  }
+
+  /**
+   * Awaits the gate — bounded when a clock is configured. A gate that has
+   * neither settled nor rejected (the `onInit`-never-ran case) rejects after
+   * the bound with {@linkcode ChainGateTimeoutError}; a REJECTED gate still
+   * refuses forever, and `timeoutMs: 0` restores wait-forever.
+   */
+  #throughGate(gate: Promise<void>): Promise<void> {
+    const clock = this.#clock;
+    const timeoutMs = clock?.timeoutMs ?? DEFAULT_CHAIN_READY_TIMEOUT_MS;
+    if (clock === undefined || timeoutMs === 0) {
+      return gate;
+    }
+    let timer: TimerHandle | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = clock.runtime.setTimeout(() => {
+        reject(new ChainGateTimeoutError(timeoutMs));
+      }, timeoutMs);
+    });
+    // When the gate wins the race the timer is cleared below and this promise
+    // never settles; when the timeout fires, this handler observes the
+    // rejection alongside the race so nothing is left unhandled.
+    timeout.catch(() => {});
+    return Promise.race([gate, timeout]).finally(() => {
+      if (timer !== undefined) {
+        clock.runtime.clearTimeout(timer);
+      }
+    });
   }
 
   /** Sends RPC traffic through the underlying broker — the caller side of RPC. */
