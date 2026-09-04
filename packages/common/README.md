@@ -135,6 +135,7 @@ package fits the plugin architecture.
 | `replaceTenant`              | function  |
 | `resolveKeysetSort`          | function  |
 | `resolveRegistryEntry`       | function  |
+| `resolveResponseStatus`      | function  |
 | `respondWithError`           | function  |
 | `sealRequestIdentity`        | function  |
 | `securityMetadataOf`         | function  |

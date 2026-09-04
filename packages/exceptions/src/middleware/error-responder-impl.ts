@@ -16,6 +16,7 @@ import type {
   IErrorResponder,
   IRequestContext,
 } from '@setu-ts/common';
+import { resolveResponseStatus } from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
 import { RESPONDER_DETAIL } from '../formatters/problem-details.ts';
@@ -132,7 +133,12 @@ export function createErrorResponder(
 ): IErrorResponder {
   return {
     respond(target: ErrorResponderTarget, init: ErrorResponseInit): void {
-      const error = buildErrorFromInit(init);
+      // Sanitized before the error is built, not just before the status is
+      // written, so the formatted body's `status` member agrees with the status
+      // actually written. Idempotent, so the common path through
+      // `respondWithError` — which already sanitized — reports nothing twice.
+      const status = resolveResponseStatus(init.status, target);
+      const error = buildErrorFromInit(status === init.status ? init : { ...init, status });
       // The formatter's `ctx` parameter is a FULL `IRequestContext` by its
       // contract (M70f re-review round 2, finding 2). The target is a full
       // context only at the in-pipeline sites; the kernel's pre-pipeline sites
@@ -164,7 +170,7 @@ export function createErrorResponder(
       }
       const bytes = new TextEncoder().encode(JSON.stringify(body));
       target.response
-        .status(init.status)
+        .status(status)
         .header('content-type', contentType)
         .send(bytes);
     },

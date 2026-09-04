@@ -19,6 +19,7 @@ export {
   ERROR_RESPONDER_BRAND,
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
+  resolveResponseStatus,
   respondWithError,
 } from './errors/error-responder.ts';
 export type {
