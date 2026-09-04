@@ -8698,17 +8698,19 @@ this function — `@ValidateBody` "validated NOTHING" for the same reason — an
 arm beside it.
 
 `@Public()` is inert in the opposite, safe direction: it does not exempt a route from a guard (the
-route simply becomes unreachable, `401`), and its one real effect is contributing `security: []` to
-the document. That is a usability wart, not a hole, and it is in scope only as documentation.
+route simply becomes unreachable, `401`). It contributes `security: []` only when no enforced
+restriction is present; a restricted route keeps its derived OpenAPI requirement. That preserves a
+truthful document without making `@Public` a security bypass.
 
 **Decided (maintainer, 2026-09-03): enforcement defaults ON.** `enforceRoles: false` is the escape
-hatch, mirroring M70n's `enforceSchemas`, and a startup warning names every route whose restrictions
-are unenforced when no authorization capability is registered. This is a **breaking behaviour
-change** and takes CHANGELOG migration text: a route decorated `@Roles`/`@Permissions` that serves
-today will start refusing, which is the point — an unenforced authorization decoration is the defect
-— but it will break tests that were passing for the wrong reason. The default is on because the
-alternative leaves a decorator whose own JSDoc promises enforcement silently inert unless a reader
-opts in, which is the state this milestone exists to end.
+hatch, mirroring M70n's `enforceSchemas`, and when no authorization capability is registered the
+route FAILS CLOSED — it answers `501` and is never served unguarded — while the startup warning
+names every affected route and both remedies (register a provider, or `enforceRoles: false`). This
+is a **breaking behaviour change** and takes CHANGELOG migration text: a route decorated
+`@Roles`/`@Permissions` that serves today will start refusing, which is the point — an unenforced
+authorization decoration is the defect — but it will break tests that were passing for the wrong
+reason. The default is on because the alternative leaves a decorator whose own JSDoc promises
+enforcement silently inert unless a reader opts in, which is the state this milestone exists to end.
 
 **X18-5 — `'schema-per-tenant'` and `'database-per-tenant'` produce no physical isolation (High).**
 `multi-tenancy-plugin/README.md:43-49` states, unqualified, "one schema per tenant" and "one
@@ -8976,6 +8978,6 @@ the decision, since a required member breaks out-of-repo implementors.
 | 86        | ✅     | non-http ingress registration + pipeline            |
 | 87        | ✅     | request-path performance (kernel/runtime/common)    |
 | 88        | ✅     | response-path performance (kernel/runtime/common)   |
-| 89a       | ⬜     | declarations that enforce nothing (X18-3/5/4/1)     |
+| 89a       | ✅     | declarations that enforce nothing (X18-3/5/4/1)     |
 | 89b       | ✅     | caller errors read as server faults (X18-2, X19-1)  |
 | 89c       | ⬜     | 0.3.0 ingress surface (X16-1, X16-2)                |

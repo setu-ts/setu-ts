@@ -218,8 +218,15 @@ describe('DecoratorPlugin validation enforcement (E1)', () => {
     expect(def.schema?.query).toEqual({ kind: 'q' });
   });
 
-  it('declares an optional dependency on the validation capability', () => {
+  it('declares optional dependency edges on both enforced capabilities', () => {
+    // Real dependency edges (not priority luck): a REPLACEMENT provider
+    // registered at a higher priority number still lands before this plugin,
+    // so the register-time resolution of both capabilities sees it. The
+    // authorization edge arrived with M89a's `enforceRoles`.
     const plugin = DecoratorPlugin({});
-    expect(plugin.optionalDependencies).toEqual([CAPABILITIES.VALIDATION]);
+    expect(plugin.optionalDependencies).toEqual([
+      CAPABILITIES.VALIDATION,
+      CAPABILITIES.AUTHORIZATION,
+    ]);
   });
 });

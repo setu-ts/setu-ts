@@ -96,12 +96,27 @@ export interface MultiTenancyPluginOptions {
   header?: HeaderResolverOptions;
   /** Options forwarded to {@linkcode PathResolver}. */
   path?: PathResolverOptions;
-  /** Options forwarded to {@linkcode JwtResolver}. */
+  /**
+   * Options forwarded to {@linkcode JwtResolver}.
+   *
+   * **Security note:** the resolver reads the tenant id from an UNVERIFIED JWT
+   * claim — a client can mint a token naming any tenant. Acceptable only
+   * alongside authentication middleware which separately verifies the token.
+   * A `register()` warning fires when the resolved chain contains a
+   * `JwtResolver`.
+   */
   jwt?: JwtResolverOptions;
   /**
    * Database-isolation strategy: a discriminant string, or a custom
    * {@linkcode ITenantIsolationStrategy} instance.
    * Default: `'column-per-tenant'`.
+   *
+   * A strategy NAMES the isolation an {@linkcode ITenantDataStore} is expected
+   * to implement; it does not by itself create schemas or databases. The
+   * shipped `MemoryTenantDataStore` uses the strategy's label as a
+   * partition-map key, so all three kinds isolate correctly on it — but no
+   * shipped adapter is told the strategy. A `register()` warning fires when a
+   * non-`'column-per-tenant'` strategy is selected with no `dataStore`.
    */
   database?: DatabaseStrategyKind | ITenantIsolationStrategy;
   /**

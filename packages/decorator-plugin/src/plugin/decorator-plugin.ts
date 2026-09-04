@@ -16,6 +16,7 @@ import type {
   DecoratorHandler,
   FactoryProvider,
   HttpMethod,
+  IAuthorizationService,
   IPlugin,
   IPluginContext,
   IValidationService,
@@ -27,6 +28,8 @@ import type {
   ValidationTarget,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+
+import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
 
 import { metadataStore } from '../metadata/metadata-store.ts';
 import type {
@@ -74,6 +77,21 @@ export interface DecoratorPluginOptions {
    * appended; the absent-capability warning is also silenced.
    */
   readonly enforceSchemas?: boolean;
+  /**
+   * When `true` (the default), a route decorated with `@Roles` /
+   * `@Permissions` gets enforcing authorization middleware appended to its
+   * chain — after the route's guards and filters, before any validation
+   * middleware. The middleware resolves `CAPABILITIES.AUTHORIZATION` per
+   * request: with a provider registered it answers `401`/`403` exactly like
+   * the equivalent `@UseGuards(requireRole(...))` spelling; with none, the
+   * route FAILS CLOSED — it answers `501` and is never served unguarded — and
+   * `register()` warns once per affected route.
+   *
+   * When `false`, role/permission metadata stays description-only (no
+   * enforcement middleware is appended) and the absent-capability warning is
+   * silenced: the pre-M89a behaviour.
+   */
+  readonly enforceRoles?: boolean;
 }
 
 /** Plugin name — matches the package name without the scope. */
@@ -324,14 +342,12 @@ function createHandler(
   };
 }
 
-/** Composes the ordered middleware chain for a route (class then method). */
+/** Composes the post-authorization route middleware (class then method). */
 function composeMiddleware(
   ctrl: ControllerMetadata,
   route: RouteMetadata,
 ): MiddlewareFunction[] {
   return [
-    ...ctrl.guards,
-    ...route.guards,
     ...ctrl.interceptors,
     ...route.interceptors,
     ...ctrl.middleware,
@@ -339,6 +355,28 @@ function composeMiddleware(
     ...ctrl.filters,
     ...route.filters,
   ];
+}
+
+/** Composes guards, which deliberately precede declarative authorization. */
+function composeGuards(
+  ctrl: ControllerMetadata,
+  route: RouteMetadata,
+): MiddlewareFunction[] {
+  return [...ctrl.guards, ...route.guards];
+}
+
+/** Resolves a route's method-overriding-class authorization declarations. */
+function effectiveRestrictions(
+  ctrlMeta: ControllerMetadata,
+  route: RouteMetadata,
+): {
+  readonly roles: readonly string[] | undefined;
+  readonly permissions: readonly string[] | undefined;
+} {
+  return {
+    roles: route.roles ?? ctrlMeta.roles,
+    permissions: route.permissions ?? ctrlMeta.permissions,
+  };
 }
 
 /** Builds the response-schema map from `@ApiResponse` metadata, if any. */
@@ -361,17 +399,17 @@ function buildResponseSchemas(route: RouteMetadata): Record<number, unknown> | u
  * Builds the {@linkcode RouteSchema} from validation and OpenAPI metadata.
  * Returns `undefined` when no schema-relevant metadata is present.
  *
- * `@Public` is carried through as an empty `security` array, the OpenAPI
- * marker for a public operation. Without it a decorated route has no way to
- * opt out of a document-level security requirement, and a route explicitly
- * marked public would be documented as requiring the very token it bypasses.
- * `@Roles`/`@Permissions` are deliberately NOT mapped: a role is not a
- * security scheme, and there is no way to infer which declared scheme grants
- * it without inventing a name the document does not contain.
+ * An unrestricted `@Public` route carries an empty `security` array, the
+ * OpenAPI marker that opts out of a document-level requirement. When roles or
+ * permissions are enforced, that marker is omitted so their branded
+ * middleware derives the truthful requirement. Roles and permissions are not
+ * otherwise mapped: a role is not a security scheme, and the plugin cannot
+ * infer which declared scheme grants it without inventing a name.
  */
 function buildRouteSchema(
   ctrl: ControllerMetadata,
   route: RouteMetadata,
+  enforceRoles: boolean,
 ): RouteSchema | undefined {
   const schema = route.schema;
   const tags = [...ctrl.tags, ...(route.openapi?.tags ?? [])];
@@ -379,7 +417,10 @@ function buildRouteSchema(
   const response = buildResponseSchemas(route);
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
-  const isPublic = route.isPublic === true;
+  const restrictions = effectiveRestrictions(ctrl, route);
+  const isPublic = route.isPublic === true && (
+    !enforceRoles || (restrictions.roles === undefined && restrictions.permissions === undefined)
+  );
   if (
     !hasSchema && !hasTags && summary === undefined && response === undefined && !isPublic
   ) {
@@ -426,6 +467,76 @@ function enforcedTargets(route: RouteMetadata): SchemaTarget[] {
     }
   }
   return out;
+}
+
+/**
+ * Warns that a route carries `@Roles`/`@Permissions` restrictions but no
+ * `CAPABILITIES.AUTHORIZATION` provider is registered. The route still fails
+ * CLOSED — its middleware answers `501` per request — so this is a signal
+ * about availability, never a notice that the route is unguarded. One warning
+ * per affected route, naming the restriction and both remedies.
+ */
+function warnUnenforcedRestrictions(
+  ctx: IPluginContext,
+  controller: Constructor,
+  route: RouteMetadata,
+  roles: readonly string[] | undefined,
+  permissions: readonly string[] | undefined,
+): void {
+  if (ctx.logger === undefined) {
+    return;
+  }
+  ctx.logger.warn(
+    'Route declares @Roles/@Permissions restrictions but no authorization capability is registered; the route fails closed and answers 501',
+    {
+      controller: className(controller),
+      handler: route.handler,
+      ...(roles !== undefined ? { roles: [...roles] } : {}),
+      ...(permissions !== undefined ? { permissions: [...permissions] } : {}),
+      hint: 'Register an authorization provider under CAPABILITIES.AUTHORIZATION (e.g. ' +
+        'AuthPlugin with rbac) to enforce them, or set enforceRoles: false on ' +
+        'DecoratorPlugin to keep the metadata description-only.',
+    },
+  );
+}
+
+/**
+ * Appends the enforcing authorization middleware for a route's effective
+ * `@Roles`/`@Permissions` restrictions — roles first, so a route carrying
+ * both is refused by the one that actually failed. Method-level metadata
+ * overrides class-level metadata (the decorators' own documented precedence);
+ * the union is never used.
+ *
+ * Called AFTER route guards and BEFORE interceptors, ordinary middleware,
+ * filters, and validation. A guard's `401` still wins, while no later stage
+ * can short-circuit a route before its declared restriction runs.
+ *
+ * The capability argument is the REGISTRATION-TIME view, used only to decide
+ * whether the startup warning fires; the appended middleware re-resolves
+ * `CAPABILITIES.AUTHORIZATION` per request, so a provider registered later is
+ * honoured and the fail-closed refusal applies exactly while none exists.
+ */
+function appendAuthorizationMiddleware(
+  ctx: IPluginContext,
+  controller: Constructor,
+  ctrlMeta: ControllerMetadata,
+  route: RouteMetadata,
+  middleware: MiddlewareFunction[],
+  authorization: IAuthorizationService | undefined,
+): void {
+  const { roles, permissions } = effectiveRestrictions(ctrlMeta, route);
+  if (roles === undefined && permissions === undefined) {
+    return;
+  }
+  if (authorization === undefined) {
+    warnUnenforcedRestrictions(ctx, controller, route, roles, permissions);
+  }
+  if (roles !== undefined) {
+    middleware.push(createRolesMiddleware(roles));
+  }
+  if (permissions !== undefined) {
+    middleware.push(createPermissionsMiddleware(permissions));
+  }
 }
 
 /**
@@ -597,6 +708,8 @@ function registerController(
   target: Constructor,
   validation: IValidationService | undefined,
   enforceSchemas: boolean,
+  enforceRoles: boolean,
+  authorization: IAuthorizationService | undefined,
 ): void {
   const ctrlMeta = metadataStore.getController(target);
   if (ctrlMeta === undefined) {
@@ -608,11 +721,15 @@ function registerController(
     const fullPath = joinPaths(ctrlMeta.version ?? '', ctrlMeta.path, route.path);
     warnUnresolvableParameters(ctx, target, route);
     const handler = createHandler(instance, route.handler, route.params);
-    const middleware = composeMiddleware(ctrlMeta, route);
+    const middleware = composeGuards(ctrlMeta, route);
+    if (enforceRoles) {
+      appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
+    }
+    middleware.push(...composeMiddleware(ctrlMeta, route));
     if (enforceSchemas) {
       appendValidationMiddleware(ctx, target, route, middleware, validation);
     }
-    const schema = buildRouteSchema(ctrlMeta, route);
+    const schema = buildRouteSchema(ctrlMeta, route, enforceRoles);
     const routeDef: RouteDefinition = {
       handler,
       ...(middleware.length > 0 ? { middleware } : {}),
@@ -678,10 +795,10 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
     name: PLUGIN_NAME,
     version: denoJson.version,
     provides: [CAPABILITIES.METADATA_STORE],
-    // A real dependency edge (not priority luck): a REPLACEMENT validation
-    // provider registered at a higher priority number then still lands before
-    // this plugin, so register-time resolution sees it.
-    optionalDependencies: [CAPABILITIES.VALIDATION],
+    // Real dependency edges (not priority luck): a REPLACEMENT provider
+    // registered at a higher priority number still lands before this plugin,
+    // so the register-time resolution of both capabilities sees it.
+    optionalDependencies: [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION],
     priority: PLUGIN_PRIORITY.LOW,
 
     async register(ctx: IPluginContext): Promise<void> {
@@ -693,8 +810,17 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // fixed at registration time (optionalDependencies guarantees a
       // replacement provider has already registered).
       const enforceSchemas = opts.enforceSchemas ?? true;
+      const enforceRoles = opts.enforceRoles ?? true;
       const validation = ctx.services.has(CAPABILITIES.VALIDATION)
         ? ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION)
+        : undefined;
+      // Registration-time view of the authorization capability: it decides
+      // ONLY whether the startup warning fires. The appended middleware
+      // re-resolves CAPABILITIES.AUTHORIZATION per request, so a provider
+      // registered later is honoured and the fail-closed refusal applies
+      // exactly while none exists.
+      const authorization = ctx.services.has(CAPABILITIES.AUTHORIZATION)
+        ? ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION)
         : undefined;
 
       let discoveredControllers: Constructor[] = [];
@@ -733,7 +859,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
         registerService(ctx, svc);
       }
       for (const ctrl of controllers) {
-        registerController(ctx, ctrl, validation, enforceSchemas);
+        registerController(ctx, ctrl, validation, enforceSchemas, enforceRoles, authorization);
       }
       replayCustomDecorators(ctx);
     },
