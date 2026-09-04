@@ -62,6 +62,33 @@ function createPluginName(name?: string): string {
 }
 
 /**
+ * Validates the `chainReadyTimeoutMs` domain at the single point the option is
+ * resolved into the chain-gate clock. `NaN`, a negative value, or `Infinity`
+ * would otherwise reach `setTimeout`, which clamps them to ~0–1 ms — silently
+ * INVERTING the bound into an immediate refusal of every startup-window
+ * dispatch (`Infinity` intuitively means "never refuse"; a `NaN` from a bad
+ * env parse would refuse everything). `0` is the documented wait-forever value
+ * and is accepted.
+ *
+ * @param value - The configured `chainReadyTimeoutMs`
+ * @returns The validated value, unchanged
+ * @throws {RangeError} Naming the option unless the value is a finite,
+ * non-negative number of milliseconds
+ */
+const MAX_CHAIN_READY_TIMEOUT_MS = 2_147_483_647;
+
+function assertChainReadyTimeoutMs(value: number): number {
+  if (!Number.isFinite(value) || value < 0 || value > MAX_CHAIN_READY_TIMEOUT_MS) {
+    throw new RangeError(
+      `MessagingPlugin option 'chainReadyTimeoutMs' must be a finite, ` +
+        `non-negative number of milliseconds no greater than ${MAX_CHAIN_READY_TIMEOUT_MS} ` +
+        `(received ${value}); 0 waits forever.`,
+    );
+  }
+  return value;
+}
+
+/**
  * MessagingPlugin factory.
  *
  * Creates a plugin that registers an IMessageBroker implementation based on
@@ -176,6 +203,15 @@ export function MessagingPlugin(
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
+      // Validate before constructing or connecting a broker. If this option is
+      // invalid, registration must leave an externally backed broker untouched.
+      // No factory means no gate, so the documented ignored-option behavior is
+      // preserved for that arm.
+      const chainReadyTimeoutMs = behaviorFactories.length > 0 &&
+          options.chainReadyTimeoutMs !== undefined
+        ? assertChainReadyTimeoutMs(options.chainReadyTimeoutMs)
+        : undefined;
+
       // Resolve optional logger
       let logger: { error: (msg: string) => void } | undefined;
       if (ctx.services.has('logger')) {
@@ -189,7 +225,22 @@ export function MessagingPlugin(
       let broker: MessageBrokerAdapter;
 
       if (brokerType === 'memory') {
-        broker = new InMemoryBroker(ctx.runtime, serializer);
+        broker = new InMemoryBroker(ctx.runtime, serializer, {
+          // `publish` resolves on dispatch hand-off (M89c), so a rejected
+          // handler's only observable outcome is this report. The logger is
+          // read at CALL time, not captured here — the M52b lesson, where a
+          // logger captured at register() silenced every later report.
+          onDispatchError: (error, metadata) => {
+            const logger = ctx.services.has('logger')
+              ? ctx.services.get<{ error: (msg: string) => void }>('logger')
+              : undefined;
+            const detail = error instanceof Error ? error.message : String(error);
+            logger?.error(
+              `In-memory broker handler rejected for topic "${metadata.topic}" ` +
+                `(messageId: ${metadata.messageId}): ${detail}`,
+            );
+          },
+        });
       } else if (brokerType === 'redis-streams') {
         const opts = options as {
           url?: string;
@@ -326,7 +377,13 @@ export function MessagingPlugin(
         // timing has to change.
         broker = behaviorFactories.length === 0
           ? new PipelinedBroker(broker, behaviorChain)
-          : new PipelinedBroker(broker, behaviorChain, chainReady);
+          : new PipelinedBroker(broker, behaviorChain, chainReady, {
+            runtime: ctx.runtime,
+            // exactOptionalPropertyTypes: omit the option when unset so the
+            // broker applies its own default bound. The validated value is
+            // resolved before any external broker is connected.
+            ...(chainReadyTimeoutMs !== undefined ? { timeoutMs: chainReadyTimeoutMs } : {}),
+          });
       }
 
       // Register the broker as IMessageBroker

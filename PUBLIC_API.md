@@ -4023,13 +4023,24 @@ type MessagingPluginOptions =
 
 Every `MessagingPluginOptions` arm also inherits these ingress-registration options:
 
-| Option          | Type                                                                 | Behavior                                                                                                                                                                                                                                                                                                                                                             |
-| --------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `subscriptions` | `readonly SubscriptionEntry[]`                                       | Declarative `subscribe()` calls. A `SubscriptionDefinition` is `{ topic, handler, options? }`; factory entries resolve during async `onInit`, so subscriptions are established before the application serves. When a `behaviors` factory is declared, DELIVERY is held until `onInit` has resolved the chain, so no message reaches a handler through a partial one. |
-| `behaviors`     | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | Wraps subscribe handlers in declared order with `kind: 'messaging'`, topic, message payload, and available headers. No delivery attempt is invented. With no behaviours, no decorator is applied.                                                                                                                                                                    |
+| Option                | Type                                                                 | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subscriptions`       | `readonly SubscriptionEntry[]`                                       | Declarative `subscribe()` calls. A `SubscriptionDefinition` is `{ topic, handler, options? }`; factory entries resolve during async `onInit`, so subscriptions are established before the application serves. When a `behaviors` factory is declared, DELIVERY is held until `onInit` has resolved the chain, so no message reaches a handler through a partial one.                                                                                                                                                                                                                                                                |
+| `behaviors`           | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | Wraps subscribe handlers in declared order with `kind: 'messaging'`, topic, message payload, and available headers. No delivery attempt is invented. With no behaviours, no decorator is applied.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `chainReadyTimeoutMs` | `number`                                                             | Bounds a dispatch held on the behaviour-chain gate (armed only when a `behaviors` FACTORY is declared). A held dispatch past the bound rejects with `ChainGateTimeoutError`, whose message names `register()`; the gate itself stays, so later dispatches refuse the same way rather than delivering through a partial chain. Default `10_000`; `0` waits forever. Must be finite, non-negative, and no greater than `2_147_483_647` — `NaN`, a negative value, `Infinity`, or a larger value throws a `RangeError` naming the option at registration. Ignored when no factory is configured, because the gate is then never armed. |
 
 The chain deliberately does not wrap or add a registration arm for `respond()`: its handler returns
 a value, unlike the void-returning subscribe handlers, and remains forwarded unchanged.
+
+**Publish timing.** `publish` resolves once every matching subscription's work item has been handed
+to dispatch — never once every handler has returned — the same guarantee real brokers give, so a
+plugin publishing during its own `register()` cannot deadlock startup against the gate. A handler
+that rejects never rejects the publish and never becomes an unhandled rejection: on the in-memory
+broker, which has no ack model and no redelivery, the failure path terminates in a report through
+the application's logger. `InMemoryBrokerOptions.onDispatchError` supplies that reporter for
+applications constructing `InMemoryBroker` directly (the plugin always supplies one); absent it, the
+rejection is observed and dropped. A supplied reporter may return a promise; synchronous throws and
+asynchronous rejections from it are swallowed as the failure-path terminus.
 
 **Cloud brokers require production credentials OR an injected transport:**
 
@@ -4234,8 +4245,9 @@ export type { PubSubSdkModule, ServiceBusSdkModule } from '@setu-ts/messaging-pl
 export { JsonSerializer } from '@setu-ts/messaging-plugin';
 export type { ISerializer } from '@setu-ts/messaging-plugin';
 
-// Request-reply error classes
+// Request-reply and gate error classes
 export {
+  ChainGateTimeoutError,
   CloudBrokerUnavailableError,
   MessagingNotSupportedError,
   RemoteHandlerError,
@@ -4247,6 +4259,7 @@ export {
 export type {
   CustomMessagingOptions,
   EventsMessagingBridgeOptions,
+  InMemoryBrokerOptions,
   KafkaMessagingOptions,
   KafkaOptions,
   MemoryMessagingOptions,
@@ -5550,6 +5563,19 @@ app.router.get('/users', async (ctx) => {
 `AsyncLocalStorage`). The middleware resolves the tenant first; `getRepository` reads it from
 `ctx.request.tenant`. Calling `getRepository` before the middleware runs throws
 `TenantNotResolvedError`.
+
+**Non-HTTP work uses `getRepositoryFor(tenantId, entity)`** (since `0.4.0`) — the ctx-free entry
+point, modelled on `prefixCacheKey`: a queue processor, scheduled job, or ingress behaviour holds no
+`IRequestContext`, so the tenant id comes from the work item's own payload and the repository scopes
+to the id GIVEN. The id is trusted input — nothing resolves it — so keep using
+`getRepository(ctx, …)` on the HTTP path, where the middleware-resolved tenant is authoritative:
+
+```typescript
+// Inside an ingress behaviour (or any background work): no IRequestContext exists.
+const payload = ctx.payload as { tenantId: string };
+const repo = tenancy.getRepositoryFor<{ id: string }>(payload.tenantId, 'Order');
+await repo.create({ id: 'ord-1' });
+```
 
 ### Options
 

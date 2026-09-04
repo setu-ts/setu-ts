@@ -55,6 +55,9 @@ const SCRATCH_DIR = '.tmp/package-readme-fences';
 const READMES: Readonly<Record<string, number>> = {
   'packages/storage-plugin/README.md': 3,
   'packages/messaging-plugin/README.md': 5,
+  // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
+  // fence — gated so it cannot ship uncompilable.
+  'packages/multi-tenancy-plugin/README.md': 3,
   'packages/scheduler-plugin/README.md': 3,
   'packages/queue-plugin/README.md': 8,
   'packages/worker-pool-plugin/README.md': 3,
@@ -96,7 +99,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(22);
+    expect(Object.keys(READMES)).toHaveLength(23);
 
     const counts: Record<string, number> = {};
     for (const readme of Object.keys(READMES)) {

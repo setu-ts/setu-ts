@@ -121,7 +121,12 @@ describe('InMemoryBroker', () => {
     await broker.disconnect();
   });
 
-  it('handler rejection propagates to publish', async () => {
+  it('handler rejection is observed and dropped; publish resolves (M89c contract)', async () => {
+    // M89c §3.1b: publish resolves on dispatch hand-off, so a handler
+    // rejection no longer propagates to the caller — it is observed on the
+    // retained promise and, with no onDispatchError configured, dropped (this
+    // broker has no redelivery to fall back on). The full reporter cases live
+    // in in-memory-dispatch-timing.test.ts.
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
     const broker = new InMemoryBroker(runtime, serializer);
@@ -132,7 +137,7 @@ describe('InMemoryBroker', () => {
       throw new Error('handler failed');
     });
 
-    await expect(broker.publish('test.topic', 'test')).rejects.toThrow('handler failed');
+    await expect(broker.publish('test.topic', 'test')).resolves.toBeUndefined();
 
     await broker.disconnect();
   });

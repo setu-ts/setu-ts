@@ -44,18 +44,32 @@ await broker.subscribe<{ userId: string }>('user.created', async (message) => {
 await broker.publish('user.created', { userId: '123' });
 ```
 
+## Publish timing
+
+`publish` resolves once every matching subscription's work item has been **handed to dispatch** —
+never once every handler has returned. This is the guarantee real brokers give (a RabbitMQ or Redis
+`publish` returns before delivery), so the in-memory default honours it too, and a plugin that
+publishes during its own `register()` cannot deadlock startup against the behaviour-chain gate. A
+handler that rejects never rejects the publish and never surfaces as an unhandled rejection: on the
+in-memory broker — which has no ack model and no redelivery — the failure path terminates in a
+report through the application's logger. An application constructing `InMemoryBroker` directly
+supplies its own reporter via `InMemoryBrokerOptions.onDispatchError`; absent one the rejection is
+observed and dropped. One slow or throwing fan-out handler also no longer delays or aborts delivery
+to its siblings.
+
 ## Options
 
 `MessagingPluginOptions` is a union discriminated on `broker`. Two options are shared by every arm:
 
-| Option          | Type                                                                 | Default          | Description                                                                                                                                                                                                                                     |
-| --------------- | -------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `broker`        | `MessagingBrokerType`                                                | `'memory'`       | Selects the arm. Optional only on the memory arm, so `MessagingPlugin()` stays valid.                                                                                                                                                           |
-| `name`          | `string`                                                             | —                | Instance name for multi-instance setups.                                                                                                                                                                                                        |
-| `serializer`    | `ISerializer`                                                        | `JsonSerializer` | Payload serializer.                                                                                                                                                                                                                             |
-| `tracing`       | `boolean`                                                            | `true`           | Create broker producer/consumer spans when telemetry is registered.                                                                                                                                                                             |
-| `subscriptions` | `readonly SubscriptionEntry[]`                                       | —                | Declarative `subscribe()` registrations. A `SubscriptionDefinition` is `{ topic, handler, options? }`; factories resolve during async `onInit`. When a `behaviors` factory is declared, delivery is held until `onInit` has resolved the chain. |
-| `behaviors`     | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                | Chain around subscribe handlers. It sees `kind: 'messaging'`, topic, message payload, and available headers; no delivery attempt is fabricated.                                                                                                 |
+| Option                | Type                                                                 | Default          | Description                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------- | -------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `broker`              | `MessagingBrokerType`                                                | `'memory'`       | Selects the arm. Optional only on the memory arm, so `MessagingPlugin()` stays valid.                                                                                                                                                                                                                                                                                                                                      |
+| `name`                | `string`                                                             | —                | Instance name for multi-instance setups.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `serializer`          | `ISerializer`                                                        | `JsonSerializer` | Payload serializer.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `tracing`             | `boolean`                                                            | `true`           | Create broker producer/consumer spans when telemetry is registered.                                                                                                                                                                                                                                                                                                                                                        |
+| `chainReadyTimeoutMs` | `number`                                                             | `10_000`         | Bounds a dispatch held on the behaviour-chain gate (armed only when a `behaviors` FACTORY is declared). A held dispatch past the bound rejects with `ChainGateTimeoutError`; `0` waits forever. Must be finite, non-negative, and no greater than `2_147_483_647` — `NaN`, a negative value, `Infinity`, or a larger value throws a `RangeError` naming the option at registration. Ignored when no factory is configured. |
+| `subscriptions`       | `readonly SubscriptionEntry[]`                                       | —                | Declarative `subscribe()` registrations. A `SubscriptionDefinition` is `{ topic, handler, options? }`; factories resolve during async `onInit`. When a `behaviors` factory is declared, delivery is held until `onInit` has resolved the chain.                                                                                                                                                                            |
+| `behaviors`           | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                | Chain around subscribe handlers. It sees `kind: 'messaging'`, topic, message payload, and available headers; no delivery attempt is fabricated.                                                                                                                                                                                                                                                                            |
 
 Omitting `name` registers under the bare `CAPABILITIES.MESSAGING` token as plugin
 `messaging-plugin`. Supplying one derives both — token `messaging.<name>`, plugin
@@ -219,6 +233,7 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 | `loadPubSubModule`             | function  |
 | `loadServiceBusModule`         | function  |
 | `MessagingPlugin`              | function  |
+| `ChainGateTimeoutError`        | class     |
 | `CloudBrokerUnavailableError`  | class     |
 | `GcpPubSubBroker`              | class     |
 | `InMemoryBroker`               | class     |
@@ -236,6 +251,7 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 | `EventsMessagingBridgeOptions` | interface |
 | `IMessageBroker`               | interface |
 | `INatsHeaders`                 | interface |
+| `InMemoryBrokerOptions`        | interface |
 | `IPubSubSubscription`          | interface |
 | `IPubSubTransport`             | interface |
 | `ISerializer`                  | interface |

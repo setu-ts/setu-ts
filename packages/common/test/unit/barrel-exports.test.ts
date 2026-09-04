@@ -172,6 +172,42 @@ describe('@setu-ts/common barrel — M86 ingress contracts', () => {
 });
 
 // ---------------------------------------------------------------------------
+// M89c — the ctx-free member on IMultiTenancyService
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M89c IMultiTenancyService.getRepositoryFor', () => {
+  it('carries the ctx-free member with the committed signature (declared against the barrel)', () => {
+    // Type-level: the member resolves through the BARREL's interface with
+    // exactly the committed signature — no IRequestContext, id first. This is
+    // the one public-surface change M89c makes here, so the pin is the
+    // milestone's own "nothing else moved" guard for this interface.
+    const service: import('../../src/index.ts').IMultiTenancyService = {
+      getCurrentTenant: () => undefined,
+      getRepository: () => {
+        throw new Error('not exercised');
+      },
+      getRepositoryFor: <Entity, Id = string>(
+        _tenantId: string,
+        _entity: string,
+      ): import('../../src/index.ts').ITenantRepository<Entity, Id> => ({
+        findAll: () => Promise.resolve([] as readonly Entity[]),
+        findById: () => Promise.resolve(null),
+        find: () => Promise.resolve([] as readonly Entity[]),
+        create: (data) => Promise.resolve(data as unknown as Entity),
+        update: () => Promise.resolve(null),
+        delete: () => Promise.resolve(false),
+      }),
+      prefixCacheKey: (tenantId, key) => `${tenantId}:${key}`,
+    };
+
+    const repo: import('../../src/index.ts').ITenantRepository<{ id: string }> = service
+      .getRepositoryFor('acme', 'Widget');
+    expect(typeof repo.findAll).toBe('function');
+    expect(service.prefixCacheKey('acme', 'k')).toBe('acme:k');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M87 — isPromiseLike
 // ---------------------------------------------------------------------------
 

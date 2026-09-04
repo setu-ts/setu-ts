@@ -7,6 +7,7 @@
 import type {
   IIngressBehavior,
   MessageHandler,
+  MessageMetadata,
   RegistryFactory,
   SubscribeOptions,
 } from '@setu-ts/common';
@@ -260,6 +261,55 @@ export interface MessagingCommonOptions {
    * @since 0.3.0
    */
   readonly behaviors?: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[];
+  /**
+   * Bounds a dispatch held on the behaviour-chain gate, which exists only when
+   * a `RegistryFactory` behaviour is declared. A held dispatch that waits
+   * longer than this rejects with `ChainGateTimeoutError`, whose message names
+   * the likely cause (a plugin publishing during its own `register()`); the
+   * gate itself is left in place, so later dispatches refuse the same way
+   * rather than delivering through a partial chain.
+   *
+   * Default `10_000` ms. `0` disables the bound and restores the wait-forever
+   * behaviour, for an application that would rather hang than fail. The value
+   * must be a finite, non-negative number no greater than `2_147_483_647`:
+   * `NaN`, a negative value, `Infinity`, or a larger value throws a `RangeError`
+   * naming this option at registration,
+   * when a behaviour factory arms the gate (`Infinity` does NOT mean
+   * wait-forever — `0` does). Ignored entirely when no behaviour factory is
+   * configured, because the gate is then never armed. Declared on this shared
+   * base — never per-arm — since the gate exists for every broker.
+   *
+   * @since 0.4.0
+   */
+  readonly chainReadyTimeoutMs?: number;
+}
+
+/**
+ * Options for the in-memory broker — the adapter behind the `memory` arm of
+ * {@linkcode MessagingPluginOptions}, constructed by it and by applications
+ * that build `InMemoryBroker` directly.
+ *
+ * @since 0.4.0
+ */
+export interface InMemoryBrokerOptions {
+  /**
+   * Called once per REJECTED subscription handler, with the error and the
+   * message metadata of the failed dispatch. `publish` resolves on dispatch
+   * hand-off — never on handler completion — so this reporter is the terminus
+   * of the broker's failure path: the in-memory broker has no ack model and
+   * no redelivery to fall back on (unlike RabbitMQ, where a rejection reaching
+   * the broker's failure path can nack and redeliver). Absent, the rejection
+   * is still observed and settled — never an unhandled rejection — then
+   * dropped. A reporter that itself throws or rejects is swallowed by the broker: it is
+   * the last-resort sink, so its own failure can neither reject `publish` nor
+   * abort the sibling fan-out nor surface as an unhandled rejection.
+   * `MessagingPlugin` always supplies one backed by the application's logger,
+   * so the absent case is reachable only by constructing the broker directly.
+   */
+  readonly onDispatchError?: (
+    error: unknown,
+    metadata: MessageMetadata,
+  ) => void | Promise<void>;
 }
 
 /**

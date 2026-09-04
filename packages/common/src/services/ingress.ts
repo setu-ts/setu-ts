@@ -35,7 +35,12 @@ export type IngressKind = 'queue' | 'scheduler' | 'messaging' | 'websocket';
  *
  * There is deliberately no `state` slot and no `services` member: the envelope
  * is a per-item read-only value, and a behaviour needing a capability closes
- * over it via its `RegistryFactory` arm instead.
+ * over it via its `RegistryFactory` arm instead. That closed-over capability
+ * is also how a TENANT concern is written: the tenant id is read from
+ * `payload` and scoped through the ctx-free members of
+ * `IMultiTenancyService` (`getRepositoryFor`/`prefixCacheKey`) — its
+ * `IRequestContext`-taking members are unreachable from an ingress path,
+ * which carries no request.
  *
  * @typeParam TPayload - The native work item the ingress carries
  * @since 0.3.0

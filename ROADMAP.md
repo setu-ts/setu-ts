@@ -8980,4 +8980,4 @@ the decision, since a required member breaks out-of-repo implementors.
 | 88        | ✅     | response-path performance (kernel/runtime/common)   |
 | 89a       | ✅     | declarations that enforce nothing (X18-3/5/4/1)     |
 | 89b       | ✅     | caller errors read as server faults (X18-2, X19-1)  |
-| 89c       | ⬜     | 0.3.0 ingress surface (X16-1, X16-2)                |
+| 89c       | ✅     | 0.3.0 ingress surface (X16-1, X16-2)                |

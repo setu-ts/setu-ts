@@ -7,6 +7,7 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
+import type { InMemoryBrokerOptions } from '../interfaces/index.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
@@ -32,6 +33,7 @@ interface Subscriber {
 export class InMemoryBroker implements MessageBrokerAdapter {
   #runtime: IRuntimeServices;
   #serializer: ISerializer;
+  #options: InMemoryBrokerOptions | undefined;
   #subscribers: Map<string, Subscriber[]>;
   #queueCursors: Map<string, Map<string, number>>; // topic -> queue -> cursor
   #ready = false;
@@ -42,10 +44,12 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    *
    * @param runtime - Runtime services for uuid, timestamps, and timers
    * @param serializer - Serializer for message payloads
+   * @param options - Optional behaviour, currently the dispatch-error reporter
    */
-  constructor(runtime: IRuntimeServices, serializer: ISerializer) {
+  constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: InMemoryBrokerOptions) {
     this.#runtime = runtime;
     this.#serializer = serializer;
+    this.#options = options;
     this.#subscribers = new Map();
     this.#queueCursors = new Map();
     this.#rr = new RequestReplyCore({
@@ -128,14 +132,28 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * @typeParam T - The message payload type
    * @param topic - The topic to publish to
    * @param message - The message payload
-   * @returns Resolves when all handlers have been invoked
+   * @returns Resolves once every matching subscription's work item has been
+   * handed to dispatch — NOT once every handler has returned. A handler's
+   * rejection reaches the configured `onDispatchError` (or is observed and
+   * dropped when none is configured); it never rejects the publish and never
+   * becomes an unhandled rejection. This is the guarantee real brokers give —
+   * `publish` returns before delivery — so the in-memory double honours it
+   * too. Since M89c it also means one slow or throwing fan-out handler no
+   * longer delays or aborts delivery to its siblings.
    * @since 0.1.0
    */
   publish<T>(topic: string, message: T): Promise<void> {
     return this.publishWithHeaders(topic, message, {});
   }
 
-  /** Publishes a message with framework-owned transport headers. @internal */
+  /**
+   * Publishes a message with framework-owned transport headers. Resolves on
+   * dispatch hand-off (see {@linkcode publish}); each invoked handler's
+   * promise is RETAINED and its rejection routed to the failure path below —
+   * never dropped, never unhandled. @internal
+   */
+  // Resolves-on-hand-off is the documented contract, not a forgotten await.
+  // deno-lint-ignore require-await
   async publishWithHeaders<T>(
     topic: string,
     message: T,
@@ -172,12 +190,14 @@ export class InMemoryBroker implements MessageBrokerAdapter {
       }
     }
 
-    // Deliver to all no-queue subscribers (fanout)
+    // Deliver to all no-queue subscribers (fanout): INVOKE each, retain its
+    // promise, and move on — no await, so one handler's completion or failure
+    // never gates its siblings.
     for (const sub of noQueueSubs) {
-      await sub.handler(deserialized, metadata);
+      this.#invoke(sub, deserialized, metadata);
     }
 
-    // Deliver to one subscriber per queue (round-robin)
+    // Deliver to one subscriber per queue (round-robin), same hand-off.
     for (const [queue, queueSubs] of queueMap.entries()) {
       if (queueSubs.length === 0) {
         continue;
@@ -196,10 +216,55 @@ export class InMemoryBroker implements MessageBrokerAdapter {
 
       // Round-robin: select subscriber at cursor position
       const selectedSub = queueSubs[cursor % queueSubs.length];
-      await selectedSub.handler(deserialized, metadata);
+      this.#invoke(selectedSub, deserialized, metadata);
 
       // Advance cursor
       topicCursors.set(queue, (cursor + 1) % queueSubs.length);
+    }
+  }
+
+  /**
+   * Hands one work item to a subscriber and RETAINS the returned promise.
+   * A rejection — synchronous or asynchronous — is observed here and routed
+   * to the broker's failure path, so a failing handler can never surface as
+   * an unhandled rejection; without this retain, resolving `publish` on
+   * hand-off would orphan every in-flight handler promise.
+   */
+  #invoke(sub: Subscriber, message: unknown, metadata: MessageMetadata): void {
+    let result: void | Promise<void>;
+    try {
+      result = sub.handler(message, metadata);
+    } catch (error) {
+      this.#reportDispatchError(error, metadata);
+      return;
+    }
+    void Promise.resolve(result).catch((error: unknown) => {
+      this.#reportDispatchError(error, metadata);
+    });
+  }
+
+  /**
+   * The terminus of this broker's failure path. Unlike a real broker — where
+   * a rejection reaching the failure path can nack and redeliver — the
+   * in-memory double has no ack model and no redelivery, so reporting is the
+   * whole of it: the rejection has been observed and settled, and with no
+   * reporter configured it is dropped.
+   *
+   * A reporter that itself throws or rejects is swallowed HERE, at the single chokepoint
+   * both call sites share: the reporter is the last-resort sink, and letting
+   * its throw escape would abort the sibling fan-out from the synchronous
+   * catch (rejecting `publish`) or orphan the void-ed retained-promise chain
+   * as a genuine unhandled rejection (the asynchronous one). Falling back
+   * further only moves the hole.
+   */
+  #reportDispatchError(error: unknown, metadata: MessageMetadata): void {
+    const reporter = this.#options?.onDispatchError;
+    if (reporter !== undefined) {
+      try {
+        void Promise.resolve(reporter(error, metadata)).catch(() => {});
+      } catch {
+        // Swallowed deliberately — see the doc comment above.
+      }
     }
   }
 

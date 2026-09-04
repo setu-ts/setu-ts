@@ -64,6 +64,29 @@ export interface IMultiTenancyService {
     entity: string,
   ): ITenantRepository<Entity, Id>;
   /**
+   * Create a tenant-scoped repository for the given entity type, scoped to
+   * the tenant id GIVEN — no `IRequestContext` required. This is the entry
+   * point for non-HTTP work (an ingress behaviour, a queue processor, a
+   * scheduled job), where no request exists to resolve a tenant from; the
+   * caller reads the tenant id from the work item's own payload. Modelled on
+   * {@linkcode prefixCacheKey} — this interface's other ctx-free, id-taking
+   * member.
+   *
+   * The id is TRUSTED INPUT: nothing resolves it, so a caller passing a
+   * user-controlled value bypasses the resolved tenant. On the HTTP path use
+   * {@linkcode getRepository}, which reads the middleware-resolved
+   * `ctx.request.tenant`.
+   *
+   * @param tenantId - The tenant id to scope the repository to (trusted input)
+   * @param entity - Entity name for scoping
+   * @returns A tenant-scoped repository
+   * @since 0.4.0
+   */
+  getRepositoryFor<Entity, Id = string>(
+    tenantId: string,
+    entity: string,
+  ): ITenantRepository<Entity, Id>;
+  /**
    * Build a cache key that includes the tenant id, joined by the separator
    * the plugin was configured with (`cache.separator`, default `':'`). The
    * separator is deliberately NOT a per-call argument: this method is the

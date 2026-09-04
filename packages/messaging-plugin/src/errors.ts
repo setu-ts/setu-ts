@@ -96,3 +96,42 @@ export class ReplyInboxUnavailableError extends Error {
     this.name = 'ReplyInboxUnavailableError';
   }
 }
+
+/**
+ * Thrown when a delivery held on the ingress behaviour-chain gate
+ * (`PipelinedBroker`) waits longer than the configured
+ * `chainReadyTimeoutMs` (default 10 000 ms; `0` waits forever) for the
+ * behaviour chain to open.
+ *
+ * The gate opens at the end of `onInit`; a dispatch still held past the bound
+ * means `onInit` never ran to completion — most often a plugin that publishes
+ * during its own `register()` while a behaviour factory is configured, which
+ * closes a circular wait (publish → delivery → gate → `onInit` → the
+ * `register()` that never returns). The gate itself is left in place, so
+ * later dispatches refuse the same way rather than delivering through a
+ * partial chain.
+ *
+ * @since 0.4.0
+ */
+export class ChainGateTimeoutError extends Error {
+  /** The bound that fired, in milliseconds. */
+  readonly timeoutMs: number;
+
+  /**
+   * Creates the error reported for a dispatch that outlived the bound while
+   * the gate had neither settled nor rejected.
+   *
+   * @param timeoutMs - The configured `chainReadyTimeoutMs` bound that fired
+   */
+  constructor(timeoutMs: number) {
+    super(
+      `Messaging behaviour chain did not open within ${timeoutMs}ms — ` +
+        'delivery is held on the ingress behaviour-chain gate, and a plugin ' +
+        'that publishes during its own register() is the likely cause. ' +
+        'Check plugins resolving the messaging broker in register(), or set ' +
+        'MessagingPlugin({ chainReadyTimeoutMs: 0 }) to wait indefinitely.',
+    );
+    this.name = 'ChainGateTimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}

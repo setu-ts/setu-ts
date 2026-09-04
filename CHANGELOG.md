@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common` — `IMultiTenancyService.getRepositoryFor(tenantId, entity)`**, the ctx-free
+  tenant-scoped repository entry point, modelled on the interface's other ctx-free, id-taking member
+  `prefixCacheKey`. It exists because `0.3.0`'s release notes advertised a **tenant** concern as
+  expressible once per ingress kind, and measured against the shipped contract it was not: both
+  tenant-bearing members take an `IRequestContext`, which no ingress path has. The concern became
+  expressible in THIS release, not `0.3.0`. An ingress behaviour reads the tenant id from the work
+  item's own payload (`IngressContext.payload`) and scopes through the ctx-free member; the id is
+  trusted input, so `getRepository(ctx, …)` stays the HTTP-path member.
+
+- **`@setu-ts/messaging-plugin` — the bounded chain-gate wait.** `MessagingCommonOptions` gains
+  `chainReadyTimeoutMs` (default `10_000`; `0` waits forever; ignored when no `behaviors` factory is
+  configured, because the gate is then never armed; finite, non-negative values up to
+  `2_147_483_647`): a dispatch held on the gate rejects after the bound with the new exported
+  `ChainGateTimeoutError`, whose message names `register()` as the likely cause. A REJECTED gate
+  still refuses delivery forever, as before. Also exported: `InMemoryBrokerOptions`, whose optional
+  `onDispatchError(error, metadata)` is the terminus of the in-memory broker's handler-failure path
+  (the plugin always supplies one backed by the application's logger, read at call time; the option
+  is reachable only by constructing the broker directly).
+
 - **`@setu-ts/common` — the HTTP status hint**, a symbol-keyed brand through which a package that
   may not import `@setu-ts/exceptions` (AI_GUIDELINES §2.2) states how its own error should be
   answered: `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint(error, hint)` and
@@ -31,6 +50,37 @@ All notable changes to this project are documented here. The format follows
   ERROR is answered, which is never a success or a redirect.
 
 ### Changed
+
+- **BREAKING (behaviour) — `InMemoryBroker.publish` resolves on dispatch hand-off, not on handler
+  completion** (X16-1). The documented contract said it resolves "when all handlers have been
+  invoked"; it actually resolved when every handler had RETURNED, and combined with the behaviour
+  chain's delivery gate — which opens at the end of `onInit` — a plugin that published (and awaited
+  the publish) during its own `register()` deadlocked startup silently: no boot, no error, no log.
+  Measured on 2026-09-03, the blast radius was the in-memory broker alone; rabbitmq and
+  redis-streams already returned before delivery and delivered through the complete chain. `publish`
+  now resolves once each matching subscription's work item has been handed to dispatch, the
+  guarantee real brokers always gave. Every invoked handler's promise is RETAINED: a rejection
+  reaches the broker's failure path — on in-memory, a logger report via the plugin-supplied
+  `onDispatchError` — never the caller, and never an unhandled rejection. One slow or throwing
+  fan-out handler also no longer delays or aborts delivery to its siblings.
+
+  _Migration:_ code that awaited `publish` and then asserted a handler side-effect without awaiting
+  anything else needs one more `await` (a completion deferred the handler exposes, or a polling
+  wait). A handler rejection no longer propagates to `await publish`; branch on the handler's own
+  error path or observe the logger report instead.
+
+- **BREAKING (API) — `IMultiTenancyService` gains the REQUIRED `getRepositoryFor`** (X16-2). Out-of-
+  repo implementors of the interface must add it; the framework's own `MultiTenancyService` is the
+  only in-repo implementor. Required rather than optional because an optional member returning
+  `undefined` cannot distinguish "no such tenant" from "this implementation does not offer the
+  read". `tenantById` was deliberately NOT added: nothing in the committed surface can implement it
+  — `MultiTenancyService` holds a CRUD store and no tenant catalog — and inventing one is its own
+  design.
+
+  _Migration:_ add one method to any custom `IMultiTenancyService` implementation:
+  `getRepositoryFor(tenantId, entity)` returns an `ITenantRepository` scoped to the id GIVEN
+  (`new TenantRepository(store, tenantId, entity)` is the shipped shape). Callers change nothing
+  except where they previously could not do this at all.
 
 - **BREAKING (behaviour) — `@Roles`/`@Permissions` are now ENFORCED.** `DecoratorPlugin` appends
   enforcing authorization middleware to every route carrying a restriction: it resolves
