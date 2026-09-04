@@ -26,6 +26,7 @@ import {
   CAPABILITIES,
   ERROR_RESPONDER_STATE_KEY,
   httpStatusHintOf,
+  resolveResponseStatus,
   serializeError,
 } from '@setu-ts/common';
 
@@ -198,6 +199,27 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
           statusTitle(error.statusCode),
           undefined,
           cause,
+        );
+      }
+
+      // An `HttpError` carries whatever status its thrower passed: the
+      // constructor validates nothing, and its own JSDoc says the factory
+      // functions are what "guarantee a correct status code". So
+      // `throw new HttpError(4004, ...)` — a typo for `404` — reached
+      // `response.status()` and threw `RangeError` out of the one `catch` that
+      // exists to contain throws. The status is clamped BEFORE the log and the
+      // body are built, so the logged status, the body's own status member and
+      // the written status are one number. Rebuilding rather than clamping at
+      // the write also makes `responseError === error` false, which suppresses
+      // the stack — correct by that check's own stated invariant, since the
+      // error being SERVED is no longer the error that was LOGGED.
+      const servedStatus = resolveResponseStatus(responseError.statusCode, ctx);
+      if (servedStatus !== responseError.statusCode) {
+        responseError = new HttpError(
+          servedStatus,
+          responseError.message,
+          responseError.details,
+          responseError.cause instanceof Error ? responseError.cause : undefined,
         );
       }
 

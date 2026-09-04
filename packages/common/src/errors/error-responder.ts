@@ -31,6 +31,9 @@
  * @module
  */
 import type { IResponse } from '../http.ts';
+import type { IServiceRegistry } from '../registry.ts';
+import type { ILogger } from '../services/logger.ts';
+import { CAPABILITIES } from '../tokens.ts';
 
 /**
  * The `ctx.state` key under which an application's resolved error responder is
@@ -201,9 +204,14 @@ export interface IErrorResponder {
  * @since 0.1.0
  */
 export function respondWithError(target: ErrorResponderTarget, init: ErrorResponseInit): void {
+  // Sanitize BEFORE delegating, so a responder receives a serveable status and
+  // its formatted body's `status` member agrees with the status actually
+  // written. `resolveResponseStatus` is idempotent, so the responder's own
+  // guard re-runs on an already-clean value and reports nothing twice.
+  const safeInit = withServeableStatus(init, target);
   const responder = target.state.get(ERROR_RESPONDER_STATE_KEY);
   if (isErrorResponder(responder)) {
-    responder.respond(target, init);
+    responder.respond(target, safeInit);
     return;
   }
   // The no-responder fallback writes through `.json()` — the SAME call the
@@ -215,11 +223,11 @@ export function respondWithError(target: ErrorResponderTarget, init: ErrorRespon
   // The two calls are separate statements rather than chained: `status()`
   // returns `IResponse` on the real builder but `void` on many test fakes, so
   // chaining would crash a minimal context that only needs to record the status.
-  const body: Record<string, unknown> = { error: init.title };
-  if (init.detail !== undefined) {
-    body.detail = init.detail;
+  const body: Record<string, unknown> = { error: safeInit.title };
+  if (safeInit.detail !== undefined) {
+    body.detail = safeInit.detail;
   }
-  target.response.status(init.status);
+  target.response.status(safeInit.status);
   target.response.json(body);
 }
 
@@ -230,4 +238,115 @@ function isErrorResponder(value: unknown): value is IErrorResponder {
     value !== null &&
     typeof (value as IErrorResponder).respond === 'function'
   );
+}
+
+/**
+ * The lowest status the web `Response` constructor accepts.
+ *
+ * Deliberately NOT the `400` floor of `MIN_HINT_STATUS` in `status-hint.ts`.
+ * An {@linkcode ErrorResponseInit} carries a plain `number` that an application
+ * authors — `FlagGuardOptions.statusCode` is the shipped example — so any
+ * serveable status is expressible here, where an `HttpStatusHint`, which says
+ * how an *error* is answered, is restricted to `400`-`599`. This bound is
+ * serveability; that one is error-ness.
+ */
+const MIN_SERVEABLE_STATUS = 200;
+
+/** The highest status the web `Response` constructor accepts. */
+const MAX_SERVEABLE_STATUS = 599;
+
+/**
+ * The statuses the Fetch standard forbids a body on.
+ *
+ * Being inside `[200, 599]` is not sufficient: `new Response(body, { status })`
+ * throws `TypeError: Response with null body status cannot have body` for
+ * these three, and every path through this seam writes a body — an
+ * {@linkcode ErrorResponseInit} carries a required `title`. So an init naming
+ * one of them is self-contradictory in the same way an out-of-range number is,
+ * and takes the same remedy. Measured against the real serve path, not
+ * inferred: all three threw out of `app.fetch` before this was excluded.
+ */
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
+
+/** The status an unserveable one is clamped to. */
+const CLAMPED_STATUS = 500;
+
+/**
+ * Returns a status the web `Response` constructor will accept, clamping an
+ * unserveable one to `500` and reporting it through the logger capability when
+ * one is reachable.
+ *
+ * The `Response` constructor throws `RangeError` for anything outside
+ * `[200, 599]` and for a non-integer, and `TypeError` for a body on one of the
+ * null-body statuses `204`/`205`/`304` (see {@linkcode NULL_BODY_STATUSES}) —
+ * any of which would make the error path itself the fault: the response the
+ * caller asked for is replaced by an unhandled exception on the real serve
+ * path. Three shipped call sites pass a status the
+ * APPLICATION authors — `FlagGuardOptions.statusCode`, the multi-tenancy
+ * `rejectionStatus`, and a `WebSocketGuardDecision.status` — so a plausible
+ * typo such as `4004` for `404` crashes every request to that route.
+ *
+ * Clamping to `500` rather than treating the status as absent is deliberate:
+ * the caller definitely wants an error response and only the number is wrong.
+ *
+ * `Number.isInteger` is checked BEFORE the range comparisons because `NaN` —
+ * what a mis-derived status collapses to — satisfies neither `<` nor `>`, so a
+ * bare range check would accept it and the constructor would then reject it
+ * as `0`.
+ *
+ * `inject()` cannot observe any of this: it builds no native `Response`, so a
+ * regression test must drive `app.fetch`.
+ *
+ * @param status - The status an {@linkcode ErrorResponseInit} carries
+ * @param target - The context the response is written to; supplies the logger
+ * @returns `status` when it is serveable, otherwise `500`
+ * @since 0.4.0
+ */
+export function resolveResponseStatus(status: number, target: ErrorResponderTarget): number {
+  if (
+    Number.isInteger(status) &&
+    status >= MIN_SERVEABLE_STATUS &&
+    status <= MAX_SERVEABLE_STATUS &&
+    !NULL_BODY_STATUSES.has(status)
+  ) {
+    return status;
+  }
+  reportUnserveableStatus(status, target);
+  return CLAMPED_STATUS;
+}
+
+/**
+ * Returns an init whose status is serveable, reusing the original object when
+ * it already is so the common path allocates nothing.
+ */
+function withServeableStatus(
+  init: ErrorResponseInit,
+  target: ErrorResponderTarget,
+): ErrorResponseInit {
+  const status = resolveResponseStatus(init.status, target);
+  return status === init.status ? init : { ...init, status };
+}
+
+/**
+ * Reports an unserveable status through the logger capability, when the target
+ * is a full request context and a logger is registered.
+ *
+ * The pre-pipeline targets carry no `services`, so a clamp there is silent —
+ * the alternative is no clamp at all, which crashes the request. Reporting can
+ * never replace the error response: a throwing logger is swallowed.
+ */
+function reportUnserveableStatus(status: number, target: ErrorResponderTarget): void {
+  const services = (target as { readonly services?: IServiceRegistry }).services;
+  if (typeof services?.has !== 'function') return;
+  try {
+    if (!services.has(CAPABILITIES.LOGGER)) return;
+    services.get<ILogger>(CAPABILITIES.LOGGER).error(
+      'An error response carried an unserveable status; answering 500 instead.',
+      { status, clampedTo: CLAMPED_STATUS },
+    );
+  } catch {
+    // Reporting is best-effort: a throwing logger, or a malformed registry
+    // whose `get` is not callable, must never turn the error response this
+    // function exists to protect into a 500.
+  }
 }

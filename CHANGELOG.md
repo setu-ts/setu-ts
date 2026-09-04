@@ -100,6 +100,37 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`@setu-ts/common` / `@setu-ts/exceptions` — an unserveable status no longer makes the error path
+  itself the fault.** `respondWithError` and `createErrorResponder`'s responder passed
+  `ErrorResponseInit.status` straight to `response.status(...)`. The web `Response` constructor
+  throws `RangeError` outside `[200, 599]` and for a non-integer, and `TypeError` for a body on one
+  of the null-body statuses `204`/`205`/`304` — so such a value replaced the error response the
+  caller asked for with an unhandled exception on the real serve path. The null-body three are in
+  range and so survive a range check; every path through this seam writes a body, since
+  `ErrorResponseInit.title` is required.
+
+  This was reachable from application code through published options, not only from a framework
+  literal: `FlagGuardOptions.statusCode`, the multi-tenancy `rejectionStatus`, and a
+  `WebSocketGuardDecision.status` are all authored by the application, so `4004` — a plausible typo
+  for `404` — crashed every request to that route. A new exported
+  `resolveResponseStatus(status,
+  target)` clamps an unserveable status to `500` and reports it
+  through the logger capability when the target carries one; `Number.isInteger` is checked before
+  the range comparisons, because `NaN` satisfies neither `<` nor `>`. Both entry points sanitize
+  before building their response, so the formatted body's status member and the written status
+  cannot disagree.
+
+  A THIRD door was found while fixing the first two and is closed with them: `HttpError`'s
+  constructor validates nothing — its own JSDoc says the factory functions are what guarantee a
+  correct status — so `throw new HttpError(4004, '...')` reached `response.status()` and threw
+  `RangeError` out of the one `catch` that exists to contain throws. `errorHandler` now clamps
+  before it logs and before it builds the body, so the logged status, the body's status member and
+  the written status are one number; the thrower's message survives, since only the number was
+  wrong.
+
+  No behaviour changes for a serveable status. `inject()` could not observe any of this — it builds
+  no native `Response` — so the regression tests drive `app.fetch`.
+
 - **`setu add` refuses extra arguments instead of silently discarding them.** The contract is
   singular; `setu add auth cache` used to add one package, report `updated deno.json` and exit 0
   with the rest uninspected. A second positional is now a usage error naming the count (`exit 2`,

@@ -1,0 +1,282 @@
+/**
+ * Regression: an application-authored status that the web `Response`
+ * constructor refuses must not turn the error path itself into the fault.
+ *
+ * `FlagGuardOptions.statusCode` is a PUBLISHED option, so `4004` — a plausible
+ * typo for `404` — is authored by application code and reaches
+ * `respondWithError` unchecked. Before the guard, every request to that route
+ * threw `RangeError: The status provided (4004) is outside the range
+ * [200, 599]` out of `app.fetch`.
+ *
+ * Driven with `app.fetch` and never `inject()`: `inject()` builds no native
+ * `Response`, so it cannot observe this at all — the M51 `Allow`-header trap.
+ *
+ * @module
+ */
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+import { createTestApp } from '@setu-ts/testing';
+import type { IKernelApplication } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
+
+/**
+ * The structural pino instance `PinoFactory` returns. Declared here because
+ * `logger-plugin` keeps `PinoLoggerLike` internal; the members and their
+ * `(obj, msg)` argument order are copied from its declaration, where the
+ * structured object is FIRST.
+ */
+interface PinoLoggerLike {
+  readonly level: string;
+  fatal(obj: unknown, msg: string): void;
+  error(obj: unknown, msg: string): void;
+  warn(obj: unknown, msg: string): void;
+  info(obj: unknown, msg: string): void;
+  debug(obj: unknown, msg: string): void;
+  trace(obj: unknown, msg: string): void;
+  child(bindings: Record<string, unknown>): PinoLoggerLike;
+}
+import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
+
+import { errorHandler } from '../../src/middleware/error-handler.ts';
+import { HttpError } from '../../src/errors/http-error.ts';
+
+/**
+ * An app whose `/typo`, `/nan` and `/sane` routes are each guarded by a flag
+ * guard carrying the named status.
+ */
+async function buildApp(format: 'default' | 'rfc9457'): Promise<IKernelApplication> {
+  const app = await createTestApp({
+    plugins: [
+      RuntimePlugin(),
+      FeatureFlagsPlugin({
+        provider: 'memory',
+        options: { flags: { 'off-flag': { enabled: false } } },
+      }),
+    ],
+    autoStart: false,
+  });
+  app.middleware.add(errorHandler({ format, logErrors: false }), {
+    priority: 0,
+    name: 'error-handler',
+  });
+  const guards: ReadonlyArray<readonly [string, number]> = [
+    ['/typo', 4004],
+    ['/nan', Number.NaN],
+    ['/huge', 999],
+    // In range, but the Fetch standard forbids a body on these, so the
+    // `Response` constructor rejects them with `TypeError` rather than
+    // `RangeError` — a second crash the range check alone does not close.
+    ['/no-content', 204],
+    ['/reset', 205],
+    ['/not-modified', 304],
+    ['/sane', 404],
+  ];
+  let priority = 100;
+  for (const [path, statusCode] of guards) {
+    const guard = createFlagGuard('off-flag', { statusCode });
+    app.middleware.add(
+      (ctx, next) => (ctx.request.path === path ? guard(ctx, next) : next()),
+      { priority: priority++, name: `guard${path}` },
+    );
+    app.router.get(path, (ctx) => ctx.response.text('handler ran'));
+  }
+  await app.start();
+  return app;
+}
+
+/** Drives a path through the REAL serve path and reads status + body. */
+async function drive(app: IKernelApplication, path: string) {
+  const res = await app.fetch(new Request(`http://test.local${path}`));
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+}
+
+describe('an unserveable status on a published guard option', () => {
+  it('answers 500 instead of throwing RangeError out of app.fetch (default format)', async () => {
+    const app = await buildApp('default');
+    try {
+      // Each of these threw before the guard existed.
+      for (const path of ['/typo', '/nan', '/huge', '/no-content', '/reset', '/not-modified']) {
+        const res = await drive(app, path);
+        expect(res.status).toBe(500);
+        // The body's own status member agrees with the written status.
+        expect(res.body.statusCode).toBe(500);
+      }
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('leaves a serveable status untouched', async () => {
+    const app = await buildApp('default');
+    try {
+      const res = await drive(app, '/sane');
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ statusCode: 404, message: 'Not Found' });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it("keeps the formatted body's status member in agreement with the written status", async () => {
+    const app = await buildApp('rfc9457');
+    try {
+      const res = await drive(app, '/typo');
+      expect(res.status).toBe(500);
+      // The Problem Details `status` member is built from the same sanitized
+      // init, so body and header cannot disagree.
+      expect(res.body.status).toBe(500);
+      const sane = await drive(app, '/sane');
+      expect(sane.status).toBe(404);
+      expect(sane.body.status).toBe(404);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('never runs the guarded handler — the route is still refused, just serveably', async () => {
+    const app = await buildApp('default');
+    try {
+      const res = await app.fetch(new Request('http://test.local/typo'));
+      expect(res.status).toBe(500);
+      expect(await res.text()).not.toContain('handler ran');
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
+describe('an unserveable status on a thrown HttpError', () => {
+  /**
+   * `HttpError`'s constructor validates nothing — its own JSDoc says the
+   * factory functions are what guarantee a correct status — so this is a
+   * SECOND door to the identical crash, reached without `respondWithError`.
+   */
+  async function throwingApp(format: 'default' | 'rfc9457'): Promise<IKernelApplication> {
+    const app = await createTestApp({ plugins: [RuntimePlugin()], autoStart: false });
+    app.middleware.add(errorHandler({ format, logErrors: false }), {
+      priority: 0,
+      name: 'error-handler',
+    });
+    app.router.get('/typo', () => {
+      throw new HttpError(4004, 'typo');
+    });
+    app.router.get('/nan', () => {
+      throw new HttpError(Number.NaN, 'nan');
+    });
+    app.router.get('/no-content', () => {
+      throw new HttpError(204, 'no content');
+    });
+    app.router.get('/sane', () => {
+      throw new HttpError(404, 'genuinely missing');
+    });
+    await app.start();
+    return app;
+  }
+
+  it('answers 500 instead of throwing RangeError out of the handler catch', async () => {
+    const app = await throwingApp('default');
+    try {
+      const typo = await drive(app, '/typo');
+      expect(typo.status).toBe(500);
+      // The status is clamped; only the number was wrong, so the message the
+      // thrower deliberately wrote survives.
+      expect(typo.body).toEqual({ statusCode: 500, message: 'typo' });
+      expect((await drive(app, '/nan')).status).toBe(500);
+      // The null-body statuses reach this door too.
+      expect((await drive(app, '/no-content')).status).toBe(500);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('leaves a serveable thrown status untouched', async () => {
+    const app = await throwingApp('default');
+    try {
+      const res = await drive(app, '/sane');
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ statusCode: 404, message: 'genuinely missing' });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('keeps the Problem Details status member in agreement with the written status', async () => {
+    const app = await throwingApp('rfc9457');
+    try {
+      const res = await drive(app, '/typo');
+      expect(res.status).toBe(500);
+      expect(res.body.status).toBe(500);
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
+describe('the clamp reported through a REAL first-party logger', () => {
+  /**
+   * Regression guard for the `resolveLogger` this-binding class (M52c): the
+   * loggers `logger-plugin` ships implement their level methods in terms of a
+   * private `#` field, so a DETACHED method call throws `TypeError`. Every
+   * other assertion for this path uses a plain-object fake, where a detached
+   * method works fine.
+   *
+   * `reportUnserveableStatus` swallows a throwing logger by design — the report
+   * must never replace the error response — so "did not throw" would prove
+   * nothing here; the emitted record is what must be observed. The REAL
+   * `PinoLogger` is used rather than `ConsoleLogger` because it is the one
+   * first-party logger with an injectable sink, so the private-field property
+   * that matters is exercised without capturing `console` (which `no-console`
+   * forbids). The double sits at the third-party pino boundary, not at our own
+   * `ILogger`.
+   */
+  it('emits the clamp report, not just a 500', async () => {
+    const emitted: Array<{ meta: unknown; msg: string }> = [];
+    const sink: PinoLoggerLike = {
+      level: 'error',
+      fatal: () => {},
+      error: (meta: unknown, msg: string) => {
+        emitted.push({ meta, msg });
+      },
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+      child: () => sink,
+    };
+
+    const app = await createTestApp({
+      plugins: [
+        RuntimePlugin(),
+        // The REAL PinoLogger class — its `error` reaches `this.#pino`, so a
+        // detached call throws — writing into the sink above.
+        LoggerPlugin({ transport: 'pino', level: 'error', pinoFactory: () => sink }),
+        FeatureFlagsPlugin({
+          provider: 'memory',
+          options: { flags: { 'off-flag': { enabled: false } } },
+        }),
+      ],
+      autoStart: false,
+    });
+    app.middleware.add(errorHandler({ format: 'default', logErrors: false }), {
+      priority: 0,
+      name: 'error-handler',
+    });
+    const guard = createFlagGuard('off-flag', { statusCode: 4004 });
+    app.middleware.add((ctx, next) => guard(ctx, next), { priority: 100, name: 'guard' });
+    app.router.get('/typo', (ctx) => ctx.response.text('handler ran'));
+    await app.start();
+    try {
+      const res = await app.fetch(new Request('http://test.local/typo'));
+      expect(res.status).toBe(500);
+    } finally {
+      await app.stop();
+    }
+
+    const report = emitted.find((e) => e.msg.includes('unserveable status'));
+    expect(report).toBeDefined();
+    // The metadata reaches the logger too — a detached call would have thrown
+    // before emitting anything, and the swallow would have hidden it.
+    expect(report?.meta).toMatchObject({ status: 4004, clampedTo: 500 });
+  });
+});
