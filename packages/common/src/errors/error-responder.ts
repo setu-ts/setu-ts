@@ -258,13 +258,19 @@ const MAX_SERVEABLE_STATUS = 599;
 /**
  * The statuses the Fetch standard forbids a body on.
  *
- * Being inside `[200, 599]` is not sufficient: `new Response(body, { status })`
- * throws `TypeError: Response with null body status cannot have body` for
- * these three, and every path through this seam writes a body — an
- * {@linkcode ErrorResponseInit} carries a required `title`. So an init naming
- * one of them is self-contradictory in the same way an out-of-range number is,
- * and takes the same remedy. Measured against the real serve path, not
- * inferred: all three threw out of `app.fetch` before this was excluded.
+ * Being inside `[200, 599]` is not sufficient. `new Response(body, { status })`
+ * rejects a body at these three, and every path through this seam writes one —
+ * an {@linkcode ErrorResponseInit} carries a required `title`. So an init
+ * naming one of them is self-contradictory in the same way an out-of-range
+ * number is, and takes the same remedy.
+ *
+ * The consequence of NOT clamping is a silently discarded error rather than a
+ * crash: `@setu-ts/runtime`'s snapshot mapper drops a body written at one of
+ * these statuses (it must, or the constructor throws inside the adapter where
+ * nothing can catch it), so an unclamped error init would be served as a
+ * bodiless `204` and the caller would never learn what went wrong. Clamping
+ * keeps the error answerable. Before that mapper guard existed, all three
+ * threw out of `app.fetch` — measured, not inferred.
  */
 const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
 
