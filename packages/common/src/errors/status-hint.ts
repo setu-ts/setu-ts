@@ -243,9 +243,11 @@ export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
  * The second is semantic, and it is why the floor is `400` rather than `200`:
  * a hint says how an ERROR should be answered, and an error is never a success
  * or a redirect. This is deliberately stricter than the
- * {@linkcode ErrorResponseInit} it extends — `respondWithError` takes its
- * status from a literal at the call site, visible in review, while a brand
- * travels from another package inside an error.
+ * {@linkcode ErrorResponseInit} it extends, whose `status` is a plain `number`
+ * an application authors and so may be any serveable status, not only an error
+ * one; it is guarded separately by `resolveResponseStatus` against the
+ * serveability bound `200`-`599`. That bound is serveability, this one is
+ * error-ness.
  */
 function isConformingStatus(status: unknown): status is number {
   if (typeof status !== 'number') return false;

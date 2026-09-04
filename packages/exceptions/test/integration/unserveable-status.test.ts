@@ -18,6 +18,7 @@ import { expect } from '@std/expect';
 import { createTestApp } from '@setu-ts/testing';
 import type { IKernelApplication } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
 import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
 
 import { errorHandler } from '../../src/middleware/error-handler.ts';
@@ -181,5 +182,63 @@ describe('an unserveable status on a thrown HttpError', () => {
     } finally {
       await app.stop();
     }
+  });
+});
+
+describe('the clamp reported through the REAL ConsoleLogger', () => {
+  /**
+   * Regression guard for the `resolveLogger` this-binding class (M52c): the
+   * loggers `logger-plugin` ships implement their level methods in terms of a
+   * private `#` field, so a DETACHED method call throws `TypeError`. Every
+   * other assertion for this path uses a plain-object fake, where a detached
+   * method works fine.
+   *
+   * `reportUnserveableStatus` swallows a throwing logger by design — the
+   * report must never replace the error response — so "did not throw" would
+   * prove nothing here. The log line itself is what must be observed, so
+   * `console.log` (the sink `ConsoleLogger` writes to) is captured.
+   */
+  it('emits the clamp report, not just a 500', async () => {
+    const lines: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(' '));
+    };
+    try {
+      const app = await createTestApp({
+        plugins: [
+          RuntimePlugin(),
+          LoggerPlugin({ level: 'error' }), // real ConsoleLogger, not a fake
+          FeatureFlagsPlugin({
+            provider: 'memory',
+            options: { flags: { 'off-flag': { enabled: false } } },
+          }),
+        ],
+        autoStart: false,
+      });
+      app.middleware.add(errorHandler({ format: 'default', logErrors: false }), {
+        priority: 0,
+        name: 'error-handler',
+      });
+      const guard = createFlagGuard('off-flag', { statusCode: 4004 });
+      app.middleware.add((ctx, next) => guard(ctx, next), { priority: 100, name: 'guard' });
+      app.router.get('/typo', (ctx) => ctx.response.text('handler ran'));
+      await app.start();
+      try {
+        const res = await app.fetch(new Request('http://test.local/typo'));
+        expect(res.status).toBe(500);
+      } finally {
+        await app.stop();
+      }
+    } finally {
+      console.log = realLog;
+    }
+
+    const report = lines.find((l) => l.includes('unserveable status'));
+    expect(report).toBeDefined();
+    // The metadata reaches the logger too — a detached call would have thrown
+    // before writing anything, and the swallow would have hidden it.
+    expect(report).toContain('"status":4004');
+    expect(report).toContain('"clampedTo":500');
   });
 });
