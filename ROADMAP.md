@@ -8419,7 +8419,7 @@ them would still silently select the wrong transport — complete (PR #215).
 
 ---
 
-## Milestone 86: Non-HTTP Ingress — Registration Sites and a Pipeline
+## Milestone 86: Non-HTTP Ingress — Registration Sites and a Pipeline ✅ (PR #228)
 
 **Objective:** Give the four ingress paths that do not ride HTTP — WebSocket routes, queue
 processors, scheduler jobs and broker subscriptions — the two things HTTP ingress has had since M2:
@@ -8546,7 +8546,7 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
 
 ---
 
-## Milestone 87: Request-Path Performance
+## Milestone 87: Request-Path Performance ✅ (PR #227)
 
 **Package(s):** `packages/common`, `packages/kernel`, `packages/runtime`
 
@@ -8672,7 +8672,7 @@ rather than by package — the M70a–M70n precedent, where each letter stayed i
 | **M89b** | A caller error that reads as a server fault | X18-2, X19-1               |
 | **M89c** | The `0.3.0` ingress surface                 | X16-1, X16-2               |
 
-## Milestone 89a: Declarations That Enforce Nothing
+## Milestone 89a: Declarations That Enforce Nothing ✅ (PR #235)
 
 **Package(s):** `packages/decorator-plugin`, `packages/multi-tenancy-plugin`, `packages/cli`, docs
 
