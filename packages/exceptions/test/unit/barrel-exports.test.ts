@@ -56,6 +56,12 @@ describe('exceptions barrel exports', () => {
       'VALIDATION_TYPE',
       'ABOUT_BLANK',
       'createErrorResponder',
+      // `buildErrorFromInit` is the one owner of the
+      // `{ status, title, detail }` -> `HttpError` mapping, shared by the
+      // responder and `errorHandler`'s M89b status-hint path. It is an
+      // implementation detail of both; a package that needs the behaviour
+      // reaches `respondWithError` or brands with `withHttpStatusHint`.
+      'buildErrorFromInit',
     ] as const;
 
     for (const name of internal) {

@@ -657,6 +657,54 @@ projecting one silently changes the response shape.
 Uniqueness and types are outside what any schema-less store can do. **Use the Memory adapter for
 development and tests, and run integration tests against the backend you deploy on.**
 
+## What a refused query returns to the client
+
+The three query-shape refusals — `UnsupportedQueryFeatureError`, `UnsupportedFilterOperatorError`
+and `UnsupportedRawQueryError` — are answered **`501 Not Implemented`** when `@setu-ts/exceptions`'
+`errorHandler` is registered. The **status and the detail sentence are the invariant**; the body's
+shape is the format that application configured. Under `format: 'rfc9457'`:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Not Implemented",
+  "status": 501,
+  "detail": "Query feature 'orderBy' is not supported by the 'dynamodb' database adapter."
+}
+```
+
+Under the `default` format the same refusal reads
+`{"statusCode":501,"message":"Not Implemented","details":{"detail":"…"}}`, and with no
+`errorHandler` registered, `{"error":"Not Implemented","detail":"…"}`.
+
+`501` because the condition is permanent and the backend genuinely does not implement what the query
+asked for. This is the shape you meet when **switching backends**, which is what the portable
+contract is for: an application that works on MongoDB will answer `501` on an ordered endpoint under
+DynamoDB rather than the `500 Internal Server Error` it used to (M89b).
+
+**The error's `message` is never served.** It is the full diagnostic — it names entities, columns
+and sort keys — and it reaches the log alone, where `errorHandler` records it unmasked along with
+the cause chain. The served `detail` is composed from the framework's own identifiers, which is what
+lets a refusal be readable without becoming a disclosure channel.
+
+**Not every `UnsupportedQueryFeatureError` is branded, and that is deliberate.** The class is shared
+by two kinds of refusal: a caller-caused query shape, and a **configuration** refusal. Only the
+former is answered `501`; the latter keeps the masked `500` that is correct for an internal fault.
+Branding the constructor unconditionally made a blank `columnFamily` — a value the developer wrote —
+answer every request
+`501 "Query feature 'mapping' is not supported by the 'bigtable' database
+adapter."`, which is a lie
+twice over. The split is an allowlist of `feature` values (`attribute-value`, `composite-key`,
+`cursor-pagination`, `key`, `nested-path`, `offset`, `order-by`/`orderBy`, `row-key`, `update`);
+`mapping`, `endpoint`, `date-encoding` and `transaction` are excluded, and **an unclassified value
+is not branded** — so a feature name added later keeps its masked `500` until someone decides
+otherwise.
+
+The transaction and concurrency errors (`MongoTransactionUnavailableError`,
+`CosmosTransactionScopeError`, `CosmosConcurrentModificationError`, `BigtableTransactionScopeError`)
+deliberately keep the masked `500`: they may quote backend state, and a concurrency conflict is
+transient rather than permanent. Branch on them with `instanceof` — every one is exported.
+
 ## Transactions
 
 `IUnitOfWork` groups repository work into one transaction. Prisma exposes only callback-style

@@ -114,6 +114,7 @@ package fits the plugin architecture.
 | `errorResponderOf`           | function  |
 | `extractContextFromHeaders`  | function  |
 | `fromNullable`               | function  |
+| `httpStatusHintOf`           | function  |
 | `isErr`                      | function  |
 | `isLexicallyContained`       | function  |
 | `isNone`                     | function  |
@@ -147,12 +148,14 @@ package fits the plugin architecture.
 | `upgradeIntentOf`            | function  |
 | `validatedStateKey`          | function  |
 | `validationMetadataOf`       | function  |
+| `withHttpStatusHint`         | function  |
 | `withSecurityMetadata`       | function  |
 | `withValidationMetadata`     | function  |
 | `CAPABILITIES`               | const     |
 | `CLIENT_IP_STATE_KEY`        | const     |
 | `ERROR_RESPONDER_BRAND`      | const     |
 | `ERROR_RESPONDER_STATE_KEY`  | const     |
+| `HTTP_STATUS_HINT`           | const     |
 | `PLUGIN_PRIORITY`            | const     |
 | `SECURITY_METADATA`          | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`   | const     |
@@ -189,6 +192,7 @@ package fits the plugin architecture.
 | `HandlerResult`              | interface |
 | `HealthCheckResult`          | interface |
 | `HealthReport`               | interface |
+| `HttpStatusHint`             | interface |
 | `IAdapterTransaction`        | interface |
 | `IApplication`               | interface |
 | `IAuditLogger`               | interface |

@@ -254,6 +254,7 @@ export class BigtableAdapter implements IDatabaseAdapter {
   // deno-lint-ignore require-await -- the refusal must REJECT, not throw synchronously
   async rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     throw new UnsupportedRawQueryError(
+      'bigtable',
       'BigtableAdapter does not support raw queries. Bigtable has no SQL surface behind ' +
         'query(sql, params) — its data plane is ReadRows, MutateRow and CheckAndMutateRow. ' +
         'Use the injected client directly for anything the portable contract does not express.',

@@ -252,6 +252,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
   // deno-lint-ignore require-await -- the refusal must REJECT, not throw synchronously
   async rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
     throw new UnsupportedRawQueryError(
+      'cosmos',
       'CosmosAdapter does not support container-less raw queries. A Cosmos SQL query is scoped to ' +
         'one container and this signature names none; use the injected client directly ' +
         '(container.items.query).',

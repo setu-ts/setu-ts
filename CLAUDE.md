@@ -4193,23 +4193,76 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   counter-argument itself, that introducing release tooling immediately before a prepared release is
   risk traded against a manual bump that is auditable and already covered by `release:verify` — so
   if built, build it early in a cycle, never at cut time.
-- **Next milestone** — **M89b** (X-series defect closeout, second of three letters; M89a — the
-  declarations that enforced nothing — is complete above). The `smoke/` programme's X16–X19
-  exercises against published `0.3.0` produced **8 findings, 4 High**, closed as M89a/M89b/M89c
-  grouped by defect **shape** rather than by package (the M70a–M70n precedent). **M89b** — caller
-  errors delivered as masked `500`s, twice: RBAC guards with no `rbac` arm (the guards resolve
-  `CAPABILITIES.AUTHORIZATION` unconditionally, so a principal that genuinely holds the required
-  role reads a masked `500`), and every `UnsupportedQueryFeatureError` (a documented refusal that
-  reads as a server fault when an application switches backends). **M89c** — the `0.3.0` ingress
-  surface: a register-time publish deadlocks startup (measured to be **in-memory-broker only**; the
-  gate is correct on rabbitmq and redis-streams, and awaiting is the entire trigger), and the tenant
-  concern the release notes advertise cannot be written because both tenant-bearing members require
-  an `IRequestContext` no ingress path has. The open decisions were taken by the maintainer on
-  2026-09-03 and are recorded in the ROADMAP sections: query refusals answer **`501`** through a
-  status hint carried on the error and read by `errorHandler`, and an authorization guard that
-  cannot evaluate its policy because no provider is registered answers `501` too — its existing
-  `403` for a genuine policy refusal is unchanged, and M89a's decorated routes already answer
-  identically for the identical condition.
+- **Milestone 89b** (`common` + `exceptions` + `database-plugin` + `auth-plugin` — caller errors
+  that read as server faults. Two findings with one shape: a condition the CALLER caused, carrying
+  an accurate and actionable message, delivered to that caller as a masked
+  `500 Internal Server Error` with the message reachable only in the log. Both now answer
+  **`501 Not
+  Implemented`** (maintainer decision, 2026-09-03), which is what forces one status
+  decision rather than two that drift.
+
+  **The mechanism is a symbol-keyed brand in `common`** — `HTTP_STATUS_HINT`, `HttpStatusHint`,
+  `withHttpStatusHint`, `httpStatusHintOf` — because M70f's `respondWithError` seam cannot reach
+  every site: a data source throwing from deep inside an adapter holds no `IRequestContext`. §2.2
+  forbids `database-plugin` importing `exceptions`, so a brand in `common` is the only channel (the
+  M57 `SECURITY_METADATA` / M47 frame-codec precedent), and `Symbol.for` because a local symbol
+  misses on every read when two copies of `common` share a process.
+
+  **Four plan claims did not survive the source, and the second is the one that would have shipped a
+  silently wrong body.** (1) The hint's home is `errors/status-hint.ts`, not `http.ts` — the brand
+  MECHANISM follows M57 but the SUBJECT is an error response, so it belongs beside
+  `ErrorResponseInit`. (2) The plan had `errorHandler` build its own `HttpError` from the hint;
+  **M70f's `createErrorResponder` already owns that exact mapping, and it is not a one-liner** — the
+  `default` formatter reads the disclosure from `details.detail` while the Problem Details
+  formatters read it off a module-private `RESPONDER_DETAIL` symbol, so a second hand-rolled
+  construction loses the disclosure in exactly one format and passes the other's tests. So
+  `HttpStatusHint extends ErrorResponseInit` (it IS one, with `detail` narrowed to required) and the
+  construction is extracted to one `buildErrorFromInit` both call, pinned by a test asserting
+  byte-identical bodies across all three formats. (3) §3.4 claimed all three refusals "already
+  carry" structured fields; `UnsupportedRawQueryError` carried none, so it gains a
+  `readonly
+  adapter` and a breaking `(adapter, message)` constructor — without it the one refusal
+  a developer meets while switching backends could not name which backend refused. (4) The response
+  status was written from the NORMALIZED error, which masking preserves but a hint does not, so a
+  hinted response would have carried a `501` body under a `500` status line; `logError` reported the
+  same value, leaving an operator correlating a log line with a response hunting a `500` no client
+  ever saw. Both now read the served error, while the logged MESSAGE and cause stay the unmasked
+  diagnostic. The stack-attach condition became `responseError === error`, which states the shared
+  invariant — attach the stack only when the error SERVED is the error LOGGED — and made the
+  `masked` flag dead, so it is gone.
+
+  **The masking exemption is narrow by construction rather than by trust**: what a hinted response
+  serves is a fixed sentence the brand site wrote, composed from framework-chosen identifiers
+  (`feature`, `operator`, `connector`, `adapter`), so there is no driver diagnostic in the body for
+  masking to remove — X12-3 stays closed, and the unhinted-500 assertions live in the SAME file as
+  the exemption so widening it fails a test on the line below. The three query-shape refusals are
+  branded and the four transaction/concurrency errors deliberately are not (they may quote backend
+  state, and a concurrency conflict is transient rather than permanent), asserted as a table so an
+  eighth class forces a decision.
+
+  **X18-2 needed no hint** — the guards hold a context, so `services.has` plus `respondWithError` is
+  the whole fix; the shared decision is the STATUS, not the plumbing. `501` rather than `403`
+  because nothing is wrong with the caller: the deployment cannot evaluate the policy at all. The
+  `403` and `401` paths are untouched and the guards still fail CLOSED.
+
+  **Both findings were reproduced through a real kernel application before anything was changed**,
+  and the M68 test that covered X18-2 was **asserting the defect**
+  (`expect(response.statusCode)
+  .toBe(500)`) — it is now the regression guard, extended to all
+  four authorization guards, because the defect was a property of the shared capability resolution
+  rather than of one guard. Two unit fixtures were contract-violating doubles whose fake registry
+  omitted `has`, which `IServiceRegistry` requires; they reported the absent-capability path for a
+  registry that had the service) — complete (PR #236)
+- **Next milestone** — **M89c** (X-series defect closeout, last of three letters; M89a — the
+  declarations that enforced nothing — and M89b — the caller errors that read as server faults — are
+  both complete above). The `smoke/` programme's X16–X19 exercises against published `0.3.0`
+  produced **8 findings, 4 High**, closed as M89a/M89b/M89c grouped by defect **shape** rather than
+  by package (the M70a–M70n precedent). **M89c** — the `0.3.0` ingress surface: a register-time
+  publish deadlocks startup (measured to be **in-memory-broker only**; the gate is correct on
+  rabbitmq and redis-streams, and awaiting is the entire trigger), and the tenant concern the
+  release notes advertise cannot be written because both tenant-bearing members require an
+  `IRequestContext` no ingress path has. The M89c open decisions are recorded in its ROADMAP
+  section.
 
 ## Verification (run before declaring any work done)
 

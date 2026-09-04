@@ -13,6 +13,8 @@ import { createTestApp } from '@setu-ts/testing';
 import type { IKernelApplication } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
+import { withHttpStatusHint } from '@setu-ts/common';
+
 import { errorHandler } from '../../src/middleware/error-handler.ts';
 import type { ErrorHandlerOptions } from '../../src/middleware/error-handler.ts';
 import { internalServerError, notFound, validationError } from '../../src/errors/exceptions.ts';
@@ -176,4 +178,84 @@ describe('errorHandler in a kernel application', () => {
       }
     });
   });
+});
+
+describe('errorHandler — a status hint the platform cannot serve', () => {
+  // The hint's `status` is typed `number`, and the brand key is `Symbol.for`,
+  // so the value reaching `errorHandler` comes from another package and may be
+  // anything a `number` can hold. A status outside [200, 599] — or a
+  // non-integer like `NaN`, which a mis-derived value collapses to — makes the
+  // web `Response` constructor throw, so the ERROR HANDLER ITSELF becomes the
+  // fault on the real serve path.
+  //
+  // Driven with `app.fetch`, never `inject()`, and that is the whole point:
+  // `inject()` builds no native `Response`, so it reported `999` and `null`
+  // quite happily while `app.fetch` threw `RangeError`. A unit test against a
+  // fake context cannot see this class at all.
+  // Two families: statuses the platform cannot serve at all, and statuses it
+  // CAN serve but which an error must never carry — a hint says how an error
+  // is answered, and an error is never a success or a redirect.
+  const rejected = [
+    999,
+    0,
+    -1,
+    400.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    200, // serveable, but a success
+    302, // serveable, but a redirect
+    399, // the boundary, one below the floor
+    600, // the boundary, one above the ceiling
+  ];
+
+  for (const status of rejected) {
+    it(`falls back to the masked 500 for a hint carrying status ${String(status)}`, async () => {
+      const app = await createErroringApp(
+        'default',
+        withHttpStatusHint(new Error('the full diagnostic'), {
+          status,
+          title: 'Not Implemented',
+          detail: 'D',
+        }),
+      );
+
+      const response = await app.fetch(new Request('http://test.local/boom'));
+
+      // Treated as ABSENT — the documented rule for a non-conforming brand —
+      // so the error takes the ordinary masked path rather than crashing.
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({
+        statusCode: 500,
+        message: 'Internal Server Error',
+      });
+
+      await app.stop();
+    });
+  }
+
+  for (const status of [400, 501, 599]) {
+    it(`serves a hint carrying the in-range status ${status}`, async () => {
+      // The control at both boundaries: the guard must reject only what it
+      // means to, not disable the feature.
+      const app = await createErroringApp(
+        'default',
+        withHttpStatusHint(new Error('the full diagnostic'), {
+          status,
+          title: 'Refused',
+          detail: 'D',
+        }),
+      );
+
+      const response = await app.fetch(new Request('http://test.local/boom'));
+
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({
+        statusCode: status,
+        message: 'Refused',
+        details: { detail: 'D' },
+      });
+
+      await app.stop();
+    });
+  }
 });

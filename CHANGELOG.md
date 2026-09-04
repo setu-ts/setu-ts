@@ -6,6 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`@setu-ts/common` — the HTTP status hint**, a symbol-keyed brand through which a package that
+  may not import `@setu-ts/exceptions` (AI_GUIDELINES §2.2) states how its own error should be
+  answered: `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint(error, hint)` and
+  `httpStatusHintOf(error)`. It exists because M70f's `respondWithError` seam cannot reach every
+  site — a data source throwing from deep inside an adapter holds no `IRequestContext` — so its
+  error arrived at `errorHandler` as a plain `Error`, was normalized to `500`, and was masked.
+
+  `HttpStatusHint` is an `ErrorResponseInit` whose `detail` is **required**, and `errorHandler`
+  builds the response from the hint's `status`/`title`/`detail` and never from the error's
+  `message`. Both entry points construct through one implementation, so a hinted throw and a
+  `respondWithError` call carrying the same values answer byte-identically under every configured
+  format. A hinted error is exempt from `maskInternalErrors` — narrow by construction rather than by
+  trust, since what it serves is a fixed sentence the brand site wrote, so there is no driver
+  diagnostic in the body for masking to remove. A brand on a deliberately thrown `HttpError` is
+  ignored; that error already states its own status. `Symbol.for`, so two copies of `common` in one
+  process resolve the same key.
+
+  `HttpStatusHint.status` must be an **integer in `400`–`599`**; a hint outside that range reads as
+  absent and the error takes the ordinary masked-`500` path. An unserveable status would otherwise
+  make the web `Response` constructor throw out of the error handler itself, and a hint says how an
+  ERROR is answered, which is never a success or a redirect.
+
 ### Changed
 
 - **BREAKING (behaviour) — `@Roles`/`@Permissions` are now ENFORCED.** `DecoratorPlugin` appends
@@ -23,6 +47,56 @@ All notable changes to this project are documented here. The format follows
   pass `DecoratorPlugin({ enforceRoles: false })` to restore the previous behaviour (metadata
   recorded, nothing enforced, no warning). A route carrying both decorators now requires any of the
   roles AND any of the permissions; method-level declarations override class-level ones.
+
+- **BREAKING (behaviour) — a database query refusal answers `501 Not Implemented`, not a masked
+  `500`** (X19-1). `UnsupportedQueryFeatureError`, `UnsupportedFilterOperatorError` and
+  `UnsupportedRawQueryError` now carry the status hint above, so a DynamoDB non-key `orderBy` or a
+  Bigtable `offset` reaches the client as `501` with a sentence naming the feature and the adapter,
+  instead of `{"title":"Internal Server Error","detail":"Internal Server Error"}` with the useful
+  message reachable only in the log. This is the shape a developer meets when SWITCHING BACKENDS: an
+  application that worked on MongoDB answered `500` on every ordered endpoint under DynamoDB, and
+  the response said the server was broken.
+
+  **Not every `UnsupportedQueryFeatureError` is branded.** The class is shared by caller-caused
+  query shapes and by configuration refusals, so only an allowlist of `feature` values is answered
+  `501`; `mapping`, `endpoint`, `date-encoding` and `transaction` keep the masked `500`, and an
+  unclassified value is not branded. Branding it unconditionally made a blank `columnFamily` answer
+  every request `501 "Query feature 'mapping' is not supported …"`.
+
+  The served `detail` is composed from this package's own structured fields (`feature`, `operator`,
+  `connector`, `adapter`) and never from the error's `message`, which stays the full diagnostic and
+  reaches the log alone. The four transaction and concurrency errors keep their masked `500`: they
+  may legitimately quote backend state, and a concurrency conflict is transient rather than
+  permanent.
+
+  _Migration:_ a client or test asserting `500` on a refused query now sees `501`. Branch on the
+  exported error classes with `instanceof` rather than on the status where you need the distinction.
+
+- **BREAKING (behaviour) — RBAC guards without an `rbac` arm answer `501`, not a masked `500`**
+  (X18-2). `AuthPluginOptions.rbac` became optional in M68; the four authorization guards
+  (`requireRole`, `requirePermission`, `requireAnyRole`, `requireAllPermissions`) then resolved
+  `CAPABILITIES.AUTHORIZATION` unconditionally, so the registry's throw escaped into the pipeline
+  and a principal that genuinely HELD the required role was refused with a masked
+  `500 Internal Server Error` — a real fault with `/health`, `/ready` and `/live` all reporting
+  `up`. They now consult `services.has` and short-circuit with `501 Not Implemented` /
+  `Authorization is not configured`.
+
+  `501` rather than `403` because nothing is wrong with the caller: the deployment cannot evaluate
+  the policy at all, and the condition is permanent for that deployment. A principal that genuinely
+  fails a policy check keeps its `403` — that path is unchanged — and the guards still fail
+  **closed** either way.
+
+  _Migration:_ supply the `rbac` arm to make the guards evaluate. A test asserting `500` for this
+  composition now sees `501`.
+
+- **BREAKING (API) — `UnsupportedRawQueryError` takes the adapter name first.** The constructor is
+  now `(adapter: string, message: string)` and the class carries a `readonly adapter`, matching the
+  structured fields its two sibling refusals already had. Without it the served `detail` could not
+  name which backend refused, leaving the one refusal in the family less actionable than the others.
+
+  _Migration:_ `new UnsupportedRawQueryError(message)` becomes
+  `new UnsupportedRawQueryError('<adapter>', message)`. Every in-repo call site is updated; the
+  class is exported, so an application constructing it directly gets a compile error.
 
 ### Fixed
 

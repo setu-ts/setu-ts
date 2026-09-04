@@ -36,7 +36,7 @@ interface Probe {
  * role/permission check, and whose response captures the status and the JSON
  * body `respondWithError` writes.
  */
-function makeProbe(user?: IPrincipal, authorized = true): Probe {
+function makeProbe(user?: IPrincipal, authorized = true, hasAuthorization = true): Probe {
   const state = {
     status: null as number | null,
     body: null as Record<string, unknown> | null,
@@ -57,6 +57,11 @@ function makeProbe(user?: IPrincipal, authorized = true): Probe {
     response,
     state: new Map<string, unknown>(),
     services: {
+      // `IServiceRegistry` declares `has`, and the guards consult it before
+      // resolving (M89b). A fake omitting it is a contract-violating double:
+      // it would report the absent-capability path for a registry that does
+      // have the service.
+      has: () => hasAuthorization,
       get: () => ({
         hasRole: () => authorized,
         hasPermission: () => authorized,
@@ -72,6 +77,58 @@ const next = (state: Probe['state']) => () => {
   state.continued = true;
   return Promise.resolve();
 };
+
+describe('auth guards without an authorization capability (M89b, X18-2)', () => {
+  // The tenth rejection. Before M89b these four resolved the capability
+  // unconditionally, so the registry's throw escaped into the pipeline and the
+  // caller got a masked 500 — even holding the required role. They now refuse
+  // deliberately, and the property this file exists to pin is that the refusal
+  // still SHORT-CIRCUITS: the handler must not run.
+  const authorized: IPrincipal = {
+    id: 'u1',
+    roles: ['admin'],
+    permissions: ['users:create'],
+  };
+
+  const guards = [
+    ['requireRole', requireRole('admin')],
+    ['requirePermission', requirePermission('users:create')],
+    ['requireAnyRole', requireAnyRole(['admin'])],
+    ['requireAllPermissions', requireAllPermissions(['users:create'])],
+  ] as const;
+
+  for (const [name, guard] of guards) {
+    it(`${name} answers 501 and does not run the handler`, async () => {
+      const { ctx, state } = makeProbe(authorized, true, false);
+
+      await guard(ctx, next(state));
+
+      expect(state.status).toBe(501);
+      expect(state.continued).toBe(false);
+      expect(state.body).toEqual({
+        error: 'Not Implemented',
+        detail: 'Authorization is not configured',
+      });
+    });
+  }
+
+  it('leaves requireAuth working, since it resolves nothing', async () => {
+    const { ctx, state } = makeProbe(authorized, true, false);
+
+    await requireAuth()(ctx, next(state));
+
+    expect(state.continued).toBe(true);
+    expect(state.status).toBeNull();
+  });
+
+  it('leaves publicRoute working, since it resolves nothing', async () => {
+    const { ctx, state } = makeProbe(undefined, true, false);
+
+    await publicRoute()(ctx, next(state));
+
+    expect(state.continued).toBe(true);
+  });
+});
 
 describe('auth guards keep their status and short-circuit (M70f)', () => {
   it('requireAuth rejects an anonymous caller with 401 and does not run the handler', async () => {

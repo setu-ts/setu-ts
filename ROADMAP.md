@@ -8419,7 +8419,7 @@ them would still silently select the wrong transport — complete (PR #215).
 
 ---
 
-## Milestone 86: Non-HTTP Ingress — Registration Sites and a Pipeline
+## Milestone 86: Non-HTTP Ingress — Registration Sites and a Pipeline ✅ (PR #228)
 
 **Objective:** Give the four ingress paths that do not ride HTTP — WebSocket routes, queue
 processors, scheduler jobs and broker subscriptions — the two things HTTP ingress has had since M2:
@@ -8546,7 +8546,7 @@ paradigm choice, because there is nothing off the HTTP path to attach a decorato
 
 ---
 
-## Milestone 87: Request-Path Performance
+## Milestone 87: Request-Path Performance ✅ (PR #227)
 
 **Package(s):** `packages/common`, `packages/kernel`, `packages/runtime`
 
@@ -8672,7 +8672,7 @@ rather than by package — the M70a–M70n precedent, where each letter stayed i
 | **M89b** | A caller error that reads as a server fault | X18-2, X19-1               |
 | **M89c** | The `0.3.0` ingress surface                 | X16-1, X16-2               |
 
-## Milestone 89a: Declarations That Enforce Nothing
+## Milestone 89a: Declarations That Enforce Nothing ✅ (PR #235)
 
 **Package(s):** `packages/decorator-plugin`, `packages/multi-tenancy-plugin`, `packages/cli`, docs
 
@@ -8745,9 +8745,14 @@ in here as a deliberate deviation from the grouping** (the M58 `g controller` / 
 precedent): it is a ten-line refusal, this letter ships first, and leaving it unmerged across three
 milestones is worse than the impurity.
 
-## Milestone 89b: Caller Errors That Read as Server Faults
+## Milestone 89b: Caller Errors That Read as Server Faults ✅ (PR #236)
 
-**Package(s):** `packages/auth-plugin`, `packages/database-plugin`, possibly `packages/common`
+**Package(s):** `packages/auth-plugin`, `packages/database-plugin`, `packages/common`,
+`packages/exceptions`
+
+The "possibly `packages/common`" resolved to **yes, and `packages/exceptions` with it** (the
+M70b/M70g/M70h list-correction precedent): §2.2 forbids `database-plugin` importing `exceptions`, so
+the brand has to live in `common`, and `exceptions` is the package that reads it.
 
 **Objective:** Two findings, one mechanism applied twice: a condition the **caller** caused,
 carrying an accurate and actionable message, delivered to that caller as a masked
@@ -8974,5 +8979,5 @@ the decision, since a required member breaks out-of-repo implementors.
 | 87        | ✅     | request-path performance (kernel/runtime/common)    |
 | 88        | ✅     | response-path performance (kernel/runtime/common)   |
 | 89a       | ✅     | declarations that enforce nothing (X18-3/5/4/1)     |
-| 89b       | ⬜     | caller errors read as server faults (X18-2, X19-1)  |
+| 89b       | ✅     | caller errors read as server faults (X18-2, X19-1)  |
 | 89c       | ⬜     | 0.3.0 ingress surface (X16-1, X16-2)                |

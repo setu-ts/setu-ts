@@ -29,6 +29,10 @@ export type {
 // Error serialization for structured logging (M70f, X2-5)
 export { serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
+// HTTP status hint (M89b, X19-1) — how a package that cannot import
+// `@setu-ts/exceptions` states the status its own error should be answered with
+export { HTTP_STATUS_HINT, httpStatusHintOf, withHttpStatusHint } from './errors/status-hint.ts';
+export type { HttpStatusHint } from './errors/status-hint.ts';
 
 // Health probe
 export { createCachedProbe } from './health/probe.ts';

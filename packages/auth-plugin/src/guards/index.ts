@@ -20,6 +20,43 @@ const AUTHENTICATED: RouteSecurityMetadata = Object.freeze({ authenticated: true
 const PUBLIC: RouteSecurityMetadata = Object.freeze({ authenticated: false });
 
 /**
+ * Resolves the authorization service, or answers `501` when none is registered.
+ *
+ * `AuthPluginOptions.rbac` is optional (M68): a JWT-only registration provides
+ * `jwt` and `authentication` and deliberately registers no authorization
+ * service. Before M89b the four authorization guards resolved the capability
+ * with `services.get`, whose throw for an unregistered token escaped into the
+ * pipeline — so a principal that genuinely HELD the required role was refused
+ * with a masked `500 Internal Server Error` while `/health`, `/ready` and
+ * `/live` all reported `up` (X18-2).
+ *
+ * The status is `501`, not `403`: nothing is wrong with the caller's
+ * credentials, and nothing about the request is malformed. The deployment
+ * cannot evaluate the policy at all, permanently, which is what `501` states —
+ * and it is the same status `@setu-ts/database-plugin`'s query-shape refusals
+ * answer, so one condition has one answer across the framework. A genuine
+ * policy refusal keeps its existing `403`; that path is untouched.
+ *
+ * The guards still fail CLOSED — the property X18-2 confirmed and this must
+ * not regress. What changes is that the refusal is deliberate and legible
+ * rather than an escaped registry error.
+ *
+ * @param ctx - The request context, used to resolve and to answer
+ * @returns The service, or `null` when none is registered (a response was written)
+ */
+function resolveAuthorization(ctx: IRequestContext): IAuthorizationService | null {
+  if (!ctx.services.has(CAPABILITIES.AUTHORIZATION)) {
+    respondWithError(ctx, {
+      status: 501,
+      title: 'Not Implemented',
+      detail: 'Authorization is not configured',
+    });
+    return null;
+  }
+  return ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
+}
+
+/**
  * Guard that requires authentication. Returns 401 if no principal.
  *
  * @returns Middleware function
@@ -68,7 +105,10 @@ export function requireRole(role: string): MiddlewareFunction {
       return;
     }
 
-    const authService = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
+    const authService = resolveAuthorization(ctx);
+    if (authService === null) {
+      return;
+    }
     if (!authService.hasRole(user, role)) {
       respondWithError(ctx, {
         status: 403,
@@ -106,7 +146,10 @@ export function requirePermission(permission: string): MiddlewareFunction {
       return;
     }
 
-    const authService = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
+    const authService = resolveAuthorization(ctx);
+    if (authService === null) {
+      return;
+    }
     if (!authService.hasPermission(user, permission)) {
       respondWithError(ctx, {
         status: 403,
@@ -144,7 +187,10 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
       return;
     }
 
-    const authService = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
+    const authService = resolveAuthorization(ctx);
+    if (authService === null) {
+      return;
+    }
     if (!authService.hasAnyRole(user, roles)) {
       respondWithError(ctx, {
         status: 403,
@@ -185,7 +231,10 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
       return;
     }
 
-    const authService = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
+    const authService = resolveAuthorization(ctx);
+    if (authService === null) {
+      return;
+    }
     if (!authService.hasAllPermissions(user, permissions)) {
       respondWithError(ctx, {
         status: 403,
