@@ -4252,7 +4252,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   four authorization guards, because the defect was a property of the shared capability resolution
   rather than of one guard. Two unit fixtures were contract-violating doubles whose fake registry
   omitted `has`, which `IServiceRegistry` requires; they reported the absent-capability path for a
-  registry that had the service) — complete (PR pending)
+  registry that had the service) — complete (PR #236)
 - **Next milestone** — **M89c** (X-series defect closeout, last of three letters; M89a — the
   declarations that enforced nothing — and M89b — the caller errors that read as server faults — are
   both complete above). The `smoke/` programme's X16–X19 exercises against published `0.3.0`

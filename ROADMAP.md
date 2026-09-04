@@ -8745,7 +8745,7 @@ in here as a deliberate deviation from the grouping** (the M58 `g controller` / 
 precedent): it is a ten-line refusal, this letter ships first, and leaving it unmerged across three
 milestones is worse than the impurity.
 
-## Milestone 89b: Caller Errors That Read as Server Faults ✅ (PR pending)
+## Milestone 89b: Caller Errors That Read as Server Faults ✅ (PR #236)
 
 **Package(s):** `packages/auth-plugin`, `packages/database-plugin`, `packages/common`,
 `packages/exceptions`
