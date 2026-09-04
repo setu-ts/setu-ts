@@ -8698,8 +8698,9 @@ this function — `@ValidateBody` "validated NOTHING" for the same reason — an
 arm beside it.
 
 `@Public()` is inert in the opposite, safe direction: it does not exempt a route from a guard (the
-route simply becomes unreachable, `401`), and its one real effect is contributing `security: []` to
-the document. That is a usability wart, not a hole, and it is in scope only as documentation.
+route simply becomes unreachable, `401`). It contributes `security: []` only when no enforced
+restriction is present; a restricted route keeps its derived OpenAPI requirement. That preserves a
+truthful document without making `@Public` a security bypass.
 
 **Decided (maintainer, 2026-09-03): enforcement defaults ON.** `enforceRoles: false` is the escape
 hatch, mirroring M70n's `enforceSchemas`, and when no authorization capability is registered the

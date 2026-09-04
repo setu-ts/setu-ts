@@ -3762,22 +3762,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 89a** (`decorator-plugin` + `multi-tenancy-plugin` + `cli` — declarations that enforce
   nothing. `@Roles`/`@Permissions` are ENFORCED by default: `appendAuthorizationMiddleware` appends
   one middleware per restriction — roles first, ALL-of across kinds / ANY-of within a kind, method
-  overriding class — between `composeMiddleware` and the validation band; the middleware resolves
-  `CAPABILITIES.AUTHORIZATION` PER REQUEST, and with no provider the route fails closed —
-  `501 Not Implemented / "Authorization is not configured"`, never served unguarded — while
-  `register()` warns once per affected route naming both remedies. `enforceRoles: false` restores
-  the inert behaviour — a BREAKING behaviour change with CHANGELOG migration text. The decorated
-  refusal is pinned byte-identical (modulo the path the responder echoes in `instance`) with a
-  `@UseGuards(requireRole(...))` route in one real kernel app under `'rfc9457'`; ordering proven
-  `401` → `403` → `400`; the appended middleware is M57-branded so `deriveSecurity` documents
-  decorated routes; `@Public` corrected to OpenAPI-marking-only (C5). X18-5: `register()` warns when
-  a non-`column` isolation strategy is selected with no `dataStore`, and the multi-tenancy README
-  stops claiming physical schemas/databases (the strategy NAMES what a store implements; the
-  headline example moves to `'column-per-tenant'`). X18-4: a `register()` warning fires whenever the
-  RESOLVED chain contains a `JwtResolver` (including the bare-instance spelling the plugin's own
-  pre-check missed), with the unverified-claim caveat moved to where the choice is made. X18-1:
-  `setu add` refuses extra positionals (`exit 2`, nothing written) instead of silently discarding
-  them) — complete (PR pending).
+  overriding class — after guards and before interceptors, ordinary middleware, filters, and the
+  validation band; the middleware resolves `CAPABILITIES.AUTHORIZATION` PER REQUEST, and with no
+  provider the route fails closed — `501 Not Implemented / "Authorization is not configured"`, never
+  served unguarded — while `register()` warns once per affected route naming both remedies.
+  `enforceRoles: false` restores the inert behaviour — a BREAKING behaviour change with CHANGELOG
+  migration text. The decorated refusal is pinned byte-identical (modulo the path the responder
+  echoes in `instance`) with a `@UseGuards(requireRole(...))` route in one real kernel app under
+  `'rfc9457'`; ordering proven `401` → `403` → `400`; the appended middleware is M57-branded so
+  `deriveSecurity` documents decorated routes; `@Public` contributes its OpenAPI public marker only
+  to unrestricted routes (C5). X18-5: `register()` warns when a non-`column` isolation strategy is
+  selected with no `dataStore`, and the multi-tenancy README stops claiming physical
+  schemas/databases (the strategy NAMES what a store implements; the headline example moves to
+  `'column-per-tenant'`). X18-4: a `register()` warning fires whenever the RESOLVED chain contains a
+  `JwtResolver` (including the bare-instance spelling the plugin's own pre-check missed), with the
+  unverified-claim caveat moved to where the choice is made. X18-1: `setu add` refuses extra
+  positionals (`exit 2`, nothing written) instead of silently discarding them) — complete (PR
+  pending).
 - **Milestone 79** (`common` + `database-plugin` + `cloudflare-plugin` — portable data-access
   contract: composite keys, nested field paths and keyset cursor pagination, implemented across all
   **five** shipped adapters. The ROADMAP scoped four; `MongoAdapter` shipped in M78, so the in-scope

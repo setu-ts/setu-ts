@@ -175,15 +175,18 @@ discarding arguments it cannot honour.
 
 ### 3.7 `@Public()` stays documentation in this milestone
 
-- **Decision:** no behaviour change. The JSDoc's two false sentences (the bypass claim and the
-  precedence claim, C5) are replaced by a statement that it contributes `security: []` to the
-  OpenAPI document and does **not** exempt a route from a guard.
+- **Decision:** no authentication or authorization bypass. The JSDoc's two false sentences (the
+  bypass claim and the precedence claim, C5) are replaced by a statement that an unrestricted route
+  contributes `security: []` to the OpenAPI document and does **not** exempt a route from a guard.
+  When an enforced restriction is present, the public marker is omitted so derived OpenAPI security
+  remains truthful.
 - **Why:** measured, a `@Public()` route under a blanket authentication guard answers `401` — inert
   in the **fail-closed** direction, so it is a usability wart rather than a hole. Making it exempt
   is a security-relevant behaviour change that deserves its own decision, and bundling it with an
   enforcement change that turns refusals ON would put two opposite-direction changes in one release.
-- **Test home:** `test/unit/public-decorator-docs.test.ts` pins that `@Public()` adds no middleware,
-  so a later milestone changing that has a failing test to update.
+- **Test home:** `test/unit/public-decorator-docs.test.ts` pins that `@Public()` adds no middleware
+  and cannot document a restricted route as public; `test/integration/roles-enforced.test.ts` pins
+  the derived requirement through a real OpenAPI document.
 
 ### 3.8 The M57 brand on the appended middleware
 

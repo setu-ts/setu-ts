@@ -8,7 +8,8 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES, type ILogger, type IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger, IPluginContext } from '@setu-ts/common';
 
 import { MultiTenancyPlugin } from '../../src/plugin/multi-tenancy-plugin.ts';
 import { attachRecordingLogger, createRecordingFakeLogger } from '../fixtures/fake-logger.ts';
@@ -23,7 +24,7 @@ function makeContext(): { ctx: IPluginContext; warnCalls: string[] } {
     services: {
       has: (token: string) => token === CAPABILITIES.JWT,
       get: () => ({
-        decode: (_token: string) => ({ tenant_id: 't1' }),
+        decode: () => ({ tenant_id: 't1' }),
       }),
       register: () => {},
       registerFactory: () => {},

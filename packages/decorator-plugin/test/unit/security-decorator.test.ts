@@ -53,6 +53,11 @@ describe('Security decorators', () => {
     expect(metadataStore.getRoutesFor(C)[0].permissions).toEqual(['read', 'write']);
   });
 
+  it('refuses empty @Roles and @Permissions declarations', () => {
+    expect(() => Roles()).toThrow('@Roles() requires at least one role.');
+    expect(() => Permissions()).toThrow('@Permissions() requires at least one permission.');
+  });
+
   it('@Public sets isPublic on the route', () => {
     @Controller('/x')
     class C {

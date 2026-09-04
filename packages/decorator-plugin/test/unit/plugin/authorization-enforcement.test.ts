@@ -17,7 +17,9 @@ import {
   Permissions,
   Post,
   Roles,
+  UseFilters,
   UseGuards,
+  UseInterceptors,
   ValidateBody,
 } from '../../../src/index.ts';
 import { DecoratorPlugin } from '../../../src/plugin/decorator-plugin.ts';
@@ -41,8 +43,8 @@ function fakeAuthorization(
   permissions: readonly string[] = [],
 ): IAuthorizationService {
   return {
-    hasRole: (_principal, role) => roles.includes(role),
-    hasPermission: (_principal, permission) => permissions.includes(permission),
+    hasRole: (...args) => roles.includes(args[1]),
+    hasPermission: (...args) => permissions.includes(args[1]),
     hasAnyRole: (principal, names) =>
       names.some((r) => fakeAuthorization(roles, permissions).hasRole(principal, r)),
     hasAllPermissions: (principal, names) =>
@@ -232,7 +234,7 @@ function fakeValidationService(): {
     },
     middleware(schema: unknown, target: MiddlewareCall['target']): MiddlewareFunction {
       calls.push({ schema, target });
-      const fn: MiddlewareFunction = (_ctx, nxt) => nxt();
+      const fn: MiddlewareFunction = (...args) => args[1]();
       const marker = `mw-${++n}`;
       Object.defineProperty(fn, '__marker', { value: marker });
       return fn;
@@ -262,14 +264,18 @@ describe('DecoratorPlugin authorization enforcement (X18-3)', () => {
     metadataStore.clear();
   });
 
-  it('appends the authorization middleware after guards and BEFORE validation middleware', async () => {
+  it('appends authorization after guards and before later route stages', async () => {
     const guardFn: MiddlewareFunction = () => {};
+    const interceptorFn: MiddlewareFunction = () => {};
+    const filterFn: MiddlewareFunction = () => {};
     const bodySchema = { kind: 'body-schema' };
 
     @Controller('/items')
     class ItemsController {
       @Post('/')
       @UseGuards(guardFn)
+      @UseInterceptors(interceptorFn)
+      @UseFilters(filterFn)
       @Roles('admin')
       @ValidateBody(bodySchema)
       create() {
@@ -284,12 +290,28 @@ describe('DecoratorPlugin authorization enforcement (X18-3)', () => {
     await DecoratorPlugin({ controllers: [ItemsController] }).register(ctx);
 
     const mw = asRouteDef(routes[0].route).middleware ?? [];
-    // Order: the route's own guard, then the enforcement band (authorization,
-    // then validation LAST), so a guard's 401 wins and a 403 is not preceded
-    // by a 400.
-    expect(mw.map((fn) => isAuthorizationMiddleware(fn))).toEqual([false, true, false]);
+    // Order: guard, enforcement, then interceptors/filters and validation.
+    // No later route stage can short-circuit an authorization declaration.
+    expect(mw).toHaveLength(5);
+    expect(mw[0]).toBe(guardFn);
+    expect(isAuthorizationMiddleware(mw[1])).toBe(true);
+    expect(mw[2]).toBe(interceptorFn);
+    expect(mw[3]).toBe(filterFn);
+    expect(mw.map((fn) => isAuthorizationMiddleware(fn))).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false,
+    ]);
     expect(fake.calls).toEqual([{ schema: bodySchema, target: 'body' }]);
-    expect(mw.map((fn) => fake.markerOf(fn))).toEqual([undefined, undefined, 'mw-1']);
+    expect(mw.map((fn) => fake.markerOf(fn))).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'mw-1',
+    ]);
   });
 
   it('appends roles THEN permissions for a route declaring both (ALL-of across kinds)', async () => {

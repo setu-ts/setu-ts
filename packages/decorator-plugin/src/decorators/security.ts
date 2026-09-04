@@ -72,6 +72,7 @@ export function isContextParameter(metadata?: Readonly<Record<string, unknown>>)
  * @since 0.1.0
  */
 export function Roles(...roles: string[]): SetuClassOrMethodDecorator {
+  assertNonEmptyRestriction('Roles', 'role', roles);
   return classOrMethodDecorator(
     (store, target) => {
       store.mergeController(target, { roles });
@@ -97,6 +98,7 @@ export function Roles(...roles: string[]): SetuClassOrMethodDecorator {
  * @since 0.1.0
  */
 export function Permissions(...permissions: string[]): SetuClassOrMethodDecorator {
+  assertNonEmptyRestriction('Permissions', 'permission', permissions);
   return classOrMethodDecorator(
     (store, target) => {
       store.mergeController(target, { permissions });
@@ -109,14 +111,27 @@ export function Permissions(...permissions: string[]): SetuClassOrMethodDecorato
   );
 }
 
+/** Rejects a declaration that cannot name an authorization requirement. */
+function assertNonEmptyRestriction(
+  decorator: 'Roles' | 'Permissions',
+  kind: 'role' | 'permission',
+  names: readonly string[],
+): void {
+  if (names.length === 0) {
+    throw new Error(`@${decorator}() requires at least one ${kind}.`);
+  }
+}
+
 /**
- * Marks a route as public in the OpenAPI document: the route's schema carries
- * `security: []`, so a document-level security requirement does not apply to
- * it.
+ * Marks an unrestricted route as public in the OpenAPI document: its schema
+ * carries `security: []`, so a document-level security requirement does not
+ * apply to it.
  *
  * It does NOT exempt a route from a guard or from `@Roles`/`@Permissions`
- * enforcement — those still run and still refuse. A route that must be
- * reachable unauthenticated should carry no restriction in the first place.
+ * enforcement — those still run and still refuse. When enforcement is enabled,
+ * a route carrying a restriction omits the public marker so derived OpenAPI
+ * security remains truthful. A route that must be reachable unauthenticated
+ * should carry no restriction in the first place.
  *
  * @returns A method decorator
  * @since 0.1.0

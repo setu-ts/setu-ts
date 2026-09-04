@@ -99,7 +99,8 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
   `CurrentUser`, `Ctx`, `Custom`
 - **Modules** — `@Module({ controllers, providers, imports })`
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
-- **Security** — `@Roles`, `@Permissions` (enforced — see below), `@Public` (OpenAPI marking only)
+- **Security** — `@Roles`, `@Permissions` (enforced — see below), `@Public` (unrestricted OpenAPI
+  marking)
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
 - **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse`
@@ -133,8 +134,9 @@ When **no authorization provider is registered**, a decorated route **fails clos
 affected route naming both remedies (register a provider under `CAPABILITIES.AUTHORIZATION`, or set
 `enforceRoles: false`).
 
-`@Public` contributes `security: []` to the OpenAPI document only. It does **not** exempt a route
-from a guard or from `@Roles`/`@Permissions` enforcement.
+`@Public` contributes `security: []` to the OpenAPI document only when the route has no enforced
+`@Roles`/`@Permissions` restriction. It does **not** exempt a route from a guard or from that
+enforcement; a restricted route keeps its derived OpenAPI security requirement.
 
 ## Exports
 

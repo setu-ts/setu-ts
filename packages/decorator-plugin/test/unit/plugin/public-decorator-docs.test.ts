@@ -11,11 +11,10 @@ import { createFakeContext } from '../../fixtures/fake-context.ts';
 /**
  * §3.7: `@Public()` stays documentation in this milestone. Its JSDoc used to
  * claim it bypassed authentication and authorization and took precedence over
- * `@Roles`/`@Permissions` — nothing read `isPublic` except the OpenAPI schema
- * builder (`security: []`). It is inert in the FAIL-CLOSED direction, so this
- * milestone corrects the docs instead of enforcing a bypass. These tests pin
- * the behaviour so a later milestone making `@Public` exempt has a failing
- * test to update.
+ * `@Roles`/`@Permissions`. It remains inert in the FAIL-CLOSED direction, so
+ * this milestone corrects the docs instead of enforcing a bypass. A route
+ * with an enforced restriction cannot also be documented as public; these
+ * tests pin both guarantees for any later exemption change to update.
  */
 
 function asRouteDef(route: unknown): { middleware?: MiddlewareFunction[]; schema?: unknown } {
@@ -52,7 +51,7 @@ describe('@Public contributes no middleware (§3.7)', () => {
     ).toEqual([]);
   });
 
-  it('@Public does NOT exempt a route from @Roles enforcement (fail closed)', async () => {
+  it('@Public does NOT exempt a route from @Roles enforcement or document it as public', async () => {
     @Controller('/mixed')
     class MixedController {
       @Get('/')
@@ -69,5 +68,9 @@ describe('@Public contributes no middleware (§3.7)', () => {
     const mw = asRouteDef(routes[0].route).middleware ?? [];
     expect(mw).toHaveLength(1);
     expect(isAuthorizationMiddleware(mw[0])).toBe(true);
+    // The effective runtime restriction omits `security: []`, allowing the
+    // authorization middleware's M57 brand to derive the truthful requirement.
+    expect((asRouteDef(routes[0].route).schema as { security?: unknown } | undefined)?.security)
+      .toBeUndefined();
   });
 });

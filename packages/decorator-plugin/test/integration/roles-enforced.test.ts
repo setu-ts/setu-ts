@@ -1,7 +1,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { Constructor, IJwtService } from '@setu-ts/common';
+import type { Constructor, IJwtService, MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { authMiddleware, AuthPlugin, requireRole } from '@setu-ts/auth-plugin';
@@ -9,7 +9,16 @@ import { errorHandler } from '@setu-ts/exceptions';
 import { ValidationPlugin } from '@setu-ts/validation-plugin';
 import { OpenApiPlugin } from '@setu-ts/openapi-plugin';
 
-import { Controller, Get, Post, Roles, UseGuards, ValidateBody } from '../../src/index.ts';
+import {
+  Controller,
+  Get,
+  Post,
+  Public,
+  Roles,
+  UseGuards,
+  UseInterceptors,
+  ValidateBody,
+} from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 
@@ -190,6 +199,37 @@ describe('decorated @Roles enforced through a real kernel app (X18-3)', () => {
     }
   });
 
+  it('runs authorization before an interceptor that would short-circuit', async () => {
+    let interceptorRan = false;
+    const shortCircuit: MiddlewareFunction = (ctx) => {
+      interceptorRan = true;
+      return ctx.response.json({ bypassed: true });
+    };
+
+    @Controller('/short-circuit')
+    class ShortCircuitController {
+      @Get('/restricted')
+      @Roles('admin')
+      @UseInterceptors(shortCircuit)
+      restricted() {
+        return { secret: true };
+      }
+    }
+
+    const { app, viewerToken } = await startApp([ShortCircuitController]);
+    try {
+      const refused = await app.inject({
+        method: 'GET',
+        url: 'http://localhost/short-circuit/restricted',
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(refused.statusCode).toBe(403);
+      expect(interceptorRan).toBe(false);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('deriveSecurity sees the M57 brand: the document names the requirement', async () => {
     @Controller('/documented')
     class DocumentedController {
@@ -212,6 +252,34 @@ describe('decorated @Roles enforced through a real kernel app (X18-3)', () => {
       // Before M89a `security` was ABSENT here: the route was documented as
       // unprotected while its declaration promised the opposite.
       expect(spec.paths['/documented/restricted']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('@Public with an enforced role keeps the derived OpenAPI requirement', async () => {
+    @Controller('/mixed-documentation')
+    class MixedDocumentationController {
+      @Get('/restricted')
+      @Public()
+      @Roles('admin')
+      restricted() {
+        return { secret: true };
+      }
+    }
+
+    const { app } = await startApp([MixedDocumentationController]);
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: 'http://localhost/openapi.json',
+      });
+      const spec = (await response.json()) as {
+        paths: Record<string, Record<string, Record<string, unknown>>>;
+      };
+      expect(spec.paths['/mixed-documentation/restricted']?.get?.security).toEqual([
+        { bearerAuth: [] },
+      ]);
     } finally {
       await app.stop();
     }

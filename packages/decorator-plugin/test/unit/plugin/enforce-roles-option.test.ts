@@ -46,10 +46,10 @@ function recordingLogger(): {
 }
 
 const authorization: IAuthorizationService = {
-  hasRole: (_p, role) => role === 'admin',
-  hasPermission: (_p, permission) => permission === 'billing:write',
-  hasAnyRole: (_p, roles) => roles.includes('admin'),
-  hasAllPermissions: (_p, permissions) => permissions.every((p) => p === 'billing:write'),
+  hasRole: (...args) => args[1] === 'admin',
+  hasPermission: (...args) => args[1] === 'billing:write',
+  hasAnyRole: (...args) => args[1].includes('admin'),
+  hasAllPermissions: (...args) => args[1].every((p) => p === 'billing:write'),
 };
 
 /** True for the authorization middleware the plugin appends (M57-branded). */

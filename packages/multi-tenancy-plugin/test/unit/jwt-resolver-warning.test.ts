@@ -6,14 +6,15 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { CAPABILITIES, type ILogger, type IPluginContext } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ILogger, IPluginContext } from '@setu-ts/common';
 
 import { MultiTenancyPlugin } from '../../src/plugin/multi-tenancy-plugin.ts';
 import { HeaderResolver } from '../../src/resolvers/header-resolver.ts';
 import { JwtResolver } from '../../src/resolvers/jwt-resolver.ts';
 import { attachRecordingLogger, createRecordingFakeLogger } from '../fixtures/fake-logger.ts';
 
-const decode = (_token: string): Record<string, unknown> | null => ({ tenant_id: 't1' });
+const decode = (): Record<string, unknown> | null => ({ tenant_id: 't1' });
 
 /** Minimal plugin context: recording logger, CAPABILITIES.JWT registered. */
 function makeContext(): { ctx: IPluginContext; warnCalls: string[] } {

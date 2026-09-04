@@ -342,14 +342,12 @@ function createHandler(
   };
 }
 
-/** Composes the ordered middleware chain for a route (class then method). */
+/** Composes the post-authorization route middleware (class then method). */
 function composeMiddleware(
   ctrl: ControllerMetadata,
   route: RouteMetadata,
 ): MiddlewareFunction[] {
   return [
-    ...ctrl.guards,
-    ...route.guards,
     ...ctrl.interceptors,
     ...route.interceptors,
     ...ctrl.middleware,
@@ -357,6 +355,28 @@ function composeMiddleware(
     ...ctrl.filters,
     ...route.filters,
   ];
+}
+
+/** Composes guards, which deliberately precede declarative authorization. */
+function composeGuards(
+  ctrl: ControllerMetadata,
+  route: RouteMetadata,
+): MiddlewareFunction[] {
+  return [...ctrl.guards, ...route.guards];
+}
+
+/** Resolves a route's method-overriding-class authorization declarations. */
+function effectiveRestrictions(
+  ctrlMeta: ControllerMetadata,
+  route: RouteMetadata,
+): {
+  readonly roles: readonly string[] | undefined;
+  readonly permissions: readonly string[] | undefined;
+} {
+  return {
+    roles: route.roles ?? ctrlMeta.roles,
+    permissions: route.permissions ?? ctrlMeta.permissions,
+  };
 }
 
 /** Builds the response-schema map from `@ApiResponse` metadata, if any. */
@@ -379,17 +399,17 @@ function buildResponseSchemas(route: RouteMetadata): Record<number, unknown> | u
  * Builds the {@linkcode RouteSchema} from validation and OpenAPI metadata.
  * Returns `undefined` when no schema-relevant metadata is present.
  *
- * `@Public` is carried through as an empty `security` array, the OpenAPI
- * marker for a public operation. Without it a decorated route has no way to
- * opt out of a document-level security requirement, and a route explicitly
- * marked public would be documented as requiring the very token it bypasses.
- * `@Roles`/`@Permissions` are deliberately NOT mapped: a role is not a
- * security scheme, and there is no way to infer which declared scheme grants
- * it without inventing a name the document does not contain.
+ * An unrestricted `@Public` route carries an empty `security` array, the
+ * OpenAPI marker that opts out of a document-level requirement. When roles or
+ * permissions are enforced, that marker is omitted so their branded
+ * middleware derives the truthful requirement. Roles and permissions are not
+ * otherwise mapped: a role is not a security scheme, and the plugin cannot
+ * infer which declared scheme grants it without inventing a name.
  */
 function buildRouteSchema(
   ctrl: ControllerMetadata,
   route: RouteMetadata,
+  enforceRoles: boolean,
 ): RouteSchema | undefined {
   const schema = route.schema;
   const tags = [...ctrl.tags, ...(route.openapi?.tags ?? [])];
@@ -397,7 +417,10 @@ function buildRouteSchema(
   const response = buildResponseSchemas(route);
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
-  const isPublic = route.isPublic === true;
+  const restrictions = effectiveRestrictions(ctrl, route);
+  const isPublic = route.isPublic === true && (
+    !enforceRoles || (restrictions.roles === undefined && restrictions.permissions === undefined)
+  );
   if (
     !hasSchema && !hasTags && summary === undefined && response === undefined && !isPublic
   ) {
@@ -484,10 +507,9 @@ function warnUnenforcedRestrictions(
  * overrides class-level metadata (the decorators' own documented precedence);
  * the union is never used.
  *
- * Called AFTER `composeMiddleware` and BEFORE `appendValidationMiddleware`,
- * reproducing the validation append's documented band: an authentication
- * guard's `401` still wins, and a `403` is not preceded by a `400` describing
- * a body the caller was never entitled to submit.
+ * Called AFTER route guards and BEFORE interceptors, ordinary middleware,
+ * filters, and validation. A guard's `401` still wins, while no later stage
+ * can short-circuit a route before its declared restriction runs.
  *
  * The capability argument is the REGISTRATION-TIME view, used only to decide
  * whether the startup warning fires; the appended middleware re-resolves
@@ -502,8 +524,7 @@ function appendAuthorizationMiddleware(
   middleware: MiddlewareFunction[],
   authorization: IAuthorizationService | undefined,
 ): void {
-  const roles = route.roles ?? ctrlMeta.roles;
-  const permissions = route.permissions ?? ctrlMeta.permissions;
+  const { roles, permissions } = effectiveRestrictions(ctrlMeta, route);
   if (roles === undefined && permissions === undefined) {
     return;
   }
@@ -700,14 +721,15 @@ function registerController(
     const fullPath = joinPaths(ctrlMeta.version ?? '', ctrlMeta.path, route.path);
     warnUnresolvableParameters(ctx, target, route);
     const handler = createHandler(instance, route.handler, route.params);
-    const middleware = composeMiddleware(ctrlMeta, route);
+    const middleware = composeGuards(ctrlMeta, route);
     if (enforceRoles) {
       appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
     }
+    middleware.push(...composeMiddleware(ctrlMeta, route));
     if (enforceSchemas) {
       appendValidationMiddleware(ctx, target, route, middleware, validation);
     }
-    const schema = buildRouteSchema(ctrlMeta, route);
+    const schema = buildRouteSchema(ctrlMeta, route, enforceRoles);
     const routeDef: RouteDefinition = {
       handler,
       ...(middleware.length > 0 ? { middleware } : {}),

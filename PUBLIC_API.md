@@ -6296,9 +6296,10 @@ per-document component.
   Emitting it would produce a document that is invalid per the specification — Swagger UI renders a
   lock on every operation with no Authorize button — and nothing downstream can detect it, since the
   spec endpoint still answers `200`.
-- A decorated route marked `@Public` is documented with an empty `security` array, so it opts out of
-  a document-level requirement. `@Roles`/`@Permissions` are not mapped: a role is not a security
-  scheme and no declared scheme can be inferred from one.
+- An unrestricted decorated route marked `@Public` is documented with an empty `security` array, so
+  it opts out of a document-level requirement. `@Public` never exempts a route from an enforced
+  `@Roles`/`@Permissions` declaration; when one is present, the public marker is omitted and the
+  middleware's derived requirement documents the protection truthfully.
 
 ### Accessing the Spec
 
@@ -9098,7 +9099,7 @@ carry full JSDoc.
 | `Inject`                                                     | function | Class decorator declaring constructor injection tokens, one per argument in argument order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `Optional`                                                   | function | Wraps a token inside `@Inject(...)`; that argument receives `undefined` when the token has no provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `Roles`/`Permissions`                                        | function | Class/method decorator — authorization requirements. ENFORCED when `enforceRoles` is not `false`: each decorated route gets middleware resolving `CAPABILITIES.AUTHORIZATION` per request, answering `401` without a principal and `403` on a failed check with the same bodies the equivalent `@UseGuards(requireRole(...))` spelling produces. With no authorization provider the route FAILS CLOSED — `501`, never served unguarded — and `DecoratorPlugin` warns once per route. Method-level declarations override class-level; a route carrying both `@Roles` and `@Permissions` requires (any role) AND (any permission) |
-| `Public`                                                     | function | Method decorator — contributes `security: []` to the OpenAPI document. It does NOT exempt a route from a guard or from `@Roles`/`@Permissions` enforcement                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `Public`                                                     | function | Method decorator — contributes `security: []` only for a route without an enforced `@Roles`/`@Permissions` restriction. It does NOT exempt a route from a guard or from enforcement; a restricted route keeps its derived OpenAPI security requirement                                                                                                                                                                                                                                                                                                                                                                          |
 | `UseGuards`/`UseInterceptors`/`UseFilters`                   | function | Class/method pipeline decorators                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `ValidateBody`/`ValidateQuery`/`ValidateParams`              | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route                                                                                                                                                                                    |
 | `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -9161,10 +9162,10 @@ Contract notes:
   schemas description-only and silences the warning.
 - **`@Roles`/`@Permissions` are enforced, not just described** (`enforceRoles`, default `true`):
   `registerController` appends one middleware per present restriction — roles first, so a route
-  carrying both kinds is refused by the one that failed — after `composeMiddleware` and BEFORE the
-  validation middleware, so a guard's `401` still wins and a `403` is not preceded by a `400`. The
-  middleware resolves `CAPABILITIES.AUTHORIZATION` PER REQUEST, so a provider registered after
-  `register()` is honoured; with none, the route answers
+  carrying both kinds is refused by the one that failed — after guards and BEFORE interceptors,
+  ordinary middleware, filters, and validation, so no later stage can short-circuit a declared
+  restriction. The middleware resolves `CAPABILITIES.AUTHORIZATION` PER REQUEST, so a provider
+  registered after `register()` is honoured; with none, the route answers
   `501 Not Implemented / "Authorization is
   not configured"` and `register()` warns once per
   affected route naming the controller, handler, restriction and both remedies (register a provider,
@@ -9185,7 +9186,7 @@ Contract notes:
   per (method, HTTP verb) at read time, so metadata is correct regardless of application order.
   Class-level guards/interceptors/middleware run before method-level; method-level
   `@Roles`/`@Permissions` override class-level; `@Public` sets the `isPublic` flag (OpenAPI
-  `security: []` only — no guard bypass).
+  `security: []` only for unrestricted routes — no guard bypass).
 - **Handler return values**: a controller method either returns a value (serialized as JSON by the
   plugin's handler wrapper) or returns a `HandlerResult` from `ctx.response.*`.
 - **Discovery**: `discoverControllers` walks via `IRuntimeServices.fs` (absent on edge platforms →

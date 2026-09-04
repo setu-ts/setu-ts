@@ -39,9 +39,9 @@ All notable changes to this project are documented here. The format follows
   `JwtResolver`.** Tenant identity comes from an UNVERIFIED token claim — a client can mint a token
   naming any tenant — acceptable only alongside authentication middleware which separately verifies
   the token. The README and the `jwt` option's JSDoc now say so where the choice is made.
-- **`@Public`'s documentation matches its behaviour.** It contributes `security: []` to the OpenAPI
-  document; it does NOT bypass authentication or authorization, and it does not take precedence over
-  `@Roles`/`@Permissions` — nothing read the flag except the document builder.
+- **`@Public`'s documentation matches its behaviour.** It contributes `security: []` only for a
+  route without an enforced `@Roles`/`@Permissions` restriction. It does NOT bypass authentication
+  or authorization; a restricted route keeps its derived OpenAPI security requirement.
 
 ## [0.3.0] — 2026-09-03
 
