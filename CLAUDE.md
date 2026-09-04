@@ -4272,6 +4272,69 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   carry CHANGELOG migration text; the multi-tenancy README ships the tenant-in-a-behaviour recipe
   (now fence-gated) and the messaging README the publish-timing note; the register-time publish is
   pinned against a REAL RabbitMQ broker via the extended `outage-real` suite ) — complete (PR #240).
+- **Release `v0.4.0`** — on `release/v0.4.0`, published 2026-09-04 (PR #242, tag at the merge commit
+  `fd885cfc`; CI published it, one green `Publish to JSR` job — the seventh first-try success in a
+  row). **47 packages**, list unchanged since alpha.8, so no first-time publisher and neither
+  `release:create-packages` nor `release:link-repos` was needed. Scope was M88 (response-path
+  performance), M89a/M89b/M89c, and the two status-clamping fixes (#238, #239). The **second minor
+  after the label drop**, carrying **six breaking changes** — four behavioural (two refusals move
+  from a masked `500` to `501`, a restricted route starts answering `401`/`403`/`501` where it used
+  to serve, and `InMemoryBroker.publish` resolves earlier) and two API (`IMultiTenancyService` gains
+  a required member; `UnsupportedRawQueryError` takes the adapter first). Verified after publishing
+  by querying all 47 on the registry — every one live at `0.4.0`, every one reporting
+  `latest: 0.4.0`, none yanked — then a **bare** `deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime`
+  with no pin into a throwaway dir, which emitted `^0.4.0`, resolved `common` **transitively at
+  0.4.0**, and served `200 {"ok":true}`. That transitive resolution is the only real evidence the
+  cross-package specifier bump landed INSIDE the published tarballs. Six package pages spot-checked
+  as rendering their READMEs. The Release object was created by the workflow, flagged
+  `prerelease=true` (the `0.*` arm — drop it at 1.0), carrying `resolved-set.json` at exactly the
+  byte size the local pre-flight produced.
+
+  **The gap found while cutting it was a REPEAT of alpha.10's failure mode, which is the finding
+  that matters**: PR #233 (M88) had **no CHANGELOG entry at all** — only a passing mention inside
+  another bullet ("unrelated to M88") — while it put `ResponseSnapshotInit` on `@setu-ts/common`'s
+  published surface and added `ResponseSnapshot.responseInit`. A released type would have shipped
+  unannounced. alpha.10 lost PR #195 the same way. The other two checks were run and came back
+  clean: no internal contradiction (the alpha.9 mode) and nothing misfiled into the published
+  `[0.3.0]` section (the v0.3.0 mode), confirmed by diffing that section against its state at the
+  tag. **Three consecutive releases have now each been saved by one of those three manual checks**,
+  which is the argument for automating them — Qodo raised exactly this on the release PR (thread
+  3937802154), and `scripts/verify-release.ts:227-242` was confirmed from source to check only that
+  the section is non-empty. Deferred to a check 8 built early in the next cycle, not at cut time
+  (the v0.3.0 precedent for release tooling); it needs stable PR identifiers in the entries, which
+  the prose format does not carry, so it is a changelog-format change rather than a one-liner.
+
+  **A flake was found and fixed rather than re-run** (PR #241, merged first; the release branch is
+  rebased on it). The first full-suite run went red in `queue-plugin`, a package the release touches
+  in no way: two tests in `queue-service-coverage.test.ts` asserted against `Date.now()` while the
+  service scheduled on `FakeRuntimeServices`. In the last 200 ms of any wall-clock minute the cron's
+  next run falls inside `advanceMs(200)`, the job fires, and the reschedule puts it a minute past a
+  real-clock window. **Both tests pass 6/6 in isolation**, which is why it survived. Quantified
+  rather than guessed: sweeping all 6000 10 ms offsets in the minute gives **20 failing offsets
+  before the fix and 0 after** — a contiguous band exactly matching `advanceMs(200)`. This is the
+  named "never mix clocks" pitfall, and two sibling assertions in the same file were moved for the
+  same reason: they pass today only because nothing advances the fake clock ahead of them.
+
+  **Two version-bump traps, one of them new.** The `apps/*/deno.lock` regeneration must use the same
+  entry points `check:apps` uses — `main.ts`, `smoke.ts`, and `worker.ts` **when it exists**: a
+  narrower set silently DROPPED `apps/cloudflare`'s `@hono/hono` entry, because that app reaches
+  hono only through `worker.ts`. Prove the regeneration surgical **structurally** — normalise only
+  the `@setu-ts` version tokens and compare — because a line-level "every changed line contains a
+  version" grep gives false positives: a removed block's bare `"dependencies": [` and `]` lines
+  carry no version yet belong to a block re-added at the new one. All 15 came back identical, and
+  `check:apps` then left the tree clean, which is the confirmation that the regeneration matched
+  what the gate produces. The second trap is the known one and it fired again: widening
+  `SHIPPED_VERSION_LINES` for the `0.4` line is mandatory, and its immediate payoff was catching two
+  `0.4.0` references the `0\.[23]` pattern had been blind to. Both new guards are
+  stale-**within**-0.4 and were verified to fail with the pattern reverted, since an equality case
+  is satisfied by a gate that reads nothing.
+
+  **Three prose sites could not be bumped mechanically and were rephrased instead.** "pre-`0.3.0`
+  document" / "the `0.3.0` document changes", describing the OpenAPI shape M70m changed, become
+  FALSE if bumped. Rather than shield a whole bullet list or code fence with a `version:history`
+  marker — the v0.3.0 lesson, where a marker shielded live guidance — they now read
+  "pre-derivation", which cannot go stale. Every marker in the tree was re-audited; all four shield
+  genuinely historical text, with the live sentences above them.
 - **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
   named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
   suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`
