@@ -249,11 +249,22 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * in-memory double has no ack model and no redelivery, so reporting is the
    * whole of it: the rejection has been observed and settled, and with no
    * reporter configured it is dropped.
+   *
+   * A reporter that itself throws is swallowed HERE, at the single chokepoint
+   * both call sites share: the reporter is the last-resort sink, and letting
+   * its throw escape would abort the sibling fan-out from the synchronous
+   * catch (rejecting `publish`) or orphan the void-ed retained-promise chain
+   * as a genuine unhandled rejection (the asynchronous one). Falling back
+   * further only moves the hole.
    */
   #reportDispatchError(error: unknown, metadata: MessageMetadata): void {
     const reporter = this.#options?.onDispatchError;
     if (reporter !== undefined) {
-      reporter(error, metadata);
+      try {
+        reporter(error, metadata);
+      } catch {
+        // Swallowed deliberately — see the doc comment above.
+      }
     }
   }
 

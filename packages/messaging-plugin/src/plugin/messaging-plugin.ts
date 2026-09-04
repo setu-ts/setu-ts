@@ -62,6 +62,30 @@ function createPluginName(name?: string): string {
 }
 
 /**
+ * Validates the `chainReadyTimeoutMs` domain at the single point the option is
+ * resolved into the chain-gate clock. `NaN`, a negative value, or `Infinity`
+ * would otherwise reach `setTimeout`, which clamps them to ~0–1 ms — silently
+ * INVERTING the bound into an immediate refusal of every startup-window
+ * dispatch (`Infinity` intuitively means "never refuse"; a `NaN` from a bad
+ * env parse would refuse everything). `0` is the documented wait-forever value
+ * and is accepted.
+ *
+ * @param value - The configured `chainReadyTimeoutMs`
+ * @returns The validated value, unchanged
+ * @throws {RangeError} Naming the option unless the value is a finite,
+ * non-negative number of milliseconds
+ */
+function assertChainReadyTimeoutMs(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new RangeError(
+      `MessagingPlugin option 'chainReadyTimeoutMs' must be a finite, ` +
+        `non-negative number of milliseconds (received ${value}); 0 waits forever.`,
+    );
+  }
+  return value;
+}
+
+/**
  * MessagingPlugin factory.
  *
  * Creates a plugin that registers an IMessageBroker implementation based on
@@ -344,9 +368,12 @@ export function MessagingPlugin(
           : new PipelinedBroker(broker, behaviorChain, chainReady, {
             runtime: ctx.runtime,
             // exactOptionalPropertyTypes: omit the option when unset so the
-            // broker applies its own default bound.
+            // broker applies its own default bound. The value is validated
+            // where it resolves into the clock — a `NaN`/negative/`Infinity`
+            // bound would reach `setTimeout` and clamp to ~0, refusing every
+            // held dispatch instead of bounding the wait.
             ...(options.chainReadyTimeoutMs !== undefined
-              ? { timeoutMs: options.chainReadyTimeoutMs }
+              ? { timeoutMs: assertChainReadyTimeoutMs(options.chainReadyTimeoutMs) }
               : {}),
           });
       }

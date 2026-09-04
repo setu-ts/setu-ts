@@ -196,6 +196,47 @@ describe('a rejected handler reaches onDispatchError and never the publish (M89c
     }
   });
 
+  it('a THROWING reporter never rejects publish and never surfaces as unhandledrejection', async () => {
+    // The reporter is the LAST-RESORT sink: its own throw must cure nothing
+    // and cost nothing. Unhandled, it would abort the sibling fan-out from
+    // `#invoke`'s synchronous catch (publish would reject) and orphan the
+    // void-ed retained-promise chain as a genuine unhandled rejection (the
+    // async path). Covers BOTH `#reportDispatchError` call sites.
+    const probe = new UnhandledRejectionProbe();
+    probe.start();
+    try {
+      const reported: unknown[] = [];
+      const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer(), {
+        onDispatchError: (error) => {
+          reported.push(error);
+          throw new Error('reporter exploded');
+        },
+      });
+      await broker.connect();
+
+      const received: string[] = [];
+      await broker.subscribe('t', () => {
+        throw new Error('sync boom'); // the synchronous-throw site
+      });
+      await broker.subscribe('t', () => Promise.reject(new Error('async boom'))); // the retained-promise site
+      await broker.subscribe('t', (message) => {
+        received.push(`sibling:${String(message)}`);
+      });
+
+      await expect(broker.publish('t', 'm')).resolves.toBeUndefined();
+      await settle();
+
+      // The reporter SAW both handler failures (before throwing each time).
+      expect(reported.map((e) => (e as Error).message)).toEqual(['sync boom', 'async boom']);
+      // The sibling fan-out stayed intact.
+      expect(received).toEqual(['sibling:m']);
+      // Neither reporter throw escaped the broker.
+      expect(probe.events).toEqual([]);
+    } finally {
+      probe.stop();
+    }
+  });
+
   it('observes and drops a rejection when no reporter is configured — never unhandled', async () => {
     const probe = new UnhandledRejectionProbe();
     probe.start();

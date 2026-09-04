@@ -5,7 +5,9 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   HealthCheckResult,
   HealthStatus,
+  IIngressBehavior,
   IMessageBroker,
+  IngressContext,
   IPluginContext,
   IRuntimeServices,
 } from '@setu-ts/common';
@@ -1105,5 +1107,71 @@ describe('MessagingPlugin', () => {
     const broker = ctx.services.get(CAPABILITIES.MESSAGING);
     expect(broker).toBeDefined();
     expect((broker as { isReady: () => boolean }).isReady()).toBe(true);
+  });
+
+  // ─── chainReadyTimeoutMs option domain (M89c review fix) ──────────────────
+  //
+  // `NaN`, a negative value, or `Infinity` would reach `setTimeout`, which
+  // clamps them to ~0–1 ms — silently INVERTING the bound into an immediate
+  // refusal of every startup-window dispatch. The documented domain is a
+  // finite, non-negative number (`0` = wait forever).
+
+  const chainGateBehaviorFactory = (): IIngressBehavior => ({
+    handle: (_ctx: IngressContext, next: () => Promise<void>): Promise<void> => next(),
+  });
+
+  it('chainReadyTimeoutMs: NaN throws at registration naming the option', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({
+      broker: 'memory',
+      // The gate — and so the option — is armed only when a behaviour FACTORY
+      // is declared: the single point the option resolves into the clock.
+      behaviors: [chainGateBehaviorFactory],
+      chainReadyTimeoutMs: Number.NaN,
+    });
+
+    const outcome = plugin.register(ctx);
+    await expect(outcome).rejects.toThrow(RangeError);
+    await expect(outcome).rejects.toThrow('chainReadyTimeoutMs');
+  });
+
+  it('chainReadyTimeoutMs: -1 throws at registration naming the option', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({
+      broker: 'memory',
+      behaviors: [chainGateBehaviorFactory],
+      chainReadyTimeoutMs: -1,
+    });
+
+    const outcome = plugin.register(ctx);
+    await expect(outcome).rejects.toThrow(RangeError);
+    await expect(outcome).rejects.toThrow('chainReadyTimeoutMs');
+  });
+
+  it('chainReadyTimeoutMs: Infinity throws at registration naming the option', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({
+      broker: 'memory',
+      behaviors: [chainGateBehaviorFactory],
+      chainReadyTimeoutMs: Infinity,
+    });
+
+    const outcome = plugin.register(ctx);
+    await expect(outcome).rejects.toThrow(RangeError);
+    await expect(outcome).rejects.toThrow('chainReadyTimeoutMs');
+  });
+
+  it('chainReadyTimeoutMs: 0 (wait forever) and positive values still register', async () => {
+    for (const timeoutMs of [0, 250]) {
+      const { ctx, registered } = createFakeContext();
+      const plugin = MessagingPlugin({
+        broker: 'memory',
+        behaviors: [chainGateBehaviorFactory],
+        chainReadyTimeoutMs: timeoutMs,
+      });
+
+      await plugin.register(ctx);
+      expect(registered.has(CAPABILITIES.MESSAGING)).toBe(true);
+    }
   });
 });
