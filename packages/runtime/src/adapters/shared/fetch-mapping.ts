@@ -236,12 +236,37 @@ export function mapWebRequestToFrameworkRequest(request: Request): IRequest {
 }
 
 /**
+ * The statuses RFC 9110 defines as carrying no content, which the `Response`
+ * constructor enforces by throwing
+ * `TypeError: Response with null body status cannot have body`.
+ *
+ * The framework's own response model does not prevent a handler from writing a
+ * body at one of these — `ctx.response.status(204).json(...)` is expressible,
+ * and so is the far likelier `status(204).send(new Uint8Array(0))` or
+ * `status(204).text('')`, where the body is EMPTY but still present. Before
+ * this was handled, every one of those threw out of the adapter, after the
+ * pipeline had finished, so no middleware and no `errorHandler` could see it:
+ * the request died with an unhandled `TypeError`.
+ *
+ * The body is therefore dropped rather than the throw being propagated, which
+ * is what Express and Fastify both do and what RFC 9110 §15.3.5 implies — a
+ * `204` has no content, so serving it without one is the conformant answer.
+ * Headers are left alone: RFC 9110 permits representation metadata on a `204`.
+ */
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
+
+/**
  * Maps an `IResponse.snapshot()` to a web-standard `Response`.
  *
  * Accepts the discriminated {@linkcode ResponseSnapshot} union: when
  * `streaming` is `true`, the `ReadableStream` body is passed straight
  * through to `new Response(streamBody, { status, headers })` with zero
  * buffering. On the buffered arm, the existing logic is unchanged.
+ *
+ * A body written at one of the {@linkcode NULL_BODY_STATUSES} is dropped, and
+ * a stream body is CANCELLED rather than merely discarded, so the source it
+ * reads from (a file handle, an upstream response) is released instead of
+ * leaking.
  *
  * @param snapshot - The response snapshot
  * @returns A web-standard `Response`
@@ -256,6 +281,17 @@ export function mapSnapshotToWebResponse(
   // the native Response constructor. Explicit/multi-value headers fall back
   // to the existing Headers path unchanged.
   const headers = snapshot.responseInit?.headers ?? snapshot.headers;
+
+  if (NULL_BODY_STATUSES.has(status)) {
+    // Cancelling is not tidiness: an abandoned `ReadableStream` holds its
+    // source open (the M70k HEAD-descriptor-leak class). `cancel()` rejects if
+    // the stream is already errored or locked, which must not replace a valid
+    // response with a throw, so the rejection is swallowed.
+    if (streaming && body !== null) {
+      void body.cancel().catch(() => {});
+    }
+    return new Response(null, { status, headers });
+  }
 
   if (streaming) {
     // Pass the ReadableStream straight through — the web fetch model pumps it
