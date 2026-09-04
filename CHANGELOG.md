@@ -25,6 +25,11 @@ All notable changes to this project are documented here. The format follows
   ignored; that error already states its own status. `Symbol.for`, so two copies of `common` in one
   process resolve the same key.
 
+  `HttpStatusHint.status` must be an **integer in `400`–`599`**; a hint outside that range reads as
+  absent and the error takes the ordinary masked-`500` path. An unserveable status would otherwise
+  make the web `Response` constructor throw out of the error handler itself, and a hint says how an
+  ERROR is answered, which is never a success or a redirect.
+
 ### Changed
 
 - **BREAKING (behaviour) — a database query refusal answers `501 Not Implemented`, not a masked

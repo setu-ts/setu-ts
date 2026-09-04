@@ -106,6 +106,60 @@ describe('HTTP status hint', () => {
     }
   });
 
+  it('should reject a status the platform cannot serve, or that an error cannot carry', () => {
+    // `status` is typed `number` and the key is global, so the value arrives
+    // from another package. Two families are refused:
+    //   - unserveable: the web `Response` constructor throws `RangeError`
+    //     outside [200, 599], which would make the error handler ITSELF the
+    //     fault — a throw escaping the one `catch` that contains throws.
+    //   - wrong kind: a hint says how an ERROR is answered, and an error is
+    //     never a success or a redirect.
+    // Refusing reads as ABSENT, so the error takes the ordinary masked path.
+    for (
+      const status of [
+        999,
+        0,
+        -1,
+        400.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        200,
+        302,
+        399,
+        600,
+      ]
+    ) {
+      const error = new Error('boom');
+      Object.defineProperty(error, HTTP_STATUS_HINT, {
+        value: { status, title: 'T', detail: 'D' },
+        configurable: true,
+      });
+      expect(httpStatusHintOf(error), `status ${String(status)}`).toBeUndefined();
+    }
+  });
+
+  it('should accept both boundaries of the conforming range', () => {
+    // The control for the test above: the guard must reject only what it means
+    // to. 400 and 599 are the inclusive edges.
+    for (const status of [400, 499, 500, 599]) {
+      const hint: HttpStatusHint = { status, title: 'T', detail: 'D' };
+      const branded = withHttpStatusHint(new Error('boom'), hint);
+      expect(httpStatusHintOf(branded), `status ${status}`).toEqual(hint);
+    }
+  });
+
+  it('should throw when branding a frozen error, as documented', () => {
+    // The brand is a property defined on the error itself, so a non-extensible
+    // one cannot carry it. Documented with `@throws` rather than swallowed:
+    // silently returning an unbranded error would serve a masked 500 while the
+    // caller believed it had set a status.
+    const frozen = Object.freeze(new Error('boom'));
+
+    expect(() => withHttpStatusHint(frozen, { status: 501, title: 'T', detail: 'D' }))
+      .toThrow(TypeError);
+  });
+
   it('should reject a non-object brand value', () => {
     const error = new Error('boom');
     Object.defineProperty(error, HTTP_STATUS_HINT, { value: 501, configurable: true });

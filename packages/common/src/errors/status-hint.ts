@@ -35,6 +35,24 @@ import type { ErrorResponseInit } from './error-responder.ts';
 export const HTTP_STATUS_HINT: unique symbol = Symbol.for('setu.http.status-hint');
 
 /**
+ * The lowest {@linkcode HttpStatusHint.status} treated as conforming.
+ *
+ * A hint says how an ERROR should be answered, so a `2xx` or `3xx` is rejected
+ * rather than served: an error is never a success or a redirect.
+ *
+ * @since 0.4.0
+ */
+const MIN_HINT_STATUS = 400;
+
+/**
+ * The highest {@linkcode HttpStatusHint.status} treated as conforming — the
+ * top of the range the web `Response` constructor accepts.
+ *
+ * @since 0.4.0
+ */
+const MAX_HINT_STATUS = 599;
+
+/**
  * How an error should be answered, as decided by the code that threw it.
  *
  * It is an {@linkcode ErrorResponseInit} — the same shape
@@ -70,6 +88,14 @@ export const HTTP_STATUS_HINT: unique symbol = Symbol.for('setu.http.status-hint
  */
 export interface HttpStatusHint extends ErrorResponseInit {
   /**
+   * The HTTP status to answer with. **Must be an integer in `400`–`599`**; a
+   * hint outside that range is treated as ABSENT and the error takes the
+   * ordinary masked-`500` path, because a hint says how an ERROR should be
+   * answered and a status the platform cannot serve would make the error
+   * handler itself throw.
+   */
+  readonly status: number;
+  /**
    * The caller-facing disclosure, served verbatim — **required** here, where
    * {@linkcode ErrorResponseInit} leaves it optional, because a hint that
    * omitted it would fall back to the `Error`'s own message.
@@ -93,6 +119,8 @@ export interface HttpStatusHint extends ErrorResponseInit {
  * @param error - The error to brand
  * @param hint - How it should be answered
  * @returns The same `error` reference, branded
+ * @throws {TypeError} If `error` is frozen, sealed, or otherwise not
+ * extensible — the brand is defined as a property on the error itself
  *
  * @example
  * ```typescript
@@ -156,11 +184,34 @@ export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
  * symbol is treated as absent rather than trusted — the `securityMetadataOf`
  * precedent, and the reason `Symbol.for` is safe here: another library
  * claiming this key cannot make `errorHandler` serve an arbitrary body.
+ *
+ * `status` is checked against {@linkcode MIN_HINT_STATUS}–{@linkcode
+ * MAX_HINT_STATUS}, not merely against `typeof === 'number'`, for two reasons.
+ *
+ * The first is that a status outside the web `Response` constructor's
+ * `[200, 599]` makes it throw `RangeError` — so a hint carrying `999`, `0`, a
+ * negative, a fraction, `NaN` or `Infinity` would turn the error handler
+ * itself into the fault, a throw escaping the one `catch` that exists to
+ * contain throws. Because `status` is typed `number` and the key is global,
+ * that value arrives from another package and may be anything a `number`
+ * holds; a mis-derived one collapses to `NaN` rather than to a plausible
+ * status.
+ *
+ * The second is semantic, and it is why the floor is `400` rather than `200`:
+ * a hint says how an ERROR should be answered, and an error is never a success
+ * or a redirect. This is deliberately stricter than the
+ * {@linkcode ErrorResponseInit} it extends — `respondWithError` takes its
+ * status from a literal at the call site, visible in review, while a brand
+ * travels from another package inside an error.
  */
 function isHttpStatusHint(value: unknown): value is HttpStatusHint {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as { status?: unknown; title?: unknown; detail?: unknown };
-  return typeof candidate.status === 'number' &&
-    typeof candidate.title === 'string' &&
-    typeof candidate.detail === 'string';
+  if (typeof candidate.status !== 'number') return false;
+  // `Number.isInteger` also rejects `NaN` and both infinities, so the range
+  // comparisons below never run against a value for which `>=`/`<=` are
+  // vacuously false.
+  if (!Number.isInteger(candidate.status)) return false;
+  if (candidate.status < MIN_HINT_STATUS || candidate.status > MAX_HINT_STATUS) return false;
+  return typeof candidate.title === 'string' && typeof candidate.detail === 'string';
 }
