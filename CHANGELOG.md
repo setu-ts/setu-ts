@@ -103,8 +103,11 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/common` / `@setu-ts/exceptions` — an unserveable status no longer makes the error path
   itself the fault.** `respondWithError` and `createErrorResponder`'s responder passed
   `ErrorResponseInit.status` straight to `response.status(...)`. The web `Response` constructor
-  throws `RangeError` outside `[200, 599]` and for a non-integer, so an out-of-range value replaced
-  the error response the caller asked for with an unhandled exception on the real serve path.
+  throws `RangeError` outside `[200, 599]` and for a non-integer, and `TypeError` for a body on one
+  of the null-body statuses `204`/`205`/`304` — so such a value replaced the error response the
+  caller asked for with an unhandled exception on the real serve path. The null-body three are in
+  range and so survive a range check; every path through this seam writes a body, since
+  `ErrorResponseInit.title` is required.
 
   This was reachable from application code through published options, not only from a framework
   literal: `FlagGuardOptions.statusCode`, the multi-tenancy `rejectionStatus`, and a

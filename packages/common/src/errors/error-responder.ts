@@ -255,6 +255,19 @@ const MIN_SERVEABLE_STATUS = 200;
 /** The highest status the web `Response` constructor accepts. */
 const MAX_SERVEABLE_STATUS = 599;
 
+/**
+ * The statuses the Fetch standard forbids a body on.
+ *
+ * Being inside `[200, 599]` is not sufficient: `new Response(body, { status })`
+ * throws `TypeError: Response with null body status cannot have body` for
+ * these three, and every path through this seam writes a body — an
+ * {@linkcode ErrorResponseInit} carries a required `title`. So an init naming
+ * one of them is self-contradictory in the same way an out-of-range number is,
+ * and takes the same remedy. Measured against the real serve path, not
+ * inferred: all three threw out of `app.fetch` before this was excluded.
+ */
+const NULL_BODY_STATUSES: ReadonlySet<number> = new Set([204, 205, 304]);
+
 /** The status an unserveable one is clamped to. */
 const CLAMPED_STATUS = 500;
 
@@ -264,9 +277,11 @@ const CLAMPED_STATUS = 500;
  * one is reachable.
  *
  * The `Response` constructor throws `RangeError` for anything outside
- * `[200, 599]` and for a non-integer, which would make the error path itself
- * the fault: the response the caller asked for is replaced by an unhandled
- * exception on the real serve path. Three shipped call sites pass a status the
+ * `[200, 599]` and for a non-integer, and `TypeError` for a body on one of the
+ * null-body statuses `204`/`205`/`304` (see {@linkcode NULL_BODY_STATUSES}) —
+ * any of which would make the error path itself the fault: the response the
+ * caller asked for is replaced by an unhandled exception on the real serve
+ * path. Three shipped call sites pass a status the
  * APPLICATION authors — `FlagGuardOptions.statusCode`, the multi-tenancy
  * `rejectionStatus`, and a `WebSocketGuardDecision.status` — so a plausible
  * typo such as `4004` for `404` crashes every request to that route.
@@ -291,7 +306,8 @@ export function resolveResponseStatus(status: number, target: ErrorResponderTarg
   if (
     Number.isInteger(status) &&
     status >= MIN_SERVEABLE_STATUS &&
-    status <= MAX_SERVEABLE_STATUS
+    status <= MAX_SERVEABLE_STATUS &&
+    !NULL_BODY_STATUSES.has(status)
   ) {
     return status;
   }

@@ -19,6 +19,23 @@ import { createTestApp } from '@setu-ts/testing';
 import type { IKernelApplication } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
+
+/**
+ * The structural pino instance `PinoFactory` returns. Declared here because
+ * `logger-plugin` keeps `PinoLoggerLike` internal; the members and their
+ * `(obj, msg)` argument order are copied from its declaration, where the
+ * structured object is FIRST.
+ */
+interface PinoLoggerLike {
+  readonly level: string;
+  fatal(obj: unknown, msg: string): void;
+  error(obj: unknown, msg: string): void;
+  warn(obj: unknown, msg: string): void;
+  info(obj: unknown, msg: string): void;
+  debug(obj: unknown, msg: string): void;
+  trace(obj: unknown, msg: string): void;
+  child(bindings: Record<string, unknown>): PinoLoggerLike;
+}
 import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
 
 import { errorHandler } from '../../src/middleware/error-handler.ts';
@@ -47,6 +64,12 @@ async function buildApp(format: 'default' | 'rfc9457'): Promise<IKernelApplicati
     ['/typo', 4004],
     ['/nan', Number.NaN],
     ['/huge', 999],
+    // In range, but the Fetch standard forbids a body on these, so the
+    // `Response` constructor rejects them with `TypeError` rather than
+    // `RangeError` — a second crash the range check alone does not close.
+    ['/no-content', 204],
+    ['/reset', 205],
+    ['/not-modified', 304],
     ['/sane', 404],
   ];
   let priority = 100;
@@ -73,7 +96,7 @@ describe('an unserveable status on a published guard option', () => {
     const app = await buildApp('default');
     try {
       // Each of these threw before the guard existed.
-      for (const path of ['/typo', '/nan', '/huge']) {
+      for (const path of ['/typo', '/nan', '/huge', '/no-content', '/reset', '/not-modified']) {
         const res = await drive(app, path);
         expect(res.status).toBe(500);
         // The body's own status member agrees with the written status.
@@ -141,6 +164,9 @@ describe('an unserveable status on a thrown HttpError', () => {
     app.router.get('/nan', () => {
       throw new HttpError(Number.NaN, 'nan');
     });
+    app.router.get('/no-content', () => {
+      throw new HttpError(204, 'no content');
+    });
     app.router.get('/sane', () => {
       throw new HttpError(404, 'genuinely missing');
     });
@@ -157,6 +183,8 @@ describe('an unserveable status on a thrown HttpError', () => {
       // thrower deliberately wrote survives.
       expect(typo.body).toEqual({ statusCode: 500, message: 'typo' });
       expect((await drive(app, '/nan')).status).toBe(500);
+      // The null-body statuses reach this door too.
+      expect((await drive(app, '/no-content')).status).toBe(500);
     } finally {
       await app.stop();
     }
@@ -185,7 +213,7 @@ describe('an unserveable status on a thrown HttpError', () => {
   });
 });
 
-describe('the clamp reported through the REAL ConsoleLogger', () => {
+describe('the clamp reported through a REAL first-party logger', () => {
   /**
    * Regression guard for the `resolveLogger` this-binding class (M52c): the
    * loggers `logger-plugin` ships implement their level methods in terms of a
@@ -193,52 +221,62 @@ describe('the clamp reported through the REAL ConsoleLogger', () => {
    * other assertion for this path uses a plain-object fake, where a detached
    * method works fine.
    *
-   * `reportUnserveableStatus` swallows a throwing logger by design — the
-   * report must never replace the error response — so "did not throw" would
-   * prove nothing here. The log line itself is what must be observed, so
-   * `console.log` (the sink `ConsoleLogger` writes to) is captured.
+   * `reportUnserveableStatus` swallows a throwing logger by design — the report
+   * must never replace the error response — so "did not throw" would prove
+   * nothing here; the emitted record is what must be observed. The REAL
+   * `PinoLogger` is used rather than `ConsoleLogger` because it is the one
+   * first-party logger with an injectable sink, so the private-field property
+   * that matters is exercised without capturing `console` (which `no-console`
+   * forbids). The double sits at the third-party pino boundary, not at our own
+   * `ILogger`.
    */
   it('emits the clamp report, not just a 500', async () => {
-    const lines: string[] = [];
-    const realLog = console.log;
-    console.log = (...args: unknown[]) => {
-      lines.push(args.map(String).join(' '));
+    const emitted: Array<{ meta: unknown; msg: string }> = [];
+    const sink: PinoLoggerLike = {
+      level: 'error',
+      fatal: () => {},
+      error: (meta: unknown, msg: string) => {
+        emitted.push({ meta, msg });
+      },
+      warn: () => {},
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+      child: () => sink,
     };
+
+    const app = await createTestApp({
+      plugins: [
+        RuntimePlugin(),
+        // The REAL PinoLogger class — its `error` reaches `this.#pino`, so a
+        // detached call throws — writing into the sink above.
+        LoggerPlugin({ transport: 'pino', level: 'error', pinoFactory: () => sink }),
+        FeatureFlagsPlugin({
+          provider: 'memory',
+          options: { flags: { 'off-flag': { enabled: false } } },
+        }),
+      ],
+      autoStart: false,
+    });
+    app.middleware.add(errorHandler({ format: 'default', logErrors: false }), {
+      priority: 0,
+      name: 'error-handler',
+    });
+    const guard = createFlagGuard('off-flag', { statusCode: 4004 });
+    app.middleware.add((ctx, next) => guard(ctx, next), { priority: 100, name: 'guard' });
+    app.router.get('/typo', (ctx) => ctx.response.text('handler ran'));
+    await app.start();
     try {
-      const app = await createTestApp({
-        plugins: [
-          RuntimePlugin(),
-          LoggerPlugin({ level: 'error' }), // real ConsoleLogger, not a fake
-          FeatureFlagsPlugin({
-            provider: 'memory',
-            options: { flags: { 'off-flag': { enabled: false } } },
-          }),
-        ],
-        autoStart: false,
-      });
-      app.middleware.add(errorHandler({ format: 'default', logErrors: false }), {
-        priority: 0,
-        name: 'error-handler',
-      });
-      const guard = createFlagGuard('off-flag', { statusCode: 4004 });
-      app.middleware.add((ctx, next) => guard(ctx, next), { priority: 100, name: 'guard' });
-      app.router.get('/typo', (ctx) => ctx.response.text('handler ran'));
-      await app.start();
-      try {
-        const res = await app.fetch(new Request('http://test.local/typo'));
-        expect(res.status).toBe(500);
-      } finally {
-        await app.stop();
-      }
+      const res = await app.fetch(new Request('http://test.local/typo'));
+      expect(res.status).toBe(500);
     } finally {
-      console.log = realLog;
+      await app.stop();
     }
 
-    const report = lines.find((l) => l.includes('unserveable status'));
+    const report = emitted.find((e) => e.msg.includes('unserveable status'));
     expect(report).toBeDefined();
     // The metadata reaches the logger too — a detached call would have thrown
-    // before writing anything, and the swallow would have hidden it.
-    expect(report).toContain('"status":4004');
-    expect(report).toContain('"clampedTo":500');
+    // before emitting anything, and the swallow would have hidden it.
+    expect(report?.meta).toMatchObject({ status: 4004, clampedTo: 500 });
   });
 });

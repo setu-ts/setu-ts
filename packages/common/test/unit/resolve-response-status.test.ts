@@ -106,6 +106,21 @@ describe('resolveResponseStatus', () => {
     }
   });
 
+  it('clamps the null-body statuses 204/205/304, which are in range but forbid a body', () => {
+    const { t } = makeTarget();
+    // `new Response(body, { status })` throws `TypeError: Response with null
+    // body status cannot have body` for these three, and every path through
+    // this seam writes a body (`title` is required on the init). Measured
+    // against the real serve path, not inferred.
+    for (const status of [204, 205, 304]) {
+      expect(resolveResponseStatus(status, t)).toBe(500);
+    }
+    // The neighbours are unaffected — this excludes exactly three values.
+    for (const status of [203, 206, 303, 305]) {
+      expect(resolveResponseStatus(status, t)).toBe(status);
+    }
+  });
+
   it('reports the clamp through the logger capability when one is reachable', () => {
     const { services, calls } = makeLoggerServices();
     const { t } = makeTarget(services);
