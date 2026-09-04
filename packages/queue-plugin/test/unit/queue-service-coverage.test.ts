@@ -122,11 +122,11 @@ describe('QueueService - coverage', () => {
       expect(id).toBeTruthy();
 
       // Job should not be immediately available
-      const reservedNow = await adapter.reserve('delayed-test', 1, Date.now());
+      const reservedNow = await adapter.reserve('delayed-test', 1, runtime.now());
       expect(reservedNow.length).toBe(0);
 
       // Job should be available after delay
-      const reservedLater = await adapter.reserve('delayed-test', 1, Date.now() + 5000);
+      const reservedLater = await adapter.reserve('delayed-test', 1, runtime.now() + 5000);
       expect(reservedLater.length).toBe(1);
     });
   });
@@ -215,8 +215,12 @@ describe('QueueService - coverage', () => {
       // Advance past poll interval
       await runtime.advanceMs(200);
 
-      // Both should be enqueued
-      const due = await adapter.fetchRecurringDue(Date.now() + 60000);
+      // Both should be enqueued. The window is read off `runtime`, the clock
+      // the service actually scheduled against — NOT `Date.now()`. Mixing them
+      // made this fail in the last 200ms of any wall-clock minute: `nextRunAtMs`
+      // then lands inside `advanceMs(200)`, the job fires, and the reschedule
+      // puts it a full minute past a real-clock window. Measured ~0.33% of runs.
+      const due = await adapter.fetchRecurringDue(runtime.now() + 60000);
       expect(due.length).toBe(2);
     });
 
@@ -228,8 +232,9 @@ describe('QueueService - coverage', () => {
       // Advance past poll interval - the cron calculation should succeed
       await runtime.advanceMs(200);
 
-      // Verify the job was processed
-      const due = await adapter.fetchRecurringDue(Date.now() + 60000);
+      // Verify the job was processed. Same clock as the service, for the
+      // reason given on the sibling test above.
+      const due = await adapter.fetchRecurringDue(runtime.now() + 60000);
       expect(due.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -286,7 +291,7 @@ describe('QueueService - coverage', () => {
       await runtime.advanceMs(200);
 
       // Job should be acked (not in processing)
-      const reserved = await adapter.reserve('ack-test', 1, Date.now());
+      const reserved = await adapter.reserve('ack-test', 1, runtime.now());
       expect(reserved.length).toBe(0);
     });
   });
