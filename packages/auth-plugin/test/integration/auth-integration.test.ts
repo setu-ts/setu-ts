@@ -490,7 +490,7 @@ describe('AuthPlugin without RBAC — real application', () => {
       expect(body.error).toBe('Not Implemented');
       // The detail names the missing configuration rather than restating the
       // status, which is the whole difference from the masked 500.
-      expect(body.detail).toBe('Authorization is not configured for this application');
+      expect(body.detail).toBe('Authorization is not configured');
     }
 
     await app.stop();

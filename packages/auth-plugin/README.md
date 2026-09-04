@@ -180,9 +180,9 @@ app.router.get('/health', { middleware: [publicRoute()], handler });
 
 `rbac` is optional, and a JWT-only registration provides no authorization service. In that
 composition the four authorization guards — `requireRole`, `requirePermission`, `requireAnyRole`,
-`requireAllPermissions` — answer **`501`** with the detail
-`Authorization is not configured for this application`, short-circuiting before the handler.
-`requireAuth()` and `publicRoute()` resolve nothing and are unaffected.
+`requireAllPermissions` — answer **`501`** with the detail `Authorization is not configured`,
+short-circuiting before the handler. `requireAuth()` and `publicRoute()` resolve nothing and are
+unaffected.
 
 The guards answer through the error-responder seam, so the **status and the detail text are the
 invariant** while the body's shape is whatever the application configured. With no `errorHandler`
@@ -190,11 +190,11 @@ registered you get the framework-default fallback; with one, its format:
 
 ```jsonc
 // no errorHandler
-{ "error": "Not Implemented", "detail": "Authorization is not configured for this application" }
+{ "error": "Not Implemented", "detail": "Authorization is not configured" }
 // errorHandler()
-{ "statusCode": 501, "message": "Not Implemented", "details": { "detail": "Authorization is not configured for this application" } }
+{ "statusCode": 501, "message": "Not Implemented", "details": { "detail": "Authorization is not configured" } }
 // errorHandler({ format: 'rfc9457' })
-{ "type": "about:blank", "title": "Not Implemented", "status": 501, "detail": "Authorization is not configured for this application", "instance": "/reports" }
+{ "type": "about:blank", "title": "Not Implemented", "status": 501, "detail": "Authorization is not configured", "instance": "/reports" }
 ```
 
 `501` rather than `403` because nothing is wrong with the caller: the deployment cannot evaluate the

@@ -49,7 +49,7 @@ function resolveAuthorization(ctx: IRequestContext): IAuthorizationService | nul
     respondWithError(ctx, {
       status: 501,
       title: 'Not Implemented',
-      detail: 'Authorization is not configured for this application',
+      detail: 'Authorization is not configured',
     });
     return null;
   }

@@ -107,7 +107,7 @@ describe('auth guards without an authorization capability (M89b, X18-2)', () => 
       expect(state.continued).toBe(false);
       expect(state.body).toEqual({
         error: 'Not Implemented',
-        detail: 'Authorization is not configured for this application',
+        detail: 'Authorization is not configured',
       });
     });
   }

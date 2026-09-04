@@ -1924,14 +1924,13 @@ does not register an authorization service or advertise the authorization capabi
 **What the guards then do (M89b, X18-2).** `requireAuth()` and `publicRoute()` resolve nothing and
 are unaffected. The four authorization guards — `requireRole`, `requirePermission`, `requireAnyRole`
 and `requireAllPermissions` — answer **`501 Not Implemented`** with
-`Authorization is not configured for this application`, short-circuiting before the handler. The
-status is `501` rather than `403` because nothing is wrong with the caller: the deployment cannot
-evaluate the policy at all, and the condition is permanent for that deployment. A principal that
-genuinely fails a policy check still gets `403`; that path is unchanged. Before M89b these four
-resolved the capability unconditionally, so the registry's throw escaped into the pipeline and the
-caller received a masked `500 Internal Server Error` — a real fault with `/health`, `/ready` and
-`/live` all reporting `up`. They still fail closed either way; what changed is that the refusal is
-legible.
+`Authorization is not configured`, short-circuiting before the handler. The status is `501` rather
+than `403` because nothing is wrong with the caller: the deployment cannot evaluate the policy at
+all, and the condition is permanent for that deployment. A principal that genuinely fails a policy
+check still gets `403`; that path is unchanged. Before M89b these four resolved the capability
+unconditionally, so the registry's throw escaped into the pipeline and the caller received a masked
+`500 Internal Server Error` — a real fault with `/health`, `/ready` and `/live` all reporting `up`.
+They still fail closed either way; what changed is that the refusal is legible.
 
 > **Session authentication and caller-supplied strategies (M73):** `session` takes a
 > `SessionAuthOptions` whose single required member, `toPrincipal(view)`, maps the opened

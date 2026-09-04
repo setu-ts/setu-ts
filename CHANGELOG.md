@@ -73,7 +73,7 @@ All notable changes to this project are documented here. The format follows
   and a principal that genuinely HELD the required role was refused with a masked
   `500 Internal Server Error` — a real fault with `/health`, `/ready` and `/live` all reporting
   `up`. They now consult `services.has` and short-circuit with `501 Not Implemented` /
-  `Authorization is not configured for this application`.
+  `Authorization is not configured`.
 
   `501` rather than `403` because nothing is wrong with the caller: the deployment cannot evaluate
   the policy at all, and the condition is permanent for that deployment. A principal that genuinely
