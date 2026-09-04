@@ -19,7 +19,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 ---
 
 > [!IMPORTANT]
-> **Status: all 47 packages are published in `v0.3.0` and are live on JSR.**
+> **Status: all 47 packages are published in `v0.4.0` and are live on JSR.**
 >
 > <!-- version:history -->
 >
@@ -194,16 +194,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Deno
-deno add jsr:@setu-ts/kernel@^0.3.0 jsr:@setu-ts/runtime@^0.3.0
+deno add jsr:@setu-ts/kernel@^0.4.0 jsr:@setu-ts/runtime@^0.4.0
 
 # Node
-npx jsr add @setu-ts/kernel@^0.3.0 @setu-ts/runtime@^0.3.0
+npx jsr add @setu-ts/kernel@^0.4.0 @setu-ts/runtime@^0.4.0
 
 # Bun
-bunx jsr add @setu-ts/kernel@^0.3.0 @setu-ts/runtime@^0.3.0
+bunx jsr add @setu-ts/kernel@^0.4.0 @setu-ts/runtime@^0.4.0
 ```
 
-**The `@^0.3.0` is recommended, not required.** `v0.3.0` is a normal release, so a bare
+**The `@^0.4.0` is recommended, not required.** `v0.4.0` is a normal release, so a bare
 `deno add jsr:@setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet the
 next breaking release as a deliberate upgrade than as a surprise — see [Versioning](#versioning).
 
@@ -218,7 +218,7 @@ younger than a day. Pass `--min-dep-age 0` to override it, or wait it out.
 ### The CLI
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.3.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.4.0/main
 
 setu new my-app
 cd my-app && setu generate service billing
@@ -226,7 +226,7 @@ cd my-app && setu generate service billing
 
 The `-n setu` is required: Deno would otherwise name the binary after the package (`cli`).
 
-All 47 workspace members are published on JSR, in `v0.3.0`: the core (`common`, `kernel`, `runtime`,
+All 47 workspace members are published on JSR, in `v0.4.0`: the core (`common`, `kernel`, `runtime`,
 `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, and the
 `cli`.
 
@@ -242,10 +242,10 @@ Setu-TS is pre-1.0, and the version number says exactly what that means:
 
 | Bump                         | What it carries                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |
-| **Minor** — `0.2` → `0.3`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
+| **Minor** — `0.3` → `0.4`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
 | **Patch** — the third number | Fixes and additions only. Safe to take without reading anything.                           |
 
-Under semver a `^0.3.0` range means `>=0.3.0 <0.4.0`, so a caret pin absorbs patches and stops at
+Under semver a `^0.4.0` range means `>=0.4.0 <0.5.0`, so a caret pin absorbs patches and stops at
 the next breaking release. That is the intended way to depend on this project today.
 
 <!-- version:history -->

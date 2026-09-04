@@ -8,7 +8,7 @@
 # The build context MUST be the repository root. An example's deno.json maps only the packages it
 # imports DIRECTLY; `@setu-ts/common` reaches `packages/kernel` through the root workspace. Copy
 # `packages/` without the root `deno.json` and the build fails with
-#   Could not find version of '@setu-ts/common' that matches '^0.3.0'
+#   Could not find version of '@setu-ts/common' that matches '^0.4.0'
 # because the caret-prerelease specifier is then resolved against JSR instead of the local member.
 #
 # Building from source rather than from published JSR is deliberate: an image must track HEAD, and

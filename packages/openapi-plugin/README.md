@@ -138,8 +138,8 @@ Rules and limits:
   working document into a codegen failure for its consumers.
 - The derived `400` carries a description and no schema — the body shape depends on the validation
   plugin's configured `errorFormat`, which this plugin cannot see.
-- `deriveRequestSchemas: false` disables derivation only. It does NOT restore the rest of the 0.3.0
-  document changes: owner exclusion, the `operationId` format and schema deduplication are
+- `deriveRequestSchemas: false` disables derivation only. It does NOT restore the rest of the
+  pre-derivation document: owner exclusion, the `operationId` format and schema deduplication are
   unconditional. To document the operational routes again, pass `excludeOwners: []`.
 
 ## Operation ids

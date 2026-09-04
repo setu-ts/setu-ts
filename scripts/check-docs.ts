@@ -1479,7 +1479,7 @@ const SHIPPED_VERSION_LINES = [
   // and `0.2.1+build.7` would capture `0.2.1`. Identifiers require at least
   // one character after each dot, so a trailing sentence period is not
   // swallowed into the version.
-  String.raw`0\.[23]\.\d+` +
+  String.raw`0\.[234]\.\d+` +
   String.raw`(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
   String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`,
 ].join('|');
