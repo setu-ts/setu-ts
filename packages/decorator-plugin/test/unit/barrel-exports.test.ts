@@ -109,6 +109,21 @@ describe('published barrel surface', () => {
     }
   });
 
+  it('keeps the authorization middleware internal (M89a)', () => {
+    // The enforcing middleware @Roles/@Permissions produce is plugin plumbing
+    // reached through registration, never a published symbol — the published
+    // surface is unchanged by M89a.
+    for (
+      const name of [
+        'createRolesMiddleware',
+        'createPermissionsMiddleware',
+        'appendAuthorizationMiddleware',
+      ]
+    ) {
+      expect(name in barrel).toBe(false);
+    }
+  });
+
   it('keeps the type-level assertions live', () => {
     // Referencing them stops `noUnusedLocals` removing the compile-time checks.
     expect(_source.descriptor.type).toBe('param');

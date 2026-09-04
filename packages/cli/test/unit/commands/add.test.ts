@@ -223,6 +223,29 @@ describe('runAddCommand', () => {
     expect(await h.run([])).toBe(2);
   });
 
+  it('refuses a second positional with exit 2, writing nothing (X18-1)', async () => {
+    // X18-1: five requested packages used to report `updated deno.json` and
+    // exit 0 with one added — the contract is singular and exceeding it is a
+    // usage error, like every other misapplied input to this CLI.
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+
+    expect(await h.run(['auth', 'cache', 'logger'])).toBe(2);
+
+    expect(h.err.join('\n')).toContain('takes one package; got 3');
+    expect(h.err.join('\n')).toContain('Run it once per package');
+    // The manifest is untouched: refused, not partially applied.
+    expect(h.read('/app/deno.json')).toBe(DENO_MANIFEST);
+  });
+
+  it('keeps the one-positional form unchanged', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+
+    expect(await h.run(['auth'])).toBe(0);
+
+    expect(h.out.join('\n')).toContain('updated /app/deno.json');
+    expect(JSON.parse(h.read('/app/deno.json')).imports['@setu-ts/auth-plugin']).toBeDefined();
+  });
+
   it('lists every addable package under --help', async () => {
     const h = harness();
     expect(await h.run(['--help'])).toBe(0);

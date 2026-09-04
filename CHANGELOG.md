@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING (behaviour) — `@Roles`/`@Permissions` are now ENFORCED.** `DecoratorPlugin` appends
+  enforcing authorization middleware to every route carrying a restriction: it resolves
+  `CAPABILITIES.AUTHORIZATION` per request and answers `401` without a principal and `403` on a
+  failed check, byte-identical with the equivalent `@UseGuards(requireRole(...))` spelling. When no
+  authorization provider is registered the route FAILS CLOSED — it answers `501 Not Implemented` and
+  never serves unguarded — and `register()` warns once per affected route. A route decorated
+  `@Roles`/`@Permissions` that serves today will start refusing, which is the point: an unenforced
+  authorization decoration is the defect — but it will break tests that were passing for the wrong
+  reason.
+
+  _Migration:_ register an authorization provider under `CAPABILITIES.AUTHORIZATION` (e.g.
+  `AuthPlugin({ jwt: { secret }, rbac: { roles } })`) so the declared restrictions are evaluated, or
+  pass `DecoratorPlugin({ enforceRoles: false })` to restore the previous behaviour (metadata
+  recorded, nothing enforced, no warning). A route carrying both decorators now requires any of the
+  roles AND any of the permissions; method-level declarations override class-level ones.
+
+### Fixed
+
+- **`setu add` refuses extra arguments instead of silently discarding them.** The contract is
+  singular; `setu add auth cache` used to add one package, report `updated deno.json` and exit 0
+  with the rest uninspected. A second positional is now a usage error naming the count (`exit 2`,
+  nothing written) — the same by-name refusal every other misapplied input to the CLI gets.
+- **`MultiTenancyPlugin` warns at `register()` when a non-`column` isolation strategy is selected
+  with no `dataStore`.** `'schema-per-tenant'`/`'database-per-tenant'` NAME the isolation a store is
+  expected to implement; the shipped `MemoryTenantDataStore` only partitions by the strategy's
+  label, no shipped adapter is told the strategy, and the README no longer claims physical schemas
+  or databases are created. The headline example moves to `'column-per-tenant'`.
+- **`MultiTenancyPlugin` warns at `register()` when the resolved resolver chain contains a
+  `JwtResolver`.** Tenant identity comes from an UNVERIFIED token claim — a client can mint a token
+  naming any tenant — acceptable only alongside authentication middleware which separately verifies
+  the token. The README and the `jwt` option's JSDoc now say so where the choice is made.
+- **`@Public`'s documentation matches its behaviour.** It contributes `security: []` only for a
+  route without an enforced `@Roles`/`@Permissions` restriction. It does NOT bypass authentication
+  or authorization; a restricted route keeps its derived OpenAPI security requirement.
+
 ## [0.3.0] — 2026-09-03
 
 **The request path gets roughly 2.4x faster, and non-HTTP ingress gains the behaviour pipeline HTTP

@@ -19,7 +19,7 @@ import { CAPABILITIES, type IMultiTenancyService } from '@setu-ts/common';
 app.register(MultiTenancyPlugin({
   resolver: 'subdomain',
   subdomain: { baseDomain: 'example.com' },
-  database: 'schema-per-tenant',
+  database: 'column-per-tenant',
   required: true,
 }));
 
@@ -40,15 +40,30 @@ The resolved tenant is also available as `ctx.request.tenant`.
 **`subdomain` requires `baseDomain`** and constrains resolution to it: a request for an unrelated
 host does not resolve a tenant.
 
+**`jwt` reads an UNVERIFIED claim** — the tenant id comes from a token whose signature nobody has
+checked, so a client can mint a token naming any tenant. Use it only alongside authentication
+middleware which separately verifies the token (e.g. `AuthPlugin`). A `register()` warning fires
+whenever the resolved chain contains a `JwtResolver`.
+
 ## Isolation strategies
 
-| `database`              | Isolation                                  |
-| ----------------------- | ------------------------------------------ |
-| `'column-per-tenant'`   | a tenant column on shared tables (default) |
-| `'schema-per-tenant'`   | one schema per tenant                      |
-| `'database-per-tenant'` | one database per tenant                    |
+A strategy NAMES the isolation an `ITenantDataStore` is expected to implement — selecting one does
+not by itself create schemas or databases. The shipped `MemoryTenantDataStore` uses the strategy's
+label as its partition-map key, so all three isolate correctly on it, and a store may ignore
+isolation metadata entirely (see `ITenantDataStore.useIsolation`). No shipped database adapter is
+told the strategy.
+
+| `database`              | Strategy names                                      |
+| ----------------------- | --------------------------------------------------- |
+| `'column-per-tenant'`   | a tenant column on shared tables (default)          |
+| `'schema-per-tenant'`   | a per-tenant schema the injected store implements   |
+| `'database-per-tenant'` | a per-tenant database the injected store implements |
 
 You may also pass a custom `ITenantIsolationStrategy`.
+
+A **`register()` warning** fires when a non-`'column-per-tenant'` strategy is selected and no
+`dataStore` is injected: the default memory store cannot deliver physical isolation, so the
+selection is flagged rather than silently logical-only.
 
 ## Options
 
