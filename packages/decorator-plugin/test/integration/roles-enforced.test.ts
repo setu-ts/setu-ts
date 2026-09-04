@@ -201,6 +201,7 @@ describe('decorated @Roles enforced through a real kernel app (X18-3)', () => {
 
   it('runs authorization before an interceptor that would short-circuit', async () => {
     let interceptorRan = false;
+    let handlerRan = false;
     const shortCircuit: MiddlewareFunction = (ctx) => {
       interceptorRan = true;
       return ctx.response.json({ bypassed: true });
@@ -212,6 +213,7 @@ describe('decorated @Roles enforced through a real kernel app (X18-3)', () => {
       @Roles('admin')
       @UseInterceptors(shortCircuit)
       restricted() {
+        handlerRan = true;
         return { secret: true };
       }
     }
@@ -224,7 +226,15 @@ describe('decorated @Roles enforced through a real kernel app (X18-3)', () => {
         headers: { authorization: `Bearer ${viewerToken}` },
       });
       expect(refused.statusCode).toBe(403);
+      expect(await refused.json()).toEqual({
+        type: 'about:blank',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'Role "admin" is required',
+        instance: '/short-circuit/restricted',
+      });
       expect(interceptorRan).toBe(false);
+      expect(handlerRan).toBe(false);
     } finally {
       await app.stop();
     }
