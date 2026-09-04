@@ -2,17 +2,20 @@
  * Errors the database plugin throws, exported so consumers can branch on them
  * with `instanceof` rather than matching message text.
  *
- * The three query-shape refusals — {@linkcode UnsupportedFilterOperatorError},
- * {@linkcode UnsupportedRawQueryError} and
- * {@linkcode UnsupportedQueryFeatureError} — additionally carry an
- * `HttpStatusHint` from `@setu-ts/common`, so `errorHandler` answers them
- * `501 Not Implemented` with a caller-safe sentence instead of a masked `500`
- * (M89b, X19-1). Each is a condition the CALLER caused: the query asks for
- * something the active backend does not implement, permanently, and that is
- * exactly what `501` states. The transaction and concurrency errors below are
- * deliberately NOT branded — they may legitimately quote backend state, and a
- * concurrency conflict is transient rather than permanent, so both keep the
- * masked `500` that stops a driver diagnostic reaching a caller (X12-3).
+ * Three of them additionally carry an `HttpStatusHint` from `@setu-ts/common`,
+ * so `errorHandler` answers a caller-caused refusal `501 Not Implemented` with
+ * a caller-safe sentence instead of a masked `500` (M89b, X19-1):
+ * {@linkcode UnsupportedFilterOperatorError} and
+ * {@linkcode UnsupportedRawQueryError} always, and
+ * {@linkcode UnsupportedQueryFeatureError} for the `feature` values in
+ * `QUERY_SHAPE_FEATURES` — that class is shared by caller-caused query
+ * refusals AND by configuration refusals, so branding it unconditionally
+ * turned a misconfigured deployment into a caller-facing `501`.
+ *
+ * The transaction and concurrency errors below are deliberately NOT branded:
+ * they may legitimately quote backend state, and a concurrency conflict is
+ * transient rather than permanent, so both keep the masked `500` that stops a
+ * driver diagnostic reaching a caller (X12-3).
  *
  * The served `detail` is composed from this package's OWN structured fields —
  * the feature, operator, connector and adapter names the framework chose — and
@@ -31,6 +34,60 @@ import { withHttpStatusHint } from '@setu-ts/common';
  * cannot drift apart into different statuses.
  */
 const NOT_IMPLEMENTED = { status: 501, title: 'Not Implemented' } as const;
+
+/**
+ * The {@linkcode UnsupportedQueryFeatureError} `feature` values that name a
+ * condition the **caller** caused, and are therefore answered `501` rather
+ * than a masked `500`.
+ *
+ * This class is shared by two kinds of refusal, which is why the brand is not
+ * unconditional (M89b code review, Qodo finding 3). A caller-caused refusal
+ * describes the query or payload the application just sent — its sort, its
+ * cursor, its key, a value the backend cannot represent — and `501` is honest:
+ * the backend does not implement what was asked for, permanently.
+ *
+ * The values deliberately absent describe the **deployment**, not the request:
+ *
+ * - `'mapping'` — the application's own `tables`/`entities` configuration
+ *   (a blank column family, an unusable qualifier). Measured: before this
+ *   allowlist a blank `columnFamily` answered every request
+ *   `501 "Query feature 'mapping' is not supported by the 'bigtable' database
+ *   adapter."` — which is a lie twice over, since the deployment is
+ *   misconfigured and no query feature is missing.
+ * - `'endpoint'` — a malformed endpoint URL, and the refusal of a plaintext
+ *   HTTP endpoint to a remote host. Both are raised from the client loader at
+ *   `connect()`, so they fail `app.start()` and cannot reach a response at
+ *   all; they are listed here so the split reads completely.
+ * - `'date-encoding'` — an attribute missing from the `dateAttributes`
+ *   declaration: configuration, surfaced by a query.
+ * - `'transaction'` — a duplicate key or an over-limit batch in the caller's
+ *   own buffer. Kept unbranded so that NO transaction-scope condition is
+ *   branded, matching the three dedicated scope-error classes below.
+ *
+ * **An unlisted value is NOT branded**, and that default is the point: a
+ * feature name added later keeps the masked `500` it has today until someone
+ * decides otherwise, so a mistake here can never invent a caller-facing status
+ * for an internal fault. Un-branding is never a regression; branding is.
+ */
+const QUERY_SHAPE_FEATURES: ReadonlySet<string> = new Set([
+  'attribute-value',
+  'composite-key',
+  'cursor-pagination',
+  'key',
+  'nested-path',
+  'offset',
+  // BOTH spellings, deliberately: the DynamoDB adapter throws `'orderBy'`
+  // (`dynamo-access-path.ts`) while the Bigtable one throws `'order-by'`
+  // (`bigtable-scan.ts`). That inconsistency predates this milestone and is
+  // NOT normalised here — `feature` is a released field a consumer may branch
+  // on — but listing only one spelling silently drops the other back to a
+  // masked 500. An enumeration that missed `'orderBy'` is exactly how the
+  // first draft of this list shipped, caught by the Dynamo integration test.
+  'order-by',
+  'orderBy',
+  'row-key',
+  'update',
+]);
 
 /**
  * Thrown at translation time when a filter operator cannot be honoured by the
@@ -185,10 +242,15 @@ export class UnsupportedQueryFeatureError extends Error {
     super(message);
     this.feature = feature;
     this.adapter = adapter;
-    withHttpStatusHint(this, {
-      ...NOT_IMPLEMENTED,
-      detail: `Query feature '${feature}' is not supported by the '${adapter}' database adapter.`,
-    });
+    // Branded only for a caller-caused query shape — see
+    // `QUERY_SHAPE_FEATURES`. A configuration or deployment refusal keeps the
+    // masked `500` that is correct for an internal fault.
+    if (QUERY_SHAPE_FEATURES.has(feature)) {
+      withHttpStatusHint(this, {
+        ...NOT_IMPLEMENTED,
+        detail: `Query feature '${feature}' is not supported by the '${adapter}' database adapter.`,
+      });
+    }
   }
 }
 

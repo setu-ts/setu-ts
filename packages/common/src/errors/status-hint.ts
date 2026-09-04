@@ -174,19 +174,62 @@ export function withHttpStatusHint<T extends Error>(error: T, hint: HttpStatusHi
  */
 export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
-  const carrier = error as { readonly [HTTP_STATUS_HINT]?: unknown };
-  const value = carrier[HTTP_STATUS_HINT];
-  return isHttpStatusHint(value) ? value : undefined;
+  // Every read of the carrier and of the brand happens inside this `try`, and
+  // each member is read EXACTLY ONCE into a local. Two reasons, both of which
+  // the documented "a foreign value is treated as absent rather than trusted"
+  // promise depends on:
+  //
+  //   1. The key is `Symbol.for`, so any package can define it — including as
+  //      a throwing getter. Left unguarded that throw escapes `errorHandler`'s
+  //      catch, which is the one `catch` in the framework whose job is to
+  //      contain throws, so the error path would itself become the fault.
+  //   2. A STATEFUL getter could otherwise pass validation and then return
+  //      something else when the response is built. Returning a frozen
+  //      snapshot removes that by construction rather than by luck: the
+  //      previous version happened to read `status` four times, so a value
+  //      that changed on the second read was caught by accident — a getter
+  //      that changed on the fifth would not have been.
+  try {
+    const carrier = error as { readonly [HTTP_STATUS_HINT]?: unknown };
+    const value = carrier[HTTP_STATUS_HINT];
+    if (typeof value !== 'object' || value === null) return undefined;
+    const candidate = value as {
+      status?: unknown;
+      title?: unknown;
+      detail?: unknown;
+      details?: unknown;
+    };
+    const status = candidate.status;
+    const title = candidate.title;
+    const detail = candidate.detail;
+    const details = candidate.details;
+    if (!isConformingStatus(status)) return undefined;
+    if (typeof title !== 'string' || typeof detail !== 'string') return undefined;
+    // `details` is optional on `ErrorResponseInit`. A non-plain-object value
+    // is dropped rather than rejecting the whole hint: the three required
+    // members are what the response is built from, and `details` is an
+    // extension bag no in-repo brand sets.
+    const carriedDetails =
+      typeof details === 'object' && details !== null && !Array.isArray(details)
+        ? (details as Readonly<Record<string, unknown>>)
+        : undefined;
+    return Object.freeze(
+      carriedDetails === undefined
+        ? { status, title, detail }
+        : { status, title, detail, details: carriedDetails },
+    );
+  } catch {
+    // A hostile or buggy accessor reads as ABSENT, exactly like a malformed
+    // brand: the error then takes the ordinary masked path.
+    return undefined;
+  }
 }
 
 /**
- * Narrows an unknown branded value. A foreign value under the same global
- * symbol is treated as absent rather than trusted — the `securityMetadataOf`
- * precedent, and the reason `Symbol.for` is safe here: another library
- * claiming this key cannot make `errorHandler` serve an arbitrary body.
+ * Reports whether a brand's `status` is one this framework will serve.
  *
- * `status` is checked against {@linkcode MIN_HINT_STATUS}–{@linkcode
- * MAX_HINT_STATUS}, not merely against `typeof === 'number'`, for two reasons.
+ * Checked against {@linkcode MIN_HINT_STATUS}–{@linkcode MAX_HINT_STATUS}, not
+ * merely against `typeof === 'number'`, for two reasons.
  *
  * The first is that a status outside the web `Response` constructor's
  * `[200, 599]` makes it throw `RangeError` — so a hint carrying `999`, `0`, a
@@ -204,14 +247,11 @@ export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
  * status from a literal at the call site, visible in review, while a brand
  * travels from another package inside an error.
  */
-function isHttpStatusHint(value: unknown): value is HttpStatusHint {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as { status?: unknown; title?: unknown; detail?: unknown };
-  if (typeof candidate.status !== 'number') return false;
-  // `Number.isInteger` also rejects `NaN` and both infinities, so the range
-  // comparisons below never run against a value for which `>=`/`<=` are
-  // vacuously false.
-  if (!Number.isInteger(candidate.status)) return false;
-  if (candidate.status < MIN_HINT_STATUS || candidate.status > MAX_HINT_STATUS) return false;
-  return typeof candidate.title === 'string' && typeof candidate.detail === 'string';
+function isConformingStatus(status: unknown): status is number {
+  if (typeof status !== 'number') return false;
+  // `Number.isInteger` runs FIRST and is load-bearing: `NaN` makes `<` and `>`
+  // both false, so a bare range check would ACCEPT it — and `NaN` is what a
+  // mis-derived status collapses to. Measured, not assumed.
+  if (!Number.isInteger(status)) return false;
+  return status >= MIN_HINT_STATUS && status <= MAX_HINT_STATUS;
 }

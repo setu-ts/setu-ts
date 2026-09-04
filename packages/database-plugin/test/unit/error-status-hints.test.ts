@@ -34,8 +34,8 @@ const DIAGNOSTIC = "SELECT * FROM users WHERE ssn = $1 -- ['SECRET-123']";
 const BRANDED: readonly { name: string; error: Error; detail: string }[] = [
   {
     name: 'UnsupportedQueryFeatureError',
-    error: new UnsupportedQueryFeatureError('orderBy', 'dynamodb', DIAGNOSTIC),
-    detail: "Query feature 'orderBy' is not supported by the 'dynamodb' database adapter.",
+    error: new UnsupportedQueryFeatureError('order-by', 'dynamodb', DIAGNOSTIC),
+    detail: "Query feature 'order-by' is not supported by the 'dynamodb' database adapter.",
   },
   {
     name: 'UnsupportedFilterOperatorError (connector known)',
@@ -104,6 +104,60 @@ describe('database error status hints', () => {
     for (const { name, error } of BRANDED) {
       expect(error.message, name).toBe(DIAGNOSTIC);
     }
+  });
+
+  it('brands every caller-caused query-shape feature', () => {
+    // The nine `feature` values that describe the query or payload the
+    // application just sent. Each is answered `501`.
+    for (
+      const feature of [
+        'attribute-value',
+        'composite-key',
+        'cursor-pagination',
+        'key',
+        'nested-path',
+        'offset',
+        // Both spellings ship: dynamo says `orderBy`, bigtable says `order-by`.
+        'order-by',
+        'orderBy',
+        'row-key',
+        'update',
+      ]
+    ) {
+      const hint = httpStatusHintOf(
+        new UnsupportedQueryFeatureError(feature, 'dynamodb', DIAGNOSTIC),
+      );
+      expect(hint?.status, feature).toBe(501);
+      expect(hint?.detail, feature).toBe(
+        `Query feature '${feature}' is not supported by the 'dynamodb' database adapter.`,
+      );
+    }
+  });
+
+  it('does NOT brand a configuration or deployment feature', () => {
+    // `UnsupportedQueryFeatureError` is shared by two kinds of refusal (M89b
+    // code review, Qodo finding 3). These four describe the DEPLOYMENT, not
+    // the request, so they keep the masked `500` that is correct for an
+    // internal fault. Branding them made a blank `columnFamily` answer every
+    // request `501 "Query feature 'mapping' is not supported …"` — a lie
+    // twice over, since nothing about the query was unsupported.
+    for (const feature of ['mapping', 'endpoint', 'date-encoding', 'transaction']) {
+      const error = new UnsupportedQueryFeatureError(feature, 'bigtable', DIAGNOSTIC);
+      expect(httpStatusHintOf(error), feature).toBeUndefined();
+      // Still the same class with the same structured fields — only the
+      // caller-facing status changes.
+      expect(error.feature, feature).toBe(feature);
+    }
+  });
+
+  it('does NOT brand a feature value nobody has classified', () => {
+    // The safe default, and the reason the allowlist is an allowlist: a
+    // feature name added by a future adapter keeps the masked `500` it would
+    // have had, rather than silently inventing a caller-facing status for
+    // what might be an internal fault.
+    const error = new UnsupportedQueryFeatureError('some-future-feature', 'dynamodb', DIAGNOSTIC);
+
+    expect(httpStatusHintOf(error)).toBeUndefined();
   });
 
   it('leaves the transaction and concurrency errors unbranded', () => {

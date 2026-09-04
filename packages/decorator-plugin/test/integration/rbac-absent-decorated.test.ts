@@ -104,7 +104,8 @@ describe('decorated route with no authorization capability (§3.5)', () => {
       // Everything that DEFINES the refusal must match. `instance` is the
       // request path and must differ: the kernel refuses two routes on one
       // path (M68), so the twin cannot share `/reports/digest`.
-      const refusalOf = ({ instance: _instance, ...rest }: Record<string, unknown>) => rest;
+      const refusalOf = (body: Record<string, unknown>): Record<string, unknown> =>
+        Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'instance'));
 
       expect(guarded.statusCode).toBe(refused.statusCode);
       expect(refusalOf(guardedBody)).toEqual(refusalOf(body));

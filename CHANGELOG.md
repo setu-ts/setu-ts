@@ -57,6 +57,12 @@ All notable changes to this project are documented here. The format follows
   application that worked on MongoDB answered `500` on every ordered endpoint under DynamoDB, and
   the response said the server was broken.
 
+  **Not every `UnsupportedQueryFeatureError` is branded.** The class is shared by caller-caused
+  query shapes and by configuration refusals, so only an allowlist of `feature` values is answered
+  `501`; `mapping`, `endpoint`, `date-encoding` and `transaction` keep the masked `500`, and an
+  unclassified value is not branded. Branding it unconditionally made a blank `columnFamily` answer
+  every request `501 "Query feature 'mapping' is not supported …"`.
+
   The served `detail` is composed from this package's own structured fields (`feature`, `operator`,
   `connector`, `adapter`) and never from the error's `message`, which stays the full diagnostic and
   reaches the log alone. The four transaction and concurrency errors keep their masked `500`: they

@@ -149,6 +149,87 @@ describe('HTTP status hint', () => {
     }
   });
 
+  it('should carry a plain-object `details`, and drop anything else', () => {
+    // `details` is optional on `ErrorResponseInit`, which `HttpStatusHint`
+    // extends, so a brand may set it and `buildErrorFromInit` merges it. A
+    // non-plain-object value is DROPPED rather than rejecting the whole hint:
+    // the three required members are what the response is built from.
+    const carried = { errors: [{ field: 'name' }] };
+    const withDetails = new Error('boom');
+    Object.defineProperty(withDetails, HTTP_STATUS_HINT, {
+      value: { status: 501, title: 'T', detail: 'D', details: carried },
+      configurable: true,
+    });
+    expect(httpStatusHintOf(withDetails)?.details).toEqual(carried);
+
+    for (const details of [['an', 'array'], 'a string', 42, null]) {
+      const error = new Error('boom');
+      Object.defineProperty(error, HTTP_STATUS_HINT, {
+        value: { status: 501, title: 'T', detail: 'D', details },
+        configurable: true,
+      });
+      const hint = httpStatusHintOf(error);
+      expect(hint, JSON.stringify(details)).toEqual({ status: 501, title: 'T', detail: 'D' });
+      expect('details' in (hint ?? {}), JSON.stringify(details)).toBe(false);
+    }
+  });
+
+  it('should return a FROZEN snapshot, read once, not the branded object', () => {
+    // Two properties in one. The snapshot is frozen, so a caller cannot mutate
+    // what the response will be built from. And each member is read EXACTLY
+    // once, so a STATEFUL getter cannot pass validation and then change value
+    // when `errorHandler` builds the response — the previous version read
+    // `status` four times and caught a second-read change only by accident.
+    let reads = 0;
+    const error = new Error('boom');
+    Object.defineProperty(error, HTTP_STATUS_HINT, {
+      configurable: true,
+      value: {
+        get status() {
+          reads += 1;
+          return reads === 1 ? 501 : 999;
+        },
+        title: 'T',
+        detail: 'D',
+      },
+    });
+
+    const hint = httpStatusHintOf(error);
+
+    expect(reads).toBe(1);
+    expect(hint).toEqual({ status: 501, title: 'T', detail: 'D' });
+    expect(Object.isFrozen(hint)).toBe(true);
+  });
+
+  it('should read a hostile accessor as ABSENT rather than throwing', () => {
+    // The key is `Symbol.for`, so any package can define it — including as a
+    // throwing getter. Unguarded, that throw escapes `errorHandler`'s catch,
+    // which is the one `catch` whose job is to contain throws, so the error
+    // path would itself become the fault. Both the carrier read and the member
+    // reads are covered.
+    const carrierThrows = new Error('boom');
+    Object.defineProperty(carrierThrows, HTTP_STATUS_HINT, {
+      configurable: true,
+      get() {
+        throw new Error('hostile carrier getter');
+      },
+    });
+    expect(httpStatusHintOf(carrierThrows)).toBeUndefined();
+
+    const memberThrows = new Error('boom');
+    Object.defineProperty(memberThrows, HTTP_STATUS_HINT, {
+      configurable: true,
+      value: {
+        status: 501,
+        title: 'T',
+        get detail(): string {
+          throw new Error('hostile member getter');
+        },
+      },
+    });
+    expect(httpStatusHintOf(memberThrows)).toBeUndefined();
+  });
+
   it('should throw when branding a frozen error, as documented', () => {
     // The brand is a property defined on the error itself, so a non-extensible
     // one cannot carry it. Documented with `@throws` rather than swallowed:

@@ -1868,6 +1868,19 @@ is reachable only in the log, and is what `errorHandler` records. So the respons
 a sentence without gaining a disclosure channel; a hinted error is exempt from `maskInternalErrors`
 precisely because there is no driver output in its body to mask.
 
+**Not every `UnsupportedQueryFeatureError` is branded, and that is deliberate.** The class is shared
+by two kinds of refusal: a caller-caused query shape, and a **configuration** refusal. Only the
+former is answered `501`; the latter keeps the masked `500` that is correct for an internal fault.
+Branding the constructor unconditionally made a blank `columnFamily` — a value the developer wrote —
+answer every request
+`501 "Query feature 'mapping' is not supported by the 'bigtable' database
+adapter."`, which is a lie
+twice over. The split is an allowlist of `feature` values (`attribute-value`, `composite-key`,
+`cursor-pagination`, `key`, `nested-path`, `offset`, `order-by`/`orderBy`, `row-key`, `update`);
+`mapping`, `endpoint`, `date-encoding` and `transaction` are excluded, and **an unclassified value
+is not branded** — so a feature name added later keeps its masked `500` until someone decides
+otherwise.
+
 The four transaction and concurrency errors — `MongoTransactionUnavailableError`,
 `CosmosTransactionScopeError`, `CosmosConcurrentModificationError` and
 `BigtableTransactionScopeError` — are deliberately **not** branded and keep their masked `500`: they

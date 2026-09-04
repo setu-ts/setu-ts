@@ -687,6 +687,19 @@ and sort keys — and it reaches the log alone, where `errorHandler` records it 
 the cause chain. The served `detail` is composed from the framework's own identifiers, which is what
 lets a refusal be readable without becoming a disclosure channel.
 
+**Not every `UnsupportedQueryFeatureError` is branded, and that is deliberate.** The class is shared
+by two kinds of refusal: a caller-caused query shape, and a **configuration** refusal. Only the
+former is answered `501`; the latter keeps the masked `500` that is correct for an internal fault.
+Branding the constructor unconditionally made a blank `columnFamily` — a value the developer wrote —
+answer every request
+`501 "Query feature 'mapping' is not supported by the 'bigtable' database
+adapter."`, which is a lie
+twice over. The split is an allowlist of `feature` values (`attribute-value`, `composite-key`,
+`cursor-pagination`, `key`, `nested-path`, `offset`, `order-by`/`orderBy`, `row-key`, `update`);
+`mapping`, `endpoint`, `date-encoding` and `transaction` are excluded, and **an unclassified value
+is not branded** — so a feature name added later keeps its masked `500` until someone decides
+otherwise.
+
 The transaction and concurrency errors (`MongoTransactionUnavailableError`,
 `CosmosTransactionScopeError`, `CosmosConcurrentModificationError`, `BigtableTransactionScopeError`)
 deliberately keep the masked `500`: they may quote backend state, and a concurrency conflict is

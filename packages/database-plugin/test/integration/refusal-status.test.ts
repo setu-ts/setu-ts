@@ -153,6 +153,44 @@ describe('query refusals answer 501 through a real application', () => {
     await app.stop();
   });
 
+  it('leaves a MISCONFIGURATION masked, not answered 501', async () => {
+    // M89b code review, Qodo finding 3. `UnsupportedQueryFeatureError` is
+    // shared by caller-caused query refusals and by CONFIGURATION refusals,
+    // and branding its constructor unconditionally made a blank
+    // `columnFamily` — a value the developer wrote — answer every request
+    // `501 "Query feature 'mapping' is not supported by the 'bigtable'
+    // database adapter."` That is a lie twice over: the deployment is
+    // misconfigured and no query feature is missing. Measured, then fixed by
+    // branding only the caller-caused `feature` values.
+    const adapter = new BigtableAdapter({
+      client: createFakeBigtableClient(new FakeBigtableStore()),
+      instance: 'test-instance',
+      tables: { Event: { table: 'events', columnFamily: '   ' } },
+    });
+    const app = createApplication({
+      plugins: [RuntimePlugin(), DatabasePlugin({ type: 'custom', adapter })],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+    app.router.get('/events', {
+      handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
+        const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        return ctx.response.json(await db.getRepository('Event').findAll({}));
+      },
+    });
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/events' });
+
+    expect(response.statusCode).toBe(500);
+    const body = response.json<{ status: number; detail: string }>();
+    expect(body.status).toBe(500);
+    expect(body.detail).toBe('Internal Server Error');
+    // And the configuration diagnostic stays out of the body.
+    expect(JSON.stringify(body)).not.toContain('columnFamily');
+
+    await app.stop();
+  });
+
   it('leaves an ordinary 500 masked in the same application', async () => {
     // The control: the exemption is for hinted errors only, so a genuine
     // fault on a neighbouring route still answers a masked 500.
