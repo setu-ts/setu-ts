@@ -64,6 +64,7 @@
     "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git,docker --allow-write packages test",
     "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git,docker --allow-write packages test --coverage=coverage --coverage-raw-data-only && deno run --allow-run=deno scripts/coverage.ts && deno run --allow-run=deno scripts/script-coverage.ts coverage",
     "audit": "deno audit --level=high",
+    "audit:ci": "deno run --allow-run=deno scripts/audit.ts",
     "publish:check": "deno publish --dry-run",
     "release:verify": "deno run --allow-read scripts/verify-release.ts",
     "release:resolved-set": "deno run --allow-read --allow-write scripts/release-resolved-set.ts",

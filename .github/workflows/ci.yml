@@ -404,5 +404,12 @@ jobs:
 
       # Native dependency audit (JSR + npm deps in deno.lock).
       # OSV-Scanner is not used: it has no deno.lock support.
+      #
+      # `audit:ci`, not `audit`: the npm advisory endpoint flakes, and a bare
+      # `deno audit` then fails having scanned nothing. The wrapper retries a
+      # REGISTRY failure and fails immediately on a real advisory — and still
+      # fails if every attempt is a registry failure, because "could not scan"
+      # is not "no vulnerabilities". See scripts/audit.ts for why
+      # `--ignore-registry-errors` is deliberately not used.
       - name: Audit
-        run: deno task audit
+        run: deno task audit:ci
