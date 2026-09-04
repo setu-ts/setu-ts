@@ -56,10 +56,10 @@ function createHarness(): Harness {
       },
     },
     health: {
-      register: (_name: string, _check: () => Promise<unknown>): void => {},
+      register: (): void => {},
     },
     lifecycle: {
-      onClose: (_hook: () => void | Promise<void>): void => {},
+      onClose: (): void => {},
       onInit: (hook: () => void | Promise<void>): void => {
         initHooks.push(hook);
       },
@@ -78,7 +78,8 @@ describe('a register-time awaited publish no longer deadlocks startup (X16-1)', 
     // The instance behaviour is available at register(); the factory one can
     // only resolve at onInit — which is why the gate exists.
     const instanceBehavior: IIngressBehavior = {
-      handle(_ctx: IngressContext, next: () => Promise<void>): void | Promise<void> {
+      handle(ctx: IngressContext, next: () => Promise<void>): void | Promise<void> {
+        expect(ctx.kind).toBe('messaging');
         log.push('instance');
         return next();
       },
@@ -87,7 +88,8 @@ describe('a register-time awaited publish no longer deadlocks startup (X16-1)', 
       // Resolves a capability through the registry, as a real factory does.
       void services;
       return {
-        handle(_ctx: IngressContext, next: () => Promise<void>): void | Promise<void> {
+        handle(ctx: IngressContext, next: () => Promise<void>): void | Promise<void> {
+          expect(ctx.kind).toBe('messaging');
           log.push('factory');
           return next();
         },

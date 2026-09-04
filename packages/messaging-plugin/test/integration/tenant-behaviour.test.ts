@@ -54,7 +54,6 @@ class PerTenantMapTenancy implements IMultiTenancyService {
 
   getRepository<Entity, Id = string>(
     ctx: import('@setu-ts/common').IRequestContext,
-    _entity: string,
   ): ITenantRepository<Entity, Id> {
     const tenant = ctx.request.tenant;
     if (tenant === undefined) {
@@ -65,7 +64,6 @@ class PerTenantMapTenancy implements IMultiTenancyService {
 
   getRepositoryFor<Entity, Id = string>(
     tenantId: string,
-    _entity: string,
   ): ITenantRepository<Entity, Id> {
     return this.#repoFor<Entity, Id>(tenantId);
   }
@@ -140,10 +138,10 @@ function createHarness(service: IMultiTenancyService): Harness {
       },
     },
     health: {
-      register: (_name: string, _check: () => Promise<unknown>): void => {},
+      register: (): void => {},
     },
     lifecycle: {
-      onClose: (_hook: () => void | Promise<void>): void => {},
+      onClose: (): void => {},
       onInit: (hook: () => void | Promise<void>): void => {
         initHooks.push(hook);
       },

@@ -250,7 +250,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
    * whole of it: the rejection has been observed and settled, and with no
    * reporter configured it is dropped.
    *
-   * A reporter that itself throws is swallowed HERE, at the single chokepoint
+   * A reporter that itself throws or rejects is swallowed HERE, at the single chokepoint
    * both call sites share: the reporter is the last-resort sink, and letting
    * its throw escape would abort the sibling fan-out from the synchronous
    * catch (rejecting `publish`) or orphan the void-ed retained-promise chain
@@ -261,7 +261,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
     const reporter = this.#options?.onDispatchError;
     if (reporter !== undefined) {
       try {
-        reporter(error, metadata);
+        void Promise.resolve(reporter(error, metadata)).catch(() => {});
       } catch {
         // Swallowed deliberately — see the doc comment above.
       }

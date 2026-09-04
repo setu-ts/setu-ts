@@ -77,7 +77,6 @@ describe('barrel exports', () => {
       },
       getRepositoryFor: <Entity, Id = string>(
         tenantId: string,
-        _entity: string,
       ): import('@setu-ts/common').ITenantRepository<Entity, Id> => ({
         findAll: () => Promise.resolve([] as readonly Entity[]),
         findById: () => Promise.resolve(null),

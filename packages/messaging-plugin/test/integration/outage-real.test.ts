@@ -208,7 +208,6 @@ describe('REAL RabbitMQ register-time publish (M89c §6)', () => {
   it('a register-time publish still boots and still delivers through the COMPLETE chain', async () => {
     const url = Deno.env.get('RABBITMQ_URL');
     if (url === undefined) {
-      console.log('SKIP: RABBITMQ_URL not set');
       return;
     }
 
@@ -220,7 +219,6 @@ describe('REAL RabbitMQ register-time publish (M89c §6)', () => {
       // npm:amqplib not available
     }
     if (!amqplibPresent) {
-      console.log('SKIP: npm:amqplib not available');
       return;
     }
 
@@ -235,13 +233,15 @@ describe('REAL RabbitMQ register-time publish (M89c §6)', () => {
       rabbit,
       [
         {
-          handle: (_ctx, next) => {
+          handle: (ctx, next) => {
+            expect(ctx.kind).toBe('messaging');
             log.push('instance');
             return next();
           },
         },
         {
-          handle: (_ctx, next) => {
+          handle: (ctx, next) => {
+            expect(ctx.kind).toBe('messaging');
             log.push('factory');
             return next();
           },
@@ -255,6 +255,7 @@ describe('REAL RabbitMQ register-time publish (M89c §6)', () => {
     const received: string[] = [];
 
     try {
+      await rabbit.connect();
       // "register()" of a later plugin: subscribe, then AWAIT a publish —
       // before the gate opens. On a real broker publish already returned
       // before delivery; it must still resolve, not deadlock.

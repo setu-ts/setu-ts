@@ -1,6 +1,8 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
+import { InMemoryBroker } from '../../src/brokers/in-memory-broker.ts';
+import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   HealthCheckResult,
@@ -65,7 +67,7 @@ function createFakeContext(): {
     services: {
       has: (token: string) => registered.has(token),
       get: <T>(token: string): T => registered.get(token) as T,
-      getAll: <T>(_token: string): readonly T[] => [],
+      getAll: <T>(): readonly T[] => [],
       register: (token: string, svc: unknown) => {
         registered.set(token, svc);
       },
@@ -1111,19 +1113,30 @@ describe('MessagingPlugin', () => {
 
   // ─── chainReadyTimeoutMs option domain (M89c review fix) ──────────────────
   //
-  // `NaN`, a negative value, or `Infinity` would reach `setTimeout`, which
+  // `NaN`, a negative value, `Infinity`, or an overlarge value would reach `setTimeout`, which
   // clamps them to ~0–1 ms — silently INVERTING the bound into an immediate
   // refusal of every startup-window dispatch. The documented domain is a
-  // finite, non-negative number (`0` = wait forever).
+  // finite, non-negative, supported timer value (`0` = wait forever).
 
   const chainGateBehaviorFactory = (): IIngressBehavior => ({
-    handle: (_ctx: IngressContext, next: () => Promise<void>): Promise<void> => next(),
+    handle: (ctx: IngressContext, next: () => Promise<void>): Promise<void> => {
+      expect(ctx.kind).toBe('messaging');
+      return next();
+    },
   });
 
-  it('chainReadyTimeoutMs: NaN throws at registration naming the option', async () => {
+  it('validates an invalid chainReadyTimeoutMs before connecting a custom broker', async () => {
     const { ctx } = createFakeContext();
+    const instance = new InMemoryBroker(ctx.runtime, new JsonSerializer());
+    const originalConnect = instance.connect.bind(instance);
+    let connectCalls = 0;
+    instance.connect = async (): Promise<void> => {
+      connectCalls += 1;
+      await originalConnect();
+    };
     const plugin = MessagingPlugin({
-      broker: 'memory',
+      broker: 'custom',
+      instance,
       // The gate — and so the option — is armed only when a behaviour FACTORY
       // is declared: the single point the option resolves into the clock.
       behaviors: [chainGateBehaviorFactory],
@@ -1133,6 +1146,7 @@ describe('MessagingPlugin', () => {
     const outcome = plugin.register(ctx);
     await expect(outcome).rejects.toThrow(RangeError);
     await expect(outcome).rejects.toThrow('chainReadyTimeoutMs');
+    expect(connectCalls).toBe(0);
   });
 
   it('chainReadyTimeoutMs: -1 throws at registration naming the option', async () => {
@@ -1161,8 +1175,21 @@ describe('MessagingPlugin', () => {
     await expect(outcome).rejects.toThrow('chainReadyTimeoutMs');
   });
 
+  it('chainReadyTimeoutMs above the runtime timer maximum throws at registration', async () => {
+    const { ctx } = createFakeContext();
+    const plugin = MessagingPlugin({
+      broker: 'memory',
+      behaviors: [chainGateBehaviorFactory],
+      chainReadyTimeoutMs: 2_147_483_648,
+    });
+
+    const outcome = plugin.register(ctx);
+    await expect(outcome).rejects.toThrow(RangeError);
+    await expect(outcome).rejects.toThrow('chainReadyTimeoutMs');
+  });
+
   it('chainReadyTimeoutMs: 0 (wait forever) and positive values still register', async () => {
-    for (const timeoutMs of [0, 250]) {
+    for (const timeoutMs of [0, 250, 2_147_483_647]) {
       const { ctx, registered } = createFakeContext();
       const plugin = MessagingPlugin({
         broker: 'memory',

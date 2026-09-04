@@ -237,6 +237,28 @@ describe('a rejected handler reaches onDispatchError and never the publish (M89c
     }
   });
 
+  it('a REJECTING async reporter never rejects publish or surfaces as unhandledrejection', async () => {
+    const probe = new UnhandledRejectionProbe();
+    probe.start();
+    try {
+      const broker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer(), {
+        onDispatchError: () => Promise.reject(new Error('async reporter exploded')),
+      });
+      await broker.connect();
+
+      await broker.subscribe('t', () => {
+        throw new Error('handler boom');
+      });
+
+      await expect(broker.publish('t', 'm')).resolves.toBeUndefined();
+      await settle();
+
+      expect(probe.events).toEqual([]);
+    } finally {
+      probe.stop();
+    }
+  });
+
   it('observes and drops a rejection when no reporter is configured — never unhandled', async () => {
     const probe = new UnhandledRejectionProbe();
     probe.start();
@@ -301,10 +323,10 @@ describe('MessagingPlugin supplies the in-memory failure reporter (M89c §3.1b)'
           registered.set(token, value);
         },
       },
-      health: { register: (_n: string, _c: () => Promise<unknown>): void => {} },
+      health: { register: (): void => {} },
       lifecycle: {
-        onClose: (_h: () => void | Promise<void>): void => {},
-        onInit: (_h: () => void | Promise<void>): void => {},
+        onClose: (): void => {},
+        onInit: (): void => {},
       },
     } as unknown as IPluginContext;
 

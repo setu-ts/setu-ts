@@ -80,10 +80,18 @@ function createManualClock(): ManualClock {
 /** Recording adapter: captures the WRAPPED handler `subscribeWithHeaders` installs. */
 function createCapturingAdapter(): {
   adapter: MessageBrokerAdapter;
-  wrapped: { handler?: MessageHandler<unknown> };
+  wrapped: {
+    handler?: MessageHandler<unknown>;
+    topic?: string;
+    options?: SubscribeOptions | undefined;
+  };
   metadata: MessageMetadata;
 } {
-  const wrapped: { handler?: MessageHandler<unknown> } = {};
+  const wrapped: {
+    handler?: MessageHandler<unknown>;
+    topic?: string;
+    options?: SubscribeOptions | undefined;
+  } = {};
   const adapter: MessageBrokerAdapter = {
     connect: () => Promise.resolve(),
     disconnect: () => Promise.resolve(),
@@ -97,10 +105,12 @@ function createCapturingAdapter(): {
       options?: SubscribeOptions,
     ): Promise<ISubscription> => adapter.subscribeWithHeaders(topic, handler, options),
     subscribeWithHeaders: <T>(
-      _topic: string,
+      topic: string,
       handler: MessageHandler<T>,
-      _options?: SubscribeOptions,
+      options?: SubscribeOptions,
     ): Promise<ISubscription> => {
+      wrapped.topic = topic;
+      wrapped.options = options;
       wrapped.handler = handler as MessageHandler<unknown>;
       return Promise.resolve({ unsubscribe: () => Promise.resolve() });
     },
@@ -119,7 +129,8 @@ function createCapturingAdapter(): {
 
 function passThrough(log: string[], label: string): IIngressBehavior {
   return {
-    handle(_ctx: IngressContext, next: () => Promise<void>): void | Promise<void> {
+    handle(ctx: IngressContext, next: () => Promise<void>): void | Promise<void> {
+      expect(ctx.kind).toBe('messaging');
       log.push(label);
       return next();
     },

@@ -75,11 +75,14 @@ function createPluginName(name?: string): string {
  * @throws {RangeError} Naming the option unless the value is a finite,
  * non-negative number of milliseconds
  */
+const MAX_CHAIN_READY_TIMEOUT_MS = 2_147_483_647;
+
 function assertChainReadyTimeoutMs(value: number): number {
-  if (!Number.isFinite(value) || value < 0) {
+  if (!Number.isFinite(value) || value < 0 || value > MAX_CHAIN_READY_TIMEOUT_MS) {
     throw new RangeError(
       `MessagingPlugin option 'chainReadyTimeoutMs' must be a finite, ` +
-        `non-negative number of milliseconds (received ${value}); 0 waits forever.`,
+        `non-negative number of milliseconds no greater than ${MAX_CHAIN_READY_TIMEOUT_MS} ` +
+        `(received ${value}); 0 waits forever.`,
     );
   }
   return value;
@@ -200,6 +203,15 @@ export function MessagingPlugin(
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
+      // Validate before constructing or connecting a broker. If this option is
+      // invalid, registration must leave an externally backed broker untouched.
+      // No factory means no gate, so the documented ignored-option behavior is
+      // preserved for that arm.
+      const chainReadyTimeoutMs = behaviorFactories.length > 0 &&
+          options.chainReadyTimeoutMs !== undefined
+        ? assertChainReadyTimeoutMs(options.chainReadyTimeoutMs)
+        : undefined;
+
       // Resolve optional logger
       let logger: { error: (msg: string) => void } | undefined;
       if (ctx.services.has('logger')) {
@@ -368,13 +380,9 @@ export function MessagingPlugin(
           : new PipelinedBroker(broker, behaviorChain, chainReady, {
             runtime: ctx.runtime,
             // exactOptionalPropertyTypes: omit the option when unset so the
-            // broker applies its own default bound. The value is validated
-            // where it resolves into the clock — a `NaN`/negative/`Infinity`
-            // bound would reach `setTimeout` and clamp to ~0, refusing every
-            // held dispatch instead of bounding the wait.
-            ...(options.chainReadyTimeoutMs !== undefined
-              ? { timeoutMs: assertChainReadyTimeoutMs(options.chainReadyTimeoutMs) }
-              : {}),
+            // broker applies its own default bound. The validated value is
+            // resolved before any external broker is connected.
+            ...(chainReadyTimeoutMs !== undefined ? { timeoutMs: chainReadyTimeoutMs } : {}),
           });
       }
 

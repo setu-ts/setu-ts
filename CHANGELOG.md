@@ -19,13 +19,13 @@ All notable changes to this project are documented here. The format follows
 
 - **`@setu-ts/messaging-plugin` — the bounded chain-gate wait.** `MessagingCommonOptions` gains
   `chainReadyTimeoutMs` (default `10_000`; `0` waits forever; ignored when no `behaviors` factory is
-  configured, because the gate is then never armed): a dispatch held on the gate rejects after the
-  bound with the new exported `ChainGateTimeoutError`, whose message names `register()` as the
-  likely cause. A REJECTED gate still refuses delivery forever, as before. Also exported:
-  `InMemoryBrokerOptions`, whose optional `onDispatchError(error, metadata)` is the terminus of the
-  in-memory broker's handler-failure path (the plugin always supplies one backed by the
-  application's logger, read at call time; the option is reachable only by constructing the broker
-  directly).
+  configured, because the gate is then never armed; finite, non-negative values up to
+  `2_147_483_647`): a dispatch held on the gate rejects after the bound with the new exported
+  `ChainGateTimeoutError`, whose message names `register()` as the likely cause. A REJECTED gate
+  still refuses delivery forever, as before. Also exported: `InMemoryBrokerOptions`, whose optional
+  `onDispatchError(error, metadata)` is the terminus of the in-memory broker's handler-failure path
+  (the plugin always supplies one backed by the application's logger, read at call time; the option
+  is reachable only by constructing the broker directly).
 
 - **`@setu-ts/common` — the HTTP status hint**, a symbol-keyed brand through which a package that
   may not import `@setu-ts/exceptions` (AI_GUIDELINES §2.2) states how its own error should be
