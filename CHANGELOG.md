@@ -140,9 +140,11 @@ All notable changes to this project are documented here. The format follows
 
   Reachable from ordinary handler code, and not only as a typo —
   `status(204).send(new Uint8Array(0))` and `status(204).text('')` carry a body that is present but
-  EMPTY, and a `DELETE` answering `204` with a confirmation body is the commonest REST idiom there
-  is. Only `send()` with no argument worked. Present since the M23 fetch model; unrelated to M88,
-  which changed the header source and left body handling byte-identical.
+  EMPTY, and attaching a confirmation body to the `204` that a `DELETE` idiomatically returns is an
+  easy mistake to make. Such a body is invalid — a `204` carries no content, and a client cannot
+  read one — so it is discarded; return `200` when a confirmation representation is actually needed.
+  Only `send()` with no argument worked. Present since the M23 fetch model; unrelated to M88, which
+  changed the header source and left body handling byte-identical.
 
   The body is now dropped rather than the throw propagated — what Express and Fastify both do, and
   what RFC 9110 §15.3.5 implies, since a `204` has no content. Headers are preserved (RFC 9110

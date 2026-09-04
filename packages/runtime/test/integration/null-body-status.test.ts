@@ -29,8 +29,10 @@ describe('a null-body status written with a body', () => {
     app.router.get('/bare-204', (ctx) => ctx.response.status(204).send());
     app.router.get('/reset-205', (ctx) => ctx.response.status(205).json({ a: 1 }));
     app.router.get('/not-modified-304', (ctx) => ctx.response.status(304).text(''));
-    // The single most ordinary REST idiom: DELETE answering 204 with a
-    // confirmation body.
+    // An easy mistake rather than a correct idiom: `DELETE` idiomatically
+    // answers 204, and attaching a confirmation body to it is invalid — a 204
+    // carries no content. The body is discarded; a handler that must return a
+    // representation should answer 200.
     app.router.delete('/resource', (ctx) => ctx.response.status(204).json({ deleted: true }));
     await app.start();
     try {
