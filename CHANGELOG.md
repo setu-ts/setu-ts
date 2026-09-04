@@ -4,7 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] — 2026-09-05
+
+**A declaration that enforced nothing now enforces, and a caller's mistake stops reading as a server
+fault.** `@Roles`/`@Permissions` recorded metadata and were evaluated by nobody, so a route that
+looked guarded served every request; they are now enforced, and a deployment with no authorization
+provider fails **closed** rather than open. Alongside it, three classes of refusal that a caller
+caused — an unsupported query shape, a raw query on an adapter that cannot run one, an RBAC guard
+with no `rbac` arm — answered a masked `500 Internal Server Error` with the useful sentence
+reachable only in the log; they now answer `501 Not Implemented` and say what is wrong.
+
+**The in-memory broker stops deadlocking startup.** A plugin that awaited its own `publish` during
+`register()` hung with no boot, no error and no log; `publish` now resolves on dispatch hand-off,
+the guarantee the real brokers always gave, and the behaviour chain's delivery gate is bounded by
+`chainReadyTimeoutMs`. Non-HTTP ingress also gains the tenant entry point `0.3.0`'s notes advertised
+and the shipped contract could not express: `getRepositoryFor(tenantId, entity)`.
+
+**Six breaking changes ride with it**, every one carrying migration text in Changed. Four are
+behavioural: two refusals move from a masked `500` to `501`, a restricted route starts answering
+`401`/`403`/`501` where it used to serve, and `InMemoryBroker.publish` resolves earlier — so a test
+asserting the old status, or one that awaited `publish` and then read a handler side-effect, needs
+updating. Two are API changes, reaching implementors of `IMultiTenancyService` and callers
+constructing `UnsupportedRawQueryError` directly. Under `0.x` a minor bump is where breaking changes
+live — see [Versioning](README.md#versioning).
 
 ### Added
 
@@ -48,6 +70,24 @@ All notable changes to this project are documented here. The format follows
   absent and the error takes the ordinary masked-`500` path. An unserveable status would otherwise
   make the web `Response` constructor throw out of the error handler itself, and a hint says how an
   ERROR is answered, which is never a success or a redirect.
+
+- **`@setu-ts/common` — `ResponseSnapshotInit`**, and the optional `ResponseSnapshot.responseInit`
+  member that carries it (M88). Terminal `json`/`text`/`html`/byte/redirect responses now defer
+  building the framework `Headers` object until something actually reads the documented live
+  `snapshot.headers` view; when the kernel never needed a mutable instance it attaches this header
+  input instead, and the shared runtime mapper hands it straight to the native `Response`
+  constructor. Explicit and repeated header writes keep the existing path.
+
+  The member is `@internal` — a kernel-to-runtime protocol, not application surface. Middleware and
+  handler code continue to read `snapshot.headers`, whose behaviour is unchanged. The initializer is
+  a fresh mutable copy of an immutable internal source, so a native server adding a derived header
+  (`@hono/node-server` computing `Content-Length`) cannot contaminate another response; a real Node
+  adapter regression test pins that.
+
+  Source-compatible in both directions: the member is optional, so an existing `ResponseSnapshot`
+  producer or consumer is unaffected. **Measurement, stated narrowly:** focused response conversion
+  measured 35.7% lower median cost, and five alternating Node-adapter loopback samples measured a
+  +4.9% median with material local variance. Neither is a production-throughput claim.
 
 ### Changed
 
@@ -4184,6 +4224,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.4.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.4.0
 [0.3.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.3.0
 [0.2.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.2.0
 [0.1.0-alpha.10]: https://github.com/setu-ts/setu-ts/releases/tag/v0.1.0-alpha.10

@@ -6120,7 +6120,7 @@ app.register(OpenApiPlugin({
   // Defaults to ['health-plugin', 'metrics-plugin']; pass [] to document them.
   excludeOwners: ['health-plugin', 'metrics-plugin'],
   // Fill requestBody and parameters from the validation middleware guarding
-  // each route. On by default; pass false for the pre-0.3.0 document.
+  // each route. On by default; pass false for the pre-derivation document.
   deriveRequestSchemas: true,
   // Endpoint configuration
   endpoint: '/docs', // Path for Swagger UI HTML (default: '/docs')
@@ -6191,8 +6191,8 @@ Rules and limits, stated rather than left to discovery:
   status is real; no body schema is emitted, because the shape depends on the plugin's configured
   `errorFormat`, which the generator cannot see.
 - **`deriveRequestSchemas: false`** disables derivation only. Owner exclusion, the `operationId`
-  format and schema deduplication are unconditional, so this does not restore the whole pre-0.3.0
-  document; pass `excludeOwners: []` to document the operational routes again.
+  format and schema deduplication are unconditional, so this does not restore the whole
+  pre-derivation document; pass `excludeOwners: []` to document the operational routes again.
 
 Unlike `deriveSecurity` this is ON by default, because nothing has to be configured for it: a
 security requirement names a scheme that cannot be inferred from a guard, while the schema on the
@@ -6393,7 +6393,7 @@ Install it with an explicit binary name, because Deno's default inference would 
 package (`cli`):
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.3.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.4.0/main
 ```
 
 `--min-dep-age 0` because Deno refuses a dependency published within the last 24 hours, and the CLI
@@ -9552,7 +9552,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.3.0
+deno add jsr:@setu-ts/sdk@^0.4.0
 ```
 
 ### createClient()
