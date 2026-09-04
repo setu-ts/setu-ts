@@ -39,19 +39,26 @@ import { backoffMs, classifyAudit, runAuditLoop, shouldRetry } from '../../scrip
 function scripted(codes: readonly number[], msPerRun = 0): {
   deps: AuditDeps;
   calls: string[][];
+  budgets: number[];
   waits: number[];
   logs: string[];
 } {
   const calls: string[][] = [];
+  const budgets: number[] = [];
   const waits: number[] = [];
   const logs: string[] = [];
   let clock = 0;
   let index = 0;
 
   const deps: AuditDeps = {
-    run: (extra): Promise<AuditRun> => {
+    run: (extra, timeoutMs): Promise<AuditRun> => {
       calls.push([...extra]);
-      clock += msPerRun;
+      budgets.push(timeoutMs);
+      // Honour the deadline the way a killed child does, so the fake cannot
+      // silently overrun a bound the real runner enforces.
+      const timedOut = msPerRun > timeoutMs;
+      clock += Math.min(msPerRun, timeoutMs);
+      if (timedOut) return Promise.resolve({ code: 143, timedOut: true });
       const code = codes[index++];
       if (code === undefined) throw new Error(`unscripted audit call #${index}`);
       return Promise.resolve({ code });
@@ -65,7 +72,7 @@ function scripted(codes: readonly number[], msPerRun = 0): {
     log: (message) => logs.push(message),
   };
 
-  return { deps, calls, waits, logs };
+  return { deps, calls, budgets, waits, logs };
 }
 
 describe('classifyAudit', () => {
@@ -207,14 +214,69 @@ describe('runAuditLoop', () => {
 
   it('skips the classification run on the final attempt', async () => {
     // A failing audit costs ~5 minutes; labelling a failure that fails either
-    // way is pure waste.
-    // One 12-minute run exhausts the budget, so attempt 1 is also the last.
-    const { deps, calls, logs } = scripted([1], 12 * 60_000);
+    // way is pure waste. Three registry failures reach the last attempt, which
+    // must not spend another audit on a label.
+    const { deps, calls } = scripted([1, 0, 1, 0, 1]);
 
     expect(await runAuditLoop(deps)).toBe(1);
-    // The strict run only — no `--ignore-registry-errors` classification.
+    // 3 strict + 2 classifications, NOT 3 + 3.
+    expect(calls.filter((c) => c.length === 0).length).toBe(3);
+    expect(calls.filter((c) => c.includes('--ignore-registry-errors')).length).toBe(2);
+  });
+
+  it('bounds total elapsed time however slow the audits are', async () => {
+    // The invariant, and the reason the bound is a per-process timeout rather
+    // than an elapsed check between attempts: with 5-minute runs the earlier
+    // between-attempts form reached 15 minutes against a 12-minute budget,
+    // because it reserved only the backoff and never accounted for the
+    // classification run or the next attempt.
+    let clock = 0;
+    const FIVE_MIN = 5 * 60_000;
+    const codes = [1, 0, 1, 0, 1];
+    let i = 0;
+
+    const code = await runAuditLoop({
+      run: (_extra, timeoutMs) => {
+        const ran = Math.min(FIVE_MIN, timeoutMs);
+        clock += ran;
+        return Promise.resolve(
+          ran < FIVE_MIN ? { code: 143, timedOut: true } : { code: codes[i++] ?? 1 },
+        );
+      },
+      sleep: (ms) => {
+        clock += ms;
+        return Promise.resolve();
+      },
+      now: () => clock,
+      log: () => {},
+    });
+
+    expect(code).not.toBe(0);
+    expect(clock).toBeLessThanOrEqual(12 * 60_000);
+  });
+
+  it('hands every run the REMAINING budget, never the full one', async () => {
+    // Each successive process must get less, or a late attempt could run for
+    // the whole budget again.
+    const { deps, budgets } = scripted([1, 0, 1, 0, 1], 60_000);
+
+    await runAuditLoop(deps);
+    expect(budgets.length).toBe(5);
+    for (let i = 1; i < budgets.length; i++) {
+      expect(budgets[i]! < budgets[i - 1]!, `budget ${i} shrank`).toBe(true);
+    }
+    expect(budgets[0]).toBe(12 * 60_000);
+  });
+
+  it('fails closed on a timed-out run rather than classifying it', async () => {
+    // A killed audit produced no advisory data. Classifying it would report a
+    // real advisory (fail-closed, but naming the wrong cause).
+    const { deps, calls, logs } = scripted([1], 13 * 60_000);
+
+    expect(await runAuditLoop(deps)).toBe(1);
     expect(calls).toEqual([[]]);
-    expect(logs.some((line) => line.includes('FAILED'))).toBe(true);
+    expect(logs.some((line) => line.includes('budget is spent'))).toBe(true);
+    expect(logs.some((line) => line.includes('nothing was scanned'))).toBe(true);
   });
 
   it('propagates a non-1 exit code rather than normalising it', async () => {

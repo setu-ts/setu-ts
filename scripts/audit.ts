@@ -57,6 +57,14 @@ export type AuditOutcome =
 export interface AuditRun {
   /** The process exit code. */
   readonly code: number;
+  /**
+   * Whether the run was killed for exceeding its share of the budget.
+   *
+   * A killed run produced NO advisory data, so it is never classified: a
+   * timed-out strict run plus a timed-out lenient run would otherwise read as
+   * a real advisory, which is fail-closed but names the wrong cause.
+   */
+  readonly timedOut?: boolean;
 }
 
 /**
@@ -120,13 +128,23 @@ const MAX_ATTEMPTS = 3;
  * healthy audit finishes in about a minute, but a failing one *hangs* on the
  * advisory endpoint for roughly five before giving up. Three attempts plus a
  * classification run each is therefore ~25 minutes, which is a runaway CI job
- * rather than a retry. The budget bounds the step no matter how slow an
- * individual attempt turns out to be.
+ * rather than a retry.
+ *
+ * The bound is enforced by giving every child process the REMAINING budget as
+ * a hard timeout, so total elapsed time cannot exceed this no matter how many
+ * attempts run or how slow any one of them is. Checking elapsed time only
+ * between attempts is NOT sufficient and was measured so: with 5-minute runs
+ * the loop reached 15 minutes, because the check reserved only the backoff and
+ * never accounted for the classification run or the next attempt.
  */
 const TOTAL_BUDGET_MS = 12 * 60_000;
 
 /**
- * Whether another attempt should be made.
+ * Whether another attempt is worth starting.
+ *
+ * This decides whether to bother, NOT whether the step stays inside its
+ * budget — that is guaranteed by the per-process timeout in `runAuditLoop`,
+ * because no prediction about how long an audit will take can be trusted.
  *
  * @param attempt - The 1-based attempt just completed
  * @param elapsedMs - Wall-clock milliseconds since the step began
@@ -148,8 +166,14 @@ export function shouldRetry(attempt: number, elapsedMs: number): boolean {
 
 /** The seams the loop drives, injectable so it is testable without spawning. */
 export interface AuditDeps {
-  /** Runs `deno audit --level=high`, plus any extra flags. */
-  readonly run: (extra: readonly string[]) => Promise<AuditRun>;
+  /**
+   * Runs `deno audit --level=high`, plus any extra flags.
+   *
+   * @param extra - Additional flags for this invocation
+   * @param timeoutMs - Hard bound; the child is killed when it elapses, and
+   *   the result then carries `timedOut: true`
+   */
+  readonly run: (extra: readonly string[], timeoutMs: number) => Promise<AuditRun>;
   /** Waits, so a flapping endpoint gets a moment to recover. */
   readonly sleep: (ms: number) => Promise<void>;
   /** Monotonic milliseconds. NEVER `Date.now()` — this measures a duration. */
@@ -172,6 +196,20 @@ export interface AuditDeps {
  */
 export async function runAuditLoop(deps: AuditDeps): Promise<number> {
   const started = deps.now();
+  /** Milliseconds left in the whole step's budget. */
+  const remaining = (): number => TOTAL_BUDGET_MS - (deps.now() - started);
+  const spent = (): number => Math.round((deps.now() - started) / 1000);
+
+  /** Reports a budget exhaustion and the exit code to fail with. */
+  const exhausted = (attempt: number): number => {
+    deps.log(
+      `audit: FAILED — the ${TOTAL_BUDGET_MS / 60_000}-minute budget is spent ` +
+        `(attempt ${attempt}/${MAX_ATTEMPTS}, ${spent()}s). The npm advisory endpoint ` +
+        'did not answer in time, so nothing was scanned. This is deliberately not a ' +
+        'pass: a scan that produced no data is not a clean scan.',
+    );
+    return 1;
+  };
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (attempt > 1) {
@@ -180,20 +218,24 @@ export async function runAuditLoop(deps: AuditDeps): Promise<number> {
       await deps.sleep(wait);
     }
 
-    const strict = await deps.run([]);
+    const strictBudget = remaining();
+    if (strictBudget <= 0) return exhausted(attempt);
+
+    const strict = await deps.run([], strictBudget);
+    // A killed run scanned nothing, so it is neither clean nor classifiable.
+    if (strict.timedOut === true) return exhausted(attempt);
+
     if (strict.code === 0) {
       if (attempt > 1) deps.log(`audit: clean on attempt ${attempt}`);
       return 0;
     }
 
-    const elapsed = deps.now() - started;
-    const retrying = shouldRetry(attempt, elapsed);
-
     // Classify only when the answer can still change what we do. On the final
     // attempt the run fails either way, and the label costs another full audit.
-    if (!retrying) {
+    const lenientBudget = remaining();
+    if (!shouldRetry(attempt, deps.now() - started) || lenientBudget <= 0) {
       deps.log(
-        `audit: FAILED (attempt ${attempt}/${MAX_ATTEMPTS}, ${Math.round(elapsed / 1000)}s). ` +
+        `audit: FAILED (attempt ${attempt}/${MAX_ATTEMPTS}, ${spent()}s). ` +
           'Read the audit output above: it is either a real advisory at or above ' +
           '--level=high, or the npm advisory endpoint was unavailable. This is ' +
           'deliberately not a pass — a scan that produced no data is not a clean scan.',
@@ -202,7 +244,8 @@ export async function runAuditLoop(deps: AuditDeps): Promise<number> {
     }
 
     deps.log('audit: non-zero exit — classifying (advisory vs registry failure)');
-    const lenient = await deps.run(['--ignore-registry-errors']);
+    const lenient = await deps.run(['--ignore-registry-errors'], lenientBudget);
+    if (lenient.timedOut === true) return exhausted(attempt);
 
     if (classifyAudit(strict, lenient).kind === 'advisory') {
       deps.log(
@@ -223,14 +266,33 @@ export async function runAuditLoop(deps: AuditDeps): Promise<number> {
   return 1;
 }
 
-/** Spawns one real `deno audit`, inheriting stdio so CI shows its output. */
-async function spawnAudit(extra: readonly string[]): Promise<AuditRun> {
-  const { code } = await new Deno.Command(Deno.execPath(), {
-    args: ['audit', '--level=high', ...extra],
-    stdout: 'inherit',
-    stderr: 'inherit',
-  }).output();
-  return { code };
+/**
+ * Spawns one real `deno audit`, inheriting stdio so CI shows its output.
+ *
+ * The child is killed when `timeoutMs` elapses. `Deno.Command` with a `signal`
+ * RESOLVES rather than rejecting on abort (probed: `code 143`, `SIGTERM`), so
+ * the timeout is reported through `timedOut` instead of an exception — and it
+ * is read from our own controller rather than from `signal === 'SIGTERM'`,
+ * which something other than this deadline could also produce.
+ *
+ * @param extra - Additional flags for this invocation
+ * @param timeoutMs - Hard bound on the child's lifetime
+ * @returns The exit code, and whether the deadline killed it
+ */
+async function spawnAudit(extra: readonly string[], timeoutMs: number): Promise<AuditRun> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const { code } = await new Deno.Command(Deno.execPath(), {
+      args: ['audit', '--level=high', ...extra],
+      stdout: 'inherit',
+      stderr: 'inherit',
+      signal: controller.signal,
+    }).output();
+    return { code, timedOut: controller.signal.aborted };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 if (import.meta.main) {
