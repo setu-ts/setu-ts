@@ -8613,6 +8613,13 @@ Contract notes:
   `ReadableStream<Uint8Array>` (live stream). This allows middleware to safely inspect the response
   without draining a live stream — middleware that reads the body must check `streaming` first.
   Widened from the flat shape added in Milestone 11 to a discriminated union in Milestone 42.
+- A body written at a **null-body status** (`204`, `205`, `304`) is **dropped** when the response is
+  mapped to a web `Response`, and a stream body is `cancel()`led so its source is released. The
+  `Response` constructor rejects a body at these statuses, and the mapping runs in the HTTP adapter
+  after the pipeline, so passing one through raised a `TypeError` no middleware or `errorHandler`
+  could catch. Dropping matches Express and Fastify and follows RFC 9110 §15.3.5; headers are
+  preserved, which RFC 9110 permits. `IResponse.snapshot()` is unchanged and still reports whatever
+  body was written — the drop happens at the mapping boundary, not in the response model.
 - `IRequest.signal?: AbortSignal` — an abort signal that fires when the underlying HTTP connection
   is severed (client disconnect, timeout). Populated by the HTTP adapter from the native
   `Request.signal`; optional because injected / test requests may not carry one. Added in

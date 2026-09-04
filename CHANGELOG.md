@@ -131,6 +131,24 @@ All notable changes to this project are documented here. The format follows
   No behaviour changes for a serveable status. `inject()` could not observe any of this — it builds
   no native `Response` — so the regression tests drive `app.fetch`.
 
+- **`@setu-ts/runtime` — a null-body status written with a body no longer kills the request.**
+  `new Response(body, { status })` throws
+  `TypeError: Response with null body status cannot have body` for `204`, `205` and `304`, and the
+  shared snapshot mapper passed the body through regardless. The throw happened inside the HTTP
+  adapter, **after** the pipeline had finished, so no middleware and no `errorHandler` could catch
+  it: the request died with an unhandled exception rather than a response.
+
+  Reachable from ordinary handler code, and not only as a typo —
+  `status(204).send(new Uint8Array(0))` and `status(204).text('')` carry a body that is present but
+  EMPTY, and a `DELETE` answering `204` with a confirmation body is the commonest REST idiom there
+  is. Only `send()` with no argument worked. Present since the M23 fetch model; unrelated to M88,
+  which changed the header source and left body handling byte-identical.
+
+  The body is now dropped rather than the throw propagated — what Express and Fastify both do, and
+  what RFC 9110 §15.3.5 implies, since a `204` has no content. Headers are preserved (RFC 9110
+  permits representation metadata on a `204`), and a dropped **stream** body is `cancel()`led rather
+  than discarded, so its source is released instead of leaking.
+
 - **`setu add` refuses extra arguments instead of silently discarding them.** The contract is
   singular; `setu add auth cache` used to add one package, report `updated deno.json` and exit 0
   with the rest uninspected. A second positional is now a usage error naming the count (`exit 2`,

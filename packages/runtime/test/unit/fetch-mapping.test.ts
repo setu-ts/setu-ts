@@ -329,6 +329,105 @@ describe('fetch-mapping | snapshot→Response', () => {
 // Integration: Request→IRequest→snapshot→Response round-trip
 // ---------------------------------------------------------------------------
 
+describe('fetch-mapping | null-body statuses', () => {
+  /**
+   * `new Response(body, { status })` throws
+   * `TypeError: Response with null body status cannot have body` for 204, 205
+   * and 304. The framework's response model does not prevent a handler from
+   * writing a body at one of those, and the throw happened in the adapter
+   * AFTER the pipeline, so no middleware and no `errorHandler` could catch it.
+   */
+  const buffered = (status: number, body: Uint8Array | string | null): ResponseSnapshot => ({
+    streaming: false,
+    status,
+    headers: new Headers(),
+    body,
+  });
+
+  it('drops a buffered body at 204, 205 and 304 instead of throwing', async () => {
+    for (const status of [204, 205, 304]) {
+      const res = mapSnapshotToWebResponse(buffered(status, '{"a":1}'));
+      expect(res.status).toBe(status);
+      expect(await res.text()).toBe('');
+    }
+  });
+
+  it('drops an EMPTY body too — presence is what the constructor rejects, not length', async () => {
+    // The likeliest real shapes: `status(204).send(new Uint8Array(0))` and
+    // `status(204).text('')`. Both carry a body that is present but empty.
+    for (const body of [new Uint8Array(0), '']) {
+      const res = mapSnapshotToWebResponse(buffered(204, body));
+      expect(res.status).toBe(204);
+      expect(await res.text()).toBe('');
+    }
+  });
+
+  it('leaves the neighbouring statuses untouched', async () => {
+    for (const status of [200, 203, 206, 303, 305, 404]) {
+      const res = mapSnapshotToWebResponse(buffered(status, 'kept'));
+      expect(res.status).toBe(status);
+      expect(await res.text()).toBe('kept');
+    }
+  });
+
+  it('preserves headers on a dropped-body response', () => {
+    const headers = new Headers({ 'x-trace': 'abc' });
+    headers.append('set-cookie', 'a=1');
+    headers.append('set-cookie', 'b=2');
+    const res = mapSnapshotToWebResponse({ streaming: false, status: 204, headers, body: 'x' });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('x-trace')).toBe('abc');
+    expect(res.headers.getSetCookie()).toEqual(['a=1', 'b=2']);
+  });
+
+  it('CANCELS a dropped stream body, so its source is released rather than leaked', async () => {
+    let cancelled = false;
+    let cancelReason: unknown;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('never sent'));
+      },
+      cancel(reason) {
+        cancelled = true;
+        cancelReason = reason;
+      },
+    });
+
+    const res = mapSnapshotToWebResponse({
+      streaming: true,
+      status: 204,
+      headers: new Headers(),
+      body,
+    });
+    expect(res.status).toBe(204);
+    // `cancel()` resolves asynchronously; yield once so the underlying
+    // source's own `cancel` has run.
+    await Promise.resolve();
+    expect(cancelled).toBe(true);
+    expect(cancelReason).toBeUndefined();
+    expect(body.locked).toBe(false);
+  });
+
+  it('survives a stream whose cancel rejects — a valid response must not become a throw', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        throw new Error('source refused to close');
+      },
+    });
+    const res = mapSnapshotToWebResponse({
+      streaming: true,
+      status: 205,
+      headers: new Headers(),
+      body,
+    });
+    expect(res.status).toBe(205);
+    expect(await res.text()).toBe('');
+    // Yield so the swallowed rejection settles before the test ends; an
+    // unhandled rejection here would fail the run.
+    await new Promise((r) => setTimeout(r, 0));
+  });
+});
+
 describe('fetch-mapping | full round-trip', () => {
   it('preserves method, headers, body', async () => {
     const body = '{"data":"test"}';
