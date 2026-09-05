@@ -141,13 +141,6 @@ export async function runCli(
     return args.flags['help'] === true || args.flags['h'] === true ? EXIT_OK : EXIT_USAGE;
   }
 
-  // `commands` has no command-specific help text, so its documented global
-  // help flags print the top-level usage without requiring a project config.
-  if (command === 'commands' && (args.flags['help'] === true || args.flags['h'] === true)) {
-    printHelp(deps.log);
-    return EXIT_OK;
-  }
-
   // A flag no part of this command reads used to be silently ignored, so a
   // typo (`--templat rest`) scaffolded a DIFFERENT project with exit 0. The
   // dispatcher refuses it before any command body runs, so nothing is written.
@@ -165,6 +158,15 @@ export async function runCli(
   // command's positionals are its handler's input, so neither is checked here.
   const positionalRefusal = builtInPositionalRefusal(command, args.positionals, deps.error);
   if (positionalRefusal !== undefined) return positionalRefusal;
+
+  // `commands` has no command-specific help text, so its documented global
+  // help flags print the top-level usage without requiring a project config.
+  // This follows both dispatcher refusals: `commands --help --templat` must
+  // not turn an unsupported flag into a successful no-op.
+  if (command === 'commands' && (args.flags['help'] === true || args.flags['h'] === true)) {
+    printHelp(deps.log);
+    return EXIT_OK;
+  }
 
   const rest = {
     positionals: args.positionals.slice(1),

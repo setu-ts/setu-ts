@@ -341,6 +341,13 @@ describe('every documented flag is accepted', () => {
       expect(h.err.text()).toBe('');
     });
   }
+
+  it('refuses an unsupported flag alongside commands help before printing it', async () => {
+    const h = harness();
+    expect(await h.run(['commands', '--help', '--templat'])).toBe(2);
+    expect(h.err.text()).toContain('Unknown option `--templat` for `setu commands`.');
+    expect(h.out.text()).toBe('');
+  });
 });
 
 describe('help text agrees with the inventory', () => {

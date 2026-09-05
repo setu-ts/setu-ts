@@ -218,11 +218,12 @@ const WORKSPACE: ICommandFlagSpec = spec('workspace', [], ['reallocate']);
  * `setu commands` accepts the documented global help flags. `runCli` prints
  * top-level help before this command can check for a project config module.
  */
-const COMMANDS: ICommandFlagSpec = spec('commands', ['dir', 'config'], [], {
-  fixed: 1,
-  taken: 0,
-  noun: 'no arguments',
-});
+const COMMANDS: ICommandFlagSpec = {
+  label: 'commands',
+  allowed: [...GLOBAL_FLAGS, 'dir', 'config'],
+  documented: [],
+  positionals: { fixed: 1, taken: 0, noun: 'no arguments' },
+};
 
 /** `setu help` prints the top-level usage; the help flags are its only input. */
 const HELP: ICommandFlagSpec = spec('help', [], [], {
