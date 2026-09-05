@@ -362,11 +362,11 @@ refused rather than resolved by load order.
 
 ## Exit codes
 
-| Code | Meaning                                                                                                                                                                   |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success, including `--help` and `--version`.                                                                                                                              |
-| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, or a handler threw.                   |
-| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| Code | Meaning                                                                                                                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success, including `--help` and `--version`.                                                                                                                                                                        |
+| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, or a handler threw.                                                             |
+| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
 
 ## Next Steps
 

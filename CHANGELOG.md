@@ -8,6 +8,46 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING — `@setu-ts/cli` — bare `setu generate` is informational, not an error.** With no
+  schematic named it printed the available schematics through the normal output sink yet exited `2`
+  — an error exit whose guidance read like help. It now lists the schematics and exits `0`, printing
+  exactly the text `setu generate --help` prints. No refusal moves: `generate
+  <schematic>` with a
+  missing name, `generate custom` with a missing name, an unknown schematic, and an over-arity
+  invocation all keep exit `2` with nothing written. One addition: the `--runtime` validation every
+  generating path runs now sits above the listing, so bare `setu generate --runtime deno2` refuses
+  with exit `2` where the listing used to print over the typo. Migration: a script branching on bare
+  `setu generate` exiting `2` sees `0` now — branch on the printed list or drop the branch.
+
+- **BREAKING — `@setu-ts/cli` — unknown flags are refused instead of silently ignored.** `setu`
+  collected every `--flag` and never consulted the valid names, so a typo scaffolded a DIFFERENT
+  project with exit `0` and no warning: `new app --dry-run --templat rest` produced the minimal
+  project where `--template rest` produces the `rest` composition, and `--base-port` (the real flag
+  is `--port`) was swallowed the same way. Each command now refuses a flag outside its own set —
+  subcommand-aware for `generate app`, `generate library`, and `workspace ports` — with exit `2`, a
+  message naming the command and, within a small edit distance, a "did you mean" suggestion, and
+  nothing written or created. Flags kept deliberately recognized for a NAMED refusal (`--di` and
+  `--depends-on` on `new`; the transport flags, `--runtime`, and `--di` on `generate app`) still
+  reach their specific guidance, and plugin-registered commands accept only `--dir` and `--config` —
+  a `CliCommandHandler` receives positionals only, so no plugin can read any other flag. Migration:
+  a script passing a stray flag today exits `0` and will now exit `2` — remove or correct the flag.
+  No compatibility mode preserves ignored flags: accepting an unrecognized option would restore the
+  silent misconfiguration this change removes.
+
+- **BREAKING — `@setu-ts/cli` — extra positional arguments are refused instead of silently
+  ignored.** `new` read the first positional only, so `setu new app extra junk` scaffolded `app` and
+  reported success with exit `0`; `generate` read only the schematic word, its name, and (for
+  `custom`) the custom-schematic name, dropping anything after; and `adopt`, `workspace ports`,
+  `commands`, and `help` consumed no positionals at all. Each now refuses an over-arity invocation —
+  exit `2`, nothing written or created, a message naming the command and the expected count — in the
+  dispatcher before any command body runs, mirroring `add`'s existing refusal. Tokens after `--` are
+  positionals ([`parseArgs`]) and refuse the same way. Valid arities are unchanged (`new app`,
+  `generate <schematic> <name>`, `generate custom <schematic-name> <name>`,
+  `generate app|library
+  <name>`, and the bare `add`/`adopt`/`workspace ports`/`commands`/`help`
+  forms), and plugin-registered commands still receive every positional. Migration: a script passing
+  stray positionals today exits `0` and will now exit `2` — remove them.
+
 - **BREAKING — `@setu-ts/database-plugin` — default memory raw-SQL and programmatic-migration
   refusals now answer `501 Not Implemented` instead of a masked `500`.** `query()` now rejects with
   `UnsupportedRawQueryError` rather than throwing synchronously, so callers using `.catch()` now

@@ -238,9 +238,38 @@ describe('runGenerateCommand', () => {
   });
 
   describe('usage errors', () => {
-    it('returns 2 and lists schematics when none is named', async () => {
+    it('lists the schematics on the log sink and exits 0 when none is named', async () => {
+      // Bare `generate` is informational by decision: it prints exactly the
+      // text `--help` prints, so the error exit contradicted its own output.
+      // A missing name, an unknown schematic, and over-arity still exit 2.
       const h = harness();
-      expect(await h.run([])).toBe(2);
+      expect(await h.run([]), h.err.text()).toBe(0);
+      expect(h.out.text()).toContain('Usage: setu generate <schematic> <name>');
+      expect(h.out.text()).toContain('Schematics:');
+      expect(h.err.text()).toBe('');
+    });
+
+    it('refuses an invalid --runtime on the bare listing instead of exiting 0 over it', async () => {
+      // The `--runtime` validation runs ABOVE the informational return, so the
+      // listing cannot silently swallow a typo every generating path refuses.
+      const h = harness();
+      expect(await h.run(['--runtime', 'deno2'])).toBe(2);
+      expect(h.err.text()).toContain('Unknown runtime "deno2"');
+      expect(h.out.text()).not.toContain('Schematics:');
+    });
+
+    for (const flag of ['--runtime', '--runtime=']) {
+      it(`refuses a valueless ${flag} on the bare listing`, async () => {
+        const h = harness();
+        expect(await h.run([flag])).toBe(2);
+        expect(h.err.text()).toContain('Option --runtime requires a value.');
+        expect(h.out.text()).not.toContain('Schematics:');
+      });
+    }
+
+    it('still lists on the bare arm when --runtime is a valid target', async () => {
+      const h = harness();
+      expect(await h.run(['--runtime', 'bun'])).toBe(0);
       expect(h.out.text()).toContain('Schematics:');
     });
 
@@ -434,6 +463,15 @@ describe('runGenerateCommand', () => {
       expect(h.err.text()).toContain('Unknown runtime "solaris"');
       expect(h.fs.writes).toEqual([]);
     });
+
+    for (const flag of ['--runtime', '--runtime=']) {
+      it(`refuses a valueless ${flag} before generating`, async () => {
+        const h = harness();
+        expect(await h.run(['service', 'billing', flag])).toBe(2);
+        expect(h.err.text()).toContain('Option --runtime requires a value.');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
 
     it('accepts every supported runtime', async () => {
       for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers']) {

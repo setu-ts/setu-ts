@@ -6,6 +6,7 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 import { parseArgs } from './args.ts';
+import { builtInFlagRefusal, builtInPositionalRefusal } from './flags.ts';
 import {
   APP_VERB,
   CONFIG_MODULE,
@@ -138,6 +139,33 @@ export async function runCli(
     printHelp(deps.log);
     // A bare `setu` with no command is a usage error; `setu --help` is not.
     return args.flags['help'] === true || args.flags['h'] === true ? EXIT_OK : EXIT_USAGE;
+  }
+
+  // A flag no part of this command reads used to be silently ignored, so a
+  // typo (`--templat rest`) scaffolded a DIFFERENT project with exit 0. The
+  // dispatcher refuses it before any command body runs, so nothing is written.
+  // `version`/`v` never reach this — consumed above — and a plugin command's
+  // flags are checked in its dispatcher, after the config module is confirmed
+  // and before the application boots.
+  const flagRefusal = builtInFlagRefusal(command, args.positionals[1], args.flags, deps.error);
+  if (flagRefusal !== undefined) return flagRefusal;
+
+  // The positional twin: `new` read one name and `generate` read at most a
+  // schematic and a name, silently dropping the rest, so `setu new app extra
+  // junk` scaffolded `app` and reported success with exit 0. Refused by the
+  // same dispatcher gate — exit 2, the error sink, nothing written — before
+  // any command body runs. `add` refuses its own extras (X18-1) and a plugin
+  // command's positionals are its handler's input, so neither is checked here.
+  const positionalRefusal = builtInPositionalRefusal(command, args.positionals, deps.error);
+  if (positionalRefusal !== undefined) return positionalRefusal;
+
+  // `commands` has no command-specific help text, so its documented global
+  // help flags print the top-level usage without requiring a project config.
+  // This follows both dispatcher refusals: `commands --help --templat` must
+  // not turn an unsupported flag into a successful no-op.
+  if (command === 'commands' && (args.flags['help'] === true || args.flags['h'] === true)) {
+    printHelp(deps.log);
+    return EXIT_OK;
   }
 
   const rest = {
