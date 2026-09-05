@@ -294,15 +294,30 @@ describe('DatabasePlugin integration', () => {
     expect((result as { status: string }).status).toBe('up');
   });
 
-  it('memory adapter query throws unsupported error', async () => {
+  it('memory adapter query rejects unsupported error', async () => {
     const ctx = createFakeContext();
     const plugin = DatabasePlugin();
     await plugin.register!(ctx);
     const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    expect(() => db.query('SELECT 1')).toThrow('memory adapter does not support');
+    await expect(db.query('SELECT 1')).rejects.toThrow('memory adapter does not support');
   });
 
-  it('memory adapter migrate throws unsupported error', async () => {
+  it('memory adapter query reaches a caller using catch without awaiting it', async () => {
+    const ctx = createFakeContext();
+    const plugin = DatabasePlugin();
+    await plugin.register!(ctx);
+    const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    let caught = false;
+
+    db.query('SELECT 1').catch(() => {
+      caught = true;
+    });
+    await Promise.resolve();
+
+    expect(caught).toBe(true);
+  });
+
+  it('memory adapter migrate rejects unsupported error', async () => {
     const ctx = createFakeContext();
     const plugin = DatabasePlugin();
     await plugin.register!(ctx);

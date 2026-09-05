@@ -101,6 +101,7 @@ export {
   CosmosTransactionScopeError,
   MongoTransactionUnavailableError,
   UnsupportedFilterOperatorError,
+  UnsupportedMigrationError,
   UnsupportedQueryFeatureError,
   UnsupportedRawQueryError,
 } from './errors.ts';

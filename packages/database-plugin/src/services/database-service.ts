@@ -25,6 +25,7 @@ import {
   readDrizzleQueryHandle,
 } from '../query/drizzle-query.ts';
 import type { IDynamoAccessPathReportingDataSource } from '../adapters/dynamo/dynamo-data-source.ts';
+import { UnsupportedMigrationError, UnsupportedRawQueryError } from '../errors.ts';
 
 /**
  * Reads DynamoDB's optional access-path diagnostic without widening the
@@ -132,16 +133,18 @@ export class DatabaseService implements IDatabaseService {
   /**
    * @inheritdoc
    *
-   * NOTE: the memory-adapter refusal throws **synchronously** even though the
-   * declared return type is a promise, so a caller using `.catch()` rather
-   * than `await` is bypassed. That is pre-existing published behavior pinned
-   * by two committed tests, and correcting it is a behavior change outside
-   * M52c's scope — flagged rather than changed here. `migrate()` below
-   * rejects, so the two refusals are currently inconsistent.
+   * The memory adapter rejects with {@linkcode UnsupportedRawQueryError}, so
+   * every refusal from this `Promise`-returning method is observable through
+   * either `await` or `.catch()`.
    */
   query<T>(sql: string, params?: unknown[]): Promise<T[]> {
     if (this._adapterType === 'memory') {
-      throw new Error('The memory adapter does not support raw SQL queries.');
+      return Promise.reject(
+        new UnsupportedRawQueryError(
+          'memory',
+          'The memory adapter does not support raw SQL queries.',
+        ),
+      );
     }
     return this._adapter.rawQuery<T>(sql, params);
   }
@@ -149,7 +152,9 @@ export class DatabaseService implements IDatabaseService {
   /** @inheritdoc */
   migrate(): Promise<void> {
     return Promise.reject(
-      new Error('Programmatic migrations are not supported by the current database adapters.'),
+      new UnsupportedMigrationError(
+        'Programmatic migrations are not supported by the current database adapters.',
+      ),
     );
   }
 

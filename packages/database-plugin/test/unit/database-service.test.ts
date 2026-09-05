@@ -114,13 +114,13 @@ describe('DatabaseService', () => {
   });
 
   describe('query', () => {
-    it('throws for memory adapter', () => {
-      expect(() => service.query('SELECT 1')).toThrow();
+    it('rejects for memory adapter', async () => {
+      await expect(service.query('SELECT 1')).rejects.toThrow();
     });
   });
 
   describe('migrate', () => {
-    it('throws for all adapters', async () => {
+    it('rejects for all adapters', async () => {
       await expect(service.migrate()).rejects.toThrow();
     });
   });

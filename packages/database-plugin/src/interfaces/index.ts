@@ -223,7 +223,8 @@ export interface IDatabaseService {
 
   /**
    * Programmatic migrations are unsupported by the current adapters. Each ORM
-   * owns schema migration through its own CLI, so this method rejects.
+   * owns schema migration through its own CLI, so this rejects with
+   * {@linkcode UnsupportedMigrationError}.
    *
    * @returns A rejected promise naming the unsupported operation
    * @since 0.1.0

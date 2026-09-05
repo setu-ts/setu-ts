@@ -38,7 +38,7 @@ import {
 } from '../../query/query-builder.ts';
 import { resolveKeyColumns } from '../../query/key-target.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
-import { UnsupportedQueryFeatureError } from '../../errors.ts';
+import { UnsupportedQueryFeatureError, UnsupportedRawQueryError } from '../../errors.ts';
 
 /**
  * A single in-memory entity store keyed by entity name.
@@ -748,6 +748,11 @@ export class MemoryAdapter implements IDatabaseAdapter {
 
   /** @inheritdoc — raw query not supported on memory adapter. */
   rawQuery<T>(_sql: string, _params?: unknown[]): Promise<T[]> {
-    return Promise.reject(new Error('The memory adapter does not support raw SQL queries.'));
+    return Promise.reject(
+      new UnsupportedRawQueryError(
+        'memory',
+        'The memory adapter does not support raw SQL queries.',
+      ),
+    );
   }
 }
