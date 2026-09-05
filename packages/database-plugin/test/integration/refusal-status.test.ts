@@ -23,7 +23,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { HandlerResult, IRequestContext } from '@setu-ts/common';
 import { errorHandler } from '@setu-ts/exceptions';
 
-import { DatabasePlugin } from '../../src/index.ts';
+import { DatabasePlugin, MemoryAdapter } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/index.ts';
 import { DynamoAdapter } from '../../src/adapters/dynamo/dynamo-adapter.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
@@ -98,9 +98,12 @@ function bootBigtableApp() {
   return app;
 }
 
-/** Builds the default memory-backed app with raw-query and migration routes. */
-function bootMemoryApp() {
-  const app = createApplication({ plugins: [RuntimePlugin(), DatabasePlugin({ type: 'memory' })] });
+/** Builds a memory-backed app through either its built-in or custom arm. */
+function bootMemoryApp(adapterArm: 'memory' | 'custom' = 'memory') {
+  const database = adapterArm === 'memory'
+    ? DatabasePlugin({ type: 'memory' })
+    : DatabasePlugin({ type: 'custom', adapter: new MemoryAdapter() });
+  const app = createApplication({ plugins: [RuntimePlugin(), database] });
   app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
   app.router.get('/q', {
     handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
@@ -156,6 +159,22 @@ describe('query refusals answer 501 through a real application', () => {
       detail: 'Programmatic migrations are not supported by the current database adapters.',
       instance: '/m',
     });
+
+    await app.stop();
+  });
+
+  it('keeps the same raw-query refusal through the custom MemoryAdapter arm', async () => {
+    const app = bootMemoryApp('custom');
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/q' });
+
+    expect(response.statusCode).toBe(501);
+    const body = response.json<{ detail: string }>();
+    expect(body.detail).toBe("Raw queries are not supported by the 'memory' database adapter.");
+    expect(JSON.stringify(body)).not.toContain(
+      'The memory adapter does not support raw SQL queries.',
+    );
 
     await app.stop();
   });

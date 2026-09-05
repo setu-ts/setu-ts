@@ -17,13 +17,19 @@ import { expect } from '@std/expect';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
-import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import { UnsupportedQueryFeatureError, UnsupportedRawQueryError } from '../../src/errors.ts';
 
 describe('MemoryAdapter', () => {
   let adapter: MemoryAdapter;
 
   beforeEach(() => {
     adapter = new MemoryAdapter();
+  });
+
+  describe('rawQuery', () => {
+    it('rejects with UnsupportedRawQueryError', async () => {
+      await expect(adapter.rawQuery('SELECT 1')).rejects.toBeInstanceOf(UnsupportedRawQueryError);
+    });
   });
 
   describe('connect / disconnect / isReady', () => {
