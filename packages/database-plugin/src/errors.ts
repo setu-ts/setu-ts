@@ -2,11 +2,12 @@
  * Errors the database plugin throws, exported so consumers can branch on them
  * with `instanceof` rather than matching message text.
  *
- * Three of them additionally carry an `HttpStatusHint` from `@setu-ts/common`,
- * so `errorHandler` answers a caller-caused refusal `501 Not Implemented` with
- * a caller-safe sentence instead of a masked `500` (M89b, X19-1):
+ * Four of them additionally carry an `HttpStatusHint` from `@setu-ts/common`,
+ * so `errorHandler` answers a safe, permanent refusal `501 Not Implemented`
+ * with a caller-safe sentence instead of a masked `500` (M89b, X19-1):
  * {@linkcode UnsupportedFilterOperatorError} and
  * {@linkcode UnsupportedRawQueryError} always, and
+ * {@linkcode UnsupportedMigrationError}, and
  * {@linkcode UnsupportedQueryFeatureError} for the `feature` values in
  * `QUERY_SHAPE_FEATURES` — that class is shared by caller-caused query
  * refusals AND by configuration refusals, so branding it unconditionally
@@ -17,21 +18,20 @@
  * transient rather than permanent, so both keep the masked `500` that stops a
  * driver diagnostic reaching a caller (X12-3).
  *
- * The served `detail` is composed from this package's OWN structured fields —
- * the feature, operator, connector and adapter names the framework chose — and
- * never from the `message`, which is the operator-facing diagnostic. That is
- * what makes the masking exemption safe rather than a widening.
+ * The served `detail` is composed from this package's own fields or a fixed
+ * framework sentence, never from the `message`, which is the operator-facing
+ * diagnostic. That is what makes the masking exemption safe rather than a
+ * widening.
  *
  * @module
  */
 import { withHttpStatusHint } from '@setu-ts/common';
 
 /**
- * The status every query-shape refusal is answered with.
+ * The status every caller-safe refusal in this module is answered with.
  *
- * One constant rather than three literals: the three describe one condition —
- * the active backend does not implement what the query asked for — so they
- * cannot drift apart into different statuses.
+ * One constant rather than repeated literals keeps every permanent
+ * not-implemented response consistent.
  */
 const NOT_IMPLEMENTED = { status: 501, title: 'Not Implemented' } as const;
 
@@ -193,6 +193,46 @@ export class UnsupportedRawQueryError extends Error {
     withHttpStatusHint(this, {
       ...NOT_IMPLEMENTED,
       detail: `Raw queries are not supported by the '${adapter}' database adapter.`,
+    });
+  }
+}
+
+/**
+ * Thrown by {@linkcode IDatabaseService.migrate} because programmatic
+ * migrations are not implemented by the current adapters.
+ *
+ * Each adapter owns schema migration through its own CLI. The refusal is a
+ * permanent framework capability boundary, so it rejects with a `501` hint
+ * rather than reading as an internal server fault.
+ *
+ * @example
+ * ```typescript
+ * import { UnsupportedMigrationError } from '@setu-ts/database-plugin';
+ *
+ * try {
+ *   await db.migrate();
+ * } catch (error) {
+ *   if (error instanceof UnsupportedMigrationError) {
+ *     console.error(error.message);
+ *   }
+ * }
+ * ```
+ * @since 0.4.0
+ */
+export class UnsupportedMigrationError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'UnsupportedMigrationError';
+
+  /**
+   * Creates the error with an operator-facing diagnostic that is never served.
+   *
+   * @param message - The full diagnostic, safe to log
+   */
+  constructor(message: string) {
+    super(message);
+    withHttpStatusHint(this, {
+      ...NOT_IMPLEMENTED,
+      detail: 'Programmatic migrations are not supported by the current database adapters.',
     });
   }
 }

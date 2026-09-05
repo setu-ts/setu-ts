@@ -19,6 +19,7 @@ import {
   CosmosTransactionScopeError,
   MongoTransactionUnavailableError,
   UnsupportedFilterOperatorError,
+  UnsupportedMigrationError,
   UnsupportedQueryFeatureError,
   UnsupportedRawQueryError,
 } from '../../src/errors.ts';
@@ -30,7 +31,7 @@ import {
  */
 const DIAGNOSTIC = "SELECT * FROM users WHERE ssn = $1 -- ['SECRET-123']";
 
-/** The three query-shape refusals, which describe the caller's own query. */
+/** The query and framework-capability refusals that are safe to serve as 501s. */
 const BRANDED: readonly { name: string; error: Error; detail: string }[] = [
   {
     name: 'UnsupportedQueryFeatureError',
@@ -51,6 +52,11 @@ const BRANDED: readonly { name: string; error: Error; detail: string }[] = [
     name: 'UnsupportedRawQueryError',
     error: new UnsupportedRawQueryError('mongodb', DIAGNOSTIC),
     detail: "Raw queries are not supported by the 'mongodb' database adapter.",
+  },
+  {
+    name: 'UnsupportedMigrationError',
+    error: new UnsupportedMigrationError(DIAGNOSTIC),
+    detail: 'Programmatic migrations are not supported by the current database adapters.',
   },
 ];
 
@@ -76,7 +82,7 @@ const UNBRANDED: readonly { name: string; error: Error }[] = [
 ];
 
 describe('database error status hints', () => {
-  it('brands every query-shape refusal with 501 and a caller-safe detail', () => {
+  it('brands every caller-safe refusal with 501 and a caller-safe detail', () => {
     for (const { name, error, detail } of BRANDED) {
       const hint = httpStatusHintOf(error);
       expect(hint, name).toBeDefined();
@@ -174,5 +180,6 @@ describe('database error status hints', () => {
     expect(new UnsupportedFilterOperatorError('contains', 'sqlite', 'x').operator).toBe('contains');
     expect(new UnsupportedFilterOperatorError('contains', 'sqlite', 'x').connector).toBe('sqlite');
     expect(new UnsupportedRawQueryError('cosmos', 'x').adapter).toBe('cosmos');
+    expect(new UnsupportedMigrationError('x').name).toBe('UnsupportedMigrationError');
   });
 });

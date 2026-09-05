@@ -1134,7 +1134,8 @@ statement is refused before the driver is reached, because a mis-bound parameter
 PostgreSQL, `?`, `?|` and `?&` are also jsonb key-containment operators that no scanner can tell
 from a placeholder; such a statement is refused or fails at the database, never mis-bound — write it
 with `$N` placeholders. Programmatic `migrate()` is unsupported by all current adapters and rejects
-because each ORM owns migrations through its CLI.
+with `UnsupportedMigrationError` because each ORM owns migrations through its CLI; it is a permanent
+framework capability boundary and therefore answers `501 Not Implemented` through `errorHandler`.
 
 `FindOptions.filter` and `CountOptions.filter` accept a portable expression tree in addition to the
 existing equality-only `where` map. `where` and `filter` are conjoined, and every built-in adapter
@@ -1809,7 +1810,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                            |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                            |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                            |
-| `UnsupportedFilterOperatorError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                                                                                            | classes                            |
+| `UnsupportedFilterOperatorError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                                                               | classes                            |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                              |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                              |
 | `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                                                                                                                                                   | types                              |
@@ -1867,6 +1868,12 @@ The served `detail` is composed from this package's own structured fields (`feat
 is reachable only in the log, and is what `errorHandler` records. So the response gains a status and
 a sentence without gaining a disclosure channel; a hinted error is exempt from `maskInternalErrors`
 precisely because there is no driver output in its body to mask.
+
+**Programmatic migrations answer `501 Not Implemented` too.** `UnsupportedMigrationError` names a
+distinct framework-capability refusal rather than pretending a migration is a raw query or a query
+shape. Every current adapter lacks programmatic migration support and delegates it to its own CLI,
+so the refusal is permanent and `501` is the honest response. Its hint carries a fixed sentence,
+never an operator-facing error message.
 
 **Not every `UnsupportedQueryFeatureError` is branded, and that is deliberate.** The class is shared
 by two kinds of refusal: a caller-caused query shape, and a **configuration** refusal. Only the

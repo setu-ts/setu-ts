@@ -98,7 +98,68 @@ function bootBigtableApp() {
   return app;
 }
 
+/** Builds the default memory-backed app with raw-query and migration routes. */
+function bootMemoryApp() {
+  const app = createApplication({ plugins: [RuntimePlugin(), DatabasePlugin({ type: 'memory' })] });
+  app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+  app.router.get('/q', {
+    handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      return ctx.response.json(await db.query('SELECT 1'));
+    },
+  });
+  app.router.get('/m', {
+    handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      await db.migrate();
+      return ctx.response.json({});
+    },
+  });
+  return app;
+}
+
 describe('query refusals answer 501 through a real application', () => {
+  it('answers the default memory adapter raw-query refusal with a safe 501', async () => {
+    const app = bootMemoryApp();
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/q' });
+
+    expect(response.statusCode).toBe(501);
+    const body = response.json<{ status: number; title: string; detail: string }>();
+    expect(body).toEqual({
+      type: 'about:blank',
+      title: 'Not Implemented',
+      status: 501,
+      detail: "Raw queries are not supported by the 'memory' database adapter.",
+      instance: '/q',
+    });
+    expect(JSON.stringify(body)).not.toContain(
+      'The memory adapter does not support raw SQL queries.',
+    );
+
+    await app.stop();
+  });
+
+  it('answers the framework-wide migration refusal with a 501', async () => {
+    const app = bootMemoryApp();
+    await app.start();
+
+    const response = await app.inject({ method: 'GET', url: 'http://localhost/m' });
+
+    expect(response.statusCode).toBe(501);
+    const body = response.json<{ status: number; title: string; detail: string }>();
+    expect(body).toEqual({
+      type: 'about:blank',
+      title: 'Not Implemented',
+      status: 501,
+      detail: 'Programmatic migrations are not supported by the current database adapters.',
+      instance: '/m',
+    });
+
+    await app.stop();
+  });
+
   it('answers a Dynamo non-key orderBy with 501 and the adapter named', async () => {
     const app = bootDynamoApp();
     await app.start();

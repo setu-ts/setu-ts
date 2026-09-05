@@ -155,6 +155,7 @@ describe('database-plugin barrel exports', () => {
 
   it('exports the Mongo adapter and only its application-facing surface', () => {
     expect(typeof database.MongoAdapter).toBe('function');
+    expect(typeof database.UnsupportedMigrationError).toBe('function');
     expect(typeof database.UnsupportedRawQueryError).toBe('function');
     expect(typeof database.MongoTransactionUnavailableError).toBe('function');
     for (

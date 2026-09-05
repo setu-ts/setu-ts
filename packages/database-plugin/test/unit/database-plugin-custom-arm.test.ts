@@ -203,9 +203,9 @@ describe('DatabasePlugin — the custom arm', () => {
     await app.start();
 
     const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    // The memory adapter is the only one that refuses raw SQL by type. It
-    // refuses synchronously — see the note on `DatabaseService.query`.
-    expect(() => db.query('SELECT 1')).toThrow(/does not support raw SQL/);
+    // The memory adapter is the only one that refuses raw SQL by type. Its
+    // Promise-returning method rejects, so callers can observe it with `.catch()`.
+    await expect(db.query('SELECT 1')).rejects.toThrow(/does not support raw SQL/);
     await app.stop();
   });
 });

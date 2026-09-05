@@ -687,6 +687,10 @@ and sort keys — and it reaches the log alone, where `errorHandler` records it 
 the cause chain. The served `detail` is composed from the framework's own identifiers, which is what
 lets a refusal be readable without becoming a disclosure channel.
 
+`migrate()` also answers `501`, through the separately named `UnsupportedMigrationError`.
+Programmatic migration is unsupported by every current adapter and belongs to that adapter's CLI; it
+is a framework capability boundary, not a raw query or query-shape refusal.
+
 **Not every `UnsupportedQueryFeatureError` is branded, and that is deliberate.** The class is shared
 by two kinds of refusal: a caller-caused query shape, and a **configuration** refusal. Only the
 former is answered `501`; the latter keeps the masked `500` that is correct for an internal fault.
@@ -745,6 +749,7 @@ imperative begin/commit.
 | `PrismaRepository`                        | class     |
 | `UnitOfWork`                              | class     |
 | `UnsupportedFilterOperatorError`          | class     |
+| `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
 | `BigtableAdapterOptionsBase`              | interface |

@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING — `@setu-ts/database-plugin` — default memory raw-SQL and programmatic-migration
+  refusals now answer `501 Not Implemented` instead of a masked `500`.** `query()` now rejects with
+  `UnsupportedRawQueryError` rather than throwing synchronously, so callers using `.catch()` now
+  receive the refusal. `migrate()` rejects with the new `UnsupportedMigrationError`: migrations are
+  a framework-wide unsupported capability, not a raw-query or query-shape refusal. Update status
+  assertions from `500` to `501` and synchronous `try`/`catch` call sites to `await` or `.catch()`;
+  use each adapter's migration CLI instead of `migrate()`.
+
 ## [0.4.0] — 2026-09-05
 
 **A declaration that enforced nothing now enforces, and a caller's mistake stops reading as a server
