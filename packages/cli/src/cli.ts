@@ -145,7 +145,8 @@ export async function runCli(
   // typo (`--templat rest`) scaffolded a DIFFERENT project with exit 0. The
   // dispatcher refuses it before any command body runs, so nothing is written.
   // `version`/`v` never reach this — consumed above — and a plugin command's
-  // flags are checked at dispatch, after the command is known to exist.
+  // flags are checked in its dispatcher, after the config module is confirmed
+  // and before the application boots.
   const flagRefusal = builtInFlagRefusal(command, args.positionals[1], args.flags, deps.error);
   if (flagRefusal !== undefined) return flagRefusal;
 

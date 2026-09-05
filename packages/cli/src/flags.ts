@@ -19,7 +19,10 @@
  * This module owns the inventory — what each command's `--help` text documents,
  * plus the flags a command deliberately READS in order to refuse with specific
  * guidance — and the refusals that run in the dispatcher before any command
- * body.
+ * body. The plugin-command arm's check lives in `dispatchPluginCommand`
+ * ([`plugin-commands.ts`](./commands/plugin-commands.ts)), which refuses an
+ * unknown flag after the config module is confirmed and BEFORE the application
+ * is loaded and started — a typo'd flag never boots the project.
  *
  * Nothing here is exported from `src/index.ts`: this is internal dispatcher
  * machinery, read by [`cli.ts`](./cli.ts),
@@ -204,8 +207,12 @@ const WORKSPACE_PORTS: CommandFlagSpec = spec(
  * `setu workspace` with a subcommand other than `ports`: the command itself
  * refuses every subcommand but `ports` with its usage line, so there is no
  * silent drop for this check to close and no positional contract here.
+ * `--reallocate` is kept recognized-but-refused so that `workspace
+ * --reallocate` (subcommand omitted) reaches that teaching usage line — which
+ * names the fix — instead of a generic "Unknown option"; anything genuinely
+ * foreign stays strictly refused.
  */
-const WORKSPACE: CommandFlagSpec = spec('workspace', []);
+const WORKSPACE: CommandFlagSpec = spec('workspace', [], ['reallocate']);
 
 /**
  * `setu commands`: no `--help` handling of its own (verified from
@@ -233,9 +240,9 @@ const HELP: CommandFlagSpec = spec('help', [], [], {
  * @param command - The first positional (`new`, `generate`, …)
  * @param subcommand - The second positional, when present
  * @returns The entry, or `undefined` for anything else — those are the
- * plugin-command arm, checked at dispatch by
+ * plugin-command arm, checked in `dispatchPluginCommand` by
  * {@linkcode firstUnknownFlag} against {@linkcode PLUGIN_COMMAND_FLAGS},
- * after the command is known to exist
+ * after the config module is known to exist and before the application boots
  */
 export function commandFlagsFor(
   command: string,

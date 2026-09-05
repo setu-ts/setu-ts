@@ -249,6 +249,21 @@ describe('runGenerateCommand', () => {
       expect(h.err.text()).toBe('');
     });
 
+    it('refuses an invalid --runtime on the bare listing instead of exiting 0 over it', async () => {
+      // The `--runtime` validation runs ABOVE the informational return, so the
+      // listing cannot silently swallow a typo every generating path refuses.
+      const h = harness();
+      expect(await h.run(['--runtime', 'deno2'])).toBe(2);
+      expect(h.err.text()).toContain('Unknown runtime "deno2"');
+      expect(h.out.text()).not.toContain('Schematics:');
+    });
+
+    it('still lists on the bare arm when --runtime is a valid target', async () => {
+      const h = harness();
+      expect(await h.run(['--runtime', 'bun'])).toBe(0);
+      expect(h.out.text()).toContain('Schematics:');
+    });
+
     it('returns 0 for --help', async () => {
       const h = harness();
       expect(await h.run(['--help'])).toBe(0);

@@ -222,7 +222,8 @@ export async function runCommandsListing(
  * @param args - Arguments after the command name, already parsed
  * @param deps - Filesystem, working directory, and output sinks
  * @returns `0` when the handler returns, `1` when it throws or the app fails to
- * boot, `2` when no config module exists or no such command is registered
+ * boot, `2` when no config module exists, an unknown flag is refused before the
+ * app boots, or no such command is registered
  */
 export async function dispatchPluginCommand(
   name: string,
@@ -238,6 +239,19 @@ export async function dispatchPluginCommand(
     return EXIT_USAGE;
   }
 
+  // A plugin command cannot read any flag — the handler receives positionals
+  // only — so anything beyond what THIS dispatcher consumes is a typo. Checked
+  // HERE, before `withPluginCommands` boots the application: loading and
+  // starting the project runs every plugin's init/bootstrap hooks (a database
+  // plugin WILL connect), and a typo'd flag must not cost that boot. The
+  // missing-config messages above keep their precedence — only once the config
+  // module exists does the flag check run, so nothing is written either way.
+  const unknown = firstUnknownFlag(args.flags, PLUGIN_COMMAND_FLAGS);
+  if (unknown !== undefined) {
+    deps.error(unknownOptionMessage(name, unknown, PLUGIN_COMMAND_FLAGS));
+    return EXIT_USAGE;
+  }
+
   try {
     return await withPluginCommands(deps, dir, config, async (commands) => {
       const match = commands.find((command) => command.name === name);
@@ -249,15 +263,6 @@ export async function dispatchPluginCommand(
           deps.error('Available plugin commands:');
           for (const command of commands) deps.error(`  ${command.name}`);
         }
-        return EXIT_USAGE;
-      }
-
-      // A plugin command cannot read any flag — the handler receives positionals
-      // only — so anything beyond what THIS dispatcher consumes is a typo.
-      // Refused before the handler runs; nothing is written either way.
-      const unknown = firstUnknownFlag(args.flags, PLUGIN_COMMAND_FLAGS);
-      if (unknown !== undefined) {
-        deps.error(unknownOptionMessage(name, unknown, PLUGIN_COMMAND_FLAGS));
         return EXIT_USAGE;
       }
 

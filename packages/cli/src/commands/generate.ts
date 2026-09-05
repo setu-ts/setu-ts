@@ -161,25 +161,28 @@ export async function runGenerateCommand(
     return EXIT_OK;
   }
 
+  // Validated ABOVE the bare-arm listing so the informational listing cannot
+  // silently swallow an invalid `--runtime` (exiting 0 over a typo read as
+  // success). Rejected rather than defaulted: a custom schematic branches on
+  // `options.runtime`, so silently swallowing a typo would change the
+  // generated output with no diagnostic. `new` rejects it the same way.
+  const runtimeFlag = stringFlag(args.flags, 'runtime');
+  if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
+    deps.error(
+      `Unknown runtime "${runtimeFlag}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
+    );
+    return EXIT_USAGE;
+  }
+
   const schematicName = args.positionals[0];
   if (schematicName === undefined) {
     // Informational, exactly like the `--help` branch above: the listing is
     // ordinary output (identical text, same log sink), so an error exit
     // contradicted the guidance it carried. Everything that genuinely fails —
-    // a missing name, an unknown schematic, over-arity — still exits 2 below.
+    // an invalid `--runtime` (refused above), a missing name, an unknown
+    // schematic, over-arity — still exits 2.
     printSchematics(installed, deps.log);
     return EXIT_OK;
-  }
-
-  const runtimeFlag = stringFlag(args.flags, 'runtime');
-  if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
-    // Rejected rather than defaulted: a custom schematic branches on
-    // `options.runtime`, so silently swallowing a typo would change the
-    // generated output with no diagnostic. `new` rejects it the same way.
-    deps.error(
-      `Unknown runtime "${runtimeFlag}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
-    );
-    return EXIT_USAGE;
   }
   // Detected from the project rather than defaulted, because the project already
   // knows: `setu new svc --runtime bun` records the choice once and nobody

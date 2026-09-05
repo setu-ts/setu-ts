@@ -14,7 +14,9 @@ All notable changes to this project are documented here. The format follows
   exactly the text `setu generate --help` prints. No refusal moves: `generate
   <schematic>` with a
   missing name, `generate custom` with a missing name, an unknown schematic, and an over-arity
-  invocation all keep exit `2` with nothing written. Migration: a script branching on bare
+  invocation all keep exit `2` with nothing written. One addition: the `--runtime` validation every
+  generating path runs now sits above the listing, so bare `setu generate --runtime deno2` refuses
+  with exit `2` where the listing used to print over the typo. Migration: a script branching on bare
   `setu generate` exiting `2` sees `0` now — branch on the printed list or drop the branch.
 
 - **BREAKING — `@setu-ts/cli` — unknown flags are refused instead of silently ignored.** `setu`

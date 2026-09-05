@@ -58,25 +58,34 @@ const WORKSPACE_SEED = {
   '/work/deno.json': '{"workspace": ["./apps/*"]}',
 };
 
-/** A harness whose project has a config module, booted through an injected loader. */
+/**
+ * A harness whose project has a config module, booted through an injected
+ * loader. `wasBooted()` reports whether the loader ran — the seam a plugin
+ * command's refusal must not reach.
+ */
 function withApp(commands: readonly { name: string; handler: () => void }[]): {
   readonly fs: FakeFs;
   readonly err: Recorder;
+  wasBooted(): boolean;
   run(argv: readonly string[]): Promise<number>;
 } {
   const fs = createFakeFs({ '/work/setu.config.ts': 'export function createApp() {}' });
   const err = createRecorder();
-  const appModule = (_url: string) =>
-    Promise.resolve({
+  let booted = false;
+  const appModule = (_url: string) => {
+    booted = true;
+    return Promise.resolve({
       createApp: () => ({
         services: { getAll: () => commands },
         start: () => Promise.resolve(),
         stop: () => Promise.resolve(),
       }),
     });
+  };
   return {
     fs,
     err,
+    wasBooted: () => booted,
     run: (argv) =>
       runCli(argv, {
         fs,
@@ -125,6 +134,7 @@ describe('unknown-option refusal', () => {
       [['add', 'auth', '--dryrun'], 'setu add'],
       [['adopt', '--dryrun'], 'setu adopt'],
       [['workspace', 'ports', '--reallocat'], 'setu workspace ports'],
+      [['workspace', '--reallocat'], 'setu workspace'],
       [['workspace', 'bogus-sub', '--bogus'], 'setu workspace'],
       [['commands', '--bogus'], 'setu commands'],
       [['help', '--bogus'], 'setu help'],
@@ -298,6 +308,7 @@ describe('every documented flag is accepted', () => {
         ['new', 'app', '--version'],
         ['new', '--help'],
         ['g', 'service', 'x', '-h'],
+        ['workspace', '--help'],
       ]
     ) {
       const h = harness();
@@ -354,6 +365,25 @@ describe('help text agrees with the inventory', () => {
 });
 
 describe('named refusals keep precedence over the generic check', () => {
+  it('workspace --reallocate with ports omitted reaches the body teaching usage, not the generic refusal', async () => {
+    // The subcommand omission is what the usage line teaches: the body's own
+    // message names `workspace ports --reallocate`, so it — not "Unknown
+    // option" — is the answer to the invocation.
+    const h = harness();
+    expect(await h.run(['workspace', '--reallocate'])).toBe(2);
+    expect(h.err.text()).toContain('Usage: setu workspace ports --reallocate');
+    expect(h.err.text()).not.toContain('Unknown option');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('a genuinely foreign flag on bare workspace stays strictly refused', async () => {
+    const h = harness();
+    expect(await h.run(['workspace', '--totally-bogus'])).toBe(2);
+    expect(h.err.text()).toContain('Unknown option `--totally-bogus` for `setu workspace`.');
+    expect(h.err.text()).not.toContain('Did you mean');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   it('setu new --di keeps its specific M65 guidance', async () => {
     const h = harness();
     expect(await h.run(['new', 'app', '--di'])).toBe(2);
@@ -425,7 +455,7 @@ describe('suggestion mechanics', () => {
 });
 
 describe('plugin commands', () => {
-  it('refuses a flag the dispatcher does not consume, before the handler runs', async () => {
+  it('refuses a flag the dispatcher does not consume, before the app boots and the handler runs', async () => {
     let ran = false;
     const h = withApp([{
       name: 'db:migrate',
@@ -435,6 +465,9 @@ describe('plugin commands', () => {
     }]);
     expect(await h.run(['db:migrate', '--verbose'])).toBe(2);
     expect(h.err.text()).toContain('Unknown option `--verbose` for `setu db:migrate`.');
+    // The refusal sits ABOVE the boot in `dispatchPluginCommand`: the loader is
+    // never invoked, so no plugin init/bootstrap hook runs for a typo'd flag.
+    expect(h.wasBooted()).toBe(false);
     expect(ran).toBe(false);
   });
 
@@ -447,6 +480,8 @@ describe('plugin commands', () => {
       },
     }]);
     expect(await h.run(['db:migrate', '--dir', '/work', '--config', 'setu.config.ts'])).toBe(0);
+    // A valid plugin command still boots and dispatches.
+    expect(h.wasBooted()).toBe(true);
     expect(ran).toBe(true);
   });
 
@@ -454,5 +489,27 @@ describe('plugin commands', () => {
     const h = withApp([{ name: 'db:migrate', handler: () => {} }]);
     expect(await h.run(['db:migrate', '--help'])).toBe(2);
     expect(h.err.text()).toContain('Unknown option `--help` for `setu db:migrate`.');
+    expect(h.wasBooted()).toBe(false);
+  });
+
+  it('keeps the missing-config messages even when the flag is unknown too', async () => {
+    // No config module and no loader injected: the missing-config refusal keeps
+    // its precedence over the flag check, and nothing is ever loaded.
+    const h = harness();
+    expect(await h.run(['db:migrate', '--verbse'])).toBe(2);
+    expect(h.err.lines[0]).toContain('Unknown command: db:migrate');
+    expect(h.err.text()).toContain('No setu.config.ts found');
+    expect(h.err.text()).not.toContain('Unknown option');
+  });
+
+  it('refuses a typo flag on a command the app does not register either — the flag wins', async () => {
+    // The one message this round moves: with the config module present, a
+    // typo'd flag refuses before the boot that would have discovered the
+    // command was absent.
+    const h = withApp([{ name: 'db:migrate', handler: () => {} }]);
+    expect(await h.run(['db:nope', '--verbse'])).toBe(2);
+    expect(h.err.text()).toContain('Unknown option `--verbse` for `setu db:nope`.');
+    expect(h.wasBooted()).toBe(false);
+    expect(h.err.text()).not.toContain('Unknown command');
   });
 });
