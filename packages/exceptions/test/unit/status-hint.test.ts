@@ -44,9 +44,13 @@ const HINT: HttpStatusHint = {
 
 /** Decode the response body back to a parsed object. */
 function parseBody(body: Uint8Array | string | null): Record<string, unknown> {
-  if (body === null) return {};
-  const text = typeof body === 'string' ? body : new TextDecoder().decode(body);
-  return JSON.parse(text) as Record<string, unknown>;
+  return JSON.parse(bodyText(body)) as Record<string, unknown>;
+}
+
+/** Decode the exact serialized response body. */
+function bodyText(body: Uint8Array | string | null): string {
+  if (body === null) return '';
+  return typeof body === 'string' ? body : new TextDecoder().decode(body);
 }
 
 /** A `next()` that throws the given value synchronously. */
@@ -218,9 +222,7 @@ describe('errorHandler — HTTP status hint', () => {
       });
 
       expect(thrownSnapshot().status, format).toBe(respondedSnapshot().status);
-      expect(parseBody(thrownSnapshot().body), format).toEqual(
-        parseBody(respondedSnapshot().body),
-      );
+      expect(bodyText(thrownSnapshot().body), format).toBe(bodyText(respondedSnapshot().body));
       expect(thrownSnapshot().headers.get('content-type'), format).toBe(
         respondedSnapshot().headers.get('content-type'),
       );

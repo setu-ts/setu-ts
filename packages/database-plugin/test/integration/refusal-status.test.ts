@@ -21,7 +21,7 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HandlerResult, IRequestContext } from '@setu-ts/common';
-import { errorHandler } from '@setu-ts/exceptions';
+import { type ErrorFormat, errorHandler } from '@setu-ts/exceptions';
 
 import { DatabasePlugin, MemoryAdapter } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/index.ts';
@@ -99,12 +99,15 @@ function bootBigtableApp() {
 }
 
 /** Builds a memory-backed app through either its built-in or custom arm. */
-function bootMemoryApp(adapterArm: 'memory' | 'custom' = 'memory') {
+function bootMemoryApp(
+  format: ErrorFormat = 'rfc9457',
+  adapterArm: 'memory' | 'custom' = 'memory',
+) {
   const database = adapterArm === 'memory'
     ? DatabasePlugin({ type: 'memory' })
     : DatabasePlugin({ type: 'custom', adapter: new MemoryAdapter() });
   const app = createApplication({ plugins: [RuntimePlugin(), database] });
-  app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+  app.middleware.add(errorHandler({ format }), { priority: 10, name: 'errors' });
   app.router.get('/q', {
     handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
       const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
@@ -144,27 +147,44 @@ describe('query refusals answer 501 through a real application', () => {
     await app.stop();
   });
 
-  it('answers the framework-wide migration refusal with a 501', async () => {
-    const app = bootMemoryApp();
-    await app.start();
+  it('serializes the framework-wide migration refusal exactly in every built-in format', async () => {
+    const detail = 'Programmatic migrations are not supported by the current database adapters.';
+    const cases: readonly { format: ErrorFormat; contentType: string; body: string }[] = [
+      {
+        format: 'default',
+        contentType: 'application/json; charset=utf-8',
+        body: `{"statusCode":501,"message":"Not Implemented","details":{"detail":"${detail}"}}`,
+      },
+      {
+        format: 'rfc9457',
+        contentType: 'application/problem+json',
+        body:
+          `{"type":"about:blank","title":"Not Implemented","status":501,"detail":"${detail}","instance":"/m"}`,
+      },
+      {
+        format: 'rfc7807',
+        contentType: 'application/problem+json',
+        body:
+          `{"type":"https://setu-ts.dev/errors/501","title":"Not Implemented","status":501,"detail":"${detail}","instance":"/m"}`,
+      },
+    ];
 
-    const response = await app.inject({ method: 'GET', url: 'http://localhost/m' });
+    for (const { format, contentType, body } of cases) {
+      const app = bootMemoryApp(format);
+      await app.start();
 
-    expect(response.statusCode).toBe(501);
-    const body = response.json<{ status: number; title: string; detail: string }>();
-    expect(body).toEqual({
-      type: 'about:blank',
-      title: 'Not Implemented',
-      status: 501,
-      detail: 'Programmatic migrations are not supported by the current database adapters.',
-      instance: '/m',
-    });
+      const response = await app.inject({ method: 'GET', url: 'http://localhost/m' });
 
-    await app.stop();
+      expect(response.statusCode, format).toBe(501);
+      expect(response.headers.get('content-type'), format).toBe(contentType);
+      expect(response.body, format).toBe(body);
+
+      await app.stop();
+    }
   });
 
   it('keeps the same raw-query refusal through the custom MemoryAdapter arm', async () => {
-    const app = bootMemoryApp('custom');
+    const app = bootMemoryApp('rfc9457', 'custom');
     await app.start();
 
     const response = await app.inject({ method: 'GET', url: 'http://localhost/q' });
