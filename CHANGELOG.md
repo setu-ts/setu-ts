@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING — `@setu-ts/cli` — bare `setu generate` is informational, not an error.** With no
+  schematic named it printed the available schematics through the normal output sink yet exited `2`
+  — an error exit whose guidance read like help. It now lists the schematics and exits `0`, printing
+  exactly the text `setu generate --help` prints. No refusal moves: `generate
+  <schematic>` with a
+  missing name, `generate custom` with a missing name, an unknown schematic, and an over-arity
+  invocation all keep exit `2` with nothing written. Migration: a script branching on bare
+  `setu generate` exiting `2` sees `0` now — branch on the printed list or drop the branch.
+
 - **BREAKING — `@setu-ts/cli` — unknown flags are refused instead of silently ignored.** `setu`
   collected every `--flag` and never consulted the valid names, so a typo scaffolded a DIFFERENT
   project with exit `0` and no warning: `new app --dry-run --templat rest` produced the minimal

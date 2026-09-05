@@ -117,7 +117,9 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
  *
  * @param args - Arguments after the `generate` verb, already parsed
  * @param deps - Filesystem, clock, and output sinks
- * @returns `0` on success, `1` on a runtime error, `2` on a usage error
+ * @returns `0` on success — including the bare `generate` listing, which is
+ *   informational rather than an error — `1` on a runtime error, `2` on a usage
+ *   error
  */
 export async function runGenerateCommand(
   args: ParsedArgs,
@@ -161,8 +163,12 @@ export async function runGenerateCommand(
 
   const schematicName = args.positionals[0];
   if (schematicName === undefined) {
+    // Informational, exactly like the `--help` branch above: the listing is
+    // ordinary output (identical text, same log sink), so an error exit
+    // contradicted the guidance it carried. Everything that genuinely fails —
+    // a missing name, an unknown schematic, over-arity — still exits 2 below.
     printSchematics(installed, deps.log);
-    return EXIT_USAGE;
+    return EXIT_OK;
   }
 
   const runtimeFlag = stringFlag(args.flags, 'runtime');

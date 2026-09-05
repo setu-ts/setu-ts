@@ -188,12 +188,6 @@ describe('unchanged neighbors of the refusal', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
-  it('a bare generate still usage-errors with the schematic list', async () => {
-    const h = harness({ seed: WORKSPACE_SEED });
-    expect(await h.run(['generate'])).toBe(2);
-    expect(h.out.text()).toContain('Usage: setu generate <schematic> <name>');
-  });
-
   it('a missing generate name still usage-errors in the command body', async () => {
     const h = harness({ seed: WORKSPACE_SEED });
     expect(await h.run(['generate', 'service'])).toBe(2);
@@ -210,6 +204,20 @@ describe('unchanged neighbors of the refusal', () => {
     const h = harness({ seed: WORKSPACE_SEED });
     expect(await h.run(['frobnicate', 'extra'])).toBe(2);
     expect(h.err.text()).toContain('Unknown command: frobnicate');
+  });
+});
+
+describe('the bare generate listing', () => {
+  it('is informational — the schematic list on the log sink, exit 0', async () => {
+    // Changed from exit 2 by decision: the listing bare `generate` prints IS
+    // the help text (`--help` returns the identical output with exit 0), so
+    // the error exit contradicted the output it carried. The refusals beside
+    // it — a missing name, an unknown schematic, over-arity — are unchanged.
+    const h = harness({ seed: WORKSPACE_SEED });
+    expect(await h.run(['generate']), h.err.text()).toBe(0);
+    expect(h.out.text()).toContain('Usage: setu generate <schematic> <name>');
+    expect(h.out.text()).toContain('Schematics:');
+    expect(h.err.text()).toBe('');
   });
 });
 

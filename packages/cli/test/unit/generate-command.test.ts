@@ -238,10 +238,15 @@ describe('runGenerateCommand', () => {
   });
 
   describe('usage errors', () => {
-    it('returns 2 and lists schematics when none is named', async () => {
+    it('lists the schematics on the log sink and exits 0 when none is named', async () => {
+      // Bare `generate` is informational by decision: it prints exactly the
+      // text `--help` prints, so the error exit contradicted its own output.
+      // A missing name, an unknown schematic, and over-arity still exit 2.
       const h = harness();
-      expect(await h.run([])).toBe(2);
+      expect(await h.run([]), h.err.text()).toBe(0);
+      expect(h.out.text()).toContain('Usage: setu generate <schematic> <name>');
       expect(h.out.text()).toContain('Schematics:');
+      expect(h.err.text()).toBe('');
     });
 
     it('returns 0 for --help', async () => {
