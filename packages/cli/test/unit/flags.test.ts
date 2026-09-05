@@ -1,6 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createFakeFs, createRecorder, type FakeFs, type Recorder } from '../fixtures/fake-fs.ts';
+import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
+import type { FakeFs, Recorder } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
 import { commandFlagsFor, DOCUMENTED_FLAGS, suggestFlag } from '../../src/flags.ts';
 
@@ -19,14 +20,14 @@ function parseHelpFlags(text: string): Set<string> {
   return names;
 }
 
-interface Harness {
+interface IHarness {
   readonly fs: FakeFs;
   readonly out: Recorder;
   readonly err: Recorder;
   run(argv: readonly string[]): Promise<number>;
 }
 
-function harness(seed: Readonly<Record<string, string>> = {}): Harness {
+function harness(seed: Readonly<Record<string, string>> = {}): IHarness {
   const fs = createFakeFs(seed);
   const out = createRecorder();
   const err = createRecorder();
@@ -72,7 +73,7 @@ function withApp(commands: readonly { name: string; handler: () => void }[]): {
   const fs = createFakeFs({ '/work/setu.config.ts': 'export function createApp() {}' });
   const err = createRecorder();
   let booted = false;
-  const appModule = (_url: string) => {
+  const appModule = () => {
     booted = true;
     return Promise.resolve({
       createApp: () => ({
@@ -116,6 +117,15 @@ describe('unknown-option refusal', () => {
     expect(h.err.text()).not.toContain('Did you mean');
     expect(h.fs.writes).toEqual([]);
   });
+
+  for (const flag of ['--__proto__', '--__proto__=value']) {
+    it(`refuses ${flag} before new can write files`, async () => {
+      const h = harness();
+      expect(await h.run(['new', 'app', flag])).toBe(2);
+      expect(h.err.text()).toContain('Unknown option `--__proto__` for `setu new`.');
+      expect(h.fs.writes).toEqual([]);
+    });
+  }
 
   it('suggests --port for --base-port on new', async () => {
     const h = harness();
@@ -322,6 +332,15 @@ describe('every documented flag is accepted', () => {
     expect(h.err.text()).toContain('No setu.config.ts');
     expect(h.err.text()).not.toContain('Unknown option');
   });
+
+  for (const flag of ['--help', '-h']) {
+    it(`prints top-level help for commands ${flag} without loading a project`, async () => {
+      const h = harness();
+      expect(await h.run(['commands', flag])).toBe(0);
+      expect(h.out.text()).toContain('Usage:');
+      expect(h.err.text()).toBe('');
+    });
+  }
 });
 
 describe('help text agrees with the inventory', () => {
@@ -455,6 +474,15 @@ describe('suggestion mechanics', () => {
 });
 
 describe('plugin commands', () => {
+  for (const flag of ['--__proto__', '--__proto__=value']) {
+    it(`refuses ${flag} before the plugin command boots`, async () => {
+      const h = withApp([{ name: 'db:migrate', handler: () => {} }]);
+      expect(await h.run(['db:migrate', flag])).toBe(2);
+      expect(h.err.text()).toContain('Unknown option `--__proto__` for `setu db:migrate`.');
+      expect(h.wasBooted()).toBe(false);
+    });
+  }
+
   it('refuses a flag the dispatcher does not consume, before the app boots and the handler runs', async () => {
     let ran = false;
     const h = withApp([{

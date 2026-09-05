@@ -31,6 +31,8 @@ All notable changes to this project are documented here. The format follows
   reach their specific guidance, and plugin-registered commands accept only `--dir` and `--config` —
   a `CliCommandHandler` receives positionals only, so no plugin can read any other flag. Migration:
   a script passing a stray flag today exits `0` and will now exit `2` — remove or correct the flag.
+  No compatibility mode preserves ignored flags: accepting an unrecognized option would restore the
+  silent misconfiguration this change removes.
 
 - **BREAKING — `@setu-ts/cli` — extra positional arguments are refused instead of silently
   ignored.** `new` read the first positional only, so `setu new app extra junk` scaffolded `app` and

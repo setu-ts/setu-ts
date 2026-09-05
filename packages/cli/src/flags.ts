@@ -62,7 +62,7 @@ export const PLUGIN_COMMAND_FLAGS: readonly string[] = ['dir', 'config'];
  * its fixed words (the verb and any subcommand word), and what they are for
  * the refusal message.
  */
-export interface CommandPositionals {
+export interface ICommandPositionals {
   /**
    * Leading positionals that are part of the command's own shape — the verb,
    * plus the subcommand word when the command has one (`generate app`).
@@ -76,7 +76,7 @@ export interface CommandPositionals {
 }
 
 /** One built-in command's flag and positional inventory. */
-export interface CommandFlagSpec {
+export interface ICommandFlagSpec {
   /** How the command reads in refusal messages (`new`, `generate app`). */
   readonly label: string;
   /** Every flag name the invocation may carry — the strict allowlist. */
@@ -97,15 +97,15 @@ export interface CommandFlagSpec {
    * subcommand but `ports`. A plugin command's positionals are its handler's
    * input and are never checked here.
    */
-  readonly positionals?: CommandPositionals;
+  readonly positionals?: ICommandPositionals;
 }
 
 function spec(
   label: string,
   documented: readonly string[],
   recognizedRefusals: readonly string[] = [],
-  positionals?: CommandPositionals,
-): CommandFlagSpec {
+  positionals?: ICommandPositionals,
+): ICommandFlagSpec {
   return {
     label,
     allowed: [...GLOBAL_FLAGS, ...documented, ...recognizedRefusals],
@@ -116,7 +116,7 @@ function spec(
 }
 
 /** `setu new`: everything `--help` documents, plus the M65 named refusals. */
-const NEW: CommandFlagSpec = spec(
+const NEW: ICommandFlagSpec = spec(
   'new',
   [
     'template',
@@ -141,7 +141,7 @@ const NEW: CommandFlagSpec = spec(
 );
 
 /** `setu generate` for a schematic: the schematic word plus one name. */
-const GENERATE: CommandFlagSpec = spec(
+const GENERATE: ICommandFlagSpec = spec(
   'generate',
   ['dir', 'dry-run', 'runtime'],
   [],
@@ -149,7 +149,7 @@ const GENERATE: CommandFlagSpec = spec(
 );
 
 /** `setu generate custom <schematic-name> <name>`: two names after the verb. */
-const GENERATE_CUSTOM: CommandFlagSpec = spec(
+const GENERATE_CUSTOM: ICommandFlagSpec = spec(
   'generate custom',
   ['dir', 'dry-run', 'runtime'],
   [],
@@ -157,7 +157,7 @@ const GENERATE_CUSTOM: CommandFlagSpec = spec(
 );
 
 /** `setu generate app`: the workspace-member flags, plus the named refusals. */
-const GENERATE_APP: CommandFlagSpec = spec(
+const GENERATE_APP: ICommandFlagSpec = spec(
   'generate app',
   ['template', 'port', 'env-file', 'depends-on', 'dir', 'dry-run'],
   // Read ONLY to be refused with their own guidance: the four transport flags
@@ -168,7 +168,7 @@ const GENERATE_APP: CommandFlagSpec = spec(
 );
 
 /** `setu generate library`. */
-const GENERATE_LIBRARY: CommandFlagSpec = spec(
+const GENERATE_LIBRARY: ICommandFlagSpec = spec(
   'generate library',
   ['scope', 'dir', 'dry-run'],
   [],
@@ -181,10 +181,10 @@ const GENERATE_LIBRARY: CommandFlagSpec = spec(
  * package; got 3. Run it once per package.`), and this check must not preempt
  * that message with a second way of saying the same thing.
  */
-const ADD: CommandFlagSpec = spec('add', ['dir', 'dry-run']);
+const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run']);
 
 /** `setu adopt`: takes no positionals at all — `--name` and `--port` are flags. */
-const ADOPT: CommandFlagSpec = spec(
+const ADOPT: ICommandFlagSpec = spec(
   'adopt',
   ['name', 'port', 'dir', 'dry-run'],
   [],
@@ -192,7 +192,7 @@ const ADOPT: CommandFlagSpec = spec(
 );
 
 /** `setu workspace ports --reallocate`: `ports` is the last word it reads. */
-const WORKSPACE_PORTS: CommandFlagSpec = spec(
+const WORKSPACE_PORTS: ICommandFlagSpec = spec(
   'workspace ports',
   [
     'reallocate',
@@ -212,21 +212,20 @@ const WORKSPACE_PORTS: CommandFlagSpec = spec(
  * names the fix — instead of a generic "Unknown option"; anything genuinely
  * foreign stays strictly refused.
  */
-const WORKSPACE: CommandFlagSpec = spec('workspace', [], ['reallocate']);
+const WORKSPACE: ICommandFlagSpec = spec('workspace', [], ['reallocate']);
 
 /**
- * `setu commands`: no `--help` handling of its own (verified from
- * `runCommandsListing`), so the global help flags are not accepted either.
+ * `setu commands` accepts the documented global help flags. `runCli` prints
+ * top-level help before this command can check for a project config module.
  */
-const COMMANDS: CommandFlagSpec = {
-  label: 'commands',
-  allowed: ['dir', 'config'],
-  documented: [],
-  positionals: { fixed: 1, taken: 0, noun: 'no arguments' },
-};
+const COMMANDS: ICommandFlagSpec = spec('commands', ['dir', 'config'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
 
 /** `setu help` prints the top-level usage; the help flags are its only input. */
-const HELP: CommandFlagSpec = spec('help', [], [], {
+const HELP: ICommandFlagSpec = spec('help', [], [], {
   fixed: 1,
   taken: 0,
   noun: 'no arguments',
@@ -247,7 +246,7 @@ const HELP: CommandFlagSpec = spec('help', [], [], {
 export function commandFlagsFor(
   command: string,
   subcommand: string | undefined,
-): CommandFlagSpec | undefined {
+): ICommandFlagSpec | undefined {
   switch (command) {
     case 'new':
     case 'n':

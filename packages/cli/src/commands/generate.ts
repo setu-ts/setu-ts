@@ -166,13 +166,20 @@ export async function runGenerateCommand(
   // success). Rejected rather than defaulted: a custom schematic branches on
   // `options.runtime`, so silently swallowing a typo would change the
   // generated output with no diagnostic. `new` rejects it the same way.
-  const runtimeFlag = stringFlag(args.flags, 'runtime');
-  if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
+  const runtimeValue = args.flags['runtime'];
+  if (runtimeValue !== undefined && typeof runtimeValue !== 'string') {
     deps.error(
-      `Unknown runtime "${runtimeFlag}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
+      `Option --runtime requires a value. Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
     );
     return EXIT_USAGE;
   }
+  if (typeof runtimeValue === 'string' && !isTargetRuntime(runtimeValue)) {
+    deps.error(
+      `Unknown runtime "${runtimeValue}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
+    );
+    return EXIT_USAGE;
+  }
+  const runtimeFlag = runtimeValue;
 
   const schematicName = args.positionals[0];
   if (schematicName === undefined) {

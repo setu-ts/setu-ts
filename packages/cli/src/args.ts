@@ -42,6 +42,10 @@ export function parseArgs(
 ): ParsedArgs {
   const positionals: string[] = [];
   const flags: Record<string, string | boolean | readonly string[]> = {};
+  // Flag names are user-controlled. A null prototype ensures `--__proto__`
+  // becomes an ordinary own property, so dispatcher validation cannot lose it
+  // through Object.prototype's legacy setter.
+  Object.setPrototypeOf(flags, null);
 
   const setFlag = (key: string, value: string | boolean): void => {
     // Dependencies are intentionally repeatable: a service can wait on more

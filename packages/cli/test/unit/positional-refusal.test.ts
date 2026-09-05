@@ -1,6 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createFakeFs, createRecorder, type FakeFs, type Recorder } from '../fixtures/fake-fs.ts';
+import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
+import type { FakeFs, Recorder } from '../fixtures/fake-fs.ts';
 import { runCli } from '../../src/cli.ts';
 
 /**
@@ -15,21 +16,21 @@ import { runCli } from '../../src/cli.ts';
  * @module
  */
 
-interface Harness {
+interface IHarness {
   readonly fs: FakeFs;
   readonly out: Recorder;
   readonly err: Recorder;
   run(argv: readonly string[]): Promise<number>;
 }
 
-interface HarnessOptions {
+interface IHarnessOptions {
   readonly seed?: Readonly<Record<string, string>>;
   readonly load?: () => Promise<{ schematic: () => readonly { path: string; contents: string }[] }>;
   readonly loadApp?: (url: string) => Promise<Record<string, unknown>>;
   readonly portAvailable?: (port: number) => Promise<boolean>;
 }
 
-function harness(options: HarnessOptions = {}): Harness {
+function harness(options: IHarnessOptions = {}): IHarness {
   const fs = createFakeFs(options.seed ?? {});
   const out = createRecorder();
   const err = createRecorder();
@@ -141,7 +142,7 @@ describe('extra-positional refusal', () => {
   it('refuses a positional on commands, which takes none', async () => {
     const h = harness({
       seed: { '/work/setu.config.ts': 'export function createApp() {}' },
-      loadApp: (_url: string) =>
+      loadApp: () =>
         Promise.resolve({
           createApp: () => ({
             services: { getAll: () => [{ name: 'db:migrate', handler: () => {} }] },
@@ -284,7 +285,7 @@ describe('valid arities still succeed', () => {
   it('commands takes no positionals and still lists', async () => {
     const h = harness({
       seed: { '/work/setu.config.ts': 'export function createApp() {}' },
-      loadApp: (_url: string) =>
+      loadApp: () =>
         Promise.resolve({
           createApp: () => ({
             services: { getAll: () => [{ name: 'db:migrate', handler: () => {} }] },
@@ -307,7 +308,7 @@ describe('valid arities still succeed', () => {
     let received: readonly string[] = [];
     const h = harness({
       seed: { '/work/setu.config.ts': 'export function createApp() {}' },
-      loadApp: (_url: string) =>
+      loadApp: () =>
         Promise.resolve({
           createApp: () => ({
             services: {

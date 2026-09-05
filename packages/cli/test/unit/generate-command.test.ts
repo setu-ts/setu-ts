@@ -258,6 +258,15 @@ describe('runGenerateCommand', () => {
       expect(h.out.text()).not.toContain('Schematics:');
     });
 
+    for (const flag of ['--runtime', '--runtime=']) {
+      it(`refuses a valueless ${flag} on the bare listing`, async () => {
+        const h = harness();
+        expect(await h.run([flag])).toBe(2);
+        expect(h.err.text()).toContain('Option --runtime requires a value.');
+        expect(h.out.text()).not.toContain('Schematics:');
+      });
+    }
+
     it('still lists on the bare arm when --runtime is a valid target', async () => {
       const h = harness();
       expect(await h.run(['--runtime', 'bun'])).toBe(0);
@@ -454,6 +463,15 @@ describe('runGenerateCommand', () => {
       expect(h.err.text()).toContain('Unknown runtime "solaris"');
       expect(h.fs.writes).toEqual([]);
     });
+
+    for (const flag of ['--runtime', '--runtime=']) {
+      it(`refuses a valueless ${flag} before generating`, async () => {
+        const h = harness();
+        expect(await h.run(['service', 'billing', flag])).toBe(2);
+        expect(h.err.text()).toContain('Option --runtime requires a value.');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
 
     it('accepts every supported runtime', async () => {
       for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers']) {
