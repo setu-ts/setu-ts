@@ -139,10 +139,16 @@ describe('unknown-option refusal', () => {
   });
 
   it('never reports `--` terminator tokens or -k=value keys as unknown flags', async () => {
+    // Round 2: everything after `--` is a POSITIONAL ([`parseArgs`]), so this
+    // invocation now carries three names where `new` takes one — refused as
+    // the positional twin of this module's flag check, never misreported as
+    // an unknown option.
     const terminated = harness();
-    expect(await terminated.run(['new', 'app', '--dry-run', '--', '--templat', 'rest'])).toBe(0);
+    expect(await terminated.run(['new', 'app', '--dry-run', '--', '--templat', 'rest'])).toBe(2);
+    expect(terminated.err.text()).toContain('setu new takes one project name; got 3.');
     expect(terminated.err.text()).not.toContain('Unknown option');
-    expect(terminated.out.text()).toContain('would create');
+    expect(terminated.out.text()).not.toContain('would create');
+    expect(terminated.fs.writes).toEqual([]);
 
     const shortValue = harness();
     expect(await shortValue.run(['g', 'service', 'billing', '--dir=/other', '--dry-run'])).toBe(0);

@@ -8,10 +8,18 @@
  * scaffolded the minimal project with exit 0 and no warning, and a bare
  * `--totally-bogus-flag` was swallowed the same way.
  *
+ * The positional twin lives here too: `new` read one name and `generate` read
+ * at most a schematic and a name, silently dropping the rest — `setu new app
+ * extra junk` scaffolded `app` and reported success — and the zero-positional
+ * commands (`adopt`, `workspace ports`, `commands`, `help`) dropped everything.
+ * The inventory carries each command's positional contract and the dispatcher
+ * refuses an over-arity invocation the same way: exit 2, message on the error
+ * sink, nothing written or created, before any command body runs.
+ *
  * This module owns the inventory — what each command's `--help` text documents,
  * plus the flags a command deliberately READS in order to refuse with specific
- * guidance — and the refusal that runs in the dispatcher before any command
- * body: exit 2, message on the error sink, nothing written or created.
+ * guidance — and the refusals that run in the dispatcher before any command
+ * body.
  *
  * Nothing here is exported from `src/index.ts`: this is internal dispatcher
  * machinery, read by [`cli.ts`](./cli.ts),
@@ -46,7 +54,25 @@ const GLOBAL_FLAGS: readonly string[] = ['help', 'h'];
  */
 export const PLUGIN_COMMAND_FLAGS: readonly string[] = ['dir', 'config'];
 
-/** One built-in command's flag inventory. */
+/**
+ * One built-in command's positional contract: the arguments it consumes after
+ * its fixed words (the verb and any subcommand word), and what they are for
+ * the refusal message.
+ */
+export interface CommandPositionals {
+  /**
+   * Leading positionals that are part of the command's own shape — the verb,
+   * plus the subcommand word when the command has one (`generate app`).
+   * Counted against the FULL positional array, the way `runCli` sees it.
+   */
+  readonly fixed: number;
+  /** How many arguments the command consumes after those. */
+  readonly taken: number;
+  /** What the consumed arguments are, phrased with their count. */
+  readonly noun: string;
+}
+
+/** One built-in command's flag and positional inventory. */
 export interface CommandFlagSpec {
   /** How the command reads in refusal messages (`new`, `generate app`). */
   readonly label: string;
@@ -61,14 +87,29 @@ export interface CommandFlagSpec {
    * `ports` usage).
    */
   readonly documented: readonly string[];
+  /**
+   * The positional contract, refused beside the flag check. Absent where the
+   * command already refuses every over-arity input itself: `add` names its
+   * own extras (X18-1), and the non-`ports` `workspace` arm refuses every
+   * subcommand but `ports`. A plugin command's positionals are its handler's
+   * input and are never checked here.
+   */
+  readonly positionals?: CommandPositionals;
 }
 
 function spec(
   label: string,
   documented: readonly string[],
   recognizedRefusals: readonly string[] = [],
+  positionals?: CommandPositionals,
 ): CommandFlagSpec {
-  return { label, allowed: [...GLOBAL_FLAGS, ...documented, ...recognizedRefusals], documented };
+  return {
+    label,
+    allowed: [...GLOBAL_FLAGS, ...documented, ...recognizedRefusals],
+    documented,
+    // Omitted rather than passed as `undefined`: exactOptionalPropertyTypes.
+    ...(positionals === undefined ? {} : { positionals }),
+  };
 }
 
 /** `setu new`: everything `--help` documents, plus the M65 named refusals. */
@@ -92,10 +133,25 @@ const NEW: CommandFlagSpec = spec(
   // Read ONLY to be refused with their own guidance: `--di` points at
   // `--template class-based` (M65), `--depends-on` points at `generate app`.
   ['di', 'depends-on'],
+  // `new <project-name>`: one name, exactly. Extras used to be dropped.
+  { fixed: 1, taken: 1, noun: 'one project name' },
 );
 
-/** `setu generate` for a schematic, including `custom`. */
-const GENERATE: CommandFlagSpec = spec('generate', ['dir', 'dry-run', 'runtime']);
+/** `setu generate` for a schematic: the schematic word plus one name. */
+const GENERATE: CommandFlagSpec = spec(
+  'generate',
+  ['dir', 'dry-run', 'runtime'],
+  [],
+  { fixed: 2, taken: 1, noun: 'one name' },
+);
+
+/** `setu generate custom <schematic-name> <name>`: two names after the verb. */
+const GENERATE_CUSTOM: CommandFlagSpec = spec(
+  'generate custom',
+  ['dir', 'dry-run', 'runtime'],
+  [],
+  { fixed: 2, taken: 2, noun: 'two names: the custom schematic and the artifact name' },
+);
 
 /** `setu generate app`: the workspace-member flags, plus the named refusals. */
 const GENERATE_APP: CommandFlagSpec = spec(
@@ -105,25 +161,50 @@ const GENERATE_APP: CommandFlagSpec = spec(
   // name the workspace-wide alternative, `--runtime` names the workspace's own
   // toolchain when it disagrees, and `--di` goes through `resolveTemplateChoice`.
   ['transport', 'transport-url', 'broker', 'queue', 'runtime', 'di'],
+  { fixed: 2, taken: 1, noun: 'one member name' },
 );
 
 /** `setu generate library`. */
-const GENERATE_LIBRARY: CommandFlagSpec = spec('generate library', ['scope', 'dir', 'dry-run']);
+const GENERATE_LIBRARY: CommandFlagSpec = spec(
+  'generate library',
+  ['scope', 'dir', 'dry-run'],
+  [],
+  { fixed: 2, taken: 1, noun: 'one library name' },
+);
 
-/** `setu add <plugin>`. */
+/**
+ * `setu add <plugin>` carries no positional contract here ON PURPOSE: the
+ * command refuses its own extras with X18-1's wording (`setu add takes one
+ * package; got 3. Run it once per package.`), and this check must not preempt
+ * that message with a second way of saying the same thing.
+ */
 const ADD: CommandFlagSpec = spec('add', ['dir', 'dry-run']);
 
-/** `setu adopt`. */
-const ADOPT: CommandFlagSpec = spec('adopt', ['name', 'port', 'dir', 'dry-run']);
+/** `setu adopt`: takes no positionals at all — `--name` and `--port` are flags. */
+const ADOPT: CommandFlagSpec = spec(
+  'adopt',
+  ['name', 'port', 'dir', 'dry-run'],
+  [],
+  { fixed: 1, taken: 0, noun: 'no arguments' },
+);
 
-/** `setu workspace ports --reallocate`. */
-const WORKSPACE_PORTS: CommandFlagSpec = spec('workspace ports', [
-  'reallocate',
-  'dir',
-  'dry-run',
-]);
+/** `setu workspace ports --reallocate`: `ports` is the last word it reads. */
+const WORKSPACE_PORTS: CommandFlagSpec = spec(
+  'workspace ports',
+  [
+    'reallocate',
+    'dir',
+    'dry-run',
+  ],
+  [],
+  { fixed: 2, taken: 0, noun: 'no arguments beyond ports' },
+);
 
-/** `setu workspace` with a subcommand other than `ports` (refused by the command). */
+/**
+ * `setu workspace` with a subcommand other than `ports`: the command itself
+ * refuses every subcommand but `ports` with its usage line, so there is no
+ * silent drop for this check to close and no positional contract here.
+ */
 const WORKSPACE: CommandFlagSpec = spec('workspace', []);
 
 /**
@@ -134,15 +215,20 @@ const COMMANDS: CommandFlagSpec = {
   label: 'commands',
   allowed: ['dir', 'config'],
   documented: [],
+  positionals: { fixed: 1, taken: 0, noun: 'no arguments' },
 };
 
 /** `setu help` prints the top-level usage; the help flags are its only input. */
-const HELP: CommandFlagSpec = spec('help', []);
+const HELP: CommandFlagSpec = spec('help', [], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
 
 /**
  * Resolves the inventory entry for a built-in command, subcommand-aware:
- * `generate app`/`generate library` take flags the bare verb does not, and
- * `workspace ports` likewise.
+ * `generate app`/`generate library`/`generate custom` carry their own
+ * positional contracts, and `workspace ports` likewise.
  *
  * @param command - The first positional (`new`, `generate`, …)
  * @param subcommand - The second positional, when present
@@ -163,6 +249,7 @@ export function commandFlagsFor(
     case 'g':
       if (subcommand === 'app') return GENERATE_APP;
       if (subcommand === 'library') return GENERATE_LIBRARY;
+      if (subcommand === 'custom') return GENERATE_CUSTOM;
       return GENERATE;
     case 'add':
       return ADD;
@@ -327,5 +414,57 @@ export function builtInFlagRefusal(
   const unknown = firstUnknownFlag(flags, entry.allowed);
   if (unknown === undefined) return undefined;
   error(unknownOptionMessage(entry.label, unknown, entry.allowed));
+  return EXIT_USAGE;
+}
+
+/**
+ * Builds the over-arity refusal, naming the command, what it takes, and how
+ * many arguments were supplied — the wording pattern of `add`'s own X18-1
+ * refusal, which stays the command's own because this check deliberately
+ * carries no contract for `add`.
+ *
+ * @param label - The command as the user's invocation names it
+ * @param noun - What the command takes, phrased with its count
+ * @param got - The arguments supplied beyond the command's fixed words
+ * @returns The message for the error sink
+ */
+export function extraPositionalsMessage(
+  label: string,
+  noun: string,
+  got: number,
+): string {
+  return `${PROGRAM_NAME} ${label} takes ${noun}; got ${got}.`;
+}
+
+/**
+ * The dispatcher's strict check for a built-in command's positional arity:
+ * refuses an invocation supplying more arguments than the command consumes —
+ * `new app extra junk` used to scaffold `app` and report success — with exit
+ * 2 and the message on the error sink, before any command body runs, so
+ * nothing is written or created.
+ *
+ * Everything after `--` is a positional ([`parseArgs`](./args.ts)), so
+ * terminator-hidden tokens refuse here too; that is exactly how a stray
+ * flag-shaped token reaches a command as a positional.
+ *
+ * @param command - The first positional
+ * @param positionals - The full parsed positional array, verb included
+ * @param error - The error sink
+ * @returns {@linkcode EXIT_USAGE} when refused, `undefined` to continue —
+ * including for entries with no positional contract (`add`, the non-`ports`
+ * `workspace` arm) and the plugin-command arm, whose positionals are the
+ * handler's input
+ */
+export function builtInPositionalRefusal(
+  command: string,
+  positionals: readonly string[],
+  error: (message: string) => void,
+): number | undefined {
+  const entry = commandFlagsFor(command, positionals[1]);
+  if (entry?.positionals === undefined) return undefined;
+  const { fixed, taken, noun } = entry.positionals;
+  const got = positionals.length - fixed;
+  if (got <= taken) return undefined;
+  error(extraPositionalsMessage(entry.label, noun, got));
   return EXIT_USAGE;
 }

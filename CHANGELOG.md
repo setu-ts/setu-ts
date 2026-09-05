@@ -21,6 +21,20 @@ All notable changes to this project are documented here. The format follows
   a `CliCommandHandler` receives positionals only, so no plugin can read any other flag. Migration:
   a script passing a stray flag today exits `0` and will now exit `2` — remove or correct the flag.
 
+- **BREAKING — `@setu-ts/cli` — extra positional arguments are refused instead of silently
+  ignored.** `new` read the first positional only, so `setu new app extra junk` scaffolded `app` and
+  reported success with exit `0`; `generate` read only the schematic word, its name, and (for
+  `custom`) the custom-schematic name, dropping anything after; and `adopt`, `workspace ports`,
+  `commands`, and `help` consumed no positionals at all. Each now refuses an over-arity invocation —
+  exit `2`, nothing written or created, a message naming the command and the expected count — in the
+  dispatcher before any command body runs, mirroring `add`'s existing refusal. Tokens after `--` are
+  positionals ([`parseArgs`]) and refuse the same way. Valid arities are unchanged (`new app`,
+  `generate <schematic> <name>`, `generate custom <schematic-name> <name>`,
+  `generate app|library
+  <name>`, and the bare `add`/`adopt`/`workspace ports`/`commands`/`help`
+  forms), and plugin-registered commands still receive every positional. Migration: a script passing
+  stray positionals today exits `0` and will now exit `2` — remove them.
+
 - **BREAKING — `@setu-ts/database-plugin` — default memory raw-SQL and programmatic-migration
   refusals now answer `501 Not Implemented` instead of a masked `500`.** `query()` now rejects with
   `UnsupportedRawQueryError` rather than throwing synchronously, so callers using `.catch()` now

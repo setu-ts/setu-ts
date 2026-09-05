@@ -6,7 +6,7 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 import { parseArgs } from './args.ts';
-import { builtInFlagRefusal } from './flags.ts';
+import { builtInFlagRefusal, builtInPositionalRefusal } from './flags.ts';
 import {
   APP_VERB,
   CONFIG_MODULE,
@@ -148,6 +148,15 @@ export async function runCli(
   // flags are checked at dispatch, after the command is known to exist.
   const flagRefusal = builtInFlagRefusal(command, args.positionals[1], args.flags, deps.error);
   if (flagRefusal !== undefined) return flagRefusal;
+
+  // The positional twin: `new` read one name and `generate` read at most a
+  // schematic and a name, silently dropping the rest, so `setu new app extra
+  // junk` scaffolded `app` and reported success with exit 0. Refused by the
+  // same dispatcher gate — exit 2, the error sink, nothing written — before
+  // any command body runs. `add` refuses its own extras (X18-1) and a plugin
+  // command's positionals are its handler's input, so neither is checked here.
+  const positionalRefusal = builtInPositionalRefusal(command, args.positionals, deps.error);
+  if (positionalRefusal !== undefined) return positionalRefusal;
 
   const rest = {
     positionals: args.positionals.slice(1),
