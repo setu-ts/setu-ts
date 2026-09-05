@@ -14,6 +14,7 @@ import type { CliCommandHandler, IFileSystem } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
+import { firstUnknownFlag, PLUGIN_COMMAND_FLAGS, unknownOptionMessage } from '../flags.ts';
 import {
   CONFIG_EXPORT,
   CONFIG_MODULE,
@@ -248,6 +249,15 @@ export async function dispatchPluginCommand(
           deps.error('Available plugin commands:');
           for (const command of commands) deps.error(`  ${command.name}`);
         }
+        return EXIT_USAGE;
+      }
+
+      // A plugin command cannot read any flag — the handler receives positionals
+      // only — so anything beyond what THIS dispatcher consumes is a typo.
+      // Refused before the handler runs; nothing is written either way.
+      const unknown = firstUnknownFlag(args.flags, PLUGIN_COMMAND_FLAGS);
+      if (unknown !== undefined) {
+        deps.error(unknownOptionMessage(name, unknown, PLUGIN_COMMAND_FLAGS));
         return EXIT_USAGE;
       }
 

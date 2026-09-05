@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING — `@setu-ts/cli` — unknown flags are refused instead of silently ignored.** `setu`
+  collected every `--flag` and never consulted the valid names, so a typo scaffolded a DIFFERENT
+  project with exit `0` and no warning: `new app --dry-run --templat rest` produced the minimal
+  project where `--template rest` produces the `rest` composition, and `--base-port` (the real flag
+  is `--port`) was swallowed the same way. Each command now refuses a flag outside its own set —
+  subcommand-aware for `generate app`, `generate library`, and `workspace ports` — with exit `2`, a
+  message naming the command and, within a small edit distance, a "did you mean" suggestion, and
+  nothing written or created. Flags kept deliberately recognized for a NAMED refusal (`--di` and
+  `--depends-on` on `new`; the transport flags, `--runtime`, and `--di` on `generate app`) still
+  reach their specific guidance, and plugin-registered commands accept only `--dir` and `--config` —
+  a `CliCommandHandler` receives positionals only, so no plugin can read any other flag. Migration:
+  a script passing a stray flag today exits `0` and will now exit `2` — remove or correct the flag.
+
 - **BREAKING — `@setu-ts/database-plugin` — default memory raw-SQL and programmatic-migration
   refusals now answer `501 Not Implemented` instead of a masked `500`.** `query()` now rejects with
   `UnsupportedRawQueryError` rather than throwing synchronously, so callers using `.catch()` now

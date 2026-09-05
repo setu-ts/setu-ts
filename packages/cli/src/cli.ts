@@ -6,6 +6,7 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 import { parseArgs } from './args.ts';
+import { builtInFlagRefusal } from './flags.ts';
 import {
   APP_VERB,
   CONFIG_MODULE,
@@ -139,6 +140,14 @@ export async function runCli(
     // A bare `setu` with no command is a usage error; `setu --help` is not.
     return args.flags['help'] === true || args.flags['h'] === true ? EXIT_OK : EXIT_USAGE;
   }
+
+  // A flag no part of this command reads used to be silently ignored, so a
+  // typo (`--templat rest`) scaffolded a DIFFERENT project with exit 0. The
+  // dispatcher refuses it before any command body runs, so nothing is written.
+  // `version`/`v` never reach this — consumed above — and a plugin command's
+  // flags are checked at dispatch, after the command is known to exist.
+  const flagRefusal = builtInFlagRefusal(command, args.positionals[1], args.flags, deps.error);
+  if (flagRefusal !== undefined) return flagRefusal;
 
   const rest = {
     positionals: args.positionals.slice(1),

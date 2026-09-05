@@ -126,9 +126,18 @@ install, and `setu generate --help` lists only what is available here.
 | `--help`, `-h`        | Prints usage.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--version`, `-v`     | Prints the version.                                                                                                                                                                                                                                                                                                                                                                                                         |
 
+Every command refuses an option outside its own set — subcommand-aware for `generate app`,
+`generate library`, and `workspace ports` — with exit `2` and nothing written, suggesting the
+nearest known name when one is within a small edit distance (`--templat` suggests `--template`;
+`--base-port` suggests `--port`). A flag kept deliberately recognized for a named refusal (`--di`
+and `--depends-on` on `new`, the transport flags and `--runtime` on `generate app`) still reaches
+that specific message. Plugin-registered commands accept only `--dir` and `--config`: a handler
+receives positionals only, so no plugin command can read any other flag.
+
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
-error (unknown command or schematic, missing argument, unknown `--runtime`, or a name that cannot
-form an identifier — empty after normalization, or digit-leading such as `2fa`).
+error (unknown command or schematic, missing argument, unknown `--runtime`, an option the command
+does not recognize, or a name that cannot form an identifier — empty after normalization, or
+digit-leading such as `2fa`).
 
 A relative `--dir` is resolved against the working directory.
 

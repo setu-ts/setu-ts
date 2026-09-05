@@ -103,6 +103,9 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log('Options:');
   log('  --dry-run          Print what would be created, write nothing');
   log('  --dir <path>       Generate into this directory instead of the CWD');
+  log(
+    `  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (detected from the project by default)`,
+  );
 }
 
 /**

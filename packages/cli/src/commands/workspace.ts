@@ -66,11 +66,11 @@ export async function runWorkspaceCommand(
   deps: WorkspaceCommandDependencies,
 ): Promise<number> {
   if (args.flags['help'] === true || args.flags['h'] === true) {
-    deps.log(`Usage: ${PROGRAM_NAME} workspace ports --reallocate [--dir <path>]`);
+    deps.log(`Usage: ${PROGRAM_NAME} workspace ports --reallocate [--dir <path>] [--dry-run]`);
     return EXIT_OK;
   }
   if (args.positionals[0] !== 'ports' || args.flags['reallocate'] !== true) {
-    deps.error(`Usage: ${PROGRAM_NAME} workspace ports --reallocate [--dir <path>]`);
+    deps.error(`Usage: ${PROGRAM_NAME} workspace ports --reallocate [--dir <path>] [--dry-run]`);
     return EXIT_USAGE;
   }
   if (args.flags['dir'] !== undefined && stringFlag(args.flags, 'dir') === undefined) {

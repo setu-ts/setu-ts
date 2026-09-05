@@ -6488,6 +6488,14 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--help`, `-h`                                  | both                                       | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `--version`, `-v`                               | —                                          | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
+Every command refuses an option outside its own set — subcommand-aware for `generate app`,
+`generate library`, and `workspace ports` — with exit `2` and nothing written, suggesting the
+nearest known name when one is within a small edit distance (`--templat` suggests `--template`;
+`--base-port` suggests `--port`). A flag kept deliberately recognized for a named refusal (`--di`
+and `--depends-on` on `new`, the transport flags and `--runtime` on `generate app`) still reaches
+that specific message. Plugin-registered commands accept only `--dir` and `--config`: a
+`CliCommandHandler` receives positionals only, so no plugin command can read any other flag.
+
 ### `setu add <plugin>`
 
 Adds a framework package to the project's manifest, pinned to the version of the CLI that added it —
@@ -6522,11 +6530,11 @@ manifest cannot be parsed, `2` for an unknown package name or a missing argument
 
 ### Exit codes
 
-| Code | Meaning                                                                                                                                                                                                           |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | Success (including `--help` and `--version`).                                                                                                                                                                     |
-| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.               |
-| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| Code | Meaning                                                                                                                                                                                                                                                     |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success (including `--help` and `--version`).                                                                                                                                                                                                               |
+| `1`  | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.                                                         |
+| `2`  | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
 
 ### Interactive scaffolding
 
