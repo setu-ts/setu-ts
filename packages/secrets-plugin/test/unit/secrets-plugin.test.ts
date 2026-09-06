@@ -203,5 +203,61 @@ describe('SecretsPlugin.register', () => {
       expect(health.status).toBe('down');
       expect(health.data).toEqual({ provider: 'vault', reachable: false });
     });
+
+    it('measures the probe TTL on the INJECTED runtime clock', async () => {
+      let probes = 0;
+      const client = {
+        getSecretValue: (_id: string): Promise<string | null> => Promise.resolve('v'),
+        putSecretValue: (_id: string, _v: string): Promise<void> => Promise.resolve(),
+        isHealthy: (): Promise<boolean> => {
+          probes++;
+          return Promise.resolve(true);
+        },
+      };
+      const plugin = SecretsPlugin({ provider: 'aws-kms', options: { client } });
+      const { ctx, healthIndicators } = createFakeContext();
+      // Controllable monotonic clock on the injected runtime. Set BEFORE
+      // register(): resolveProbeTiming binds ctx.runtime's hrtime there.
+      let now = 0;
+      (ctx.runtime as { hrtime: () => number }).hrtime = (): number => now;
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.SECRETS) as HealthFn;
+      await indicator();
+      await indicator();
+      expect(probes).toBe(1);
+      // Advance the INJECTED clock past the 5-second TTL: the next read is a
+      // fresh probe even though no wall-clock time has passed. Against the
+      // old ambient performance.now() fallback the third read still landed
+      // inside the real-time TTL and this failed with 1 probe.
+      now = 5001;
+      await indicator();
+      expect(probes).toBe(2);
+    });
+
+    it('bounds each probe with the INJECTED runtime timers', async () => {
+      const timerCalls: Array<{ ms: number }> = [];
+      const client = {
+        getSecretValue: (_id: string): Promise<string | null> => Promise.resolve('v'),
+        putSecretValue: (_id: string, _v: string): Promise<void> => Promise.resolve(),
+        isHealthy: (): Promise<boolean> => Promise.resolve(true),
+      };
+      const plugin = SecretsPlugin({ provider: 'aws-kms', options: { client } });
+      const { ctx, healthIndicators } = createFakeContext();
+      (ctx.runtime as {
+        setTimeout: (fn: () => void, ms: number) => unknown;
+      }).setTimeout = (fn: () => void, ms: number): unknown => {
+        timerCalls.push({ ms });
+        return setTimeout(fn, ms);
+      };
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.SECRETS) as HealthFn;
+      await indicator();
+      // Exactly one bound armed, from the runtime's setTimeout — not the
+      // ambient one. The old code armed an ambient timer and this saw zero.
+      expect(timerCalls.length).toBe(1);
+      expect(timerCalls[0]?.ms).toBe(2000);
+    });
   });
 });

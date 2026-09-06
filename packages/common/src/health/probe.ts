@@ -25,7 +25,7 @@
  *
  * @since 0.1.0
  */
-import type { TimerHandle } from '../runtime.ts';
+import type { IRuntimeServices, TimerHandle } from '../runtime.ts';
 
 /**
  * Options for {@linkcode createCachedProbe}.
@@ -134,5 +134,60 @@ export function createCachedProbe(options: CachedProbeOptions): () => Promise<bo
       return value;
     });
     return inFlight;
+  };
+}
+
+/**
+ * The clock-and-timer surface {@linkcode createCachedProbe} runs on, bound to
+ * a runtime.
+ *
+ * @since 0.4.0
+ */
+export interface ProbeTiming {
+  /**
+   * Monotonic clock in milliseconds — the runtime's `hrtime`. Measures the
+   * cache TTL as an interval, never a wall-clock reading.
+   */
+  readonly hrtime: () => number;
+  /**
+   * Timer used to bound each probe — the runtime's `setTimeout`.
+   */
+  readonly setTimer: (fn: () => void, ms: number) => TimerHandle;
+  /**
+   * Cancels a timer created by {@linkcode ProbeTiming.setTimer} — the
+   * runtime's `clearTimeout`.
+   */
+  readonly clearTimer: (handle: TimerHandle) => void;
+}
+
+/**
+ * Resolves a probe's monotonic clock and timer surface from an injected
+ * {@linkcode IRuntimeServices}.
+ *
+ * Every member is bound to the runtime the caller passes. There is NO ambient
+ * `performance.now()`/`Date.now()` fallback: all time access outside
+ * `packages/runtime` must go through `IRuntimeServices` (AI_GUIDELINES §4.1 /
+ * §4.2), so a caller with no runtime to inject has no clock the probe may
+ * lawfully read. Pass the result straight into {@linkcode createCachedProbe}:
+ * `hrtime` measures the TTL, and the timer pair bounds each probe.
+ *
+ * @param runtime - The runtime services (e.g. `ctx.runtime` on a plugin
+ *   context, non-optional by contract)
+ * @returns The timing surface, bound to `runtime`
+ *
+ * @example
+ * ```typescript
+ * const probe = createCachedProbe({
+ *   probe: () => client.ping().then(() => true, () => false),
+ *   ...resolveProbeTiming(ctx.runtime),
+ * });
+ * ```
+ * @since 0.4.0
+ */
+export function resolveProbeTiming(runtime: IRuntimeServices): ProbeTiming {
+  return {
+    hrtime: runtime.hrtime.bind(runtime),
+    setTimer: runtime.setTimeout.bind(runtime),
+    clearTimer: runtime.clearTimeout.bind(runtime),
   };
 }

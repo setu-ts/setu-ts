@@ -1,6 +1,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { createCachedProbe } from '../../../src/health/probe.ts';
+import { createCachedProbe, resolveProbeTiming } from '../../../src/health/probe.ts';
+import type { IRuntimeServices } from '../../../src/runtime.ts';
 import type { CachedProbeOptions } from '../../../src/health/probe.ts';
 
 class FakeClock {
@@ -231,5 +232,53 @@ describe('createCachedProbe', () => {
     };
     const isHealthy = createCachedProbe(options);
     expect(typeof isHealthy).toBe('function');
+  });
+});
+
+describe('resolveProbeTiming', () => {
+  // A runtime double carrying ONLY the three members the helper reads.
+  const fakeRuntime = () => {
+    const state = { now: 0, timers: [] as Array<{ ms: number }>, cleared: [] as unknown[] };
+    const runtime = {
+      hrtime: (): number => state.now,
+      setTimeout: (_fn: () => void, ms: number): unknown => {
+        state.timers.push({ ms });
+        return { handle: ms };
+      },
+      clearTimeout: (handle: unknown): void => {
+        state.cleared.push(handle);
+      },
+    } as unknown as IRuntimeServices;
+    return { runtime, state };
+  };
+
+  it('binds every member to the injected runtime — no ambient clock exists', () => {
+    // The regression this pins: the helper must not reach for
+    // performance.now()/Date.now(); reading time goes through the injected
+    // runtime's own hrtime, whatever it reports.
+    const { runtime, state } = fakeRuntime();
+    const timing = resolveProbeTiming(runtime);
+
+    state.now = 4242;
+    expect(timing.hrtime()).toBe(4242);
+  });
+
+  it('resolves the timer pair from the injected runtime', () => {
+    const { runtime, state } = fakeRuntime();
+    const timing = resolveProbeTiming(runtime);
+
+    const handle = timing.setTimer(() => {}, 250);
+    timing.clearTimer(handle);
+    expect(state.timers).toEqual([{ ms: 250 }]);
+    expect(state.cleared).toEqual([{ handle: 250 }]);
+  });
+
+  it('composes with createCachedProbe through the spread (type-level)', () => {
+    const { runtime } = fakeRuntime();
+    const probe = createCachedProbe({
+      probe: () => Promise.resolve(true),
+      ...resolveProbeTiming(runtime),
+    });
+    expect(typeof probe).toBe('function');
   });
 });

@@ -7,18 +7,13 @@
  *
  * @module
  */
-import type {
-  ICacheStore,
-  IPlugin,
-  IPluginContext,
-  IRuntimeServices,
-  TimerHandle,
-} from '@setu-ts/common';
+import type { ICacheStore, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 import {
   CAPABILITIES,
   createCachedProbe,
   createCapabilityToken,
   PLUGIN_PRIORITY,
+  resolveProbeTiming,
 } from '@setu-ts/common';
 import type { CachePluginOptions, CacheStoreOptions } from '../interfaces/index.ts';
 import type { CacheStore } from '../stores/cache-store.ts';
@@ -227,9 +222,9 @@ function buildStoreOptions(opts?: CacheStoreOptions): CacheStoreOptions {
  * in-flight probe, caches the outcome for a TTL, and bounds each probe with
  * a timeout, so polling `/health` never turns into backend load. The TTL is
  * measured on the runtime's monotonic clock and the timeout on the runtime's
- * own timers; without a runtime capability (bare unit-test contexts) the
- * helper's ambient-timer defaults apply over a monotonic `performance`
- * reading.
+ * own timers, both injected from `ctx.runtime` — non-optional by contract
+ * (the kernel registers the runtime provider first), so the probe has no
+ * ambient-clock path.
  *
  * @param backend - The connected backend store
  * @param ctx - Plugin context (runtime resolution)
@@ -243,7 +238,7 @@ function buildReachabilityProbe(
   if (typeof isHealthy !== 'function') {
     return undefined;
   }
-  const timing = resolveProbeTiming(ctx);
+  const timing = resolveProbeTiming(ctx.runtime);
   return createCachedProbe({
     // Bound call: the store's `isHealthy` reads private state, so it must be
     // invoked on its owner.
@@ -251,8 +246,8 @@ function buildReachabilityProbe(
     ttlMs: PROBE_TTL_MS,
     timeoutMs: PROBE_TIMEOUT_MS,
     hrtime: timing.hrtime,
-    ...(timing.setTimer !== undefined ? { setTimer: timing.setTimer } : {}),
-    ...(timing.clearTimer !== undefined ? { clearTimer: timing.clearTimer } : {}),
+    setTimer: timing.setTimer,
+    clearTimer: timing.clearTimer,
   });
 }
 
@@ -261,27 +256,6 @@ const PROBE_TTL_MS = 5000;
 
 /** Per-probe timeout, in milliseconds. A slower probe counts as unreachable. */
 const PROBE_TIMEOUT_MS = 2000;
-
-/**
- * Resolves the probe's monotonic clock and timer surface from the runtime
- * capability when registered, falling back to a monotonic `performance`
- * reading (the ambient timers stay the probe helper's own defaults).
- */
-function resolveProbeTiming(ctx: IPluginContext): {
-  hrtime: () => number;
-  setTimer?: ((fn: () => void, ms: number) => TimerHandle) | undefined;
-  clearTimer?: ((handle: TimerHandle) => void) | undefined;
-} {
-  if (ctx.services.has(CAPABILITIES.RUNTIME)) {
-    const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    return {
-      hrtime: runtime.hrtime.bind(runtime),
-      setTimer: runtime.setTimeout.bind(runtime),
-      clearTimer: runtime.clearTimeout.bind(runtime),
-    };
-  }
-  return { hrtime: () => performance.now() };
-}
 
 /**
  * Resolve an optional logger from the plugin context.

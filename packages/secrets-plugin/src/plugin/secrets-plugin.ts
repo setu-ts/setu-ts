@@ -10,9 +10,13 @@ import type {
   IPluginContext,
   IRuntimeServices,
   ISecretManager,
-  TimerHandle,
 } from '@setu-ts/common';
-import { CAPABILITIES, createCachedProbe, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createCachedProbe,
+  PLUGIN_PRIORITY,
+  resolveProbeTiming,
+} from '@setu-ts/common';
 import type {
   IAwsSecretsClient,
   IAzureSecretsClient,
@@ -199,8 +203,10 @@ function resolveLogger(ctx: IPluginContext): ILogger | undefined {
  * One `createCachedProbe` closure per plugin instance, constructed at
  * registration time: concurrent health callers share one in-flight probe,
  * the outcome is cached for a TTL on the runtime's monotonic clock, and
- * each probe is bounded by the runtime's own timers. `undefined` when the
- * provider offers no probe — the indicator then reports
+ * each probe is bounded by the runtime's own timers — both injected from
+ * `ctx.runtime`, non-optional by contract (the kernel registers the runtime
+ * provider first), so the probe has no ambient-clock path. `undefined` when
+ * the provider offers no probe — the indicator then reports
  * `reachable: 'unknown'`.
  *
  * @param provider - The connected provider
@@ -215,15 +221,15 @@ function buildReachabilityProbe(
   if (typeof isHealthy !== 'function') {
     return undefined;
   }
-  const timing = resolveProbeTiming(ctx);
+  const timing = resolveProbeTiming(ctx.runtime);
   return createCachedProbe({
     // Bound call: a provider's `isHealthy` may read instance state.
     probe: () => isHealthy.call(provider),
     ttlMs: PROBE_TTL_MS,
     timeoutMs: PROBE_TIMEOUT_MS,
     hrtime: timing.hrtime,
-    ...(timing.setTimer !== undefined ? { setTimer: timing.setTimer } : {}),
-    ...(timing.clearTimer !== undefined ? { clearTimer: timing.clearTimer } : {}),
+    setTimer: timing.setTimer,
+    clearTimer: timing.clearTimer,
   });
 }
 
@@ -232,27 +238,6 @@ const PROBE_TTL_MS = 5000;
 
 /** Per-probe timeout, in milliseconds. A slower probe counts as unreachable. */
 const PROBE_TIMEOUT_MS = 2000;
-
-/**
- * Resolves the probe's monotonic clock and timer surface from the runtime
- * capability when registered, falling back to a monotonic `performance`
- * reading (the ambient timers stay the probe helper's own defaults).
- */
-function resolveProbeTiming(ctx: IPluginContext): {
-  hrtime: () => number;
-  setTimer?: ((fn: () => void, ms: number) => TimerHandle) | undefined;
-  clearTimer?: ((handle: TimerHandle) => void) | undefined;
-} {
-  if (ctx.services.has(CAPABILITIES.RUNTIME)) {
-    const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    return {
-      hrtime: runtime.hrtime.bind(runtime),
-      setTimer: runtime.setTimeout.bind(runtime),
-      clearTimer: runtime.clearTimeout.bind(runtime),
-    };
-  }
-  return { hrtime: () => performance.now() };
-}
 
 /** Narrows an injected client to the AWS facade by structural probe. */
 function isAwsClient(client: SecretsProviderOptions['client']): client is IAwsSecretsClient {

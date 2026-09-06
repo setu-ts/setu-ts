@@ -89,7 +89,13 @@ describe('CachePlugin', () => {
       cli: {
         register: () => {},
       },
-      runtime: null as unknown as IPluginContext['runtime'],
+      runtime: {
+        env: {},
+        hrtime: (): number => performance.now(),
+        setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+        clearTimeout: (handle: unknown): void =>
+          clearTimeout(handle as ReturnType<typeof setTimeout>),
+      } as unknown as IPluginContext['runtime'],
       options: {},
       app: null as unknown as IPluginContext['app'],
     };
@@ -280,9 +286,11 @@ describe('CachePlugin', () => {
       expect(registered.has(CAPABILITIES.CACHE)).toBe(true);
     });
 
-    it('does not crash when runtime is absent', async () => {
-      // No runtime registered — resolveClock returns undefined; MemoryStore
-      // falls back to its default bound performance.now.
+    it('does not crash when the runtime service token is absent', async () => {
+      // No runtime registered under the token — resolveClock returns
+      // undefined; MemoryStore falls back to its default bound
+      // performance.now. (ctx.runtime itself stays populated: it is
+      // non-optional by contract, and the M90b probe builds on it.)
       const { ctx } = createFakeContext();
       const plugin = CachePlugin();
       await expect(plugin.register(ctx)).resolves.toBeUndefined();
@@ -357,6 +365,60 @@ describe('CachePlugin', () => {
       // is served from the cached outcome, not a second backend round trip.
       await Promise.all([indicator(), indicator()]);
       expect(pingCalls).toBe(1);
+    });
+
+    it('measures the probe TTL on the INJECTED runtime clock', async () => {
+      const fake = createFakeIoredis();
+      let pingCalls = 0;
+      const counting = Object.create(fake.client) as typeof fake.client;
+      counting.ping = (): Promise<string> => {
+        pingCalls++;
+        return Promise.resolve('PONG');
+      };
+      const plugin = CachePlugin({ store: 'redis', options: { client: counting } });
+      const { ctx, healthIndicators } = createFakeContext();
+      // Controllable monotonic clock on the injected runtime. Set BEFORE
+      // register(): resolveProbeTiming binds ctx.runtime's hrtime there.
+      let now = 0;
+      (ctx.runtime as { hrtime: () => number }).hrtime = (): number => now;
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.CACHE) as () => Promise<{
+        status: string;
+      }>;
+      await indicator();
+      await indicator();
+      expect(pingCalls).toBe(1);
+      // Advance the INJECTED clock past the 5-second TTL: the next read is a
+      // fresh probe even though no wall-clock time has passed. Against the
+      // old ambient performance.now() fallback the third read still landed
+      // inside the real-time TTL and this failed with 1 ping.
+      now = 5001;
+      await indicator();
+      expect(pingCalls).toBe(2);
+    });
+
+    it('bounds each probe with the INJECTED runtime timers', async () => {
+      const fake = createFakeIoredis();
+      const timerCalls: Array<{ ms: number }> = [];
+      const plugin = CachePlugin({ store: 'redis', options: { client: fake.client } });
+      const { ctx, healthIndicators } = createFakeContext();
+      (ctx.runtime as {
+        setTimeout: (fn: () => void, ms: number) => unknown;
+      }).setTimeout = (fn: () => void, ms: number): unknown => {
+        timerCalls.push({ ms });
+        return setTimeout(fn, ms);
+      };
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.CACHE) as () => Promise<{
+        status: string;
+      }>;
+      await indicator();
+      // Exactly one bound armed, from the runtime's setTimeout — not the
+      // ambient one. The old code armed an ambient timer and this saw zero.
+      expect(timerCalls.length).toBe(1);
+      expect(timerCalls[0]?.ms).toBe(2000);
     });
   });
 });
