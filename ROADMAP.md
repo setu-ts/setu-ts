@@ -8882,11 +8882,29 @@ their own exercises rather than chores belonging to any one of them.
 | **M90i** | Observability that joins up                        | 3        | 0    | common, queue-plugin, logger-plugin, telemetry-plugin                  |
 | **M90j** | The operator's diagnostic survives to the operator | 3        | 0    | database-plugin, common, messaging-plugin                              |
 
-**Recommended order.** M90a, M90b and M90d carry every High finding and should lead. M90f and M90j
-are the two whose value is disproportionate to their size: both are one rule applied inconsistently
-across five or six packages, and both have a mechanism already built (`withHttpStatusHint` from
-M89b, and `serializeError`'s existing guarded read). M90h is doc-only and can ride any of the
-others.
+**Recommended order.** The twelve High findings sit in five letters — M90b (4), M90a (3), M90c (2),
+M90d (2) and M90e (1) — and those five should lead. **M90d first among them**: `nats` and `kafka`
+fail during `register()` with an uncaught rejection, so an application configured with either never
+binds a socket, which is a broken capability rather than a degraded one.
+
+M90f and M90j carry no High row and are still worth pulling forward, because each is one rule
+applied inconsistently across five or six packages and each has a mechanism already built
+(`withHttpStatusHint` from M89b, and `serializeError`'s existing guarded read). M90h is doc-only and
+can ride any of the others.
+
+**The table totals 44, not 49.** Five findings are deliberately **not** grouped, because each is a
+single instance rather than a shape and forcing it into a letter would misrepresent the letter:
+
+| Finding | Why it stands alone                                                                                                                                                                     |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `X20-3` | `set()` cannot create a secret on AWS/GCP — one portable method meaning four different things per backend; a contract question, not a defect shape                                      |
+| `X20-4` | A binary secret reads as absent — the absent-must-mean-cannot shape, but a single instance                                                                                              |
+| `X20-5` | AWS/GCP cannot be pointed at a non-default endpoint — pairs conceptually with M90g's `X38-3` (the portable surface cannot express what deployment requires), and two is not yet a group |
+| `X28-6` | A dead broker holds a request for 90 s — amplifies `X28-5` in M90b rather than standing on its own                                                                                      |
+| `X28-8` | First publish after an outage is lost — narrow, and correct behaviour sits one retry away                                                                                               |
+
+They stay in `smoke/X20-X33-GROUPING.md` so the register remains complete, and any of them can be
+folded into a letter later if a second instance turns up.
 
 ### Milestone 90a: Abuse Control That Actually Protects
 
